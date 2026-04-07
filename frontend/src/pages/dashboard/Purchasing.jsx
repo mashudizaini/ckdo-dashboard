@@ -1,0 +1,2002 @@
+import { useState, useEffect, useRef, useMemo } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import {
+  FileText, History, Banknote, Truck, BookOpen, BarChart2,
+  RefreshCw, Plus, Trash2, X, Loader2, CheckCircle, Search, Filter,
+  Download, ChevronLeft, ChevronRight, TrendingUp, TrendingDown,
+} from "lucide-react";
+import * as XLSX from "xlsx";
+import {
+  LineChart, Line, BarChart, Bar,
+  XAxis, YAxis, CartesianGrid,
+  Tooltip, Legend, ResponsiveContainer,
+} from "recharts";
+import { purchasingApi } from "@/api/dashboard";
+
+/* ─── Tab definitions ─────────────────────────────── */
+
+const TABS = [
+  { id: "open-pr",             icon: FileText,  color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Open PR"             },
+  { id: "purchase-history",    icon: History,   color: "text-orange-400", bg: "bg-orange-500/10", activeBorder: "border-orange-500/40", label: "Purchase History"    },
+  { id: "price-analysis",      icon: BarChart2, color: "text-cyan-400",   bg: "bg-cyan-500/10",   activeBorder: "border-cyan-500/40",   label: "Price Analysis"      },
+  { id: "monthly-spend",       icon: Banknote,  color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Monthly Spend"       },
+  { id: "active-suppliers",    icon: Truck,     color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Active Suppliers"    },
+  { id: "manufacturer-master", icon: BookOpen,  color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Manufacturer Master" },
+];
+
+/* ─── Main Page ───────────────────────────────────── */
+
+export default function PurchasingDashboard() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const activeId = TABS.find((t) => location.pathname.includes(t.id))?.id ?? "open-pr";
+
+  useEffect(() => {
+    if (location.pathname === "/dashboard/purchasing" || location.pathname === "/dashboard/purchasing/") {
+      navigate("/dashboard/purchasing/open-pr", { replace: true });
+    }
+  }, []);
+
+  return (
+    <div className="p-6 space-y-4">
+      {/* Tab Buttons */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
+        {TABS.map((tab) => {
+          const active = activeId === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => navigate(`/dashboard/purchasing/${tab.id}`)}
+              className={`flex items-center gap-3 rounded-lg border px-4 py-3 transition-all ${
+                active
+                  ? `${tab.bg} ${tab.activeBorder} ring-1 ring-inset ${tab.activeBorder}`
+                  : "bg-gray-900 border-gray-800 hover:border-gray-700 hover:bg-gray-800/60"
+              }`}
+            >
+              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${tab.bg} border ${tab.activeBorder}`}>
+                <tab.icon size={15} className={tab.color} />
+              </div>
+              <span className={`text-sm font-medium truncate ${active ? "text-white" : "text-gray-400"}`}>
+                {tab.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {activeId === "open-pr"             && <OpenPRSection />}
+      {activeId === "purchase-history"    && <PurchaseHistorySection />}
+      {activeId === "price-analysis"      && <PriceAnalysisSection />}
+      {activeId === "monthly-spend"       && <MonthlySpendSection />}
+      {activeId === "active-suppliers"    && <ActiveSuppliersSection />}
+      {activeId === "manufacturer-master" && <ManufacturerMasterSection />}
+    </div>
+  );
+}
+
+/* ─── Section: Open PR ────────────────────────────── */
+
+const PR_STATUS_STYLE = {
+  "APPROVED":   { label: "Approved",   cls: "bg-green-500/15 text-green-400 border-green-500/30" },
+  "IN PROCESS": { label: "In Process", cls: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30" },
+  "INCOMPLETE": { label: "Incomplete", cls: "bg-gray-500/15 text-gray-400 border-gray-500/30" },
+  "REJECTED":   { label: "Rejected",   cls: "bg-red-500/15 text-red-400 border-red-500/30" },
+};
+
+function AgingBadge({ days }) {
+  if (days == null) return <span className="text-gray-600">—</span>;
+  const d = Number(days);
+  if (d === 0) return <span className="text-gray-400">{d}d</span>;
+  if (d <= 7)  return <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-500/15 text-yellow-400 border border-yellow-500/30">{d}d</span>;
+  return <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-red-500/15 text-red-400 border border-red-500/30">{d}d</span>;
+}
+
+function PRStatusBadge({ status }) {
+  const s = PR_STATUS_STYLE[status?.toUpperCase()] || { label: status, cls: "bg-gray-700 text-gray-400 border-gray-600" };
+  return <span className={`px-1.5 py-0.5 rounded text-xs font-medium border ${s.cls}`}>{s.label}</span>;
+}
+
+function OpenPRSection() {
+  const today = new Date();
+  const pad2  = (n) => String(n).padStart(2, "0");
+  const toISO = (d) => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  const firstOfYear = `${today.getFullYear()}-01-01`;
+
+  const [f, setF] = useState({
+    pr_status: "", material_type: "", pr_number: "",
+    item_code: "", item_desc: "", requestor: "",
+    currency_code: "", date_from: firstOfYear, date_to: toISO(today),
+    exchange_rate_type: "Corporate",
+  });
+  const [loading,  setLoading]  = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [rows,     setRows]     = useState([]);
+  const [kpi,      setKpi]      = useState(null);
+  const [error,    setError]    = useState("");
+  const [page,     setPage]     = useState(1);
+
+  const setFld = (k) => (e) => setF(p => ({ ...p, [k]: e.target.value }));
+
+  const handleSearch = async () => {
+    setLoading(true); setError(""); setPage(1);
+    try {
+      const p = {};
+      if (f.pr_status)          p.pr_status          = f.pr_status;
+      if (f.material_type)      p.material_type      = f.material_type;
+      if (f.pr_number)          p.pr_number          = f.pr_number;
+      if (f.item_code)          p.item_code          = f.item_code;
+      if (f.item_desc)          p.item_desc          = f.item_desc;
+      if (f.requestor)          p.requestor          = f.requestor;
+      if (f.currency_code)      p.currency_code      = f.currency_code;
+      if (f.date_from)          p.date_from          = f.date_from;
+      if (f.date_to)            p.date_to            = f.date_to;
+      if (f.exchange_rate_type) p.exchange_rate_type = f.exchange_rate_type;
+      const r = await purchasingApi.getOpenPR(p);
+      if (r?.success) {
+        setRows(r.data || []);
+        setKpi(r.kpi || null);
+        setSearched(true);
+      } else {
+        setError(r?.error || "Request failed");
+      }
+    } catch (e) {
+      setError(e?.detail || e?.message || "Network error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReset = () => {
+    setF({ pr_status: "", material_type: "", pr_number: "", item_code: "",
+           item_desc: "", requestor: "", currency_code: "",
+           date_from: firstOfYear, date_to: toISO(today), exchange_rate_type: "Corporate" });
+    setRows([]); setKpi(null); setSearched(false); setError(""); setPage(1);
+  };
+
+  const handleDownload = () => {
+    const cols = ["PR Number","Line","Item Code","Item Description","Category","Type",
+                  "Requestor","UoM","Qty","Currency","Unit Price","Unit Price IDR",
+                  "Total Value","Total Value IDR","Status","Created Date","Aging (days)"];
+    const data = rows.map(r => [
+      r.pr_number, r.line_num, r.item_code, r.item_description,
+      r.category_code, r.material_type, r.requestor, r.uom, r.quantity,
+      r.currency_code, r.unit_price_orig, r.unit_price_idr,
+      r.total_value_orig, r.total_value_idr,
+      r.pr_status, r.creation_date, r.aging_days,
+    ]);
+    downloadExcel(`open_pr_${toISO(today)}`, cols, data);
+  };
+
+  const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
+  const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
+
+  return (
+    <div className="space-y-4">
+      {/* Filter Panel */}
+      <SectionCard
+        title="Open PR — Approval Status"
+        subtitle="Purchase Requisition"
+        action={
+          <div className="flex gap-2">
+            <ActionBtn icon={RefreshCw} label="Reset" color="bg-gray-700 hover:bg-gray-600" onClick={handleReset} />
+            <ActionBtn icon={loading ? Loader2 : Search} label="Search" color="bg-blue-600 hover:bg-blue-700" onClick={handleSearch} />
+          </div>
+        }
+      >
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+          <Field label="PR Status">
+            <select className={SELECT} value={f.pr_status} onChange={setFld("pr_status")}>
+              <option value="">— All —</option>
+              <option value="IN PROCESS">In Process</option>
+              <option value="INCOMPLETE">Incomplete</option>
+              <option value="REJECTED">Rejected</option>
+              <option value="APPROVED">Approved</option>
+            </select>
+          </Field>
+          <Field label="Material Type">
+            <select className={SELECT} value={f.material_type} onChange={setFld("material_type")}>
+              <option value="">— All —</option>
+              <option value="Direct Material">Direct Material</option>
+              <option value="Indirect Material">Indirect Material</option>
+            </select>
+          </Field>
+          <Field label="Currency">
+            <select className={SELECT} value={f.currency_code} onChange={setFld("currency_code")}>
+              <option value="">— All —</option>
+              <option value="IDR">IDR</option>
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+            </select>
+          </Field>
+          <Field label="Exchange Rate Type">
+            <input className={INPUT} value={f.exchange_rate_type} onChange={setFld("exchange_rate_type")} placeholder="Corporate" />
+          </Field>
+          <Field label="PR Number">
+            <input className={INPUT} value={f.pr_number} onChange={setFld("pr_number")} placeholder="e.g. 2510…" />
+          </Field>
+          <Field label="Item Code">
+            <input className={INPUT} value={f.item_code} onChange={setFld("item_code")} placeholder="e.g. RM-0001" />
+          </Field>
+          <Field label="Item Description">
+            <input className={INPUT} value={f.item_desc} onChange={setFld("item_desc")} placeholder="partial search…" />
+          </Field>
+          <Field label="Requestor">
+            <input className={INPUT} value={f.requestor} onChange={setFld("requestor")} placeholder="username / dept" />
+          </Field>
+          <Field label="Date From">
+            <input className={INPUT} type="date" value={f.date_from} onChange={setFld("date_from")} />
+          </Field>
+          <Field label="Date To">
+            <input className={INPUT} type="date" value={f.date_to} onChange={setFld("date_to")} />
+          </Field>
+        </div>
+        {error && (
+          <div className="mt-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
+            <X size={12} />{error}
+          </div>
+        )}
+      </SectionCard>
+
+      {/* KPI Cards */}
+      {searched && kpi && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: "PR Headers",   value: kpi.total_pr_headers, color: "text-blue-400",   bg: "bg-blue-500/10",   border: "border-blue-500/20" },
+            { label: "Total Lines",  value: kpi.total_lines,      color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" },
+            { label: "Overdue (>7d)", value: kpi.overdue_lines,   color: "text-red-400",    bg: "bg-red-500/10",    border: "border-red-500/20" },
+            { label: "Avg Aging",    value: `${kpi.avg_aging}d`,  color: "text-yellow-400", bg: "bg-yellow-500/10", border: "border-yellow-500/20" },
+          ].map(k => (
+            <div key={k.label} className={`rounded-lg border ${k.border} ${k.bg} px-4 py-3`}>
+              <p className="text-xs text-gray-500 mb-1">{k.label}</p>
+              <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Results Table */}
+      {searched && (
+        <div className="rounded-lg border border-gray-800">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 bg-gray-900/50">
+            <span className="text-xs text-gray-500">{rows.length} lines</span>
+            {rows.length > 0 && (
+              <button onClick={handleDownload}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium text-green-400 border border-green-500/30 bg-green-500/10 hover:bg-green-500/20 transition-colors">
+                <Download size={12} /> Download Excel
+              </button>
+            )}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-800/60">
+                  {["PR Number","Line","Item Code","Item Description","Category","Type",
+                    "Requestor","UoM","Qty","Currency","Unit Price","Unit Price IDR",
+                    "Total Value","Total Value IDR","Status","Created","Aging"].map(h => (
+                    <th key={h} className={TH}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={17} className="px-3 py-10 text-center text-xs text-gray-500">
+                    <Loader2 size={14} className="animate-spin inline mr-2" />Loading...
+                  </td></tr>
+                ) : rows.length === 0 ? (
+                  <tr><td colSpan={17} className="px-3 py-10 text-center text-xs text-gray-600">No data found</td></tr>
+                ) : paged.map((r, i) => (
+                  <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
+                    <td className={`${TD} text-blue-400 font-mono font-medium`}>{r.pr_number}</td>
+                    <td className={`${TD} text-gray-400 text-center`}>{r.line_num}</td>
+                    <td className={`${TD} text-gray-300 font-mono`}>{r.item_code}</td>
+                    <td className={`${TD} text-gray-300 max-w-48 truncate`} title={r.item_description}>{r.item_description}</td>
+                    <td className={`${TD} text-gray-400`}>{r.category_code}</td>
+                    <td className={`${TD} text-gray-400`}>
+                      <span className={`px-1.5 py-0.5 rounded text-xs border ${
+                        r.material_type === "Direct Material"
+                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                          : "bg-slate-500/10 text-slate-400 border-slate-500/30"
+                      }`}>{r.material_type}</span>
+                    </td>
+                    <td className={`${TD} text-gray-400`}>{r.requestor}</td>
+                    <td className={`${TD} text-gray-500`}>{r.uom}</td>
+                    <td className={`${TD} text-right text-gray-300`}>{fmtQty(r.quantity)}</td>
+                    <td className={`${TD} text-gray-500`}>{r.currency_code}</td>
+                    <td className={`${TD} text-right text-gray-300`}>{fmtIDR(r.unit_price_orig)}</td>
+                    <td className={`${TD} text-right text-gray-400`}>{fmtIDR(r.unit_price_idr)}</td>
+                    <td className={`${TD} text-right text-gray-300 font-medium`}>{fmtIDR(r.total_value_orig)}</td>
+                    <td className={`${TD} text-right text-gray-400`}>{fmtIDR(r.total_value_idr)}</td>
+                    <td className={TD}><PRStatusBadge status={r.pr_status} /></td>
+                    <td className={`${TD} text-gray-500`}>{r.creation_date}</td>
+                    <td className={TD}><AgingBadge days={r.aging_days} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pagination total={rows.length} page={page} onPage={setPage} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Section: Purchase History ──────────────────── */
+
+const CY = new Date().getFullYear();
+const PAGE_SIZE = 10;
+const VIEWS = [
+  { id: "detail",      label: "Detail View" },
+  { id: "by-item",     label: "By Item (Pivot)" },
+  { id: "by-supplier", label: "By Supplier (Pivot)" },
+];
+const fmtIDR = (n) => n == null ? "-" : Number(n).toLocaleString("id-ID");
+const fmtQty = (n) => n == null ? "-" : Number(n).toLocaleString();
+
+function PurchaseHistorySection() {
+  const [orgs,       setOrgs]       = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [currencies, setCurrencies] = useState([]);
+  const [view,       setView]       = useState("detail");
+  const [searched,   setSearched]   = useState(false);
+  const [loadingMap, setLoadingMap] = useState({ detail: false, "by-item": false, "by-supplier": false });
+  const [results,    setResults]    = useState({ detail: null, "by-item": null, "by-supplier": null });
+  const [filterErr,  setFilterErr]  = useState(null);
+
+  const [f, setF] = useState({
+    org_id: "", exchange_rate_type: "Corporate",
+    year_from: CY - 2, year_to: CY,
+    item_code: "", item_desc: "", vendor_name: "", manufacturer: "",
+    country_of_origin: "", category: "", currency_code: "", material_type: "",
+  });
+
+  useEffect(() => {
+    purchasingApi.getOrganizations().then(r => { if (r.success) setOrgs(r.data ?? []); }).catch(() => {});
+    purchasingApi.getCategories().then(r => { if (r.success) setCategories(r.data ?? []); }).catch(() => {});
+    purchasingApi.getCurrencies().then(r => { if (r.success) setCurrencies(r.data ?? []); }).catch(() => {});
+  }, []);
+
+  const params = useMemo(() => ({
+    org_id:             f.org_id             || undefined,
+    exchange_rate_type: f.exchange_rate_type || "Corporate",
+    year_from:          f.year_from          || undefined,
+    year_to:            f.year_to            || undefined,
+    item_code:          f.item_code          || undefined,
+    item_desc:          f.item_desc          || undefined,
+    vendor_name:        f.vendor_name        || undefined,
+    manufacturer:       f.manufacturer       || undefined,
+    country_of_origin:  f.country_of_origin  || undefined,
+    category:           f.category           || undefined,
+    currency_code:      f.currency_code      || undefined,
+    material_type:      f.material_type      || undefined,
+  }), [f]);
+
+  const handleSearch = async () => {
+    if (!f.year_from || !f.year_to) { setFilterErr("Year From dan Year To wajib diisi"); return; }
+    setFilterErr(null);
+    setSearched(true);
+    setLoadingMap({ detail: true, "by-item": true, "by-supplier": true });
+    const [r1, r2, r3] = await Promise.allSettled([
+      purchasingApi.getPurchaseHistoryDetail(params),
+      purchasingApi.getPurchaseHistoryByItem(params),
+      purchasingApi.getPurchaseHistoryBySupplier(params),
+    ]);
+    setResults({
+      detail:       r1.status === "fulfilled" ? r1.value : { success: false, error: String(r1.reason), data: [] },
+      "by-item":    r2.status === "fulfilled" ? r2.value : { success: false, error: String(r2.reason), data: [], years: [] },
+      "by-supplier":r3.status === "fulfilled" ? r3.value : { success: false, error: String(r3.reason), data: [], years: [] },
+    });
+    setLoadingMap({ detail: false, "by-item": false, "by-supplier": false });
+  };
+
+  const handleReset = () => {
+    setF({ org_id: "", exchange_rate_type: "Corporate", year_from: CY - 2, year_to: CY,
+           item_code: "", item_desc: "", vendor_name: "", manufacturer: "",
+           country_of_origin: "", category: "", currency_code: "", material_type: "" });
+    setSearched(false); setResults({ detail: null, "by-item": null, "by-supplier": null }); setFilterErr(null);
+  };
+
+  const inp = (key, extra = {}) => (
+    <input className={INPUT} value={f[key]} onChange={e => setF(p => ({ ...p, [key]: e.target.value }))} {...extra} />
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* Filter Panel */}
+      <SectionCard
+        title="Purchase History"
+        subtitle="Filter data history pembelian dari Oracle EBS"
+        action={
+          <div className="flex gap-2">
+            <ActionBtn icon={RefreshCw} label="Reset" color="bg-gray-700 hover:bg-gray-600" onClick={handleReset} />
+            <ActionBtn icon={Filter} label="Cari" color="bg-orange-600 hover:bg-orange-700" onClick={handleSearch} />
+          </div>
+        }
+      >
+        {filterErr && (
+          <div className="mb-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
+            <X size={12} />{filterErr}
+          </div>
+        )}
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+          <Field label="Organization">
+            <select className={SELECT} value={f.org_id} onChange={e => setF(p => ({ ...p, org_id: e.target.value }))}>
+              <option value="">— Semua —</option>
+              {orgs.map(o => <option key={o.organization_id} value={o.organization_id}>{o.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Year From *">
+            <input className={INPUT} type="number" value={f.year_from} onChange={e => setF(p => ({ ...p, year_from: e.target.value }))} />
+          </Field>
+          <Field label="Year To *">
+            <input className={INPUT} type="number" value={f.year_to} onChange={e => setF(p => ({ ...p, year_to: e.target.value }))} />
+          </Field>
+          <Field label="Exchange Rate Type">
+            {inp("exchange_rate_type", { placeholder: "Corporate" })}
+          </Field>
+          <Field label="Item Code">{inp("item_code", { placeholder: "e.g. CKD24Q0062" })}</Field>
+          <Field label="Item Description">{inp("item_desc", { placeholder: "Pencarian partial..." })}</Field>
+          <Field label="Vendor Name">{inp("vendor_name", { placeholder: "Pencarian partial..." })}</Field>
+          <Field label="Manufacturer">{inp("manufacturer", { placeholder: "Pencarian partial..." })}</Field>
+          <Field label="Country of Origin">{inp("country_of_origin", { placeholder: "e.g. INDONESIA" })}</Field>
+          <Field label="Category">
+            <select className={SELECT} value={f.category} onChange={e => setF(p => ({ ...p, category: e.target.value }))}>
+              <option value="">— Semua —</option>
+              {categories.map(c => <option key={c.category} value={c.category}>{c.category}</option>)}
+            </select>
+          </Field>
+          <Field label="Currency">
+            <select className={SELECT} value={f.currency_code} onChange={e => setF(p => ({ ...p, currency_code: e.target.value }))}>
+              <option value="">— Semua —</option>
+              {currencies.map(c => <option key={c.currency_code} value={c.currency_code}>{c.currency_code}</option>)}
+            </select>
+          </Field>
+          <Field label="Material Type">
+            <select className={SELECT} value={f.material_type} onChange={e => setF(p => ({ ...p, material_type: e.target.value }))}>
+              <option value="">— Semua —</option>
+              <option value="Direct Material">Direct Material</option>
+              <option value="Indirect Material">Indirect Material</option>
+            </select>
+          </Field>
+        </div>
+      </SectionCard>
+
+      {/* Results */}
+      {searched && (
+        <div className="space-y-3">
+          {/* View Selector */}
+          <div className="flex gap-2">
+            {VIEWS.map(v => (
+              <button key={v.id} onClick={() => setView(v.id)}
+                className={`px-4 py-2 rounded-lg text-xs font-medium border transition-all ${
+                  view === v.id
+                    ? "bg-orange-500/10 border-orange-500/40 text-orange-400"
+                    : "bg-gray-900 border-gray-800 text-gray-500 hover:border-gray-700"
+                }`}>
+                {v.label}
+                {results[v.id]?.count != null && (
+                  <span className="ml-2 px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">{results[v.id].count}</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {view === "detail"      && <PHDetailTable      data={results.detail?.data ?? []}        loading={loadingMap.detail}      error={results.detail?.error} />}
+          {view === "by-item"     && <PHByItemTable      data={results["by-item"]?.data ?? []}    loading={loadingMap["by-item"]}  error={results["by-item"]?.error}    years={results["by-item"]?.years ?? []} />}
+          {view === "by-supplier" && <PHBySupplierTable  data={results["by-supplier"]?.data ?? []}loading={loadingMap["by-supplier"]} error={results["by-supplier"]?.error} years={results["by-supplier"]?.years ?? []} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Shared: Excel download helper ─────────────── */
+
+function downloadExcel(filename, headers, rows) {
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Data");
+  XLSX.writeFile(wb, `${filename}.xlsx`);
+}
+
+/* ─── Shared: Pagination controls ───────────────── */
+
+function Pagination({ total, page, onPage }) {
+  const pages = Math.ceil(total / PAGE_SIZE);
+  if (pages <= 1) return null;
+  return (
+    <div className="flex items-center justify-between px-3 py-2 border-t border-gray-800 bg-gray-900/50">
+      <span className="text-xs text-gray-500">
+        {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} dari {total} baris
+      </span>
+      <div className="flex items-center gap-1">
+        <button onClick={() => onPage(page - 1)} disabled={page === 1}
+          className="p-1 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 transition-colors">
+          <ChevronLeft size={14} />
+        </button>
+        {Array.from({ length: pages }, (_, i) => i + 1)
+          .filter(p => p === 1 || p === pages || Math.abs(p - page) <= 1)
+          .reduce((acc, p, i, arr) => {
+            if (i > 0 && p - arr[i - 1] > 1) acc.push("...");
+            acc.push(p);
+            return acc;
+          }, [])
+          .map((p, i) => p === "..." ? (
+            <span key={`e${i}`} className="px-1 text-xs text-gray-600">…</span>
+          ) : (
+            <button key={p} onClick={() => onPage(p)}
+              className={`w-6 h-6 rounded text-xs font-medium transition-colors ${
+                p === page ? "bg-orange-500/20 text-orange-400 border border-orange-500/40" : "text-gray-500 hover:text-gray-300"
+              }`}>{p}</button>
+          ))}
+        <button onClick={() => onPage(page + 1)} disabled={page === pages}
+          className="p-1 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 transition-colors">
+          <ChevronRight size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PHDetailTable({ data, loading, error }) {
+  const [page, setPage] = useState(1);
+  const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
+  const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
+  const cols = ["Org ID","Organization","Item Code","Item Desc","Category","Type","Currency","Country","Year","Qty","Rcvd Qty","PO Amt Orig","PO Amt IDR","UOM"];
+  const paged = data.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const handleDownload = () => {
+    const rows = data.map(r => [
+      r.organization_id, r.organization_name, r.item_code, r.item_description,
+      r.category, r.material_type, r.currency_code, r.country_of_origin, r.year,
+      r.po_qty, r.received_qty, r.po_amount_orig, r.po_amount_idr, r.uom,
+    ]);
+    downloadExcel("purchase_history_detail", cols, rows);
+  };
+
+  return (
+    <div className="rounded-lg border border-gray-800">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 bg-gray-900/50">
+        <span className="text-xs text-gray-500">{data.length} baris</span>
+        {data.length > 0 && (
+          <button onClick={handleDownload}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium text-green-400 border border-green-500/30 bg-green-500/10 hover:bg-green-500/20 transition-colors">
+            <Download size={12} /> Download Excel
+          </button>
+        )}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead><tr className="bg-gray-800/60">{cols.map(h => <th key={h} className={TH}>{h}</th>)}</tr></thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={cols.length} className="px-3 py-10 text-center text-xs text-gray-500"><Loader2 size={14} className="animate-spin inline mr-2" />Memuat data...</td></tr>
+            ) : error ? (
+              <tr><td colSpan={cols.length} className="px-3 py-6 text-center text-xs text-red-400">{error}</td></tr>
+            ) : paged.length === 0 ? (
+              <tr><td colSpan={cols.length} className="px-3 py-10 text-center text-xs text-gray-600">Tidak ada data ditemukan</td></tr>
+            ) : paged.map((r, i) => (
+              <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
+                <td className={`${TD} text-gray-400 font-mono`}>{r.organization_id}</td>
+                <td className={`${TD} text-gray-300 max-w-[140px] truncate`} title={r.organization_name}>{r.organization_name}</td>
+                <td className={`${TD} font-mono text-blue-400`}>{r.item_code}</td>
+                <td className={`${TD} text-gray-300 max-w-[180px] truncate`} title={r.item_description}>{r.item_description}</td>
+                <td className={`${TD} text-gray-400`}>{r.category}</td>
+                <td className={`${TD} text-gray-400`}>{r.material_type}</td>
+                <td className={`${TD} text-yellow-400`}>{r.currency_code}</td>
+                <td className={`${TD} text-gray-400`}>{r.country_of_origin}</td>
+                <td className={`${TD} text-gray-300 font-medium`}>{r.year}</td>
+                <td className={`${TD} text-right text-gray-300`}>{fmtQty(r.po_qty)}</td>
+                <td className={`${TD} text-right text-gray-400`}>{fmtQty(r.received_qty)}</td>
+                <td className={`${TD} text-right text-gray-300`}>{fmtIDR(r.po_amount_orig)}</td>
+                <td className={`${TD} text-right text-green-400 font-medium`}>{fmtIDR(r.po_amount_idr)}</td>
+                <td className={`${TD} text-gray-500`}>{r.uom}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pagination total={data.length} page={page} onPage={setPage} />
+    </div>
+  );
+}
+
+function PHByItemTable({ data, years, loading, error }) {
+  const [page, setPage] = useState(1);
+  const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
+  const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
+  const fixedCols = ["Org ID","Organization","Item Code","Item Desc","Category","Type","Currency","UOM"];
+  const totalCols = fixedCols.length + years.length * 2 + 2;
+  const paged = data.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const handleDownload = () => {
+    const headers = [...fixedCols, ...years.flatMap(y => [`Value IDR ${y}`, `Qty ${y}`]), "Total Value IDR", "Total Qty"];
+    const rows = data.map(r => [
+      r.organization_id, r.organization_name, r.item_code, r.item_description,
+      r.category, r.material_type, r.currency_code, r.uom,
+      ...years.flatMap(y => [r[`value_idr_${y}`] ?? 0, r[`qty_${y}`] ?? 0]),
+      r.total_value_idr, r.total_qty,
+    ]);
+    downloadExcel("purchase_history_by_item.xlsx", headers, rows);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-gray-500">{data.length} baris ditemukan</span>
+        <button onClick={handleDownload} disabled={data.length === 0}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600/20 hover:bg-green-600/30 text-green-400 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+          <Download size={12} /> Download Excel
+        </button>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-gray-800">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-800/60">
+              {fixedCols.map(h => <th key={h} className={TH}>{h}</th>)}
+              {years.map(y => (
+                <th key={y} className={TH} colSpan={2}>{y}</th>
+              ))}
+              <th className={TH} colSpan={2}>TOTAL</th>
+            </tr>
+            <tr className="bg-gray-800/40">
+              {fixedCols.map(h => <th key={h} className="px-3 py-1" />)}
+              {years.map(y => (
+                <>
+                  <th key={`vi${y}`} className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Value IDR</th>
+                  <th key={`q${y}`}  className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Qty</th>
+                </>
+              ))}
+              <th className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Value IDR</th>
+              <th className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={totalCols} className="px-3 py-10 text-center text-xs text-gray-500"><Loader2 size={14} className="animate-spin inline mr-2" />Memuat data...</td></tr>
+            ) : error ? (
+              <tr><td colSpan={totalCols} className="px-3 py-6 text-center text-xs text-red-400">{error}</td></tr>
+            ) : data.length === 0 ? (
+              <tr><td colSpan={totalCols} className="px-3 py-10 text-center text-xs text-gray-600">Tidak ada data ditemukan</td></tr>
+            ) : paged.map((r, i) => (
+              <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
+                <td className={`${TD} text-gray-400 font-mono`}>{r.organization_id}</td>
+                <td className={`${TD} text-gray-300 max-w-[120px] truncate`} title={r.organization_name}>{r.organization_name}</td>
+                <td className={`${TD} font-mono text-blue-400`}>{r.item_code}</td>
+                <td className={`${TD} text-gray-300 max-w-[160px] truncate`} title={r.item_description}>{r.item_description}</td>
+                <td className={`${TD} text-gray-400`}>{r.category}</td>
+                <td className={`${TD} text-gray-400`}>{r.material_type}</td>
+                <td className={`${TD} text-yellow-400`}>{r.currency_code}</td>
+                <td className={`${TD} text-gray-500`}>{r.uom}</td>
+                {years.map(y => (
+                  <>
+                    <td key={`vi${y}`} className={`${TD} text-right text-gray-300`}>{fmtIDR(r[`value_idr_${y}`])}</td>
+                    <td key={`q${y}`}  className={`${TD} text-right text-gray-400`}>{fmtQty(r[`qty_${y}`])}</td>
+                  </>
+                ))}
+                <td className={`${TD} text-right text-green-400 font-medium`}>{fmtIDR(r.total_value_idr)}</td>
+                <td className={`${TD} text-right text-gray-300 font-medium`}>{fmtQty(r.total_qty)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pagination total={data.length} page={page} onPage={setPage} />
+    </div>
+  );
+}
+
+function PHBySupplierTable({ data, years, loading, error }) {
+  const [page, setPage] = useState(1);
+  const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
+  const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
+  const fixedCols = ["Org ID","Organization","Item Code","Category","Supplier","Manufacturer","Country","Currency","UOM"];
+  const totalCols = fixedCols.length + years.length * 3 + 3;
+  const paged = data.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const handleDownload = () => {
+    const headers = [...fixedCols, ...years.flatMap(y => [`Value Orig ${y}`, `Value IDR ${y}`, `Qty ${y}`]), "Total Orig", "Total IDR", "Total Qty"];
+    const rows = data.map(r => [
+      r.organization_id, r.organization_name, r.item_code, r.category,
+      r.supplier_name, r.manufacturer_name, r.country_of_origin, r.currency_code, r.uom,
+      ...years.flatMap(y => [r[`value_orig_${y}`] ?? 0, r[`value_idr_${y}`] ?? 0, r[`qty_${y}`] ?? 0]),
+      r.total_value_orig, r.total_value_idr, r.total_qty,
+    ]);
+    downloadExcel("purchase_history_by_supplier.xlsx", headers, rows);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-gray-500">{data.length} baris ditemukan</span>
+        <button onClick={handleDownload} disabled={data.length === 0}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600/20 hover:bg-green-600/30 text-green-400 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+          <Download size={12} /> Download Excel
+        </button>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-gray-800">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-800/60">
+              {fixedCols.map(h => <th key={h} className={TH}>{h}</th>)}
+              {years.map(y => <th key={y} className={TH} colSpan={3}>{y}</th>)}
+              <th className={TH} colSpan={3}>TOTAL</th>
+            </tr>
+            <tr className="bg-gray-800/40">
+              {fixedCols.map(h => <th key={h} className="px-3 py-1" />)}
+              {years.map(y => (
+                <>
+                  <th key={`vo${y}`} className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Orig</th>
+                  <th key={`vi${y}`} className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">IDR</th>
+                  <th key={`q${y}`}  className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Qty</th>
+                </>
+              ))}
+              <th className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Orig</th>
+              <th className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">IDR</th>
+              <th className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={totalCols} className="px-3 py-10 text-center text-xs text-gray-500"><Loader2 size={14} className="animate-spin inline mr-2" />Memuat data...</td></tr>
+            ) : error ? (
+              <tr><td colSpan={totalCols} className="px-3 py-6 text-center text-xs text-red-400">{error}</td></tr>
+            ) : data.length === 0 ? (
+              <tr><td colSpan={totalCols} className="px-3 py-10 text-center text-xs text-gray-600">Tidak ada data ditemukan</td></tr>
+            ) : paged.map((r, i) => (
+              <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
+                <td className={`${TD} text-gray-400 font-mono`}>{r.organization_id}</td>
+                <td className={`${TD} text-gray-300 max-w-[120px] truncate`} title={r.organization_name}>{r.organization_name}</td>
+                <td className={`${TD} font-mono text-blue-400`}>{r.item_code}</td>
+                <td className={`${TD} text-gray-400`}>{r.category}</td>
+                <td className={`${TD} text-gray-300 max-w-[140px] truncate`} title={r.supplier_name}>{r.supplier_name}</td>
+                <td className={`${TD} text-gray-300 max-w-[120px] truncate`} title={r.manufacturer_name}>{r.manufacturer_name}</td>
+                <td className={`${TD} text-gray-400`}>{r.country_of_origin}</td>
+                <td className={`${TD} text-yellow-400`}>{r.currency_code}</td>
+                <td className={`${TD} text-gray-500`}>{r.uom}</td>
+                {years.map(y => (
+                  <>
+                    <td key={`vo${y}`} className={`${TD} text-right text-gray-300`}>{fmtIDR(r[`value_orig_${y}`])}</td>
+                    <td key={`vi${y}`} className={`${TD} text-right text-green-400`}>{fmtIDR(r[`value_idr_${y}`])}</td>
+                    <td key={`q${y}`}  className={`${TD} text-right text-gray-400`}>{fmtQty(r[`qty_${y}`])}</td>
+                  </>
+                ))}
+                <td className={`${TD} text-right text-gray-300 font-medium`}>{fmtIDR(r.total_value_orig)}</td>
+                <td className={`${TD} text-right text-green-400 font-medium`}>{fmtIDR(r.total_value_idr)}</td>
+                <td className={`${TD} text-right text-gray-300 font-medium`}>{fmtQty(r.total_qty)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pagination total={data.length} page={page} onPage={setPage} />
+    </div>
+  );
+}
+
+/* ─── Section: Monthly Spend ─────────────────────── */
+
+/* ─── Monthly Spend helpers ──────────────────────── */
+
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const fmtB  = (n) => n == null ? "—" : (Number(n) / 1_000_000_000).toFixed(2) + " B";
+const fmtM  = (n) => n == null ? "—" : (Number(n) / 1_000_000).toFixed(1) + " M";
+const fmtIDRShort = (n) => {
+  if (n == null) return "—";
+  const v = Number(n);
+  if (v >= 1_000_000_000) return (v / 1_000_000_000).toFixed(2) + "B";
+  if (v >= 1_000_000)     return (v / 1_000_000).toFixed(1) + "M";
+  return fmtIDR(v);
+};
+
+const MS_COLORS = {
+  "Direct Material":   "#34d399",
+  "Indirect Material": "#60a5fa",
+  "Total":             "#a78bfa",
+};
+
+function MonthlySpendSection() {
+  const cy = new Date().getFullYear();
+  const [f, setF] = useState({
+    org_id: "", year_from: cy - 2, year_to: cy,
+    currency_code: "", material_type: "", exchange_rate_type: "Corporate",
+  });
+  const [orgs,     setOrgs]     = useState([]);
+  const [loading,  setLoading]  = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [rawData,  setRawData]  = useState([]);
+  const [error,    setError]    = useState("");
+  const [chartMode, setChartMode] = useState("stacked");   // "stacked" | "yoy"
+  const [page,     setPage]     = useState(1);
+
+  useEffect(() => {
+    purchasingApi.getOrganizations().then(r => { if (r.success) setOrgs(r.data ?? []); }).catch(() => {});
+  }, []);
+
+  const handleSearch = async () => {
+    setLoading(true); setError(""); setPage(1);
+    try {
+      const p = {};
+      if (f.org_id)             p.org_id             = f.org_id;
+      if (f.year_from)          p.year_from          = f.year_from;
+      if (f.year_to)            p.year_to            = f.year_to;
+      if (f.currency_code)      p.currency_code      = f.currency_code;
+      if (f.material_type)      p.material_type      = f.material_type;
+      if (f.exchange_rate_type) p.exchange_rate_type = f.exchange_rate_type;
+      const r = await purchasingApi.getMonthlySpend(p);
+      if (r?.success) { setRawData(r.data || []); setSearched(true); }
+      else setError(r?.error || "Request failed");
+    } catch (e) {
+      setError(e?.detail || e?.message || "Network error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReset = () => {
+    setF({ org_id: "", year_from: cy - 2, year_to: cy, currency_code: "", material_type: "", exchange_rate_type: "Corporate" });
+    setRawData([]); setSearched(false); setError(""); setPage(1);
+  };
+
+  // ── Pivot: stacked bar — [{label, direct, indirect, total, po_count}]
+  const stackedData = useMemo(() => {
+    const map = {};
+    rawData.forEach(r => {
+      const key = r.ym_label;
+      if (!map[key]) map[key] = { label: key, yr: r.yr, mo: r.mo, direct: 0, indirect: 0, total: 0, po_count: 0 };
+      const v = Number(r.spend_idr) || 0;
+      if (r.material_type === "Direct Material")   map[key].direct   += v;
+      else                                          map[key].indirect += v;
+      map[key].total    += v;
+      map[key].po_count += Number(r.po_count) || 0;
+    });
+    return Object.values(map).sort((a, b) => a.yr - b.yr || a.mo - b.mo);
+  }, [rawData]);
+
+  // ── Pivot: year-over-year line — [{mo: 1, label: "Jan", 2023: ..., 2024: ...}]
+  const years = useMemo(() => [...new Set(rawData.map(r => r.yr))].sort(), [rawData]);
+  const yoyData = useMemo(() => {
+    const map = {};
+    for (let m = 1; m <= 12; m++) map[m] = { mo: m, label: MONTH_NAMES[m - 1] };
+    rawData.forEach(r => {
+      const v = Number(r.spend_idr) || 0;
+      map[r.mo][r.yr] = (map[r.mo][r.yr] || 0) + v;
+    });
+    return Object.values(map);
+  }, [rawData]);
+
+  // ── KPIs
+  const kpi = useMemo(() => {
+    if (!stackedData.length) return null;
+    const total  = stackedData.reduce((s, r) => s + r.total, 0);
+    const direct = stackedData.reduce((s, r) => s + r.direct, 0);
+    const indir  = stackedData.reduce((s, r) => s + r.indirect, 0);
+    const poCount= stackedData.reduce((s, r) => s + r.po_count, 0);
+    const maxMo  = stackedData.reduce((a, b) => b.total > a.total ? b : a, stackedData[0]);
+    return { total, direct, indir, poCount, maxMo };
+  }, [stackedData]);
+
+  // ── Table (paged)
+  const tableData = stackedData.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
+  const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
+
+  const handleDownload = () => {
+    const cols = ["Month","Year","Direct Material (IDR)","Indirect Material (IDR)","Total (IDR)","PO Count"];
+    const rows = stackedData.map(r => [r.label, r.yr, r.direct, r.indirect, r.total, r.po_count]);
+    downloadExcel(`monthly_spend_${f.year_from}-${f.year_to}`, cols, rows);
+  };
+
+  const YOY_COLORS = ["#60a5fa","#34d399","#f59e0b","#f87171","#a78bfa","#fb923c"];
+
+  return (
+    <div className="space-y-4">
+      {/* Filter Panel */}
+      <SectionCard
+        title="Monthly Spend — Trend"
+        subtitle="PO spend per month from Oracle EBS · IDR equivalent"
+        action={
+          <div className="flex gap-2">
+            <ActionBtn icon={RefreshCw} label="Reset" color="bg-gray-700 hover:bg-gray-600" onClick={handleReset} />
+            <ActionBtn icon={loading ? Loader2 : Filter} label="Search" color="bg-green-600 hover:bg-green-700" onClick={handleSearch} />
+          </div>
+        }
+      >
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          <Field label="Organization">
+            <select className={SELECT} value={f.org_id} onChange={e => setF(p => ({ ...p, org_id: e.target.value }))}>
+              <option value="">— All —</option>
+              {orgs.map(o => <option key={o.organization_id} value={o.organization_id}>{o.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Year From">
+            <input className={INPUT} type="number" value={f.year_from} onChange={e => setF(p => ({ ...p, year_from: e.target.value }))} />
+          </Field>
+          <Field label="Year To">
+            <input className={INPUT} type="number" value={f.year_to} onChange={e => setF(p => ({ ...p, year_to: e.target.value }))} />
+          </Field>
+          <Field label="Currency">
+            <select className={SELECT} value={f.currency_code} onChange={e => setF(p => ({ ...p, currency_code: e.target.value }))}>
+              <option value="">— All —</option>
+              <option value="IDR">IDR</option>
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+            </select>
+          </Field>
+          <Field label="Material Type">
+            <select className={SELECT} value={f.material_type} onChange={e => setF(p => ({ ...p, material_type: e.target.value }))}>
+              <option value="">— All —</option>
+              <option value="Direct Material">Direct Material</option>
+              <option value="Indirect Material">Indirect Material</option>
+            </select>
+          </Field>
+          <Field label="Exchange Rate">
+            <input className={INPUT} value={f.exchange_rate_type} onChange={e => setF(p => ({ ...p, exchange_rate_type: e.target.value }))} placeholder="Corporate" />
+          </Field>
+        </div>
+        {error && (
+          <div className="mt-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
+            <X size={12} />{error}
+          </div>
+        )}
+      </SectionCard>
+
+      {loading && (
+        <div className="flex items-center justify-center py-12 text-gray-500 text-sm gap-2">
+          <Loader2 size={16} className="animate-spin" /> Loading data from Oracle EBS...
+        </div>
+      )}
+
+      {searched && !loading && (
+        <>
+          {/* KPI Cards */}
+          {kpi && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { label: "Total Spend (IDR)", value: fmtB(kpi.total),   color: "text-green-400",  bg: "bg-green-500/10",  border: "border-green-500/20" },
+                { label: "Direct Material",   value: fmtB(kpi.direct),  color: "text-emerald-400",bg: "bg-emerald-500/10",border: "border-emerald-500/20" },
+                { label: "Indirect Material", value: fmtB(kpi.indir),   color: "text-blue-400",   bg: "bg-blue-500/10",   border: "border-blue-500/20" },
+                { label: "Total PO Count",    value: kpi.poCount.toLocaleString(), color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" },
+              ].map(k => (
+                <div key={k.label} className={`rounded-lg border ${k.border} ${k.bg} px-4 py-3`}>
+                  <p className="text-xs text-gray-500 mb-1">{k.label}</p>
+                  <p className={`text-xl font-bold ${k.color}`}>{k.value}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Chart Toggle */}
+          <div className="flex gap-2">
+            {[{ id: "stacked", label: "Stacked by Type" }, { id: "yoy", label: "Year-over-Year" }].map(m => (
+              <button key={m.id} onClick={() => setChartMode(m.id)}
+                className={`px-4 py-2 rounded-lg text-xs font-medium border transition-all ${
+                  chartMode === m.id
+                    ? "bg-green-500/10 border-green-500/40 text-green-400"
+                    : "bg-gray-900 border-gray-800 text-gray-500 hover:border-gray-700"
+                }`}>{m.label}</button>
+            ))}
+          </div>
+
+          {/* Chart */}
+          {stackedData.length === 0 ? (
+            <div className="rounded-lg border border-gray-800 py-12 text-center text-xs text-gray-600">No data found</div>
+          ) : chartMode === "stacked" ? (
+            <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-4">
+              <p className="text-xs text-gray-500 mb-3">Monthly PO Spend (IDR) — Direct vs Indirect</p>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={stackedData} margin={{ top: 4, right: 16, left: 16, bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis dataKey="label" tick={{ fill: "#6b7280", fontSize: 10 }} angle={-45} textAnchor="end" interval={0} />
+                  <YAxis tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} />
+                  <Tooltip
+                    contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
+                    formatter={(v, name) => [fmtIDR(v), name]}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11, color: "#9ca3af", paddingTop: 8 }} />
+                  <Bar dataKey="direct"   name="Direct Material"   stackId="a" fill={MS_COLORS["Direct Material"]}   radius={[0,0,0,0]} />
+                  <Bar dataKey="indirect" name="Indirect Material" stackId="a" fill={MS_COLORS["Indirect Material"]} radius={[4,4,0,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-4">
+              <p className="text-xs text-gray-500 mb-3">Year-over-Year Monthly Spend (IDR)</p>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={yoyData} margin={{ top: 4, right: 16, left: 16, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis dataKey="label" tick={{ fill: "#6b7280", fontSize: 10 }} />
+                  <YAxis tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} />
+                  <Tooltip
+                    contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
+                    formatter={(v, name) => [fmtIDR(v), `Year ${name}`]}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11, color: "#9ca3af" }} />
+                  {years.map((yr, i) => (
+                    <Line key={yr} type="monotone" dataKey={yr} name={String(yr)}
+                      stroke={YOY_COLORS[i % YOY_COLORS.length]} strokeWidth={2}
+                      dot={{ r: 3 }} activeDot={{ r: 5 }} connectNulls />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Summary Table */}
+          <div className="rounded-lg border border-gray-800">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 bg-gray-900/50">
+              <span className="text-xs text-gray-500">{stackedData.length} months</span>
+              {stackedData.length > 0 && (
+                <button onClick={handleDownload}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium text-green-400 border border-green-500/30 bg-green-500/10 hover:bg-green-500/20 transition-colors">
+                  <Download size={12} /> Download Excel
+                </button>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-800/60">
+                    {["Month","Direct Material (IDR)","Indirect Material (IDR)","Total (IDR)","PO Count"].map(h => (
+                      <th key={h} className={TH}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tableData.length === 0 ? (
+                    <tr><td colSpan={5} className="px-3 py-10 text-center text-xs text-gray-600">No data</td></tr>
+                  ) : tableData.map((r, i) => {
+                    const pct = kpi?.total > 0 ? (r.total / kpi.total) * 100 : 0;
+                    return (
+                      <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
+                        <td className={`${TD} text-gray-300 font-medium`}>{r.label}</td>
+                        <td className={`${TD} text-right text-emerald-400`}>{fmtIDR(r.direct)}</td>
+                        <td className={`${TD} text-right text-blue-400`}>{fmtIDR(r.indirect)}</td>
+                        <td className={`${TD} text-right text-gray-200 font-semibold`}>
+                          <div className="flex items-center justify-end gap-2">
+                            <div className="w-16 h-1.5 rounded-full bg-gray-700 overflow-hidden">
+                              <div className="h-full rounded-full bg-green-500" style={{ width: `${pct}%` }} />
+                            </div>
+                            {fmtIDR(r.total)}
+                          </div>
+                        </td>
+                        <td className={`${TD} text-right text-gray-400`}>{r.po_count}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <Pagination total={stackedData.length} page={page} onPage={setPage} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ─── Section: Active Suppliers ──────────────────── */
+
+function ActiveSuppliersSection() {
+  const cy = new Date().getFullYear();
+  const [f, setF] = useState({
+    org_id: "", year_from: cy - 1, year_to: cy,
+    vendor_name: "", material_type: "", exchange_rate_type: "Corporate",
+  });
+  const [orgs,     setOrgs]     = useState([]);
+  const [loading,  setLoading]  = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [rows,     setRows]     = useState([]);
+  const [error,    setError]    = useState("");
+  const [page,     setPage]     = useState(1);
+
+  useEffect(() => {
+    purchasingApi.getOrganizations().then(r => { if (r.success) setOrgs(r.data ?? []); }).catch(() => {});
+  }, []);
+
+  const handleSearch = async () => {
+    setLoading(true); setError(""); setPage(1);
+    try {
+      const p = {};
+      if (f.org_id)             p.org_id             = f.org_id;
+      if (f.year_from)          p.year_from          = f.year_from;
+      if (f.year_to)            p.year_to            = f.year_to;
+      if (f.vendor_name)        p.vendor_name        = f.vendor_name;
+      if (f.material_type)      p.material_type      = f.material_type;
+      if (f.exchange_rate_type) p.exchange_rate_type = f.exchange_rate_type;
+      const r = await purchasingApi.getActiveSuppliers(p);
+      if (r?.success) { setRows(r.data || []); setSearched(true); }
+      else setError(r?.error || "Request failed");
+    } catch (e) {
+      setError(e?.detail || e?.message || "Network error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReset = () => {
+    setF({ org_id: "", year_from: cy - 1, year_to: cy, vendor_name: "", material_type: "", exchange_rate_type: "Corporate" });
+    setRows([]); setSearched(false); setError(""); setPage(1);
+  };
+
+  // KPIs
+  const kpi = useMemo(() => {
+    if (!rows.length) return null;
+    const totalSpend = rows.reduce((s, r) => s + (Number(r.total_idr) || 0), 0);
+    const totalPO    = rows.reduce((s, r) => s + (Number(r.po_count)  || 0), 0);
+    const top        = rows[0];
+    return { count: rows.length, totalSpend, totalPO, topName: top?.supplier_name, topSpend: top?.total_idr };
+  }, [rows]);
+
+  // Top 10 for bar chart
+  const chartData = useMemo(() =>
+    rows.slice(0, 10).map(r => ({
+      name: r.supplier_name?.length > 18 ? r.supplier_name.slice(0, 18) + "…" : r.supplier_name,
+      direct:   Number(r.direct_idr)   || 0,
+      indirect: Number(r.indirect_idr) || 0,
+      total:    Number(r.total_idr)    || 0,
+    }))
+  , [rows]);
+
+  const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
+  const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
+  const maxSpend = rows[0] ? (Number(rows[0].total_idr) || 1) : 1;
+
+  const handleDownload = () => {
+    const cols = ["Supplier Name","PO Count","Item Count","Category Count","Last PO Date",
+                  "Direct (IDR)","Indirect (IDR)","Total (IDR)"];
+    const data = rows.map(r => [
+      r.supplier_name, r.po_count, r.item_count, r.category_count, r.last_po_date,
+      r.direct_idr, r.indirect_idr, r.total_idr,
+    ]);
+    downloadExcel(`active_suppliers_${f.year_from}-${f.year_to}`, cols, data);
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Filter Panel */}
+      <SectionCard
+        title="Active Suppliers"
+        subtitle="Suppliers with approved POs in the selected period · Oracle EBS"
+        action={
+          <div className="flex gap-2">
+            <ActionBtn icon={RefreshCw} label="Reset"  color="bg-gray-700 hover:bg-gray-600" onClick={handleReset} />
+            <ActionBtn icon={loading ? Loader2 : Search} label="Search" color="bg-blue-600 hover:bg-blue-700" onClick={handleSearch} />
+          </div>
+        }
+      >
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          <Field label="Organization">
+            <select className={SELECT} value={f.org_id} onChange={e => setF(p => ({ ...p, org_id: e.target.value }))}>
+              <option value="">— All —</option>
+              {orgs.map(o => <option key={o.organization_id} value={o.organization_id}>{o.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Year From">
+            <input className={INPUT} type="number" value={f.year_from} onChange={e => setF(p => ({ ...p, year_from: e.target.value }))} />
+          </Field>
+          <Field label="Year To">
+            <input className={INPUT} type="number" value={f.year_to} onChange={e => setF(p => ({ ...p, year_to: e.target.value }))} />
+          </Field>
+          <Field label="Supplier Name">
+            <input className={INPUT} value={f.vendor_name} onChange={e => setF(p => ({ ...p, vendor_name: e.target.value }))} placeholder="partial search…" />
+          </Field>
+          <Field label="Material Type">
+            <select className={SELECT} value={f.material_type} onChange={e => setF(p => ({ ...p, material_type: e.target.value }))}>
+              <option value="">— All —</option>
+              <option value="Direct Material">Direct Material</option>
+              <option value="Indirect Material">Indirect Material</option>
+            </select>
+          </Field>
+          <Field label="Exchange Rate">
+            <input className={INPUT} value={f.exchange_rate_type} onChange={e => setF(p => ({ ...p, exchange_rate_type: e.target.value }))} placeholder="Corporate" />
+          </Field>
+        </div>
+        {error && (
+          <div className="mt-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
+            <X size={12} />{error}
+          </div>
+        )}
+      </SectionCard>
+
+      {loading && (
+        <div className="flex items-center justify-center py-12 text-gray-500 text-sm gap-2">
+          <Loader2 size={16} className="animate-spin" /> Loading from Oracle EBS...
+        </div>
+      )}
+
+      {searched && !loading && (
+        <>
+          {/* KPI Cards */}
+          {kpi && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { label: "Active Suppliers", value: kpi.count,                     color: "text-blue-400",   bg: "bg-blue-500/10",   border: "border-blue-500/20" },
+                { label: "Total Spend (IDR)", value: fmtB(kpi.totalSpend),         color: "text-green-400",  bg: "bg-green-500/10",  border: "border-green-500/20" },
+                { label: "Total PO Count",   value: kpi.totalPO.toLocaleString(),  color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" },
+                { label: "Top Supplier",     value: kpi.topName ?? "—",            color: "text-yellow-400", bg: "bg-yellow-500/10", border: "border-yellow-500/20",
+                  sub: fmtIDRShort(kpi.topSpend) },
+              ].map(k => (
+                <div key={k.label} className={`rounded-lg border ${k.border} ${k.bg} px-4 py-3`}>
+                  <p className="text-xs text-gray-500 mb-1">{k.label}</p>
+                  <p className={`text-xl font-bold truncate ${k.color}`} title={String(k.value)}>{k.value}</p>
+                  {k.sub && <p className="text-xs text-gray-500 mt-0.5">{k.sub} IDR</p>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Top 10 Bar Chart */}
+          {chartData.length > 0 && (
+            <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-4">
+              <p className="text-xs text-gray-500 mb-3">Top {chartData.length} Suppliers by Spend (IDR)</p>
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 60, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" horizontal={false} />
+                  <XAxis type="number" tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} />
+                  <YAxis type="category" dataKey="name" width={140} tick={{ fill: "#9ca3af", fontSize: 10 }} />
+                  <Tooltip
+                    contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
+                    formatter={(v, name) => [fmtIDR(v), name]}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11, color: "#9ca3af" }} />
+                  <Bar dataKey="direct"   name="Direct Material"   stackId="s" fill="#34d399" radius={[0,0,0,0]} />
+                  <Bar dataKey="indirect" name="Indirect Material" stackId="s" fill="#60a5fa" radius={[0,4,4,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Table */}
+          <div className="rounded-lg border border-gray-800">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 bg-gray-900/50">
+              <span className="text-xs text-gray-500">{rows.length} suppliers</span>
+              {rows.length > 0 && (
+                <button onClick={handleDownload}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium text-green-400 border border-green-500/30 bg-green-500/10 hover:bg-green-500/20 transition-colors">
+                  <Download size={12} /> Download Excel
+                </button>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-800/60">
+                    {["#","Supplier Name","PO Count","Items","Categories","Last PO","Direct (IDR)","Indirect (IDR)","Total (IDR)","Share"].map(h => (
+                      <th key={h} className={TH}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.length === 0 ? (
+                    <tr><td colSpan={10} className="px-3 py-10 text-center text-xs text-gray-600">No data found</td></tr>
+                  ) : paged.map((r, i) => {
+                    const rank  = (page - 1) * PAGE_SIZE + i + 1;
+                    const share = maxSpend > 0 ? ((Number(r.total_idr) || 0) / maxSpend) * 100 : 0;
+                    return (
+                      <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
+                        <td className={`${TD} text-gray-600 text-center w-8`}>{rank}</td>
+                        <td className={`${TD} text-gray-200 font-medium max-w-52 truncate`} title={r.supplier_name}>{r.supplier_name}</td>
+                        <td className={`${TD} text-right text-gray-400`}>{r.po_count}</td>
+                        <td className={`${TD} text-right text-gray-400`}>{r.item_count}</td>
+                        <td className={`${TD} text-right text-gray-400`}>{r.category_count}</td>
+                        <td className={`${TD} text-gray-500`}>{r.last_po_date}</td>
+                        <td className={`${TD} text-right text-emerald-400`}>{fmtIDR(r.direct_idr)}</td>
+                        <td className={`${TD} text-right text-blue-400`}>{fmtIDR(r.indirect_idr)}</td>
+                        <td className={`${TD} text-right text-gray-200 font-semibold`}>{fmtIDR(r.total_idr)}</td>
+                        <td className={`${TD} w-24`}>
+                          <div className="flex items-center gap-1.5">
+                            <div className="flex-1 h-1.5 rounded-full bg-gray-700 overflow-hidden">
+                              <div className="h-full rounded-full bg-blue-500" style={{ width: `${share}%` }} />
+                            </div>
+                            <span className="text-gray-600 text-xs w-8 text-right">{share.toFixed(0)}%</span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <Pagination total={rows.length} page={page} onPage={setPage} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ─── Section: Price Analysis ────────────────────── */
+
+const LINE_COLORS = ["#06b6d4","#f59e0b","#10b981","#f43f5e","#8b5cf6","#3b82f6","#ec4899","#84cc16"];
+const fmtIDR2 = (v) => v == null ? "—" : new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 }).format(v);
+
+function PriceAnalysisSection() {
+  const [filters, setFilters] = useState({
+    item_code: "", item_desc: "", vendor_name: "",
+    year_from: CY - 3, year_to: CY,
+    material_type: "", category: "",
+  });
+  const [data,    setData]    = useState([]);
+  const [years,   setYears]   = useState([]);
+  const [metals,  setMetals]  = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState("");
+  const [searched, setSearched] = useState(false);
+
+  // Fetch metals prices on mount
+  useEffect(() => {
+    purchasingApi.getMetalsLatest()
+      .then(r => setMetals(r?.data || null))
+      .catch(() => {});
+  }, []);
+
+  const handleSearch = async () => {
+    setLoading(true); setError("");
+    try {
+      const p = {};
+      if (filters.item_code)    p.item_code   = filters.item_code;
+      if (filters.item_desc)    p.item_desc   = filters.item_desc;
+      if (filters.vendor_name)  p.vendor_name = filters.vendor_name;
+      if (filters.year_from)    p.year_from   = filters.year_from;
+      if (filters.year_to)      p.year_to     = filters.year_to;
+      if (filters.material_type) p.material_type = filters.material_type;
+      if (filters.category)     p.category    = filters.category;
+      const r = await purchasingApi.getPriceAnalysis(p);
+      if (r?.success) {
+        setData(r.data || []);
+        setYears(r.years || []);
+        setSearched(true);
+      } else {
+        setError(r?.error || "Request failed");
+      }
+    } catch (e) {
+      setError(e?.detail || e?.message || "Network error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Build chart data: [{year: 2022, "Supplier A": 12000, "Supplier B": 14000}, ...]
+  const chartData = useMemo(() => {
+    if (!data.length) return [];
+    const suppliers = [...new Set(data.map(r => r.supplier_name))];
+    const yearMap = {};
+    years.forEach(y => { yearMap[y] = { year: String(y) }; });
+    data.forEach(r => {
+      if (yearMap[r.trx_year]) {
+        yearMap[r.trx_year][r.supplier_name] = r.avg_price_idr;
+      }
+    });
+    return Object.values(yearMap);
+  }, [data, years]);
+
+  const suppliers = useMemo(() => [...new Set(data.map(r => r.supplier_name))], [data]);
+
+  // Build summary table: rows=suppliers, cols=years
+  const tableRows = useMemo(() => {
+    if (!data.length) return [];
+    const map = {};
+    data.forEach(r => {
+      const key = `${r.supplier_name}|||${r.item_code}`;
+      if (!map[key]) map[key] = {
+        supplier_name: r.supplier_name,
+        item_code: r.item_code,
+        item_desc: r.item_desc,
+        uom: r.uom,
+        currency: r.currency_code,
+        country: r.country_of_origin,
+        years: {},
+      };
+      map[key].years[r.trx_year] = {
+        avg_price_idr: r.avg_price_idr,
+        avg_price_orig: r.avg_price_orig,
+        total_qty: r.total_qty,
+        po_count: r.po_count,
+      };
+    });
+    return Object.values(map);
+  }, [data]);
+
+  const handleDownload = () => {
+    if (!tableRows.length) return;
+    const headers = ["Supplier", "Item Code", "Description", "UOM", "Currency", "Country",
+      ...years.flatMap(y => [`Avg Price IDR ${y}`, `Avg Price Orig ${y}`, `Qty ${y}`, `PO ${y}`])];
+    const rows = tableRows.map(r => [
+      r.supplier_name, r.item_code, r.item_desc, r.uom, r.currency, r.country,
+      ...years.flatMap(y => [
+        r.years[y]?.avg_price_idr ?? "", r.years[y]?.avg_price_orig ?? "",
+        r.years[y]?.total_qty ?? "", r.years[y]?.po_count ?? "",
+      ]),
+    ]);
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Price Analysis");
+    XLSX.writeFile(wb, `price_analysis_${filters.item_code || "all"}.xlsx`);
+  };
+
+  const inp = "w-full text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-3 py-2 focus:outline-none focus:border-cyan-500";
+  const lbl = "text-xs text-gray-400 font-medium mb-1";
+
+  return (
+    <div className="space-y-4">
+      {/* Metals Reference Panel */}
+      {metals && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <p className="text-xs text-gray-400 font-semibold mb-3 uppercase tracking-wider">
+            Commodity Reference Price (metals.dev · USD/troy oz)
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { label: "Platinum",  val: metals.platinum  },
+              { label: "Palladium", val: metals.palladium },
+              { label: "Gold",      val: metals.gold      },
+              { label: "Silver",    val: metals.silver    },
+            ].map(m => (
+              <div key={m.label} className="bg-gray-800 rounded-lg p-3 text-center">
+                <p className="text-xs text-gray-400">{m.label}</p>
+                <p className="text-lg font-bold text-cyan-400">
+                  ${m.val?.toLocaleString("en-US", { minimumFractionDigits: 2 }) ?? "—"}
+                </p>
+                <p className="text-xs text-gray-500">per troy oz</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-gray-600 mt-2">
+            Updated: {metals.updated_at ? new Date(metals.updated_at).toLocaleString("id-ID") : "—"}
+          </p>
+        </div>
+      )}
+
+      {/* Filter Panel */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Filter size={14} className="text-cyan-400" />
+          <span className="text-sm font-semibold text-gray-200">Filter</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+          <div className="col-span-2">
+            <p className={lbl}>Item Code</p>
+            <input className={inp} value={filters.item_code}
+              onChange={e => setFilters(f => ({...f, item_code: e.target.value}))}
+              placeholder="e.g. RM-0001" />
+          </div>
+          <div className="col-span-2">
+            <p className={lbl}>Item Description</p>
+            <input className={inp} value={filters.item_desc}
+              onChange={e => setFilters(f => ({...f, item_desc: e.target.value}))}
+              placeholder="e.g. Paracetamol" />
+          </div>
+          <div className="col-span-2">
+            <p className={lbl}>Supplier</p>
+            <input className={inp} value={filters.vendor_name}
+              onChange={e => setFilters(f => ({...f, vendor_name: e.target.value}))}
+              placeholder="Supplier name" />
+          </div>
+          <div>
+            <p className={lbl}>Year From</p>
+            <input className={inp} type="number" value={filters.year_from}
+              onChange={e => setFilters(f => ({...f, year_from: e.target.value}))} />
+          </div>
+          <div>
+            <p className={lbl}>Year To</p>
+            <input className={inp} type="number" value={filters.year_to}
+              onChange={e => setFilters(f => ({...f, year_to: e.target.value}))} />
+          </div>
+          <div>
+            <p className={lbl}>Material Type</p>
+            <select className={inp} value={filters.material_type}
+              onChange={e => setFilters(f => ({...f, material_type: e.target.value}))}>
+              <option value="">All</option>
+              <option value="Direct Material">Direct</option>
+              <option value="Indirect Material">Indirect</option>
+            </select>
+          </div>
+        </div>
+        <div className="flex gap-2 mt-3">
+          <button onClick={handleSearch} disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold disabled:opacity-50">
+            {loading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+            {loading ? "Loading..." : "Search"}
+          </button>
+          {searched && data.length > 0 && (
+            <button onClick={handleDownload}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-semibold">
+              <Download size={13} /> Download Excel
+            </button>
+          )}
+        </div>
+        {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+      </div>
+
+      {/* Chart */}
+      {searched && chartData.length > 0 && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <p className="text-sm font-semibold text-gray-200 mb-4">
+            Average Purchase Price Trend (IDR/UOM) — by Supplier
+          </p>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={chartData} margin={{ top: 4, right: 20, left: 10, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis dataKey="year" tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false}
+                tickFormatter={v => fmtIDR2(v)} width={80} />
+              <Tooltip
+                contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
+                labelStyle={{ color: "#e5e7eb", fontWeight: 600 }}
+                formatter={(v, name) => [fmtIDR2(v), name]}
+              />
+              <Legend wrapperStyle={{ fontSize: 11, color: "#9ca3af" }} />
+              {suppliers.map((s, i) => (
+                <Line key={s} type="monotone" dataKey={s}
+                  stroke={LINE_COLORS[i % LINE_COLORS.length]}
+                  strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} connectNulls />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Summary Table */}
+      {searched && tableRows.length > 0 && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-800">
+            <p className="text-sm font-semibold text-gray-200">
+              Price Detail Table — {tableRows.length} supplier(s)
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-gray-800 bg-gray-800/60">
+                  <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Supplier</th>
+                  <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Item Code</th>
+                  <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Description</th>
+                  <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">UOM</th>
+                  <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Curr</th>
+                  <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Country</th>
+                  {years.map(y => (
+                    <th key={y} className="px-3 py-2 text-center text-gray-400 whitespace-nowrap" colSpan={2}>
+                      {y}
+                    </th>
+                  ))}
+                </tr>
+                <tr className="border-b border-gray-800 bg-gray-800/40">
+                  <th colSpan={6} />
+                  {years.map(y => (
+                    <>
+                      <th key={`${y}-p`} className="px-3 py-1 text-center text-gray-500 whitespace-nowrap font-normal">Avg IDR</th>
+                      <th key={`${y}-q`} className="px-3 py-1 text-center text-gray-500 whitespace-nowrap font-normal">Qty</th>
+                    </>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tableRows.map((r, i) => {
+                  // compute trend: compare last year vs prev year avg price
+                  const lastY = years[years.length - 1];
+                  const prevY = years[years.length - 2];
+                  const lastP = r.years[lastY]?.avg_price_idr;
+                  const prevP = r.years[prevY]?.avg_price_idr;
+                  const trend = lastP && prevP ? (lastP > prevP ? "up" : lastP < prevP ? "down" : "flat") : null;
+                  return (
+                    <tr key={i} className="border-b border-gray-800 hover:bg-gray-800/40">
+                      <td className="px-3 py-2 text-gray-200 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          {trend === "up"   && <TrendingUp   size={11} className="text-red-400" />}
+                          {trend === "down" && <TrendingDown size={11} className="text-green-400" />}
+                          {r.supplier_name}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-cyan-400 font-mono whitespace-nowrap">{r.item_code}</td>
+                      <td className="px-3 py-2 text-gray-300 max-w-xs truncate">{r.item_desc}</td>
+                      <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.uom}</td>
+                      <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.currency}</td>
+                      <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.country}</td>
+                      {years.map(y => (
+                        <>
+                          <td key={`${y}-p`} className="px-3 py-2 text-right text-gray-200 whitespace-nowrap">
+                            {fmtIDR2(r.years[y]?.avg_price_idr)}
+                          </td>
+                          <td key={`${y}-q`} className="px-3 py-2 text-right text-gray-400 whitespace-nowrap">
+                            {r.years[y]?.total_qty != null ? fmtIDR2(r.years[y].total_qty) : "—"}
+                          </td>
+                        </>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {searched && data.length === 0 && !loading && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center text-gray-400 text-sm">
+          No data found. Try adjusting filters.
+        </div>
+      )}
+
+      {!searched && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-8 text-center text-gray-500 text-sm">
+          Set filters and click <span className="text-cyan-400 font-semibold">Search</span> to load price analysis data.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Section: Manufacturer Master ───────────────── */
+
+function ManufacturerMasterSection() {
+  const [data,       setData]       = useState([]);
+  const [loading,    setLoading]    = useState(false);
+  const [error,      setError]      = useState(null);
+  const [showForm,   setShowForm]   = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+
+  const loadList = async () => {
+    setLoading(true); setError(null);
+    try {
+      const r = await purchasingApi.getManufacturerList();
+      if (r.success) setData(r.data ?? []);
+      else setError(r.error);
+    } catch (e) {
+      setError(String(e?.message ?? e));
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { loadList(); }, []);
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("Hapus record ini?")) return;
+    setDeletingId(id);
+    try {
+      const r = await purchasingApi.deleteManufacturer(id);
+      if (r.success) setData((prev) => prev.filter((row) => row.manufacturer_id !== id));
+      else setError(r.error);
+    } finally { setDeletingId(null); }
+  };
+
+  return (
+    <>
+      <SectionCard
+        title="Manufacturer Master"
+        subtitle="Data master pabrik/manufacturer per item Oracle"
+        action={
+          <div className="flex gap-2">
+            <ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-gray-700 hover:bg-gray-600" onClick={loadList} />
+            <ActionBtn icon={Plus} label="Tambah" color="bg-purple-600 hover:bg-purple-700" onClick={() => setShowForm(true)} />
+          </div>
+        }
+      >
+        {error && (
+          <div className="mb-4 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">{error}</div>
+        )}
+
+        <div className="overflow-x-auto rounded-lg border border-gray-800">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-800/60">
+                {["Item Code", "Item Description", "Org ID", "Manufacturer", "Country", "Created By", "Date", ""].map((h) => (
+                  <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-3 py-10 text-center text-xs text-gray-600">
+                    {loading ? "Memuat data..." : "Belum ada data. Klik Tambah untuk menambah record."}
+                  </td>
+                </tr>
+              ) : (
+                data.map((row) => (
+                  <tr key={row.manufacturer_id} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
+                    <td className="px-3 py-2.5 text-xs font-mono text-blue-400 whitespace-nowrap">{row.item_code}</td>
+                    <td className="px-3 py-2.5 text-xs text-gray-300 max-w-[200px] truncate" title={row.item_description}>{row.item_description}</td>
+                    <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">{row.organization_id}</td>
+                    <td className="px-3 py-2.5 text-xs text-gray-200 font-medium whitespace-nowrap">{row.manufacturer_name}</td>
+                    <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">{row.country_of_origin}</td>
+                    <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">{row.created_by}</td>
+                    <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">{row.creation_date}</td>
+                    <td className="px-3 py-2.5">
+                      <button
+                        onClick={() => handleDelete(row.manufacturer_id)}
+                        disabled={deletingId === row.manufacturer_id}
+                        className="p-1.5 rounded text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+                      >
+                        {deletingId === row.manufacturer_id
+                          ? <Loader2 size={13} className="animate-spin" />
+                          : <Trash2 size={13} />}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </SectionCard>
+
+      {showForm && (
+        <ManufacturerForm
+          onClose={() => setShowForm(false)}
+          onSaved={() => { setShowForm(false); loadList(); }}
+        />
+      )}
+    </>
+  );
+}
+
+/* ─── Manufacturer Input Form (Modal) ────────────── */
+
+function ManufacturerForm({ onClose, onSaved }) {
+  const [orgs,        setOrgs]        = useState([]);
+  const [items,       setItems]       = useState([]);
+  const [orgLoading,  setOrgLoading]  = useState(true);
+  const [itemLoading, setItemLoading] = useState(false);
+  const [saving,      setSaving]      = useState(false);
+  const [error,       setError]       = useState(null);
+  const [itemSearch,  setItemSearch]  = useState("");
+  const [showDrop,    setShowDrop]    = useState(false);
+  const searchTimer = useRef(null);
+
+  const [form, setForm] = useState({
+    organization_id:   "",
+    item_id:           "",
+    item_code:         "",
+    item_description:  "",
+    manufacturer_name: "",
+    country_of_origin: "",
+  });
+
+  // Load organizations
+  useEffect(() => {
+    purchasingApi.getOrganizations()
+      .then((r) => { if (r.success) setOrgs(r.data ?? []); })
+      .catch(() => {})
+      .finally(() => setOrgLoading(false));
+  }, []);
+
+  const searchItems = (orgId, search) => {
+    if (!orgId) return;
+    setItemLoading(true);
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const r = await purchasingApi.getItems(orgId, search);
+        if (r.success) { setItems(r.data ?? []); setShowDrop(true); }
+      } finally { setItemLoading(false); }
+    }, 200);
+  };
+
+  const handleOrgChange = (e) => {
+    setForm((p) => ({ ...p, organization_id: e.target.value, item_id: "", item_code: "", item_description: "" }));
+    setItems([]);
+    setItemSearch("");
+    setShowDrop(false);
+  };
+
+  const handleItemInput = (e) => {
+    const val = e.target.value;
+    setItemSearch(val);
+    setForm((p) => ({ ...p, item_id: "", item_code: val, item_description: "" }));
+    searchItems(form.organization_id, val);
+  };
+
+  const selectItem = (item) => {
+    setForm((p) => ({ ...p, item_id: item.item_id, item_code: item.item_code, item_description: item.item_description }));
+    setItemSearch(item.item_code);
+    setShowDrop(false);
+  };
+
+  const handleSave = async () => {
+    if (!form.organization_id || !form.item_code.trim() || !form.manufacturer_name.trim()) {
+      setError("Organization, Item Code, dan Manufacturer Name wajib diisi");
+      return;
+    }
+    setSaving(true); setError(null);
+    try {
+      const r = await purchasingApi.createManufacturer({
+        item_id:           form.item_id ? Number(form.item_id) : 0,
+        organization_id:   Number(form.organization_id),
+        item_code:         form.item_code,
+        item_description:  form.item_description,
+        manufacturer_name: form.manufacturer_name,
+        country_of_origin: form.country_of_origin,
+      });
+      if (r.success) onSaved();
+      else setError(r.error);
+    } catch (e) {
+      setError(String(e?.message ?? e));
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="w-full max-w-lg rounded-xl border border-gray-700 bg-gray-900 shadow-2xl overflow-visible">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <h3 className="text-sm font-semibold text-gray-200">Tambah Manufacturer Master</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4 overflow-visible">
+          {/* Organization dropdown */}
+          <Field label="Organization *">
+            {orgLoading ? (
+              <div className="flex items-center gap-2 text-xs text-gray-500">
+                <Loader2 size={12} className="animate-spin" /> Memuat organizations...
+              </div>
+            ) : (
+              <select value={form.organization_id} onChange={handleOrgChange} className={SELECT}>
+                <option value="">-- Pilih Organization --</option>
+                {orgs.map((o) => (
+                  <option key={o.organization_id} value={o.organization_id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+
+          {/* Item Code searchable LOV */}
+          <Field label="Item Code *">
+            <div className="relative">
+              <div className="relative">
+                <input
+                  className={INPUT}
+                  value={itemSearch}
+                  onChange={handleItemInput}
+                  onFocus={() => { if (items.length > 0) setShowDrop(true); }}
+                  onBlur={() => setTimeout(() => setShowDrop(false), 150)}
+                  placeholder={form.organization_id ? "Ketik kode item untuk mencari..." : "Pilih organization dulu"}
+                  disabled={!form.organization_id}
+                />
+                <span className="absolute right-3 top-2 text-gray-600">
+                  {itemLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                </span>
+              </div>
+
+              {showDrop && (
+                <div className="absolute z-[200] w-full mt-1 rounded-lg border border-gray-700 bg-gray-800 shadow-xl max-h-52 overflow-y-auto">
+                  {items.length > 0 ? items.map((item) => (
+                    <button
+                      key={item.item_id}
+                      type="button"
+                      onMouseDown={() => selectItem(item)}
+                      className="w-full text-left px-3 py-2.5 hover:bg-gray-700 transition-colors border-b border-gray-700/50 last:border-0"
+                    >
+                      <p className="text-xs font-mono font-medium text-blue-400">{item.item_code}</p>
+                      <p className="text-xs text-gray-400 truncate">{item.item_description}</p>
+                    </button>
+                  )) : (
+                    <p className="px-3 py-2.5 text-xs text-gray-500">Tidak ada item ditemukan di organization ini</p>
+                  )}
+                </div>
+              )}
+            </div>
+            {form.item_description && (
+              <p className="mt-1 text-xs text-gray-500 truncate" title={form.item_description}>{form.item_description}</p>
+            )}
+          </Field>
+
+          {/* Manufacturer Name */}
+          <Field label="Manufacturer Name *">
+            <input
+              className={INPUT}
+              value={form.manufacturer_name}
+              onChange={(e) => setForm((p) => ({ ...p, manufacturer_name: e.target.value }))}
+              placeholder="Nama pabrik / manufacturer"
+            />
+          </Field>
+
+          {/* Country of Origin */}
+          <Field label="Country of Origin">
+            <input
+              className={INPUT}
+              value={form.country_of_origin}
+              onChange={(e) => setForm((p) => ({ ...p, country_of_origin: e.target.value }))}
+              placeholder="Contoh: Indonesia, Germany, USA"
+            />
+          </Field>
+
+          {error && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs">
+              <X size={13} /> {error}
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-800">
+          <button onClick={onClose} className="px-3 py-1.5 rounded-md text-xs font-medium text-gray-400 hover:text-gray-200 transition-colors">
+            Batal
+          </button>
+          <ActionBtn
+            icon={saving ? Loader2 : CheckCircle}
+            label={saving ? "Menyimpan..." : "Simpan"}
+            color="bg-purple-600 hover:bg-purple-700"
+            onClick={handleSave}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Shared UI ───────────────────────────────────── */
+
+const INPUT  = "w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 disabled:opacity-40";
+const SELECT = "w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500";
+
+function Field({ label, children }) {
+  return (
+    <div>
+      <label className="block text-xs text-gray-500 mb-1">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function SectionCard({ title, subtitle, action, children }) {
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900">
+      <div className="flex items-start justify-between px-5 py-4 border-b border-gray-800">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-200">{title}</h3>
+          {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
+        </div>
+        <div className="flex gap-2">{action}</div>
+      </div>
+      <div className="p-5">{children}</div>
+    </div>
+  );
+}
+
+function ActionBtn({ icon: Icon, label, color, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-white transition-colors ${color}`}
+    >
+      <Icon size={13} />{label}
+    </button>
+  );
+}
+
+function DataTable({ headers, rows = [], placeholder }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-gray-800">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-gray-800/60">
+            {headers.map((h) => (
+              <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td colSpan={headers.length} className="px-3 py-10 text-center text-xs text-gray-600">{placeholder}</td>
+            </tr>
+          ) : (
+            rows.map((row, i) => (
+              <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
+                {row.map((cell, j) => (
+                  <td key={j} className="px-3 py-2.5 text-xs text-gray-300 whitespace-nowrap">{cell}</td>
+                ))}
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}

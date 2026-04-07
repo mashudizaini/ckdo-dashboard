@@ -1,0 +1,99 @@
+/**
+ * Auth Store — Zustand
+ * ─────────────────────────────────────────
+ * Manages Keycloak authentication state.
+ * Token disimpan di memory (bukan localStorage).
+ */
+import { create } from "zustand";
+import Keycloak from "keycloak-js";
+
+const kc = new Keycloak({
+  url: import.meta.env.VITE_KEYCLOAK_URL,
+  realm: import.meta.env.VITE_KEYCLOAK_REALM,
+  clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID,
+});
+
+let kcInitialized = false;
+
+export const useAuthStore = create((set, get) => ({
+  keycloak: kc,
+  isAuthenticated: false,
+  isLoading: true,
+  user: null,
+  token: null,
+  roles: [],
+
+  init: async () => {
+    if (kcInitialized) return;
+    kcInitialized = true;
+    try {
+      const authenticated = await kc.init({
+        checkLoginIframe: false,
+        pkceMethod: "S256",
+      });
+
+      if (!authenticated) {
+        set({ isLoading: false });
+        return;
+      }
+
+      if (authenticated) {
+        // loadUserProfile bisa gagal jika endpoint profile tidak aktif
+        let profile = {};
+        try {
+          profile = await kc.loadUserProfile();
+        } catch (_) {
+          // fallback ke tokenParsed
+        }
+
+        const roles =
+          kc.realmAccess?.roles ||
+          kc.tokenParsed?.realm_access?.roles ||
+          [];
+
+        set({
+          isAuthenticated: true,
+          isLoading: false,
+          token: kc.token,
+          roles,
+          user: {
+            id: kc.subject,
+            username: kc.tokenParsed?.preferred_username,
+            email: profile.email ?? kc.tokenParsed?.email ?? "",
+            fullName: (
+              `${profile.firstName ?? kc.tokenParsed?.given_name ?? ""} ` +
+              `${profile.lastName ?? kc.tokenParsed?.family_name ?? ""}`
+            ).trim(),
+          },
+        });
+
+        // Auto-refresh token 60s sebelum expire
+        setInterval(() => {
+          kc.updateToken(60).then((refreshed) => {
+            if (refreshed) {
+              set({ token: kc.token });
+            }
+          });
+        }, 30000);
+      }
+    } catch (error) {
+      console.error("Keycloak init failed:", error);
+      set({ isLoading: false });
+    }
+  },
+
+  logout: () => {
+    kc.logout({ redirectUri: window.location.origin });
+    set({ isAuthenticated: false, user: null, token: null, roles: [] });
+  },
+
+  hasRole: (role) => {
+    const { roles } = get();
+    return roles.includes(role) || roles.includes("admin");
+  },
+
+  hasAnyRole: (...checkRoles) => {
+    const { roles } = get();
+    return roles.includes("admin") || checkRoles.some((r) => roles.includes(r));
+  },
+}));

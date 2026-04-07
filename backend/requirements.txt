@@ -1,0 +1,54 @@
+setuptools>=69.0.0
+wheel
+
+# Web Framework
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
+
+# Database
+sqlalchemy==2.0.27
+alembic==1.13.1
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+
+# Oracle
+oracledb==2.1.2
+
+# Auth / Keycloak
+python-keycloak==3.9.1
+python-jose[cryptography]==3.3.0
+httpx==0.27.0
+
+# Cache / Queue
+redis==5.0.1
+celery==5.3.6
+
+# Validation
+pydantic==2.6.1
+pydantic-settings==2.2.1
+email-validator==2.1.0
+
+# AI
+anthropic==0.40.0
+#openai-whisper==20231117
+faster-whisper==1.0.3
+
+# Data Processing
+pandas==2.2.0
+openpyxl==3.1.2
+python-docx==1.1.0
+
+# HR API
+# talenta-python==0.1.0
+
+# File Upload
+python-multipart==0.0.9
+aiofiles==23.2.1
+
+# Utils
+python-dotenv==1.0.1
+structlog==24.1.0
+tenacity==8.2.3
+
+# SSH
+paramiko==3.4.0

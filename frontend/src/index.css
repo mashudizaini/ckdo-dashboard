@@ -1,0 +1,200 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { background-color: var(--bg-main, #0d0d1a); color: var(--text-primary, #f1f5f9); }
+  * { border-color: var(--border, rgba(255,255,255,0.08)); }
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: var(--scrollbar-track, #0a0a16); }
+  ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb, #6366f1); border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { filter: brightness(1.3); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ADMINLY 2 DARK STYLE — Card elevation system
+   Semua halaman dashboard pakai Tailwind gray-xxx.
+   Override di sini agar tampil seperti Adminly 2.
+═══════════════════════════════════════════════════════════════ */
+
+/* ── Card utama (bg-gray-900) — elevated, seperti Adminly 2 ── */
+.bg-gray-900 {
+  background-color: var(--bg-card) !important;
+  box-shadow: var(--card-shadow) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 16px !important;
+}
+
+/* ── Card dalam / section (bg-gray-800) ── */
+.bg-gray-800 {
+  background-color: var(--bg-card2) !important;
+  border-radius: 12px !important;
+  border: 1px solid var(--border) !important;
+}
+
+/* ── Background terdalam ── */
+.bg-gray-950 { background-color: var(--bg-card3) !important; border-radius: 12px !important; }
+.bg-gray-700  { background-color: var(--bg-card3) !important; }
+.bg-gray-600  { background-color: var(--bg-card2) !important; }
+
+/* ── Hover states ── */
+.hover\:bg-gray-900:hover {
+  background-color: var(--bg-card-hover) !important;
+  transition: background-color 0.2s ease;
+}
+.hover\:bg-gray-800:hover     { background-color: var(--bg-card2) !important; }
+.bg-gray-800\/60              { background-color: rgba(28,28,46,0.6) !important; }
+.hover\:bg-gray-800\/60:hover { background-color: rgba(36,36,54,0.85) !important; }
+
+/* ── Borders ── */
+.border-gray-800  { border-color: var(--border)  !important; }
+.border-gray-700  { border-color: var(--border2) !important; }
+.border-gray-600  { border-color: rgba(255,255,255,0.15) !important; }
+.hover\:border-gray-700:hover { border-color: var(--border2) !important; }
+.hover\:border-gray-600:hover { border-color: var(--accent)  !important; }
+
+/* ── Text ── */
+.text-white     { color: #ffffff !important; }
+.text-gray-100  { color: var(--text-primary)   !important; }
+.text-gray-200  { color: var(--text-primary)   !important; }
+.text-gray-300  { color: var(--text-secondary) !important; }
+.text-gray-400  { color: var(--text-muted)     !important; }
+.text-gray-500  { color: var(--text-muted)     !important; }
+.text-gray-600  { color: rgba(148,163,184,0.7)  !important; }
+
+/* ── Dividers ── */
+.divide-gray-800 > * + * { border-color: var(--border)  !important; }
+.divide-gray-700 > * + * { border-color: var(--border2) !important; }
+
+/* ── Ring ── */
+.ring-gray-800 { --tw-ring-color: var(--border)  !important; }
+.ring-gray-700 { --tw-ring-color: var(--border2) !important; }
+
+/* ── Tab aktif — glow ring ── */
+.ring-1.ring-inset {
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb, 99,102,241), 0.35) !important;
+}
+
+/* ── Colored badge backgrounds ── */
+.bg-blue-500\/10   { background-color: rgba(var(--accent-rgb,99,102,241), 0.12) !important; }
+.bg-green-500\/10  { background-color: rgba(16,185,129,0.12)  !important; }
+.bg-red-500\/10    { background-color: rgba(239,68,68,0.12)   !important; }
+.bg-yellow-500\/10 { background-color: rgba(234,179,8,0.12)   !important; }
+.bg-orange-500\/10 { background-color: rgba(249,115,22,0.12)  !important; }
+.bg-purple-500\/10 { background-color: rgba(168,85,247,0.12)  !important; }
+
+/* ── Table rows ── */
+tr:hover td { background-color: var(--bg-card2) !important; transition: background 0.15s; }
+
+/* ── Recharts tooltip ── */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: var(--bg-card2) !important;
+  border: 1px solid var(--border2) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4) !important;
+}
+
+/* ── Input/select ── */
+input, select, textarea {
+  background-color: var(--bg-card2) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border2) !important;
+  border-radius: 8px !important;
+}
+input::placeholder, textarea::placeholder { color: var(--text-muted) !important; }
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   LIGHT NEUMORPHIC THEME — [data-theme="light"]
+   Override card styles untuk tampilan neumorphic cream
+═══════════════════════════════════════════════════════════════ */
+
+[data-theme="light"] body,
+[data-theme="light"] html {
+  background-color: var(--bg-main) !important;
+  color: var(--text-primary) !important;
+}
+
+[data-theme="light"] .bg-gray-900 {
+  background-color: var(--bg-card) !important;
+  box-shadow: var(--card-shadow) !important;
+  border: none !important;
+  border-radius: 16px !important;
+}
+
+[data-theme="light"] .bg-gray-800 {
+  background-color: var(--bg-card) !important;
+  box-shadow: var(--card-shadow-in) !important;
+  border: none !important;
+  border-radius: 12px !important;
+}
+
+[data-theme="light"] .bg-gray-950,
+[data-theme="light"] .bg-gray-700 {
+  background-color: var(--bg-card3) !important;
+  border-radius: 10px !important;
+  box-shadow: inset 2px 2px 6px var(--shadow-dark), inset -2px -2px 6px var(--shadow-light) !important;
+  border: none !important;
+}
+
+[data-theme="light"] .hover\:bg-gray-900:hover {
+  background-color: var(--bg-card) !important;
+  box-shadow: var(--card-shadow-in) !important;
+}
+
+[data-theme="light"] .hover\:bg-gray-800:hover {
+  background-color: var(--bg-card2) !important;
+}
+
+[data-theme="light"] .bg-gray-800\/60 {
+  background-color: rgba(234,231,223,0.7) !important;
+}
+
+/* Border jadi transparan di light theme */
+[data-theme="light"] .border-gray-800,
+[data-theme="light"] .border-gray-700,
+[data-theme="light"] .border-gray-600 {
+  border-color: rgba(0,0,0,0.07) !important;
+}
+
+/* Text light theme */
+[data-theme="light"] .text-white     { color: #111827 !important; }
+[data-theme="light"] .text-gray-100  { color: #111827 !important; }
+[data-theme="light"] .text-gray-200  { color: #1f2937 !important; }
+[data-theme="light"] .text-gray-300  { color: #374151 !important; }
+[data-theme="light"] .text-gray-400  { color: #6b7280 !important; }
+[data-theme="light"] .text-gray-500  { color: #9ca3af !important; }
+
+/* Badge backgrounds light */
+[data-theme="light"] .bg-blue-500\/10   { background-color: rgba(var(--accent-rgb), 0.12) !important; }
+[data-theme="light"] .bg-green-500\/10  { background-color: rgba(16,185,129,0.12) !important; }
+[data-theme="light"] .bg-red-500\/10    { background-color: rgba(239,68,68,0.10) !important; }
+[data-theme="light"] .bg-yellow-500\/10 { background-color: rgba(234,179,8,0.10) !important; }
+
+/* Ring light */
+[data-theme="light"] .ring-1.ring-inset {
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.3) !important;
+}
+
+/* Table */
+[data-theme="light"] tr:hover td {
+  background-color: var(--bg-card2) !important;
+}
+
+/* Input light */
+[data-theme="light"] input,
+[data-theme="light"] select,
+[data-theme="light"] textarea {
+  background-color: var(--bg-card) !important;
+  color: var(--text-primary) !important;
+  border-color: rgba(0,0,0,0.1) !important;
+  box-shadow: inset 2px 2px 6px var(--shadow-dark), inset -2px -2px 6px var(--shadow-light) !important;
+}
+
+/* Scrollbar light */
+[data-theme="light"] ::-webkit-scrollbar-track { background: var(--bg-main) !important; }
+[data-theme="light"] ::-webkit-scrollbar-thumb { background: var(--accent) !important; }

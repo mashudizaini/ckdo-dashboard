@@ -1,0 +1,19 @@
+.env
+*.pyc
+__pycache__/
+.venv/
+node_modules/
+dist/
+*.egg-info/
+uploads/
+exports/
+results/
+*.log
+postgres_data/
+redis_data/
+# Oracle Client - too large for GitHub, must be installed on server
+oracle_client/*.so*
+oracle_client/*.so
+oracle_client/*.dll
+oracle_client/*.dylib
+oracle_client/oci.so*
