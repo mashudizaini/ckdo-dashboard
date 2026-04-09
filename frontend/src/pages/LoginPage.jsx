@@ -9,11 +9,7 @@ export default function LoginPage() {
   };
 
   const handleAccountLogin = () => {
-    const url = import.meta.env.VITE_KEYCLOAK_URL;
-    const realm = import.meta.env.VITE_KEYCLOAK_REALM;
-    const clientId = import.meta.env.VITE_KEYCLOAK_CLIENT_ID;
-    const redirectUri = encodeURIComponent(window.location.origin);
-    window.location.href = `${url}/realms/${realm}/protocol/openid-connect/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=openid`;
+    keycloak.login({ prompt: "login" });
   };
 
   return (
