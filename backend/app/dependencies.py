@@ -1,9 +1,8 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from keycloak import KeycloakOpenID
 from jose import jwt, JWTError
 from app.config import get_settings
-from functools import lru_cache
+import httpx
 import structlog
 
 logger = structlog.get_logger()
@@ -11,19 +10,18 @@ settings = get_settings()
 
 security = HTTPBearer()
 
+_jwks_cache: dict = {}
 
-# ─────────────────────────────────────────
-# KEYCLOAK CLIENT
-# ─────────────────────────────────────────
-
-@lru_cache()
-def get_keycloak_client() -> KeycloakOpenID:
-    return KeycloakOpenID(
-        server_url=settings.keycloak_url,
-        realm_name=settings.keycloak_realm,
-        client_id=settings.keycloak_client_id,
-        client_secret_key=settings.keycloak_client_secret,
-    )
+async def get_jwks() -> dict:
+    """Fetch JWKS from Keycloak — cached in memory."""
+    if _jwks_cache:
+        return _jwks_cache
+    jwks_url = f"{settings.keycloak_url}/realms/{settings.keycloak_realm}/protocol/openid-connect/certs"
+    async with httpx.AsyncClient() as client:
+        response = await client.get(jwks_url, timeout=10)
+        response.raise_for_status()
+        _jwks_cache.update(response.json())
+    return _jwks_cache
 
 
 # ─────────────────────────────────────────
@@ -53,18 +51,17 @@ class CurrentUser:
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    kc: KeycloakOpenID = Depends(get_keycloak_client),
 ) -> CurrentUser:
     """
-    FastAPI dependency — validates Keycloak Bearer token.
+    FastAPI dependency — validates Keycloak Bearer token via JWKS.
     Injects CurrentUser into route handlers.
     """
     token = credentials.credentials
     try:
-        public_key = "-----BEGIN PUBLIC KEY-----\n" + kc.public_key() + "\n-----END PUBLIC KEY-----"
+        jwks = await get_jwks()
         token_data = jwt.decode(
             token,
-            public_key,
+            jwks,
             algorithms=["RS256"],
             options={"verify_aud": False},
         )
