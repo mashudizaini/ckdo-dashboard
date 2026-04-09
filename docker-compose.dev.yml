@@ -10,6 +10,7 @@ services:
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
       KC_PROXY: edge
+      KC_HTTP_RELATIVE_PATH: /auth
 
   backend:
     environment:
