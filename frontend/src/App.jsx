@@ -51,10 +51,6 @@ export default function App() {
     return <LoginPage />;
   }
 
-  // DEBUG — hapus setelah masalah roles terselesaikan
-  console.log("[AUTH DEBUG] roles:", useAuthStore.getState().roles);
-  console.log("[AUTH DEBUG] token parsed:", useAuthStore.getState().keycloak?.tokenParsed);
-
   return (
     <Routes>
       {/* App Launcher — halaman utama setelah login */}
