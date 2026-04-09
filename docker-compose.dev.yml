@@ -1,0 +1,25 @@
+# docker-compose.dev.yml
+# Override untuk Dev Server (172.21.2.209 / dashboard-dev.ckd-otto.com)
+# Digunakan bersama docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+
+services:
+  keycloak:
+    command: start-dev --import-realm
+    environment:
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY: edge
+
+  backend:
+    environment:
+      - ENVIRONMENT=development
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  nginx:
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    ports:
+      - "80:80"
+      - "443:443"
