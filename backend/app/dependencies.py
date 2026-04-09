@@ -1,6 +1,7 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from keycloak import KeycloakOpenID
+from jose import jwt, JWTError
 from app.config import get_settings
 from functools import lru_cache
 import structlog
@@ -60,11 +61,21 @@ async def get_current_user(
     """
     token = credentials.credentials
     try:
-        # Decode and verify token against Keycloak public key
-        options = {"verify_signature": True, "verify_aud": False, "exp": True}
         public_key = "-----BEGIN PUBLIC KEY-----\n" + kc.public_key() + "\n-----END PUBLIC KEY-----"
-        token_data = kc.decode_token(token, key=public_key, options=options)
+        token_data = jwt.decode(
+            token,
+            public_key,
+            algorithms=["RS256"],
+            options={"verify_aud": False},
+        )
         return CurrentUser(token_data)
+    except JWTError as e:
+        logger.warning("Token validation failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     except Exception as e:
         logger.warning("Token validation failed", error=str(e))
         raise HTTPException(
