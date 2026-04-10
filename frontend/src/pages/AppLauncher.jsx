@@ -7,6 +7,7 @@ import logo from "@/assets/LOGO-ONLY.png";
 
 const APPS = [
   { id: "dashboard",  name: "CKDO Dashboard",   desc: "Monitoring & reporting",       url: "/dashboard/it",  status: "sso",     emoji: "📊", role: "app:dashboard"  },
+  { id: "eis",        name: "EIS Dashboard",    desc: "Executive information system", url: "http://172.21.2.209:8090", status: "sso", emoji: "📈", role: "app:eis" },
   { id: "eticket",    name: "E-Ticket System",   desc: "Helpdesk & ticketing",         url: "http://helpdesk.ckd-otto.com/login", status: "sso", emoji: "🎫", role: "app:eticket" },
   { id: "portal-hr",  name: "HR Portal",         desc: "Employee self-service",        url: "https://portal.ckd-otto.com/auth/login", status: "pending", emoji: "👥", role: "app:portal-hr" },
   { id: "talenta",    name: "Talenta HR",         desc: "Attendance & payroll",         url: "https://hr.talenta.co", status: "pending", emoji: "🕐", role: "app:talenta" },
@@ -35,6 +36,7 @@ function AppCard({ app, index, onNavigate, onDashboardClick }) {
 
   const handleClick = () => {
     if (app.id === "dashboard") { onDashboardClick(); onNavigate(app.url); return; }
+    if (app.id === "eis") { window.open(app.url, "_blank", "noopener,noreferrer"); return; }
     window.open(app.url, "_blank");
   };
 
