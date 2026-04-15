@@ -148,8 +148,30 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
     use_cookie_mode = bool(resolved_cookie)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(accept_downloads=True)
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ],
+        )
+        context = await browser.new_context(
+            accept_downloads=True,
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1280, "height": 800},
+            locale="id-ID",
+        )
+        # Sembunyikan tanda automation dari JavaScript
+        await context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3] });
+            window.chrome = { runtime: {} };
+        """)
         page = await context.new_page()
 
         try:
@@ -305,6 +327,8 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                 ], req.password, "password")
 
                 await fill_field([
+                    'input[name="DNTCaptchaInputText"]',   # DNTCaptcha (.NET) — Coretax
+                    'input[id="DNTCaptchaInputText"]',
                     'input[name="CaptchaCode"]', 'input[id="CaptchaCode"]',
                     'input[name="captcha"]', 'input[id="captcha"]',
                     'input[name="VerificationCode"]', 'input[name="CaptchaInputText"]',
@@ -312,6 +336,21 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                 ], captcha_code, "captcha")
 
                 await page.screenshot(path=str(out_dir / "debug_form_filled.png"))
+
+                # Verifikasi nilai aktual dari setiap input (tampilkan di log)
+                try:
+                    vals = await page.evaluate("""() =>
+                        Array.from(document.querySelectorAll('input')).map(el => ({
+                            name: el.name || el.id,
+                            type: el.type,
+                            len:  el.value.length,
+                            val:  el.type === 'password' ? '***' : el.value,
+                        }))
+                    """)
+                    filled = [f"{v['name']}={v['val']!r}(len={v['len']})" for v in vals if v['len'] > 0]
+                    _update_job(job_id, message=f"Verifikasi nilai form: {' | '.join(filled)}")
+                except Exception:
+                    pass
                 _update_job(job_id, message="Form terisi, submit login…")
 
                 # ── 4. Submit form ─────────────────────────────────────────────

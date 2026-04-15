@@ -360,23 +360,9 @@ export default function CoretaxDownloader() {
 
           {/* Panel perbarui cookie (collapsed by default) */}
           {showSetup && (
-            <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: 10, padding: "16px 18px", marginBottom: 20, border: "1px solid rgba(255,255,255,0.06)" }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "#818cf8", marginBottom: 12 }}>
-                Cara perbarui Cookie (jika download gagal karena sesi expired):
-              </div>
-              {[
-                "Login ke coretaxdjp.pajak.go.id di Chrome seperti biasa.",
-                "Tekan F12 → buka tab Network.",
-                "Klik salah satu request ke coretaxdjp.pajak.go.id.",
-                "Di panel kanan → Headers → Request Headers → cari baris Cookie:",
-                "Klik kanan nilai Cookie → Copy Value → paste di bawah.",
-              ].map((step, i) => (
-                <div key={i} style={S.stepItem}>
-                  <span style={S.stepNum}>{i + 1}</span>
-                  <span>{step}</span>
-                </div>
-              ))}
-              <label style={{ ...S.label, marginTop: 12 }}>Cookie baru</label>
+            <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: 10, padding: "20px 22px", marginBottom: 20, border: "1px solid rgba(255,255,255,0.06)" }}>
+              <CookieGuide />
+              <label style={{ ...S.label, marginTop: 4 }}>Paste nilai Cookie di sini</label>
               <textarea
                 style={{ ...S.textarea, minHeight: 80 }}
                 placeholder="JSESSIONID=...; __RequestVerificationToken=...; ..."
@@ -387,7 +373,7 @@ export default function CoretaxDownloader() {
                 spellCheck={false}
               />
               <button
-                style={{ ...S.btnPrimary, marginTop: 10, opacity: savingCookie || !cookieDraft.trim() ? 0.5 : 1 }}
+                style={{ ...S.btnPrimary, marginTop: 12, opacity: savingCookie || !cookieDraft.trim() ? 0.5 : 1 }}
                 onClick={handleSaveCookie}
                 disabled={savingCookie || !cookieDraft.trim()}
               >
@@ -460,42 +446,26 @@ export default function CoretaxDownloader() {
         <div style={S.card}>
           <p style={S.cardTitle}>
             <Cookie size={13} style={{ display: "inline", marginRight: 6 }} />
-            Setup Sesi Coretax (satu kali)
+            Setup Sesi Coretax — Lakukan Satu Kali
           </p>
 
-          <div style={{ display: "flex", gap: 10, padding: "10px 14px", background: "rgba(99,102,241,0.07)",
-                        border: "1px solid rgba(99,102,241,0.2)", borderRadius: 8, fontSize: 13,
-                        color: "#818cf8", marginBottom: 20 }}>
-            <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ display: "flex", gap: 10, padding: "12px 16px", background: "rgba(99,102,241,0.08)",
+                        border: "1px solid rgba(99,102,241,0.2)", borderRadius: 10, fontSize: 13,
+                        color: "#818cf8", marginBottom: 22 }}>
+            <Info size={15} style={{ flexShrink: 0, marginTop: 1 }} />
             <span>
-              Lakukan ini <strong>satu kali</strong>. Setelah cookie disimpan, download berikutnya
-              cukup klik tombol "Mulai" tanpa perlu buka DevTools lagi.
+              Setelah setup ini selesai, download berikutnya cukup klik{" "}
+              <strong>"Mulai Download"</strong> — tidak perlu buka DevTools lagi.
+              Cookie hanya perlu diperbarui jika sesi Coretax expired.
             </span>
           </div>
 
-          <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: 10, padding: "16px 18px", marginBottom: 20 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#818cf8", marginBottom: 12 }}>
-              Cara mendapatkan Cookie dari Chrome:
-            </div>
-            {[
-              "Buka Chrome, login ke coretaxdjp.pajak.go.id seperti biasa (termasuk pilih NPWP perusahaan).",
-              "Tekan F12 untuk buka DevTools → klik tab Network.",
-              "Klik salah satu baris request ke coretaxdjp.pajak.go.id di daftar.",
-              "Di panel kanan → klik Headers → scroll ke Request Headers.",
-              "Cari baris \"Cookie:\" → klik kanan nilainya → Copy Value.",
-              "Paste di kotak di bawah → klik Simpan.",
-            ].map((step, i) => (
-              <div key={i} style={S.stepItem}>
-                <span style={S.stepNum}>{i + 1}</span>
-                <span>{step}</span>
-              </div>
-            ))}
-          </div>
+          <CookieGuide />
 
           <label style={S.label}>Paste nilai Cookie di sini</label>
           <textarea
             style={{ ...S.textarea, minHeight: 90 }}
-            placeholder="JSESSIONID=abc123; __RequestVerificationToken=xyz; ..."
+            placeholder="JSESSIONID=abc123; __RequestVerificationToken=xyz; DNT=1; ..."
             value={cookieDraft}
             onChange={(e) => setCookieDraft(e.target.value)}
             onFocus={(e)  => (e.target.style.borderColor = "#6366f1")}
@@ -511,7 +481,7 @@ export default function CoretaxDownloader() {
             >
               {savingCookie
                 ? <><Loader2 size={14} className="animate-spin" /> Menyimpan…</>
-                : <><Cookie size={14} /> Simpan & Mulai</>}
+                : <><Cookie size={14} /> Simpan & Lanjutkan</>}
             </button>
             <button
               style={{ ...S.btnSecondary }}
@@ -759,6 +729,118 @@ export default function CoretaxDownloader() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Panduan langkah-demi-langkah cara copy Cookie dari Chrome ────────────────
+function CookieGuide() {
+  const code = (text) => (
+    <code style={{ background: "rgba(99,102,241,0.15)", color: "#a5b4fc", padding: "1px 6px", borderRadius: 4, fontSize: 12, fontFamily: "monospace" }}>
+      {text}
+    </code>
+  );
+  const tag = (text, color = "#34d399") => (
+    <span style={{ background: `${color}18`, color, border: `1px solid ${color}30`, borderRadius: 4, padding: "1px 7px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
+      {text}
+    </span>
+  );
+
+  const steps = [
+    {
+      title: "Login ke Coretax di Chrome",
+      detail: <>
+        Buka <strong style={{ color: "#e2e8f0" }}>coretaxdjp.pajak.go.id</strong> di Chrome dan login seperti biasa menggunakan NPWP + password + CAPTCHA.
+        Setelah masuk, <strong style={{ color: "#e2e8f0" }}>pilih NPWP perusahaan</strong> dari dropdown di pojok kanan atas halaman.
+        Pastikan sudah tampil halaman utama Coretax (bukan halaman login).
+      </>,
+    },
+    {
+      title: "Buka DevTools Chrome",
+      detail: <>
+        Tekan tombol <code style={{ background: "rgba(255,255,255,0.1)", color: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontSize: 13, fontWeight: 700, border: "1px solid rgba(255,255,255,0.2)" }}>F12</code>{" "}
+        di keyboard (atau klik kanan di halaman → <em>Inspect</em>).
+        Jendela DevTools akan muncul di bagian bawah atau samping browser.
+      </>,
+    },
+    {
+      title: "Buka tab Network",
+      detail: <>
+        Di bagian atas DevTools, klik tab {tag("Network", "#818cf8")}.
+        Jika tab Network sudah terbuka tapi daftarnya kosong, tekan{" "}
+        <code style={{ background: "rgba(255,255,255,0.1)", color: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontSize: 13, fontWeight: 700, border: "1px solid rgba(255,255,255,0.2)" }}>F5</code>{" "}
+        atau refresh halaman Coretax agar request muncul. Akan terlihat banyak baris request.
+      </>,
+    },
+    {
+      title: "Klik salah satu request Coretax",
+      detail: <>
+        Di daftar request (kolom Name), cari baris yang alamatnya mengandung{" "}
+        {code("coretaxdjp.pajak.go.id")} — biasanya baris paling atas setelah refresh.
+        Klik <strong style={{ color: "#e2e8f0" }}>satu kali</strong> pada baris tersebut.
+        Panel detail akan muncul di sebelah kanan.
+      </>,
+    },
+    {
+      title: "Temukan baris Cookie di Request Headers",
+      detail: <>
+        Di panel kanan, klik tab {tag("Headers", "#818cf8")}.
+        Scroll ke bawah sampai menemukan bagian{" "}
+        <strong style={{ color: "#e2e8f0" }}>Request Headers</strong>.
+        Cari baris berlabel {code("cookie:")} atau {code("Cookie:")}.
+        Nilai di sebelah kanannya adalah teks panjang berisi banyak nama=nilai dipisah titik koma.
+        <div style={{ marginTop: 6, padding: "6px 10px", background: "rgba(0,0,0,0.3)", borderRadius: 6, fontSize: 11, color: "#64748b", fontFamily: "monospace" }}>
+          Contoh: JSESSIONID=abc123; __RequestVerif...=xyz; DNT=1; …
+        </div>
+      </>,
+    },
+    {
+      title: "Copy nilai Cookie",
+      detail: <>
+        <strong style={{ color: "#e2e8f0" }}>Klik kanan</strong> tepat pada nilai cookie (teks panjang di sebelah kanan {code("cookie:")}).
+        Pilih {tag("Copy value", "#34d399")} dari menu yang muncul.
+        <br /><br />
+        <span style={{ color: "#fbbf24" }}>⚠ Jangan klik kanan pada tulisan "cookie:" — klik kanan pada nilainya (teks panjang di sebelah kanannya).</span>
+      </>,
+    },
+    {
+      title: "Paste di kotak di bawah → Simpan",
+      detail: <>
+        Klik di dalam kotak teks di bawah, lalu tekan{" "}
+        <code style={{ background: "rgba(255,255,255,0.1)", color: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontWeight: 700, border: "1px solid rgba(255,255,255,0.2)" }}>Ctrl+V</code>{" "}
+        untuk paste. Klik tombol {tag("Simpan", "#6366f1")}.
+        Selesai — download berikutnya cukup klik Mulai tanpa perlu buka DevTools lagi.
+      </>,
+    },
+  ];
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 14 }}>
+        Langkah-langkah mendapatkan Cookie dari Chrome
+      </div>
+      {steps.map((step, i) => (
+        <div key={i} style={{ display: "flex", gap: 14, marginBottom: 14 }}>
+          {/* Nomor + garis vertikal */}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+            <div style={{ width: 26, height: 26, borderRadius: "50%", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {i + 1}
+            </div>
+            {i < steps.length - 1 && (
+              <div style={{ width: 2, flex: 1, minHeight: 12, background: "rgba(99,102,241,0.2)", marginTop: 4 }} />
+            )}
+          </div>
+          {/* Konten */}
+          <div style={{ paddingBottom: i < steps.length - 1 ? 4 : 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0", marginBottom: 4 }}>
+              {step.title}
+            </div>
+            <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.7 }}>
+              {step.detail}
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
