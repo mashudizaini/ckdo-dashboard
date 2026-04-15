@@ -183,16 +183,17 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                 _update_job(job_id, message="Mode cookie: menyiapkan sesi browser…")
 
                 # Parse cookie string → list of dicts untuk Playwright
+                # Gunakan "url" bukan domain+path agar flag secure/sameSite otomatis
+                # sesuai dengan situs HTTPS target.
                 parsed_cookies = []
                 for part in resolved_cookie.split(";"):
                     part = part.strip()
                     if "=" in part:
                         name, _, value = part.partition("=")
                         parsed_cookies.append({
-                            "name":   name.strip(),
-                            "value":  value.strip(),
-                            "domain": "coretaxdjp.pajak.go.id",
-                            "path":   "/",
+                            "name":  name.strip(),
+                            "value": value.strip(),
+                            "url":   "https://coretaxdjp.pajak.go.id",
                         })
 
                 if not parsed_cookies:
@@ -209,11 +210,12 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                 await asyncio.sleep(2)
 
                 current_url = page.url
+                await page.screenshot(path=str(out_dir / "debug_cookie_result.png"))
                 if "login" in current_url.lower() or "identityprovider" in current_url.lower():
-                    await page.screenshot(path=str(out_dir / "debug_cookie_redirect.png"))
                     raise RuntimeError(
-                        "Cookie kedaluwarsa atau tidak valid — browser diredirect ke halaman login. "
-                        "Silakan login ulang di browser Chrome, copy cookie baru, lalu coba lagi."
+                        f"Cookie tidak diterima — browser diredirect ke: {current_url[:120]} "
+                        "Silakan login ulang di Chrome, copy cookie baru, lalu coba lagi. "
+                        "Cek screenshot debug_cookie_result.png untuk detail."
                     )
 
                 _update_job(job_id, message=f"Sesi valid ✓  Membuka tabel eBupot BPU…")
