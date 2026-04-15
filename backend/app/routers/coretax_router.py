@@ -112,20 +112,45 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
             # ── 2. Screenshot CAPTCHA → pause, tunggu user input ──────────
             _update_job(job_id, message="Menunggu CAPTCHA diisi…")
 
-            # Screenshot form login dengan CAPTCHA
+            # Screenshot: coba isolasi hanya elemen gambar CAPTCHA (untuk dibaca lebih jelas)
             captcha_path = out_dir / "captcha.png"
-            try:
-                # Coba screenshot hanya area form login
-                form_loc = page.locator(
-                    "form, .login-form, .login-container, "
-                    "div:has(input[type='password'])"
-                ).first
-                if await form_loc.is_visible(timeout=3_000):
-                    await form_loc.screenshot(path=str(captcha_path))
-                else:
+            CAPTCHA_IMG_SELECTORS = [
+                'img[src*="Captcha"]',
+                'img[src*="captcha"]',
+                'img[id*="captcha" i]',
+                'img[class*="captcha" i]',
+                'canvas[id*="captcha" i]',
+                '#captchaImage',
+                '.captcha img',
+                'div[class*="captcha"] img',
+            ]
+            captcha_isolated = False
+            for csel in CAPTCHA_IMG_SELECTORS:
+                try:
+                    cimg = page.locator(csel).first
+                    if await cimg.is_visible(timeout=2_000):
+                        await cimg.screenshot(path=str(captcha_path))
+                        captcha_isolated = True
+                        break
+                except Exception:
+                    continue
+
+            if not captcha_isolated:
+                # Fallback: screenshot form / full page
+                try:
+                    form_loc = page.locator(
+                        "form, .login-form, .login-container, "
+                        "div:has(input[type='password'])"
+                    ).first
+                    if await form_loc.is_visible(timeout=3_000):
+                        await form_loc.screenshot(path=str(captcha_path))
+                    else:
+                        await page.screenshot(path=str(captcha_path))
+                except Exception:
                     await page.screenshot(path=str(captcha_path))
-            except Exception:
-                await page.screenshot(path=str(captcha_path))
+
+            # Screenshot full page untuk referensi terpisah
+            await page.screenshot(path=str(out_dir / "debug_login_fullpage.png"))
 
             # Set status waiting_captcha dan tunggu event
             captcha_event: asyncio.Event = jobs[job_id]["_captcha_event"]
@@ -136,6 +161,9 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
 
             # ── 3. Isi form login ─────────────────────────────────────────
             _update_job(job_id, status="running", message="Mengisi form login…")
+
+            # Screenshot kondisi halaman saat background task baru resume
+            await page.screenshot(path=str(out_dir / "debug_before_fill.png"))
 
             # Selector ID Pengguna (NPWP / username)
             USERNAME_SELECTORS = [
@@ -190,7 +218,10 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
             _update_job(job_id, message="Password diisi, mengisi CAPTCHA…")
 
             await fill_first_visible(CAPTCHA_SELECTORS, captcha_code, "captcha")
-            _update_job(job_id, message="CAPTCHA diisi, submit login…")
+
+            # Screenshot setelah semua field terisi — untuk verifikasi
+            await page.screenshot(path=str(out_dir / "debug_form_filled.png"))
+            _update_job(job_id, message="Form terisi, submit login…")
 
             # ── 4. Submit form ────────────────────────────────────────────
             SUBMIT_SELECTORS = [
@@ -222,16 +253,23 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                 )
             except PWTimeout:
                 await page.screenshot(path=str(out_dir / "debug_after_submit.png"))
-                # Cek apakah ada pesan error login
-                err_text = await page.locator(
-                    '.validation-summary-errors, .error-message, '
-                    '[class*="error"], [class*="alert"]'
-                ).first.text_content(timeout=2_000) if True else ""
-                hint = f" Pesan error: {err_text[:120]}" if err_text else ""
+                # Coba ambil pesan error dari halaman
+                err_text = ""
+                try:
+                    err_loc = page.locator(
+                        '.validation-summary-errors, .validation-summary-valid, '
+                        '[class*="error" i], [class*="alert" i], '
+                        '[class*="invalid" i], span.field-validation-error'
+                    ).first
+                    if await err_loc.is_visible(timeout=2_000):
+                        err_text = (await err_loc.text_content() or "").strip()[:150]
+                except Exception:
+                    pass
+                hint = f' Pesan dari server: "{err_text}"' if err_text else ""
                 raise RuntimeError(
-                    f"Login gagal — timeout redirect.{hint} "
-                    f"Kemungkinan: CAPTCHA salah, password salah, atau CAPTCHA sudah kedaluwarsa. "
-                    f"Cek screenshot debug_after_submit.png."
+                    f"Login gagal — halaman tidak redirect.{hint} "
+                    f"Lihat screenshot debug_after_submit.png dan debug_form_filled.png "
+                    f"di panel Debug di bawah."
                 )
 
             _update_job(job_id, message="Login berhasil, memilih NPWP perusahaan…")

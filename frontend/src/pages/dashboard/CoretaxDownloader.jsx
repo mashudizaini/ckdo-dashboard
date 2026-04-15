@@ -93,8 +93,19 @@ export default function CoretaxDownloader() {
   const [captchaCode, setCaptchaCode] = useState("");
   const [captchaImg,  setCaptchaImg]  = useState(null);   // object URL
   const [captchaTs,   setCaptchaTs]   = useState(0);      // timestamp untuk force-reload
+  const [debugImgs,   setDebugImgs]   = useState({});     // filename → object URL
   const pollRef  = useRef(null);
   const logRef   = useRef(null);
+
+  // Helper: muat satu screenshot sebagai object URL
+  const loadDebugImg = async (jobId, filename) => {
+    try {
+      const res = await fetch(`${BASE_URL}/debug/screenshot/${jobId}/${filename}?t=${Date.now()}`, { cache: "no-store" });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      return URL.createObjectURL(blob);
+    } catch (_) { return null; }
+  };
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -150,6 +161,28 @@ export default function CoretaxDownloader() {
     return () => { cancelled = true; };
   }, [captchaTs]);  // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Load screenshot debug saat status error ──────────────────────────────────
+  useEffect(() => {
+    if (!job?.job_id || job.status !== "error") return;
+    let cancelled = false;
+    const DEBUG_FILES = [
+      "debug_login_fullpage.png",
+      "debug_before_fill.png",
+      "debug_form_filled.png",
+      "debug_after_submit.png",
+    ];
+    (async () => {
+      const results = {};
+      for (const f of DEBUG_FILES) {
+        if (cancelled) break;
+        const url = await loadDebugImg(job.job_id, f);
+        if (url) results[f] = url;
+      }
+      if (!cancelled) setDebugImgs(results);
+    })();
+    return () => { cancelled = true; };
+  }, [job?.status]);  // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Mulai job ────────────────────────────────────────────────────────────────
   const handleStart = async () => {
     if (!form.username || !form.password) {
@@ -161,6 +194,7 @@ export default function CoretaxDownloader() {
     setLogs([]);
     setCaptchaImg(null);
     setCaptchaCode("");
+    setDebugImgs({});
     addLog("Mengirim permintaan ke server…");
 
     try {
@@ -223,6 +257,10 @@ export default function CoretaxDownloader() {
     setLoading(false);
     setCaptchaImg(null);
     setCaptchaCode("");
+    setDebugImgs((prev) => {
+      Object.values(prev).forEach((u) => URL.revokeObjectURL(u));
+      return {};
+    });
     addLog("Job dihapus");
   };
 
@@ -434,31 +472,43 @@ export default function CoretaxDownloader() {
             </div>
           )}
 
-          {/* Debug screenshots saat error */}
+          {/* Debug screenshots saat error — ditampilkan inline */}
           {job.status === "error" && (
-            <div style={{ marginTop: 14, padding: "12px 16px", background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.2)", borderRadius: 10 }}>
-              <div style={{ fontSize: 12, color: "#fbbf24", fontWeight: 600, marginBottom: 8 }}>
-                Screenshot Debug (klik untuk melihat kondisi browser saat error):
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 12, color: "#fbbf24", fontWeight: 600, marginBottom: 12 }}>
+                Screenshot Browser (untuk mendiagnosis penyebab error):
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {[
-                  "captcha.png",
-                  "debug_no_username.png",
-                  "debug_no_password.png",
-                  "debug_no_submit.png",
-                  "debug_after_submit.png",
-                  "debug_issued_page.png",
-                  "debug_no_pdf_btn_page1.png",
-                ].map((f) => (
-                  <a key={f}
-                    href={`${BASE_URL}/debug/screenshot/${job.job_id}/${f}`}
-                    target="_blank" rel="noreferrer"
-                    style={{ fontSize: 12, color: "#818cf8", textDecoration: "underline", padding: "4px 8px", background: "rgba(99,102,241,0.1)", borderRadius: 6, border: "1px solid rgba(99,102,241,0.2)" }}
-                  >
-                    {f}
-                  </a>
-                ))}
-              </div>
+
+              {Object.keys(debugImgs).length === 0 && (
+                <div style={{ fontSize: 12, color: "#475569", display: "flex", alignItems: "center", gap: 6 }}>
+                  <Loader2 size={13} className="animate-spin" /> Memuat screenshot debug…
+                </div>
+              )}
+
+              {/* Tampilkan setiap screenshot sebagai gambar inline */}
+              {[
+                { key: "debug_login_fullpage.png", label: "Halaman Login (awal)" },
+                { key: "debug_before_fill.png",   label: "Sebelum isi form" },
+                { key: "debug_form_filled.png",    label: "Setelah form diisi" },
+                { key: "debug_after_submit.png",   label: "Setelah submit (penyebab error)" },
+              ].map(({ key, label }) =>
+                debugImgs[key] ? (
+                  <div key={key} style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span style={{ fontWeight: 600, color: "#94a3b8" }}>{label}</span>
+                      <a href={debugImgs[key]} target="_blank" rel="noreferrer"
+                        style={{ fontSize: 11, color: "#818cf8", textDecoration: "underline" }}>
+                        buka di tab baru ↗
+                      </a>
+                    </div>
+                    <img
+                      src={debugImgs[key]}
+                      alt={label}
+                      style={{ width: "100%", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", display: "block" }}
+                    />
+                  </div>
+                ) : null
+              )}
             </div>
           )}
         </div>
