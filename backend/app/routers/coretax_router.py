@@ -162,10 +162,52 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
             # ── 3. Isi form login ─────────────────────────────────────────
             _update_job(job_id, status="running", message="Mengisi form login…")
 
-            # Screenshot kondisi halaman saat background task baru resume
+            # Screenshot + dump semua input di halaman (untuk diagnostik selector)
             await page.screenshot(path=str(out_dir / "debug_before_fill.png"))
+            try:
+                all_inputs = await page.evaluate("""() =>
+                    Array.from(document.querySelectorAll('input')).map(el => ({
+                        tag:         el.tagName,
+                        type:        el.type,
+                        name:        el.name,
+                        id:          el.id,
+                        placeholder: el.placeholder,
+                        visible:     !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length),
+                    }))
+                """)
+                input_summary = " | ".join(
+                    f"{i.get('type','?')}[name={i.get('name','-')} id={i.get('id','-')}]"
+                    for i in all_inputs if i.get("visible")
+                )
+                _update_job(job_id, message=f"Input fields ditemukan: {input_summary}")
+            except Exception:
+                pass
 
-            # Selector ID Pengguna (NPWP / username)
+            # ── Helper: isi field dengan trigger event (untuk React/Angular forms) ──
+            async def fill_first_visible(selectors: list[str], value: str, label: str) -> str:
+                for sel in selectors:
+                    try:
+                        loc = page.locator(sel).first
+                        if await loc.is_visible(timeout=2_000):
+                            await loc.click()                  # fokus
+                            await loc.fill("")                 # clear
+                            await loc.press_sequentially(value, delay=40)  # ketik per karakter
+                            # Trigger change event (untuk framework SPA)
+                            await page.evaluate(
+                                "(el) => { el.dispatchEvent(new Event('input',{bubbles:true}));"
+                                " el.dispatchEvent(new Event('change',{bubbles:true})); }",
+                                await loc.element_handle()
+                            )
+                            return sel
+                    except Exception:
+                        continue
+                await page.screenshot(path=str(out_dir / f"debug_no_{label}.png"))
+                raise RuntimeError(
+                    f"Field '{label}' tidak ditemukan. "
+                    f"Lihat screenshot debug_no_{label}.png dan pesan 'Input fields ditemukan' di log."
+                )
+
+            # Isi ID Pengguna
             USERNAME_SELECTORS = [
                 'input[name="UserName"]',
                 'input[id="UserName"]',
@@ -177,6 +219,10 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                 'input[placeholder*="username" i]',
                 'input[type="text"]:visible',
             ]
+            used_u = await fill_first_visible(USERNAME_SELECTORS, req.username, "username")
+            _update_job(job_id, message=f"ID Pengguna diisi via '{used_u}'")
+
+            # Isi Kata Sandi
             PASSWORD_SELECTORS = [
                 'input[name="Password"]',
                 'input[id="Password"]',
@@ -184,42 +230,42 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                 'input[id="password"]',
                 'input[type="password"]:visible',
             ]
+            used_p = await fill_first_visible(PASSWORD_SELECTORS, req.password, "password")
+            _update_job(job_id, message=f"Kata Sandi diisi via '{used_p}'")
+
+            # Isi CAPTCHA
             CAPTCHA_SELECTORS = [
                 'input[name="CaptchaCode"]',
                 'input[id="CaptchaCode"]',
                 'input[name="captcha"]',
                 'input[id="captcha"]',
                 'input[name="VerificationCode"]',
+                'input[name="CaptchaInputText"]',
+                'input[name="captchaText"]',
                 'input[placeholder*="CAPTCHA" i]',
                 'input[placeholder*="kode" i]',
-                # Fallback: input text ketiga di form
+                'input[placeholder*="verification" i]',
             ]
+            used_c = await fill_first_visible(CAPTCHA_SELECTORS, captcha_code, "captcha")
+            _update_job(job_id, message=f"CAPTCHA '{captcha_code}' diisi via '{used_c}'")
 
-            async def fill_first_visible(selectors: list[str], value: str, label: str) -> str:
-                for sel in selectors:
-                    try:
-                        loc = page.locator(sel).first
-                        if await loc.is_visible(timeout=2_000):
-                            await loc.clear()
-                            await loc.fill(value)
-                            return sel
-                    except Exception:
-                        continue
-                await page.screenshot(path=str(out_dir / f"debug_no_{label}.png"))
-                raise RuntimeError(
-                    f"Field '{label}' tidak ditemukan di halaman Coretax. "
-                    f"Cek screenshot debug_no_{label}.png untuk melihat kondisi halaman."
-                )
+            # Verifikasi: baca kembali nilai aktual dari form
+            try:
+                form_values = await page.evaluate("""() =>
+                    Array.from(document.querySelectorAll('input')).map(el => ({
+                        name:      el.name || el.id,
+                        type:      el.type,
+                        hasValue:  !!el.value,
+                        len:       el.value.length,
+                    }))
+                """)
+                filled = [f"{v['name']}(len={v['len']})" for v in form_values if v['hasValue']]
+                empty  = [f"{v['name']}" for v in form_values if not v['hasValue'] and v['type'] != 'hidden']
+                _update_job(job_id, message=f"Verifikasi form — terisi: {filled} | kosong: {empty}")
+            except Exception:
+                pass
 
-            used = await fill_first_visible(USERNAME_SELECTORS, req.username, "username")
-            _update_job(job_id, message=f"Username diisi ({used})")
-
-            await fill_first_visible(PASSWORD_SELECTORS, req.password, "password")
-            _update_job(job_id, message="Password diisi, mengisi CAPTCHA…")
-
-            await fill_first_visible(CAPTCHA_SELECTORS, captcha_code, "captcha")
-
-            # Screenshot setelah semua field terisi — untuk verifikasi
+            # Screenshot setelah semua field terisi
             await page.screenshot(path=str(out_dir / "debug_form_filled.png"))
             _update_job(job_id, message="Form terisi, submit login…")
 

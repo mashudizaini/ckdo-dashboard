@@ -372,25 +372,49 @@ export default function CoretaxDownloader() {
           </p>
 
           <p style={{ fontSize: 13, color: "#94a3b8", marginBottom: 16 }}>
-            Browser sudah membuka halaman login Coretax. Lihat gambar di bawah,
-            ketik angka/huruf yang terlihat, lalu klik <strong style={{ color: "#fb923c" }}>Submit CAPTCHA</strong>.
+            Browser sudah membuka halaman login Coretax dan menunggu di sini.
+            Lihat gambar di bawah, ketik kode CAPTCHA, lalu klik{" "}
+            <strong style={{ color: "#fb923c" }}>Submit CAPTCHA</strong>.
           </p>
 
-          {/* Gambar CAPTCHA */}
-          <div style={{ marginBottom: 16 }}>
-            {captchaImg ? (
-              <img
-                src={captchaImg}
-                alt="CAPTCHA Coretax"
-                style={{ maxWidth: "100%", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)" }}
-              />
-            ) : (
-              <div style={{ padding: "24px", textAlign: "center", color: "#475569", fontSize: 13, background: "rgba(0,0,0,0.2)", borderRadius: 8 }}>
-                <Loader2 size={18} className="animate-spin" style={{ display: "inline", marginRight: 6 }} />
-                Memuat gambar CAPTCHA…
+          {/* Dua tampilan: gambar terisolasi (atas) + full page (bawah) */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+
+            {/* Kiri: CAPTCHA terisolasi (zoomed) */}
+            <div>
+              <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6, fontWeight: 600 }}>
+                CAPTCHA (zoom) — ketik kode ini ↓
               </div>
-            )}
+              {captchaImg ? (
+                <img
+                  src={captchaImg}
+                  alt="CAPTCHA Coretax"
+                  style={{ width: "100%", borderRadius: 8, border: "2px solid rgba(251,146,60,0.5)",
+                           imageRendering: "pixelated" }}
+                />
+              ) : (
+                <div style={{ padding: "32px 16px", textAlign: "center", color: "#475569",
+                              fontSize: 12, background: "rgba(0,0,0,0.2)", borderRadius: 8 }}>
+                  <Loader2 size={16} className="animate-spin" style={{ display: "inline", marginRight: 6 }} />
+                  Memuat…
+                </div>
+              )}
+            </div>
+
+            {/* Kanan: Full page login (untuk konteks) */}
+            <div>
+              <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6, fontWeight: 600 }}>
+                Tampilan penuh halaman login
+              </div>
+              <DebugImage jobId={job.job_id} filename="debug_login_fullpage.png" />
+            </div>
           </div>
+
+          <p style={{ fontSize: 12, color: "#fb923c", marginBottom: 12, padding: "8px 12px",
+                      background: "rgba(251,146,60,0.08)", borderRadius: 6 }}>
+            Pastikan kode yang diketik PERSIS sama dengan yang terlihat di gambar CAPTCHA (case-sensitive).
+            Jika gambar tidak jelas, klik <strong>Refresh</strong> — namun kode CAPTCHA akan berubah.
+          </p>
 
           {/* Input + tombol */}
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
@@ -523,5 +547,53 @@ export default function CoretaxDownloader() {
         </div>
       )}
     </div>
+  );
+}
+
+// ── Helper: muat & tampilkan screenshot debug sebagai <img> ──────────────────
+function DebugImage({ jobId, filename }) {
+  const [src, setSrc] = useState(null);
+  const [err, setErr] = useState(false);
+
+  useEffect(() => {
+    if (!jobId || !filename) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `${BASE_URL}/debug/screenshot/${jobId}/${filename}?t=${Date.now()}`,
+          { cache: "no-store" }
+        );
+        if (!res.ok || cancelled) { setErr(true); return; }
+        const blob = await res.blob();
+        if (!cancelled) setSrc(URL.createObjectURL(blob));
+      } catch (_) { if (!cancelled) setErr(true); }
+    })();
+    return () => {
+      cancelled = true;
+      setSrc((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
+    };
+  }, [jobId, filename]);
+
+  if (err) return (
+    <div style={{ padding: "12px", textAlign: "center", fontSize: 11, color: "#334155",
+                  background: "rgba(0,0,0,0.15)", borderRadius: 8 }}>
+      Tidak tersedia
+    </div>
+  );
+  if (!src) return (
+    <div style={{ padding: "12px", textAlign: "center", fontSize: 11, color: "#475569",
+                  background: "rgba(0,0,0,0.15)", borderRadius: 8 }}>
+      <Loader2 size={14} className="animate-spin" style={{ display: "inline", marginRight: 4 }} />
+      Memuat…
+    </div>
+  );
+  return (
+    <img src={src} alt={filename}
+      style={{ width: "100%", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)",
+               display: "block", cursor: "pointer" }}
+      onClick={() => window.open(src, "_blank")}
+      title="Klik untuk buka di tab baru"
+    />
   );
 }
