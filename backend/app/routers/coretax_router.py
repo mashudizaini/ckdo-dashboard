@@ -19,6 +19,7 @@ Dependency: pip install playwright fastapi python-multipart
 """
 
 import asyncio
+import json
 import zipfile
 from pathlib import Path
 from typing import Optional
@@ -42,6 +43,27 @@ ISSUED_URL = "https://coretaxdjp.pajak.go.id/withholding-slips-portal/id-ID/ebup
 DOWNLOAD_DIR = Path("downloads/coretax")
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+SAVED_COOKIE_FILE = DOWNLOAD_DIR / "saved_cookie.json"
+
+
+def _load_saved_cookie() -> dict | None:
+    """Baca cookie tersimpan dari file. Return None kalau tidak ada."""
+    try:
+        if SAVED_COOKIE_FILE.exists():
+            return json.loads(SAVED_COOKIE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return None
+
+
+def _save_cookie_to_file(cookie_string: str):
+    data = {
+        "cookie_string": cookie_string,
+        "saved_at": datetime.now().isoformat(),
+    }
+    SAVED_COOKIE_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
 # ─── In-memory job store ──────────────────────────────────────────────────────
 jobs: dict[str, dict] = {}
 
@@ -49,9 +71,10 @@ jobs: dict[str, dict] = {}
 # ─── Schema ──────────────────────────────────────────────────────────────────
 class StartJobRequest(BaseModel):
     # ── Mode 1: Cookie (DIANJURKAN) ──────────────────────────────────────────
-    # Cara ambil: Login di Chrome → F12 → Network → klik request apapun ke
-    # coretaxdjp.pajak.go.id → Headers → salin seluruh nilai "Cookie:"
-    cookie_string: Optional[str] = None
+    # Kalau use_saved_cookie=True, pakai cookie yang sudah tersimpan di server.
+    # Kalau cookie_string diisi, simpan ke server lalu gunakan.
+    use_saved_cookie: bool = False
+    cookie_string:    Optional[str] = None
 
     # ── Mode 2: Login otomatis ───────────────────────────────────────────────
     username: str = ""
@@ -105,7 +128,24 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
     out_dir = _job_dir(job_id)
     _update_job(job_id, status="running", message="Membuka browser…")
 
-    use_cookie_mode = bool(req.cookie_string and req.cookie_string.strip())
+    # Resolusi cookie: pakai yang baru (dan simpan), atau ambil yang tersimpan
+    resolved_cookie: str | None = None
+    if req.cookie_string and req.cookie_string.strip():
+        resolved_cookie = req.cookie_string.strip()
+        _save_cookie_to_file(resolved_cookie)          # simpan otomatis
+        _update_job(job_id, message="Cookie baru disimpan ke server.")
+    elif req.use_saved_cookie:
+        saved = _load_saved_cookie()
+        if saved:
+            resolved_cookie = saved["cookie_string"]
+            saved_at = saved.get("saved_at", "")[:16].replace("T", " ")
+            _update_job(job_id, message=f"Menggunakan cookie tersimpan (disimpan: {saved_at})…")
+        else:
+            _update_job(job_id, status="error",
+                        message="Tidak ada cookie tersimpan. Silakan paste cookie baru terlebih dahulu.")
+            return
+
+    use_cookie_mode = bool(resolved_cookie)
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -122,7 +162,7 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
 
                 # Parse cookie string → list of dicts untuk Playwright
                 parsed_cookies = []
-                for part in req.cookie_string.strip().split(";"):
+                for part in resolved_cookie.split(";"):
                     part = part.strip()
                     if "=" in part:
                         name, _, value = part.partition("=")
@@ -488,6 +528,34 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
+
+@coretax_router.get("/saved-cookie")
+async def get_saved_cookie_status():
+    """Cek apakah ada cookie tersimpan di server."""
+    data = _load_saved_cookie()
+    if not data:
+        return {"has_cookie": False, "saved_at": None}
+    saved_at = data.get("saved_at", "")
+    return {"has_cookie": True, "saved_at": saved_at}
+
+
+@coretax_router.post("/save-cookie")
+async def save_cookie(body: dict):
+    """Simpan cookie string ke server untuk dipakai di download berikutnya."""
+    cookie_string = (body.get("cookie_string") or "").strip()
+    if not cookie_string:
+        raise HTTPException(status_code=400, detail="cookie_string tidak boleh kosong")
+    _save_cookie_to_file(cookie_string)
+    return {"message": "Cookie berhasil disimpan", "saved_at": datetime.now().isoformat()}
+
+
+@coretax_router.delete("/saved-cookie")
+async def delete_saved_cookie():
+    """Hapus cookie tersimpan."""
+    if SAVED_COOKIE_FILE.exists():
+        SAVED_COOKIE_FILE.unlink()
+    return {"message": "Cookie dihapus"}
+
 
 @coretax_router.post("/start", response_model=JobStatus)
 async def start_job(req: StartJobRequest, background_tasks: BackgroundTasks):
