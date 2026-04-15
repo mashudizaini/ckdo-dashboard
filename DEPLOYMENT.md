@@ -445,6 +445,7 @@ sudo crontab -e
 ### 7.1 Login ke Keycloak Admin Console
 
 ```
+     http://dashboard-dev.ckd-otto.com/auth/admin --valid url
 URL: https://dashboard-dev.ckd-otto.com/auth/admin
 User: admin
 Password: (nilai KEYCLOAK_ADMIN_PASSWORD di .env)

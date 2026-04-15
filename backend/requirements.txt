@@ -52,3 +52,6 @@ tenacity==8.2.3
 
 # SSH
 paramiko==3.4.0
+
+# Coretax browser automation
+playwright>=1.44.0

@@ -9,6 +9,9 @@ from app.database import async_engine, Base, init_oracle_client
 # ── Dashboard Routers ──
 from app.routers.dashboard import it, hr, pac, accounting, purchasing
 
+# ── Coretax Router ──
+from app.routers.coretax_router import coretax_router
+
 # ── AI Tools Routers ──
 from app.routers.ai_tools import chatbot, meeting_notes
 
@@ -94,3 +97,6 @@ app.include_router(purchasing.router, prefix=f"{API_PREFIX}/dashboard/purchasing
 # AI Tools
 app.include_router(chatbot.router,       prefix=f"{API_PREFIX}/ai/chatbot",       tags=["AI - Chatbot"])
 app.include_router(meeting_notes.router, prefix=f"{API_PREFIX}/ai/meeting-notes", tags=["AI - Meeting Notes"])
+
+# Coretax Bulk Downloader (prefix already set in router: /api/coretax)
+app.include_router(coretax_router)

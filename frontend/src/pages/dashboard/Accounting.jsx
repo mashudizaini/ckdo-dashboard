@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { TrendingUp, TrendingDown, DollarSign, FileText, RefreshCw } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, FileText, RefreshCw, FileDown } from "lucide-react";
+import CoretaxDownloader from "./CoretaxDownloader";
 
 export default function AccountingDashboard() {
   const [activeSection, setActiveSection] = useState("revenue");
@@ -8,13 +9,14 @@ export default function AccountingDashboard() {
     { id: "revenue", icon: TrendingUp,   color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Reporting (Revenue)", value: "—" },
     { id: "expense", icon: TrendingDown, color: "text-red-400",    bg: "bg-red-500/10",    activeBorder: "border-red-500/40",    label: "Expense Bulanan",     value: "—" },
     { id: "profit",  icon: DollarSign,   color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Net Profit",          value: "—" },
-    { id: "ar",      icon: FileText,     color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "AR Balance",          value: "—" },
+    { id: "ar",      icon: FileText,     color: "text-yellow-400",  bg: "bg-yellow-500/10",  activeBorder: "border-yellow-500/40",  label: "AR Balance",          value: "—" },
+    { id: "coretax", icon: FileDown,     color: "text-purple-400",  bg: "bg-purple-500/10",  activeBorder: "border-purple-500/40",  label: "Coretax Download",    value: "—" },
   ];
 
   return (
     <div className="p-6 space-y-4">
       {/* Tab Buttons */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 xl:grid-cols-5 gap-2">
         {kpiCards.map((c) => (
           <button
             key={c.id}
@@ -85,6 +87,9 @@ export default function AccountingDashboard() {
           />
         </SectionCard>
       )}
+
+      {/* Section: Coretax */}
+      {activeSection === "coretax" && <CoretaxDownloader />}
     </div>
   );
 }
