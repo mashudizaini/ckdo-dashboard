@@ -4,7 +4,7 @@ import {
   Upload, Search, ChevronLeft, ChevronRight, X
 } from "lucide-react";
 import EmployeeUpload from "./EmployeeUpload";
-import useAuthStore from "@/store/authStore";
+import { useAuthStore } from "@/store/authStore";
 
 const API = "/api/v1/dashboard/hr/employees";
 
