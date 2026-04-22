@@ -5,6 +5,7 @@ import structlog
 
 from app.config import get_settings
 from app.database import async_engine, Base, init_oracle_client
+import app.models.employee  # noqa: F401 — register models ke Base.metadata
 
 # ── Dashboard Routers ──
 from app.routers.dashboard import it, hr, pac, accounting, purchasing

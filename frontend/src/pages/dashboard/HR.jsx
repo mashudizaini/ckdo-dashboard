@@ -1,20 +1,28 @@
-import { useState } from "react";
-import { Users, UserCheck, Umbrella, BarChart2, RefreshCw } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import {
+  Users, UserCheck, Umbrella, BarChart2, RefreshCw,
+  Upload, Search, ChevronLeft, ChevronRight, X
+} from "lucide-react";
+import EmployeeUpload from "./EmployeeUpload";
+import useAuthStore from "@/store/authStore";
+
+const API = "/api/v1/dashboard/hr/employees";
 
 export default function HRDashboard() {
   const [activeSection, setActiveSection] = useState("employees");
 
   const kpiCards = [
-    { id: "employees",  icon: Users,     color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Total Karyawan",  value: "—" },
-    { id: "present",    icon: UserCheck, color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Hadir Hari Ini",  value: "—" },
-    { id: "leave",      icon: Umbrella,  color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Cuti / Leave",    value: "—" },
-    { id: "attendance", icon: BarChart2, color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Attendance Rate", value: "—" },
+    { id: "employees",  icon: Users,     color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Employee Information" },
+    { id: "present",    icon: UserCheck, color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Hadir Hari Ini" },
+    { id: "leave",      icon: Umbrella,  color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Cuti / Leave" },
+    { id: "attendance", icon: BarChart2, color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40", label: "Attendance Rate" },
+    { id: "upload",     icon: Upload,    color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Upload Karyawan" },
   ];
 
   return (
     <div className="p-6 space-y-4">
       {/* Tab Buttons */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 xl:grid-cols-5 gap-2">
         {kpiCards.map((c) => (
           <button
             key={c.id}
@@ -35,20 +43,17 @@ export default function HRDashboard() {
         ))}
       </div>
 
+      {/* ── Data Karyawan (tabel + search) ─────────────────────────────────── */}
       {activeSection === "employees" && (
-        <SectionCard title="Karyawan per Department">
-          <DataTable
-            headers={["Department", "Permanent", "Contract", "Total"]}
-            rows={[
-              ["Production",           "480", "40", "520"],
-              ["Quality Assurance",    "170", "15", "185"],
-              ["Warehouse",            "95",  "20", "115"],
-              ["Finance & Accounting", "45",  "5",  "50"],
-              ["HR & GA",              "30",  "5",  "35"],
-              ["IT",                   "15",  "2",  "17"],
-              ["Marketing & Sales",    "25",  "5",  "30"],
-            ]}
-          />
+        <SectionCard title="List Of Employee">
+          <EmployeeTable />
+        </SectionCard>
+      )}
+
+      {/* ── Upload Karyawan ──────────────────────────────────────────────────── */}
+      {activeSection === "upload" && (
+        <SectionCard title="Upload File Excel Karyawan">
+          <EmployeeUpload />
         </SectionCard>
       )}
 
@@ -86,6 +91,238 @@ export default function HRDashboard() {
       )}
     </div>
   );
+}
+
+// ── Tabel karyawan dengan search + filter + pagination ────────────────────────
+function EmployeeTable() {
+  const { token }    = useAuthStore();
+  const headers      = { Authorization: `Bearer ${token}` };
+
+  const [data,       setData]       = useState({ employees: [], total: 0, pages: 1 });
+  const [loading,    setLoading]    = useState(false);
+  const [page,       setPage]       = useState(1);
+  const [search,     setSearch]     = useState("");
+  const [deptFilter, setDeptFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [teamFilter, setTeamFilter] = useState("");
+  const [departments, setDepartments]   = useState([]);
+  const [teams,       setTeams]         = useState([]);
+  const [summary,    setSummary]    = useState(null);
+
+  const PAGE_SIZE = 25;
+
+  const fetchDepts = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/departments`, { headers });
+      if (res.ok) setDepartments(await res.json());
+    } catch (_) {}
+  }, []); // eslint-disable-line
+
+  const fetchTeams = useCallback(async (dept) => {
+    try {
+      const url = dept ? `${API}/teams?department=${encodeURIComponent(dept)}` : `${API}/teams`;
+      const res = await fetch(url, { headers });
+      if (res.ok) setTeams(await res.json());
+    } catch (_) {}
+  }, []); // eslint-disable-line
+
+  const fetchSummary = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/summary`, { headers });
+      if (res.ok) setSummary(await res.json());
+    } catch (_) {}
+  }, []); // eslint-disable-line
+
+  const fetchEmployees = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page:      page,
+        page_size: PAGE_SIZE,
+        ...(search       ? { search }               : {}),
+        ...(deptFilter   ? { department: deptFilter } : {}),
+        ...(statusFilter ? { status: statusFilter }  : {}),
+        ...(teamFilter   ? { team: teamFilter }      : {}),
+      });
+      const res = await fetch(`${API}?${params}`, { headers });
+      if (res.ok) setData(await res.json());
+    } catch (_) {}
+    finally { setLoading(false); }
+  }, [page, search, deptFilter, statusFilter, teamFilter]); // eslint-disable-line
+
+  useEffect(() => { fetchDepts(); fetchSummary(); fetchTeams(""); }, []); // eslint-disable-line
+  useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
+
+  // Reset page kalau filter/search berubah
+  const handleSearch   = (v) => { setSearch(v);       setPage(1); };
+  const handleDept     = (v) => { setDeptFilter(v);   setTeamFilter(""); fetchTeams(v); setPage(1); };
+  const handleStatus   = (v) => { setStatusFilter(v); setPage(1); };
+  const handleTeam     = (v) => { setTeamFilter(v);   setPage(1); };
+
+  const STATUS_BADGE = {
+    "Permanent": "bg-green-500/15 text-green-400 border-green-500/30",
+    "Contract":  "bg-amber-500/15 text-amber-400 border-amber-500/30",
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      {summary && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: "Total Karyawan", val: summary.total,     color: "text-blue-400" },
+            { label: "Permanent",      val: summary.permanent, color: "text-green-400" },
+            { label: "Contract",       val: summary.contract,  color: "text-amber-400" },
+            { label: "Laki-laki / Perempuan", val: `${summary.male} / ${summary.female}`, color: "text-purple-400" },
+          ].map(({ label, val, color }) => (
+            <div key={label} className="rounded-lg border border-gray-800 bg-gray-800/40 px-4 py-3 text-center">
+              <div className={`text-2xl font-bold ${color}`}>{val}</div>
+              <div className="text-xs text-gray-500 mt-0.5">{label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Filter bar */}
+      <div className="flex flex-wrap gap-2">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+          <input
+            type="text"
+            placeholder="Cari nama / NIK / jabatan…"
+            value={search}
+            onChange={(e) => handleSearch(e.target.value)}
+            className="w-full rounded-lg border border-gray-700 bg-gray-900 pl-8 pr-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500 transition-colors"
+          />
+          {search && (
+            <button onClick={() => handleSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400">
+              <X size={13} />
+            </button>
+          )}
+        </div>
+
+        <select
+          value={deptFilter}
+          onChange={(e) => handleDept(e.target.value)}
+          className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+        >
+          <option value="">Semua Department</option>
+          {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
+
+        <select
+          value={statusFilter}
+          onChange={(e) => handleStatus(e.target.value)}
+          className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+        >
+          <option value="">Semua Status</option>
+          <option value="Permanent">Permanent</option>
+          <option value="Contract">Contract</option>
+        </select>
+
+        <select
+          value={teamFilter}
+          onChange={(e) => handleTeam(e.target.value)}
+          className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+        >
+          <option value="">Semua Team</option>
+          {teams.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+
+        <button
+          onClick={() => fetchEmployees()}
+          className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-400 hover:border-gray-600 hover:text-gray-200 transition-colors"
+        >
+          <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Refresh
+        </button>
+      </div>
+
+      {/* Tabel */}
+      <div className="overflow-x-auto rounded-lg border border-gray-800">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-800/60">
+              {["NIK", "Nama", "Department", "Divisi / Tim", "Jabatan", "Penempatan", "Status", "Tgl Masuk"].map((h) => (
+                <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800">
+            {loading ? (
+              <tr>
+                <td colSpan={8} className="py-12 text-center">
+                  <Loader size={16} className="mx-auto animate-spin text-gray-600" />
+                </td>
+              </tr>
+            ) : data.employees.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="py-12 text-center text-xs text-gray-600">
+                  {search || deptFilter || statusFilter
+                    ? "Tidak ada karyawan yang sesuai filter"
+                    : "Belum ada data karyawan. Upload file Excel di tab Upload Karyawan."}
+                </td>
+              </tr>
+            ) : (
+              data.employees.map((e) => (
+                <tr key={e.user_id} className="hover:bg-gray-800/40 transition-colors">
+                  <td className="px-3 py-2.5 font-mono text-xs text-gray-500">{e.user_id}</td>
+                  <td className="px-3 py-2.5 font-medium text-gray-200 whitespace-nowrap">{e.full_name}</td>
+                  <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap">{e.department || "—"}</td>
+                  <td className="px-3 py-2.5 text-gray-500 text-xs">
+                    {[e.division, e.team].filter(Boolean).join(" / ") || "—"}
+                  </td>
+                  <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap max-w-[180px] truncate" title={e.job_title}>{e.job_title || "—"}</td>
+                  <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{e.work_placement || "—"}</td>
+                  <td className="px-3 py-2.5">
+                    {e.status ? (
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[e.status] || "bg-gray-700 text-gray-400 border-gray-600"}`}>
+                        {e.status}
+                      </span>
+                    ) : "—"}
+                  </td>
+                  <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap text-xs">
+                    {e.date_of_joining
+                      ? new Date(e.date_of_joining).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
+                      : "—"}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      {data.pages > 1 && (
+        <div className="flex items-center justify-between text-xs text-gray-500">
+          <span>
+            {data.total} karyawan · halaman {page} dari {data.pages}
+          </span>
+          <div className="flex gap-1">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="rounded-md border border-gray-700 p-1.5 hover:bg-gray-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronLeft size={13} />
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(data.pages, p + 1))}
+              disabled={page === data.pages}
+              className="rounded-md border border-gray-700 p-1.5 hover:bg-gray-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronRight size={13} />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Shared helpers ─────────────────────────────────────────────────────────────
+function Loader({ size = 16, className = "" }) {
+  return <Loader2 size={size} className={className} />;
 }
 
 function SectionCard({ title, action, children }) {
