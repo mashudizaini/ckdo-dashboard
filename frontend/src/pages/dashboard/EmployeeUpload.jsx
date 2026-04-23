@@ -10,7 +10,7 @@ import {
   Loader2, RefreshCw, Clock, ChevronDown, ChevronUp,
   Users, UserPlus, RotateCcw, AlertCircle
 } from "lucide-react";
-import useAuthStore from "@/store/authStore";
+import { useAuthStore } from "@/store/authStore";
 
 const API = "/api/v1/dashboard/hr/employees";
 

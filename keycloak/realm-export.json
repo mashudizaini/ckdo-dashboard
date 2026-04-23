@@ -2488,6 +2488,34 @@
       "defaultAction": false,
       "priority": 1000,
       "config": {}
+    },
+    {
+      "id": "bc324cd2-b4ef-496d-b4b2-8b49d95c7f68",
+      "name": "app:idrac-dev",
+      "description": "iDRAC Device Management",
+      "composite": false,
+      "clientRole": false,
+      "containerId": "647c713f-a671-4db1-bd8f-e87aeaea7c70",
+      "attributes": {
+        "console.launcher.1.displayName": "iDRAC",
+        "console.launcher.1.iconClass": "fa fa-server",
+        "console.launcher.1.url": "https://idrac.local",
+        "console.launcher.1.pos": 2
+      }
+    },
+    {
+      "id": "bc324cd2-b4ef-496d-b4b2-8b49d95c7f69",
+      "name": "app:synology",
+      "description": "Synology Share Folder",
+      "composite": false,
+      "clientRole": false,
+      "containerId": "647c713f-a671-4db1-bd8f-e87aeaea7c70",
+      "attributes": {
+        "console.launcher.1.displayName": "Synology",
+        "console.launcher.1.iconClass": "fa fa-hdd-o",
+        "console.launcher.1.url": "https://synology.local:5001",
+        "console.launcher.1.pos": 1
+      }
     }
   ],
   "browserFlow": "browser",

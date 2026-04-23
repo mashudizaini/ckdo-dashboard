@@ -16,8 +16,10 @@ const APPS = [
   { id: "ovm",        name: "OVM Manager",        desc: "Oracle VM virtualization",     url: "https://172.21.2.200:7002/ovm/console/faces/login.jspx", status: "direct", emoji: "🖥️", role: "app:ovm" },
   { id: "idrac",      name: "Dell iDRAC",         desc: "Server remote management",     url: "https://172.21.2.199/restgui/start.html?login", status: "direct", emoji: "🔧", role: "app:idrac" },
   { id: "idrac-98",   name: "Dell iDRAC 98",      desc: "Server remote management",     url: "https://172.21.2.198/restgui/start.html?login", status: "direct", emoji: "🔧", role: "app:idrac-98" },
+  { id: "idrac-dev",   name: "Dell iDRAC Dev",      desc: "Server remote management",   url: "https://172.21.2.197/restgui/start.html?login", status: "direct", emoji: "🔧", role: "app:idrac-dev" },
   { id: "website",    name: "Company Website",    desc: "ckd-otto.com public site",     url: "https://ckd-otto.com", status: "direct", emoji: "🌐", role: "app:website" },
   { id: "myminio",    name: "MinIO Storage",      desc: "Object storage management",    url: "http://172.21.2.157:9001", status: "direct", emoji: "🗄️", role: "app:myminio" },
+  { id: "synology",  name: "Synology Share Folder", desc: "Share Folder management",    url: "http://172.21.2.207:5000/#/signin", status: "direct", emoji: "🗄️", role: "app:synology" },
 ];
 
 const STATUS_CONFIG = {
