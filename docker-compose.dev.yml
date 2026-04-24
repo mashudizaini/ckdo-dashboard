@@ -8,7 +8,6 @@ services:
     command: start-dev --import-realm
     environment:
       KC_HOSTNAME_STRICT: "false"
-      KC_HTTP_ENABLED: "true"
       KC_PROXY: edge
       KC_HTTP_RELATIVE_PATH: /auth
 
