@@ -362,6 +362,11 @@ export default function AppLauncher() {
             </div>
           </div>
 
+          {/* DEBUG SEMENTARA — hapus setelah selesai debug */}
+          <div style={{ background: "#fef9c3", padding: "8px 16px", borderRadius: 8, fontSize: 11, color: "#713f12", fontFamily: "monospace", wordBreak: "break-all" }}>
+            <strong>DEBUG roles:</strong> {JSON.stringify(roles)}
+          </div>
+
           {/* App Grid — flex 1 agar mengisi sisa tinggi layar */}
           <div style={{
             flex: 1,
