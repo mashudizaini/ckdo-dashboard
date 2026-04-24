@@ -207,6 +207,24 @@
         "attributes": {}
       },
       {
+        "id": "fd26e785-a3a3-4cd4-bead-10dca1c61fa2",
+        "name": "app:idrac-dev",
+        "description": "Dell iDRAC Dev Server",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "647c713f-a671-4db1-bd8f-e87aeaea7c70",
+        "attributes": {}
+      },
+      {
+        "id": "3a6e4148-50f9-425e-b676-17b9861abad7",
+        "name": "app:synology",
+        "description": "Synology Share Folder",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "647c713f-a671-4db1-bd8f-e87aeaea7c70",
+        "attributes": {}
+      },
+      {
         "id": "111ce28e-b1d0-4216-bd3b-551b3be7b7df",
         "name": "offline_access",
         "description": "${role_offline-access}",
@@ -1095,74 +1113,6 @@
         "offline_access",
         "microprofile-jwt"
       ]
-    },
-    {
-      "id": "bc324cd2-b4ef-496d-b4b2-8b49d95c7f68",
-      "clientId": "idrac-dev",
-      "name": "Dell iDRAC Dev",
-      "description": "iDRAC Device Management",
-      "rootUrl": "https://idrac.local",
-      "surrogateAuthRequired": false,
-      "enabled": true,
-      "alwaysDisplayInConsole": false,
-      "clientAuthenticatorType": "client-secret",
-      "redirectUris": [ "https://idrac.local/*" ],
-      "webOrigins": [ "https://idrac.local" ],
-      "notBefore": 0,
-      "bearerOnly": false,
-      "consentRequired": false,
-      "standardFlowEnabled": false,
-      "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
-      "serviceAccountsEnabled": false,
-      "publicClient": false,
-      "frontchannelLogout": false,
-      "protocol": "openid-connect",
-      "attributes": {
-        "console.launcher.1.displayName": "iDRAC",
-        "console.launcher.1.iconClass": "fa fa-server",
-        "console.launcher.1.url": "https://idrac.local",
-        "console.launcher.1.pos": 2
-      },
-      "authenticationFlowBindingOverrides": {},
-      "fullScopeAllowed": false,
-      "nodeReRegistrationTimeout": 0,
-      "defaultClientScopes": [ "web-origins", "acr", "profile", "roles", "email" ],
-      "optionalClientScopes": [ "address", "phone", "offline_access", "microprofile-jwt" ]
-    },
-    {
-      "id": "bc324cd2-b4ef-496d-b4b2-8b49d95c7f69",
-      "clientId": "synology",
-      "name": "Synology Share Folder",
-      "description": "Synology Share Folder",
-      "rootUrl": "https://synology.local:5001",
-      "surrogateAuthRequired": false,
-      "enabled": true,
-      "alwaysDisplayInConsole": false,
-      "clientAuthenticatorType": "client-secret",
-      "redirectUris": [ "https://synology.local:5001/*" ],
-      "webOrigins": [ "https://synology.local:5001" ],
-      "notBefore": 0,
-      "bearerOnly": false,
-      "consentRequired": false,
-      "standardFlowEnabled": false,
-      "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
-      "serviceAccountsEnabled": false,
-      "publicClient": false,
-      "frontchannelLogout": false,
-      "protocol": "openid-connect",
-      "attributes": {
-        "console.launcher.1.displayName": "Synology",
-        "console.launcher.1.iconClass": "fa fa-hdd-o",
-        "console.launcher.1.url": "https://synology.local:5001",
-        "console.launcher.1.pos": 1
-      },
-      "authenticationFlowBindingOverrides": {},
-      "fullScopeAllowed": false,
-      "nodeReRegistrationTimeout": 0,
-      "defaultClientScopes": [ "web-origins", "acr", "profile", "roles", "email" ],
-      "optionalClientScopes": [ "address", "phone", "offline_access", "microprofile-jwt" ]
     }
   ],
   "clientScopes": [
@@ -2554,10 +2504,10 @@
       "providerId": "update_user_locale",
       "enabled": true,
       "defaultAction": false,
-       "priority": 1000,
-       "config": {}
-     }
-   ],
+      "priority": 1000,
+      "config": {}
+    }
+  ],
   "browserFlow": "browser",
   "registrationFlow": "registration",
   "directGrantFlow": "direct grant",
