@@ -412,3 +412,228 @@ async def get_monthly_attendance_rate(
             "rate":     rate,
         })
     return data
+
+
+# ── Department summary (plan vs actual) ───────────────────────────────────────
+
+@router.get("/dept-summary")
+async def get_dept_summary(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Attendance Plan vs Actual per department (seluruh data yang tersedia)."""
+    result = await db.execute(
+        select(
+            AttendanceRecord.department,
+            func.sum(case((AttendanceRecord.week_day.notin_(WEEKENDS), 1), else_=0)).label("plan"),
+            func.sum(case((and_(
+                AttendanceRecord.actual_checkin.isnot(None),
+                AttendanceRecord.week_day.notin_(WEEKENDS),
+            ), 1), else_=0)).label("actual"),
+        )
+        .group_by(AttendanceRecord.department)
+        .order_by(AttendanceRecord.department)
+    )
+    rows = result.fetchall()
+    return [
+        {
+            "department": r[0] or "—",
+            "plan":   int(r[1] or 0),
+            "actual": int(r[2] or 0),
+            "rate":   round(int(r[2] or 0) / max(int(r[1] or 1), 1) * 100),
+        }
+        for r in rows if r[0]
+    ]
+
+
+# ── Who's off (absent on latest date) ─────────────────────────────────────────
+
+@router.get("/whos-off")
+async def get_whos_off(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Karyawan yang absen pada tanggal terakhir yang tersedia."""
+    latest_q = await db.execute(select(func.max(AttendanceRecord.attendance_date)))
+    latest   = latest_q.scalar()
+    if not latest:
+        return {"date": None, "data": []}
+
+    result = await db.execute(
+        select(
+            AttendanceRecord.employee_name,
+            AttendanceRecord.department,
+            AttendanceRecord.notes,
+        )
+        .where(AttendanceRecord.attendance_date == latest)
+        .where(AttendanceRecord.actual_checkin.is_(None))
+        .where(AttendanceRecord.week_day.notin_(WEEKENDS))
+        .order_by(AttendanceRecord.employee_name)
+        .limit(15)
+    )
+    rows = result.fetchall()
+    return {
+        "date": str(latest),
+        "data": [
+            {"name": r[0] or "—", "department": r[1] or "—", "reason": r[2] or "Absen"}
+            for r in rows
+        ],
+    }
+
+
+# ── Workforce stats (gender + work location) ───────────────────────────────────
+
+@router.get("/workforce-stats")
+async def get_workforce_stats(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Attendance rate berdasarkan gender dan work_placement (join dengan tabel employees)."""
+    from app.models.employee import Employee
+
+    def _rate(plan, actual):
+        p, a = int(plan or 0), int(actual or 0)
+        return round(a / p * 100) if p > 0 else 0
+
+    gender_q = await db.execute(
+        select(
+            Employee.sex,
+            func.sum(case((AttendanceRecord.week_day.notin_(WEEKENDS), 1), else_=0)).label("plan"),
+            func.sum(case((and_(
+                AttendanceRecord.actual_checkin.isnot(None),
+                AttendanceRecord.week_day.notin_(WEEKENDS),
+            ), 1), else_=0)).label("actual"),
+        )
+        .join(Employee, AttendanceRecord.employee_id == Employee.user_id)
+        .where(Employee.sex.isnot(None))
+        .group_by(Employee.sex)
+    )
+    gender_rows = gender_q.fetchall()
+
+    loc_q = await db.execute(
+        select(
+            Employee.work_placement,
+            func.sum(case((AttendanceRecord.week_day.notin_(WEEKENDS), 1), else_=0)).label("plan"),
+            func.sum(case((and_(
+                AttendanceRecord.actual_checkin.isnot(None),
+                AttendanceRecord.week_day.notin_(WEEKENDS),
+            ), 1), else_=0)).label("actual"),
+        )
+        .join(Employee, AttendanceRecord.employee_id == Employee.user_id)
+        .where(Employee.work_placement.isnot(None))
+        .group_by(Employee.work_placement)
+        .order_by(Employee.work_placement)
+    )
+    loc_rows = loc_q.fetchall()
+
+    GENDER = {"M": "Male", "F": "Female"}
+    return {
+        "by_gender": [
+            {"label": GENDER.get(r[0], r[0]), "plan": int(r[1] or 0),
+             "actual": int(r[2] or 0), "rate": _rate(r[1], r[2])}
+            for r in gender_rows if r[0]
+        ],
+        "by_location": [
+            {"label": r[0], "plan": int(r[1] or 0),
+             "actual": int(r[2] or 0), "rate": _rate(r[1], r[2])}
+            for r in loc_rows if r[0]
+        ],
+    }
+
+
+# ── Employee search ────────────────────────────────────────────────────────────
+
+@router.get("/search-employees")
+async def search_employees(
+    q:    str          = Query(..., min_length=2),
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    result = await db.execute(
+        select(
+            AttendanceRecord.employee_id,
+            AttendanceRecord.employee_name,
+            AttendanceRecord.department,
+        )
+        .where(AttendanceRecord.employee_name.ilike(f"%{q}%"))
+        .where(AttendanceRecord.employee_id.isnot(None))
+        .distinct(AttendanceRecord.employee_id)
+        .limit(10)
+    )
+    rows = result.fetchall()
+    return [{"id": r[0], "name": r[1], "department": r[2]} for r in rows if r[0]]
+
+
+# ── Individual employee detail ─────────────────────────────────────────────────
+
+@router.get("/employee/{employee_id}/detail")
+async def get_employee_detail(
+    employee_id: str,
+    db:          AsyncSession = Depends(get_db),
+    user:        CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Monthly attendance + absence records untuk satu karyawan."""
+    from app.models.employee import Employee
+    from sqlalchemy import extract
+
+    emp_q = await db.execute(select(Employee).where(Employee.user_id == employee_id))
+    emp   = emp_q.scalar_one_or_none()
+
+    monthly_q = await db.execute(
+        select(
+            extract("year",  AttendanceRecord.attendance_date).label("year"),
+            extract("month", AttendanceRecord.attendance_date).label("month"),
+            func.sum(case((AttendanceRecord.week_day.notin_(WEEKENDS), 1), else_=0)).label("plan"),
+            func.sum(case((and_(
+                AttendanceRecord.actual_checkin.isnot(None),
+                AttendanceRecord.week_day.notin_(WEEKENDS),
+            ), 1), else_=0)).label("actual"),
+        )
+        .where(AttendanceRecord.employee_id == employee_id)
+        .group_by(
+            extract("year",  AttendanceRecord.attendance_date),
+            extract("month", AttendanceRecord.attendance_date),
+        )
+        .order_by(
+            extract("year",  AttendanceRecord.attendance_date).asc(),
+            extract("month", AttendanceRecord.attendance_date).asc(),
+        )
+    )
+    monthly_rows = monthly_q.fetchall()
+
+    absence_q = await db.execute(
+        select(AttendanceRecord)
+        .where(AttendanceRecord.employee_id == employee_id)
+        .where(AttendanceRecord.actual_checkin.is_(None))
+        .where(AttendanceRecord.week_day.notin_(WEEKENDS))
+        .order_by(AttendanceRecord.attendance_date.desc())
+        .limit(30)
+    )
+    absences = absence_q.scalars().all()
+
+    MONTHS = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"]
+
+    first_absence = absences[0] if absences else None
+    return {
+        "employee": {
+            "id":             employee_id,
+            "name":           emp.full_name        if emp else (first_absence.employee_name if first_absence else None),
+            "department":     emp.department       if emp else (first_absence.department    if first_absence else None),
+            "team":           emp.team             if emp else None,
+            "work_placement": emp.work_placement   if emp else None,
+            "sex":            emp.sex              if emp else None,
+        },
+        "monthly": [
+            {
+                "period": f"{MONTHS[int(r[1])-1]} {int(r[0])}",
+                "plan":   int(r[2] or 0),
+                "actual": int(r[3] or 0),
+                "rate":   round(int(r[3] or 0) / max(int(r[2] or 1), 1) * 100),
+            }
+            for r in monthly_rows
+        ],
+        "absences": [
+            {"date": str(a.attendance_date), "reason": a.notes or "Absen"}
+            for a in absences
+        ],
+    }

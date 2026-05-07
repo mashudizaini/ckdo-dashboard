@@ -435,107 +435,367 @@ function AttendanceTodaySection() {
   );
 }
 
-// ── Attendance Rate Bulanan ────────────────────────────────────────────────────
-function AttendanceRateSection() {
-  const { token } = useAuthStore();
-  const headers   = { Authorization: `Bearer ${token}` };
-  const ATT_API   = "/api/v1/dashboard/hr/attendance";
+// ── Sub-komponen untuk Attendance Ratio ───────────────────────────────────────
 
-  const [data,    setData]    = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${ATT_API}/monthly-rate`, { headers });
-      if (res.ok) setData(await res.json());
-    } catch (_) {}
-    finally { setLoading(false); }
-  };
-
-  useEffect(() => { fetchData(); }, []); // eslint-disable-line
-
-  if (loading) return (
-    <div className="flex items-center justify-center py-16">
-      <Loader2 size={20} className="animate-spin text-gray-600" />
+function DeptBarChart({ data }) {
+  if (!data.length) return <p className="text-xs text-gray-600 py-6 text-center">Tidak ada data</p>;
+  const maxVal = Math.max(...data.map((d) => d.plan), 1);
+  const BAR_H  = 120;
+  return (
+    <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-xs font-semibold text-gray-400">Attendance Ratio per Department</h4>
+        <div className="flex gap-3 text-xs text-gray-600">
+          <span className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-blue-500" /> Plan</span>
+          <span className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-orange-500" /> Actual</span>
+        </div>
+      </div>
+      <div className="flex items-end justify-around gap-1" style={{ height: BAR_H + 44 }}>
+        {data.map((dept) => {
+          const planH   = Math.max(Math.round((dept.plan   / maxVal) * BAR_H), 2);
+          const actualH = Math.max(Math.round((dept.actual / maxVal) * BAR_H), dept.actual > 0 ? 2 : 0);
+          const short   = dept.department.split(/[\s/&]/)[0];
+          return (
+            <div key={dept.department} className="flex-1 flex flex-col items-center" title={dept.department}>
+              <div className="w-full flex items-end justify-center gap-0.5" style={{ height: BAR_H }}>
+                <div className="flex flex-col items-center" style={{ width: "42%" }}>
+                  <span className="text-xs text-gray-400 font-semibold">{dept.plan}</span>
+                  <div className="w-full bg-blue-500 rounded-t" style={{ height: planH }} />
+                </div>
+                <div className="flex flex-col items-center" style={{ width: "42%" }}>
+                  <span className="text-xs text-orange-400 font-semibold">{dept.actual}</span>
+                  <div className="w-full bg-orange-500 rounded-t" style={{ height: actualH }} />
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mt-1 truncate max-w-full text-center">{short}</p>
+              <p className="text-xs font-bold text-orange-400">{dept.rate}%</p>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
+}
 
-  if (data.length === 0) return (
-    <p className="py-10 text-center text-xs text-gray-600">Belum ada data absensi. Upload file Excel di tab Upload Absensi.</p>
+function WhosOffWidget({ data }) {
+  const fmtShort = (iso) => {
+    if (!iso) return "";
+    try { return new Date(iso + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short" }); }
+    catch (_) { return iso; }
+  };
+  return (
+    <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-3">
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="text-xs font-semibold text-gray-400">Who's Off</h4>
+        {data.date && <span className="text-xs text-gray-600">{fmtShort(data.date)}</span>}
+      </div>
+      {!data.data?.length ? (
+        <p className="text-xs text-gray-600 py-2 text-center">Semua hadir</p>
+      ) : (
+        <div className="space-y-1.5">
+          {data.data.slice(0, 5).map((emp, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <div className="h-5 w-5 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-400 shrink-0">
+                {emp.name?.charAt(0) || "?"}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-gray-300 truncate leading-tight">{emp.name}</p>
+                <p className="text-xs text-gray-600 leading-tight">{emp.reason}</p>
+              </div>
+            </div>
+          ))}
+          {data.data.length > 5 && (
+            <p className="text-xs text-gray-600 text-center">+{data.data.length - 5} lainnya</p>
+          )}
+        </div>
+      )}
+    </div>
   );
+}
 
-  const maxRate  = Math.max(...data.map((d) => d.rate), 1);
-  const avgRate  = (data.reduce((s, d) => s + d.rate, 0) / data.length).toFixed(1);
-  const reversed = [...data].reverse(); // oldest first for chart
+function StatBreakdown({ title, data }) {
+  return (
+    <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-3">
+      <h4 className="text-xs font-semibold text-gray-400 mb-2">{title}</h4>
+      {!data?.length ? (
+        <p className="text-xs text-gray-600 py-2 text-center">—</p>
+      ) : (
+        <div className="space-y-2.5">
+          {data.map((item) => (
+            <div key={item.label}>
+              <div className="flex justify-between text-xs mb-0.5">
+                <span className="text-gray-400 truncate max-w-[65%]">{item.label}</span>
+                <span className="text-blue-400 font-bold">{item.rate}%</span>
+              </div>
+              <div className="h-4 rounded-full bg-gray-800 overflow-hidden">
+                <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.max(item.rate, 1)}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MiniBarChart({ data }) {
+  if (!data?.length) return null;
+  const maxVal = Math.max(...data.map((d) => d.plan), 1);
+  const H = 130;
+  return (
+    <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-4">
+      <div className="flex items-center gap-3 mb-3">
+        <h4 className="text-xs font-semibold text-gray-400">Monthly Attendance</h4>
+        <div className="flex gap-2 text-xs text-gray-600">
+          <span className="flex items-center gap-1"><div className="w-2 h-2 bg-blue-500 rounded" />Plan</span>
+          <span className="flex items-center gap-1"><div className="w-2 h-2 bg-orange-500 rounded" />Actual</span>
+        </div>
+      </div>
+      <div className="flex items-end gap-2" style={{ height: H }}>
+        {data.map((m) => {
+          const planH   = Math.max(Math.round((m.plan   / maxVal) * (H - 35)), 2);
+          const actualH = Math.max(Math.round((m.actual / maxVal) * (H - 35)), m.actual > 0 ? 2 : 0);
+          return (
+            <div key={m.period} className="flex-1 flex flex-col items-center">
+              <div className="w-full flex items-end justify-center gap-0.5" style={{ height: H - 35 }}>
+                <div className="flex flex-col items-center" style={{ width: "42%" }}>
+                  <span className="text-xs text-gray-500">{m.plan}</span>
+                  <div className="w-full bg-blue-500 rounded-t" style={{ height: planH }} />
+                </div>
+                <div className="flex flex-col items-center" style={{ width: "42%" }}>
+                  <span className="text-xs text-orange-400">{m.actual}</span>
+                  <div className="w-full bg-orange-500 rounded-t" style={{ height: actualH }} />
+                </div>
+              </div>
+              <p className="text-xs text-gray-600 mt-0.5">{m.period}</p>
+              <p className="text-xs font-bold text-orange-400">{m.rate}%</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function EmployeeDetailPanel({ headers, apiBase }) {
+  const [query,   setQuery]   = useState("");
+  const [results, setResults] = useState([]);
+  const [detail,  setDetail]  = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const doSearch = async (q) => {
+    if (q.length < 2) { setResults([]); return; }
+    try {
+      const res = await fetch(`${apiBase}/search-employees?q=${encodeURIComponent(q)}`, { headers });
+      if (res.ok) setResults(await res.json());
+    } catch (_) {}
+  };
+
+  const loadDetail = async (emp) => {
+    setResults([]); setQuery(emp.name || emp.id); setLoading(true);
+    try {
+      const res = await fetch(`${apiBase}/employee/${emp.id}/detail`, { headers });
+      if (res.ok) setDetail(await res.json());
+    } catch (_) {}
+    setLoading(false);
+  };
+
+  const fmtDate = (iso) => {
+    if (!iso) return "—";
+    try { return new Date(iso + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }); }
+    catch (_) { return iso; }
+  };
 
   return (
-    <div className="space-y-5">
-      {/* Avg summary */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="rounded-lg bg-indigo-500/10 border border-indigo-500/30 px-4 py-2 text-center">
-            <div className="text-xl font-bold text-indigo-400">{avgRate}%</div>
-            <div className="text-xs text-gray-500">Rata-rata {data.length} bulan</div>
-          </div>
+    <div className="grid grid-cols-2 gap-5">
+      {/* Left: search + info + absence */}
+      <div className="space-y-3">
+        <div className="relative">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+          <input
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); doSearch(e.target.value); }}
+            placeholder="Ketik nama karyawan..."
+            className="w-full rounded-lg border border-gray-700 bg-gray-900 pl-8 pr-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500"
+          />
+          {results.length > 0 && (
+            <div className="absolute top-full left-0 right-0 z-20 mt-1 rounded-lg border border-gray-700 bg-gray-800 shadow-xl max-h-52 overflow-y-auto">
+              {results.map((r) => (
+                <button key={r.id} onClick={() => loadDetail(r)}
+                  className="w-full text-left px-3 py-2 hover:bg-gray-700 transition-colors border-b border-gray-700/40 last:border-0">
+                  <p className="text-sm text-gray-200">{r.name}</p>
+                  <p className="text-xs text-gray-500">{r.id} · {r.department}</p>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-        <button onClick={fetchData} className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
-          <RefreshCw size={11} className={loading ? "animate-spin" : ""} /> Refresh
+
+        {loading && <div className="flex justify-center py-8"><Loader2 size={18} className="animate-spin text-gray-600" /></div>}
+
+        {detail && !loading && (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: "ID",         val: detail.employee.id },
+                { label: "Department", val: detail.employee.department },
+                { label: "Team",       val: detail.employee.team },
+                { label: "Location",   val: detail.employee.work_placement },
+              ].map(({ label, val }) => (
+                <div key={label} className="rounded-lg bg-gray-800/60 border border-gray-700 px-3 py-2">
+                  <p className="text-xs text-gray-500">{label}</p>
+                  <p className="text-xs font-semibold text-gray-200 truncate">{val || "—"}</p>
+                </div>
+              ))}
+            </div>
+
+            <div>
+              <h4 className="text-xs font-semibold text-gray-400 mb-1.5">Absence Records</h4>
+              <div className="overflow-auto max-h-52 rounded-lg border border-gray-800">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-gray-800">
+                    <tr>
+                      {["Date", "Note"].map((h) => (
+                        <th key={h} className="px-2 py-2 text-left font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800">
+                    {!detail.absences.length ? (
+                      <tr><td colSpan={2} className="px-2 py-4 text-center text-gray-600">Tidak ada catatan absen</td></tr>
+                    ) : detail.absences.map((a, i) => (
+                      <tr key={i} className="hover:bg-gray-800/40">
+                        <td className="px-2 py-2 text-gray-400 whitespace-nowrap">{fmtDate(a.date)}</td>
+                        <td className="px-2 py-2 text-gray-500">{a.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
+        {!detail && !loading && (
+          <p className="py-10 text-center text-xs text-gray-600">Ketik nama karyawan untuk melihat detail attendance</p>
+        )}
+      </div>
+
+      {/* Right: monthly chart */}
+      <div>
+        {detail?.monthly?.length > 0
+          ? <MiniBarChart data={detail.monthly} />
+          : (
+            <div className="flex items-center justify-center h-48 rounded-lg border border-gray-800 bg-gray-900/50">
+              <p className="text-xs text-gray-700">Monthly chart akan tampil setelah pilih karyawan</p>
+            </div>
+          )
+        }
+      </div>
+    </div>
+  );
+}
+
+// ── Attendance Ratio Dashboard ─────────────────────────────────────────────────
+function AttendanceRateSection() {
+  const { token }  = useAuthStore();
+  const headers    = { Authorization: `Bearer ${token}` };
+  const ATT_API    = "/api/v1/dashboard/hr/attendance";
+
+  const [activeTab, setActiveTab] = useState("summary");
+  const [deptData,  setDeptData]  = useState([]);
+  const [whosOff,   setWhosOff]   = useState({ date: null, data: [] });
+  const [workforce, setWorkforce] = useState({ by_gender: [], by_location: [] });
+  const [monthly,   setMonthly]   = useState([]);
+  const [loading,   setLoading]   = useState(false);
+
+  const loadSummary = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [d, w, ws, m] = await Promise.all([
+        fetch(`${ATT_API}/dept-summary`,    { headers }).then((r) => r.ok ? r.json() : []),
+        fetch(`${ATT_API}/whos-off`,        { headers }).then((r) => r.ok ? r.json() : { date: null, data: [] }),
+        fetch(`${ATT_API}/workforce-stats`, { headers }).then((r) => r.ok ? r.json() : { by_gender: [], by_location: [] }),
+        fetch(`${ATT_API}/monthly-rate`,    { headers }).then((r) => r.ok ? r.json() : []),
+      ]);
+      setDeptData(d); setWhosOff(w); setWorkforce(ws); setMonthly(m);
+    } catch (_) {}
+    finally { setLoading(false); }
+  }, []); // eslint-disable-line
+
+  useEffect(() => { loadSummary(); }, [loadSummary]);
+
+  if (loading) return <div className="flex justify-center py-20"><Loader2 size={22} className="animate-spin text-gray-600" /></div>;
+  if (!deptData.length) return <p className="py-10 text-center text-xs text-gray-600">Belum ada data absensi. Upload file Excel di tab Upload Absensi.</p>;
+
+  return (
+    <div className="space-y-4">
+      {/* Header orange */}
+      <div className="rounded-lg py-2.5 text-center" style={{ background: "linear-gradient(90deg, #ea580c, #f97316)" }}>
+        <h2 className="text-sm font-bold text-white tracking-widest uppercase">Attendance Ratio</h2>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-0 border-b border-gray-700">
+        {[["summary", "Summary"], ["detail", "Detail"]].map(([id, label]) => (
+          <button key={id} onClick={() => setActiveTab(id)}
+            className={`px-5 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors ${
+              activeTab === id ? "border-blue-500 text-blue-400 bg-blue-500/5" : "border-transparent text-gray-500 hover:text-gray-300"
+            }`}>
+            {label}
+          </button>
+        ))}
+        <div className="flex-1" />
+        <button onClick={loadSummary} className="px-3 text-gray-600 hover:text-gray-400">
+          <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
         </button>
       </div>
 
-      {/* Bar chart */}
-      <div className="rounded-xl border border-gray-800 bg-gray-900 p-4 space-y-2.5">
-        {reversed.map((item) => (
-          <div key={item.period} className="flex items-center gap-3">
-            <span className="text-xs text-gray-500 w-14 shrink-0 text-right">{item.period}</span>
-            <div className="flex-1 h-6 rounded bg-gray-800 overflow-hidden relative">
-              <div
-                className={`h-full rounded transition-all ${item.rate >= 80 ? "bg-green-500" : item.rate >= 60 ? "bg-amber-500" : "bg-red-500"}`}
-                style={{ width: `${(item.rate / maxRate) * 100}%` }}
-              />
-              <span className="absolute inset-0 flex items-center pl-2 text-xs font-semibold text-white">
-                {item.rate}%
-              </span>
+      {/* ── Summary ── */}
+      {activeTab === "summary" && (
+        <div className="grid grid-cols-5 gap-4">
+          {/* Left 3/5: dept chart + bottom row */}
+          <div className="col-span-3 space-y-3">
+            <DeptBarChart data={deptData} />
+            <div className="grid grid-cols-3 gap-3">
+              <WhosOffWidget data={whosOff} />
+              <StatBreakdown title="Base on Gender"        data={workforce.by_gender}   />
+              <StatBreakdown title="Base on Work Location" data={workforce.by_location} />
             </div>
-            <span className="text-xs text-gray-600 w-16 shrink-0">{item.hadir}/{item.working} hadir</span>
           </div>
-        ))}
-      </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto rounded-lg border border-gray-800">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-gray-800/60">
-              {["Periode", "Hari Kerja", "Hadir", "Absen", "Attendance Rate"].map((h) => (
-                <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-800">
-            {data.map((row) => (
-              <tr key={row.period} className="hover:bg-gray-800/40 transition-colors">
-                <td className="px-3 py-2.5 font-semibold text-gray-200">{row.period}</td>
-                <td className="px-3 py-2.5 text-gray-400 text-center">{row.working}</td>
-                <td className="px-3 py-2.5 text-green-400 font-semibold text-center">{row.hadir}</td>
-                <td className="px-3 py-2.5 text-red-400 font-semibold text-center">{row.absen}</td>
-                <td className="px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1.5 rounded-full bg-gray-700 overflow-hidden">
-                      <div className={`h-full rounded-full ${row.rate >= 80 ? "bg-green-500" : row.rate >= 60 ? "bg-amber-500" : "bg-red-500"}`}
-                        style={{ width: `${row.rate}%` }} />
+          {/* Right 2/5: monthly overall */}
+          <div className="col-span-2 space-y-3">
+            <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-4">
+              <h4 className="text-xs font-semibold text-gray-400 mb-3">Monthly Overall Rate</h4>
+              <div className="space-y-2">
+                {[...monthly].reverse().map((m) => (
+                  <div key={m.period} className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500 w-14 shrink-0 text-right">{m.period}</span>
+                    <div className="flex-1 h-5 rounded bg-gray-800 overflow-hidden relative">
+                      <div className={`h-full rounded transition-all ${m.rate >= 80 ? "bg-green-500" : m.rate >= 60 ? "bg-amber-500" : "bg-red-500"}`}
+                        style={{ width: `${m.rate}%` }} />
+                      <span className="absolute inset-0 flex items-center pl-2 text-xs font-semibold text-white">{m.rate}%</span>
                     </div>
-                    <span className={`text-xs font-semibold w-12 text-right ${row.rate >= 80 ? "text-green-400" : row.rate >= 60 ? "text-amber-400" : "text-red-400"}`}>
-                      {row.rate}%
-                    </span>
                   </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-lg border border-gray-800 bg-gray-900/60 px-4 py-3">
+              <div className="flex gap-4 text-xs text-gray-500">
+                <span className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-green-500" /> ≥ 80%</span>
+                <span className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-amber-500" /> 60–79%</span>
+                <span className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-red-500" /> &lt; 60%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Detail ── */}
+      {activeTab === "detail" && (
+        <EmployeeDetailPanel headers={headers} apiBase={ATT_API} />
+      )}
     </div>
   );
 }
