@@ -176,7 +176,7 @@ async def upload_employees(
         inserted    = inserted,
         updated     = updated,
         skipped     = skipped,
-        uploaded_by = user.preferred_username if hasattr(user, "preferred_username") else "unknown",
+        uploaded_by = user.username or "unknown",
         notes       = notes or None,
     )
     db.add(log)
