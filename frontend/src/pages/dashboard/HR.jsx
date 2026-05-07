@@ -318,14 +318,81 @@ function EmployeeTable() {
   );
 }
 
+// ── Tabel detail Dept + Team ──────────────────────────────────────────────────
+function DeptTeamTable({ data }) {
+  if (!data) return null;
+  const { departments, grand_total } = data;
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-gray-800">
+      <table className="w-full text-xs border-collapse">
+        <thead>
+          <tr className="bg-gray-800/70">
+            <th className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Dept.</th>
+            <th className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Div. / Team</th>
+            <th className="px-3 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Karyawan</th>
+            <th className="px-3 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Plan</th>
+            <th className="px-3 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Act</th>
+            <th className="px-3 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {departments.map((dept) => [
+            ...dept.teams.map((team, ti) => (
+              <tr key={`${dept.department}-${team.team}`} className="hover:bg-gray-800/20">
+                {ti === 0 && (
+                  <td
+                    rowSpan={dept.teams.length + 1}
+                    className="px-3 py-2 font-semibold text-gray-200 border border-gray-700 align-middle text-left whitespace-nowrap"
+                  >
+                    {dept.department}
+                  </td>
+                )}
+                <td className="px-3 py-2 text-gray-400 border border-gray-700">{team.team}</td>
+                <td className="px-3 py-2 text-center text-gray-400 border border-gray-700">{team.employees}</td>
+                <td className="px-3 py-2 text-center text-blue-400 border border-gray-700">{team.plan}</td>
+                <td className="px-3 py-2 text-center text-orange-400 font-semibold border border-gray-700">{team.actual}</td>
+                <td className={`px-3 py-2 text-center font-semibold border border-gray-700 ${team.rate >= 95 ? "text-green-400" : team.rate >= 80 ? "text-amber-400" : "text-red-400"}`}>
+                  {team.rate}%
+                </td>
+              </tr>
+            )),
+            <tr key={`${dept.department}-total`} className="bg-gray-800/50">
+              <td className="px-3 py-2 text-xs font-bold text-gray-300 uppercase tracking-wider border border-gray-600">TOTAL</td>
+              <td className="px-3 py-2 text-center font-bold text-gray-200 border border-gray-600">{dept.total.employees}</td>
+              <td className="px-3 py-2 text-center font-bold text-blue-300 border border-gray-600">{dept.total.plan}</td>
+              <td className="px-3 py-2 text-center font-bold text-orange-300 border border-gray-600">{dept.total.actual}</td>
+              <td className={`px-3 py-2 text-center font-bold border border-gray-600 ${dept.total.rate >= 95 ? "text-green-300" : dept.total.rate >= 80 ? "text-amber-300" : "text-red-300"}`}>
+                {dept.total.rate}%
+              </td>
+            </tr>,
+          ])}
+          <tr className="bg-gray-700/60">
+            <td className="px-3 py-2.5 font-bold text-gray-100 uppercase tracking-wider border border-gray-600" colSpan={2}>GRAND TOTAL</td>
+            <td className="px-3 py-2.5 text-center font-bold text-gray-100 border border-gray-600">{grand_total.employees}</td>
+            <td className="px-3 py-2.5 text-center font-bold text-blue-200 border border-gray-600">{grand_total.plan}</td>
+            <td className="px-3 py-2.5 text-center font-bold text-orange-200 border border-gray-600">{grand_total.actual}</td>
+            <td className={`px-3 py-2.5 text-center font-bold border border-gray-600 ${grand_total.rate >= 95 ? "text-green-200" : grand_total.rate >= 80 ? "text-amber-200" : "text-red-200"}`}>
+              {grand_total.rate}%
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ── Kehadiran Hari Ini ────────────────────────────────────────────────────────
 function AttendanceTodaySection() {
   const { token } = useAuthStore();
   const headers   = { Authorization: `Bearer ${token}` };
   const ATT_API   = "/api/v1/dashboard/hr/attendance";
 
-  const [data,    setData]    = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [data,        setData]        = useState(null);
+  const [loading,     setLoading]     = useState(false);
+  const [innerTab,    setInnerTab]    = useState("today");
+  const [teamData,    setTeamData]    = useState(null);
+  const [loadingTeam, setLoadingTeam] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -336,6 +403,21 @@ function AttendanceTodaySection() {
     finally { setLoading(false); }
   };
 
+  const fetchTeamData = async () => {
+    if (teamData) return;
+    setLoadingTeam(true);
+    try {
+      const res = await fetch(`${ATT_API}/dept-team-summary`, { headers });
+      if (res.ok) setTeamData(await res.json());
+    } catch (_) {}
+    finally { setLoadingTeam(false); }
+  };
+
+  const switchTab = (tab) => {
+    setInnerTab(tab);
+    if (tab === "team") fetchTeamData();
+  };
+
   useEffect(() => { fetchData(); }, []); // eslint-disable-line
 
   const fmtDate = (iso) => {
@@ -344,93 +426,127 @@ function AttendanceTodaySection() {
     catch (_) { return iso; }
   };
 
-  if (loading) return (
-    <div className="flex items-center justify-center py-16">
-      <Loader2 size={20} className="animate-spin text-gray-600" />
-    </div>
-  );
-
-  if (!data || !data.has_data) return (
-    <p className="py-10 text-center text-xs text-gray-600">Belum ada data absensi. Upload file Excel di tab Upload Absensi.</p>
-  );
-
-  const { summary, actual_date, is_today } = data;
+  const noData = !loading && (!data || !data.has_data);
 
   return (
     <div className="space-y-4">
-      {/* Date badge */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <CalendarCheck size={14} className="text-green-400" />
-          <span className="text-sm font-semibold text-gray-200">{fmtDate(actual_date)}</span>
-          {!is_today && (
-            <span className="rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-xs text-amber-400">
-              Data terakhir tersedia
-            </span>
-          )}
-        </div>
-        <button onClick={fetchData} className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
-          <RefreshCw size={11} className={loading ? "animate-spin" : ""} /> Refresh
-        </button>
-      </div>
-
-      {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Total Karyawan", val: summary.total,           color: "text-blue-400",  bg: "bg-blue-500/10"  },
-          { label: "Hadir",          val: summary.hadir,           color: "text-green-400", bg: "bg-green-500/10" },
-          { label: "Absen",          val: summary.absen,           color: "text-red-400",   bg: "bg-red-500/10"   },
-        ].map(({ label, val, color, bg }) => (
-          <div key={label} className={`rounded-lg border border-white/5 ${bg} px-4 py-3 text-center`}>
-            <div className={`text-2xl font-bold ${color}`}>{val}</div>
-            <div className="text-xs text-gray-500 mt-0.5">{label}</div>
-          </div>
+      {/* Inner tabs */}
+      <div className="flex gap-0 border-b border-gray-800">
+        {[["today", "Kehadiran Hari Ini"], ["team", "Rekap per Tim"]].map(([id, label]) => (
+          <button key={id} onClick={() => switchTab(id)}
+            className={`px-4 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors ${
+              innerTab === id ? "border-green-500 text-green-400" : "border-transparent text-gray-500 hover:text-gray-300"
+            }`}>
+            {label}
+          </button>
         ))}
       </div>
 
-      {/* Rate bar */}
-      <div className="rounded-lg border border-gray-800 bg-gray-800/40 px-4 py-3">
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs text-gray-500">Overall Attendance Rate</span>
-          <span className="text-sm font-bold text-green-400">{summary.attendance_rate}%</span>
-        </div>
-        <div className="h-2.5 rounded-full bg-gray-700 overflow-hidden">
-          <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${summary.attendance_rate}%` }} />
-        </div>
-      </div>
-
-      {/* Table per department */}
-      <div className="overflow-x-auto rounded-lg border border-gray-800">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-gray-800/60">
-              {["Department", "Total", "Hadir", "Absen", "Rate"].map((h) => (
-                <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-800">
-            {data.data.length === 0 ? (
-              <tr><td colSpan={5} className="py-10 text-center text-xs text-gray-600">Tidak ada data hari kerja</td></tr>
-            ) : data.data.map((row) => (
-              <tr key={row.department} className="hover:bg-gray-800/40 transition-colors">
-                <td className="px-3 py-2.5 font-medium text-gray-200">{row.department}</td>
-                <td className="px-3 py-2.5 text-gray-400 text-center">{row.total}</td>
-                <td className="px-3 py-2.5 text-green-400 font-semibold text-center">{row.hadir}</td>
-                <td className="px-3 py-2.5 text-red-400 font-semibold text-center">{row.absen}</td>
-                <td className="px-3 py-2.5 text-center">
+      {/* ── Tab: Kehadiran Hari Ini ── */}
+      {innerTab === "today" && (
+        <>
+          {loading && <div className="flex justify-center py-16"><Loader2 size={20} className="animate-spin text-gray-600" /></div>}
+          {noData && <p className="py-10 text-center text-xs text-gray-600">Belum ada data absensi. Upload file Excel di tab Upload Absensi.</p>}
+          {data && data.has_data && (() => {
+            const { summary, actual_date, is_today } = data;
+            return (
+              <div className="space-y-4">
+                {/* Date badge */}
+                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1.5 rounded-full bg-gray-700 overflow-hidden">
-                      <div className="h-full rounded-full bg-green-500" style={{ width: `${row.rate}%` }} />
-                    </div>
-                    <span className="text-xs text-gray-400 w-10 text-right">{row.rate}%</span>
+                    <CalendarCheck size={14} className="text-green-400" />
+                    <span className="text-sm font-semibold text-gray-200">{fmtDate(actual_date)}</span>
+                    {!is_today && (
+                      <span className="rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-xs text-amber-400">
+                        Data terakhir tersedia
+                      </span>
+                    )}
                   </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                  <button onClick={fetchData} className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+                    <RefreshCw size={11} className={loading ? "animate-spin" : ""} /> Refresh
+                  </button>
+                </div>
+
+                {/* Summary cards */}
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { label: "Total Karyawan", val: summary.total, color: "text-blue-400",  bg: "bg-blue-500/10"  },
+                    { label: "Hadir",          val: summary.hadir, color: "text-green-400", bg: "bg-green-500/10" },
+                    { label: "Absen",          val: summary.absen, color: "text-red-400",   bg: "bg-red-500/10"   },
+                  ].map(({ label, val, color, bg }) => (
+                    <div key={label} className={`rounded-lg border border-white/5 ${bg} px-4 py-3 text-center`}>
+                      <div className={`text-2xl font-bold ${color}`}>{val}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">{label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Rate bar */}
+                <div className="rounded-lg border border-gray-800 bg-gray-800/40 px-4 py-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs text-gray-500">Overall Attendance Rate</span>
+                    <span className="text-sm font-bold text-green-400">{summary.attendance_rate}%</span>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-gray-700 overflow-hidden">
+                    <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${summary.attendance_rate}%` }} />
+                  </div>
+                </div>
+
+                {/* Table per department */}
+                <div className="overflow-x-auto rounded-lg border border-gray-800">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-800/60">
+                        {["Department", "Total", "Hadir", "Absen", "Rate"].map((h) => (
+                          <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800">
+                      {data.data.length === 0 ? (
+                        <tr><td colSpan={5} className="py-10 text-center text-xs text-gray-600">Tidak ada data hari kerja</td></tr>
+                      ) : data.data.map((row) => (
+                        <tr key={row.department} className="hover:bg-gray-800/40 transition-colors">
+                          <td className="px-3 py-2.5 font-medium text-gray-200">{row.department}</td>
+                          <td className="px-3 py-2.5 text-gray-400 text-center">{row.total}</td>
+                          <td className="px-3 py-2.5 text-green-400 font-semibold text-center">{row.hadir}</td>
+                          <td className="px-3 py-2.5 text-red-400 font-semibold text-center">{row.absen}</td>
+                          <td className="px-3 py-2.5 text-center">
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 h-1.5 rounded-full bg-gray-700 overflow-hidden">
+                                <div className="h-full rounded-full bg-green-500" style={{ width: `${row.rate}%` }} />
+                              </div>
+                              <span className="text-xs text-gray-400 w-10 text-right">{row.rate}%</span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+        </>
+      )}
+
+      {/* ── Tab: Rekap per Tim ── */}
+      {innerTab === "team" && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-500">Rekap kehadiran per departmen & tim (seluruh data yang tersedia)</p>
+            <button onClick={() => { setTeamData(null); fetchTeamData(); }}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+              <RefreshCw size={11} className={loadingTeam ? "animate-spin" : ""} /> Refresh
+            </button>
+          </div>
+          {loadingTeam && <div className="flex justify-center py-16"><Loader2 size={20} className="animate-spin text-gray-600" /></div>}
+          {!loadingTeam && teamData && <DeptTeamTable data={teamData} />}
+          {!loadingTeam && !teamData && (
+            <p className="py-10 text-center text-xs text-gray-600">Belum ada data.</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

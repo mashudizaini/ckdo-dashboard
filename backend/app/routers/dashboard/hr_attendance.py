@@ -541,6 +541,69 @@ async def get_workforce_stats(
     }
 
 
+# ── Department + Team summary (rekap per tim) ─────────────────────────────────
+
+@router.get("/dept-team-summary")
+async def get_dept_team_summary(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Rekap Plan vs Actual per department dan team (join dengan tabel employees)."""
+    from app.models.employee import Employee
+    from collections import defaultdict
+
+    result = await db.execute(
+        select(
+            AttendanceRecord.department,
+            Employee.team,
+            func.count(func.distinct(AttendanceRecord.employee_id)).label("employees"),
+            func.sum(case((AttendanceRecord.week_day.notin_(WEEKENDS), 1), else_=0)).label("plan"),
+            func.sum(case((and_(
+                AttendanceRecord.actual_checkin.isnot(None),
+                AttendanceRecord.week_day.notin_(WEEKENDS),
+            ), 1), else_=0)).label("actual"),
+        )
+        .join(Employee, AttendanceRecord.employee_id == Employee.user_id, isouter=True)
+        .group_by(AttendanceRecord.department, Employee.team)
+        .order_by(AttendanceRecord.department, Employee.team)
+    )
+    rows = result.fetchall()
+
+    depts: dict = defaultdict(list)
+    for r in rows:
+        dept   = r[0] or "—"
+        team   = r[1] or "—"
+        plan   = int(r[3] or 0)
+        actual = int(r[4] or 0)
+        if plan == 0 and actual == 0:
+            continue
+        depts[dept].append({
+            "team":      team,
+            "employees": int(r[2] or 0),
+            "plan":      plan,
+            "actual":    actual,
+            "rate":      round(actual / plan * 100) if plan > 0 else 0,
+        })
+
+    result_list = []
+    grand = {"employees": 0, "plan": 0, "actual": 0}
+
+    for dept, teams in depts.items():
+        tot = {
+            "employees": sum(t["employees"] for t in teams),
+            "plan":      sum(t["plan"]      for t in teams),
+            "actual":    sum(t["actual"]    for t in teams),
+        }
+        tot["rate"] = round(tot["actual"] / tot["plan"] * 100) if tot["plan"] > 0 else 0
+        result_list.append({"department": dept, "teams": teams, "total": tot})
+        grand["employees"] += tot["employees"]
+        grand["plan"]      += tot["plan"]
+        grand["actual"]    += tot["actual"]
+
+    grand["rate"] = round(grand["actual"] / grand["plan"] * 100) if grand["plan"] > 0 else 0
+    return {"departments": result_list, "grand_total": grand}
+
+
 # ── Employee search ────────────────────────────────────────────────────────────
 
 @router.get("/search-employees")
