@@ -13,12 +13,12 @@ export default function HRDashboard() {
   const [activeSection, setActiveSection] = useState("employees");
 
   const kpiCards = [
-    { id: "employees",  icon: Users,     color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Employee Information" },
-    { id: "present",    icon: UserCheck, color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Hadir Hari Ini" },
-    { id: "leave",      icon: Umbrella,  color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Cuti / Leave" },
-    { id: "attendance", icon: BarChart2, color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40", label: "Attendance Rate" },
-    { id: "upload",     icon: Upload,    color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Upload Karyawan" },
-    { id: "upload-att", icon: CalendarCheck, color: "text-teal-400", bg: "bg-teal-500/10", activeBorder: "border-teal-500/40", label: "Upload Absensi" },
+    { id: "employees",  icon: Users,         color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Data Karyawan" },
+    { id: "present",    icon: UserCheck,     color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Hadir Hari Ini" },
+    { id: "leave",      icon: Umbrella,      color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Cuti / Leave" },
+    { id: "attendance", icon: BarChart2,     color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40", label: "Attendance Rate" },
+    { id: "upload",     icon: Upload,        color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Upload Karyawan" },
+    { id: "upload-att", icon: CalendarCheck, color: "text-teal-400",   bg: "bg-teal-500/10",   activeBorder: "border-teal-500/40",   label: "Upload Absensi" },
   ];
 
   return (
@@ -29,16 +29,16 @@ export default function HRDashboard() {
           <button
             key={c.id}
             onClick={() => setActiveSection(activeSection === c.id ? null : c.id)}
-            className={`flex items-center gap-3 rounded-lg border px-4 py-3 transition-all ${
+            className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 transition-all ${
               activeSection === c.id
                 ? `${c.bg} ${c.activeBorder} ring-1 ring-inset ${c.activeBorder}`
                 : "bg-gray-900 border-gray-800 hover:border-gray-700 hover:bg-gray-800/60"
             }`}
           >
-            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${c.bg} border ${c.activeBorder}`}>
-              <c.icon size={15} className={c.color} />
+            <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${c.bg} border ${c.activeBorder}`}>
+              <c.icon size={12} className={c.color} />
             </div>
-            <span className={`text-sm font-medium truncate ${activeSection === c.id ? "text-white" : "text-gray-400"}`}>
+            <span className={`text-xs font-medium leading-tight ${activeSection === c.id ? "text-white" : "text-gray-400"}`}>
               {c.label}
             </span>
           </button>
@@ -67,12 +67,8 @@ export default function HRDashboard() {
       )}
 
       {activeSection === "present" && (
-        <SectionCard title="Kehadiran Hari Ini"
-          action={<ActionBtn icon={RefreshCw} label="Refresh" color="bg-blue-600 hover:bg-blue-700" />}>
-          <DataTable
-            headers={["Department", "Hadir", "Absen", "Terlambat", "WFH"]}
-            placeholder="Klik Refresh untuk memuat data kehadiran"
-          />
+        <SectionCard title="Kehadiran Hari Ini">
+          <AttendanceTodaySection />
         </SectionCard>
       )}
 
@@ -87,15 +83,8 @@ export default function HRDashboard() {
       )}
 
       {activeSection === "attendance" && (
-        <SectionCard title="Attendance Rate — Bulanan"
-          action={<ActionBtn icon={RefreshCw} label="Refresh" color="bg-blue-600 hover:bg-blue-700" />}>
-          <div className="h-40 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center mb-4">
-            <span className="text-xs text-gray-600">Chart attendance rate bulanan</span>
-          </div>
-          <DataTable
-            headers={["Bulan", "Total Hari Kerja", "Rata-rata Hadir", "Attendance Rate"]}
-            placeholder="Klik Refresh untuk memuat data"
-          />
+        <SectionCard title="Attendance Rate — Bulanan">
+          <AttendanceRateSection />
         </SectionCard>
       )}
     </div>
@@ -325,6 +314,228 @@ function EmployeeTable() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Kehadiran Hari Ini ────────────────────────────────────────────────────────
+function AttendanceTodaySection() {
+  const { token } = useAuthStore();
+  const headers   = { Authorization: `Bearer ${token}` };
+  const ATT_API   = "/api/v1/dashboard/hr/attendance";
+
+  const [data,    setData]    = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${ATT_API}/today`, { headers });
+      if (res.ok) setData(await res.json());
+    } catch (_) {}
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line
+
+  const fmtDate = (iso) => {
+    if (!iso) return "—";
+    try { return new Date(iso + "T00:00:00").toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); }
+    catch (_) { return iso; }
+  };
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-16">
+      <Loader2 size={20} className="animate-spin text-gray-600" />
+    </div>
+  );
+
+  if (!data || !data.has_data) return (
+    <p className="py-10 text-center text-xs text-gray-600">Belum ada data absensi. Upload file Excel di tab Upload Absensi.</p>
+  );
+
+  const { summary, actual_date, is_today } = data;
+
+  return (
+    <div className="space-y-4">
+      {/* Date badge */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <CalendarCheck size={14} className="text-green-400" />
+          <span className="text-sm font-semibold text-gray-200">{fmtDate(actual_date)}</span>
+          {!is_today && (
+            <span className="rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-xs text-amber-400">
+              Data terakhir tersedia
+            </span>
+          )}
+        </div>
+        <button onClick={fetchData} className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+          <RefreshCw size={11} className={loading ? "animate-spin" : ""} /> Refresh
+        </button>
+      </div>
+
+      {/* Summary cards */}
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: "Total Karyawan", val: summary.total,           color: "text-blue-400",  bg: "bg-blue-500/10"  },
+          { label: "Hadir",          val: summary.hadir,           color: "text-green-400", bg: "bg-green-500/10" },
+          { label: "Absen",          val: summary.absen,           color: "text-red-400",   bg: "bg-red-500/10"   },
+        ].map(({ label, val, color, bg }) => (
+          <div key={label} className={`rounded-lg border border-white/5 ${bg} px-4 py-3 text-center`}>
+            <div className={`text-2xl font-bold ${color}`}>{val}</div>
+            <div className="text-xs text-gray-500 mt-0.5">{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Rate bar */}
+      <div className="rounded-lg border border-gray-800 bg-gray-800/40 px-4 py-3">
+        <div className="flex items-center justify-between mb-1.5">
+          <span className="text-xs text-gray-500">Overall Attendance Rate</span>
+          <span className="text-sm font-bold text-green-400">{summary.attendance_rate}%</span>
+        </div>
+        <div className="h-2.5 rounded-full bg-gray-700 overflow-hidden">
+          <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${summary.attendance_rate}%` }} />
+        </div>
+      </div>
+
+      {/* Table per department */}
+      <div className="overflow-x-auto rounded-lg border border-gray-800">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-800/60">
+              {["Department", "Total", "Hadir", "Absen", "Rate"].map((h) => (
+                <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800">
+            {data.data.length === 0 ? (
+              <tr><td colSpan={5} className="py-10 text-center text-xs text-gray-600">Tidak ada data hari kerja</td></tr>
+            ) : data.data.map((row) => (
+              <tr key={row.department} className="hover:bg-gray-800/40 transition-colors">
+                <td className="px-3 py-2.5 font-medium text-gray-200">{row.department}</td>
+                <td className="px-3 py-2.5 text-gray-400 text-center">{row.total}</td>
+                <td className="px-3 py-2.5 text-green-400 font-semibold text-center">{row.hadir}</td>
+                <td className="px-3 py-2.5 text-red-400 font-semibold text-center">{row.absen}</td>
+                <td className="px-3 py-2.5 text-center">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-1.5 rounded-full bg-gray-700 overflow-hidden">
+                      <div className="h-full rounded-full bg-green-500" style={{ width: `${row.rate}%` }} />
+                    </div>
+                    <span className="text-xs text-gray-400 w-10 text-right">{row.rate}%</span>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Attendance Rate Bulanan ────────────────────────────────────────────────────
+function AttendanceRateSection() {
+  const { token } = useAuthStore();
+  const headers   = { Authorization: `Bearer ${token}` };
+  const ATT_API   = "/api/v1/dashboard/hr/attendance";
+
+  const [data,    setData]    = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${ATT_API}/monthly-rate`, { headers });
+      if (res.ok) setData(await res.json());
+    } catch (_) {}
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { fetchData(); }, []); // eslint-disable-line
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-16">
+      <Loader2 size={20} className="animate-spin text-gray-600" />
+    </div>
+  );
+
+  if (data.length === 0) return (
+    <p className="py-10 text-center text-xs text-gray-600">Belum ada data absensi. Upload file Excel di tab Upload Absensi.</p>
+  );
+
+  const maxRate  = Math.max(...data.map((d) => d.rate), 1);
+  const avgRate  = (data.reduce((s, d) => s + d.rate, 0) / data.length).toFixed(1);
+  const reversed = [...data].reverse(); // oldest first for chart
+
+  return (
+    <div className="space-y-5">
+      {/* Avg summary */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="rounded-lg bg-indigo-500/10 border border-indigo-500/30 px-4 py-2 text-center">
+            <div className="text-xl font-bold text-indigo-400">{avgRate}%</div>
+            <div className="text-xs text-gray-500">Rata-rata {data.length} bulan</div>
+          </div>
+        </div>
+        <button onClick={fetchData} className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+          <RefreshCw size={11} className={loading ? "animate-spin" : ""} /> Refresh
+        </button>
+      </div>
+
+      {/* Bar chart */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900 p-4 space-y-2.5">
+        {reversed.map((item) => (
+          <div key={item.period} className="flex items-center gap-3">
+            <span className="text-xs text-gray-500 w-14 shrink-0 text-right">{item.period}</span>
+            <div className="flex-1 h-6 rounded bg-gray-800 overflow-hidden relative">
+              <div
+                className={`h-full rounded transition-all ${item.rate >= 80 ? "bg-green-500" : item.rate >= 60 ? "bg-amber-500" : "bg-red-500"}`}
+                style={{ width: `${(item.rate / maxRate) * 100}%` }}
+              />
+              <span className="absolute inset-0 flex items-center pl-2 text-xs font-semibold text-white">
+                {item.rate}%
+              </span>
+            </div>
+            <span className="text-xs text-gray-600 w-16 shrink-0">{item.hadir}/{item.working} hadir</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Table */}
+      <div className="overflow-x-auto rounded-lg border border-gray-800">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-800/60">
+              {["Periode", "Hari Kerja", "Hadir", "Absen", "Attendance Rate"].map((h) => (
+                <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800">
+            {data.map((row) => (
+              <tr key={row.period} className="hover:bg-gray-800/40 transition-colors">
+                <td className="px-3 py-2.5 font-semibold text-gray-200">{row.period}</td>
+                <td className="px-3 py-2.5 text-gray-400 text-center">{row.working}</td>
+                <td className="px-3 py-2.5 text-green-400 font-semibold text-center">{row.hadir}</td>
+                <td className="px-3 py-2.5 text-red-400 font-semibold text-center">{row.absen}</td>
+                <td className="px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-1.5 rounded-full bg-gray-700 overflow-hidden">
+                      <div className={`h-full rounded-full ${row.rate >= 80 ? "bg-green-500" : row.rate >= 60 ? "bg-amber-500" : "bg-red-500"}`}
+                        style={{ width: `${row.rate}%` }} />
+                    </div>
+                    <span className={`text-xs font-semibold w-12 text-right ${row.rate >= 80 ? "text-green-400" : row.rate >= 60 ? "text-amber-400" : "text-red-400"}`}>
+                      {row.rate}%
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

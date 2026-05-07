@@ -16,7 +16,7 @@ from typing import Optional
 
 import openpyxl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, case, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -267,3 +267,148 @@ async def list_attendance(
         "pages":     (total + page_size - 1) // page_size,
         "records":   [_rec(r) for r in records],
     }
+
+
+# ── Kehadiran hari ini (per department) ───────────────────────────────────────
+
+WEEKENDS = ["Saturday", "Sunday"]
+
+@router.get("/today")
+async def get_today_attendance(
+    target_date: Optional[str] = Query(None),
+    db:          AsyncSession  = Depends(get_db),
+    user:        CurrentUser   = Depends(require_role(Roles.HR)),
+):
+    """
+    Kehadiran untuk tanggal tertentu (default: hari ini), dikelompokkan per department.
+    Jika tidak ada data untuk hari ini, otomatis tampilkan tanggal terakhir yang ada.
+    """
+    today = date.today()
+
+    if target_date:
+        try:
+            q_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+        except ValueError:
+            q_date = today
+    else:
+        q_date = today
+
+    # Cek apakah ada data untuk tanggal tersebut
+    count_q = await db.execute(
+        select(func.count()).select_from(AttendanceRecord)
+        .where(AttendanceRecord.attendance_date == q_date)
+    )
+    count = count_q.scalar() or 0
+
+    actual_date = q_date
+    if count == 0:
+        latest_q = await db.execute(
+            select(func.max(AttendanceRecord.attendance_date))
+        )
+        latest = latest_q.scalar()
+        if not latest:
+            return {"requested_date": str(q_date), "actual_date": str(q_date),
+                    "is_today": False, "has_data": False, "summary": {}, "data": []}
+        actual_date = latest
+
+    # Hitung kehadiran per department (hari kerja saja)
+    result = await db.execute(
+        select(
+            AttendanceRecord.department,
+            func.count().label("total"),
+            func.sum(case(
+                (AttendanceRecord.actual_checkin.isnot(None), 1), else_=0
+            )).label("hadir"),
+        )
+        .where(AttendanceRecord.attendance_date == actual_date)
+        .where(AttendanceRecord.week_day.notin_(WEEKENDS))
+        .group_by(AttendanceRecord.department)
+        .order_by(AttendanceRecord.department)
+    )
+    rows = result.fetchall()
+
+    data = [
+        {
+            "department": r[0] or "—",
+            "total":  int(r[1]),
+            "hadir":  int(r[2] or 0),
+            "absen":  int(r[1]) - int(r[2] or 0),
+            "rate":   round(int(r[2] or 0) / int(r[1]) * 100, 1) if r[1] > 0 else 0,
+        }
+        for r in rows
+    ]
+
+    total_all   = sum(d["total"]  for d in data)
+    total_hadir = sum(d["hadir"]  for d in data)
+    total_absen = sum(d["absen"]  for d in data)
+
+    return {
+        "requested_date": str(q_date),
+        "actual_date":    str(actual_date),
+        "is_today":       actual_date == today,
+        "has_data":       True,
+        "summary": {
+            "total":          total_all,
+            "hadir":          total_hadir,
+            "absen":          total_absen,
+            "attendance_rate": round(total_hadir / total_all * 100, 1) if total_all > 0 else 0,
+        },
+        "data": data,
+    }
+
+
+# ── Monthly attendance rate ────────────────────────────────────────────────────
+
+@router.get("/monthly-rate")
+async def get_monthly_attendance_rate(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Attendance rate per bulan (12 bulan terakhir)."""
+    from sqlalchemy import extract
+
+    result = await db.execute(
+        select(
+            extract("year",  AttendanceRecord.attendance_date).label("year"),
+            extract("month", AttendanceRecord.attendance_date).label("month"),
+            func.sum(case(
+                (AttendanceRecord.week_day.notin_(WEEKENDS), 1), else_=0
+            )).label("working"),
+            func.sum(case(
+                (and_(
+                    AttendanceRecord.actual_checkin.isnot(None),
+                    AttendanceRecord.week_day.notin_(WEEKENDS),
+                ), 1), else_=0
+            )).label("hadir"),
+        )
+        .group_by(
+            extract("year",  AttendanceRecord.attendance_date),
+            extract("month", AttendanceRecord.attendance_date),
+        )
+        .order_by(
+            extract("year",  AttendanceRecord.attendance_date).desc(),
+            extract("month", AttendanceRecord.attendance_date).desc(),
+        )
+        .limit(12)
+    )
+    rows = result.fetchall()
+
+    MONTHS = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"]
+    data = []
+    for r in rows:
+        year    = int(r[0])
+        month   = int(r[1])
+        working = int(r[2] or 0)
+        hadir   = int(r[3] or 0)
+        absen   = working - hadir
+        rate    = round(hadir / working * 100, 1) if working > 0 else 0
+        data.append({
+            "period":   f"{MONTHS[month-1]} {year}",
+            "year":     year,
+            "month":    month,
+            "working":  working,
+            "hadir":    hadir,
+            "absen":    absen,
+            "rate":     rate,
+        })
+    return data
