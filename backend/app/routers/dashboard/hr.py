@@ -5,7 +5,7 @@ Required role: hr_staff OR admin
 """
 from fastapi import APIRouter, Depends
 from app.dependencies import require_role, CurrentUser, Roles
-from app.routers.dashboard import hr_employees
+from app.routers.dashboard import hr_employees, hr_attendance
 
 router = APIRouter()
 
@@ -17,4 +17,7 @@ async def get_summary(user: CurrentUser = Depends(require_role(Roles.HR))):
 
 
 # Sub-router: employee data upload & query
-router.include_router(hr_employees.router, prefix="/employees", tags=["Dashboard - HR Employees"])
+router.include_router(hr_employees.router,  prefix="/employees",  tags=["Dashboard - HR Employees"])
+
+# Sub-router: attendance upload & query
+router.include_router(hr_attendance.router, prefix="/attendance", tags=["Dashboard - HR Attendance"])

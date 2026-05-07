@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Users, UserCheck, Umbrella, BarChart2, RefreshCw,
-  Upload, Search, ChevronLeft, ChevronRight, X, Loader2
+  Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck
 } from "lucide-react";
 import EmployeeUpload from "./EmployeeUpload";
+import AttendanceUpload from "./AttendanceUpload";
 import { useAuthStore } from "@/store/authStore";
 
 const API = "/api/v1/dashboard/hr/employees";
@@ -17,12 +18,13 @@ export default function HRDashboard() {
     { id: "leave",      icon: Umbrella,  color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Cuti / Leave" },
     { id: "attendance", icon: BarChart2, color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40", label: "Attendance Rate" },
     { id: "upload",     icon: Upload,    color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Upload Karyawan" },
+    { id: "upload-att", icon: CalendarCheck, color: "text-teal-400", bg: "bg-teal-500/10", activeBorder: "border-teal-500/40", label: "Upload Absensi" },
   ];
 
   return (
     <div className="p-6 space-y-4">
       {/* Tab Buttons */}
-      <div className="grid grid-cols-2 xl:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 xl:grid-cols-6 gap-2">
         {kpiCards.map((c) => (
           <button
             key={c.id}
@@ -54,6 +56,13 @@ export default function HRDashboard() {
       {activeSection === "upload" && (
         <SectionCard title="Upload File Excel Karyawan">
           <EmployeeUpload />
+        </SectionCard>
+      )}
+
+      {/* ── Upload Absensi ───────────────────────────────────────────────────── */}
+      {activeSection === "upload-att" && (
+        <SectionCard title="Upload File Excel Absensi">
+          <AttendanceUpload />
         </SectionCard>
       )}
 
