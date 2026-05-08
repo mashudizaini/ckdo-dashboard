@@ -9,7 +9,7 @@ const APPS = [
   { id: "dashboard",  name: "CKDO Dashboard",   desc: "Monitoring & reporting",       url: "/dashboard/it",  status: "sso",     emoji: "📊", role: "app:dashboard"  },
   { id: "eis",        name: "EIS Dashboard",    desc: "Executive information system", url: "http://172.21.2.209:8090", status: "sso", emoji: "📈", role: "app:eis" },
   { id: "eticket",    name: "E-Ticket System",   desc: "Helpdesk & ticketing",         url: "http://helpdesk.ckd-otto.com/dashboard", status: "sso",    emoji: "🎫", role: "app:eticket"     },
-  { id: "eticket-dev", name: "E-Ticket System New", desc: "Helpdesk & ticketing New", url: "http://helpdesk.ckd-otto.com/dashboard", status: "direct", emoji: "🧪", role: "app:eticket-dev" },
+  { id: "SSO-Admin", name: "SSO Administration", desc: "SSO Administration",           url: "http://dashboard-dev.ckd-otto.com/auth/admin", status: "direct", emoji: "🧪", role: "app:sso-admin" },
   { id: "portal-hr",  name: "HR Portal",         desc: "Employee self-service",        url: "https://portal.ckd-otto.com/auth/login", status: "pending", emoji: "👥", role: "app:portal-hr" },
   { id: "talenta",    name: "Talenta HR",         desc: "Attendance & payroll",         url: "https://hr.talenta.co", status: "pending", emoji: "🕐", role: "app:talenta" },
   { id: "oracle-ebs", name: "Oracle EBS",         desc: "Enterprise resource planning", url: "http://ckd-app.ckd-otto.com:8000/OA_HTML/AppsLocalLogin.jsp", status: "direct", emoji: "🔴", role: "app:oracle-ebs" },
