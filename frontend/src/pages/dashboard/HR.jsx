@@ -392,7 +392,10 @@ function AttendanceTodaySection() {
   const [loading,     setLoading]     = useState(false);
   const [innerTab,    setInnerTab]    = useState("today");
   const [teamData,    setTeamData]    = useState(null);
-  const [loadingTeam, setLoadingTeam] = useState(false);
+  const [loadingTeam,  setLoadingTeam]  = useState(false);
+  const [activeFilter, setActiveFilter] = useState(null);
+  const [employees,    setEmployees]    = useState([]);
+  const [loadingEmps,  setLoadingEmps]  = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -416,6 +419,23 @@ function AttendanceTodaySection() {
   const switchTab = (tab) => {
     setInnerTab(tab);
     if (tab === "team") fetchTeamData();
+  };
+
+  const fetchEmployees = async (filter, targetDate) => {
+    setLoadingEmps(true);
+    try {
+      const params = new URLSearchParams({ filter });
+      if (targetDate) params.append("target_date", targetDate);
+      const res = await fetch(`${ATT_API}/today/employees?${params}`, { headers });
+      if (res.ok) { const r = await res.json(); setEmployees(r.employees || []); }
+    } catch (_) {}
+    finally { setLoadingEmps(false); }
+  };
+
+  const handleCardClick = (filter) => {
+    if (activeFilter === filter) { setActiveFilter(null); setEmployees([]); return; }
+    setActiveFilter(filter);
+    fetchEmployees(filter, data?.actual_date);
   };
 
   useEffect(() => { fetchData(); }, []); // eslint-disable-line
@@ -467,17 +487,28 @@ function AttendanceTodaySection() {
                   </button>
                 </div>
 
-                {/* Summary cards */}
+                {/* Summary cards — clickable */}
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { label: "Total Karyawan", val: summary.total, color: "text-blue-400",  bg: "bg-blue-500/10"  },
-                    { label: "Hadir",          val: summary.hadir, color: "text-green-400", bg: "bg-green-500/10" },
-                    { label: "Absen",          val: summary.absen, color: "text-red-400",   bg: "bg-red-500/10"   },
-                  ].map(({ label, val, color, bg }) => (
-                    <div key={label} className={`rounded-lg border border-white/5 ${bg} px-4 py-3 text-center`}>
+                    { filter: "all",   label: "Total Karyawan", val: summary.total, color: "text-blue-400",  bg: "bg-blue-500/10",  activeBg: "bg-blue-500/25",  ring: "ring-blue-500/50"  },
+                    { filter: "hadir", label: "Hadir",          val: summary.hadir, color: "text-green-400", bg: "bg-green-500/10", activeBg: "bg-green-500/25", ring: "ring-green-500/50" },
+                    { filter: "absen", label: "Absen",          val: summary.absen, color: "text-red-400",   bg: "bg-red-500/10",   activeBg: "bg-red-500/25",   ring: "ring-red-500/50"   },
+                  ].map(({ filter, label, val, color, bg, activeBg, ring }) => (
+                    <button
+                      key={filter}
+                      onClick={() => handleCardClick(filter)}
+                      className={`rounded-lg border px-4 py-3 text-center transition-all hover:scale-[1.02] active:scale-[0.98] ${
+                        activeFilter === filter
+                          ? `${activeBg} border-transparent ring-2 ${ring}`
+                          : `${bg} border-white/5 hover:border-white/10`
+                      }`}
+                    >
                       <div className={`text-2xl font-bold ${color}`}>{val}</div>
                       <div className="text-xs text-gray-500 mt-0.5">{label}</div>
-                    </div>
+                      <div className="text-xs text-gray-600 mt-1">
+                        {activeFilter === filter ? "▲ tutup" : "▼ lihat detail"}
+                      </div>
+                    </button>
                   ))}
                 </div>
 
@@ -491,6 +522,55 @@ function AttendanceTodaySection() {
                     <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${summary.attendance_rate}%` }} />
                   </div>
                 </div>
+
+                {/* Employee list detail */}
+                {activeFilter && (
+                  <div className="rounded-xl border border-gray-800 bg-gray-900">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                      <h4 className="text-xs font-semibold text-gray-300">
+                        {activeFilter === "all" ? "Semua Karyawan" : activeFilter === "hadir" ? "Karyawan Hadir" : "Karyawan Absen"}
+                        <span className="text-gray-600 ml-1.5">({employees.length} orang)</span>
+                      </h4>
+                      <button onClick={() => { setActiveFilter(null); setEmployees([]); }}
+                        className="text-gray-600 hover:text-gray-400 transition-colors">
+                        <X size={13} />
+                      </button>
+                    </div>
+                    {loadingEmps ? (
+                      <div className="flex justify-center py-8">
+                        <Loader2 size={16} className="animate-spin text-gray-600" />
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto max-h-72">
+                        <table className="w-full text-xs">
+                          <thead className="sticky top-0 bg-gray-800/90">
+                            <tr>
+                              {["No", "Nama", "Department", "Check-In", "Check-Out", "Catatan"].map((h) => (
+                                <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-800/50">
+                            {employees.length === 0 ? (
+                              <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-600">Tidak ada data</td></tr>
+                            ) : employees.map((emp, i) => (
+                              <tr key={`${emp.id}-${i}`} className="hover:bg-gray-800/40 transition-colors">
+                                <td className="px-3 py-2 text-gray-600 text-center w-8">{i + 1}</td>
+                                <td className="px-3 py-2 font-medium text-gray-200 whitespace-nowrap">{emp.name || "—"}</td>
+                                <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{emp.department || "—"}</td>
+                                <td className={`px-3 py-2 font-mono whitespace-nowrap font-semibold ${emp.checkin ? "text-green-400" : "text-red-400"}`}>
+                                  {emp.checkin || "—"}
+                                </td>
+                                <td className="px-3 py-2 font-mono text-gray-500 whitespace-nowrap">{emp.checkout || "—"}</td>
+                                <td className="px-3 py-2 text-gray-600 max-w-[160px] truncate">{emp.notes || "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Table per department */}
                 <div className="overflow-x-auto rounded-lg border border-gray-800">

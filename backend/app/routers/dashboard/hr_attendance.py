@@ -446,6 +446,67 @@ async def get_dept_summary(
     ]
 
 
+# ── Daftar karyawan untuk filter hadir/absen/semua pada tanggal tertentu ───────
+
+@router.get("/today/employees")
+async def get_today_employees(
+    target_date: Optional[str] = Query(None),
+    filter:      str           = Query("all"),   # all | hadir | absen
+    db:          AsyncSession  = Depends(get_db),
+    user:        CurrentUser   = Depends(require_role(Roles.HR)),
+):
+    """Daftar nama karyawan (hadir/absen/semua) untuk tanggal yang ditampilkan di /today."""
+    today  = date.today()
+    q_date = today
+
+    if target_date:
+        try:
+            q_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
+    # Kalau tidak ada data untuk tanggal tersebut, cari tanggal terbaru
+    count_q = await db.execute(
+        select(func.count()).select_from(AttendanceRecord)
+        .where(AttendanceRecord.attendance_date == q_date)
+    )
+    if (count_q.scalar() or 0) == 0:
+        latest_q = await db.execute(select(func.max(AttendanceRecord.attendance_date)))
+        latest   = latest_q.scalar()
+        if latest:
+            q_date = latest
+
+    q = (
+        select(AttendanceRecord)
+        .where(AttendanceRecord.attendance_date == q_date)
+        .where(AttendanceRecord.week_day.notin_(WEEKENDS))
+    )
+    if filter == "hadir":
+        q = q.where(AttendanceRecord.actual_checkin.isnot(None))
+    elif filter == "absen":
+        q = q.where(AttendanceRecord.actual_checkin.is_(None))
+
+    q = q.order_by(AttendanceRecord.department, AttendanceRecord.employee_name)
+    result  = await db.execute(q)
+    records = result.scalars().all()
+
+    return {
+        "date":      str(q_date),
+        "filter":    filter,
+        "employees": [
+            {
+                "id":         r.employee_id,
+                "name":       r.employee_name,
+                "department": r.department,
+                "checkin":    r.actual_checkin,
+                "checkout":   r.actual_checkout,
+                "notes":      r.notes,
+            }
+            for r in records
+        ],
+    }
+
+
 # ── Who's off (absent on latest date) ─────────────────────────────────────────
 
 @router.get("/whos-off")
