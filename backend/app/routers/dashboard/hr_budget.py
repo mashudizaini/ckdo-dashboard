@@ -13,11 +13,88 @@ import openpyxl
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
+from app.database import get_oracle_connection
 from app.dependencies import require_role, CurrentUser, Roles
-from app.services.budget_service import BudgetService
+from app.services.budget_service import BudgetService, DEPT_COL, ACCOUNT_COL
+import asyncio
 
 router = APIRouter()
 MONTH_NAMES = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"]
+
+
+# ── GET /debug — cek ketersediaan data di GL_BALANCES ────────────────────────
+
+@router.get("/debug")
+async def debug_gl_balance(
+    dept: str          = Query(...),
+    year: int          = Query(...),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """
+    Endpoint diagnostik — cek apa yang ada di GL_BALANCES untuk dept+year.
+    Akses: /api/v1/dashboard/hr/budget/debug?dept=10&year=2026
+    """
+    def _run():
+        with get_oracle_connection() as conn:
+            cur = conn.cursor()
+
+            # 1. Cek actual_flag yang tersedia
+            cur.execute(f"""
+                SELECT gb.actual_flag,
+                       gb.currency_code,
+                       COUNT(*)             AS row_count,
+                       SUM(NVL(gb.period_net_dr,0) - NVL(gb.period_net_cr,0)) AS net_amount
+                FROM   gl_balances gb
+                JOIN   gl_ledgers gl  ON gl.ledger_id  = gb.ledger_id
+                JOIN   gl_code_combinations gcc
+                                      ON gcc.code_combination_id = gb.code_combination_id
+                JOIN   gl_periods gp  ON gp.period_name     = gb.period_name
+                                    AND gp.period_set_name  = gl.period_set_name
+                WHERE  gcc.{DEPT_COL} = :dept
+                  AND  gp.period_type = 'Month'
+                  AND  EXTRACT(YEAR FROM gp.start_date) = :year
+                GROUP BY gb.actual_flag, gb.currency_code
+                ORDER BY gb.actual_flag, gb.currency_code
+            """, {"dept": dept, "year": year})
+            cols = [c[0].lower() for c in cur.description]
+            flags = [dict(zip(cols, row)) for row in cur.fetchall()]
+
+            # 2. Cek 5 sample row dengan actual_flag = 'B'
+            cur.execute(f"""
+                SELECT gb.period_name,
+                       gb.currency_code,
+                       gb.actual_flag,
+                       gb.budget_version_id,
+                       gcc.{ACCOUNT_COL}  AS account_code,
+                       gb.period_net_dr,
+                       gb.period_net_cr
+                FROM   gl_balances gb
+                JOIN   gl_ledgers gl  ON gl.ledger_id  = gb.ledger_id
+                JOIN   gl_code_combinations gcc
+                                      ON gcc.code_combination_id = gb.code_combination_id
+                JOIN   gl_periods gp  ON gp.period_name     = gb.period_name
+                                    AND gp.period_set_name  = gl.period_set_name
+                WHERE  gb.actual_flag  = 'B'
+                  AND  gcc.{DEPT_COL} = :dept
+                  AND  gp.period_type  = 'Month'
+                  AND  EXTRACT(YEAR FROM gp.start_date) = :year
+                  AND  ROWNUM <= 5
+            """, {"dept": dept, "year": year})
+            cols2 = [c[0].lower() for c in cur.description]
+            samples = [dict(zip(cols2, row)) for row in cur.fetchall()]
+
+            return {"flags": flags, "budget_samples": samples}
+
+    try:
+        result = await asyncio.to_thread(_run)
+        return {
+            "dept": dept, "year": year,
+            "dept_col": DEPT_COL, "account_col": ACCOUNT_COL,
+            **result,
+            "hint": "Lihat 'flags' — jika actual_flag='B' tidak ada berarti budget belum diinput di Oracle GL untuk dept/tahun ini."
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ── GET /departments — LOV dropdown ──────────────────────────────────────────
