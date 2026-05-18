@@ -1008,6 +1008,11 @@ function AttendanceRateSection() {
 }
 
 // ── Budget Monitoring ─────────────────────────────────────────────────────────
+// Data dari 2 sumber Oracle yang di-upload terpisah:
+//   - "Import Budget"     → Oracle modul Budget   → /upload/budget
+//   - "Import Realisasi"  → Oracle modul AP Invoice → /upload/actual
+//
+// Kalkulasi:  Remain = Available + Reclass − Total Actual
 
 function BudgetMonitoringSection() {
   const { token } = useAuthStore();
@@ -1021,9 +1026,10 @@ function BudgetMonitoringSection() {
   const [loading,       setLoading]       = useState(false);
   const [expandedCode,  setExpandedCode]  = useState(null);
   const [accountDetail, setAccountDetail] = useState({});
-  const [uploading,     setUploading]     = useState(false);
+  const [uploading,     setUploading]     = useState(null); // "budget" | "actual" | null
   const [uploadMsg,     setUploadMsg]     = useState(null);
-  const fileRef = useRef(null);
+  const budgetRef = useRef(null);
+  const actualRef = useRef(null);
 
   const loadYears = useCallback(async () => {
     try {
@@ -1054,10 +1060,7 @@ function BudgetMonitoringSection() {
     if (accountDetail[key]) return;
     try {
       const res = await fetch(`${BUDGET_API}/account/${encodeURIComponent(code)}?year=${year}`, { headers: hdrs });
-      if (res.ok) {
-        const d = await res.json();
-        setAccountDetail(prev => ({ ...prev, [key]: d }));
-      }
+      if (res.ok) { const d = await res.json(); setAccountDetail(prev => ({ ...prev, [key]: d })); }
     } catch (_) {}
   };
 
@@ -1067,18 +1070,17 @@ function BudgetMonitoringSection() {
     await loadDetail(code);
   };
 
-  const handleUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
+  const doUpload = async (file, endpoint, type) => {
+    setUploading(type);
     setUploadMsg(null);
     const fd = new FormData();
     fd.append("file", file);
     try {
-      const res = await fetch(`${BUDGET_API}/upload`, { method: "POST", headers: hdrs, body: fd });
+      const res = await fetch(`${BUDGET_API}/${endpoint}`, { method: "POST", headers: hdrs, body: fd });
       const j = await res.json();
       if (res.ok) {
-        setUploadMsg({ ok: true, text: `Berhasil: ${j.upserted} baris diimport.` });
+        const count = j.upserted ?? j.inserted ?? 0;
+        setUploadMsg({ ok: true, text: `${type === "budget" ? "Budget" : "Realisasi AP"}: ${count} baris berhasil diimport.` });
         setAccountDetail({});
         load();
         loadYears();
@@ -1088,20 +1090,12 @@ function BudgetMonitoringSection() {
     } catch (_) {
       setUploadMsg({ ok: false, text: "Koneksi error." });
     }
-    setUploading(false);
-    e.target.value = "";
-  };
-
-  const handleExport = () => {
-    const params = new URLSearchParams({ year });
-    if (month) params.set("month", month);
-    window.open(`${BUDGET_API}/export?${params}&token=${token}`, "_blank");
+    setUploading(null);
   };
 
   const fmtRp = (v) => {
     if (v === undefined || v === null) return "Rp 0";
-    const abs = Math.abs(v);
-    return (v < 0 ? "-" : "") + "Rp " + abs.toLocaleString("id-ID");
+    return (v < 0 ? "-Rp " : "Rp ") + Math.abs(v).toLocaleString("id-ID");
   };
 
   const summary  = data?.summary;
@@ -1139,32 +1133,48 @@ function BudgetMonitoringSection() {
 
         <div className="flex-1" />
 
+        {/* Template */}
         <button
-          onClick={() => window.open(`${BUDGET_API}/template?token=${token}`, "_blank")}
+          onClick={() => window.open(`${BUDGET_API}/template`, "_blank")}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-700 bg-gray-900 text-xs text-gray-400 hover:text-gray-200 transition-colors"
         >
           <Download size={12} /> Template
         </button>
 
+        {/* Import Budget (dari Oracle Budget module) */}
         <button
-          onClick={() => fileRef.current?.click()}
-          disabled={uploading}
+          onClick={() => budgetRef.current?.click()}
+          disabled={!!uploading}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-xs text-white disabled:opacity-50 transition-colors"
         >
-          {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
-          Import Excel
+          {uploading === "budget" ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+          Import Budget
         </button>
-        <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleUpload} />
+        <input ref={budgetRef} type="file" accept=".xlsx,.xls" className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) doUpload(f, "upload/budget", "budget"); e.target.value = ""; }} />
 
+        {/* Import Realisasi (dari Oracle AP Invoice) */}
         <button
-          onClick={handleExport}
+          onClick={() => actualRef.current?.click()}
+          disabled={!!uploading}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-xs text-white disabled:opacity-50 transition-colors"
+        >
+          {uploading === "actual" ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+          Import Realisasi AP
+        </button>
+        <input ref={actualRef} type="file" accept=".xlsx,.xls" className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) doUpload(f, "upload/actual", "actual"); e.target.value = ""; }} />
+
+        {/* Export */}
+        <button
+          onClick={() => { const p = new URLSearchParams({ year }); if (month) p.set("month", month); window.open(`${BUDGET_API}/export?${p}`, "_blank"); }}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-xs text-white transition-colors"
         >
           <Download size={12} /> Export
         </button>
       </div>
 
-      {/* ── Upload message ── */}
+      {/* ── Upload feedback ── */}
       {uploadMsg && (
         <div className={`rounded-lg px-4 py-2 text-xs flex items-center justify-between ${
           uploadMsg.ok
@@ -1177,11 +1187,7 @@ function BudgetMonitoringSection() {
       )}
 
       {/* ── Loading ── */}
-      {loading && (
-        <div className="flex justify-center py-16">
-          <Loader2 size={22} className="animate-spin text-gray-600" />
-        </div>
-      )}
+      {loading && <div className="flex justify-center py-16"><Loader2 size={22} className="animate-spin text-gray-600" /></div>}
 
       {/* ── Empty state ── */}
       {!loading && accounts.length === 0 && (
@@ -1189,153 +1195,85 @@ function BudgetMonitoringSection() {
           <Wallet size={32} className="mx-auto text-gray-700" />
           <p className="text-xs text-gray-600">Belum ada data budget.</p>
           <p className="text-xs text-gray-700">
-            Upload file Excel atau{" "}
-            <button
-              onClick={() => window.open(`${BUDGET_API}/template?token=${token}`, "_blank")}
-              className="text-blue-400 underline"
-            >
-              download template
-            </button>{" "}
-            untuk memulai.
+            Klik <strong>Import Budget</strong> untuk upload data dari Oracle Budget Module, lalu{" "}
+            <strong>Import Realisasi AP</strong> untuk data AP Invoice.{" "}
+            <button onClick={() => window.open(`${BUDGET_API}/template`, "_blank")} className="text-blue-400 underline">
+              Download template
+            </button>.
           </p>
         </div>
       )}
 
       {/* ── Summary cards ── */}
-      {!loading && summary && (
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-          <BudgetSummaryCard label="Total Budget" value={fmtRp(summary.total_budget)} color="text-blue-400" bg="bg-blue-500/10 border-blue-500/20" />
-          <BudgetSummaryCard label="Total Realisasi" value={fmtRp(summary.total_actual)} color="text-emerald-400" bg="bg-emerald-500/10 border-emerald-500/20" />
+      {!loading && summary && accounts.length > 0 && (
+        <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
+          <BudgetSummaryCard label="Budget"    value={fmtRp(summary.total_budget)}    color="text-blue-400"   bg="bg-blue-500/10   border-blue-500/20" />
+          <BudgetSummaryCard label="Available" value={fmtRp(summary.total_available)} color="text-sky-400"    bg="bg-sky-500/10    border-sky-500/20" />
+          <BudgetSummaryCard label="Reclass"   value={fmtRp(summary.total_reclass)}   color="text-amber-400"  bg="bg-amber-500/10  border-amber-500/20" />
+          <BudgetSummaryCard label="Total Aktual (AP)" value={fmtRp(summary.total_actual)} color="text-violet-400" bg="bg-violet-500/10 border-violet-500/20" />
           <BudgetSummaryCard
-            label="Selisih (Sisa)"
-            value={fmtRp(summary.total_variance)}
-            color={summary.total_variance >= 0 ? "text-green-400" : "text-red-400"}
-            bg={summary.total_variance >= 0 ? "bg-green-500/10 border-green-500/20" : "bg-red-500/10 border-red-500/20"}
+            label="Sisa (Remain)"
+            value={fmtRp(summary.total_remain)}
+            color={summary.total_remain >= 0 ? "text-green-400" : "text-red-400"}
+            bg={summary.total_remain >= 0 ? "bg-green-500/10 border-green-500/20" : "bg-red-500/10 border-red-500/20"}
           />
-          <div className="rounded-lg border border-indigo-500/20 bg-indigo-500/10 px-4 py-3 space-y-2">
-            <p className="text-xs text-gray-500">% Serapan</p>
-            <p className="text-lg font-bold text-indigo-400">{summary.absorption_pct}%</p>
-            <div className="h-1.5 rounded-full bg-gray-800">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  summary.absorption_pct >= 80 ? "bg-green-500" :
-                  summary.absorption_pct >= 60 ? "bg-amber-500" : "bg-red-500"
-                }`}
-                style={{ width: `${Math.min(summary.absorption_pct, 100)}%` }}
-              />
-            </div>
-          </div>
         </div>
       )}
 
-      {/* ── Accounts table ── */}
+      {/* ── Accounts table (ringkasan per akun) ── */}
       {!loading && accounts.length > 0 && (
         <div className="rounded-lg border border-gray-800 overflow-hidden">
           {/* Header */}
           <div className="bg-gray-800/60 grid grid-cols-12 px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            <div className="col-span-4">Akun</div>
+            <div className="col-span-3">Akun</div>
             <div className="col-span-2 text-right">Budget</div>
-            <div className="col-span-2 text-right">Realisasi</div>
-            <div className="col-span-2 text-right">Selisih</div>
-            <div className="col-span-2 text-right">% Serapan</div>
+            <div className="col-span-2 text-right">Available</div>
+            <div className="col-span-1 text-right">Reclass</div>
+            <div className="col-span-2 text-right">Total Aktual</div>
+            <div className="col-span-2 text-right">Sisa (Remain)</div>
           </div>
 
           {accounts.map((acc) => {
-            const isExp = expandedCode === acc.account_code;
-            const detail = accountDetail[`${acc.account_code}_${year}`];
-            const pctColor = acc.absorption_pct >= 80 ? "bg-green-500"
-              : acc.absorption_pct >= 60 ? "bg-amber-500" : "bg-red-500";
-            const pctText = acc.absorption_pct >= 80 ? "text-green-400"
-              : acc.absorption_pct >= 60 ? "text-amber-400" : "text-red-400";
+            const isExp   = expandedCode === acc.account_code;
+            const detail  = accountDetail[`${acc.account_code}_${year}`];
+            const remainOk = acc.remain >= 0;
 
             return (
               <div key={acc.account_code} className="border-t border-gray-800">
-                {/* Row */}
+
+                {/* Summary row — klik untuk expand detail bulanan */}
                 <button
                   className={`w-full grid grid-cols-12 px-4 py-3 text-xs text-left transition-colors hover:bg-gray-800/40 ${isExp ? "bg-gray-800/30" : ""}`}
                   onClick={() => handleExpand(acc.account_code)}
                 >
-                  <div className="col-span-4 flex items-center gap-2">
+                  <div className="col-span-3 flex items-center gap-2">
                     <ChevronDown size={12} className={`text-gray-600 shrink-0 transition-transform ${isExp ? "rotate-180" : ""}`} />
                     <div>
-                      <span className="font-medium text-gray-200">{acc.account_name}</span>
-                      <span className="ml-2 text-gray-600 text-xs">{acc.account_code}</span>
+                      <div className="font-medium text-gray-200 leading-tight">{acc.account_name}</div>
+                      <div className="text-gray-600">{acc.account_code}</div>
                     </div>
                   </div>
-                  <div className="col-span-2 text-right text-gray-300">{fmtRp(acc.budget)}</div>
-                  <div className="col-span-2 text-right text-gray-300">{fmtRp(acc.actual)}</div>
-                  <div className={`col-span-2 text-right font-medium ${acc.variance >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {fmtRp(acc.variance)}
-                  </div>
-                  <div className="col-span-2 flex items-center justify-end gap-2">
-                    <div className="w-12 h-1.5 rounded-full bg-gray-800 overflow-hidden">
-                      <div className={`h-full rounded-full ${pctColor}`} style={{ width: `${Math.min(acc.absorption_pct, 100)}%` }} />
-                    </div>
-                    <span className={`font-medium ${pctText}`}>{acc.absorption_pct}%</span>
+                  <div className="col-span-2 text-right text-gray-400">{fmtRp(acc.budget)}</div>
+                  <div className="col-span-2 text-right text-gray-300">{fmtRp(acc.available)}</div>
+                  <div className="col-span-1 text-right text-amber-400">{fmtRp(acc.reclass)}</div>
+                  <div className="col-span-2 text-right text-violet-300">{fmtRp(acc.actual)}</div>
+                  <div className={`col-span-2 text-right font-semibold ${remainOk ? "text-green-400" : "text-red-400"}`}>
+                    {fmtRp(acc.remain)}
                   </div>
                 </button>
 
-                {/* Detail accordion */}
+                {/* ── Detail: tabel per bulan sesuai format laporan ── */}
                 {isExp && (
-                  <div className="bg-gray-950/60 border-t border-gray-800/60 px-6 py-4">
+                  <div className="border-t border-gray-800/60 bg-gray-950/50 px-4 py-3">
                     {!detail ? (
-                      <div className="flex justify-center py-6">
-                        <Loader2 size={16} className="animate-spin text-gray-600" />
-                      </div>
+                      <div className="flex justify-center py-6"><Loader2 size={16} className="animate-spin text-gray-600" /></div>
                     ) : detail.monthly.length === 0 ? (
-                      <p className="text-xs text-gray-600 text-center py-4">Tidak ada rincian bulanan untuk akun ini.</p>
+                      <p className="text-xs text-gray-600 text-center py-4">Tidak ada data bulanan untuk akun ini.</p>
                     ) : (
-                      <div className="space-y-3">
-                        <p className="text-xs font-semibold text-gray-400 mb-2">
-                          Rincian per Bulan — {acc.account_name}
-                        </p>
-                        {detail.monthly.map((m) => {
-                          const mPct = m.budget ? Math.min(m.actual / m.budget * 100, 100) : 0;
-                          const mColor = m.absorption_pct >= 80 ? "bg-green-500"
-                            : m.absorption_pct >= 60 ? "bg-amber-500" : "bg-red-500";
-                          return (
-                            <div key={m.month} className="space-y-1">
-                              <div className="flex items-center gap-3">
-                                <span className="text-xs text-gray-500 w-8 shrink-0 font-medium">
-                                  {m.month_name || MONTHS_ID[m.month - 1]}
-                                </span>
-                                {/* Budget bg + actual bar */}
-                                <div className="flex-1 relative h-4 rounded bg-gray-800 overflow-hidden">
-                                  <div className={`absolute top-0 left-0 h-full rounded ${mColor} opacity-80`}
-                                    style={{ width: `${mPct}%` }} />
-                                  <span className="absolute inset-0 flex items-center pl-2 text-xs font-medium text-white/80">
-                                    {fmtRp(m.actual)}
-                                  </span>
-                                </div>
-                                <span className="text-xs text-gray-600 w-20 text-right shrink-0">
-                                  / {fmtRp(m.budget)}
-                                </span>
-                                <span className={`text-xs font-medium w-10 text-right shrink-0 ${
-                                  m.absorption_pct >= 80 ? "text-green-400" :
-                                  m.absorption_pct >= 60 ? "text-amber-400" : "text-red-400"
-                                }`}>
-                                  {m.absorption_pct}%
-                                </span>
-                              </div>
-
-                              {/* Item list */}
-                              {m.items?.length > 0 && (
-                                <div className="ml-11 space-y-0.5 pt-0.5">
-                                  {m.items.map((item, idx) => (
-                                    <div key={idx} className="flex items-center gap-2 text-xs text-gray-600">
-                                      <span className="w-1 h-1 rounded-full bg-gray-700 shrink-0" />
-                                      <span className="flex-1 truncate">{item.name}</span>
-                                      {item.date && (
-                                        <span className="text-gray-700 shrink-0">{item.date}</span>
-                                      )}
-                                      <span className="text-gray-500 shrink-0">{fmtRp(item.amount)}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
+                      <div className="space-y-4">
+                        {detail.monthly.map((m) => (
+                          <BudgetMonthTable key={m.month} m={m} fmtRp={fmtRp} accName={acc.account_name} />
+                        ))}
                       </div>
                     )}
                   </div>
@@ -1345,6 +1283,78 @@ function BudgetMonitoringSection() {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+/* Tabel detail per bulan — mengikuti format laporan Oracle */
+function BudgetMonthTable({ m, fmtRp, accName }) {
+  const remain   = m.available + m.reclass - m.total_actual;
+  const remainOk = remain >= 0;
+
+  return (
+    <div className="rounded-lg border border-gray-800 overflow-hidden text-xs">
+      {/* Month header */}
+      <div className="bg-gray-800/80 px-3 py-1.5 flex items-center gap-3">
+        <span className="font-bold text-gray-200">{m.month_name || MONTHS_ID[m.month - 1]} Budget</span>
+        <span className="text-blue-300 font-semibold">{fmtRp(m.budget)}</span>
+        <span className="text-gray-600 flex-1">{accName}</span>
+      </div>
+
+      {/* Table */}
+      <table className="w-full">
+        <thead>
+          <tr className="bg-gray-800/40 text-gray-500 uppercase tracking-wider text-xs">
+            <th className="px-3 py-2 text-left font-semibold w-1/2">Actual Expense</th>
+            <th className="px-3 py-2 text-right font-semibold">Jumlah</th>
+            <th className="px-3 py-2 text-right font-semibold">Available</th>
+            <th className="px-3 py-2 text-right font-semibold">Reclass</th>
+            <th className="px-3 py-2 text-right font-semibold">Remain</th>
+            <th className="px-3 py-2 text-left font-semibold">Note</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-800/60">
+          {m.items.length === 0 ? (
+            <tr>
+              <td colSpan={6} className="px-3 py-3 text-gray-700 italic">Belum ada data realisasi AP Invoice.</td>
+            </tr>
+          ) : (
+            m.items.map((item, idx) => (
+              <tr key={idx} className="hover:bg-gray-800/20 transition-colors">
+                <td className="px-3 py-2 text-gray-300">{item.description}</td>
+                <td className="px-3 py-2 text-right text-gray-300 tabular-nums">{item.amount.toLocaleString("id-ID")}</td>
+                {/* Available, Reclass, Remain, Note hanya muncul di baris pertama (rowspan simulasi) */}
+                {idx === 0 ? (
+                  <>
+                    <td className="px-3 py-2 text-right text-sky-300 tabular-nums align-top"
+                      rowSpan={m.items.length}>{fmtRp(m.available)}</td>
+                    <td className="px-3 py-2 text-right text-amber-300 tabular-nums align-top"
+                      rowSpan={m.items.length}>{fmtRp(m.reclass)}</td>
+                    <td className={`px-3 py-2 text-right tabular-nums align-top font-medium ${remainOk ? "text-green-400" : "text-red-400"}`}
+                      rowSpan={m.items.length}>
+                      <div>{fmtRp(m.available + m.reclass)} −</div>
+                      <div>{fmtRp(m.total_actual)} =</div>
+                      <div className="border-t border-gray-700 mt-1 pt-1 font-bold">{fmtRp(remain)}</div>
+                    </td>
+                    <td className="px-3 py-2 text-gray-500 align-top text-xs leading-relaxed"
+                      rowSpan={m.items.length}>{m.reclass_note || "—"}</td>
+                  </>
+                ) : null}
+              </tr>
+            ))
+          )}
+
+          {/* Baris total */}
+          <tr className="bg-gray-800/40 font-semibold border-t-2 border-gray-700">
+            <td className="px-3 py-2 text-gray-400 uppercase tracking-wider text-xs">Total</td>
+            <td className="px-3 py-2 text-right text-gray-200 tabular-nums">{m.total_actual.toLocaleString("id-ID")}</td>
+            <td className="px-3 py-2 text-right text-sky-300 tabular-nums">{fmtRp(m.available)}</td>
+            <td className="px-3 py-2 text-right text-amber-300 tabular-nums">{fmtRp(m.reclass)}</td>
+            <td className={`px-3 py-2 text-right tabular-nums ${remainOk ? "text-green-400" : "text-red-400"}`}>{fmtRp(remain)}</td>
+            <td />
+          </tr>
+        </tbody>
+      </table>
     </div>
   );
 }
