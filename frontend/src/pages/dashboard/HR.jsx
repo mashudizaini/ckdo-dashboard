@@ -1,13 +1,17 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Users, UserCheck, Umbrella, BarChart2, RefreshCw,
-  Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck
+  Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck,
+  Wallet, Download, ChevronDown,
 } from "lucide-react";
 import EmployeeUpload from "./EmployeeUpload";
 import AttendanceUpload from "./AttendanceUpload";
 import { useAuthStore } from "@/store/authStore";
 
-const API = "/api/v1/dashboard/hr/employees";
+const API        = "/api/v1/dashboard/hr/employees";
+const BUDGET_API = "/api/v1/dashboard/hr/budget";
+
+const MONTHS_ID = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
 
 export default function HRDashboard() {
   const [activeSection, setActiveSection] = useState("employees");
@@ -19,12 +23,13 @@ export default function HRDashboard() {
     { id: "attendance", icon: BarChart2,     color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40", label: "Attendance Rate" },
     { id: "upload",     icon: Upload,        color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Upload Karyawan" },
     { id: "upload-att", icon: CalendarCheck, color: "text-teal-400",   bg: "bg-teal-500/10",   activeBorder: "border-teal-500/40",   label: "Upload Absensi" },
+    { id: "budget",     icon: Wallet,        color: "text-orange-400", bg: "bg-orange-500/10", activeBorder: "border-orange-500/40", label: "Budget Monitoring" },
   ];
 
   return (
     <div className="p-6 space-y-4">
       {/* Tab Buttons */}
-      <div className="grid grid-cols-2 xl:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 xl:grid-cols-7 gap-2">
         {kpiCards.map((c) => (
           <button
             key={c.id}
@@ -85,6 +90,12 @@ export default function HRDashboard() {
       {activeSection === "attendance" && (
         <SectionCard title="Attendance Rate — Bulanan">
           <AttendanceRateSection />
+        </SectionCard>
+      )}
+
+      {activeSection === "budget" && (
+        <SectionCard title="Budget Monitoring HRGA">
+          <BudgetMonitoringSection />
         </SectionCard>
       )}
     </div>
@@ -992,6 +1003,357 @@ function AttendanceRateSection() {
       {activeTab === "detail" && (
         <EmployeeDetailPanel headers={headers} apiBase={ATT_API} />
       )}
+    </div>
+  );
+}
+
+// ── Budget Monitoring ─────────────────────────────────────────────────────────
+
+function BudgetMonitoringSection() {
+  const { token } = useAuthStore();
+  const hdrs = { Authorization: `Bearer ${token}` };
+  const curYear = new Date().getFullYear();
+
+  const [year,          setYear]          = useState(curYear);
+  const [month,         setMonth]         = useState(0);
+  const [years,         setYears]         = useState([curYear, curYear - 1]);
+  const [data,          setData]          = useState(null);
+  const [loading,       setLoading]       = useState(false);
+  const [expandedCode,  setExpandedCode]  = useState(null);
+  const [accountDetail, setAccountDetail] = useState({});
+  const [uploading,     setUploading]     = useState(false);
+  const [uploadMsg,     setUploadMsg]     = useState(null);
+  const fileRef = useRef(null);
+
+  const loadYears = useCallback(async () => {
+    try {
+      const res = await fetch(`${BUDGET_API}/years`, { headers: hdrs });
+      if (res.ok) {
+        const ys = await res.json();
+        if (ys.length) setYears(ys);
+      }
+    } catch (_) {}
+  }, []); // eslint-disable-line
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ year });
+      if (month) params.set("month", month);
+      const res = await fetch(`${BUDGET_API}?${params}`, { headers: hdrs });
+      if (res.ok) setData(await res.json());
+    } catch (_) {}
+    setLoading(false);
+  }, [year, month]); // eslint-disable-line
+
+  useEffect(() => { loadYears(); }, [loadYears]);
+  useEffect(() => { load(); }, [load]);
+
+  const loadDetail = async (code) => {
+    const key = `${code}_${year}`;
+    if (accountDetail[key]) return;
+    try {
+      const res = await fetch(`${BUDGET_API}/account/${encodeURIComponent(code)}?year=${year}`, { headers: hdrs });
+      if (res.ok) {
+        const d = await res.json();
+        setAccountDetail(prev => ({ ...prev, [key]: d }));
+      }
+    } catch (_) {}
+  };
+
+  const handleExpand = async (code) => {
+    if (expandedCode === code) { setExpandedCode(null); return; }
+    setExpandedCode(code);
+    await loadDetail(code);
+  };
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadMsg(null);
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const res = await fetch(`${BUDGET_API}/upload`, { method: "POST", headers: hdrs, body: fd });
+      const j = await res.json();
+      if (res.ok) {
+        setUploadMsg({ ok: true, text: `Berhasil: ${j.upserted} baris diimport.` });
+        setAccountDetail({});
+        load();
+        loadYears();
+      } else {
+        setUploadMsg({ ok: false, text: j.detail || "Upload gagal." });
+      }
+    } catch (_) {
+      setUploadMsg({ ok: false, text: "Koneksi error." });
+    }
+    setUploading(false);
+    e.target.value = "";
+  };
+
+  const handleExport = () => {
+    const params = new URLSearchParams({ year });
+    if (month) params.set("month", month);
+    window.open(`${BUDGET_API}/export?${params}&token=${token}`, "_blank");
+  };
+
+  const fmtRp = (v) => {
+    if (v === undefined || v === null) return "Rp 0";
+    const abs = Math.abs(v);
+    return (v < 0 ? "-" : "") + "Rp " + abs.toLocaleString("id-ID");
+  };
+
+  const summary  = data?.summary;
+  const accounts = data?.accounts || [];
+
+  return (
+    <div className="space-y-4">
+
+      {/* ── Controls ── */}
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={year}
+          onChange={e => { setYear(+e.target.value); setAccountDetail({}); }}
+          className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
+        >
+          {years.map(y => <option key={y} value={y}>{y}</option>)}
+          {!years.includes(curYear) && <option value={curYear}>{curYear}</option>}
+        </select>
+
+        <select
+          value={month}
+          onChange={e => setMonth(+e.target.value)}
+          className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
+        >
+          <option value={0}>Semua Bulan</option>
+          {MONTHS_ID.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+        </select>
+
+        <button
+          onClick={load}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-700 bg-gray-900 text-xs text-gray-400 hover:text-gray-200 hover:border-gray-600 transition-colors"
+        >
+          <RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh
+        </button>
+
+        <div className="flex-1" />
+
+        <button
+          onClick={() => window.open(`${BUDGET_API}/template?token=${token}`, "_blank")}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-700 bg-gray-900 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+        >
+          <Download size={12} /> Template
+        </button>
+
+        <button
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-xs text-white disabled:opacity-50 transition-colors"
+        >
+          {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+          Import Excel
+        </button>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleUpload} />
+
+        <button
+          onClick={handleExport}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-xs text-white transition-colors"
+        >
+          <Download size={12} /> Export
+        </button>
+      </div>
+
+      {/* ── Upload message ── */}
+      {uploadMsg && (
+        <div className={`rounded-lg px-4 py-2 text-xs flex items-center justify-between ${
+          uploadMsg.ok
+            ? "bg-green-500/10 text-green-400 border border-green-500/20"
+            : "bg-red-500/10 text-red-400 border border-red-500/20"
+        }`}>
+          <span>{uploadMsg.text}</span>
+          <button onClick={() => setUploadMsg(null)}><X size={12} /></button>
+        </div>
+      )}
+
+      {/* ── Loading ── */}
+      {loading && (
+        <div className="flex justify-center py-16">
+          <Loader2 size={22} className="animate-spin text-gray-600" />
+        </div>
+      )}
+
+      {/* ── Empty state ── */}
+      {!loading && accounts.length === 0 && (
+        <div className="py-16 text-center space-y-3">
+          <Wallet size={32} className="mx-auto text-gray-700" />
+          <p className="text-xs text-gray-600">Belum ada data budget.</p>
+          <p className="text-xs text-gray-700">
+            Upload file Excel atau{" "}
+            <button
+              onClick={() => window.open(`${BUDGET_API}/template?token=${token}`, "_blank")}
+              className="text-blue-400 underline"
+            >
+              download template
+            </button>{" "}
+            untuk memulai.
+          </p>
+        </div>
+      )}
+
+      {/* ── Summary cards ── */}
+      {!loading && summary && (
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          <BudgetSummaryCard label="Total Budget" value={fmtRp(summary.total_budget)} color="text-blue-400" bg="bg-blue-500/10 border-blue-500/20" />
+          <BudgetSummaryCard label="Total Realisasi" value={fmtRp(summary.total_actual)} color="text-emerald-400" bg="bg-emerald-500/10 border-emerald-500/20" />
+          <BudgetSummaryCard
+            label="Selisih (Sisa)"
+            value={fmtRp(summary.total_variance)}
+            color={summary.total_variance >= 0 ? "text-green-400" : "text-red-400"}
+            bg={summary.total_variance >= 0 ? "bg-green-500/10 border-green-500/20" : "bg-red-500/10 border-red-500/20"}
+          />
+          <div className="rounded-lg border border-indigo-500/20 bg-indigo-500/10 px-4 py-3 space-y-2">
+            <p className="text-xs text-gray-500">% Serapan</p>
+            <p className="text-lg font-bold text-indigo-400">{summary.absorption_pct}%</p>
+            <div className="h-1.5 rounded-full bg-gray-800">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  summary.absorption_pct >= 80 ? "bg-green-500" :
+                  summary.absorption_pct >= 60 ? "bg-amber-500" : "bg-red-500"
+                }`}
+                style={{ width: `${Math.min(summary.absorption_pct, 100)}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Accounts table ── */}
+      {!loading && accounts.length > 0 && (
+        <div className="rounded-lg border border-gray-800 overflow-hidden">
+          {/* Header */}
+          <div className="bg-gray-800/60 grid grid-cols-12 px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <div className="col-span-4">Akun</div>
+            <div className="col-span-2 text-right">Budget</div>
+            <div className="col-span-2 text-right">Realisasi</div>
+            <div className="col-span-2 text-right">Selisih</div>
+            <div className="col-span-2 text-right">% Serapan</div>
+          </div>
+
+          {accounts.map((acc) => {
+            const isExp = expandedCode === acc.account_code;
+            const detail = accountDetail[`${acc.account_code}_${year}`];
+            const pctColor = acc.absorption_pct >= 80 ? "bg-green-500"
+              : acc.absorption_pct >= 60 ? "bg-amber-500" : "bg-red-500";
+            const pctText = acc.absorption_pct >= 80 ? "text-green-400"
+              : acc.absorption_pct >= 60 ? "text-amber-400" : "text-red-400";
+
+            return (
+              <div key={acc.account_code} className="border-t border-gray-800">
+                {/* Row */}
+                <button
+                  className={`w-full grid grid-cols-12 px-4 py-3 text-xs text-left transition-colors hover:bg-gray-800/40 ${isExp ? "bg-gray-800/30" : ""}`}
+                  onClick={() => handleExpand(acc.account_code)}
+                >
+                  <div className="col-span-4 flex items-center gap-2">
+                    <ChevronDown size={12} className={`text-gray-600 shrink-0 transition-transform ${isExp ? "rotate-180" : ""}`} />
+                    <div>
+                      <span className="font-medium text-gray-200">{acc.account_name}</span>
+                      <span className="ml-2 text-gray-600 text-xs">{acc.account_code}</span>
+                    </div>
+                  </div>
+                  <div className="col-span-2 text-right text-gray-300">{fmtRp(acc.budget)}</div>
+                  <div className="col-span-2 text-right text-gray-300">{fmtRp(acc.actual)}</div>
+                  <div className={`col-span-2 text-right font-medium ${acc.variance >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {fmtRp(acc.variance)}
+                  </div>
+                  <div className="col-span-2 flex items-center justify-end gap-2">
+                    <div className="w-12 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                      <div className={`h-full rounded-full ${pctColor}`} style={{ width: `${Math.min(acc.absorption_pct, 100)}%` }} />
+                    </div>
+                    <span className={`font-medium ${pctText}`}>{acc.absorption_pct}%</span>
+                  </div>
+                </button>
+
+                {/* Detail accordion */}
+                {isExp && (
+                  <div className="bg-gray-950/60 border-t border-gray-800/60 px-6 py-4">
+                    {!detail ? (
+                      <div className="flex justify-center py-6">
+                        <Loader2 size={16} className="animate-spin text-gray-600" />
+                      </div>
+                    ) : detail.monthly.length === 0 ? (
+                      <p className="text-xs text-gray-600 text-center py-4">Tidak ada rincian bulanan untuk akun ini.</p>
+                    ) : (
+                      <div className="space-y-3">
+                        <p className="text-xs font-semibold text-gray-400 mb-2">
+                          Rincian per Bulan — {acc.account_name}
+                        </p>
+                        {detail.monthly.map((m) => {
+                          const mPct = m.budget ? Math.min(m.actual / m.budget * 100, 100) : 0;
+                          const mColor = m.absorption_pct >= 80 ? "bg-green-500"
+                            : m.absorption_pct >= 60 ? "bg-amber-500" : "bg-red-500";
+                          return (
+                            <div key={m.month} className="space-y-1">
+                              <div className="flex items-center gap-3">
+                                <span className="text-xs text-gray-500 w-8 shrink-0 font-medium">
+                                  {m.month_name || MONTHS_ID[m.month - 1]}
+                                </span>
+                                {/* Budget bg + actual bar */}
+                                <div className="flex-1 relative h-4 rounded bg-gray-800 overflow-hidden">
+                                  <div className={`absolute top-0 left-0 h-full rounded ${mColor} opacity-80`}
+                                    style={{ width: `${mPct}%` }} />
+                                  <span className="absolute inset-0 flex items-center pl-2 text-xs font-medium text-white/80">
+                                    {fmtRp(m.actual)}
+                                  </span>
+                                </div>
+                                <span className="text-xs text-gray-600 w-20 text-right shrink-0">
+                                  / {fmtRp(m.budget)}
+                                </span>
+                                <span className={`text-xs font-medium w-10 text-right shrink-0 ${
+                                  m.absorption_pct >= 80 ? "text-green-400" :
+                                  m.absorption_pct >= 60 ? "text-amber-400" : "text-red-400"
+                                }`}>
+                                  {m.absorption_pct}%
+                                </span>
+                              </div>
+
+                              {/* Item list */}
+                              {m.items?.length > 0 && (
+                                <div className="ml-11 space-y-0.5 pt-0.5">
+                                  {m.items.map((item, idx) => (
+                                    <div key={idx} className="flex items-center gap-2 text-xs text-gray-600">
+                                      <span className="w-1 h-1 rounded-full bg-gray-700 shrink-0" />
+                                      <span className="flex-1 truncate">{item.name}</span>
+                                      {item.date && (
+                                        <span className="text-gray-700 shrink-0">{item.date}</span>
+                                      )}
+                                      <span className="text-gray-500 shrink-0">{fmtRp(item.amount)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BudgetSummaryCard({ label, value, color, bg }) {
+  return (
+    <div className={`rounded-lg border px-4 py-3 space-y-1 ${bg}`}>
+      <p className="text-xs text-gray-500">{label}</p>
+      <p className={`text-base font-bold truncate ${color}`}>{value}</p>
     </div>
   );
 }

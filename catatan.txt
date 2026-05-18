@@ -1,5 +1,0 @@
-startup 
-	docker-compose up
-	docker-compose up --build
-shutdown 
-	docker-compose down -v 
