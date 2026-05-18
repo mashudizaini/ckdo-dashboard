@@ -210,14 +210,18 @@ class BudgetService:
                 EXTRACT(YEAR  FROM gp.start_date)              AS year,
                 EXTRACT(MONTH FROM gp.start_date)              AS month,
                 gcc.{ACCOUNT_COL}                              AS account_code,
-                (SELECT ffvt.description
-                 FROM   fnd_flex_values    ffv
-                 JOIN   fnd_flex_values_tl ffvt
-                        ON  ffvt.flex_value_id = ffv.flex_value_id
-                        AND ffvt.language      = USERENV('LANG')
-                 WHERE  ffv.flex_value        = gcc.{ACCOUNT_COL}
-                   AND  ROWNUM               = 1)               AS account_name,
-                SUM(gb.period_net_dr - gb.period_net_cr)       AS budget_amount
+                (SELECT ffvv.description
+                 FROM   fnd_flex_values_vl  ffvv
+                 JOIN   fnd_flex_value_sets ffvs
+                        ON  ffvs.flex_value_set_id = ffvv.flex_value_set_id
+                 JOIN   fnd_id_flex_segments fifs
+                        ON  fifs.flex_value_set_id        = ffvs.flex_value_set_id
+                 WHERE  fifs.application_id               = 101
+                   AND  fifs.id_flex_code                 = 'GL#'
+                   AND  fifs.application_column_name      = '{ACCOUNT_COL.upper()}'
+                   AND  ffvv.flex_value                   = gcc.{ACCOUNT_COL}
+                   AND  ROWNUM                            = 1) AS account_name,
+                SUM(NVL(gb.period_net_dr, 0) - NVL(gb.period_net_cr, 0)) AS budget_amount
             FROM gl_balances gb
             JOIN gl_ledgers gl
                 ON  gl.ledger_id            = gb.ledger_id
@@ -227,6 +231,7 @@ class BudgetService:
                 ON  gp.period_name          = gb.period_name
                 AND gp.period_set_name      = gl.period_set_name
             WHERE gb.actual_flag            = 'B'
+              AND gb.currency_code          = gl.currency_code
               AND gcc.{DEPT_COL}            = :dept
               AND gp.period_type            = 'Month'
               AND EXTRACT(YEAR FROM gp.start_date)  = :year
