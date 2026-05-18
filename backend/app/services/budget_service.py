@@ -73,11 +73,13 @@ class BudgetService:
             SELECT DISTINCT
                 EXTRACT(YEAR FROM gp.start_date) AS budget_year
             FROM gl_balances gb
+            JOIN gl_ledgers gl
+                ON  gl.ledger_id            = gb.ledger_id
             JOIN gl_code_combinations gcc
                 ON  gcc.code_combination_id = gb.code_combination_id
             JOIN gl_periods gp
                 ON  gp.period_name          = gb.period_name
-                AND gp.period_set_name      = gb.period_set_name
+                AND gp.period_set_name      = gl.period_set_name
             WHERE gb.actual_flag    = 'B'
               AND gcc.{DEPT_COL}    = :dept
               AND gp.period_type    = 'Month'
@@ -217,11 +219,13 @@ class BudgetService:
                    AND  ROWNUM               = 1)               AS account_name,
                 SUM(gb.period_net_dr - gb.period_net_cr)       AS budget_amount
             FROM gl_balances gb
+            JOIN gl_ledgers gl
+                ON  gl.ledger_id            = gb.ledger_id
             JOIN gl_code_combinations gcc
                 ON  gcc.code_combination_id = gb.code_combination_id
             JOIN gl_periods gp
                 ON  gp.period_name          = gb.period_name
-                AND gp.period_set_name      = gb.period_set_name
+                AND gp.period_set_name      = gl.period_set_name
             WHERE gb.actual_flag            = 'B'
               AND gcc.{DEPT_COL}            = :dept
               AND gp.period_type            = 'Month'
