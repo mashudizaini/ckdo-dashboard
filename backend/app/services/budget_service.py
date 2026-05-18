@@ -81,8 +81,7 @@ class BudgetService:
                 ON  gp.period_name          = gb.period_name
                 AND gp.period_set_name      = gl.period_set_name
             WHERE gb.actual_flag    = 'B'
-              AND gcc.{DEPT_COL}    = :dept
-              AND gp.period_type    = 'Month'
+              AND  gcc.segment3 = :dept 
             ORDER BY budget_year DESC
         """
         try:
@@ -232,8 +231,7 @@ class BudgetService:
                 AND gp.period_set_name      = gl.period_set_name
             WHERE gb.actual_flag            = 'B'
               AND gb.currency_code          = gl.currency_code
-              AND gcc.{DEPT_COL}            = :dept
-              AND gp.period_type            = 'Month'
+              AND  gcc.segment3 = :dept 
               AND EXTRACT(YEAR FROM gp.start_date)  = :year
               AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) = :month)
               AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)

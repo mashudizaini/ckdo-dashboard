@@ -50,8 +50,7 @@ async def debug_gl_balance(
                                       ON gcc.code_combination_id = gb.code_combination_id
                 JOIN   gl_periods gp  ON gp.period_name     = gb.period_name
                                     AND gp.period_set_name  = gl.period_set_name
-                WHERE  gcc.{DEPT_COL} = :dept
-                  AND  gp.period_type = 'Month'
+                WHERE  gcc.segment3 = :dept
                   AND  EXTRACT(YEAR FROM gp.start_date) = :year
                 GROUP BY gb.actual_flag, gb.currency_code
                 ORDER BY gb.actual_flag, gb.currency_code
@@ -75,8 +74,7 @@ async def debug_gl_balance(
                 JOIN   gl_periods gp  ON gp.period_name     = gb.period_name
                                     AND gp.period_set_name  = gl.period_set_name
                 WHERE  gb.actual_flag  = 'B'
-                  AND  gcc.{DEPT_COL} = :dept
-                  AND  gp.period_type  = 'Month'
+                  AND   gcc.segment3 = :dept
                   AND  EXTRACT(YEAR FROM gp.start_date) = :year
                   AND  ROWNUM <= 5
             """, {"dept": dept, "year": year})
