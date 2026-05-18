@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Users, UserCheck, Umbrella, BarChart2, RefreshCw,
   Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck,
@@ -1019,6 +1019,8 @@ function BudgetMonitoringSection() {
   const hdrs = { Authorization: `Bearer ${token}` };
   const curYear = new Date().getFullYear();
 
+  const [dept,          setDept]          = useState("");
+  const [departments,   setDepartments]   = useState([]);
   const [year,          setYear]          = useState(curYear);
   const [month,         setMonth]         = useState(0);
   const [years,         setYears]         = useState([curYear, curYear - 1]);
@@ -1026,40 +1028,56 @@ function BudgetMonitoringSection() {
   const [loading,       setLoading]       = useState(false);
   const [expandedCode,  setExpandedCode]  = useState(null);
   const [accountDetail, setAccountDetail] = useState({});
-  const [uploading,     setUploading]     = useState(null); // "budget" | "actual" | null
   const [uploadMsg,     setUploadMsg]     = useState(null);
-  const budgetRef = useRef(null);
-  const actualRef = useRef(null);
 
-  const loadYears = useCallback(async () => {
+  // Load daftar department dari Oracle saat pertama kali
+  const loadDepartments = useCallback(async () => {
     try {
-      const res = await fetch(`${BUDGET_API}/years`, { headers: hdrs });
+      const res = await fetch(`${BUDGET_API}/departments`, { headers: hdrs });
       if (res.ok) {
-        const ys = await res.json();
-        if (ys.length) setYears(ys);
+        const depts = await res.json();
+        setDepartments(depts);
+        if (depts.length && !dept) setDept(depts[0].dept_code);
       }
     } catch (_) {}
   }, []); // eslint-disable-line
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const loadYears = useCallback(async () => {
+    if (!dept) return;
     try {
-      const params = new URLSearchParams({ year });
+      const res = await fetch(`${BUDGET_API}/years?dept=${encodeURIComponent(dept)}`, { headers: hdrs });
+      if (res.ok) {
+        const ys = await res.json();
+        if (ys.length) { setYears(ys); setYear(ys[0]); }
+      }
+    } catch (_) {}
+  }, [dept]); // eslint-disable-line
+
+  const load = useCallback(async () => {
+    if (!dept) return;
+    setLoading(true);
+    setData(null);
+    try {
+      const params = new URLSearchParams({ dept, year });
       if (month) params.set("month", month);
       const res = await fetch(`${BUDGET_API}?${params}`, { headers: hdrs });
       if (res.ok) setData(await res.json());
     } catch (_) {}
     setLoading(false);
-  }, [year, month]); // eslint-disable-line
+  }, [dept, year, month]); // eslint-disable-line
 
+  useEffect(() => { loadDepartments(); }, [loadDepartments]);
   useEffect(() => { loadYears(); }, [loadYears]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (dept) load(); }, [load]); // eslint-disable-line
 
   const loadDetail = async (code) => {
-    const key = `${code}_${year}`;
+    const key = `${dept}_${code}_${year}`;
     if (accountDetail[key]) return;
     try {
-      const res = await fetch(`${BUDGET_API}/account/${encodeURIComponent(code)}?year=${year}`, { headers: hdrs });
+      const res = await fetch(
+        `${BUDGET_API}/account/${encodeURIComponent(code)}?dept=${encodeURIComponent(dept)}&year=${year}`,
+        { headers: hdrs }
+      );
       if (res.ok) { const d = await res.json(); setAccountDetail(prev => ({ ...prev, [key]: d })); }
     } catch (_) {}
   };
@@ -1070,27 +1088,11 @@ function BudgetMonitoringSection() {
     await loadDetail(code);
   };
 
-  const doUpload = async (file, endpoint, type) => {
-    setUploading(type);
-    setUploadMsg(null);
-    const fd = new FormData();
-    fd.append("file", file);
-    try {
-      const res = await fetch(`${BUDGET_API}/${endpoint}`, { method: "POST", headers: hdrs, body: fd });
-      const j = await res.json();
-      if (res.ok) {
-        const count = j.upserted ?? j.inserted ?? 0;
-        setUploadMsg({ ok: true, text: `${type === "budget" ? "Budget" : "Realisasi AP"}: ${count} baris berhasil diimport.` });
-        setAccountDetail({});
-        load();
-        loadYears();
-      } else {
-        setUploadMsg({ ok: false, text: j.detail || "Upload gagal." });
-      }
-    } catch (_) {
-      setUploadMsg({ ok: false, text: "Koneksi error." });
-    }
-    setUploading(null);
+  const handleDeptChange = (newDept) => {
+    setDept(newDept);
+    setData(null);
+    setExpandedCode(null);
+    setAccountDetail({});
   };
 
   const fmtRp = (v) => {
@@ -1106,6 +1108,23 @@ function BudgetMonitoringSection() {
 
       {/* ── Controls ── */}
       <div className="flex flex-wrap items-center gap-2">
+
+        {/* Dropdown Department — dari Oracle CKDO_GL_COA_DEPARTMENT */}
+        <select
+          value={dept}
+          onChange={e => handleDeptChange(e.target.value)}
+          className="rounded-lg border border-orange-700/60 bg-gray-900 px-3 py-1.5 text-sm text-orange-200 outline-none focus:border-orange-500 min-w-36"
+        >
+          {departments.length === 0
+            ? <option value="">Memuat dept...</option>
+            : departments.map(d => (
+                <option key={d.dept_code} value={d.dept_code}>
+                  {d.dept_code}{d.dept_name ? ` — ${d.dept_name}` : ""}
+                </option>
+              ))
+          }
+        </select>
+
         <select
           value={year}
           onChange={e => { setYear(+e.target.value); setAccountDetail({}); }}
@@ -1126,61 +1145,31 @@ function BudgetMonitoringSection() {
 
         <button
           onClick={load}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-700 bg-gray-900 text-xs text-gray-400 hover:text-gray-200 hover:border-gray-600 transition-colors"
+          disabled={!dept}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-700 bg-gray-900 text-xs text-gray-400 hover:text-gray-200 hover:border-gray-600 disabled:opacity-40 transition-colors"
         >
-          <RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh
+          <RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh dari Oracle
         </button>
 
         <div className="flex-1" />
 
-        {/* Template */}
         <button
-          onClick={() => window.open(`${BUDGET_API}/template`, "_blank")}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-700 bg-gray-900 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+          onClick={() => {
+            if (!dept) return;
+            const p = new URLSearchParams({ dept, year });
+            if (month) p.set("month", month);
+            window.open(`${BUDGET_API}/export?${p}`, "_blank");
+          }}
+          disabled={!dept || !data}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-xs text-white disabled:opacity-40 transition-colors"
         >
-          <Download size={12} /> Template
-        </button>
-
-        {/* Import Budget (dari Oracle Budget module) */}
-        <button
-          onClick={() => budgetRef.current?.click()}
-          disabled={!!uploading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-xs text-white disabled:opacity-50 transition-colors"
-        >
-          {uploading === "budget" ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
-          Import Budget
-        </button>
-        <input ref={budgetRef} type="file" accept=".xlsx,.xls" className="hidden"
-          onChange={e => { const f = e.target.files?.[0]; if (f) doUpload(f, "upload/budget", "budget"); e.target.value = ""; }} />
-
-        {/* Import Realisasi (dari Oracle AP Invoice) */}
-        <button
-          onClick={() => actualRef.current?.click()}
-          disabled={!!uploading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-xs text-white disabled:opacity-50 transition-colors"
-        >
-          {uploading === "actual" ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
-          Import Realisasi AP
-        </button>
-        <input ref={actualRef} type="file" accept=".xlsx,.xls" className="hidden"
-          onChange={e => { const f = e.target.files?.[0]; if (f) doUpload(f, "upload/actual", "actual"); e.target.value = ""; }} />
-
-        {/* Export */}
-        <button
-          onClick={() => { const p = new URLSearchParams({ year }); if (month) p.set("month", month); window.open(`${BUDGET_API}/export?${p}`, "_blank"); }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-xs text-white transition-colors"
-        >
-          <Download size={12} /> Export
+          <Download size={12} /> Export Excel
         </button>
       </div>
 
-      {/* ── Upload feedback ── */}
+      {/* ── Error message ── */}
       {uploadMsg && (
-        <div className={`rounded-lg px-4 py-2 text-xs flex items-center justify-between ${
-          uploadMsg.ok
-            ? "bg-green-500/10 text-green-400 border border-green-500/20"
-            : "bg-red-500/10 text-red-400 border border-red-500/20"
-        }`}>
+        <div className="rounded-lg px-4 py-2 text-xs flex items-center justify-between bg-red-500/10 text-red-400 border border-red-500/20">
           <span>{uploadMsg.text}</span>
           <button onClick={() => setUploadMsg(null)}><X size={12} /></button>
         </div>
@@ -1190,29 +1179,27 @@ function BudgetMonitoringSection() {
       {loading && <div className="flex justify-center py-16"><Loader2 size={22} className="animate-spin text-gray-600" /></div>}
 
       {/* ── Empty state ── */}
-      {!loading && accounts.length === 0 && (
-        <div className="py-16 text-center space-y-3">
+      {!loading && dept && data && accounts.length === 0 && (
+        <div className="py-16 text-center space-y-2">
           <Wallet size={32} className="mx-auto text-gray-700" />
-          <p className="text-xs text-gray-600">Belum ada data budget.</p>
-          <p className="text-xs text-gray-700">
-            Klik <strong>Import Budget</strong> untuk upload data dari Oracle Budget Module, lalu{" "}
-            <strong>Import Realisasi AP</strong> untuk data AP Invoice.{" "}
-            <button onClick={() => window.open(`${BUDGET_API}/template`, "_blank")} className="text-blue-400 underline">
-              Download template
-            </button>.
+          <p className="text-xs text-gray-600">
+            Tidak ada data budget untuk department <strong className="text-gray-400">{dept}</strong> tahun {year}.
           </p>
+        </div>
+      )}
+      {!loading && !dept && (
+        <div className="py-16 text-center">
+          <p className="text-xs text-gray-600">Pilih department untuk melihat data budget.</p>
         </div>
       )}
 
       {/* ── Summary cards ── */}
       {!loading && summary && accounts.length > 0 && (
-        <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
-          <BudgetSummaryCard label="Budget"    value={fmtRp(summary.total_budget)}    color="text-blue-400"   bg="bg-blue-500/10   border-blue-500/20" />
-          <BudgetSummaryCard label="Available" value={fmtRp(summary.total_available)} color="text-sky-400"    bg="bg-sky-500/10    border-sky-500/20" />
-          <BudgetSummaryCard label="Reclass"   value={fmtRp(summary.total_reclass)}   color="text-amber-400"  bg="bg-amber-500/10  border-amber-500/20" />
-          <BudgetSummaryCard label="Total Aktual (AP)" value={fmtRp(summary.total_actual)} color="text-violet-400" bg="bg-violet-500/10 border-violet-500/20" />
+        <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
+          <BudgetSummaryCard label="Total Budget (GL)"    value={fmtRp(summary.total_budget)} color="text-blue-400"  bg="bg-blue-500/10  border-blue-500/20" />
+          <BudgetSummaryCard label="Total Realisasi (AP)" value={fmtRp(summary.total_actual)} color="text-violet-400" bg="bg-violet-500/10 border-violet-500/20" />
           <BudgetSummaryCard
-            label="Sisa (Remain)"
+            label="Sisa (Budget − Realisasi)"
             value={fmtRp(summary.total_remain)}
             color={summary.total_remain >= 0 ? "text-green-400" : "text-red-400"}
             bg={summary.total_remain >= 0 ? "bg-green-500/10 border-green-500/20" : "bg-red-500/10 border-red-500/20"}
@@ -1225,37 +1212,33 @@ function BudgetMonitoringSection() {
         <div className="rounded-lg border border-gray-800 overflow-hidden">
           {/* Header */}
           <div className="bg-gray-800/60 grid grid-cols-12 px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            <div className="col-span-3">Akun</div>
-            <div className="col-span-2 text-right">Budget</div>
-            <div className="col-span-2 text-right">Available</div>
-            <div className="col-span-1 text-right">Reclass</div>
-            <div className="col-span-2 text-right">Total Aktual</div>
-            <div className="col-span-2 text-right">Sisa (Remain)</div>
+            <div className="col-span-5">Akun</div>
+            <div className="col-span-3 text-right">Budget (GL)</div>
+            <div className="col-span-2 text-right">Realisasi (AP)</div>
+            <div className="col-span-2 text-right">Sisa</div>
           </div>
 
           {accounts.map((acc) => {
-            const isExp   = expandedCode === acc.account_code;
-            const detail  = accountDetail[`${acc.account_code}_${year}`];
+            const isExp    = expandedCode === acc.account_code;
+            const detail   = accountDetail[`${dept}_${acc.account_code}_${year}`];
             const remainOk = acc.remain >= 0;
 
             return (
               <div key={acc.account_code} className="border-t border-gray-800">
 
-                {/* Summary row — klik untuk expand detail bulanan */}
+                {/* Summary row */}
                 <button
                   className={`w-full grid grid-cols-12 px-4 py-3 text-xs text-left transition-colors hover:bg-gray-800/40 ${isExp ? "bg-gray-800/30" : ""}`}
                   onClick={() => handleExpand(acc.account_code)}
                 >
-                  <div className="col-span-3 flex items-center gap-2">
+                  <div className="col-span-5 flex items-center gap-2">
                     <ChevronDown size={12} className={`text-gray-600 shrink-0 transition-transform ${isExp ? "rotate-180" : ""}`} />
                     <div>
                       <div className="font-medium text-gray-200 leading-tight">{acc.account_name}</div>
                       <div className="text-gray-600">{acc.account_code}</div>
                     </div>
                   </div>
-                  <div className="col-span-2 text-right text-gray-400">{fmtRp(acc.budget)}</div>
-                  <div className="col-span-2 text-right text-gray-300">{fmtRp(acc.available)}</div>
-                  <div className="col-span-1 text-right text-amber-400">{fmtRp(acc.reclass)}</div>
+                  <div className="col-span-3 text-right text-blue-300">{fmtRp(acc.budget)}</div>
                   <div className="col-span-2 text-right text-violet-300">{fmtRp(acc.actual)}</div>
                   <div className={`col-span-2 text-right font-semibold ${remainOk ? "text-green-400" : "text-red-400"}`}>
                     {fmtRp(acc.remain)}
@@ -1287,10 +1270,9 @@ function BudgetMonitoringSection() {
   );
 }
 
-/* Tabel detail per bulan — mengikuti format laporan Oracle */
+/* Tabel detail per bulan — data dari Oracle GL (budget) + Oracle AP (actual items) */
 function BudgetMonthTable({ m, fmtRp, accName }) {
-  const remain   = m.available + m.reclass - m.total_actual;
-  const remainOk = remain >= 0;
+  const remainOk = m.remain >= 0;
 
   return (
     <div className="rounded-lg border border-gray-800 overflow-hidden text-xs">
@@ -1305,40 +1287,39 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
       <table className="w-full">
         <thead>
           <tr className="bg-gray-800/40 text-gray-500 uppercase tracking-wider text-xs">
-            <th className="px-3 py-2 text-left font-semibold w-1/2">Actual Expense</th>
-            <th className="px-3 py-2 text-right font-semibold">Jumlah</th>
-            <th className="px-3 py-2 text-right font-semibold">Available</th>
-            <th className="px-3 py-2 text-right font-semibold">Reclass</th>
-            <th className="px-3 py-2 text-right font-semibold">Remain</th>
-            <th className="px-3 py-2 text-left font-semibold">Note</th>
+            <th className="px-3 py-2 text-left font-semibold" style={{width:"45%"}}>Actual Expense (AP Invoice)</th>
+            <th className="px-3 py-2 text-right font-semibold">Jumlah (Rp)</th>
+            <th className="px-3 py-2 text-right font-semibold">Tanggal</th>
+            <th className="px-3 py-2 text-right font-semibold">No. Invoice</th>
+            <th className="px-3 py-2 text-right font-semibold">Sisa</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-800/60">
           {m.items.length === 0 ? (
             <tr>
-              <td colSpan={6} className="px-3 py-3 text-gray-700 italic">Belum ada data realisasi AP Invoice.</td>
+              <td colSpan={5} className="px-3 py-3 text-gray-700 italic">
+                Belum ada data AP Invoice untuk periode ini.
+              </td>
             </tr>
           ) : (
             m.items.map((item, idx) => (
               <tr key={idx} className="hover:bg-gray-800/20 transition-colors">
                 <td className="px-3 py-2 text-gray-300">{item.description}</td>
-                <td className="px-3 py-2 text-right text-gray-300 tabular-nums">{item.amount.toLocaleString("id-ID")}</td>
-                {/* Available, Reclass, Remain, Note hanya muncul di baris pertama (rowspan simulasi) */}
+                <td className="px-3 py-2 text-right text-gray-300 tabular-nums">
+                  {(item.amount || 0).toLocaleString("id-ID")}
+                </td>
+                <td className="px-3 py-2 text-right text-gray-500">{item.date || "—"}</td>
+                <td className="px-3 py-2 text-right text-gray-600">{item.invoice_num || "—"}</td>
+                {/* Sisa hanya tampil di baris pertama (rowspan) */}
                 {idx === 0 ? (
-                  <>
-                    <td className="px-3 py-2 text-right text-sky-300 tabular-nums align-top"
-                      rowSpan={m.items.length}>{fmtRp(m.available)}</td>
-                    <td className="px-3 py-2 text-right text-amber-300 tabular-nums align-top"
-                      rowSpan={m.items.length}>{fmtRp(m.reclass)}</td>
-                    <td className={`px-3 py-2 text-right tabular-nums align-top font-medium ${remainOk ? "text-green-400" : "text-red-400"}`}
-                      rowSpan={m.items.length}>
-                      <div>{fmtRp(m.available + m.reclass)} −</div>
-                      <div>{fmtRp(m.total_actual)} =</div>
-                      <div className="border-t border-gray-700 mt-1 pt-1 font-bold">{fmtRp(remain)}</div>
-                    </td>
-                    <td className="px-3 py-2 text-gray-500 align-top text-xs leading-relaxed"
-                      rowSpan={m.items.length}>{m.reclass_note || "—"}</td>
-                  </>
+                  <td className={`px-3 py-2 text-right tabular-nums align-top font-medium ${remainOk ? "text-green-400" : "text-red-400"}`}
+                    rowSpan={m.items.length}>
+                    <div className="text-gray-500 text-xs">{fmtRp(m.budget)}</div>
+                    <div className="text-gray-600 text-xs">− {fmtRp(m.total_actual)}</div>
+                    <div className={`border-t border-gray-700 mt-1 pt-1 font-bold ${remainOk ? "text-green-400" : "text-red-400"}`}>
+                      {fmtRp(m.remain)}
+                    </div>
+                  </td>
                 ) : null}
               </tr>
             ))
@@ -1346,12 +1327,14 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
 
           {/* Baris total */}
           <tr className="bg-gray-800/40 font-semibold border-t-2 border-gray-700">
-            <td className="px-3 py-2 text-gray-400 uppercase tracking-wider text-xs">Total</td>
-            <td className="px-3 py-2 text-right text-gray-200 tabular-nums">{m.total_actual.toLocaleString("id-ID")}</td>
-            <td className="px-3 py-2 text-right text-sky-300 tabular-nums">{fmtRp(m.available)}</td>
-            <td className="px-3 py-2 text-right text-amber-300 tabular-nums">{fmtRp(m.reclass)}</td>
-            <td className={`px-3 py-2 text-right tabular-nums ${remainOk ? "text-green-400" : "text-red-400"}`}>{fmtRp(remain)}</td>
-            <td />
+            <td className="px-3 py-2 text-gray-400 uppercase tracking-wider">Total Realisasi</td>
+            <td className="px-3 py-2 text-right text-violet-300 tabular-nums">
+              {m.total_actual.toLocaleString("id-ID")}
+            </td>
+            <td colSpan={2} />
+            <td className={`px-3 py-2 text-right tabular-nums font-bold ${remainOk ? "text-green-400" : "text-red-400"}`}>
+              {fmtRp(m.remain)}
+            </td>
           </tr>
         </tbody>
       </table>
