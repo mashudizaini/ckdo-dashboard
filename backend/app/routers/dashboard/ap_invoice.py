@@ -26,8 +26,7 @@ def _get_pg():
                             user=m.group(1), password=m.group(2))
 
 
-@router.on_event("startup")
-async def _create_staging_table():
+def ensure_staging_table():
     try:
         conn = _get_pg()
         cur = conn.cursor()

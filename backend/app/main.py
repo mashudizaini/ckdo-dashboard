@@ -40,6 +40,10 @@ async def lifespan(app: FastAPI):
     # Initialize Oracle Thick Mode
     init_oracle_client()
 
+    # Create AP Invoice staging table (psycopg2 sync)
+    from app.routers.dashboard.ap_invoice import ensure_staging_table
+    ensure_staging_table()
+
     yield
 
     logger.info("Shutting down CKDO Dashboard API")
