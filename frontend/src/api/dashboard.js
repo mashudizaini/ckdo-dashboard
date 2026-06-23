@@ -48,6 +48,7 @@ export const apInvoiceApi = {
   list:            ()         => api.get("/dashboard/accounting/ap-invoice/invoices"),
   get:             (id)       => api.get(`/dashboard/accounting/ap-invoice/invoices/${id}`),
   update:          (id, data) => api.put(`/dashboard/accounting/ap-invoice/invoices/${id}`, data),
+  delete:          (id)       => api.delete(`/dashboard/accounting/ap-invoice/invoices/${id}`),
   validate:        (id)       => api.post(`/dashboard/accounting/ap-invoice/validate/${id}`),
   insertInterface: (id, data) => api.post(`/dashboard/accounting/ap-invoice/insert-interface/${id}`, data),
   runImport:       (id)       => api.post(`/dashboard/accounting/ap-invoice/run-import/${id}`),

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Upload, FileText, CheckCircle, Send, Loader2, AlertTriangle,
-  RefreshCw, Eye, ChevronDown, ChevronUp, X,
+  RefreshCw, ChevronDown, ChevronUp, X, Pencil, Trash2, Save,
 } from "lucide-react";
 import { apInvoiceApi } from "@/api/dashboard";
 
@@ -37,14 +37,14 @@ function StatusPill({ status }) {
   );
 }
 
-function NeuBtn({ icon: Icon, label, color = "#2563eb", textColor = "#fff", onClick, disabled, loading }) {
+function NeuBtn({ icon: Icon, label, color = "#2563eb", textColor = "#fff", onClick, disabled, loading, small }) {
   return (
     <button onClick={onClick} disabled={disabled || loading}
       style={{
         display: "flex", alignItems: "center", gap: 6,
-        padding: "9px 18px", borderRadius: 12, border: "none",
+        padding: small ? "6px 12px" : "9px 18px", borderRadius: small ? 8 : 12, border: "none",
         background: color, color: textColor,
-        fontSize: 13, fontWeight: 700, cursor: disabled ? "not-allowed" : "pointer",
+        fontSize: small ? 11 : 13, fontWeight: 700, cursor: disabled ? "not-allowed" : "pointer",
         boxShadow: NEU.shadowBtn, opacity: disabled ? 0.5 : 1,
         transition: "all 0.18s ease",
       }}
@@ -52,9 +52,26 @@ function NeuBtn({ icon: Icon, label, color = "#2563eb", textColor = "#fff", onCl
       onMouseUp={e => e.currentTarget.style.boxShadow = NEU.shadowBtn}
       onMouseLeave={e => e.currentTarget.style.boxShadow = NEU.shadowBtn}
     >
-      {loading ? <Loader2 size={14} className="animate-spin" /> : Icon && <Icon size={14} />}
+      {loading ? <Loader2 size={small ? 12 : 14} className="animate-spin" /> : Icon && <Icon size={small ? 12 : 14} />}
       {label}
     </button>
+  );
+}
+
+function EditInput({ value, onChange, type = "text", align = "left", style: extraStyle }) {
+  return (
+    <input
+      type={type}
+      value={value ?? ""}
+      onChange={e => onChange(type === "number" ? (e.target.value === "" ? "" : Number(e.target.value)) : e.target.value)}
+      style={{
+        width: "100%", padding: "6px 10px", borderRadius: 8, border: "none",
+        background: NEU.bg, fontSize: 13, fontWeight: 600, color: "#1e293b",
+        boxShadow: "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff",
+        outline: "none", textAlign: align, boxSizing: "border-box",
+        ...extraStyle,
+      }}
+    />
   );
 }
 
@@ -92,7 +109,7 @@ export default function APAutoInvoice() {
       form.append("file", file);
       const res = await apInvoiceApi.upload(form);
       setMessage({ type: "success", text: `PDF berhasil di-extract! Invoice: ${res.preview?.invoice_num}` });
-      refresh();
+      await refresh();
       setSelectedId(res.stg_id);
       loadDetail(res.stg_id);
     } catch (e) {
@@ -110,6 +127,37 @@ export default function APAutoInvoice() {
       setSelectedId(id);
     } catch (e) {
       setMessage({ type: "error", text: "Gagal load detail" });
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm("Hapus invoice ini dari staging?")) return;
+    setActionLoading("delete");
+    try {
+      await apInvoiceApi.delete(id);
+      setMessage({ type: "success", text: "Invoice berhasil dihapus" });
+      setDetail(null);
+      setSelectedId(null);
+      await refresh();
+    } catch (e) {
+      setMessage({ type: "error", text: (e?.detail || e?.message || String(e)) });
+    } finally {
+      setActionLoading("");
+    }
+  };
+
+  const handleSave = async (id, payload) => {
+    setActionLoading("save");
+    setMessage(null);
+    try {
+      await apInvoiceApi.update(id, payload);
+      setMessage({ type: "success", text: "Data berhasil disimpan" });
+      await refresh();
+      loadDetail(id);
+    } catch (e) {
+      setMessage({ type: "error", text: (e?.detail || e?.message || String(e)) });
+    } finally {
+      setActionLoading("");
     }
   };
 
@@ -142,7 +190,7 @@ export default function APAutoInvoice() {
         res = await apInvoiceApi.runImport(id);
         setMessage({ type: "success", text: `APXIIMPT submitted (Request ID: ${res.conc_request_id})` });
       }
-      refresh();
+      await refresh();
       loadDetail(id);
     } catch (e) {
       setMessage({ type: "error", text: (e?.detail || e?.message || String(e)) });
@@ -158,7 +206,7 @@ export default function APAutoInvoice() {
         <div>
           <h2 style={{ fontSize: 18, fontWeight: 800, color: "#1e293b", margin: 0 }}>AP Autoinvoice</h2>
           <p style={{ fontSize: 12, color: "#64748b", fontWeight: 500, marginTop: 2 }}>
-            Upload PDF supplier → Extract → Validate → Import ke Oracle EBS
+            Upload PDF supplier → Extract → Review/Edit → Validate → Import ke Oracle EBS
           </p>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
@@ -190,15 +238,10 @@ export default function APAutoInvoice() {
       <div style={{ display: "flex", gap: 16 }}>
         {/* Invoice List */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            borderRadius: 18, overflow: "hidden",
-            boxShadow: NEU.shadowOut, background: NEU.bg,
-          }}>
+          <div style={{ borderRadius: 18, overflow: "hidden", boxShadow: NEU.shadowOut, background: NEU.bg }}>
             <div style={{
-              padding: "14px 18px",
-              background: "linear-gradient(135deg, #dfe5ed, #d8dee8)",
+              padding: "14px 18px", background: "linear-gradient(135deg, #dfe5ed, #d8dee8)",
               borderBottom: "2px solid rgba(0,0,0,0.06)",
-              display: "flex", alignItems: "center", justifyContent: "space-between",
             }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
                 Invoice Staging ({invoices.length})
@@ -226,9 +269,7 @@ export default function APAutoInvoice() {
                     <span style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>{inv.invoice_num}</span>
                     <StatusPill status={inv.status} />
                   </div>
-                  <div style={{ fontSize: 11.5, color: "#64748b", fontWeight: 500 }}>
-                    {inv.vendor_name}
-                  </div>
+                  <div style={{ fontSize: 11.5, color: "#64748b", fontWeight: 500 }}>{inv.vendor_name}</div>
                   <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
                     <span style={{ fontSize: 11, color: "#94a3b8" }}>{inv.invoice_date || "—"}</span>
                     <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>
@@ -244,7 +285,13 @@ export default function APAutoInvoice() {
         {/* Detail Panel */}
         <div style={{ flex: 1.5, minWidth: 0 }}>
           {detail ? (
-            <DetailPanel detail={detail} onAction={doAction} actionLoading={actionLoading} />
+            <DetailPanel
+              detail={detail}
+              onAction={doAction}
+              onDelete={handleDelete}
+              onSave={handleSave}
+              actionLoading={actionLoading}
+            />
           ) : (
             <div style={{
               borderRadius: 18, padding: "60px 20px", textAlign: "center",
@@ -261,20 +308,75 @@ export default function APAutoInvoice() {
   );
 }
 
-function DetailPanel({ detail, onAction, actionLoading }) {
+function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
   const [showLines, setShowLines] = useState(true);
-  const d = detail;
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({});
+  const [editLines, setEditLines] = useState([]);
 
-  const canValidate  = d.status === "NEW" || d.status === "ERROR";
+  const d = detail;
+  const canEdit = ["NEW", "VALIDATED", "ERROR"].includes(d.status);
+  const canValidate = d.status === "NEW" || d.status === "ERROR";
   const canInterface = d.status === "VALIDATED";
-  const canImport    = d.status === "INTERFACED";
+  const canImport = d.status === "INTERFACED";
+
+  const startEdit = () => {
+    setForm({
+      invoice_num: d.invoice_num,
+      invoice_date: d.invoice_date || "",
+      vendor_name: d.vendor_name || "",
+      po_number: d.po_number || "",
+      so_number: d.so_number || "",
+      currency_code: d.currency_code || "IDR",
+      subtotal: d.subtotal || 0,
+      tax_amount: d.tax_amount || 0,
+      invoice_amount: d.invoice_amount || 0,
+      terms_date: d.terms_date || "",
+    });
+    setEditLines((d.lines || []).map(ln => ({ ...ln })));
+    setEditing(true);
+  };
+
+  const cancelEdit = () => { setEditing(false); };
+
+  const saveEdit = () => {
+    const payload = { ...form };
+    if (editLines.length > 0) {
+      payload.lines_json = JSON.stringify(editLines);
+    }
+    onSave(d.stg_id, payload);
+    setEditing(false);
+  };
+
+  const updateLine = (idx, field, value) => {
+    setEditLines(prev => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], [field]: value };
+      return next;
+    });
+  };
+
+  const removeLine = (idx) => {
+    setEditLines(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const FIELDS = [
+    { key: "invoice_num",    label: "Invoice Number" },
+    { key: "invoice_date",   label: "Invoice Date" },
+    { key: "vendor_name",    label: "Vendor Name" },
+    { key: "po_number",      label: "PO Number" },
+    { key: "currency_code",  label: "Currency" },
+    { key: "subtotal",       label: "Subtotal", type: "number", fmt: true },
+    { key: "tax_amount",     label: "Tax", type: "number", fmt: true },
+    { key: "invoice_amount", label: "Total", type: "number", fmt: true },
+    { key: "terms_date",     label: "Terms Date" },
+  ];
 
   return (
     <div style={{ borderRadius: 18, boxShadow: NEU.shadowOut, background: NEU.bg, overflow: "hidden" }}>
       {/* Header */}
       <div style={{
-        padding: "16px 20px",
-        background: "linear-gradient(135deg, #dfe5ed, #d8dee8)",
+        padding: "16px 20px", background: "linear-gradient(135deg, #dfe5ed, #d8dee8)",
         borderBottom: "2px solid rgba(0,0,0,0.06)",
         display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
@@ -282,7 +384,15 @@ function DetailPanel({ detail, onAction, actionLoading }) {
           <div style={{ fontSize: 15, fontWeight: 800, color: "#1e293b" }}>{d.invoice_num}</div>
           <div style={{ fontSize: 12, color: "#64748b", fontWeight: 500, marginTop: 2 }}>{d.vendor_name}</div>
         </div>
-        <StatusPill status={d.status} />
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <StatusPill status={d.status} />
+          {canEdit && !editing && (
+            <>
+              <NeuBtn icon={Pencil} label="Edit" color="#e8edf5" textColor="#2563eb" onClick={startEdit} small />
+              <NeuBtn icon={Trash2} label="Hapus" color="#e8edf5" textColor="#dc2626" onClick={() => onDelete(d.stg_id)} loading={actionLoading === "delete"} small />
+            </>
+          )}
+        </div>
       </div>
 
       <div style={{ padding: 20 }}>
@@ -290,39 +400,44 @@ function DetailPanel({ detail, onAction, actionLoading }) {
         {d.error_msg && (
           <div style={{
             padding: "10px 14px", borderRadius: 12, marginBottom: 16, fontSize: 12,
-            background: "#fee2e2", color: "#dc2626", fontWeight: 600,
-            boxShadow: NEU.shadowOutSm,
+            background: "#fee2e2", color: "#dc2626", fontWeight: 600, boxShadow: NEU.shadowOutSm,
           }}>
             {d.error_msg}
           </div>
         )}
 
-        {/* Info Grid */}
+        {/* Info Grid — view or edit mode */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
-          {[
-            { label: "Invoice Date", value: d.invoice_date || "—" },
-            { label: "PO Number", value: d.po_number || "—" },
-            { label: "Currency", value: d.currency_code || "IDR" },
-            { label: "Subtotal", value: d.subtotal ? `Rp ${Number(d.subtotal).toLocaleString("id-ID")}` : "—" },
-            { label: "Tax", value: d.tax_amount ? `Rp ${Number(d.tax_amount).toLocaleString("id-ID")}` : "—" },
-            { label: "Total", value: d.invoice_amount ? `Rp ${Number(d.invoice_amount).toLocaleString("id-ID")}` : "—" },
-            { label: "Payment Terms", value: d.payment_terms || "—" },
-            { label: "Terms Date", value: d.terms_date || "—" },
-            { label: "Source File", value: d.source_file || "—" },
-          ].map((f) => (
-            <div key={f.label} style={{
+          {FIELDS.map((f) => (
+            <div key={f.key} style={{
               padding: "10px 14px", borderRadius: 14,
               background: NEU.bg, boxShadow: NEU.shadowOutSm,
             }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
                 {f.label}
               </div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b", wordBreak: "break-all" }}>
-                {f.value}
-              </div>
+              {editing ? (
+                <EditInput
+                  value={form[f.key]}
+                  onChange={v => setForm(p => ({ ...p, [f.key]: v }))}
+                  type={f.type || "text"}
+                />
+              ) : (
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b", wordBreak: "break-all" }}>
+                  {f.fmt && d[f.key] ? `Rp ${Number(d[f.key]).toLocaleString("id-ID")}` : (d[f.key] || "—")}
+                </div>
+              )}
             </div>
           ))}
         </div>
+
+        {/* Edit save/cancel bar */}
+        {editing && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            <NeuBtn icon={Save} label="Simpan" color="#059669" onClick={saveEdit} loading={actionLoading === "save"} />
+            <NeuBtn icon={X} label="Batal" color="#e8edf5" textColor="#64748b" onClick={cancelEdit} />
+          </div>
+        )}
 
         {/* Lines */}
         <div style={{ marginBottom: 16 }}>
@@ -332,14 +447,15 @@ function DetailPanel({ detail, onAction, actionLoading }) {
             color: "#374151", marginBottom: 8,
           }}>
             {showLines ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            Line Items ({d.lines?.length || 0})
+            Line Items ({editing ? editLines.length : (d.lines?.length || 0)})
           </button>
-          {showLines && d.lines?.length > 0 && (
+
+          {showLines && (editing ? editLines : d.lines)?.length > 0 && (
             <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
-                    {["#", "Description", "Qty", "Unit Price", "Amount"].map(h => (
+                    {["#", "Description", "Qty", "Unit Price", "Amount", ...(editing ? [""] : [])].map(h => (
                       <th key={h} style={{
                         padding: "10px 12px", fontSize: 11, fontWeight: 700,
                         color: "#374151", textAlign: h === "Description" ? "left" : "right",
@@ -350,17 +466,40 @@ function DetailPanel({ detail, onAction, actionLoading }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {d.lines.map((ln, i) => (
+                  {(editing ? editLines : d.lines).map((ln, i) => (
                     <tr key={i} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
-                      <td style={{ padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "#64748b", textAlign: "right" }}>{ln.line_num}</td>
-                      <td style={{ padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "#1e293b" }}>{ln.description}</td>
-                      <td style={{ padding: "8px 12px", fontSize: 12, fontWeight: 500, color: "#475569", textAlign: "right" }}>{ln.qty}</td>
-                      <td style={{ padding: "8px 12px", fontSize: 12, fontWeight: 500, color: "#475569", textAlign: "right" }}>
-                        {Number(ln.unit_price).toLocaleString("id-ID")}
+                      <td style={{ padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "#64748b", textAlign: "right", width: 40 }}>
+                        {ln.line_num}
                       </td>
-                      <td style={{ padding: "8px 12px", fontSize: 12, fontWeight: 700, color: "#1e293b", textAlign: "right" }}>
-                        {Number(ln.line_amount).toLocaleString("id-ID")}
+                      <td style={{ padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "#1e293b" }}>
+                        {editing ? (
+                          <EditInput value={ln.description} onChange={v => updateLine(i, "description", v)} />
+                        ) : ln.description}
                       </td>
+                      <td style={{ padding: "8px 12px", fontSize: 12, fontWeight: 500, color: "#475569", textAlign: "right", width: 80 }}>
+                        {editing ? (
+                          <EditInput value={ln.qty} onChange={v => updateLine(i, "qty", v)} type="number" align="right" />
+                        ) : ln.qty}
+                      </td>
+                      <td style={{ padding: "8px 12px", fontSize: 12, fontWeight: 500, color: "#475569", textAlign: "right", width: 120 }}>
+                        {editing ? (
+                          <EditInput value={ln.unit_price} onChange={v => updateLine(i, "unit_price", v)} type="number" align="right" />
+                        ) : Number(ln.unit_price).toLocaleString("id-ID")}
+                      </td>
+                      <td style={{ padding: "8px 12px", fontSize: 12, fontWeight: 700, color: "#1e293b", textAlign: "right", width: 120 }}>
+                        {editing ? (
+                          <EditInput value={ln.line_amount} onChange={v => updateLine(i, "line_amount", v)} type="number" align="right" />
+                        ) : Number(ln.line_amount).toLocaleString("id-ID")}
+                      </td>
+                      {editing && (
+                        <td style={{ padding: "8px 6px", textAlign: "center", width: 36 }}>
+                          <button onClick={() => removeLine(i)} style={{
+                            background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4,
+                          }} title="Hapus baris">
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -370,31 +509,32 @@ function DetailPanel({ detail, onAction, actionLoading }) {
         </div>
 
         {/* Actions */}
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {canValidate && (
-            <NeuBtn icon={CheckCircle} label="Validate" color="#059669"
-              onClick={() => onAction("validate", d.stg_id)} loading={actionLoading === "validate"} />
-          )}
-          {canInterface && (
-            <NeuBtn icon={Send} label="Insert to Interface" color="#4f46e5"
-              onClick={() => onAction("interface", d.stg_id)} loading={actionLoading === "interface"} />
-          )}
-          {canImport && (
-            <NeuBtn icon={Send} label="Run APXIIMPT" color="#be185d"
-              onClick={() => onAction("import", d.stg_id)} loading={actionLoading === "import"} />
-          )}
-          {d.status === "IMPORTED" && (
-            <div style={{
-              display: "flex", alignItems: "center", gap: 6,
-              padding: "8px 14px", borderRadius: 12, fontSize: 12, fontWeight: 700,
-              background: "#d1fae5", color: "#047857",
-              boxShadow: NEU.shadowOutSm,
-            }}>
-              <CheckCircle size={14} /> Invoice berhasil di-import ke EBS
-              {d.ap_invoice_id && <span>(ID: {d.ap_invoice_id})</span>}
-            </div>
-          )}
-        </div>
+        {!editing && (
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {canValidate && (
+              <NeuBtn icon={CheckCircle} label="Validate" color="#059669"
+                onClick={() => onAction("validate", d.stg_id)} loading={actionLoading === "validate"} />
+            )}
+            {canInterface && (
+              <NeuBtn icon={Send} label="Insert to Interface" color="#4f46e5"
+                onClick={() => onAction("interface", d.stg_id)} loading={actionLoading === "interface"} />
+            )}
+            {canImport && (
+              <NeuBtn icon={Send} label="Run APXIIMPT" color="#be185d"
+                onClick={() => onAction("import", d.stg_id)} loading={actionLoading === "import"} />
+            )}
+            {d.status === "IMPORTED" && (
+              <div style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "8px 14px", borderRadius: 12, fontSize: 12, fontWeight: 700,
+                background: "#d1fae5", color: "#047857", boxShadow: NEU.shadowOutSm,
+              }}>
+                <CheckCircle size={14} /> Invoice berhasil di-import ke EBS
+                {d.ap_invoice_id && <span>(ID: {d.ap_invoice_id})</span>}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

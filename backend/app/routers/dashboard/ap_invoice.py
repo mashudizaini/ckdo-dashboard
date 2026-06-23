@@ -211,3 +211,28 @@ async def update_invoice(stg_id: int, payload: dict):
     pg.commit()
     pg.close()
     return {"message": "Updated", "stg_id": stg_id}
+
+
+@router.delete("/invoices/{stg_id}")
+async def delete_invoice(stg_id: int):
+    pg = _get_pg()
+    cur = pg.cursor()
+    cur.execute("SELECT status, source_file FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
+    row = cur.fetchone()
+    if not row:
+        pg.close()
+        raise HTTPException(404, "Invoice tidak ditemukan")
+    if row[0] not in ("NEW", "VALIDATED", "ERROR"):
+        pg.close()
+        raise HTTPException(409, f"Tidak bisa dihapus, status: '{row[0]}'")
+
+    cur.execute("DELETE FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
+    pg.commit()
+    pg.close()
+
+    if row[1]:
+        filepath = os.path.join(svc.UPLOAD_DIR, row[1])
+        if os.path.exists(filepath):
+            os.remove(filepath)
+
+    return {"message": "Deleted", "stg_id": stg_id}
