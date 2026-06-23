@@ -261,11 +261,17 @@ function ConfigModal({ initial, onClose, onSaved, onTest, testResult }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-full max-w-md rounded-xl border border-gray-700 bg-gray-900 shadow-2xl">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
-          <h3 className="text-sm font-semibold text-gray-200">SSH Server Configuration</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors">
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.3)", backdropFilter: "blur(4px)" }}>
+      <div style={{
+        width: "100%", maxWidth: 420, borderRadius: 20,
+        background: "#e8edf5",
+        boxShadow: "10px 10px 30px #b0b5c3, -10px -10px 30px #ffffff",
+      }}>
+        <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: "#1e293b" }}>SSH Server Configuration</h3>
+          <button onClick={onClose} style={{ color: "#94a3b8", transition: "color 0.15s" }}
+            onMouseEnter={e => e.currentTarget.style.color = "#1e293b"}
+            onMouseLeave={e => e.currentTarget.style.color = "#94a3b8"}>
             <X size={16} />
           </button>
         </div>
@@ -296,7 +302,7 @@ function ConfigModal({ initial, onClose, onSaved, onTest, testResult }) {
           )}
         </div>
 
-        <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-800">
+        <div className="flex justify-end gap-2 px-5 py-4" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
           <ActionBtn
             icon={testing ? Loader2 : Wifi}
             label={testing ? "Testing..." : "Test Connection"}
@@ -331,13 +337,22 @@ function Field({ label, children }) {
 function MiniChart({ title, data, dataKey, color, domain }) {
   return (
     <div>
-      <p className="text-sm font-medium text-gray-300 mb-2">{title}</p>
+      <p style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>{title}</p>
       {data.length === 0 ? (
-        <div className="h-20 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center">
-          <span className="text-xs text-gray-600">Start monitoring untuk melihat grafik</span>
+        <div style={{
+          height: 80, borderRadius: 14,
+          background: "#e8edf5",
+          boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>Start monitoring untuk melihat grafik</span>
         </div>
       ) : (
-        <div className="h-20 rounded-lg bg-gray-800 border border-gray-700 overflow-hidden">
+        <div style={{
+          height: 80, borderRadius: 14, overflow: "hidden",
+          background: "#e8edf5",
+          boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+        }}>
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -30 }}>
               <defs>
@@ -420,7 +435,7 @@ function TablespaceSection() {
               margin={{ top: 4, right: 48, bottom: 4, left: 8 }}
             >
               <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: "#6b7280" }} tickFormatter={(v) => `${v}%`} />
-              <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 10, fill: "#d1d5db" }} />
+              <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 10, fill: "#475569" }} />
               <Tooltip
                 formatter={(v) => [`${v}%`, "Usage"]}
                 contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 6, fontSize: 11, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
@@ -558,8 +573,12 @@ function DiskUsageSection() {
         <div className="space-y-4">
           {/* Bar chart */}
           {chartData.length > 0 && (
-            <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-4">
-              <p className="text-xs font-medium mb-3" style={{ color: "var(--text-secondary, #9ca3af)" }}>
+            <div style={{
+              borderRadius: 16, padding: 16,
+              background: "#e8edf5",
+              boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+            }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 12 }}>
                 {DISK_SERVERS_CFG.find(s => s.key === activeTab)?.label} — Disk Usage per Mount Point (GB)
               </p>
               <ResponsiveContainer width="100%" height={Math.max(180, chartData.length * 40)}>
@@ -568,7 +587,7 @@ function DiskUsageSection() {
                   <XAxis type="number" tick={{ fill: "#9ca3af", fontSize: 10 }}
                     tickFormatter={v => `${v}G`} />
                   <YAxis type="category" dataKey="name" width={130}
-                    tick={{ fill: "#d1d5db", fontSize: 10 }} />
+                    tick={{ fill: "#475569", fontSize: 10 }} />
                   <Tooltip
                     contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, fontSize: 12, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
                     formatter={(v, name) => [`${v} GB`, name === "used" ? "Used" : "Free"]}
@@ -579,12 +598,12 @@ function DiskUsageSection() {
                     ))}
                     <LabelList dataKey="pct" position="right"
                       formatter={v => `${v}%`}
-                      style={{ fill: "#d1d5db", fontSize: 10, fontWeight: 600 }} />
+                      style={{ fill: "#475569", fontSize: 10, fontWeight: 600 }} />
                   </Bar>
-                  <Bar dataKey="free" name="free" stackId="d" fill="#374151" radius={[0,4,4,0]} />
+                  <Bar dataKey="free" name="free" stackId="d" fill="#cbd5e1" radius={[0,4,4,0]} />
                 </BarChart>
               </ResponsiveContainer>
-              <div className="flex items-center gap-4 mt-3 justify-center text-xs" style={{ color: "var(--text-secondary, #9ca3af)" }}>
+              <div className="flex items-center gap-4 mt-3 justify-center text-xs" style={{ color: "#64748b", fontWeight: 500 }}>
                 <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm inline-block" style={{background:"#34d399"}}/>Normal &lt;70%</span>
                 <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm inline-block" style={{background:"#fbbf24"}}/>Warning 70–90%</span>
                 <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-sm inline-block" style={{background:"#f87171"}}/>Critical ≥90%</span>
@@ -593,20 +612,28 @@ function DiskUsageSection() {
           )}
 
           {/* Detail table */}
-          <div className="rounded-lg border border-gray-700 overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-gray-700 bg-gray-800/50">
-              <span className="text-xs font-medium" style={{ color: "var(--text-secondary, #9ca3af)" }}>
+          <div style={{
+            borderRadius: 16, overflow: "hidden",
+            boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+          }}>
+            <div style={{
+              padding: "10px 16px",
+              background: "linear-gradient(135deg, #dfe5ed, #d8dee8)",
+              borderBottom: "2px solid rgba(0,0,0,0.06)",
+            }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#475569" }}>
                 {rows.length} mount points · {active.label} ({active.ip})
               </span>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr style={{ background: "rgba(55,65,81,0.6)" }}>
+                  <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
                     {["Mount Point","Filesystem","Used (GB)","Free (GB)","Total (GB)","Usage %","Status"].map(h => (
-                      <th key={h} style={{ color: "#9ca3af", fontSize: 11, fontWeight: 600, padding: "10px 12px",
+                      <th key={h} style={{ color: "#374151", fontSize: 11, fontWeight: 700, padding: "12px 14px",
                         textAlign: h.includes("GB") || h === "Usage %" ? "right" : "left",
-                        textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>
+                        textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap",
+                        borderBottom: "2px solid rgba(0,0,0,0.06)" }}>
                         {h}
                       </th>
                     ))}
@@ -614,17 +641,22 @@ function DiskUsageSection() {
                 </thead>
                 <tbody>
                   {rows.length === 0 ? (
-                    <tr><td colSpan={7} style={{ padding: "32px 12px", textAlign: "center", color: "#6b7280", fontSize: 12 }}>No mount points found</td></tr>
+                    <tr><td colSpan={7} style={{ padding: "40px 14px", textAlign: "center", color: "#94a3b8", fontSize: 12 }}>No mount points found</td></tr>
                   ) : rows.map((r, i) => (
-                    <tr key={i} style={{ borderTop: "1px solid rgba(55,65,81,0.6)" }}
-                      className="hover:bg-gray-800/30 transition-colors">
-                      <td style={{ padding: "10px 12px", color: "#e5e7eb", fontFamily: "monospace", fontWeight: 600, fontSize: 12 }}>{r.mountpoint}</td>
-                      <td style={{ padding: "10px 12px", color: "#9ca3af", fontFamily: "monospace", fontSize: 11, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.filesystem}>{r.filesystem}</td>
-                      <td style={{ padding: "10px 12px", textAlign: "right", color: "#d1d5db", fontSize: 12 }}>{r.used_gb}</td>
-                      <td style={{ padding: "10px 12px", textAlign: "right", color: "#9ca3af", fontSize: 12 }}>{r.free_gb}</td>
-                      <td style={{ padding: "10px 12px", textAlign: "right", color: "#9ca3af", fontSize: 12 }}>{r.total_gb}</td>
-                      <td style={{ padding: "10px 12px", textAlign: "right" }}><UsageBar pct={r.usage_percent} /></td>
-                      <td style={{ padding: "10px 12px" }}><StatusBadge pct={r.usage_percent} /></td>
+                    <tr key={i} style={{
+                      background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5",
+                      transition: "background 0.15s ease",
+                    }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(37,99,235,0.06)"}
+                      onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f0f3f9" : "#e8edf5"}
+                    >
+                      <td style={{ padding: "10px 14px", color: "#1e293b", fontFamily: "monospace", fontWeight: 700, fontSize: 12.5 }}>{r.mountpoint}</td>
+                      <td style={{ padding: "10px 14px", color: "#64748b", fontFamily: "monospace", fontSize: 11.5, fontWeight: 500, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.filesystem}>{r.filesystem}</td>
+                      <td style={{ padding: "10px 14px", textAlign: "right", color: "#334155", fontSize: 12.5, fontWeight: 600 }}>{r.used_gb}</td>
+                      <td style={{ padding: "10px 14px", textAlign: "right", color: "#64748b", fontSize: 12.5, fontWeight: 500 }}>{r.free_gb}</td>
+                      <td style={{ padding: "10px 14px", textAlign: "right", color: "#64748b", fontSize: 12.5, fontWeight: 500 }}>{r.total_gb}</td>
+                      <td style={{ padding: "10px 14px", textAlign: "right" }}><UsageBar pct={r.usage_percent} /></td>
+                      <td style={{ padding: "10px 14px" }}><StatusBadge pct={r.usage_percent} /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -708,15 +740,19 @@ function WorkflowErrorSection() {
 
 function SectionCard({ title, subtitle, action, children }) {
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-900">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+    <div style={{
+      background: "#e8edf5",
+      borderRadius: 20,
+      boxShadow: "6px 6px 14px #c5cad8, -6px -6px 14px #ffffff",
+    }}>
+      <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
         <div>
-          <h3 className="text-sm font-semibold text-gray-200">{title}</h3>
-          {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: "#1e293b", letterSpacing: "0.01em" }}>{title}</h3>
+          {subtitle && <p style={{ fontSize: 12, color: "#64748b", marginTop: 2, fontWeight: 500 }}>{subtitle}</p>}
         </div>
         <div className="flex gap-2">{action}</div>
       </div>
-      <div className="p-5">{children}</div>
+      <div className="p-6">{children}</div>
     </div>
   );
 }
@@ -725,7 +761,11 @@ function ActionBtn({ icon: Icon, label, color, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-white transition-colors ${color}`}
+      className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs text-white transition-all ${color}`}
+      style={{ fontWeight: 700, letterSpacing: "0.02em", boxShadow: "3px 3px 6px #c5cad8, -2px -2px 4px #ffffff" }}
+      onMouseDown={e => e.currentTarget.style.boxShadow = "inset 2px 2px 4px rgba(0,0,0,0.15)"}
+      onMouseUp={e => e.currentTarget.style.boxShadow = "3px 3px 6px #c5cad8, -2px -2px 4px #ffffff"}
+      onMouseLeave={e => e.currentTarget.style.boxShadow = "3px 3px 6px #c5cad8, -2px -2px 4px #ffffff"}
     >
       <Icon size={13} />{label}
     </button>
@@ -734,30 +774,44 @@ function ActionBtn({ icon: Icon, label, color, onClick }) {
 
 function MetricCard({ label, value, sub, gradient }) {
   return (
-    <div className={`rounded-xl bg-gradient-to-br ${gradient} p-5 text-white text-center`}>
-      <p className="text-xs opacity-80 mb-2">{label}</p>
-      <p className="text-2xl font-bold">{value}</p>
-      {sub && <p className="text-xs opacity-70 mt-1">{sub}</p>}
+    <div className={`rounded-xl bg-gradient-to-br ${gradient} p-5 text-center`}
+      style={{ color: "#ffffff", boxShadow: "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff", borderRadius: 16 }}>
+      <p style={{ fontSize: 11, fontWeight: 600, opacity: 0.9, marginBottom: 6 }}>{label}</p>
+      <p style={{ fontSize: 24, fontWeight: 800 }}>{value}</p>
+      {sub && <p style={{ fontSize: 11, opacity: 0.8, marginTop: 4, fontWeight: 500 }}>{sub}</p>}
     </div>
   );
 }
 
 function ChartPlaceholder({ label, className = "" }) {
   return (
-    <div className={`h-28 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center ${className}`}>
-      <span className="text-xs text-gray-600">{label}</span>
+    <div className={className} style={{
+      height: 112, borderRadius: 14,
+      background: "#e8edf5",
+      boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>{label}</span>
     </div>
   );
 }
 
 function DataTable({ headers, rows = [], placeholder }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-800">
+    <div style={{
+      borderRadius: 16,
+      boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+      overflow: "hidden",
+    }}>
       <table className="w-full text-sm">
         <thead>
-          <tr className="bg-gray-800/60">
+          <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
             {headers.map((h) => (
-              <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+              <th key={h} style={{
+                padding: "12px 14px", textAlign: "left", fontSize: 11, fontWeight: 700,
+                color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em",
+                whiteSpace: "nowrap", borderBottom: "2px solid rgba(0,0,0,0.06)",
+              }}>
                 {h}
               </th>
             ))}
@@ -766,15 +820,25 @@ function DataTable({ headers, rows = [], placeholder }) {
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={headers.length} className="px-3 py-10 text-center text-xs text-gray-600">
+              <td colSpan={headers.length} style={{ padding: "40px 14px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
                 {placeholder}
               </td>
             </tr>
           ) : (
             rows.map((row, i) => (
-              <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
+              <tr key={i} style={{
+                background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5",
+                transition: "background 0.15s ease",
+              }}
+                onMouseEnter={e => e.currentTarget.style.background = "rgba(37,99,235,0.06)"}
+                onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f0f3f9" : "#e8edf5"}
+              >
                 {row.map((cell, j) => (
-                  <td key={j} className="px-3 py-2.5 text-xs text-gray-300 whitespace-nowrap">
+                  <td key={j} style={{
+                    padding: "10px 14px", fontSize: 12.5, color: "#334155",
+                    fontWeight: 500, whiteSpace: "nowrap",
+                    borderBottom: "1px solid rgba(0,0,0,0.04)",
+                  }}>
                     {cell}
                   </td>
                 ))}
@@ -788,13 +852,17 @@ function DataTable({ headers, rows = [], placeholder }) {
 }
 
 function UsageBar({ pct }) {
-  const color = pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-green-500";
+  const barColor = pct >= 90 ? "#ef4444" : pct >= 70 ? "#f59e0b" : "#22c55e";
   return (
-    <div className="flex items-center gap-2">
-      <div className="w-20 h-1.5 rounded-full bg-gray-700">
-        <div className={`h-1.5 rounded-full ${color}`} style={{ width: `${pct}%` }} />
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{
+        width: 80, height: 7, borderRadius: 99,
+        background: "#e8edf5",
+        boxShadow: "inset 2px 2px 4px #c5cad8, inset -2px -2px 4px #ffffff",
+      }}>
+        <div style={{ height: "100%", width: `${pct}%`, borderRadius: 99, background: barColor, transition: "width 0.3s ease" }} />
       </div>
-      <span className="text-xs">{pct}%</span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: "#334155" }}>{pct}%</span>
     </div>
   );
 }

@@ -6,6 +6,7 @@
   html {
     background-color: var(--bg-main, #e8edf5);
     color: var(--text-primary, #1e293b);
+    font-family: 'Inter', 'Segoe UI', -apple-system, sans-serif;
   }
   * { border-color: var(--border, rgba(0,0,0,0.06)); }
   ::-webkit-scrollbar { width: 5px; }
@@ -15,98 +16,190 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   LIGHT PORTAL STYLE — Clean white cards with subtle shadows
+   NEUMORPHIC PORTAL STYLE — 3D raised cards on #e8edf5 base
+   Shadow: 6px 6px 14px #c5cad8, -6px -6px 14px #ffffff
+   Matching Application Center visual language
 ═══════════════════════════════════════════════════════════════ */
 
-/* ── Card utama (bg-gray-900) — white elevated card ── */
+/* ── Card utama (bg-gray-900) — 3D neumorphic raised ── */
 .bg-gray-900 {
   background-color: var(--bg-card) !important;
   box-shadow: var(--card-shadow) !important;
   border: none !important;
-  border-radius: 16px !important;
+  border-radius: 20px !important;
 }
 
-/* ── Card dalam / section (bg-gray-800) ── */
+/* ── Card dalam / section (bg-gray-800) — inset neumorphic ── */
 .bg-gray-800 {
-  background-color: var(--bg-card2) !important;
-  border-radius: 12px !important;
-  border: 1px solid var(--border) !important;
+  background-color: var(--bg-card) !important;
+  box-shadow: var(--card-shadow-in) !important;
+  border: none !important;
+  border-radius: 14px !important;
 }
 
 /* ── Background terdalam ── */
-.bg-gray-950 { background-color: var(--bg-card3) !important; border-radius: 12px !important; }
-.bg-gray-700  { background-color: var(--bg-card3) !important; }
+.bg-gray-950 {
+  background-color: var(--bg-card3) !important;
+  border-radius: 12px !important;
+  box-shadow: inset 2px 2px 6px var(--shadow-dark), inset -2px -2px 6px var(--shadow-light) !important;
+  border: none !important;
+}
+.bg-gray-700 {
+  background-color: var(--bg-card3) !important;
+  box-shadow: inset 2px 2px 6px var(--shadow-dark), inset -2px -2px 6px var(--shadow-light) !important;
+  border: none !important;
+}
 .bg-gray-600  { background-color: var(--bg-card2) !important; }
 
 /* ── Hover states ── */
 .hover\:bg-gray-900:hover {
   background-color: var(--bg-card-hover) !important;
-  box-shadow: var(--card-shadow-hover, var(--card-shadow)) !important;
-  transition: all 0.2s ease;
+  box-shadow: var(--card-shadow-hover) !important;
+  transition: all 0.25s ease;
 }
-.hover\:bg-gray-800:hover     { background-color: var(--bg-card2) !important; }
-.bg-gray-800\/60              { background-color: rgba(241,245,249,0.7) !important; }
-.hover\:bg-gray-800\/60:hover { background-color: rgba(241,245,249,0.9) !important; }
+.hover\:bg-gray-800:hover {
+  background-color: var(--bg-card2) !important;
+}
+.bg-gray-800\/60 {
+  background-color: var(--bg-card) !important;
+  box-shadow: 3px 3px 8px var(--shadow-dark), -3px -3px 8px var(--shadow-light) !important;
+  border: none !important;
+  border-radius: 12px !important;
+}
+.hover\:bg-gray-800\/60:hover {
+  background-color: var(--bg-card-hover) !important;
+  box-shadow: inset 3px 3px 8px var(--shadow-dark), inset -3px -3px 8px var(--shadow-light) !important;
+}
+.bg-gray-800\/50 {
+  background-color: var(--bg-card) !important;
+  box-shadow: inset 3px 3px 8px var(--shadow-dark), inset -3px -3px 8px var(--shadow-light) !important;
+  border: none !important;
+  border-radius: 12px !important;
+}
+.bg-gray-800\/40 {
+  background-color: var(--bg-card) !important;
+  box-shadow: inset 3px 3px 8px var(--shadow-dark), inset -3px -3px 8px var(--shadow-light) !important;
+  border: none !important;
+  border-radius: 12px !important;
+}
+.bg-gray-800\/90 {
+  background-color: var(--bg-card) !important;
+}
 
-/* ── Borders ── */
-.border-gray-800  { border-color: var(--border)  !important; }
-.border-gray-700  { border-color: var(--border2) !important; }
-.border-gray-600  { border-color: rgba(0,0,0,0.12) !important; }
-.hover\:border-gray-700:hover { border-color: var(--border2) !important; }
-.hover\:border-gray-600:hover { border-color: var(--accent)  !important; }
+/* ── Borders — transparent in neumorphic (shadow does the job) ── */
+.border-gray-800  { border-color: transparent !important; }
+.border-gray-700  { border-color: transparent !important; }
+.border-gray-600  { border-color: rgba(0,0,0,0.08) !important; }
+.hover\:border-gray-700:hover { border-color: rgba(0,0,0,0.06) !important; }
+.hover\:border-gray-600:hover { border-color: var(--accent) !important; }
 
-/* ── Text ── */
-.text-white     { color: #1e293b !important; }
-.text-gray-100  { color: var(--text-primary)   !important; }
-.text-gray-200  { color: #1f2937 !important; }
-.text-gray-300  { color: var(--text-secondary) !important; }
-.text-gray-400  { color: var(--text-muted)     !important; }
-.text-gray-500  { color: #9ca3af !important; }
-.text-gray-600  { color: rgba(100,116,139,0.7) !important; }
+/* ── Text — bold & alive ── */
+.text-white     { color: #1e293b !important; font-weight: 600; }
+.text-gray-100  { color: #1e293b !important; }
+.text-gray-200  { color: #1e293b !important; font-weight: 600; }
+.text-gray-300  { color: #374151 !important; font-weight: 500; }
+.text-gray-400  { color: #64748b !important; font-weight: 500; }
+.text-gray-500  { color: #64748b !important; }
+.text-gray-600  { color: #94a3b8 !important; }
 
 /* ── Dividers ── */
-.divide-gray-800 > * + * { border-color: var(--border)  !important; }
-.divide-gray-700 > * + * { border-color: var(--border2) !important; }
+.divide-gray-800 > * + * { border-color: rgba(0,0,0,0.06) !important; }
+.divide-gray-700 > * + * { border-color: rgba(0,0,0,0.08) !important; }
 
 /* ── Ring ── */
-.ring-gray-800 { --tw-ring-color: var(--border)  !important; }
-.ring-gray-700 { --tw-ring-color: var(--border2) !important; }
+.ring-gray-800 { --tw-ring-color: transparent !important; }
+.ring-gray-700 { --tw-ring-color: transparent !important; }
 
-/* ── Tab aktif — accent ring ── */
+/* ── Tab aktif — accent glow ── */
 .ring-1.ring-inset {
-  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb, 37,99,235), 0.25) !important;
+  box-shadow: inset 0 0 0 1.5px rgba(var(--accent-rgb, 37,99,235), 0.3),
+              3px 3px 8px var(--shadow-dark), -3px -3px 8px var(--shadow-light) !important;
 }
 
 /* ── Colored badge backgrounds ── */
-.bg-blue-500\/10   { background-color: rgba(var(--accent-rgb,37,99,235), 0.08) !important; }
-.bg-green-500\/10  { background-color: rgba(16,185,129,0.08) !important; }
-.bg-red-500\/10    { background-color: rgba(239,68,68,0.08)  !important; }
-.bg-yellow-500\/10 { background-color: rgba(234,179,8,0.08)  !important; }
-.bg-orange-500\/10 { background-color: rgba(249,115,22,0.08) !important; }
-.bg-purple-500\/10 { background-color: rgba(168,85,247,0.08) !important; }
+.bg-blue-500\/10   { background-color: rgba(var(--accent-rgb,37,99,235), 0.1) !important; }
+.bg-green-500\/10  { background-color: rgba(16,185,129,0.1) !important; }
+.bg-red-500\/10    { background-color: rgba(239,68,68,0.1)  !important; }
+.bg-yellow-500\/10 { background-color: rgba(234,179,8,0.1)  !important; }
+.bg-orange-500\/10 { background-color: rgba(249,115,22,0.1) !important; }
+.bg-purple-500\/10 { background-color: rgba(168,85,247,0.1) !important; }
 
-/* ── Table rows ── */
-tr:hover td { background-color: #f8fafc !important; transition: background 0.15s; }
+/* ═══════════════════════════════════════════════════════════════
+   TABLE STYLING — Alternating rows, bold headers, clean look
+═══════════════════════════════════════════════════════════════ */
+
+table {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+}
+
+thead tr {
+  background: linear-gradient(135deg, #e2e8f0, #dfe5ed) !important;
+}
+thead th {
+  color: #374151 !important;
+  font-weight: 700 !important;
+  font-size: 11px !important;
+  letter-spacing: 0.06em !important;
+  text-transform: uppercase !important;
+  padding: 12px 14px !important;
+  white-space: nowrap !important;
+  border-bottom: 2px solid rgba(0,0,0,0.06) !important;
+}
+
+tbody tr:nth-child(odd) {
+  background-color: #f0f3f9 !important;
+}
+tbody tr:nth-child(even) {
+  background-color: #e8edf5 !important;
+}
+tbody tr:hover td {
+  background-color: rgba(37,99,235,0.06) !important;
+  transition: background 0.15s ease;
+}
+tbody td {
+  padding: 10px 14px !important;
+  font-size: 12.5px !important;
+  color: #334155 !important;
+  font-weight: 500 !important;
+  border-bottom: 1px solid rgba(0,0,0,0.04) !important;
+}
 
 /* ── Recharts tooltip ── */
 .recharts-tooltip-wrapper .recharts-default-tooltip {
-  background-color: #ffffff !important;
-  border: 1px solid var(--border2) !important;
-  border-radius: 10px !important;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.1) !important;
+  background-color: var(--bg-card) !important;
+  border: none !important;
+  border-radius: 12px !important;
+  box-shadow: 4px 4px 10px var(--shadow-dark), -4px -4px 10px var(--shadow-light) !important;
   color: var(--text-primary) !important;
+  font-weight: 500 !important;
 }
 
-/* ── Input/select ── */
+/* ── Input/select — neumorphic inset ── */
 input, select, textarea {
-  background-color: #ffffff !important;
+  background-color: var(--bg-card) !important;
   color: var(--text-primary) !important;
-  border: 1px solid rgba(0,0,0,0.1) !important;
-  border-radius: 8px !important;
+  border: none !important;
+  border-radius: 10px !important;
+  box-shadow: inset 3px 3px 6px var(--shadow-dark), inset -3px -3px 6px var(--shadow-light) !important;
+  font-weight: 500 !important;
 }
 input::placeholder, textarea::placeholder { color: var(--text-muted) !important; }
 input:focus, select:focus, textarea:focus {
-  border-color: var(--accent) !important;
   outline: none !important;
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12) !important;
+  box-shadow: inset 3px 3px 6px var(--shadow-dark), inset -3px -3px 6px var(--shadow-light),
+              0 0 0 2px rgba(var(--accent-rgb), 0.25) !important;
+}
+
+/* ── Table container — neumorphic inset ── */
+.overflow-x-auto {
+  border-radius: 14px !important;
+}
+
+/* ── Rounded table wrapper borders ── */
+.rounded-lg.border {
+  border: none !important;
+  box-shadow: inset 3px 3px 8px var(--shadow-dark), inset -3px -3px 8px var(--shadow-light) !important;
+  border-radius: 14px !important;
+  overflow: hidden;
 }

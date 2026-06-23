@@ -1,8 +1,7 @@
 /**
  * CKDO Dashboard — Single Light Neumorphic Theme
  * Mengikuti style Application Center / App Portal.
- * Background putih susu, efek 3D, aksen biru.
- * Tidak ada random theme switching.
+ * Background putih susu, efek 3D neumorphic, aksen biru.
  */
 
 const NEU_BG      = "#e8edf5";
@@ -39,10 +38,10 @@ export const THEME = {
   logoFilter: "none",
   vars: {
     "--bg-main": NEU_BG,
-    "--bg-card": "#ffffff",
+    "--bg-card": NEU_BG,
     "--bg-card2": "#f1f5f9",
     "--bg-card3": "#e2e8f0",
-    "--bg-card-hover": "#f8fafc",
+    "--bg-card-hover": "#edf1f8",
     "--text-primary": "#1e293b",
     "--text-secondary": "#475569",
     "--text-muted": "#94a3b8",
@@ -53,13 +52,12 @@ export const THEME = {
     "--accent-rgb": ACCENT_RGB,
     "--shadow-dark": SHADOW_DARK,
     "--shadow-light": SHADOW_LIGHT,
-    "--card-shadow": `0 2px 8px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.04)`,
-    "--card-shadow-hover": `0 4px 12px rgba(0,0,0,0.08), 0 12px 32px rgba(0,0,0,0.06)`,
-    "--card-shadow-in": `inset 3px 3px 8px ${SHADOW_DARK}, inset -3px -3px 8px ${SHADOW_LIGHT}`,
+    "--card-shadow": `6px 6px 14px ${SHADOW_DARK}, -6px -6px 14px ${SHADOW_LIGHT}`,
+    "--card-shadow-hover": `8px 8px 18px ${SHADOW_DARK}, -8px -8px 18px ${SHADOW_LIGHT}`,
+    "--card-shadow-in": `inset 4px 4px 10px ${SHADOW_DARK}, inset -4px -4px 10px ${SHADOW_LIGHT}`,
     "--scrollbar-track": "#f1f5f9",
     "--scrollbar-thumb": ACCENT,
   },
 };
 
-// Keep THEMES array for backward compatibility but with single theme
 export const THEMES = [THEME];
