@@ -53,34 +53,34 @@ const STATUS_LABEL = {
 };
 
 const S = {
-  page:      { padding: "28px 32px", color: "#e2e8f0", fontFamily: "'DM Sans','Segoe UI',sans-serif", maxWidth: 860 },
+  page:      { padding: "28px 32px", color: "#1e293b", fontFamily: "'DM Sans','Segoe UI',sans-serif", maxWidth: 860 },
   header:    { display: "flex", alignItems: "center", gap: 12, marginBottom: 28 },
-  iconBox:   { width: 40, height: 40, borderRadius: 10, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center" },
-  title:     { fontSize: 20, fontWeight: 700, color: "#f1f5f9", margin: 0 },
+  iconBox:   { width: 40, height: 40, borderRadius: 10, background: "linear-gradient(135deg,#2563eb,#3b82f6)", display: "flex", alignItems: "center", justifyContent: "center" },
+  title:     { fontSize: 20, fontWeight: 700, color: "#1e293b", margin: 0 },
   subtitle:  { fontSize: 13, color: "#64748b", margin: 0 },
-  card:      { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: "24px 28px", marginBottom: 20 },
-  cardTitle: { fontSize: 13, fontWeight: 600, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 18 },
+  card:      { background: "#ffffff", border: "1px solid rgba(0,0,0,0.06)", borderRadius: 14, padding: "24px 28px", marginBottom: 20, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" },
+  cardTitle: { fontSize: 13, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 18 },
   grid2:     { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 },
-  label:     { fontSize: 12, color: "#94a3b8", marginBottom: 6, display: "block", fontWeight: 500 },
-  input:     { width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "10px 14px", color: "#f1f5f9", fontSize: 14, outline: "none", boxSizing: "border-box" },
-  textarea:  { width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "10px 14px", color: "#f1f5f9", fontSize: 12, outline: "none", boxSizing: "border-box", resize: "vertical", fontFamily: "'Fira Code','Courier New',monospace", lineHeight: 1.6 },
-  select:    { width: "100%", background: "#1e1e2e", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "10px 14px", color: "#f1f5f9", fontSize: 14, outline: "none", boxSizing: "border-box", cursor: "pointer" },
-  btnPrimary:  { display: "flex", alignItems: "center", gap: 8, padding: "11px 22px", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", border: "none", borderRadius: 9, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" },
+  label:     { fontSize: 12, color: "#64748b", marginBottom: 6, display: "block", fontWeight: 500 },
+  input:     { width: "100%", background: "#f8fafc", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 8, padding: "10px 14px", color: "#1e293b", fontSize: 14, outline: "none", boxSizing: "border-box" },
+  textarea:  { width: "100%", background: "#f8fafc", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 8, padding: "10px 14px", color: "#1e293b", fontSize: 12, outline: "none", boxSizing: "border-box", resize: "vertical", fontFamily: "'Fira Code','Courier New',monospace", lineHeight: 1.6 },
+  select:    { width: "100%", background: "#f8fafc", border: "1px solid rgba(0,0,0,0.1)", borderRadius: 8, padding: "10px 14px", color: "#1e293b", fontSize: 14, outline: "none", boxSizing: "border-box", cursor: "pointer" },
+  btnPrimary:  { display: "flex", alignItems: "center", gap: 8, padding: "11px 22px", background: "linear-gradient(135deg,#2563eb,#3b82f6)", border: "none", borderRadius: 9, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" },
   btnGreen:    { display: "flex", alignItems: "center", gap: 8, padding: "11px 22px", background: "linear-gradient(135deg,#059669,#10b981)", border: "none", borderRadius: 9, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" },
   btnOrange:   { display: "flex", alignItems: "center", gap: 8, padding: "11px 22px", background: "linear-gradient(135deg,#f97316,#fb923c)", border: "none", borderRadius: 9, color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" },
-  btnSecondary:{ display: "flex", alignItems: "center", gap: 6, padding: "9px 16px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, color: "#94a3b8", fontSize: 13, cursor: "pointer" },
-  btnDanger:   { display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.25)", borderRadius: 8, color: "#f87171", fontSize: 13, cursor: "pointer" },
-  btnDownload: { display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", background: "rgba(52,211,153,0.1)", border: "1px solid rgba(52,211,153,0.25)", borderRadius: 8, color: "#34d399", fontSize: 13, cursor: "pointer" },
-  progressBar:  { height: 6, borderRadius: 99, background: "rgba(255,255,255,0.07)", overflow: "hidden", marginTop: 10 },
-  progressFill: (pct) => ({ height: "100%", width: `${pct}%`, borderRadius: 99, background: "linear-gradient(90deg,#6366f1,#8b5cf6)", transition: "width 0.5s ease" }),
+  btnSecondary:{ display: "flex", alignItems: "center", gap: 6, padding: "9px 16px", background: "#f1f5f9", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, color: "#475569", fontSize: 13, cursor: "pointer" },
+  btnDanger:   { display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.2)", borderRadius: 8, color: "#dc2626", fontSize: 13, cursor: "pointer" },
+  btnDownload: { display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", background: "rgba(52,211,153,0.08)", border: "1px solid rgba(52,211,153,0.2)", borderRadius: 8, color: "#059669", fontSize: 13, cursor: "pointer" },
+  progressBar:  { height: 6, borderRadius: 99, background: "#e2e8f0", overflow: "hidden", marginTop: 10 },
+  progressFill: (pct) => ({ height: "100%", width: `${pct}%`, borderRadius: 99, background: "linear-gradient(90deg,#2563eb,#3b82f6)", transition: "width 0.5s ease" }),
   statusBadge:  (s) => ({ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 99, fontSize: 12, fontWeight: 600, background: STATUS_COLOR[s]?.bg, color: STATUS_COLOR[s]?.text, border: `1px solid ${STATUS_COLOR[s]?.border}` }),
-  logBox:  { background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 8, padding: "12px 16px", fontSize: 12, color: "#64748b", fontFamily: "'Fira Code','Courier New',monospace", minHeight: 44, marginTop: 10, lineHeight: 1.7, maxHeight: 160, overflowY: "auto" },
+  logBox:  { background: "#f8fafc", border: "1px solid rgba(0,0,0,0.06)", borderRadius: 8, padding: "12px 16px", fontSize: 12, color: "#475569", fontFamily: "'Fira Code','Courier New',monospace", minHeight: 44, marginTop: 10, lineHeight: 1.7, maxHeight: 160, overflowY: "auto" },
   statRow: { display: "flex", gap: 20, marginTop: 14 },
-  statItem:{ flex: 1, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 10, padding: "14px 16px", textAlign: "center" },
-  statNum: { fontSize: 26, fontWeight: 700, color: "#f1f5f9", lineHeight: 1 },
-  statLabel:{ fontSize: 11, color: "#475569", marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em" },
-  stepItem: { display: "flex", gap: 10, marginBottom: 8, fontSize: 13, color: "#94a3b8", alignItems: "flex-start" },
-  stepNum:  { minWidth: 22, height: 22, borderRadius: "50%", background: "rgba(99,102,241,0.25)", color: "#818cf8", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 },
+  statItem:{ flex: 1, background: "#f8fafc", border: "1px solid rgba(0,0,0,0.06)", borderRadius: 10, padding: "14px 16px", textAlign: "center" },
+  statNum: { fontSize: 26, fontWeight: 700, color: "#1e293b", lineHeight: 1 },
+  statLabel:{ fontSize: 11, color: "#64748b", marginTop: 4, textTransform: "uppercase", letterSpacing: "0.06em" },
+  stepItem: { display: "flex", gap: 10, marginBottom: 8, fontSize: 13, color: "#475569", alignItems: "flex-start" },
+  stepNum:  { minWidth: 22, height: 22, borderRadius: "50%", background: "rgba(37,99,235,0.15)", color: "#2563eb", fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 },
 };
 
 export default function CoretaxDownloader() {
@@ -360,7 +360,7 @@ export default function CoretaxDownloader() {
 
           {/* Panel perbarui cookie (collapsed by default) */}
           {showSetup && (
-            <div style={{ background: "rgba(0,0,0,0.2)", borderRadius: 10, padding: "20px 22px", marginBottom: 20, border: "1px solid rgba(255,255,255,0.06)" }}>
+            <div style={{ background: "#f8fafc", borderRadius: 10, padding: "20px 22px", marginBottom: 20, border: "1px solid rgba(0,0,0,0.06)" }}>
               <CookieGuide />
               <label style={{ ...S.label, marginTop: 4 }}>Paste nilai Cookie di sini</label>
               <textarea
@@ -589,7 +589,7 @@ export default function CoretaxDownloader() {
                 <img src={captchaImg} alt="CAPTCHA"
                   style={{ width: "100%", borderRadius: 8, border: "2px solid rgba(251,146,60,0.5)", imageRendering: "pixelated" }} />
               ) : (
-                <div style={{ padding: "32px 16px", textAlign: "center", color: "#475569", fontSize: 12, background: "rgba(0,0,0,0.2)", borderRadius: 8 }}>
+                <div style={{ padding: "32px 16px", textAlign: "center", color: "#475569", fontSize: 12, background: "#f8fafc", borderRadius: 8 }}>
                   <Loader2 size={16} className="animate-spin" style={{ display: "inline", marginRight: 6 }} />Memuat…
                 </div>
               )}

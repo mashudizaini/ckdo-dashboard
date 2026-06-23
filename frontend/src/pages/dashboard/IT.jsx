@@ -349,7 +349,7 @@ function MiniChart({ title, data, dataKey, color, domain }) {
               <XAxis dataKey="ts" tick={{ fontSize: 9, fill: "#6b7280" }} interval="preserveStartEnd" />
               <YAxis domain={domain} tick={{ fontSize: 9, fill: "#6b7280" }} />
               <Tooltip
-                contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 6, fontSize: 11 }}
+                contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 6, fontSize: 11, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
                 labelStyle={{ color: "#9ca3af" }}
                 itemStyle={{ color: color }}
               />
@@ -423,7 +423,7 @@ function TablespaceSection() {
               <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 10, fill: "#d1d5db" }} />
               <Tooltip
                 formatter={(v) => [`${v}%`, "Usage"]}
-                contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 6, fontSize: 11 }}
+                contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 6, fontSize: 11, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
                 labelStyle={{ color: "#9ca3af" }}
               />
               <Bar dataKey="pct" radius={[0, 4, 4, 0]} maxBarSize={22}>
@@ -570,7 +570,7 @@ function DiskUsageSection() {
                   <YAxis type="category" dataKey="name" width={130}
                     tick={{ fill: "#d1d5db", fontSize: 10 }} />
                   <Tooltip
-                    contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
+                    contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, fontSize: 12, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
                     formatter={(v, name) => [`${v} GB`, name === "used" ? "Used" : "Free"]}
                   />
                   <Bar dataKey="used" name="used" stackId="d" radius={[0,0,0,0]}>

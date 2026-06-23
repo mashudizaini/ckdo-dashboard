@@ -260,11 +260,11 @@ function BudgetUsageSection() {
                 <ResponsiveContainer width="100%" height={300}>
                   {chartMode === "bar" ? (
                     <BarChart data={monthly} margin={{ top: 4, right: 16, left: 16, bottom: 4 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
                       <XAxis dataKey="period_name" tick={{ fill: "#6b7280", fontSize: 10 }} />
                       <YAxis tickFormatter={fmtShort} tick={{ fill: "#6b7280", fontSize: 10 }} />
                       <Tooltip
-                        contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
+                        contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, fontSize: 12, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
                         formatter={(v, name) => [fmtIDR(v), name]}
                       />
                       <Legend wrapperStyle={{ fontSize: 11, color: "#9ca3af" }} />
@@ -273,11 +273,11 @@ function BudgetUsageSection() {
                     </BarChart>
                   ) : (
                     <LineChart data={monthly} margin={{ top: 4, right: 16, left: 16, bottom: 4 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
                       <XAxis dataKey="period_name" tick={{ fill: "#6b7280", fontSize: 10 }} />
                       <YAxis tickFormatter={fmtShort} tick={{ fill: "#6b7280", fontSize: 10 }} />
                       <Tooltip
-                        contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
+                        contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, fontSize: 12, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
                         formatter={(v, name) => [fmtIDR(v), name]}
                       />
                       <Legend wrapperStyle={{ fontSize: 11, color: "#9ca3af" }} />

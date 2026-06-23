@@ -22,12 +22,12 @@ docker-compose ps
 
 ## Service URLs (Development)
 
-| Service | URL |
-|---|---|
-| Frontend (React) | http://localhost |
-| Backend API | http://localhost/api/v1 |
+| Service            |           URL              |
+|--------------------|----------------------------|
+| Frontend (React)   | http://localhost           |
+| Backend API        | http://localhost/api/v1    |
 | API Docs (Swagger) | http://localhost:8000/docs |
-| Keycloak Admin | http://localhost:8080 |
+| Keycloak Admin     | http://localhost:8080      |
 
 ## Menambahkan Modul Baru
 
@@ -101,13 +101,13 @@ Oracle Instant Client harus tersedia di host dan di-mount ke container:
 
 ## Teknologi
 
-| Layer | Stack |
-|---|---|
-| Auth | Keycloak 24 (OIDC/OAuth2) |
-| Backend | FastAPI + SQLAlchemy 2.0 + Alembic |
-| Async Tasks | Celery + Redis |
-| Database | PostgreSQL 15 |
-| Cache | Redis 7 |
-| Frontend | React 18 + Vite + Tailwind CSS |
-| Container | Docker Compose → Kubernetes (fase lanjut) |
-| AI | Anthropic Claude API + Whisper (lokal) |
+| Layer       | Stack                              |
+|-------------|------------------------------------|
+| Auth        | Keycloak 24 (OIDC/OAuth2)          |
+| Backend     | FastAPI + SQLAlchemy 2.0 + Alembic |
+| Async Tasks | Celery + Redis                     |
+| Database    | PostgreSQL 15                      |
+| Cache       | Redis 7                            |
+| Frontend    | React 18 + Vite + Tailwind CSS     |
+| Container   | Docker Compose → Kubernetes (fase lanjut) |
+| AI          | Anthropic Claude API + Whisper (lokal) |

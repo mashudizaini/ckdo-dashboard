@@ -988,11 +988,11 @@ function MonthlySpendSection() {
               <p className="text-xs text-gray-500 mb-3">Monthly PO Spend (IDR) — Direct vs Indirect</p>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={stackedData} margin={{ top: 4, right: 16, left: 16, bottom: 40 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
                   <XAxis dataKey="label" tick={{ fill: "#6b7280", fontSize: 10 }} angle={-45} textAnchor="end" interval={0} />
                   <YAxis tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} />
                   <Tooltip
-                    contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
+                    contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, fontSize: 12, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
                     formatter={(v, name) => [fmtIDR(v), name]}
                   />
                   <Legend wrapperStyle={{ fontSize: 11, color: "#9ca3af", paddingTop: 8 }} />
@@ -1006,11 +1006,11 @@ function MonthlySpendSection() {
               <p className="text-xs text-gray-500 mb-3">Year-over-Year Monthly Spend (IDR)</p>
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={yoyData} margin={{ top: 4, right: 16, left: 16, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
                   <XAxis dataKey="label" tick={{ fill: "#6b7280", fontSize: 10 }} />
                   <YAxis tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} />
                   <Tooltip
-                    contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
+                    contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, fontSize: 12, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
                     formatter={(v, name) => [fmtIDR(v), `Year ${name}`]}
                   />
                   <Legend wrapperStyle={{ fontSize: 11, color: "#9ca3af" }} />
@@ -1235,11 +1235,11 @@ function ActiveSuppliersSection() {
               <p className="text-xs text-gray-500 mb-3">Top {chartData.length} Suppliers by Spend (IDR)</p>
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 60, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" horizontal={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" horizontal={false} />
                   <XAxis type="number" tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} />
                   <YAxis type="category" dataKey="name" width={140} tick={{ fill: "#9ca3af", fontSize: 10 }} />
                   <Tooltip
-                    contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
+                    contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, fontSize: 12, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
                     formatter={(v, name) => [fmtIDR(v), name]}
                   />
                   <Legend wrapperStyle={{ fontSize: 11, color: "#9ca3af" }} />
@@ -1520,12 +1520,12 @@ function PriceAnalysisSection() {
           </p>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 4, right: 20, left: 10, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
               <XAxis dataKey="year" tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false}
                 tickFormatter={v => fmtIDR2(v)} width={80} />
               <Tooltip
-                contentStyle={{ background: "#1f2937", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
+                contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, fontSize: 12, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
                 labelStyle={{ color: "#e5e7eb", fontWeight: 600 }}
                 formatter={(v, name) => [fmtIDR2(v), name]}
               />
