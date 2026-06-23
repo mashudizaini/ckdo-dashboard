@@ -1,0 +1,57 @@
+version: "3.9"
+
+services:
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: ckdo-ap-invoice-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ap_invoice
+      POSTGRES_USER: ap_user
+      POSTGRES_PASSWORD: ap_secret
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - ckdo-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ckdo-ap-invoice-backend
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - postgres
+    volumes:
+      - ap_uploads:/app/uploads
+    networks:
+      - ckdo-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ckdo-ap-invoice-frontend
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    depends_on:
+      - backend
+    networks:
+      - ckdo-net
+
+volumes:
+  ap_uploads:
+  pg_data:
+
+networks:
+  ckdo-net:
+    driver: bridge

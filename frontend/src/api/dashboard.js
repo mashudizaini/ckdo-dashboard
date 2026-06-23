@@ -43,6 +43,16 @@ export const accountingApi = {
   getSummary: () => api.get("/dashboard/accounting/summary"),
 };
 
+export const apInvoiceApi = {
+  upload:          (formData) => api.post("/dashboard/accounting/ap-invoice/upload", formData, { headers: { "Content-Type": "multipart/form-data" }, timeout: 120000 }),
+  list:            ()         => api.get("/dashboard/accounting/ap-invoice/invoices"),
+  get:             (id)       => api.get(`/dashboard/accounting/ap-invoice/invoices/${id}`),
+  update:          (id, data) => api.put(`/dashboard/accounting/ap-invoice/invoices/${id}`, data),
+  validate:        (id)       => api.post(`/dashboard/accounting/ap-invoice/validate/${id}`),
+  insertInterface: (id, data) => api.post(`/dashboard/accounting/ap-invoice/insert-interface/${id}`, data),
+  runImport:       (id)       => api.post(`/dashboard/accounting/ap-invoice/run-import/${id}`),
+};
+
 export const purchasingApi = {
   getSummary:        () => api.get("/dashboard/purchasing/summary"),
   getOpenPR:         (p) => api.get("/dashboard/purchasing/open-pr", { params: p }),

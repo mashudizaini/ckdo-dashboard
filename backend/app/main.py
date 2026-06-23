@@ -9,7 +9,7 @@ import app.models.employee    # noqa: F401 — register models ke Base.metadata
 import app.models.attendance   # noqa: F401 — register models ke Base.metadata
 
 # ── Dashboard Routers ──
-from app.routers.dashboard import it, hr, pac, accounting, purchasing
+from app.routers.dashboard import it, hr, pac, accounting, purchasing, ap_invoice
 
 # ── Coretax Router ──
 from app.routers.coretax_router import coretax_router
@@ -94,6 +94,7 @@ app.include_router(it.router,         prefix=f"{API_PREFIX}/dashboard/it",      
 app.include_router(hr.router,         prefix=f"{API_PREFIX}/dashboard/hr",         tags=["Dashboard - HR"])
 app.include_router(pac.router,        prefix=f"{API_PREFIX}/dashboard/pac",        tags=["Dashboard - PAC"])
 app.include_router(accounting.router, prefix=f"{API_PREFIX}/dashboard/accounting", tags=["Dashboard - Accounting"])
+app.include_router(ap_invoice.router,  prefix=f"{API_PREFIX}/dashboard/accounting/ap-invoice", tags=["Dashboard - AP Invoice"])
 app.include_router(purchasing.router, prefix=f"{API_PREFIX}/dashboard/purchasing", tags=["Dashboard - Purchasing"])
 
 # AI Tools
