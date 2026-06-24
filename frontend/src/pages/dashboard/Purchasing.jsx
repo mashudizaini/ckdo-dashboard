@@ -725,15 +725,14 @@ function PHBySupplierTable({ data, years, loading, error }) {
   const [page, setPage] = useState(1);
   const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
   const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
-  const fixedCols = ["Org ID","Organization","Item Code","Category","Supplier","Manufacturer","Country","Currency","UOM"];
+  const fixedCols = ["Supplier","Currency","Items","POs"];
   const totalCols = fixedCols.length + years.length * 3 + 3;
   const paged = data.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const handleDownload = () => {
     const headers = [...fixedCols, ...years.flatMap(y => [`Value Orig ${y}`, `Value IDR ${y}`, `Qty ${y}`]), "Total Orig", "Total IDR", "Total Qty"];
     const rows = data.map(r => [
-      r.organization_id, r.organization_name, r.item_code, r.category,
-      r.supplier_name, r.manufacturer_name, r.country_of_origin, r.currency_code, r.uom,
+      r.supplier_name, r.currency_code, r.item_count, r.po_count,
       ...years.flatMap(y => [r[`value_orig_${y}`] ?? 0, r[`value_idr_${y}`] ?? 0, r[`qty_${y}`] ?? 0]),
       r.total_value_orig, r.total_value_idr, r.total_qty,
     ]);
@@ -782,15 +781,10 @@ function PHBySupplierTable({ data, years, loading, error }) {
               <tr><td colSpan={totalCols} className="px-3 py-10 text-center text-xs text-gray-600">Tidak ada data ditemukan</td></tr>
             ) : paged.map((r, i) => (
               <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
-                <td className={`${TD} text-gray-400 font-mono`}>{r.organization_id}</td>
-                <td className={`${TD} text-gray-300 max-w-[120px] truncate`} title={r.organization_name}>{r.organization_name}</td>
-                <td className={`${TD} font-mono text-blue-400`}>{r.item_code}</td>
-                <td className={`${TD} text-gray-400`}>{r.category}</td>
-                <td className={`${TD} text-gray-300 max-w-[140px] truncate`} title={r.supplier_name}>{r.supplier_name}</td>
-                <td className={`${TD} text-gray-300 max-w-[120px] truncate`} title={r.manufacturer_name}>{r.manufacturer_name}</td>
-                <td className={`${TD} text-gray-400`}>{r.country_of_origin}</td>
+                <td className={`${TD} text-gray-300 max-w-[180px] truncate font-medium`} title={r.supplier_name}>{r.supplier_name}</td>
                 <td className={`${TD} text-yellow-400`}>{r.currency_code}</td>
-                <td className={`${TD} text-gray-500`}>{r.uom}</td>
+                <td className={`${TD} text-gray-400 text-center`}>{r.item_count}</td>
+                <td className={`${TD} text-gray-400 text-center`}>{r.po_count}</td>
                 {years.map(y => (
                   <>
                     <td key={`vo${y}`} className={`${TD} text-right text-gray-300`}>{fmtIDR(r[`value_orig_${y}`])}</td>

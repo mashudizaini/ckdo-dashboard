@@ -278,7 +278,6 @@ class PurchasingService:
                 EXTRACT(YEAR FROM poh.creation_date),
                 msi.primary_uom_code
             ORDER BY msi.segment1, EXTRACT(YEAR FROM poh.creation_date)
-            FETCH FIRST 500 ROWS ONLY
         """
         try:
             rows = await asyncio.to_thread(self._query, sql, self._ph_params(filters))
@@ -323,7 +322,6 @@ class PurchasingService:
             FROM base_data
             GROUP BY organization_id, organization_name, item_code, item_description, category, material_type, currency_code, uom
             ORDER BY item_code
-            FETCH FIRST 200 ROWS ONLY
         """
         try:
             rows = await asyncio.to_thread(self._query, sql, self._ph_params(filters))
@@ -333,7 +331,7 @@ class PurchasingService:
             return {"success": False, "error": str(e), "data": [], "years": years}
 
     async def get_purchase_history_by_supplier(self, filters: dict) -> dict:
-        """Output 3: Per supplier+manufacturer pivot by year."""
+        """Output 3: Per supplier pivot by year."""
         year_from = int(filters.get("year_from") or 2020)
         year_to   = int(filters.get("year_to")   or 2026)
         years     = list(range(year_from, year_to + 1))
@@ -346,38 +344,28 @@ class PurchasingService:
         sql = f"""
             WITH base_data AS (
                 SELECT
-                    msi.organization_id                                      AS organization_id,
-                    hou.name                                                 AS organization_name,
-                    msi.segment1                                             AS item_code,
-                    msi.description                                          AS item_description,
-                    mcb.segment1                                             AS category,
                     aps.vendor_name                                          AS supplier_name,
-                    COALESCE(mfr.manufacturer_name,'UNKNOWN')                AS manufacturer_name,
-                    COALESCE(mfr.country_of_origin,'UNKNOWN')                AS country_of_origin,
-                    msi.primary_uom_code                                     AS uom,
                     poh.currency_code,
                     EXTRACT(YEAR FROM poh.creation_date)                     AS trx_year,
                     pol.quantity * pol.unit_price                            AS line_amount_orig,
                     pol.quantity * pol.unit_price * ({self._RATE_CASE})       AS line_amount_idr,
-                    pol.quantity                                              AS line_qty
+                    pol.quantity                                              AS line_qty,
+                    COUNT(DISTINCT msi.segment1) OVER (PARTITION BY aps.vendor_name)  AS item_count,
+                    COUNT(DISTINCT poh.po_header_id) OVER (PARTITION BY aps.vendor_name) AS po_count
                 FROM {self._PH_FROM}
                 WHERE {self._PH_WHERE}
             )
             SELECT
-                organization_id, organization_name,
-                item_code, item_description, category,
-                supplier_name, manufacturer_name, country_of_origin, uom, currency_code,
+                supplier_name, currency_code,
+                MIN(item_count) AS item_count,
+                MIN(po_count)   AS po_count,
                 {pivot},
                 SUM(line_amount_orig) AS total_value_orig,
                 SUM(line_amount_idr)  AS total_value_idr,
                 SUM(line_qty)         AS total_qty
             FROM base_data
-            GROUP BY
-                organization_id, organization_name,
-                item_code, item_description, category,
-                supplier_name, manufacturer_name, country_of_origin, uom, currency_code
-            ORDER BY supplier_name, item_code
-            FETCH FIRST 200 ROWS ONLY
+            GROUP BY supplier_name, currency_code
+            ORDER BY supplier_name
         """
         try:
             rows = await asyncio.to_thread(self._query, sql, self._ph_params(filters))
