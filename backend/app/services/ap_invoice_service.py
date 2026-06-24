@@ -20,7 +20,7 @@ from app.database import get_oracle_connection
 settings = get_settings()
 
 EBS_ORG_ID = 81
-EBS_SOURCE = "XXCKD_PDF_IMPORT"
+EBS_SOURCE = "MANUAL INVOICE ENTRY"
 EBS_USER_ID = 1110
 EBS_RESP_ID = 50738
 EBS_RESP_APPL_ID = 200
@@ -519,20 +519,20 @@ def attach_pdf_to_invoice(ora_conn, ap_invoice_id: int, pdf_path: str, filename:
                 document_id, creation_date, created_by, last_update_date, last_updated_by,
                 datatype_id, category_id, security_type, publish_flag, media_id, usage_type, file_name
             ) VALUES (
-                :doc_id, SYSDATE, :uid, SYSDATE, :uid,
+                :doc_id, SYSDATE, :user_id, SYSDATE, :user_id,
                 6, :cat_id, 1, 'Y', :media_id, 'O', :filename
             )
-        """, {"doc_id": document_id, "uid": EBS_USER_ID, "cat_id": category_id, "media_id": media_id, "filename": filename})
+        """, {"doc_id": document_id, "user_id": EBS_USER_ID, "cat_id": category_id, "media_id": media_id, "filename": filename})
 
         cur.execute("""
             INSERT INTO fnd_documents_tl (
                 document_id, creation_date, created_by, last_update_date, last_updated_by,
                 language, source_lang, description, file_name, media_id
             ) VALUES (
-                :doc_id, SYSDATE, :uid, SYSDATE, :uid,
+                :doc_id, SYSDATE, :user_id, SYSDATE, :user_id,
                 'US', 'US', :descr, :filename, :media_id
             )
-        """, {"doc_id": document_id, "uid": EBS_USER_ID, "descr": filename, "filename": filename, "media_id": media_id})
+        """, {"doc_id": document_id, "user_id": EBS_USER_ID, "descr": filename, "filename": filename, "media_id": media_id})
 
         cur.execute("""
             INSERT INTO fnd_attached_documents (
@@ -540,10 +540,10 @@ def attach_pdf_to_invoice(ora_conn, ap_invoice_id: int, pdf_path: str, filename:
                 last_update_date, last_updated_by, seq_num, entity_name, pk1_value,
                 automatically_added_flag
             ) VALUES (
-                :att_id, :doc_id, SYSDATE, :uid, SYSDATE, :uid,
+                :att_id, :doc_id, SYSDATE, :user_id, SYSDATE, :user_id,
                 :seq, 'AP_INVOICES', :pk1, 'N'
             )
-        """, {"att_id": attached_doc_id, "doc_id": document_id, "uid": EBS_USER_ID, "seq": seq_num, "pk1": str(ap_invoice_id)})
+        """, {"att_id": attached_doc_id, "doc_id": document_id, "user_id": EBS_USER_ID, "seq": seq_num, "pk1": str(ap_invoice_id)})
 
     ora_conn.commit()
 
