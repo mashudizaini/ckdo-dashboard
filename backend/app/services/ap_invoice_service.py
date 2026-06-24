@@ -454,7 +454,7 @@ def check_import_result(ora_conn, invoice_num: str, vendor_id=None) -> dict:
         return {"status": "IMPORTED", "invoice_id": row[0]}
 
     sql2 = """
-        SELECT status, reject_lookup_code FROM ap_invoices_interface
+        SELECT status FROM ap_invoices_interface
         WHERE invoice_num = :inv AND org_id = :oid
         FETCH FIRST 1 ROWS ONLY
     """
@@ -462,22 +462,103 @@ def check_import_result(ora_conn, invoice_num: str, vendor_id=None) -> dict:
         oc.execute(sql2, {"inv": invoice_num, "oid": EBS_ORG_ID})
         row = oc.fetchone()
     if row and row[0] == "REJECTED":
-        return {"status": "ERROR", "invoice_id": None, "error_msg": f"REJECTED: {row[1]}"}
+        return {"status": "ERROR", "invoice_id": None, "error_msg": "APXIIMPT REJECTED"}
 
     return {"status": "PENDING", "invoice_id": None}
+
+
+def attach_pdf_to_invoice(ora_conn, ap_invoice_id: int, pdf_path: str, filename: str):
+    with open(pdf_path, "rb") as f:
+        pdf_bytes = f.read()
+
+    with ora_conn.cursor() as cur:
+        try:
+            cur.execute("""
+                SELECT category_id FROM fnd_document_categories_tl
+                WHERE user_name = 'From Supplier' AND language = USERENV('LANG') AND ROWNUM = 1
+            """)
+            row = cur.fetchone()
+            category_id = row[0] if row else None
+        except Exception:
+            category_id = None
+
+        if not category_id:
+            cur.execute("SELECT category_id FROM fnd_document_categories WHERE name = 'Miscellaneous' AND ROWNUM = 1")
+            category_id = cur.fetchone()[0]
+
+        cur.execute("SELECT fnd_lobs_s.NEXTVAL FROM DUAL")
+        media_id = cur.fetchone()[0]
+        cur.execute("SELECT fnd_documents_s.NEXTVAL FROM DUAL")
+        document_id = cur.fetchone()[0]
+        cur.execute("SELECT fnd_attached_documents_s.NEXTVAL FROM DUAL")
+        attached_doc_id = cur.fetchone()[0]
+
+        cur.execute("""
+            SELECT NVL(MAX(seq_num), 0) + 10
+            FROM fnd_attached_documents
+            WHERE entity_name = 'AP_INVOICES' AND pk1_value = :pk1
+        """, {"pk1": str(ap_invoice_id)})
+        seq_num = cur.fetchone()[0]
+
+        import oracledb
+        lob = ora_conn.createlob(oracledb.DB_TYPE_BLOB)
+        lob.write(pdf_bytes)
+
+        cur.execute("""
+            INSERT INTO fnd_lobs (
+                file_id, file_name, file_content_type, file_data,
+                upload_date, file_format, language, oracle_charset, program_name
+            ) VALUES (
+                :media_id, :filename, 'application/pdf', :file_data,
+                SYSDATE, 'binary', 'US', 'UTF8', 'FNDATTCH'
+            )
+        """, {"media_id": media_id, "filename": filename, "file_data": lob})
+
+        cur.execute("""
+            INSERT INTO fnd_documents (
+                document_id, creation_date, created_by, last_update_date, last_updated_by,
+                datatype_id, category_id, security_type, publish_flag, media_id, usage_type, file_name
+            ) VALUES (
+                :doc_id, SYSDATE, :uid, SYSDATE, :uid,
+                6, :cat_id, 1, 'Y', :media_id, 'O', :filename
+            )
+        """, {"doc_id": document_id, "uid": EBS_USER_ID, "cat_id": category_id, "media_id": media_id, "filename": filename})
+
+        cur.execute("""
+            INSERT INTO fnd_documents_tl (
+                document_id, creation_date, created_by, last_update_date, last_updated_by,
+                language, source_lang, description, file_name, media_id
+            ) VALUES (
+                :doc_id, SYSDATE, :uid, SYSDATE, :uid,
+                'US', 'US', :descr, :filename, :media_id
+            )
+        """, {"doc_id": document_id, "uid": EBS_USER_ID, "descr": filename, "filename": filename, "media_id": media_id})
+
+        cur.execute("""
+            INSERT INTO fnd_attached_documents (
+                attached_document_id, document_id, creation_date, created_by,
+                last_update_date, last_updated_by, seq_num, entity_name, pk1_value,
+                automatically_added_flag
+            ) VALUES (
+                :att_id, :doc_id, SYSDATE, :uid, SYSDATE, :uid,
+                :seq, 'AP_INVOICES', :pk1, 'N'
+            )
+        """, {"att_id": attached_doc_id, "doc_id": document_id, "uid": EBS_USER_ID, "seq": seq_num, "pk1": str(ap_invoice_id)})
+
+    ora_conn.commit()
 
 
 def check_and_update_status(db_conn, ora_conn, stg_id: int) -> dict:
     cur = db_conn.cursor()
     cur.execute("""
-        SELECT conc_request_id, invoice_num, vendor_id, status
+        SELECT conc_request_id, invoice_num, vendor_id, status, source_file
         FROM ap_invoice_stg WHERE stg_id = %s
     """, (stg_id,))
     row = cur.fetchone()
     if not row:
         raise ValueError("STG_ID tidak ditemukan")
 
-    conc_req_id, invoice_num, vendor_id, stg_status = row
+    conc_req_id, invoice_num, vendor_id, stg_status, source_file = row
     result = {"stg_status": stg_status}
 
     if conc_req_id:
@@ -489,6 +570,17 @@ def check_and_update_status(db_conn, ora_conn, stg_id: int) -> dict:
 
         if import_res["status"] == "IMPORTED":
             ap_inv_id = import_res["invoice_id"]
+
+            # Attach PDF to the created invoice
+            if source_file:
+                pdf_path = os.path.join(UPLOAD_DIR, source_file)
+                if os.path.exists(pdf_path):
+                    try:
+                        attach_pdf_to_invoice(ora_conn, ap_inv_id, pdf_path, source_file)
+                        result["attachment"] = "PDF attached"
+                    except Exception as e:
+                        result["attachment_error"] = str(e)
+
             cur.execute("""
                 UPDATE ap_invoice_stg SET status = 'IMPORTED', ap_invoice_id = %s, processed_date = NOW()
                 WHERE stg_id = %s

@@ -218,6 +218,52 @@ async def run_import(stg_id: int):
         pg.close()
 
 
+@router.post("/attach/{stg_id}")
+async def attach_pdf(stg_id: int):
+    pg = _get_pg()
+    cur = pg.cursor()
+    cur.execute("SELECT ap_invoice_id, invoice_num, vendor_id, source_file, status FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
+    row = cur.fetchone()
+    if not row:
+        pg.close()
+        raise HTTPException(404, "Invoice tidak ditemukan")
+
+    ap_invoice_id, invoice_num, vendor_id, source_file, status = row
+
+    ora = None
+    try:
+        ora = get_oracle_connection()
+
+        if not ap_invoice_id:
+            import_res = svc.check_import_result(ora, invoice_num, vendor_id)
+            if import_res["status"] == "IMPORTED":
+                ap_invoice_id = import_res["invoice_id"]
+                cur.execute("UPDATE ap_invoice_stg SET ap_invoice_id = %s, status = 'IMPORTED', processed_date = NOW() WHERE stg_id = %s",
+                            (ap_invoice_id, stg_id))
+                pg.commit()
+            else:
+                raise HTTPException(409, f"Invoice '{invoice_num}' belum ditemukan di ap_invoices_all. Pastikan APXIIMPT sudah selesai.")
+
+        if not source_file:
+            raise HTTPException(400, "Tidak ada source file untuk di-attach")
+
+        pdf_path = os.path.join(svc.UPLOAD_DIR, source_file)
+        if not os.path.exists(pdf_path):
+            raise HTTPException(404, f"File tidak ditemukan: {source_file}")
+
+        svc.attach_pdf_to_invoice(ora, ap_invoice_id, pdf_path, source_file)
+
+        return {"stg_id": stg_id, "ap_invoice_id": ap_invoice_id, "message": f"PDF berhasil di-attach ke Invoice ID {ap_invoice_id}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Attach gagal: {str(e)}")
+    finally:
+        if ora:
+            ora.close()
+        pg.close()
+
+
 @router.get("/check-status/{stg_id}")
 async def check_status(stg_id: int):
     pg = _get_pg()

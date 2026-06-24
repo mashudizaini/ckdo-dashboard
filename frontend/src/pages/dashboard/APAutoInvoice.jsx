@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Upload, FileText, CheckCircle, Send, Loader2, AlertTriangle,
-  RefreshCw, ChevronDown, ChevronUp, X, Pencil, Trash2, Save, Search,
+  RefreshCw, ChevronDown, ChevronUp, X, Pencil, Trash2, Save, Search, Paperclip,
 } from "lucide-react";
 import { apInvoiceApi } from "@/api/dashboard";
 
@@ -189,6 +189,9 @@ export default function APAutoInvoice() {
       } else if (action === "import") {
         res = await apInvoiceApi.runImport(id);
         setMessage({ type: "success", text: `APXIIMPT submitted (Request ID: ${res.conc_request_id}). Klik "Check Status" untuk cek hasil.` });
+      } else if (action === "attach") {
+        res = await apInvoiceApi.attachPdf(id);
+        setMessage({ type: "success", text: res.message });
       } else if (action === "check") {
         res = await apInvoiceApi.checkStatus(id);
         if (res.stg_status === "IMPORTED") {
@@ -577,6 +580,12 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                   label="Check Status"
                   color="#0891b2"
                   onClick={() => onAction("check", d.stg_id)} loading={actionLoading === "check"} />
+              )}
+              {(s === "SUBMITTED" || s === "IMPORTED") && (
+                <NeuBtn icon={Paperclip}
+                  label="Attach PDF"
+                  color="#d97706"
+                  onClick={() => onAction("attach", d.stg_id)} loading={actionLoading === "attach"} />
               )}
               {s === "IMPORTED" && (
                 <div style={{
