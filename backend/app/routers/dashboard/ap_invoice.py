@@ -143,7 +143,7 @@ async def insert_interface(stg_id: int, payload: dict):
     if not row:
         pg.close()
         raise HTTPException(404, "STG_ID tidak ditemukan")
-    if row[0] != "VALIDATED":
+    if row[0] not in ("VALIDATED", "PROCESSING", "ERROR"):
         pg.close()
         raise HTTPException(409, f"Status harus VALIDATED, saat ini: '{row[0]}'")
 
