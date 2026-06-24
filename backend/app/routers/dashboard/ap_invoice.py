@@ -218,6 +218,24 @@ async def run_import(stg_id: int):
         pg.close()
 
 
+@router.get("/check-status/{stg_id}")
+async def check_status(stg_id: int):
+    pg = _get_pg()
+    ora = None
+    try:
+        ora = get_oracle_connection()
+        result = svc.check_and_update_status(pg, ora, stg_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    finally:
+        if ora:
+            ora.close()
+        pg.close()
+
+
 @router.put("/invoices/{stg_id}")
 async def update_invoice(stg_id: int, payload: dict):
     allowed = {"invoice_num", "invoice_date", "vendor_name", "terms_date",

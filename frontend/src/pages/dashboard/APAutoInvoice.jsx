@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Upload, FileText, CheckCircle, Send, Loader2, AlertTriangle,
-  RefreshCw, ChevronDown, ChevronUp, X, Pencil, Trash2, Save,
+  RefreshCw, ChevronDown, ChevronUp, X, Pencil, Trash2, Save, Search,
 } from "lucide-react";
 import { apInvoiceApi } from "@/api/dashboard";
 
@@ -188,7 +188,18 @@ export default function APAutoInvoice() {
         setMessage({ type: "success", text: `Berhasil insert ke AP Interface (ID: ${res.interface_invoice_id})` });
       } else if (action === "import") {
         res = await apInvoiceApi.runImport(id);
-        setMessage({ type: "success", text: `APXIIMPT submitted (Request ID: ${res.conc_request_id})` });
+        setMessage({ type: "success", text: `APXIIMPT submitted (Request ID: ${res.conc_request_id}). Klik "Check Status" untuk cek hasil.` });
+      } else if (action === "check") {
+        res = await apInvoiceApi.checkStatus(id);
+        if (res.stg_status === "IMPORTED") {
+          setMessage({ type: "success", text: `Invoice berhasil di-import ke EBS! (AP Invoice ID: ${res.import?.invoice_id})` });
+        } else if (res.stg_status === "ERROR") {
+          setMessage({ type: "error", text: res.import?.error_msg || "Import gagal" });
+        } else {
+          const phase = res.concurrent?.phase || "—";
+          const status = res.concurrent?.status || "—";
+          setMessage({ type: "warning", text: `Concurrent: ${phase} / ${status}. Invoice belum muncul di ap_invoices_all. Coba lagi nanti.` });
+        }
       }
       await refresh();
       loadDetail(id);
@@ -560,6 +571,12 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                   label={s === "ERROR" ? "Retry Import" : s === "SUBMITTED" ? "Re-run APXIIMPT" : "Run APXIIMPT"}
                   color="#be185d"
                   onClick={() => onAction("import", d.stg_id)} loading={actionLoading === "import"} />
+              )}
+              {(s === "SUBMITTED" || s === "INTERFACED") && (
+                <NeuBtn icon={Search}
+                  label="Check Status"
+                  color="#0891b2"
+                  onClick={() => onAction("check", d.stg_id)} loading={actionLoading === "check"} />
               )}
               {s === "IMPORTED" && (
                 <div style={{

@@ -52,6 +52,7 @@ export const apInvoiceApi = {
   validate:        (id)       => api.post(`/dashboard/accounting/ap-invoice/validate/${id}`),
   insertInterface: (id, data) => api.post(`/dashboard/accounting/ap-invoice/insert-interface/${id}`, data),
   runImport:       (id)       => api.post(`/dashboard/accounting/ap-invoice/run-import/${id}`),
+  checkStatus:     (id)       => api.get(`/dashboard/accounting/ap-invoice/check-status/${id}`),
 };
 
 export const purchasingApi = {

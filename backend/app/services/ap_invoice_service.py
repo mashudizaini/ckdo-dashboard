@@ -412,3 +412,95 @@ def run_apxiimpt(db_conn, ora_conn, stg_id: int) -> dict:
     db_conn.commit()
 
     return {"stg_id": stg_id, "status": "SUBMITTED", "conc_request_id": req_id}
+
+
+def check_request_status(ora_conn, request_id: int) -> dict:
+    sql = """
+        SELECT fcr.phase_code, fcr.status_code, fcr.completion_text,
+               fpl.meaning AS phase_meaning, fsl.meaning AS status_meaning
+        FROM   fnd_concurrent_requests fcr
+        JOIN   fnd_lookups fpl ON fpl.lookup_type = 'CP_PHASE_CODE' AND fpl.lookup_code = fcr.phase_code
+        JOIN   fnd_lookups fsl ON fsl.lookup_type = 'CP_STATUS_CODE' AND fsl.lookup_code = fcr.status_code
+        WHERE  fcr.request_id = :rid
+    """
+    with ora_conn.cursor() as oc:
+        oc.execute(sql, {"rid": request_id})
+        row = oc.fetchone()
+    if not row:
+        return {"phase": "UNKNOWN", "status": "UNKNOWN", "completion_text": None}
+    return {"phase": row[3], "status": row[4], "phase_code": row[0], "status_code": row[1], "completion_text": row[2]}
+
+
+def check_import_result(ora_conn, invoice_num: str, vendor_id=None) -> dict:
+    if vendor_id:
+        sql = """
+            SELECT invoice_id FROM ap_invoices_all
+            WHERE invoice_num = :inv AND vendor_id = :vid AND org_id = :oid AND cancelled_date IS NULL
+            FETCH FIRST 1 ROWS ONLY
+        """
+        params = {"inv": invoice_num, "vid": vendor_id, "oid": EBS_ORG_ID}
+    else:
+        sql = """
+            SELECT invoice_id FROM ap_invoices_all
+            WHERE invoice_num = :inv AND org_id = :oid AND cancelled_date IS NULL
+            FETCH FIRST 1 ROWS ONLY
+        """
+        params = {"inv": invoice_num, "oid": EBS_ORG_ID}
+
+    with ora_conn.cursor() as oc:
+        oc.execute(sql, params)
+        row = oc.fetchone()
+    if row:
+        return {"status": "IMPORTED", "invoice_id": row[0]}
+
+    sql2 = """
+        SELECT status, reject_lookup_code FROM ap_invoices_interface
+        WHERE invoice_num = :inv AND org_id = :oid
+        FETCH FIRST 1 ROWS ONLY
+    """
+    with ora_conn.cursor() as oc:
+        oc.execute(sql2, {"inv": invoice_num, "oid": EBS_ORG_ID})
+        row = oc.fetchone()
+    if row and row[0] == "REJECTED":
+        return {"status": "ERROR", "invoice_id": None, "error_msg": f"REJECTED: {row[1]}"}
+
+    return {"status": "PENDING", "invoice_id": None}
+
+
+def check_and_update_status(db_conn, ora_conn, stg_id: int) -> dict:
+    cur = db_conn.cursor()
+    cur.execute("""
+        SELECT conc_request_id, invoice_num, vendor_id, status
+        FROM ap_invoice_stg WHERE stg_id = %s
+    """, (stg_id,))
+    row = cur.fetchone()
+    if not row:
+        raise ValueError("STG_ID tidak ditemukan")
+
+    conc_req_id, invoice_num, vendor_id, stg_status = row
+    result = {"stg_status": stg_status}
+
+    if conc_req_id:
+        result["concurrent"] = check_request_status(ora_conn, conc_req_id)
+
+    if stg_status in ("SUBMITTED", "INTERFACED"):
+        import_res = check_import_result(ora_conn, invoice_num, vendor_id)
+        result["import"] = import_res
+
+        if import_res["status"] == "IMPORTED":
+            ap_inv_id = import_res["invoice_id"]
+            cur.execute("""
+                UPDATE ap_invoice_stg SET status = 'IMPORTED', ap_invoice_id = %s, processed_date = NOW()
+                WHERE stg_id = %s
+            """, (ap_inv_id, stg_id))
+            db_conn.commit()
+            result["stg_status"] = "IMPORTED"
+        elif import_res["status"] == "ERROR":
+            cur.execute("""
+                UPDATE ap_invoice_stg SET status = 'ERROR', error_msg = %s
+                WHERE stg_id = %s
+            """, (import_res.get("error_msg", "Import rejected"), stg_id))
+            db_conn.commit()
+            result["stg_status"] = "ERROR"
+
+    return result
