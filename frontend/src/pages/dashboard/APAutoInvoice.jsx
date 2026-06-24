@@ -315,10 +315,12 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
   const [editLines, setEditLines] = useState([]);
 
   const d = detail;
-  const canEdit = ["NEW", "VALIDATED", "ERROR"].includes(d.status);
-  const canValidate = d.status === "NEW" || d.status === "ERROR";
-  const canInterface = d.status === "VALIDATED";
-  const canImport = d.status === "INTERFACED";
+  const s = d.status;
+  const canEdit      = ["NEW", "VALIDATED", "ERROR"].includes(s);
+  const canDelete    = ["NEW", "VALIDATED", "ERROR"].includes(s);
+  const canValidate  = s === "NEW" || s === "ERROR";
+  const canInterface = s === "VALIDATED" || s === "PROCESSING" || s === "ERROR";
+  const canImport    = s === "INTERFACED" || s === "SUBMITTED" || s === "ERROR";
 
   const startEdit = () => {
     setForm({
@@ -387,10 +389,10 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <StatusPill status={d.status} />
           {canEdit && !editing && (
-            <>
-              <NeuBtn icon={Pencil} label="Edit" color="#e8edf5" textColor="#2563eb" onClick={startEdit} small />
-              <NeuBtn icon={Trash2} label="Hapus" color="#e8edf5" textColor="#dc2626" onClick={() => onDelete(d.stg_id)} loading={actionLoading === "delete"} small />
-            </>
+            <NeuBtn icon={Pencil} label="Edit" color="#e8edf5" textColor="#2563eb" onClick={startEdit} small />
+          )}
+          {canDelete && !editing && (
+            <NeuBtn icon={Trash2} label="Hapus" color="#e8edf5" textColor="#dc2626" onClick={() => onDelete(d.stg_id)} loading={actionLoading === "delete"} small />
           )}
         </div>
       </div>
@@ -508,31 +510,68 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
           )}
         </div>
 
-        {/* Actions */}
+        {/* Actions — tombol muncul berdasarkan status */}
         {!editing && (
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {canValidate && (
-              <NeuBtn icon={CheckCircle} label="Validate" color="#059669"
-                onClick={() => onAction("validate", d.stg_id)} loading={actionLoading === "validate"} />
-            )}
-            {canInterface && (
-              <NeuBtn icon={Send} label="Insert to Interface" color="#4f46e5"
-                onClick={() => onAction("interface", d.stg_id)} loading={actionLoading === "interface"} />
-            )}
-            {canImport && (
-              <NeuBtn icon={Send} label="Run APXIIMPT" color="#be185d"
-                onClick={() => onAction("import", d.stg_id)} loading={actionLoading === "import"} />
-            )}
-            {d.status === "IMPORTED" && (
-              <div style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "8px 14px", borderRadius: 12, fontSize: 12, fontWeight: 700,
-                background: "#d1fae5", color: "#047857", boxShadow: NEU.shadowOutSm,
-              }}>
-                <CheckCircle size={14} /> Invoice berhasil di-import ke EBS
-                {d.ap_invoice_id && <span>(ID: {d.ap_invoice_id})</span>}
-              </div>
-            )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {/* Step indicator */}
+            <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+              {["NEW", "VALIDATED", "INTERFACED", "SUBMITTED", "IMPORTED"].map((step, i) => {
+                const steps = ["NEW", "VALIDATED", "INTERFACED", "SUBMITTED", "IMPORTED"];
+                const current = steps.indexOf(s);
+                const idx = i;
+                const done = idx < current || s === "IMPORTED";
+                const active = idx === current;
+                return (
+                  <div key={step} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <div style={{
+                      width: 22, height: 22, borderRadius: "50%", fontSize: 10, fontWeight: 700,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: done ? "#059669" : active ? "#2563eb" : s === "ERROR" ? "#fee2e2" : "#e2e8f0",
+                      color: done || active ? "#fff" : s === "ERROR" && idx === current ? "#dc2626" : "#94a3b8",
+                      boxShadow: active ? "0 0 0 3px rgba(37,99,235,0.2)" : "none",
+                    }}>
+                      {done ? <CheckCircle size={12} /> : i + 1}
+                    </div>
+                    <span style={{ fontSize: 10, fontWeight: 600, color: done ? "#059669" : active ? "#1e293b" : "#94a3b8" }}>
+                      {step === "NEW" ? "Upload" : step === "VALIDATED" ? "Validate" : step === "INTERFACED" ? "Interface" : step === "SUBMITTED" ? "Import" : "Done"}
+                    </span>
+                    {i < 4 && <div style={{ width: 20, height: 2, background: done ? "#059669" : "#e2e8f0", borderRadius: 1 }} />}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Action buttons */}
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {canValidate && (
+                <NeuBtn icon={CheckCircle}
+                  label={s === "ERROR" ? "Re-validate" : "Validate"}
+                  color="#059669"
+                  onClick={() => onAction("validate", d.stg_id)} loading={actionLoading === "validate"} />
+              )}
+              {canInterface && (
+                <NeuBtn icon={Send}
+                  label={s === "PROCESSING" || s === "ERROR" ? "Retry Interface" : "Insert to Interface"}
+                  color="#4f46e5"
+                  onClick={() => onAction("interface", d.stg_id)} loading={actionLoading === "interface"} />
+              )}
+              {canImport && (
+                <NeuBtn icon={Send}
+                  label={s === "ERROR" ? "Retry Import" : s === "SUBMITTED" ? "Re-run APXIIMPT" : "Run APXIIMPT"}
+                  color="#be185d"
+                  onClick={() => onAction("import", d.stg_id)} loading={actionLoading === "import"} />
+              )}
+              {s === "IMPORTED" && (
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "8px 14px", borderRadius: 12, fontSize: 12, fontWeight: 700,
+                  background: "#d1fae5", color: "#047857", boxShadow: NEU.shadowOutSm,
+                }}>
+                  <CheckCircle size={14} /> Invoice berhasil di-import ke EBS
+                  {d.ap_invoice_id && <span style={{ marginLeft: 4 }}>(ID: {d.ap_invoice_id})</span>}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

@@ -137,58 +137,79 @@ async def insert_interface(stg_id: int, payload: dict):
         raise HTTPException(400, "Payload header dan lines diperlukan")
 
     pg = _get_pg()
-    cur = pg.cursor()
-    cur.execute("SELECT status FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
-    row = cur.fetchone()
-    if not row:
-        pg.close()
-        raise HTTPException(404, "STG_ID tidak ditemukan")
-    if row[0] not in ("VALIDATED", "PROCESSING", "ERROR"):
-        pg.close()
-        raise HTTPException(409, f"Status harus VALIDATED, saat ini: '{row[0]}'")
-
-    cur.execute("UPDATE ap_invoice_stg SET status = 'PROCESSING', error_msg = NULL, processed_date = NOW() WHERE stg_id = %s", (stg_id,))
-    pg.commit()
-
-    ora = get_oracle_connection()
     try:
-        result = svc.insert_to_interface(pg, ora, stg_id, payload["header"], payload["lines"])
-    except Exception as e:
-        cur.execute("UPDATE ap_invoice_stg SET status = 'ERROR', error_msg = %s WHERE stg_id = %s",
-                    (f"Insert interface gagal: {str(e)}", stg_id))
+        cur = pg.cursor()
+        cur.execute("SELECT status FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "STG_ID tidak ditemukan")
+        if row[0] not in ("VALIDATED", "PROCESSING", "ERROR"):
+            raise HTTPException(409, f"Status harus VALIDATED, saat ini: '{row[0]}'")
+
+        cur.execute("UPDATE ap_invoice_stg SET status = 'PROCESSING', error_msg = NULL, processed_date = NOW() WHERE stg_id = %s", (stg_id,))
         pg.commit()
-        raise HTTPException(500, str(e))
-    finally:
-        ora.close()
+    except HTTPException:
         pg.close()
-    return result
+        raise
+    except Exception as e:
+        pg.close()
+        raise HTTPException(500, str(e))
+
+    ora = None
+    try:
+        ora = get_oracle_connection()
+        result = svc.insert_to_interface(pg, ora, stg_id, payload["header"], payload["lines"])
+        return result
+    except Exception as e:
+        try:
+            pg2 = _get_pg()
+            pg2.cursor().execute("UPDATE ap_invoice_stg SET status = 'ERROR', error_msg = %s WHERE stg_id = %s",
+                                 (f"Insert interface gagal: {str(e)}", stg_id))
+            pg2.commit()
+            pg2.close()
+        except Exception:
+            pass
+        raise HTTPException(500, f"Insert interface gagal: {str(e)}")
+    finally:
+        if ora:
+            ora.close()
+        pg.close()
 
 
 @router.post("/run-import/{stg_id}")
 async def run_import(stg_id: int):
     pg = _get_pg()
-    cur = pg.cursor()
-    cur.execute("SELECT status FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
-    row = cur.fetchone()
-    if not row:
-        pg.close()
-        raise HTTPException(404, "STG_ID tidak ditemukan")
-    if row[0] != "INTERFACED":
-        pg.close()
-        raise HTTPException(409, f"Status harus INTERFACED, saat ini: '{row[0]}'")
-
-    ora = get_oracle_connection()
     try:
-        result = svc.run_apxiimpt(pg, ora, stg_id)
-    except Exception as e:
-        cur.execute("UPDATE ap_invoice_stg SET status = 'ERROR', error_msg = %s WHERE stg_id = %s",
-                    (f"Run import gagal: {str(e)}", stg_id))
-        pg.commit()
-        raise HTTPException(500, str(e))
-    finally:
-        ora.close()
+        cur = pg.cursor()
+        cur.execute("SELECT status FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "STG_ID tidak ditemukan")
+        if row[0] not in ("INTERFACED", "ERROR"):
+            raise HTTPException(409, f"Status harus INTERFACED, saat ini: '{row[0]}'")
+    except HTTPException:
         pg.close()
-    return result
+        raise
+
+    ora = None
+    try:
+        ora = get_oracle_connection()
+        result = svc.run_apxiimpt(pg, ora, stg_id)
+        return result
+    except Exception as e:
+        try:
+            pg2 = _get_pg()
+            pg2.cursor().execute("UPDATE ap_invoice_stg SET status = 'ERROR', error_msg = %s WHERE stg_id = %s",
+                                 (f"Run import gagal: {str(e)}", stg_id))
+            pg2.commit()
+            pg2.close()
+        except Exception:
+            pass
+        raise HTTPException(500, f"Run import gagal: {str(e)}")
+    finally:
+        if ora:
+            ora.close()
+        pg.close()
 
 
 @router.put("/invoices/{stg_id}")
