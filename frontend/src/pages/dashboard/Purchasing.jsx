@@ -520,13 +520,21 @@ function Pagination({ total, page, onPage }) {
   const pages = Math.ceil(total / PAGE_SIZE);
   if (pages <= 1) return null;
   return (
-    <div className="flex items-center justify-between px-3 py-2 border-t border-gray-800 bg-gray-900/50">
-      <span className="text-xs text-gray-500">
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "10px 16px", borderTop: "1px solid rgba(0,0,0,0.06)",
+      background: "#e8edf5",
+    }}>
+      <span style={{ fontSize: 12, color: "#475569", fontWeight: 600 }}>
         {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} dari {total} baris
       </span>
-      <div className="flex items-center gap-1">
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
         <button onClick={() => onPage(page - 1)} disabled={page === 1}
-          className="p-1 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 transition-colors">
+          style={{
+            padding: 4, borderRadius: 6, border: "none", cursor: page === 1 ? "not-allowed" : "pointer",
+            background: "#e8edf5", color: page === 1 ? "#cbd5e1" : "#475569",
+            boxShadow: "2px 2px 5px #c5cad8, -2px -2px 5px #ffffff",
+          }}>
           <ChevronLeft size={14} />
         </button>
         {Array.from({ length: pages }, (_, i) => i + 1)
@@ -537,15 +545,25 @@ function Pagination({ total, page, onPage }) {
             return acc;
           }, [])
           .map((p, i) => p === "..." ? (
-            <span key={`e${i}`} className="px-1 text-xs text-gray-600">…</span>
+            <span key={`e${i}`} style={{ padding: "0 4px", fontSize: 12, color: "#94a3b8" }}>…</span>
           ) : (
             <button key={p} onClick={() => onPage(p)}
-              className={`w-6 h-6 rounded text-xs font-medium transition-colors ${
-                p === page ? "bg-orange-500/20 text-orange-400 border border-orange-500/40" : "text-gray-500 hover:text-gray-300"
-              }`}>{p}</button>
+              style={{
+                width: 28, height: 28, borderRadius: 8, border: "none",
+                fontSize: 12, fontWeight: 700, cursor: "pointer",
+                background: p === page ? "#2563eb" : "#e8edf5",
+                color: p === page ? "#ffffff" : "#475569",
+                boxShadow: p === page
+                  ? "inset 2px 2px 4px rgba(0,0,0,0.2)"
+                  : "2px 2px 5px #c5cad8, -2px -2px 5px #ffffff",
+              }}>{p}</button>
           ))}
         <button onClick={() => onPage(page + 1)} disabled={page === pages}
-          className="p-1 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 transition-colors">
+          style={{
+            padding: 4, borderRadius: 6, border: "none", cursor: page === pages ? "not-allowed" : "pointer",
+            background: "#e8edf5", color: page === pages ? "#cbd5e1" : "#475569",
+            boxShadow: "2px 2px 5px #c5cad8, -2px -2px 5px #ffffff",
+          }}>
           <ChevronRight size={14} />
         </button>
       </div>
@@ -566,7 +584,7 @@ function PHDetailTable({ data, loading, error }) {
       r.category, r.material_type, r.currency_code, r.country_of_origin, r.year,
       r.po_qty, r.received_qty, r.po_amount_orig, r.po_amount_idr, r.uom,
     ]);
-    downloadExcel("purchase_history_detail", cols, rows);
+    downloadExcel("purchase_history_detail", cols, rows, [9, 10, 11, 12]);
   };
 
   return (
@@ -632,7 +650,9 @@ function PHByItemTable({ data, years, loading, error }) {
       ...years.flatMap(y => [r[`value_idr_${y}`] ?? 0, r[`qty_${y}`] ?? 0]),
       r.total_value_idr, r.total_qty,
     ]);
-    downloadExcel("purchase_history_by_item.xlsx", headers, rows);
+    const amtCols = [];
+    for (let i = fixedCols.length; i < headers.length; i++) amtCols.push(i);
+    downloadExcel("purchase_history_by_item", headers, rows, amtCols);
   };
 
   return (
@@ -717,7 +737,9 @@ function PHBySupplierTable({ data, years, loading, error }) {
       ...years.flatMap(y => [r[`value_orig_${y}`] ?? 0, r[`value_idr_${y}`] ?? 0, r[`qty_${y}`] ?? 0]),
       r.total_value_orig, r.total_value_idr, r.total_qty,
     ]);
-    downloadExcel("purchase_history_by_supplier.xlsx", headers, rows);
+    const amtCols = [];
+    for (let i = fixedCols.length; i < headers.length; i++) amtCols.push(i);
+    downloadExcel("purchase_history_by_supplier", headers, rows, amtCols);
   };
 
   return (
@@ -899,7 +921,7 @@ function MonthlySpendSection() {
   const handleDownload = () => {
     const cols = ["Month","Year","Direct Material (IDR)","Indirect Material (IDR)","Total (IDR)","PO Count"];
     const rows = stackedData.map(r => [r.label, r.yr, r.direct, r.indirect, r.total, r.po_count]);
-    downloadExcel(`monthly_spend_${f.year_from}-${f.year_to}`, cols, rows);
+    downloadExcel(`monthly_spend_${f.year_from}-${f.year_to}`, cols, rows, [2, 3, 4]);
   };
 
   const YOY_COLORS = ["#60a5fa","#34d399","#f59e0b","#f87171","#a78bfa","#fb923c"];
@@ -1165,7 +1187,7 @@ function ActiveSuppliersSection() {
       r.supplier_name, r.po_count, r.item_count, r.category_count, r.last_po_date,
       r.direct_idr, r.indirect_idr, r.total_idr,
     ]);
-    downloadExcel(`active_suppliers_${f.year_from}-${f.year_to}`, cols, data);
+    downloadExcel(`active_suppliers_${f.year_from}-${f.year_to}`, cols, data, [5, 6, 7]);
   };
 
   return (

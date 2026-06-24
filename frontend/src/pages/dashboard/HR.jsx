@@ -303,22 +303,33 @@ function EmployeeTable() {
 
       {/* Pagination */}
       {data.pages > 1 && (
-        <div className="flex items-center justify-between text-xs text-gray-500">
-          <span>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "10px 0", fontSize: 12,
+        }}>
+          <span style={{ color: "#475569", fontWeight: 600 }}>
             {data.total} karyawan · halaman {page} dari {data.pages}
           </span>
-          <div className="flex gap-1">
+          <div style={{ display: "flex", gap: 4 }}>
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="rounded-md border border-gray-700 p-1.5 hover:bg-gray-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              style={{
+                padding: 6, borderRadius: 8, border: "none", cursor: page === 1 ? "not-allowed" : "pointer",
+                background: "#e8edf5", color: page === 1 ? "#cbd5e1" : "#475569",
+                boxShadow: "2px 2px 5px #c5cad8, -2px -2px 5px #ffffff",
+              }}
             >
               <ChevronLeft size={13} />
             </button>
             <button
               onClick={() => setPage((p) => Math.min(data.pages, p + 1))}
               disabled={page === data.pages}
-              className="rounded-md border border-gray-700 p-1.5 hover:bg-gray-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              style={{
+                padding: 6, borderRadius: 8, border: "none", cursor: page === data.pages ? "not-allowed" : "pointer",
+                background: "#e8edf5", color: page === data.pages ? "#cbd5e1" : "#475569",
+                boxShadow: "2px 2px 5px #c5cad8, -2px -2px 5px #ffffff",
+              }}
             >
               <ChevronRight size={13} />
             </button>

@@ -139,8 +139,9 @@ class PurchasingService:
     async def get_categories(self) -> dict:
         sql = """
             SELECT DISTINCT mcb.segment1 AS category
-            FROM mtl_categories_b    mcb
-            JOIN mtl_category_sets_tl mcs ON mcs.category_set_id   = mcb.category_set_id
+            FROM mtl_categories_b      mcb
+            JOIN mtl_item_categories   mic ON mic.category_id = mcb.category_id
+            WHERE mcb.segment1 IS NOT NULL
             ORDER BY mcb.segment1
         """
         try:
@@ -190,7 +191,7 @@ class PurchasingService:
         poh.type_lookup_code IN ('STANDARD','BLANKET','CONTRACT')
         AND poh.authorization_status NOT IN ('INCOMPLETE')
         AND NVL(poll.cancel_flag,'N') = 'N'
-        AND (:p_org_id       IS NULL OR poh.org_id             = :p_org_id)
+        AND (:p_org_id       IS NULL OR msi.organization_id    = :p_org_id)
         AND EXTRACT(YEAR FROM poh.creation_date) BETWEEN
               NVL(:p_year_from, EXTRACT(YEAR FROM poh.creation_date))
           AND NVL(:p_year_to,   EXTRACT(YEAR FROM poh.creation_date))
