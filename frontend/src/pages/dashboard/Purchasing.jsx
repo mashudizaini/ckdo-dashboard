@@ -156,16 +156,17 @@ function OpenPRSection() {
 
   const handleDownload = () => {
     const cols = ["PR Number","Line","Item Code","Item Description","Category","Type",
-                  "Requestor","UoM","Qty","Currency","Unit Price","Unit Price IDR",
+                  "Supplier","Requestor","UoM","Qty","Currency","Unit Price","Unit Price IDR",
                   "Total Value","Total Value IDR","Status","Created Date","Aging (days)"];
     const data = rows.map(r => [
       r.pr_number, r.line_num, r.item_code, r.item_description,
-      r.category_code, r.material_type, r.requestor, r.uom, r.quantity,
+      r.category_code, r.material_type, r.supplier_name || "—", r.requestor, r.uom, r.quantity,
       r.currency_code, r.unit_price_orig, r.unit_price_idr,
       r.total_value_orig, r.total_value_idr,
       r.pr_status, r.creation_date, r.aging_days,
     ]);
-    downloadExcel(`open_pr_${toISO(today)}`, cols, data);
+    const amountCols = [9, 11, 12, 13, 14];
+    downloadExcel(`open_pr_${toISO(today)}`, cols, data, amountCols);
   };
 
   const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -273,7 +274,7 @@ function OpenPRSection() {
               <thead>
                 <tr className="bg-gray-800/60">
                   {["PR Number","Line","Item Code","Item Description","Category","Type",
-                    "Requestor","UoM","Qty","Currency","Unit Price","Unit Price IDR",
+                    "Supplier","Requestor","UoM","Qty","Currency","Unit Price","Unit Price IDR",
                     "Total Value","Total Value IDR","Status","Created","Aging"].map(h => (
                     <th key={h} className={TH}>{h}</th>
                   ))}
@@ -281,11 +282,11 @@ function OpenPRSection() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={17} className="px-3 py-10 text-center text-xs text-gray-500">
+                  <tr><td colSpan={18} className="px-3 py-10 text-center text-xs text-gray-500">
                     <Loader2 size={14} className="animate-spin inline mr-2" />Loading...
                   </td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={17} className="px-3 py-10 text-center text-xs text-gray-600">No data found</td></tr>
+                  <tr><td colSpan={18} className="px-3 py-10 text-center text-xs text-gray-600">No data found</td></tr>
                 ) : paged.map((r, i) => (
                   <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
                     <td className={`${TD} text-blue-400 font-mono font-medium`}>{r.pr_number}</td>
@@ -300,6 +301,7 @@ function OpenPRSection() {
                           : "bg-slate-500/10 text-slate-400 border-slate-500/30"
                       }`}>{r.material_type}</span>
                     </td>
+                    <td className={`${TD} text-gray-400 max-w-40 truncate`} title={r.supplier_name}>{r.supplier_name || "—"}</td>
                     <td className={`${TD} text-gray-400`}>{r.requestor}</td>
                     <td className={`${TD} text-gray-500`}>{r.uom}</td>
                     <td className={`${TD} text-right text-gray-300`}>{fmtQty(r.quantity)}</td>
@@ -494,8 +496,19 @@ function PurchaseHistorySection() {
 
 /* ─── Shared: Excel download helper ─────────────── */
 
-function downloadExcel(filename, headers, rows) {
+function downloadExcel(filename, headers, rows, amountCols) {
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  if (amountCols && amountCols.length > 0) {
+    const fmt = "#,##0.00";
+    for (let r = 1; r <= rows.length; r++) {
+      for (const c of amountCols) {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        if (ws[addr] && typeof ws[addr].v === "number") {
+          ws[addr].z = fmt;
+        }
+      }
+    }
+  }
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Data");
   XLSX.writeFile(wb, `${filename}.xlsx`);

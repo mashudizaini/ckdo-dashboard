@@ -524,7 +524,8 @@ class PurchasingService:
                       * ({self._PR_RATE_CASE}), 2)                         AS total_value_idr,
                 prh.authorization_status                                    AS pr_status,
                 TO_CHAR(prh.creation_date, 'YYYY-MM-DD')                   AS creation_date,
-                TRUNC(SYSDATE) - TRUNC(prh.creation_date)                  AS aging_days
+                TRUNC(SYSDATE) - TRUNC(prh.creation_date)                  AS aging_days,
+                NVL(aps.vendor_name, NVL(prl.suggested_vendor_name, '—'))  AS supplier_name
             FROM po_requisition_headers_all prh
             JOIN po_requisition_lines_all prl
                 ON prl.requisition_header_id = prh.requisition_header_id
@@ -535,6 +536,8 @@ class PurchasingService:
                 ON  mcb.category_id = prl.category_id
             LEFT JOIN fnd_user fu
                 ON  fu.user_id = prh.created_by
+            LEFT JOIN ap_suppliers aps
+                ON  aps.vendor_id = prl.vendor_id
             WHERE NVL(prl.cancel_flag, 'N') = 'N'
               AND prh.authorization_status NOT IN ('CANCELLED')
               AND (:p_pr_status IS NULL OR prh.authorization_status = :p_pr_status)
@@ -566,7 +569,6 @@ class PurchasingService:
                            )))
               )
             ORDER BY prh.creation_date DESC, prh.segment1, prl.line_num
-            FETCH FIRST 1000 ROWS ONLY
         """
         params = {
             "p_ert":       ert,
