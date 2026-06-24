@@ -41,8 +41,8 @@ def ensure_staging_table():
                 invoice_num         VARCHAR(50) NOT NULL,
                 invoice_date        VARCHAR(20),
                 vendor_name         VARCHAR(240),
-                vendor_id           INTEGER,
-                vendor_site_id      INTEGER,
+                vendor_id           BIGINT,
+                vendor_site_id      BIGINT,
                 vendor_site_code    VARCHAR(50),
                 payment_terms       VARCHAR(50),
                 terms_date          VARCHAR(20),
@@ -54,11 +54,17 @@ def ensure_staging_table():
                 tax_amount          NUMERIC,
                 tax_serial_number   VARCHAR(100),
                 lines_json          TEXT,
-                interface_invoice_id INTEGER,
-                ap_invoice_id       INTEGER,
-                conc_request_id     INTEGER
+                interface_invoice_id BIGINT,
+                ap_invoice_id       BIGINT,
+                conc_request_id     BIGINT
             )
         """)
+        # Migrate existing table: INTEGER → BIGINT
+        for col in ('vendor_id', 'vendor_site_id', 'interface_invoice_id', 'ap_invoice_id', 'conc_request_id'):
+            try:
+                cur.execute(f"ALTER TABLE ap_invoice_stg ALTER COLUMN {col} TYPE BIGINT")
+            except Exception:
+                conn.rollback()
         conn.commit()
         conn.close()
     except Exception:
