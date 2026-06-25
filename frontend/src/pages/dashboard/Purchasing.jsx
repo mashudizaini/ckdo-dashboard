@@ -1580,77 +1580,7 @@ function PriceAnalysisSection() {
 
       {/* Summary Table */}
       {searched && tableRows.length > 0 && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-800">
-            <p className="text-sm font-semibold text-gray-200">
-              Price Detail Table — {tableRows.length} supplier(s)
-            </p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-gray-800 bg-gray-800/60">
-                  <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Supplier</th>
-                  <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Item Code</th>
-                  <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Description</th>
-                  <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">UOM</th>
-                  <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Curr</th>
-                  <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Country</th>
-                  {years.map(y => (
-                    <th key={y} className="px-3 py-2 text-center text-gray-400 whitespace-nowrap" colSpan={2}>
-                      {y}
-                    </th>
-                  ))}
-                </tr>
-                <tr className="border-b border-gray-800 bg-gray-800/40">
-                  <th colSpan={6} />
-                  {years.map(y => (
-                    <>
-                      <th key={`${y}-p`} className="px-3 py-1 text-center text-gray-500 whitespace-nowrap font-normal">Avg IDR</th>
-                      <th key={`${y}-q`} className="px-3 py-1 text-center text-gray-500 whitespace-nowrap font-normal">Qty</th>
-                    </>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {tableRows.map((r, i) => {
-                  // compute trend: compare last year vs prev year avg price
-                  const lastY = years[years.length - 1];
-                  const prevY = years[years.length - 2];
-                  const lastP = r.years[lastY]?.avg_price_idr;
-                  const prevP = r.years[prevY]?.avg_price_idr;
-                  const trend = lastP && prevP ? (lastP > prevP ? "up" : lastP < prevP ? "down" : "flat") : null;
-                  return (
-                    <tr key={i} className="border-b border-gray-800 hover:bg-gray-800/40">
-                      <td className="px-3 py-2 text-gray-200 whitespace-nowrap">
-                        <div className="flex items-center gap-1">
-                          {trend === "up"   && <TrendingUp   size={11} className="text-red-400" />}
-                          {trend === "down" && <TrendingDown size={11} className="text-green-400" />}
-                          {r.supplier_name}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-cyan-400 font-mono whitespace-nowrap">{r.item_code}</td>
-                      <td className="px-3 py-2 text-gray-300 max-w-xs truncate">{r.item_desc}</td>
-                      <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.uom}</td>
-                      <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.currency}</td>
-                      <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.country}</td>
-                      {years.map(y => (
-                        <>
-                          <td key={`${y}-p`} className="px-3 py-2 text-right text-gray-200 whitespace-nowrap">
-                            {fmtIDR2(r.years[y]?.avg_price_idr)}
-                          </td>
-                          <td key={`${y}-q`} className="px-3 py-2 text-right text-gray-400 whitespace-nowrap">
-                            {r.years[y]?.total_qty != null ? fmtIDR2(r.years[y].total_qty) : "—"}
-                          </td>
-                        </>
-                      ))}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <PriceDetailTable tableRows={tableRows} years={years} />
       )}
 
       {searched && data.length === 0 && !loading && (
@@ -1664,6 +1594,83 @@ function PriceAnalysisSection() {
           Set filters and click <span className="text-cyan-400 font-semibold">Search</span> to load price analysis data.
         </div>
       )}
+    </div>
+  );
+}
+
+function PriceDetailTable({ tableRows, years }) {
+  const [page, setPage] = useState(1);
+  const paged = tableRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-800">
+        <p className="text-sm font-semibold text-gray-200">
+          Price Detail Table — {tableRows.length} supplier(s)
+        </p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-gray-800 bg-gray-800/60">
+              <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Supplier</th>
+              <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Item Code</th>
+              <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Description</th>
+              <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">UOM</th>
+              <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Curr</th>
+              <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Country</th>
+              {years.map(y => (
+                <th key={y} className="px-3 py-2 text-center text-gray-400 whitespace-nowrap" colSpan={2}>{y}</th>
+              ))}
+            </tr>
+            <tr className="border-b border-gray-800 bg-gray-800/40">
+              <th colSpan={6} />
+              {years.map(y => (
+                <>
+                  <th key={`${y}-p`} className="px-3 py-1 text-center text-gray-500 whitespace-nowrap font-normal">Avg IDR</th>
+                  <th key={`${y}-q`} className="px-3 py-1 text-center text-gray-500 whitespace-nowrap font-normal">Qty</th>
+                </>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {paged.map((r, i) => {
+              const lastY = years[years.length - 1];
+              const prevY = years[years.length - 2];
+              const lastP = r.years[lastY]?.avg_price_idr;
+              const prevP = r.years[prevY]?.avg_price_idr;
+              const trend = lastP && prevP ? (lastP > prevP ? "up" : lastP < prevP ? "down" : "flat") : null;
+              return (
+                <tr key={i} className="border-b border-gray-800 hover:bg-gray-800/40">
+                  <td className="px-3 py-2 text-gray-200 whitespace-nowrap">
+                    <div className="flex items-center gap-1">
+                      {trend === "up"   && <TrendingUp   size={11} className="text-red-400" />}
+                      {trend === "down" && <TrendingDown size={11} className="text-green-400" />}
+                      {r.supplier_name}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-cyan-400 font-mono whitespace-nowrap">{r.item_code}</td>
+                  <td className="px-3 py-2 text-gray-300 max-w-xs truncate">{r.item_desc}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.uom}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.currency}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.country}</td>
+                  {years.map(y => (
+                    <>
+                      <td key={`${y}-p`} className="px-3 py-2 text-right text-gray-200 whitespace-nowrap">
+                        {fmtIDR2(r.years[y]?.avg_price_idr)}
+                      </td>
+                      <td key={`${y}-q`} className="px-3 py-2 text-right text-gray-400 whitespace-nowrap">
+                        {r.years[y]?.total_qty != null ? fmtIDR2(r.years[y].total_qty) : "—"}
+                      </td>
+                    </>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <Pagination total={tableRows.length} page={page} onPage={setPage} />
     </div>
   );
 }
