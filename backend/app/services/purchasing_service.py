@@ -172,7 +172,6 @@ class PurchasingService:
         po_headers_all poh
         JOIN po_lines_all          pol  ON pol.po_header_id     = poh.po_header_id
         JOIN po_line_locations_all poll ON poll.po_line_id      = pol.po_line_id
-                                       AND poll.shipment_type  NOT IN ('PREPAYMENT')
         LEFT JOIN mtl_system_items_b msi ON msi.inventory_item_id = pol.item_id
                                        AND msi.organization_id   = poll.ship_to_organization_id
         LEFT JOIN (
@@ -193,14 +192,16 @@ class PurchasingService:
 
     _PH_WHERE = """
         poh.type_lookup_code IN ('STANDARD','BLANKET','CONTRACT')
-        AND poh.authorization_status NOT IN ('INCOMPLETE')
-        AND NVL(poll.cancel_flag,'N') = 'N'
+        AND poh.authorization_status NOT IN ('CANCELLED','INCOMPLETE')
+        AND NVL(pol.cancel_flag,'N') = 'N'
         AND (:p_org_id       IS NULL OR NVL(msi.organization_id, poll.ship_to_organization_id) = :p_org_id)
         AND EXTRACT(YEAR FROM poh.creation_date) BETWEEN
               NVL(:p_year_from, EXTRACT(YEAR FROM poh.creation_date))
           AND NVL(:p_year_to,   EXTRACT(YEAR FROM poh.creation_date))
-        AND (:p_item_code    IS NULL OR NVL(msi.segment1, pol.item_id)    = :p_item_code)
-        AND (:p_item_desc    IS NULL OR UPPER(NVL(msi.description, pol.item_description)) LIKE UPPER('%'||:p_item_desc||'%'))
+        AND (:p_item_code    IS NULL OR NVL(msi.segment1, TO_CHAR(pol.item_id)) = :p_item_code)
+        AND (:p_item_desc    IS NULL
+             OR UPPER(pol.item_description) LIKE UPPER('%'||:p_item_desc||'%')
+             OR UPPER(msi.description)      LIKE UPPER('%'||:p_item_desc||'%'))
         AND (:p_vendor_name  IS NULL OR UPPER(aps.vendor_name)           LIKE UPPER('%'||:p_vendor_name||'%'))
         AND (:p_manufacturer IS NULL OR UPPER(mfr.manufacturer_name)     LIKE UPPER('%'||:p_manufacturer||'%'))
         AND (:p_country      IS NULL OR mfr.country_of_origin            = :p_country)
