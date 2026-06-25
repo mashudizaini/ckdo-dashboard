@@ -255,37 +255,30 @@ class PurchasingService:
         }
 
     async def get_purchase_history_detail(self, filters: dict) -> dict:
-        """Output 1: Aggregated per item/category/currency/country/year."""
+        """Output 1: Individual PO line detail (like Oracle PO report)."""
         sql = f"""
             SELECT
-                NVL(msi.organization_id, poll.ship_to_organization_id)   AS organization_id,
-                NVL(hou.name, TO_CHAR(poll.ship_to_organization_id))     AS organization_name,
+                poh.segment1                                             AS po_number,
+                pol.line_num                                             AS line_num,
                 NVL(msi.segment1, TO_CHAR(pol.item_id))                  AS item_code,
                 NVL(msi.description, pol.item_description)               AS item_description,
                 NVL(mcb.segment1, '—')                                   AS category,
                 ({self._MAT_TYPE})                                       AS material_type,
+                aps.vendor_name                                          AS supplier_name,
                 poh.currency_code,
-                COALESCE(mfr.country_of_origin,'UNKNOWN')                AS country_of_origin,
-                EXTRACT(YEAR FROM poh.creation_date)                     AS year,
-                SUM(pol.quantity * pol.unit_price)                       AS po_amount_orig,
-                SUM(pol.quantity * pol.unit_price * ({self._RATE_CASE}))  AS po_amount_idr,
-                SUM(pol.quantity)                                        AS po_qty,
-                SUM(poll.quantity_received)                              AS received_qty,
-                NVL(msi.primary_uom_code, pol.unit_meas_lookup_code)     AS uom
+                NVL(msi.primary_uom_code, pol.unit_meas_lookup_code)     AS uom,
+                pol.quantity                                             AS quantity,
+                pol.unit_price                                           AS unit_price,
+                ROUND(pol.quantity * pol.unit_price, 2)                  AS amount_orig,
+                ROUND(pol.quantity * pol.unit_price * ({self._RATE_CASE}), 2) AS amount_idr,
+                NVL(poll.quantity_received, 0)                           AS received_qty,
+                TO_CHAR(poh.creation_date, 'YYYY-MM-DD')                AS creation_date,
+                poh.closed_code                                          AS closure_status,
+                NVL(hou.name, TO_CHAR(poll.ship_to_organization_id))     AS organization_name,
+                COALESCE(mfr.country_of_origin,'UNKNOWN')                AS country_of_origin
             FROM {self._PH_FROM}
             WHERE {self._PH_WHERE}
-            GROUP BY
-                NVL(msi.organization_id, poll.ship_to_organization_id),
-                NVL(hou.name, TO_CHAR(poll.ship_to_organization_id)),
-                NVL(msi.segment1, TO_CHAR(pol.item_id)),
-                NVL(msi.description, pol.item_description),
-                NVL(mcb.segment1, '—'),
-                ({self._MAT_TYPE}),
-                poh.currency_code,
-                COALESCE(mfr.country_of_origin,'UNKNOWN'),
-                EXTRACT(YEAR FROM poh.creation_date),
-                NVL(msi.primary_uom_code, pol.unit_meas_lookup_code)
-            ORDER BY NVL(msi.segment1, TO_CHAR(pol.item_id)), EXTRACT(YEAR FROM poh.creation_date)
+            ORDER BY poh.creation_date DESC, poh.segment1, pol.line_num
         """
         try:
             rows = await asyncio.to_thread(self._query, sql, self._ph_params(filters))

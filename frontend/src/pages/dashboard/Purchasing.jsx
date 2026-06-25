@@ -349,7 +349,7 @@ function PurchaseHistorySection() {
 
   const [f, setF] = useState({
     org_id: "", exchange_rate_type: "Corporate",
-    year_from: CY - 2, year_to: CY,
+    year_from: CY - 5, year_to: CY,
     item_code: "", item_desc: "", vendor_name: "", manufacturer: "",
     country_of_origin: "", category: "", currency_code: "", material_type: "",
   });
@@ -394,7 +394,7 @@ function PurchaseHistorySection() {
   };
 
   const handleReset = () => {
-    setF({ org_id: "", exchange_rate_type: "Corporate", year_from: CY - 2, year_to: CY,
+    setF({ org_id: "", exchange_rate_type: "Corporate", year_from: CY - 5, year_to: CY,
            item_code: "", item_desc: "", vendor_name: "", manufacturer: "",
            country_of_origin: "", category: "", currency_code: "", material_type: "" });
     setSearched(false); setResults({ detail: null, "by-item": null, "by-supplier": null }); setFilterErr(null);
@@ -575,16 +575,20 @@ function PHDetailTable({ data, loading, error }) {
   const [page, setPage] = useState(1);
   const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
   const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
-  const cols = ["Org ID","Organization","Item Code","Item Desc","Category","Type","Currency","Country","Year","Qty","Rcvd Qty","PO Amt Orig","PO Amt IDR","UOM"];
+  const cols = ["PO Number","Line","Item Code","Item Description","Category","Type",
+                "Supplier","Org","Currency","UOM","Qty","Unit Price","Amount","Amount IDR",
+                "Rcvd Qty","PO Date","Status"];
   const paged = data.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const handleDownload = () => {
     const rows = data.map(r => [
-      r.organization_id, r.organization_name, r.item_code, r.item_description,
-      r.category, r.material_type, r.currency_code, r.country_of_origin, r.year,
-      r.po_qty, r.received_qty, r.po_amount_orig, r.po_amount_idr, r.uom,
+      r.po_number, r.line_num, r.item_code, r.item_description,
+      r.category, r.material_type, r.supplier_name, r.organization_name,
+      r.currency_code, r.uom, r.quantity, r.unit_price,
+      r.amount_orig, r.amount_idr, r.received_qty,
+      r.creation_date, r.closure_status,
     ]);
-    downloadExcel("purchase_history_detail", cols, rows, [9, 10, 11, 12]);
+    downloadExcel("purchase_history_detail", cols, rows, [10, 11, 12, 13, 14]);
   };
 
   return (
@@ -610,20 +614,23 @@ function PHDetailTable({ data, loading, error }) {
               <tr><td colSpan={cols.length} className="px-3 py-10 text-center text-xs text-gray-600">No data found</td></tr>
             ) : paged.map((r, i) => (
               <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
-                <td className={`${TD} text-gray-400 font-mono`}>{r.organization_id}</td>
-                <td className={`${TD} text-gray-300 max-w-[140px] truncate`} title={r.organization_name}>{r.organization_name}</td>
-                <td className={`${TD} font-mono text-blue-400`}>{r.item_code}</td>
+                <td className={`${TD} font-mono text-blue-400 font-medium`}>{r.po_number}</td>
+                <td className={`${TD} text-gray-400 text-center`}>{r.line_num}</td>
+                <td className={`${TD} font-mono text-gray-300`}>{r.item_code}</td>
                 <td className={`${TD} text-gray-300 max-w-[180px] truncate`} title={r.item_description}>{r.item_description}</td>
                 <td className={`${TD} text-gray-400`}>{r.category}</td>
                 <td className={`${TD} text-gray-400`}>{r.material_type}</td>
+                <td className={`${TD} text-gray-300 max-w-[160px] truncate`} title={r.supplier_name}>{r.supplier_name}</td>
+                <td className={`${TD} text-gray-400 max-w-[120px] truncate`} title={r.organization_name}>{r.organization_name}</td>
                 <td className={`${TD} text-yellow-400`}>{r.currency_code}</td>
-                <td className={`${TD} text-gray-400`}>{r.country_of_origin}</td>
-                <td className={`${TD} text-gray-300 font-medium`}>{r.year}</td>
-                <td className={`${TD} text-right text-gray-300`}>{fmtQty(r.po_qty)}</td>
-                <td className={`${TD} text-right text-gray-400`}>{fmtQty(r.received_qty)}</td>
-                <td className={`${TD} text-right text-gray-300`}>{fmtIDR(r.po_amount_orig)}</td>
-                <td className={`${TD} text-right text-green-400 font-medium`}>{fmtIDR(r.po_amount_idr)}</td>
                 <td className={`${TD} text-gray-500`}>{r.uom}</td>
+                <td className={`${TD} text-right text-gray-300`}>{fmtQty(r.quantity)}</td>
+                <td className={`${TD} text-right text-gray-300`}>{fmtIDR(r.unit_price)}</td>
+                <td className={`${TD} text-right text-gray-300 font-medium`}>{fmtIDR(r.amount_orig)}</td>
+                <td className={`${TD} text-right text-green-400 font-medium`}>{fmtIDR(r.amount_idr)}</td>
+                <td className={`${TD} text-right text-gray-400`}>{fmtQty(r.received_qty)}</td>
+                <td className={`${TD} text-gray-500`}>{r.creation_date}</td>
+                <td className={`${TD} text-gray-400`}>{r.closure_status || "Open"}</td>
               </tr>
             ))}
           </tbody>
