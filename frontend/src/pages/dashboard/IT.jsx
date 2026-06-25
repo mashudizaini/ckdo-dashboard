@@ -155,7 +155,7 @@ function ServerMonitoringSection() {
               <span className="text-xs text-gray-500">({config.username})</span>
             )}
             {config?.has_password === false && (
-              <span className="text-xs text-amber-400">Password belum diset</span>
+              <span className="text-xs text-amber-400">Password not set</span>
             )}
           </div>
           <ActionBtn icon={Settings} label="Configure" color="bg-gray-700 hover:bg-gray-600" onClick={() => setShowModal(true)} />
@@ -169,7 +169,7 @@ function ServerMonitoringSection() {
         )}
         {statusNotConf && (
           <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
-            <Settings size={14} /> Konfigurasi SSH belum lengkap. Klik Configure untuk mengisi credentials.
+            <Settings size={14} /> SSH configuration incomplete. Click Configure to enter credentials.
           </div>
         )}
 
@@ -345,7 +345,7 @@ function MiniChart({ title, data, dataKey, color, domain }) {
           boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
-          <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>Start monitoring untuk melihat grafik</span>
+          <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>Start monitoring to view charts</span>
         </div>
       ) : (
         <div style={{
@@ -398,7 +398,7 @@ function TablespaceSection() {
       if (res.success) {
         setData(res.data ?? []);
       } else {
-        setError(res.error ?? "Gagal memuat data");
+        setError(res.error ?? "Failed to load data");
       }
     } catch (e) {
       setError(String(e?.message ?? e));
@@ -451,7 +451,7 @@ function TablespaceSection() {
           </ResponsiveContainer>
         </div>
       ) : (
-        <ChartPlaceholder label="Klik Refresh untuk memuat data tablespace" className="mb-5" />
+        <ChartPlaceholder label="Click Refresh to load tablespace data" className="mb-5" />
       )}
 
       {/* Table */}
@@ -466,7 +466,7 @@ function TablespaceSection() {
             {r.status}
           </span>,
         ])}
-        placeholder="Klik Refresh untuk memuat data tablespace"
+        placeholder="Click Refresh to load tablespace data"
       />
     </SectionCard>
   );
@@ -693,7 +693,7 @@ function PendingJobsSection() {
       <DataTable
         headers={["Request ID", "Program Name", "User", "Request Date", "Wait Time", "Status"]}
         rows={data.map((r) => [r.request_id, r.program_name, r.requested_by, r.request_date, r.wait_time, r.phase_code])}
-        placeholder="Klik Refresh untuk memuat pending jobs"
+        placeholder="Click Refresh to load pending jobs"
       />
     </SectionCard>
   );
@@ -730,7 +730,7 @@ function WorkflowErrorSection() {
       <DataTable
         headers={["Item Key", "Item Type", "Activity Name", "Status", "Error Message", "Begin Date", "Days Pending"]}
         rows={data.map((r) => [r.item_key, r.item_type, r.activity_name, r.activity_status, r.error_message, r.begin_date, r.days_pending])}
-        placeholder="Klik Refresh untuk memuat workflow data"
+        placeholder="Click Refresh to load workflow data"
       />
     </SectionCard>
   );

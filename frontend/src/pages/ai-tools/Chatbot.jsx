@@ -2,17 +2,17 @@ import { useState, useRef, useEffect } from "react";
 import { MessageSquare, Send, Bot, User } from "lucide-react";
 
 const SUGGESTIONS = [
-  "Berapa total revenue bulan ini?",
-  "Status batch produksi terkini?",
-  "Ringkasan attendance karyawan?",
-  "Ada berapa PO pending approval?",
+  "What's the total revenue this month?",
+  "Current production batch status?",
+  "Employee attendance summary?",
+  "How many POs are pending approval?",
 ];
 
 export default function Chatbot() {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
-      text: "Halo! Saya AI Assistant CKDO Dashboard. Tanyakan apa saja tentang data perusahaan.",
+      text: "Hello! I'm the CKDO Dashboard AI Assistant. Ask me anything about company data.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -28,7 +28,7 @@ export default function Chatbot() {
     setMessages((prev) => [
       ...prev,
       { role: "user", text },
-      { role: "assistant", text: "Fitur AI sedang dalam pengembangan. Silakan cek kembali nanti." },
+      { role: "assistant", text: "AI feature is under development. Please check back later." },
     ]);
     setInput("");
   };
@@ -41,7 +41,7 @@ export default function Chatbot() {
           <MessageSquare className="text-blue-400" size={26} />
           AI Chatbot
         </h1>
-        <p className="text-gray-500 text-sm mt-1">AI Assistant berbasis Claude — Tanyakan apa saja tentang data perusahaan</p>
+        <p className="text-gray-500 text-sm mt-1">AI Assistant powered by Claude — Ask anything about company data</p>
       </div>
 
       {/* Chat container */}
@@ -102,7 +102,7 @@ export default function Chatbot() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
-            placeholder="Ketik pertanyaan Anda..."
+            placeholder="Type your question..."
             className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 transition-colors"
           />
           <button

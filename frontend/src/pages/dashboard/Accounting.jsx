@@ -12,7 +12,7 @@ const NEU = {
 
 const TABS = [
   { id: "ap-invoice", icon: FileText,     label: "AP Autoinvoice",    color: "#2563eb" },
-  { id: "expense",    icon: TrendingDown,  label: "Expense Bulanan",  color: "#ef4444" },
+  { id: "expense",    icon: TrendingDown,  label: "Monthly Expense",  color: "#ef4444" },
   { id: "profit",     icon: DollarSign,    label: "Net Profit",       color: "#3b82f6" },
   { id: "ar",         icon: FileText,      label: "AR Balance",       color: "#f59e0b" },
   { id: "coretax",    icon: FileDown,      label: "Coretax Download", color: "#8b5cf6" },
@@ -69,13 +69,13 @@ export default function AccountingDashboard() {
           action={<ActionBtn icon={RefreshCw} label="Refresh" />}>
           <DataTable
             headers={["Category", "Budget", "Actual", "Variance"]}
-            placeholder="Klik Refresh untuk memuat data expense"
+            placeholder="Click Refresh to load expense data"
           />
         </SectionCard>
       )}
 
       {active === "profit" && (
-        <SectionCard title="Net Profit — Trend Bulanan"
+        <SectionCard title="Net Profit — Monthly Trend"
           action={<ActionBtn icon={RefreshCw} label="Refresh" />}>
           <div style={{
             height: 160, borderRadius: 14, marginBottom: 16,
@@ -85,8 +85,8 @@ export default function AccountingDashboard() {
             <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>Chart net profit trend</span>
           </div>
           <DataTable
-            headers={["Bulan", "Revenue", "Expense", "Net Profit", "Margin"]}
-            placeholder="Klik Refresh untuk memuat data"
+            headers={["Month", "Revenue", "Expense", "Net Profit", "Margin"]}
+            placeholder="Click Refresh to load data"
           />
         </SectionCard>
       )}
@@ -96,7 +96,7 @@ export default function AccountingDashboard() {
           action={<ActionBtn icon={RefreshCw} label="Refresh" />}>
           <DataTable
             headers={["Customer", "Invoice No", "Invoice Date", "Due Date", "Amount", "Status"]}
-            placeholder="Klik Refresh untuk memuat data AR"
+            placeholder="Click Refresh to load AR data"
           />
         </SectionCard>
       )}
@@ -179,7 +179,7 @@ function DataTable({ headers, rows, placeholder }) {
           ) : (
             <tr>
               <td colSpan={headers.length} style={{ padding: "40px 14px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
-                {placeholder || "Tidak ada data"}
+                {placeholder || "No data"}
               </td>
             </tr>
           )}

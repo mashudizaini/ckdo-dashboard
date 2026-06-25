@@ -173,12 +173,16 @@ class PurchasingService:
         JOIN po_lines_all          pol  ON pol.po_header_id     = poh.po_header_id
         JOIN po_line_locations_all poll ON poll.po_line_id      = pol.po_line_id
                                        AND poll.shipment_type  NOT IN ('PREPAYMENT')
-        JOIN mtl_system_items_b    msi  ON msi.inventory_item_id = pol.item_id
+        LEFT JOIN mtl_system_items_b msi ON msi.inventory_item_id = pol.item_id
                                        AND msi.organization_id   = poll.ship_to_organization_id
-        JOIN mtl_item_categories   mic  ON mic.inventory_item_id = msi.inventory_item_id
-                                       AND mic.organization_id   = msi.organization_id
-        JOIN mtl_category_sets_tl   mcs  ON mcs.category_set_id   = mic.category_set_id
-        JOIN mtl_categories_b      mcb  ON mcb.category_id       = mic.category_id
+        LEFT JOIN (
+            SELECT mic2.inventory_item_id, mic2.organization_id,
+                   MIN(mcb2.segment1) AS segment1
+            FROM mtl_item_categories mic2
+            JOIN mtl_categories_b   mcb2 ON mcb2.category_id = mic2.category_id
+            GROUP BY mic2.inventory_item_id, mic2.organization_id
+        ) mcb ON mcb.inventory_item_id = msi.inventory_item_id
+             AND mcb.organization_id   = msi.organization_id
         JOIN ap_suppliers          aps  ON aps.vendor_id         = poh.vendor_id
         LEFT JOIN xxckdo_manufacturer_master mfr
                                         ON mfr.item_id           = msi.inventory_item_id
@@ -191,23 +195,23 @@ class PurchasingService:
         poh.type_lookup_code IN ('STANDARD','BLANKET','CONTRACT')
         AND poh.authorization_status NOT IN ('INCOMPLETE')
         AND NVL(poll.cancel_flag,'N') = 'N'
-        AND (:p_org_id       IS NULL OR msi.organization_id    = :p_org_id)
+        AND (:p_org_id       IS NULL OR NVL(msi.organization_id, poll.ship_to_organization_id) = :p_org_id)
         AND EXTRACT(YEAR FROM poh.creation_date) BETWEEN
               NVL(:p_year_from, EXTRACT(YEAR FROM poh.creation_date))
           AND NVL(:p_year_to,   EXTRACT(YEAR FROM poh.creation_date))
-        AND (:p_item_code    IS NULL OR msi.segment1                     = :p_item_code)
-        AND (:p_item_desc    IS NULL OR UPPER(msi.description)           LIKE UPPER('%'||:p_item_desc||'%'))
+        AND (:p_item_code    IS NULL OR NVL(msi.segment1, pol.item_id)    = :p_item_code)
+        AND (:p_item_desc    IS NULL OR UPPER(NVL(msi.description, pol.item_description)) LIKE UPPER('%'||:p_item_desc||'%'))
         AND (:p_vendor_name  IS NULL OR UPPER(aps.vendor_name)           LIKE UPPER('%'||:p_vendor_name||'%'))
         AND (:p_manufacturer IS NULL OR UPPER(mfr.manufacturer_name)     LIKE UPPER('%'||:p_manufacturer||'%'))
         AND (:p_country      IS NULL OR mfr.country_of_origin            = :p_country)
-        AND (:p_category     IS NULL OR mcb.segment1                     = :p_category)
+        AND (:p_category     IS NULL OR NVL(mcb.segment1,'—')             = :p_category)
         AND (:p_currency     IS NULL OR poh.currency_code                = :p_currency)
         AND (
             :p_mat_type IS NULL
             OR (:p_mat_type = 'Direct Material'
-                AND mcb.segment1 IN ('RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS'))
+                AND NVL(mcb.segment1,'') IN ('RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS'))
             OR (:p_mat_type = 'Indirect Material'
-                AND mcb.segment1 NOT IN ('RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS'))
+                AND NVL(mcb.segment1,'') NOT IN ('RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS'))
         )
     """
 
@@ -229,7 +233,7 @@ class PurchasingService:
     """
 
     _MAT_TYPE = """
-        CASE WHEN mcb.segment1 IN ('RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS')
+        CASE WHEN NVL(mcb.segment1,'') IN ('RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS')
              THEN 'Direct Material' ELSE 'Indirect Material' END
     """
 
@@ -253,11 +257,11 @@ class PurchasingService:
         """Output 1: Aggregated per item/category/currency/country/year."""
         sql = f"""
             SELECT
-                msi.organization_id                                      AS organization_id,
-                hou.name                                                 AS organization_name,
-                msi.segment1                                             AS item_code,
-                msi.description                                          AS item_description,
-                mcb.segment1                                             AS category,
+                NVL(msi.organization_id, poll.ship_to_organization_id)   AS organization_id,
+                NVL(hou.name, TO_CHAR(poll.ship_to_organization_id))     AS organization_name,
+                NVL(msi.segment1, TO_CHAR(pol.item_id))                  AS item_code,
+                NVL(msi.description, pol.item_description)               AS item_description,
+                NVL(mcb.segment1, '—')                                   AS category,
                 ({self._MAT_TYPE})                                       AS material_type,
                 poh.currency_code,
                 COALESCE(mfr.country_of_origin,'UNKNOWN')                AS country_of_origin,
@@ -266,17 +270,20 @@ class PurchasingService:
                 SUM(pol.quantity * pol.unit_price * ({self._RATE_CASE}))  AS po_amount_idr,
                 SUM(pol.quantity)                                        AS po_qty,
                 SUM(poll.quantity_received)                              AS received_qty,
-                msi.primary_uom_code                                     AS uom
+                NVL(msi.primary_uom_code, pol.unit_meas_lookup_code)     AS uom
             FROM {self._PH_FROM}
             WHERE {self._PH_WHERE}
             GROUP BY
-                msi.organization_id, hou.name,
-                msi.segment1, msi.description, mcb.segment1,
+                NVL(msi.organization_id, poll.ship_to_organization_id),
+                NVL(hou.name, TO_CHAR(poll.ship_to_organization_id)),
+                NVL(msi.segment1, TO_CHAR(pol.item_id)),
+                NVL(msi.description, pol.item_description),
+                NVL(mcb.segment1, '—'),
                 ({self._MAT_TYPE}),
                 poh.currency_code,
                 COALESCE(mfr.country_of_origin,'UNKNOWN'),
                 EXTRACT(YEAR FROM poh.creation_date),
-                msi.primary_uom_code
+                NVL(msi.primary_uom_code, pol.unit_meas_lookup_code)
             ORDER BY msi.segment1, EXTRACT(YEAR FROM poh.creation_date)
         """
         try:
@@ -299,14 +306,14 @@ class PurchasingService:
         sql = f"""
             WITH base_data AS (
                 SELECT
-                    msi.organization_id                                      AS organization_id,
-                    hou.name                                                 AS organization_name,
-                    msi.segment1                                             AS item_code,
-                    msi.description                                          AS item_description,
-                    mcb.segment1                                             AS category,
+                    NVL(msi.organization_id, poll.ship_to_organization_id)   AS organization_id,
+                    NVL(hou.name, TO_CHAR(poll.ship_to_organization_id))     AS organization_name,
+                    NVL(msi.segment1, TO_CHAR(pol.item_id))                  AS item_code,
+                    NVL(msi.description, pol.item_description)               AS item_description,
+                    NVL(mcb.segment1, '—')                                   AS category,
                     ({self._MAT_TYPE})                                       AS material_type,
                     poh.currency_code,
-                    msi.primary_uom_code                                     AS uom,
+                    NVL(msi.primary_uom_code, pol.unit_meas_lookup_code)     AS uom,
                     EXTRACT(YEAR FROM poh.creation_date)                     AS trx_year,
                     pol.quantity * pol.unit_price * ({self._RATE_CASE})       AS line_amount_idr,
                     pol.quantity                                              AS line_qty
@@ -350,7 +357,7 @@ class PurchasingService:
                     pol.quantity * pol.unit_price                            AS line_amount_orig,
                     pol.quantity * pol.unit_price * ({self._RATE_CASE})       AS line_amount_idr,
                     pol.quantity                                              AS line_qty,
-                    COUNT(DISTINCT msi.segment1) OVER (PARTITION BY aps.vendor_name)  AS item_count,
+                    COUNT(DISTINCT NVL(msi.segment1, TO_CHAR(pol.item_id))) OVER (PARTITION BY aps.vendor_name)  AS item_count,
                     COUNT(DISTINCT poh.po_header_id) OVER (PARTITION BY aps.vendor_name) AS po_count
                 FROM {self._PH_FROM}
                 WHERE {self._PH_WHERE}
@@ -387,16 +394,16 @@ class PurchasingService:
                 aps.vendor_name                                                 AS supplier_name,
                 COUNT(DISTINCT poh.po_header_id)                               AS po_count,
                 COUNT(DISTINCT msi.inventory_item_id)                          AS item_count,
-                COUNT(DISTINCT mcb.segment1)                                   AS category_count,
+                COUNT(DISTINCT NVL(mcb.segment1,'—'))                             AS category_count,
                 TO_CHAR(MAX(poh.creation_date), 'YYYY-MM-DD')                  AS last_po_date,
                 ROUND(SUM(
-                    CASE WHEN mcb.segment1 IN
+                    CASE WHEN NVL(mcb.segment1,'') IN
                         ('RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS')
                     THEN pol.quantity * pol.unit_price * ({self._RATE_CASE})
                     ELSE 0 END
                 ), 0)                                                           AS direct_idr,
                 ROUND(SUM(
-                    CASE WHEN mcb.segment1 NOT IN
+                    CASE WHEN NVL(mcb.segment1,'') NOT IN
                         ('RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS')
                     THEN pol.quantity * pol.unit_price * ({self._RATE_CASE})
                     ELSE 0 END
@@ -407,7 +414,6 @@ class PurchasingService:
             WHERE {self._PH_WHERE}
             GROUP BY aps.vendor_id, aps.vendor_name
             ORDER BY total_idr DESC
-            FETCH FIRST 200 ROWS ONLY
         """
         params = self._ph_params(filters)
         try:

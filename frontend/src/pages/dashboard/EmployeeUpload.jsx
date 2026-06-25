@@ -45,7 +45,7 @@ export default function EmployeeUpload() {
   const onFileSelect = (f) => {
     if (!f) return;
     if (!f.name.endsWith(".xlsx") && !f.name.endsWith(".xlsm")) {
-      setError("File harus berformat .xlsx atau .xlsm"); return;
+      setError("File must be .xlsx or .xlsm format"); return;
     }
     setFile(f); setError(null); setResult(null);
   };
@@ -98,9 +98,9 @@ export default function EmployeeUpload() {
       <div className="flex gap-3 rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3 text-sm text-blue-300">
         <AlertCircle size={15} className="mt-0.5 shrink-0" />
         <span>
-          Upload file Excel karyawan (format <strong>ckdo employee.xlsx</strong>).
-          Data yang sudah ada akan diperbarui berdasarkan <strong>User ID</strong>.
-          Karyawan baru akan ditambahkan otomatis.
+          Upload employee Excel file (format <strong>ckdo employee.xlsx</strong>).
+          Existing data will be updated based on <strong>User ID</strong>.
+          New employees will be added automatically.
         </span>
       </div>
 
@@ -132,7 +132,7 @@ export default function EmployeeUpload() {
             </div>
             <div className="text-center">
               <p className="text-sm font-semibold text-green-300">{file.name}</p>
-              <p className="text-xs text-gray-500 mt-1">{fileSizeKB} KB — klik untuk ganti file</p>
+              <p className="text-xs text-gray-500 mt-1">{fileSizeKB} KB — click to change file</p>
             </div>
           </>
         ) : (
@@ -141,8 +141,8 @@ export default function EmployeeUpload() {
               <Upload size={22} className="text-gray-500" />
             </div>
             <div className="text-center">
-              <p className="text-sm font-medium text-gray-300">Drag & drop file Excel di sini</p>
-              <p className="text-xs text-gray-600 mt-1">atau klik untuk pilih file (.xlsx / .xlsm)</p>
+              <p className="text-sm font-medium text-gray-300">Drag & drop Excel file here</p>
+              <p className="text-xs text-gray-600 mt-1">or click to select file (.xlsx / .xlsm)</p>
             </div>
           </>
         )}
@@ -151,13 +151,13 @@ export default function EmployeeUpload() {
       {/* ── Catatan ─────────────────────────────────────────────────────────── */}
       <div>
         <label className="mb-1.5 block text-xs font-medium text-gray-500">
-          Catatan upload <span className="text-gray-700">(opsional — contoh: "Update April 2026")</span>
+          Upload notes <span className="text-gray-700">(optional — e.g. "Update April 2026")</span>
         </label>
         <input
           type="text"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="Keterangan upload ini..."
+          placeholder="Upload description..."
           className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500 transition-colors"
         />
       </div>
@@ -172,8 +172,8 @@ export default function EmployeeUpload() {
             : "bg-indigo-600 hover:bg-indigo-500 active:scale-95"}`}
       >
         {uploading
-          ? <><Loader2 size={15} className="animate-spin" /> Mengupload…</>
-          : <><Upload size={15} /> Upload & Simpan ke Database</>}
+          ? <><Loader2 size={15} className="animate-spin" /> Uploading...</>
+          : <><Upload size={15} /> Upload & Save to Database</>}
       </button>
 
       {/* ── Error ───────────────────────────────────────────────────────────── */}
@@ -193,9 +193,9 @@ export default function EmployeeUpload() {
           </div>
           <div className="grid grid-cols-3 gap-3">
             {[
-              { icon: Users,     color: "text-blue-400",  bg: "bg-blue-500/10",   label: "Total Dibaca",  val: result.total_rows },
-              { icon: UserPlus,  color: "text-green-400", bg: "bg-green-500/10",  label: "Karyawan Baru", val: result.inserted },
-              { icon: RotateCcw, color: "text-amber-400", bg: "bg-amber-500/10",  label: "Diperbarui",    val: result.updated },
+              { icon: Users,     color: "text-blue-400",  bg: "bg-blue-500/10",   label: "Total Read",    val: result.total_rows },
+              { icon: UserPlus,  color: "text-green-400", bg: "bg-green-500/10",  label: "New Employees", val: result.inserted },
+              { icon: RotateCcw, color: "text-amber-400", bg: "bg-amber-500/10",  label: "Updated",       val: result.updated },
             ].map(({ icon: Icon, color, bg, label, val }) => (
               <div key={label} className="rounded-lg border border-white/5 bg-white/3 p-3 text-center">
                 <div className={`mx-auto mb-1.5 flex h-7 w-7 items-center justify-center rounded-lg ${bg}`}>
@@ -218,7 +218,7 @@ export default function EmployeeUpload() {
         >
           <div className="flex items-center gap-2">
             <Clock size={14} className="text-gray-500" />
-            Riwayat Upload
+            Upload History
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -235,12 +235,12 @@ export default function EmployeeUpload() {
         {showLogs && (
           <div className="border-t border-gray-800 overflow-x-auto">
             {logs.length === 0 ? (
-              <p className="px-5 py-6 text-center text-xs text-gray-600">Belum ada riwayat upload</p>
+              <p className="px-5 py-6 text-center text-xs text-gray-600">No upload history yet</p>
             ) : (
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-gray-800/50">
-                    {["Waktu Upload", "File", "Total", "Baru", "Update", "Oleh", "Catatan"].map((h) => (
+                    {["Upload Time", "File", "Total", "New", "Update", "By", "Notes"].map((h) => (
                       <th key={h} className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                     ))}
                   </tr>

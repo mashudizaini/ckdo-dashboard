@@ -91,7 +91,7 @@ export default function APAutoInvoice() {
       const data = await apInvoiceApi.list();
       setInvoices(data);
     } catch (e) {
-      setMessage({ type: "error", text: "Gagal memuat data: " + (e?.detail || e?.message || String(e)) });
+      setMessage({ type: "error", text: "Failed to load data: " + (e?.detail || e?.message || String(e)) });
     } finally {
       setLoading(false);
     }
@@ -108,12 +108,12 @@ export default function APAutoInvoice() {
       const form = new FormData();
       form.append("file", file);
       const res = await apInvoiceApi.upload(form);
-      setMessage({ type: "success", text: `PDF berhasil di-extract! Invoice: ${res.preview?.invoice_num}` });
+      setMessage({ type: "success", text: `PDF extracted successfully! Invoice: ${res.preview?.invoice_num}` });
       await refresh();
       setSelectedId(res.stg_id);
       loadDetail(res.stg_id);
     } catch (e) {
-      setMessage({ type: "error", text: "Upload gagal: " + (e?.detail || e?.message || String(e)) });
+      setMessage({ type: "error", text: "Upload failed: " + (e?.detail || e?.message || String(e)) });
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -126,16 +126,16 @@ export default function APAutoInvoice() {
       setDetail(data);
       setSelectedId(id);
     } catch (e) {
-      setMessage({ type: "error", text: "Gagal load detail" });
+      setMessage({ type: "error", text: "Failed to load detail" });
     }
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Hapus invoice ini dari staging?")) return;
+    if (!confirm("Delete this invoice from staging?")) return;
     setActionLoading("delete");
     try {
       await apInvoiceApi.delete(id);
-      setMessage({ type: "success", text: "Invoice berhasil dihapus" });
+      setMessage({ type: "success", text: "Invoice deleted successfully" });
       setDetail(null);
       setSelectedId(null);
       await refresh();
@@ -151,7 +151,7 @@ export default function APAutoInvoice() {
     setMessage(null);
     try {
       await apInvoiceApi.update(id, payload);
-      setMessage({ type: "success", text: "Data berhasil disimpan" });
+      setMessage({ type: "success", text: "Data saved successfully" });
       await refresh();
       loadDetail(id);
     } catch (e) {
@@ -171,7 +171,7 @@ export default function APAutoInvoice() {
         if (res.warnings?.length) {
           setMessage({ type: "warning", text: res.warnings.map(w => w.message).join("; ") });
         } else {
-          setMessage({ type: "success", text: "Validasi berhasil" });
+          setMessage({ type: "success", text: "Validation successful" });
         }
       } else if (action === "interface") {
         const preview = await apInvoiceApi.get(id);
@@ -185,23 +185,23 @@ export default function APAutoInvoice() {
           SO_NUMBER: preview.so_number, TAX_SERIAL_NUMBER: preview.tax_serial_number,
         };
         res = await apInvoiceApi.insertInterface(id, { header, lines: preview.lines || [] });
-        setMessage({ type: "success", text: `Berhasil insert ke AP Interface (ID: ${res.interface_invoice_id})` });
+        setMessage({ type: "success", text: `Successfully inserted to AP Interface (ID: ${res.interface_invoice_id})` });
       } else if (action === "import") {
         res = await apInvoiceApi.runImport(id);
-        setMessage({ type: "success", text: `APXIIMPT submitted (Request ID: ${res.conc_request_id}). Klik "Check Status" untuk cek hasil.` });
+        setMessage({ type: "success", text: `APXIIMPT submitted (Request ID: ${res.conc_request_id}). Click "Check Status" to check the result.` });
       } else if (action === "attach") {
         res = await apInvoiceApi.attachPdf(id);
         setMessage({ type: "success", text: res.message });
       } else if (action === "check") {
         res = await apInvoiceApi.checkStatus(id);
         if (res.stg_status === "IMPORTED") {
-          setMessage({ type: "success", text: `Invoice berhasil di-import ke EBS! (AP Invoice ID: ${res.import?.invoice_id})` });
+          setMessage({ type: "success", text: `Invoice imported to EBS successfully! (AP Invoice ID: ${res.import?.invoice_id})` });
         } else if (res.stg_status === "ERROR") {
-          setMessage({ type: "error", text: res.import?.error_msg || "Import gagal" });
+          setMessage({ type: "error", text: res.import?.error_msg || "Import failed" });
         } else {
           const phase = res.concurrent?.phase || "—";
           const status = res.concurrent?.status || "—";
-          setMessage({ type: "warning", text: `Concurrent: ${phase} / ${status}. Invoice belum muncul di ap_invoices_all. Coba lagi nanti.` });
+          setMessage({ type: "warning", text: `Concurrent: ${phase} / ${status}. Invoice not yet found in ap_invoices_all. Try again later.` });
         }
       }
       await refresh();
@@ -220,7 +220,7 @@ export default function APAutoInvoice() {
         <div>
           <h2 style={{ fontSize: 18, fontWeight: 800, color: "#1e293b", margin: 0 }}>AP Autoinvoice</h2>
           <p style={{ fontSize: 12, color: "#64748b", fontWeight: 500, marginTop: 2 }}>
-            Upload PDF supplier → Extract → Review/Edit → Validate → Import ke Oracle EBS
+            Upload supplier PDF → Extract → Review/Edit → Validate → Import to Oracle EBS
           </p>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
@@ -264,7 +264,7 @@ export default function APAutoInvoice() {
             <div style={{ maxHeight: 500, overflowY: "auto" }}>
               {invoices.length === 0 ? (
                 <div style={{ padding: "40px 20px", textAlign: "center", color: "#94a3b8", fontSize: 13 }}>
-                  {loading ? "Memuat..." : "Belum ada invoice. Upload PDF untuk memulai."}
+                  {loading ? "Loading..." : "No invoices yet. Upload PDF to get started."}
                 </div>
               ) : invoices.map((inv, i) => (
                 <div key={inv.stg_id}
@@ -313,7 +313,7 @@ export default function APAutoInvoice() {
               color: "#94a3b8", fontSize: 13, fontWeight: 500,
             }}>
               <FileText size={40} style={{ margin: "0 auto 12px", opacity: 0.3 }} />
-              Pilih invoice dari daftar untuk melihat detail
+              Select an invoice from the list to view details
             </div>
           )}
         </div>
@@ -406,7 +406,7 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
             <NeuBtn icon={Pencil} label="Edit" color="#e8edf5" textColor="#2563eb" onClick={startEdit} small />
           )}
           {canDelete && !editing && (
-            <NeuBtn icon={Trash2} label="Hapus" color="#e8edf5" textColor="#dc2626" onClick={() => onDelete(d.stg_id)} loading={actionLoading === "delete"} small />
+            <NeuBtn icon={Trash2} label="Delete" color="#e8edf5" textColor="#dc2626" onClick={() => onDelete(d.stg_id)} loading={actionLoading === "delete"} small />
           )}
         </div>
       </div>
@@ -450,8 +450,8 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
         {/* Edit save/cancel bar */}
         {editing && (
           <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-            <NeuBtn icon={Save} label="Simpan" color="#059669" onClick={saveEdit} loading={actionLoading === "save"} />
-            <NeuBtn icon={X} label="Batal" color="#e8edf5" textColor="#64748b" onClick={cancelEdit} />
+            <NeuBtn icon={Save} label="Save" color="#059669" onClick={saveEdit} loading={actionLoading === "save"} />
+            <NeuBtn icon={X} label="Cancel" color="#e8edf5" textColor="#64748b" onClick={cancelEdit} />
           </div>
         )}
 
@@ -511,7 +511,7 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                         <td style={{ padding: "8px 6px", textAlign: "center", width: 36 }}>
                           <button onClick={() => removeLine(i)} style={{
                             background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4,
-                          }} title="Hapus baris">
+                          }} title="Delete row">
                             <Trash2 size={13} />
                           </button>
                         </td>
@@ -593,7 +593,7 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                   padding: "8px 14px", borderRadius: 12, fontSize: 12, fontWeight: 700,
                   background: "#d1fae5", color: "#047857", boxShadow: NEU.shadowOutSm,
                 }}>
-                  <CheckCircle size={14} /> Invoice berhasil di-import ke EBS
+                  <CheckCircle size={14} /> Invoice imported to EBS successfully
                   {d.ap_invoice_id && <span style={{ marginLeft: 4 }}>(ID: {d.ap_invoice_id})</span>}
                 </div>
               )}

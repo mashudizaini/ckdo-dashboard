@@ -45,7 +45,7 @@ export default function AttendanceUpload() {
   const onFileSelect = (f) => {
     if (!f) return;
     if (!f.name.endsWith(".xlsx") && !f.name.endsWith(".xlsm")) {
-      setError("File harus berformat .xlsx atau .xlsm"); return;
+      setError("File must be .xlsx or .xlsm format"); return;
     }
     setFile(f); setError(null); setResult(null);
   };
@@ -97,9 +97,9 @@ export default function AttendanceUpload() {
       <div className="flex gap-3 rounded-xl border border-teal-500/20 bg-teal-500/5 px-4 py-3 text-sm text-teal-300">
         <AlertCircle size={15} className="mt-0.5 shrink-0" />
         <span>
-          Upload file Excel absensi (format <strong>Attendance HO.xlsx</strong>).
-          Header di baris 1, data mulai baris 2. Kolom wajib: <strong>ID</strong> dan <strong>Date</strong>.
-          Record yang sudah ada akan diperbarui berdasarkan <strong>ID + tanggal</strong>.
+          Upload attendance Excel file (format <strong>Attendance HO.xlsx</strong>).
+          Header in row 1, data starts at row 2. Required columns: <strong>ID</strong> and <strong>Date</strong>.
+          Existing records will be updated based on <strong>ID + date</strong>.
         </span>
       </div>
 
@@ -131,7 +131,7 @@ export default function AttendanceUpload() {
             </div>
             <div className="text-center">
               <p className="text-sm font-semibold text-green-300">{file.name}</p>
-              <p className="text-xs text-gray-500 mt-1">{fileSizeKB} KB — klik untuk ganti file</p>
+              <p className="text-xs text-gray-500 mt-1">{fileSizeKB} KB — click to change file</p>
             </div>
           </>
         ) : (
@@ -140,8 +140,8 @@ export default function AttendanceUpload() {
               <Upload size={22} className="text-gray-500" />
             </div>
             <div className="text-center">
-              <p className="text-sm font-medium text-gray-300">Drag & drop file Excel di sini</p>
-              <p className="text-xs text-gray-600 mt-1">atau klik untuk pilih file (.xlsx / .xlsm)</p>
+              <p className="text-sm font-medium text-gray-300">Drag & drop Excel file here</p>
+              <p className="text-xs text-gray-600 mt-1">or click to select file (.xlsx / .xlsm)</p>
             </div>
           </>
         )}
@@ -150,13 +150,13 @@ export default function AttendanceUpload() {
       {/* ── Catatan ─────────────────────────────────────────────────────────── */}
       <div>
         <label className="mb-1.5 block text-xs font-medium text-gray-500">
-          Catatan upload <span className="text-gray-700">(opsional — contoh: "Absensi Maret 2026")</span>
+          Upload notes <span className="text-gray-700">(optional — e.g. "Attendance March 2026")</span>
         </label>
         <input
           type="text"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="Keterangan upload ini..."
+          placeholder="Upload description..."
           className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-teal-500 transition-colors"
         />
       </div>
@@ -171,8 +171,8 @@ export default function AttendanceUpload() {
             : "bg-teal-600 hover:bg-teal-500 active:scale-95"}`}
       >
         {uploading
-          ? <><Loader2 size={15} className="animate-spin" /> Mengupload…</>
-          : <><Upload size={15} /> Upload & Simpan ke Database</>}
+          ? <><Loader2 size={15} className="animate-spin" /> Uploading...</>
+          : <><Upload size={15} /> Upload & Save to Database</>}
       </button>
 
       {/* ── Error ───────────────────────────────────────────────────────────── */}
@@ -192,9 +192,9 @@ export default function AttendanceUpload() {
           </div>
           <div className="grid grid-cols-3 gap-3">
             {[
-              { icon: CalendarCheck, color: "text-blue-400",  bg: "bg-blue-500/10",  label: "Total Dibaca",  val: result.total_rows },
-              { icon: FilePlus,      color: "text-green-400", bg: "bg-green-500/10", label: "Record Baru",   val: result.inserted },
-              { icon: RotateCcw,     color: "text-amber-400", bg: "bg-amber-500/10", label: "Diperbarui",    val: result.updated },
+              { icon: CalendarCheck, color: "text-blue-400",  bg: "bg-blue-500/10",  label: "Total Read",    val: result.total_rows },
+              { icon: FilePlus,      color: "text-green-400", bg: "bg-green-500/10", label: "New Records",   val: result.inserted },
+              { icon: RotateCcw,     color: "text-amber-400", bg: "bg-amber-500/10", label: "Updated",       val: result.updated },
             ].map(({ icon: Icon, color, bg, label, val }) => (
               <div key={label} className="rounded-lg border border-white/5 bg-white/3 p-3 text-center">
                 <div className={`mx-auto mb-1.5 flex h-7 w-7 items-center justify-center rounded-lg ${bg}`}>
@@ -217,7 +217,7 @@ export default function AttendanceUpload() {
         >
           <div className="flex items-center gap-2">
             <Clock size={14} className="text-gray-500" />
-            Riwayat Upload
+            Upload History
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -234,12 +234,12 @@ export default function AttendanceUpload() {
         {showLogs && (
           <div className="border-t border-gray-800 overflow-x-auto">
             {logs.length === 0 ? (
-              <p className="px-5 py-6 text-center text-xs text-gray-600">Belum ada riwayat upload</p>
+              <p className="px-5 py-6 text-center text-xs text-gray-600">No upload history yet</p>
             ) : (
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-gray-800/50">
-                    {["Waktu Upload", "File", "Total", "Baru", "Update", "Oleh", "Catatan"].map((h) => (
+                    {["Upload Time", "File", "Total", "New", "Update", "By", "Notes"].map((h) => (
                       <th key={h} className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                     ))}
                   </tr>

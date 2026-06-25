@@ -7,7 +7,7 @@
  *     → User login ke Coretax di Chrome seperti biasa
  *     → F12 → Network → copy Cookie header → paste di sini → Simpan & Mulai
  *   Selanjutnya (cookie masih valid):
- *     → Pilih masa pajak → klik Mulai Download (tanpa F12)
+ *     → Pilih masa pajak → klik Start Download (tanpa F12)
  */
 
 import { useState, useEffect, useRef } from "react";
@@ -46,9 +46,9 @@ const STATUS_ICON = {
 
 const STATUS_LABEL = {
   pending:         "PENDING",
-  running:         "BERJALAN",
-  waiting_captcha: "TUNGGU CAPTCHA",
-  done:            "SELESAI",
+  running:         "RUNNING",
+  waiting_captcha: "WAITING CAPTCHA",
+  done:            "DONE",
   error:           "ERROR",
 };
 
@@ -155,9 +155,9 @@ export default function CoretaxDownloader() {
       setUiMode("ready");
       setShowSetup(false);
       setCookieDraft("");
-      addLog("✓ Cookie disimpan. Siap download.");
+      addLog("✓ Cookie saved. Ready to download.");
     } catch (e) {
-      addLog(`❌ Gagal simpan cookie: ${e.message}`);
+      addLog(`❌ Failed to save cookie: ${e.message}`);
     } finally {
       setSavingCookie(false);
     }
@@ -168,7 +168,7 @@ export default function CoretaxDownloader() {
     await fetch(`${BASE_URL}/saved-cookie`, { method: "DELETE" }).catch(() => {});
     setSavedAt(null);
     setUiMode("setup");
-    addLog("Cookie dihapus. Silakan paste cookie baru.");
+    addLog("Cookie deleted. Please paste a new cookie.");
   };
 
   // ── Polling status job ────────────────────────────────────────────────────────
@@ -230,7 +230,7 @@ export default function CoretaxDownloader() {
   // ── Mulai download ────────────────────────────────────────────────────────────
   const handleStart = async (mode) => {
     if (mode === "login" && (!form.username || !form.password)) {
-      addLog("⚠ ID Pengguna dan Kata Sandi wajib diisi");
+      addLog("⚠ User ID and Password are required");
       return;
     }
     setLoading(true);
@@ -239,7 +239,7 @@ export default function CoretaxDownloader() {
     setCaptchaImg(null);
     setCaptchaCode("");
     setDebugImgs({});
-    addLog("Mengirim permintaan ke server…");
+    addLog("Sending request to server...");
 
     try {
       const body = {
@@ -260,16 +260,16 @@ export default function CoretaxDownloader() {
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setJob(data);
-      addLog(`Job dimulai: ${data.job_id}`);
+      addLog(`Job started: ${data.job_id}`);
       startPolling(data.job_id);
     } catch (e) {
-      addLog(`❌ Gagal memulai job: ${e.message}`);
+      addLog(`❌ Failed to start job: ${e.message}`);
       setLoading(false);
     }
   };
 
   const handleSubmitCaptcha = async () => {
-    if (!captchaCode.trim()) { addLog("⚠ Kode CAPTCHA harus diisi"); return; }
+    if (!captchaCode.trim()) { addLog("⚠ CAPTCHA code is required"); return; }
     if (!job?.job_id) return;
     try {
       const res = await fetch(`${BASE_URL}/captcha/${job.job_id}`, {
@@ -278,10 +278,10 @@ export default function CoretaxDownloader() {
         body: JSON.stringify({ code: captchaCode.trim() }),
       });
       if (!res.ok) throw new Error(await res.text());
-      addLog(`✓ CAPTCHA "${captchaCode}" dikirim…`);
+      addLog(`✓ CAPTCHA "${captchaCode}" submitted...`);
       setCaptchaCode("");
     } catch (e) {
-      addLog(`❌ Gagal kirim CAPTCHA: ${e.message}`);
+      addLog(`❌ Failed to submit CAPTCHA: ${e.message}`);
     }
   };
 
@@ -296,7 +296,7 @@ export default function CoretaxDownloader() {
     setJob(null); setLogs([]); setLoading(false);
     setCaptchaImg(null); setCaptchaCode("");
     setDebugImgs((prev) => { Object.values(prev).forEach(URL.revokeObjectURL); return {}; });
-    addLog("Job dihapus");
+    addLog("Job deleted");
   };
 
   const fmtDate = (iso) => {
@@ -314,7 +314,7 @@ export default function CoretaxDownloader() {
   if (uiMode === "checking") {
     return (
       <div style={{ ...S.page, display: "flex", alignItems: "center", gap: 10, color: "#64748b" }}>
-        <Loader2 size={18} className="animate-spin" /> Memeriksa status sesi…
+        <Loader2 size={18} className="animate-spin" /> Checking session status...
       </div>
     );
   }
@@ -340,19 +340,19 @@ export default function CoretaxDownloader() {
                 <Cookie size={18} color="#34d399" />
               </div>
               <div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "#34d399" }}>Sesi Coretax Tersimpan</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#34d399" }}>Coretax Session Saved</div>
                 <div style={{ fontSize: 12, color: "#475569" }}>
-                  Disimpan: {fmtDate(savedAt)}
+                  Saved: {fmtDate(savedAt)}
                 </div>
               </div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button style={S.btnSecondary} onClick={() => setShowSetup((v) => !v)}>
                 <RefreshCw size={13} />
-                Perbarui Cookie
+                Update Cookie
                 {showSetup ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
               </button>
-              <button style={S.btnDanger} onClick={handleDeleteCookie} title="Hapus sesi tersimpan">
+              <button style={S.btnDanger} onClick={handleDeleteCookie} title="Delete saved session">
                 <Trash2 size={13} />
               </button>
             </div>
@@ -362,7 +362,7 @@ export default function CoretaxDownloader() {
           {showSetup && (
             <div style={{ background: "#e8edf5", borderRadius: 16, padding: "20px 22px", marginBottom: 20, boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff" }}>
               <CookieGuide />
-              <label style={{ ...S.label, marginTop: 4 }}>Paste nilai Cookie di sini</label>
+              <label style={{ ...S.label, marginTop: 4 }}>Paste Cookie value here</label>
               <textarea
                 style={{ ...S.textarea, minHeight: 80 }}
                 placeholder="JSESSIONID=...; __RequestVerificationToken=...; ..."
@@ -378,8 +378,8 @@ export default function CoretaxDownloader() {
                 disabled={savingCookie || !cookieDraft.trim()}
               >
                 {savingCookie
-                  ? <><Loader2 size={14} className="animate-spin" /> Menyimpan…</>
-                  : <><Cookie size={14} /> Simpan Cookie Baru</>}
+                  ? <><Loader2 size={14} className="animate-spin" /> Saving...</>
+                  : <><Cookie size={14} /> Save New Cookie</>}
               </button>
             </div>
           )}
@@ -387,14 +387,14 @@ export default function CoretaxDownloader() {
           {/* Parameter download */}
           <div style={S.grid2}>
             <div>
-              <label style={S.label}>NPWP Perusahaan</label>
+              <label style={S.label}>Company Tax ID</label>
               <input style={S.input} type="text" placeholder="0741325344011000"
                 value={form.npwp} onChange={(e) => setForm({ ...form, npwp: e.target.value })}
                 onFocus={(e) => (e.target.style.borderColor = "#6366f1")}
                 onBlur={(e)  => (e.target.style.borderColor = "rgba(255,255,255,0.1)")} />
             </div>
             <div>
-              <label style={S.label}>Masa Pajak</label>
+              <label style={S.label}>Tax Period</label>
               <select style={S.select} value={form.masa_pajak}
                 onChange={(e) => setForm({ ...form, masa_pajak: e.target.value })}>
                 {MASA_PAJAK_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -402,9 +402,9 @@ export default function CoretaxDownloader() {
             </div>
             <div>
               <label style={S.label}>
-                Maks. Halaman <span style={{ color: "#475569", fontWeight: 400 }}>(kosong = semua)</span>
+                Max Pages <span style={{ color: "#475569", fontWeight: 400 }}>(blank = all)</span>
               </label>
-              <input style={S.input} type="number" placeholder="contoh: 5" min={1}
+              <input style={S.input} type="number" placeholder="e.g. 5" min={1}
                 value={form.max_pages} onChange={(e) => setForm({ ...form, max_pages: e.target.value })}
                 onFocus={(e) => (e.target.style.borderColor = "#6366f1")}
                 onBlur={(e)  => (e.target.style.borderColor = "rgba(255,255,255,0.1)")} />
@@ -418,8 +418,8 @@ export default function CoretaxDownloader() {
               disabled={loading}
             >
               {loading
-                ? <><Loader2 size={15} className="animate-spin" /> Sedang Berjalan…</>
-                : <><LogIn size={15} /> Mulai Download</>}
+                ? <><Loader2 size={15} className="animate-spin" /> Running...</>
+                : <><LogIn size={15} /> Start Download</>}
             </button>
             {job && (
               <button style={S.btnDanger} onClick={handleDeleteJob}>
@@ -433,9 +433,9 @@ export default function CoretaxDownloader() {
                         background: "rgba(0,0,0,0.15)", borderRadius: 8, fontSize: 12, color: "#475569" }}>
             <Info size={13} style={{ flexShrink: 0, marginTop: 1 }} />
             <span>
-              Jika download gagal dengan pesan "Cookie kedaluwarsa", klik{" "}
-              <strong style={{ color: "#94a3b8" }}>Perbarui Cookie</strong> di atas.
-              Cukup dilakukan saat sesi Coretax expired (bukan setiap download).
+              If download fails with "Cookie expired" message, click{" "}
+              <strong style={{ color: "#94a3b8" }}>Update Cookie</strong> above.
+              Only needed when Coretax session has expired (not every download).
             </span>
           </div>
         </div>
@@ -446,7 +446,7 @@ export default function CoretaxDownloader() {
         <div style={S.card}>
           <p style={S.cardTitle}>
             <Cookie size={13} style={{ display: "inline", marginRight: 6 }} />
-            Setup Sesi Coretax — Lakukan Satu Kali
+            Setup Coretax Session — One-time Setup
           </p>
 
           <div style={{ display: "flex", gap: 10, padding: "12px 16px", background: "rgba(99,102,241,0.08)",
@@ -454,15 +454,15 @@ export default function CoretaxDownloader() {
                         color: "#818cf8", marginBottom: 22 }}>
             <Info size={15} style={{ flexShrink: 0, marginTop: 1 }} />
             <span>
-              Setelah setup ini selesai, download berikutnya cukup klik{" "}
-              <strong>"Mulai Download"</strong> — tidak perlu buka DevTools lagi.
-              Cookie hanya perlu diperbarui jika sesi Coretax expired.
+              After this setup is complete, subsequent downloads only require clicking{" "}
+              <strong>"Start Download"</strong> — no need to open DevTools again.
+              Cookie only needs updating when Coretax session expires.
             </span>
           </div>
 
           <CookieGuide />
 
-          <label style={S.label}>Paste nilai Cookie di sini</label>
+          <label style={S.label}>Paste Cookie value here</label>
           <textarea
             style={{ ...S.textarea, minHeight: 90 }}
             placeholder="JSESSIONID=abc123; __RequestVerificationToken=xyz; DNT=1; ..."
@@ -480,14 +480,14 @@ export default function CoretaxDownloader() {
               disabled={savingCookie || !cookieDraft.trim()}
             >
               {savingCookie
-                ? <><Loader2 size={14} className="animate-spin" /> Menyimpan…</>
-                : <><Cookie size={14} /> Simpan & Lanjutkan</>}
+                ? <><Loader2 size={14} className="animate-spin" /> Saving...</>
+                : <><Cookie size={14} /> Save & Continue</>}
             </button>
             <button
               style={{ ...S.btnSecondary }}
               onClick={() => setUiMode("login")}
             >
-              <LogIn size={13} /> Pakai Login Otomatis
+              <LogIn size={13} /> Use Auto Login
             </button>
           </div>
         </div>
@@ -498,7 +498,7 @@ export default function CoretaxDownloader() {
         <div style={S.card}>
           <p style={S.cardTitle}>
             <LogIn size={13} style={{ display: "inline", marginRight: 6 }} />
-            Login Otomatis
+            Auto Login
           </p>
 
           <div style={{ display: "flex", gap: 8, padding: "10px 14px", background: "rgba(251,191,36,0.06)",
@@ -506,49 +506,49 @@ export default function CoretaxDownloader() {
                         color: "#fbbf24", marginBottom: 16 }}>
             <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
             <span>
-              Memerlukan pengisian CAPTCHA manual setelah klik Mulai. Kurang andal karena
-              tergantung respons server Coretax.{" "}
+              Requires manual CAPTCHA entry after clicking Start. Less reliable as it
+              depends on Coretax server response.{" "}
               <button
                 style={{ background: "none", border: "none", color: "#fbbf24", textDecoration: "underline", cursor: "pointer", fontSize: 12, padding: 0 }}
                 onClick={() => setUiMode("setup")}
               >
-                Gunakan mode Cookie?
+                Use Cookie mode?
               </button>
             </span>
           </div>
 
           <div style={S.grid2}>
             <div>
-              <label style={S.label}>ID Pengguna (NPWP Pribadi / Login)</label>
-              <input style={S.input} type="text" placeholder="Contoh: 720203670489T0001"
+              <label style={S.label}>User ID (Personal Tax ID / Login)</label>
+              <input style={S.input} type="text" placeholder="e.g. 720203670489T0001"
                 value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })}
                 onFocus={(e) => (e.target.style.borderColor = "#6366f1")}
                 onBlur={(e)  => (e.target.style.borderColor = "rgba(255,255,255,0.1)")} />
             </div>
             <div>
-              <label style={S.label}>Kata Sandi</label>
+              <label style={S.label}>Password</label>
               <input style={S.input} type="password" placeholder="••••••••"
                 value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
                 onFocus={(e) => (e.target.style.borderColor = "#6366f1")}
                 onBlur={(e)  => (e.target.style.borderColor = "rgba(255,255,255,0.1)")} />
             </div>
             <div>
-              <label style={S.label}>NPWP Perusahaan</label>
+              <label style={S.label}>Company Tax ID</label>
               <input style={S.input} type="text"
                 value={form.npwp} onChange={(e) => setForm({ ...form, npwp: e.target.value })}
                 onFocus={(e) => (e.target.style.borderColor = "#6366f1")}
                 onBlur={(e)  => (e.target.style.borderColor = "rgba(255,255,255,0.1)")} />
             </div>
             <div>
-              <label style={S.label}>Masa Pajak</label>
+              <label style={S.label}>Tax Period</label>
               <select style={S.select} value={form.masa_pajak}
                 onChange={(e) => setForm({ ...form, masa_pajak: e.target.value })}>
                 {MASA_PAJAK_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
             <div>
-              <label style={S.label}>Maks. Halaman <span style={{ color: "#475569", fontWeight: 400 }}>(kosong = semua)</span></label>
-              <input style={S.input} type="number" placeholder="contoh: 5" min={1}
+              <label style={S.label}>Max Pages <span style={{ color: "#475569", fontWeight: 400 }}>(blank = all)</span></label>
+              <input style={S.input} type="number" placeholder="e.g. 5" min={1}
                 value={form.max_pages} onChange={(e) => setForm({ ...form, max_pages: e.target.value })}
                 onFocus={(e) => (e.target.style.borderColor = "#6366f1")}
                 onBlur={(e)  => (e.target.style.borderColor = "rgba(255,255,255,0.1)")} />
@@ -562,8 +562,8 @@ export default function CoretaxDownloader() {
               disabled={loading}
             >
               {loading
-                ? <><Loader2 size={15} className="animate-spin" /> Sedang Berjalan…</>
-                : <><LogIn size={15} /> Mulai Login Otomatis</>}
+                ? <><Loader2 size={15} className="animate-spin" /> Running...</>
+                : <><LogIn size={15} /> Start Auto Login</>}
             </button>
             {job && <button style={S.btnDanger} onClick={handleDeleteJob}><Trash2 size={14} /> Reset</button>}
           </div>
@@ -575,10 +575,10 @@ export default function CoretaxDownloader() {
         <div style={{ ...S.card, border: "1px solid rgba(251,146,60,0.35)", background: "rgba(251,146,60,0.05)" }}>
           <p style={{ ...S.cardTitle, color: "#fb923c" }}>
             <ShieldCheck size={14} style={{ display: "inline", marginRight: 6 }} />
-            Isi Kode CAPTCHA
+            Enter CAPTCHA Code
           </p>
           <p style={{ fontSize: 13, color: "#94a3b8", marginBottom: 16 }}>
-            Browser sudah membuka halaman login. Lihat gambar CAPTCHA, ketik kode, lalu klik{" "}
+            Browser has opened the login page. View the CAPTCHA image, type the code, then click{" "}
             <strong style={{ color: "#fb923c" }}>Submit</strong>.
           </p>
 
@@ -590,22 +590,22 @@ export default function CoretaxDownloader() {
                   style={{ width: "100%", borderRadius: 8, border: "2px solid rgba(251,146,60,0.5)", imageRendering: "pixelated" }} />
               ) : (
                 <div style={{ padding: "32px 16px", textAlign: "center", color: "#475569", fontSize: 12, background: "#e8edf5", borderRadius: 12, boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff" }}>
-                  <Loader2 size={16} className="animate-spin" style={{ display: "inline", marginRight: 6 }} />Memuat…
+                  <Loader2 size={16} className="animate-spin" style={{ display: "inline", marginRight: 6 }} />Loading...
                 </div>
               )}
             </div>
             <div>
-              <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6, fontWeight: 600 }}>Halaman login (konteks)</div>
+              <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6, fontWeight: 600 }}>Login page (context)</div>
               <DebugImage jobId={job.job_id} filename="debug_login_fullpage.png" />
             </div>
           </div>
 
           <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
             <div style={{ flex: 1 }}>
-              <label style={S.label}>Kode CAPTCHA</label>
+              <label style={S.label}>CAPTCHA Code</label>
               <input
                 style={{ ...S.input, fontSize: 18, letterSpacing: "0.2em", textAlign: "center" }}
-                type="text" placeholder="Ketik kode di atas"
+                type="text" placeholder="Type code above"
                 value={captchaCode}
                 onChange={(e) => setCaptchaCode(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleSubmitCaptcha()}
@@ -618,7 +618,7 @@ export default function CoretaxDownloader() {
               <ShieldCheck size={15} /> Submit
             </button>
             <button style={{ ...S.btnDanger, padding: "10px 14px" }}
-              onClick={() => setCaptchaTs(Date.now())} title="Muat ulang CAPTCHA">
+              onClick={() => setCaptchaTs(Date.now())} title="Reload CAPTCHA">
               ↻
             </button>
           </div>
@@ -639,11 +639,11 @@ export default function CoretaxDownloader() {
           <div style={S.statRow}>
             <div style={S.statItem}>
               <div style={{ ...S.statNum, color: "#34d399" }}>{job.downloaded}</div>
-              <div style={S.statLabel}>Berhasil</div>
+              <div style={S.statLabel}>Success</div>
             </div>
             <div style={S.statItem}>
               <div style={{ ...S.statNum, color: "#f87171" }}>{job.failed}</div>
-              <div style={S.statLabel}>Gagal</div>
+              <div style={S.statLabel}>Failed</div>
             </div>
             <div style={S.statItem}>
               <div style={{ ...S.statNum, color: "#818cf8" }}>{pct}%</div>
@@ -655,7 +655,7 @@ export default function CoretaxDownloader() {
 
           <div style={S.logBox} ref={logRef}>
             {logs.length === 0
-              ? <span style={{ color: "#334155" }}>Menunggu log…</span>
+              ? <span style={{ color: "#334155" }}>Waiting for logs...</span>
               : logs.map((l, i) => <div key={i}>{l}</div>)}
           </div>
 
@@ -673,12 +673,12 @@ export default function CoretaxDownloader() {
                           background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.2)",
                           borderRadius: 10, fontSize: 13, color: "#fbbf24", alignItems: "center" }}>
               <AlertCircle size={14} style={{ flexShrink: 0 }} />
-              <span>Cookie sesi expired. </span>
+              <span>Session cookie expired.</span>
               <button
                 style={{ background: "none", border: "none", color: "#fbbf24", textDecoration: "underline", cursor: "pointer", fontSize: 13, padding: 0 }}
                 onClick={() => setShowSetup(true)}
               >
-                Klik Perbarui Cookie di atas →
+                Click Update Cookie above
               </button>
             </div>
           )}
@@ -687,20 +687,20 @@ export default function CoretaxDownloader() {
           {job.status === "error" && (
             <div style={{ marginTop: 16 }}>
               <div style={{ fontSize: 12, color: "#fbbf24", fontWeight: 600, marginBottom: 12 }}>
-                Screenshot Browser (untuk mendiagnosis error):
+                Browser Screenshots (for diagnosing errors):
               </div>
               {Object.keys(debugImgs).length === 0 && (
                 <div style={{ fontSize: 12, color: "#475569", display: "flex", alignItems: "center", gap: 6 }}>
-                  <Loader2 size={13} className="animate-spin" /> Memuat screenshot debug…
+                  <Loader2 size={13} className="animate-spin" /> Loading debug screenshots...
                 </div>
               )}
               {[
-                { key: "debug_cookie_redirect.png", label: "Cookie redirect ke login" },
-                { key: "debug_issued_page.png",      label: "Halaman eBupot (setelah login)" },
-                { key: "debug_login_fullpage.png",   label: "Halaman Login" },
-                { key: "debug_before_fill.png",      label: "Sebelum isi form" },
-                { key: "debug_form_filled.png",      label: "Setelah form diisi" },
-                { key: "debug_after_submit.png",     label: "Setelah submit" },
+                { key: "debug_cookie_redirect.png", label: "Cookie redirect to login" },
+                { key: "debug_issued_page.png",      label: "eBupot page (after login)" },
+                { key: "debug_login_fullpage.png",   label: "Login page" },
+                { key: "debug_before_fill.png",      label: "Before filling form" },
+                { key: "debug_form_filled.png",      label: "After form filled" },
+                { key: "debug_after_submit.png",     label: "After submit" },
               ].map(({ key, label }) =>
                 debugImgs[key] ? (
                   <div key={key} style={{ marginBottom: 16 }}>
@@ -708,7 +708,7 @@ export default function CoretaxDownloader() {
                       <span style={{ fontWeight: 600, color: "#94a3b8" }}>{label}</span>
                       <a href={debugImgs[key]} target="_blank" rel="noreferrer"
                         style={{ fontSize: 11, color: "#818cf8", textDecoration: "underline" }}>
-                        buka di tab baru ↗
+                        open in new tab ↗
                       </a>
                     </div>
                     <img src={debugImgs[key]} alt={label}
@@ -748,68 +748,68 @@ function CookieGuide() {
 
   const steps = [
     {
-      title: "Login ke Coretax di Chrome",
+      title: "Login to Coretax in Chrome",
       detail: <>
-        Buka <strong style={{ color: "#e2e8f0" }}>coretaxdjp.pajak.go.id</strong> di Chrome dan login seperti biasa menggunakan NPWP + password + CAPTCHA.
-        Setelah masuk, <strong style={{ color: "#e2e8f0" }}>pilih NPWP perusahaan</strong> dari dropdown di pojok kanan atas halaman.
-        Pastikan sudah tampil halaman utama Coretax (bukan halaman login).
+        Open <strong style={{ color: "#e2e8f0" }}>coretaxdjp.pajak.go.id</strong> in Chrome and login as usual using NPWP + password + CAPTCHA.
+        After logging in, <strong style={{ color: "#e2e8f0" }}>select company NPWP</strong> from the dropdown in the top right corner.
+        Make sure the Coretax main page is displayed (not the login page).
       </>,
     },
     {
-      title: "Buka DevTools Chrome",
+      title: "Open Chrome DevTools",
       detail: <>
-        Tekan tombol <code style={{ background: "rgba(255,255,255,0.1)", color: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontSize: 13, fontWeight: 700, border: "1px solid rgba(255,255,255,0.2)" }}>F12</code>{" "}
-        di keyboard (atau klik kanan di halaman → <em>Inspect</em>).
-        Jendela DevTools akan muncul di bagian bawah atau samping browser.
+        Press <code style={{ background: "rgba(255,255,255,0.1)", color: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontSize: 13, fontWeight: 700, border: "1px solid rgba(255,255,255,0.2)" }}>F12</code>{" "}
+        on your keyboard (or right-click on the page and select <em>Inspect</em>).
+        The DevTools window will appear at the bottom or side of the browser.
       </>,
     },
     {
-      title: "Buka tab Network",
+      title: "Open Network tab",
       detail: <>
-        Di bagian atas DevTools, klik tab {tag("Network", "#818cf8")}.
-        Jika tab Network sudah terbuka tapi daftarnya kosong, tekan{" "}
+        At the top of DevTools, click the {tag("Network", "#818cf8")} tab.
+        If the Network tab is open but the list is empty, press{" "}
         <code style={{ background: "rgba(255,255,255,0.1)", color: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontSize: 13, fontWeight: 700, border: "1px solid rgba(255,255,255,0.2)" }}>F5</code>{" "}
-        atau refresh halaman Coretax agar request muncul. Akan terlihat banyak baris request.
+        or refresh the Coretax page so requests appear. You will see many request rows.
       </>,
     },
     {
-      title: "Klik salah satu request Coretax",
+      title: "Click a Coretax request",
       detail: <>
-        Di daftar request (kolom Name), cari baris yang alamatnya mengandung{" "}
-        {code("coretaxdjp.pajak.go.id")} — biasanya baris paling atas setelah refresh.
-        Klik <strong style={{ color: "#e2e8f0" }}>satu kali</strong> pada baris tersebut.
-        Panel detail akan muncul di sebelah kanan.
+        In the request list (Name column), find a row with an address containing{" "}
+        {code("coretaxdjp.pajak.go.id")} — usually the top row after refresh.
+        Click <strong style={{ color: "#e2e8f0" }}>once</strong> on that row.
+        A detail panel will appear on the right.
       </>,
     },
     {
-      title: "Temukan baris Cookie di Request Headers",
+      title: "Find Cookie in Request Headers",
       detail: <>
-        Di panel kanan, klik tab {tag("Headers", "#818cf8")}.
-        Scroll ke bawah sampai menemukan bagian{" "}
-        <strong style={{ color: "#e2e8f0" }}>Request Headers</strong>.
-        Cari baris berlabel {code("cookie:")} atau {code("Cookie:")}.
-        Nilai di sebelah kanannya adalah teks panjang berisi banyak nama=nilai dipisah titik koma.
+        In the right panel, click the {tag("Headers", "#818cf8")} tab.
+        Scroll down until you find the{" "}
+        <strong style={{ color: "#e2e8f0" }}>Request Headers</strong> section.
+        Look for the row labeled {code("cookie:")} or {code("Cookie:")}.
+        The value to its right is a long text containing many name=value pairs separated by semicolons.
         <div style={{ marginTop: 6, padding: "6px 10px", background: "rgba(0,0,0,0.3)", borderRadius: 6, fontSize: 11, color: "#64748b", fontFamily: "monospace" }}>
-          Contoh: JSESSIONID=abc123; __RequestVerif...=xyz; DNT=1; …
+          Example: JSESSIONID=abc123; __RequestVerif...=xyz; DNT=1; ...
         </div>
       </>,
     },
     {
-      title: "Copy nilai Cookie",
+      title: "Copy Cookie value",
       detail: <>
-        <strong style={{ color: "#e2e8f0" }}>Klik kanan</strong> tepat pada nilai cookie (teks panjang di sebelah kanan {code("cookie:")}).
-        Pilih {tag("Copy value", "#34d399")} dari menu yang muncul.
+        <strong style={{ color: "#e2e8f0" }}>Right-click</strong> directly on the cookie value (the long text to the right of {code("cookie:")}).
+        Select {tag("Copy value", "#34d399")} from the context menu.
         <br /><br />
-        <span style={{ color: "#fbbf24" }}>⚠ Jangan klik kanan pada tulisan "cookie:" — klik kanan pada nilainya (teks panjang di sebelah kanannya).</span>
+        <span style={{ color: "#fbbf24" }}>⚠ Do not right-click on the "cookie:" label — right-click on the value (the long text to its right).</span>
       </>,
     },
     {
-      title: "Paste di kotak di bawah → Simpan",
+      title: "Paste in the box below and Save",
       detail: <>
-        Klik di dalam kotak teks di bawah, lalu tekan{" "}
+        Click inside the text box below, then press{" "}
         <code style={{ background: "rgba(255,255,255,0.1)", color: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontWeight: 700, border: "1px solid rgba(255,255,255,0.2)" }}>Ctrl+V</code>{" "}
-        untuk paste. Klik tombol {tag("Simpan", "#6366f1")}.
-        Selesai — download berikutnya cukup klik Mulai tanpa perlu buka DevTools lagi.
+        to paste. Click the {tag("Save", "#6366f1")} button.
+        Done — subsequent downloads only require clicking Start without opening DevTools again.
       </>,
     },
   ];
@@ -817,7 +817,7 @@ function CookieGuide() {
   return (
     <div style={{ marginBottom: 20 }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 14 }}>
-        Langkah-langkah mendapatkan Cookie dari Chrome
+        Steps to get Cookie from Chrome
       </div>
       {steps.map((step, i) => (
         <div key={i} style={{ display: "flex", gap: 14, marginBottom: 14 }}>
@@ -860,7 +860,7 @@ function DebugImage({ jobId, filename }) {
     })();
     return () => { cancelled = true; setSrc((p) => { if (p) URL.revokeObjectURL(p); return null; }); };
   }, [jobId, filename]);
-  if (err)  return <div style={{ padding: "12px", textAlign: "center", fontSize: 11, color: "#334155", background: "rgba(0,0,0,0.15)", borderRadius: 8 }}>Tidak tersedia</div>;
-  if (!src) return <div style={{ padding: "12px", textAlign: "center", fontSize: 11, color: "#475569", background: "rgba(0,0,0,0.15)", borderRadius: 8 }}><Loader2 size={14} className="animate-spin" style={{ display: "inline", marginRight: 4 }} />Memuat…</div>;
-  return <img src={src} alt={filename} style={{ width: "100%", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", display: "block", cursor: "pointer" }} onClick={() => window.open(src, "_blank")} title="Klik untuk buka di tab baru" />;
+  if (err)  return <div style={{ padding: "12px", textAlign: "center", fontSize: 11, color: "#334155", background: "rgba(0,0,0,0.15)", borderRadius: 8 }}>Not available</div>;
+  if (!src) return <div style={{ padding: "12px", textAlign: "center", fontSize: 11, color: "#475569", background: "rgba(0,0,0,0.15)", borderRadius: 8 }}><Loader2 size={14} className="animate-spin" style={{ display: "inline", marginRight: 4 }} />Loading...</div>;
+  return <img src={src} alt={filename} style={{ width: "100%", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)", display: "block", cursor: "pointer" }} onClick={() => window.open(src, "_blank")} title="Click to open in new tab" />;
 }

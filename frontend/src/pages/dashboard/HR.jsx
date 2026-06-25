@@ -17,12 +17,12 @@ export default function HRDashboard() {
   const [activeSection, setActiveSection] = useState("employees");
 
   const kpiCards = [
-    { id: "employees",  icon: Users,         color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Data Karyawan" },
-    { id: "present",    icon: UserCheck,     color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Hadir Hari Ini" },
-    { id: "leave",      icon: Umbrella,      color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Cuti / Leave" },
+    { id: "employees",  icon: Users,         color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Employee Data" },
+    { id: "present",    icon: UserCheck,     color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Present Today" },
+    { id: "leave",      icon: Umbrella,      color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Leave" },
     { id: "attendance", icon: BarChart2,     color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40", label: "Attendance Rate" },
-    { id: "upload",     icon: Upload,        color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Upload Karyawan" },
-    { id: "upload-att", icon: CalendarCheck, color: "text-teal-400",   bg: "bg-teal-500/10",   activeBorder: "border-teal-500/40",   label: "Upload Absensi" },
+    { id: "upload",     icon: Upload,        color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Employee Upload" },
+    { id: "upload-att", icon: CalendarCheck, color: "text-teal-400",   bg: "bg-teal-500/10",   activeBorder: "border-teal-500/40",   label: "Attendance Upload" },
     { id: "budget",     icon: Wallet,        color: "text-orange-400", bg: "bg-orange-500/10", activeBorder: "border-orange-500/40", label: "Budget Monitoring" },
   ];
 
@@ -59,36 +59,36 @@ export default function HRDashboard() {
 
       {/* ── Upload Karyawan ──────────────────────────────────────────────────── */}
       {activeSection === "upload" && (
-        <SectionCard title="Upload File Excel Karyawan">
+        <SectionCard title="Upload Employee Excel File">
           <EmployeeUpload />
         </SectionCard>
       )}
 
       {/* ── Upload Absensi ───────────────────────────────────────────────────── */}
       {activeSection === "upload-att" && (
-        <SectionCard title="Upload File Excel Absensi">
+        <SectionCard title="Upload Attendance Excel File">
           <AttendanceUpload />
         </SectionCard>
       )}
 
       {activeSection === "present" && (
-        <SectionCard title="Kehadiran Hari Ini">
+        <SectionCard title="Attendance Today">
           <AttendanceTodaySection />
         </SectionCard>
       )}
 
       {activeSection === "leave" && (
-        <SectionCard title="Karyawan Cuti / Leave"
+        <SectionCard title="Employee Leave"
           action={<ActionBtn icon={RefreshCw} label="Refresh" color="bg-blue-600 hover:bg-blue-700" />}>
           <DataTable
-            headers={["Nama", "NIK", "Department", "Jenis Cuti", "Mulai", "Selesai"]}
-            placeholder="Klik Refresh untuk memuat data cuti"
+            headers={["Name", "NIK", "Department", "Leave Type", "Start", "End"]}
+            placeholder="Click Refresh to load leave data"
           />
         </SectionCard>
       )}
 
       {activeSection === "attendance" && (
-        <SectionCard title="Attendance Rate — Bulanan">
+        <SectionCard title="Attendance Rate — Monthly">
           <AttendanceRateSection />
         </SectionCard>
       )}
@@ -179,10 +179,10 @@ function EmployeeTable() {
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {[
-            { label: "Total Karyawan", val: summary.total,     color: "text-blue-400" },
+            { label: "Total Employees", val: summary.total,     color: "text-blue-400" },
             { label: "Permanent",      val: summary.permanent, color: "text-green-400" },
             { label: "Contract",       val: summary.contract,  color: "text-amber-400" },
-            { label: "Laki-laki / Perempuan", val: `${summary.male} / ${summary.female}`, color: "text-purple-400" },
+            { label: "Male / Female", val: `${summary.male} / ${summary.female}`, color: "text-purple-400" },
           ].map(({ label, val, color }) => (
             <div key={label} className="rounded-lg border border-gray-800 bg-gray-800/40 px-4 py-3 text-center">
               <div className={`text-2xl font-bold ${color}`}>{val}</div>
@@ -198,7 +198,7 @@ function EmployeeTable() {
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
           <input
             type="text"
-            placeholder="Cari nama / NIK / jabatan…"
+            placeholder="Search name / NIK / position..."
             value={search}
             onChange={(e) => handleSearch(e.target.value)}
             className="w-full rounded-lg border border-gray-700 bg-gray-900 pl-8 pr-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500 transition-colors"
@@ -215,7 +215,7 @@ function EmployeeTable() {
           onChange={(e) => handleDept(e.target.value)}
           className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
         >
-          <option value="">Semua Department</option>
+          <option value="">All Departments</option>
           {departments.map((d) => <option key={d} value={d}>{d}</option>)}
         </select>
 
@@ -224,7 +224,7 @@ function EmployeeTable() {
           onChange={(e) => handleStatus(e.target.value)}
           className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
         >
-          <option value="">Semua Status</option>
+          <option value="">All Statuses</option>
           <option value="Permanent">Permanent</option>
           <option value="Contract">Contract</option>
         </select>
@@ -234,7 +234,7 @@ function EmployeeTable() {
           onChange={(e) => handleTeam(e.target.value)}
           className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
         >
-          <option value="">Semua Team</option>
+          <option value="">All Teams</option>
           {teams.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
 
@@ -251,7 +251,7 @@ function EmployeeTable() {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-800/60">
-              {["NIK", "Nama", "Department", "Divisi / Tim", "Jabatan", "Penempatan", "Status", "Tgl Masuk"].map((h) => (
+              {["NIK", "Name", "Department", "Division / Team", "Position", "Placement", "Status", "Join Date"].map((h) => (
                 <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -267,8 +267,8 @@ function EmployeeTable() {
               <tr>
                 <td colSpan={8} className="py-12 text-center text-xs text-gray-600">
                   {search || deptFilter || statusFilter
-                    ? "Tidak ada karyawan yang sesuai filter"
-                    : "Belum ada data karyawan. Upload file Excel di tab Upload Karyawan."}
+                    ? "No employees matching filter"
+                    : "No employee data yet. Upload Excel in Employee Upload tab."}
                 </td>
               </tr>
             ) : (
@@ -308,7 +308,7 @@ function EmployeeTable() {
           padding: "10px 0", fontSize: 12,
         }}>
           <span style={{ color: "#475569", fontWeight: 600 }}>
-            {data.total} karyawan · halaman {page} dari {data.pages}
+            {data.total} employees · page {page} of {data.pages}
           </span>
           <div style={{ display: "flex", gap: 4 }}>
             <button
@@ -352,7 +352,7 @@ function DeptTeamTable({ data }) {
           <tr className="bg-gray-800/70">
             <th className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Dept.</th>
             <th className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Div. / Team</th>
-            <th className="px-3 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Karyawan</th>
+            <th className="px-3 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Employees</th>
             <th className="px-3 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Plan</th>
             <th className="px-3 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Act</th>
             <th className="px-3 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">%</th>
@@ -474,7 +474,7 @@ function AttendanceTodaySection() {
     <div className="space-y-4">
       {/* Inner tabs */}
       <div className="flex gap-0 border-b border-gray-800">
-        {[["today", "Kehadiran Hari Ini"], ["team", "Rekap per Tim"]].map(([id, label]) => (
+        {[["today", "Attendance Today"], ["team", "Team Summary"]].map(([id, label]) => (
           <button key={id} onClick={() => switchTab(id)}
             className={`px-4 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors ${
               innerTab === id ? "border-green-500 text-green-400" : "border-transparent text-gray-500 hover:text-gray-300"
@@ -488,7 +488,7 @@ function AttendanceTodaySection() {
       {innerTab === "today" && (
         <>
           {loading && <div className="flex justify-center py-16"><Loader2 size={20} className="animate-spin text-gray-600" /></div>}
-          {noData && <p className="py-10 text-center text-xs text-gray-600">Belum ada data absensi. Upload file Excel di tab Upload Absensi.</p>}
+          {noData && <p className="py-10 text-center text-xs text-gray-600">No attendance data yet. Upload Excel in Attendance Upload tab.</p>}
           {data && data.has_data && (() => {
             const { summary, actual_date, is_today } = data;
             return (
@@ -500,7 +500,7 @@ function AttendanceTodaySection() {
                     <span className="text-sm font-semibold text-gray-200">{fmtDate(actual_date)}</span>
                     {!is_today && (
                       <span className="rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-xs text-amber-400">
-                        Data terakhir tersedia
+                        Latest available data
                       </span>
                     )}
                   </div>
@@ -512,9 +512,9 @@ function AttendanceTodaySection() {
                 {/* Summary cards — clickable */}
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { filter: "all",   label: "Total Karyawan", val: summary.total, color: "text-blue-400",  bg: "bg-blue-500/10",  activeBg: "bg-blue-500/25",  ring: "ring-blue-500/50"  },
-                    { filter: "hadir", label: "Hadir",          val: summary.hadir, color: "text-green-400", bg: "bg-green-500/10", activeBg: "bg-green-500/25", ring: "ring-green-500/50" },
-                    { filter: "absen", label: "Absen",          val: summary.absen, color: "text-red-400",   bg: "bg-red-500/10",   activeBg: "bg-red-500/25",   ring: "ring-red-500/50"   },
+                    { filter: "all",   label: "Total Employees", val: summary.total, color: "text-blue-400",  bg: "bg-blue-500/10",  activeBg: "bg-blue-500/25",  ring: "ring-blue-500/50"  },
+                    { filter: "hadir", label: "Present",        val: summary.hadir, color: "text-green-400", bg: "bg-green-500/10", activeBg: "bg-green-500/25", ring: "ring-green-500/50" },
+                    { filter: "absen", label: "Absent",         val: summary.absen, color: "text-red-400",   bg: "bg-red-500/10",   activeBg: "bg-red-500/25",   ring: "ring-red-500/50"   },
                   ].map(({ filter, label, val, color, bg, activeBg, ring }) => (
                     <button
                       key={filter}
@@ -528,7 +528,7 @@ function AttendanceTodaySection() {
                       <div className={`text-2xl font-bold ${color}`}>{val}</div>
                       <div className="text-xs text-gray-500 mt-0.5">{label}</div>
                       <div className="text-xs text-gray-600 mt-1">
-                        {activeFilter === filter ? "▲ tutup" : "▼ lihat detail"}
+                        {activeFilter === filter ? "▲ close" : "▼ view details"}
                       </div>
                     </button>
                   ))}
@@ -550,8 +550,8 @@ function AttendanceTodaySection() {
                   <div className="rounded-xl border border-gray-800 bg-gray-900">
                     <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
                       <h4 className="text-xs font-semibold text-gray-300">
-                        {activeFilter === "all" ? "Semua Karyawan" : activeFilter === "hadir" ? "Karyawan Hadir" : "Karyawan Absen"}
-                        <span className="text-gray-600 ml-1.5">({employees.length} orang)</span>
+                        {activeFilter === "all" ? "All Employees" : activeFilter === "hadir" ? "Present Employees" : "Absent Employees"}
+                        <span className="text-gray-600 ml-1.5">({employees.length})</span>
                       </h4>
                       <button onClick={() => { setActiveFilter(null); setEmployees([]); }}
                         className="text-gray-600 hover:text-gray-400 transition-colors">
@@ -567,14 +567,14 @@ function AttendanceTodaySection() {
                         <table className="w-full text-xs">
                           <thead className="sticky top-0 bg-gray-800/90">
                             <tr>
-                              {["No", "Nama", "Department", "Check-In", "Check-Out", "Catatan"].map((h) => (
+                              {["No", "Name", "Department", "Check-In", "Check-Out", "Notes"].map((h) => (
                                 <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                               ))}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-800/50">
                             {employees.length === 0 ? (
-                              <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-600">Tidak ada data</td></tr>
+                              <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-600">No data</td></tr>
                             ) : employees.map((emp, i) => (
                               <tr key={`${emp.id}-${i}`} className="hover:bg-gray-800/40 transition-colors">
                                 <td className="px-3 py-2 text-gray-600 text-center w-8">{i + 1}</td>
@@ -606,7 +606,7 @@ function AttendanceTodaySection() {
                     </thead>
                     <tbody className="divide-y divide-gray-800">
                       {data.data.length === 0 ? (
-                        <tr><td colSpan={5} className="py-10 text-center text-xs text-gray-600">Tidak ada data hari kerja</td></tr>
+                        <tr><td colSpan={5} className="py-10 text-center text-xs text-gray-600">No working day data</td></tr>
                       ) : data.data.map((row) => (
                         <tr key={row.department} className="hover:bg-gray-800/40 transition-colors">
                           <td className="px-3 py-2.5 font-medium text-gray-200">{row.department}</td>
@@ -636,7 +636,7 @@ function AttendanceTodaySection() {
       {innerTab === "team" && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-xs text-gray-500">Rekap kehadiran per departmen & tim (seluruh data yang tersedia)</p>
+            <p className="text-xs text-gray-500">Attendance summary per department & team (all available data)</p>
             <button onClick={() => { setTeamData(null); fetchTeamData(); }}
               className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
               <RefreshCw size={11} className={loadingTeam ? "animate-spin" : ""} /> Refresh
@@ -645,7 +645,7 @@ function AttendanceTodaySection() {
           {loadingTeam && <div className="flex justify-center py-16"><Loader2 size={20} className="animate-spin text-gray-600" /></div>}
           {!loadingTeam && teamData && <DeptTeamTable data={teamData} />}
           {!loadingTeam && !teamData && (
-            <p className="py-10 text-center text-xs text-gray-600">Belum ada data.</p>
+            <p className="py-10 text-center text-xs text-gray-600">No data yet.</p>
           )}
         </div>
       )}
@@ -656,7 +656,7 @@ function AttendanceTodaySection() {
 // ── Sub-komponen untuk Attendance Ratio ───────────────────────────────────────
 
 function DeptBarChart({ data }) {
-  if (!data.length) return <p className="text-xs text-gray-600 py-6 text-center">Tidak ada data</p>;
+  if (!data.length) return <p className="text-xs text-gray-600 py-6 text-center">No data</p>;
   const maxVal = Math.max(...data.map((d) => d.plan), 1);
   const BAR_H  = 120;
   return (
@@ -708,7 +708,7 @@ function WhosOffWidget({ data }) {
         {data.date && <span className="text-xs text-gray-600">{fmtShort(data.date)}</span>}
       </div>
       {!data.data?.length ? (
-        <p className="text-xs text-gray-600 py-2 text-center">Semua hadir</p>
+        <p className="text-xs text-gray-600 py-2 text-center">All present</p>
       ) : (
         <div className="space-y-1.5">
           {data.data.slice(0, 5).map((emp, i) => (
@@ -723,7 +723,7 @@ function WhosOffWidget({ data }) {
             </div>
           ))}
           {data.data.length > 5 && (
-            <p className="text-xs text-gray-600 text-center">+{data.data.length - 5} lainnya</p>
+            <p className="text-xs text-gray-600 text-center">+{data.data.length - 5} more</p>
           )}
         </div>
       )}
@@ -833,7 +833,7 @@ function EmployeeDetailPanel({ headers, apiBase }) {
           <input
             value={query}
             onChange={(e) => { setQuery(e.target.value); doSearch(e.target.value); }}
-            placeholder="Ketik nama karyawan..."
+            placeholder="Type employee name..."
             className="w-full rounded-lg border border-gray-700 bg-gray-900 pl-8 pr-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500"
           />
           {results.length > 0 && (
@@ -880,7 +880,7 @@ function EmployeeDetailPanel({ headers, apiBase }) {
                   </thead>
                   <tbody className="divide-y divide-gray-800">
                     {!detail.absences.length ? (
-                      <tr><td colSpan={2} className="px-2 py-4 text-center text-gray-600">Tidak ada catatan absen</td></tr>
+                      <tr><td colSpan={2} className="px-2 py-4 text-center text-gray-600">No absence records</td></tr>
                     ) : detail.absences.map((a, i) => (
                       <tr key={i} className="hover:bg-gray-800/40">
                         <td className="px-2 py-2 text-gray-400 whitespace-nowrap">{fmtDate(a.date)}</td>
@@ -895,7 +895,7 @@ function EmployeeDetailPanel({ headers, apiBase }) {
         )}
 
         {!detail && !loading && (
-          <p className="py-10 text-center text-xs text-gray-600">Ketik nama karyawan untuk melihat detail attendance</p>
+          <p className="py-10 text-center text-xs text-gray-600">Type employee name to view attendance details</p>
         )}
       </div>
 
@@ -905,7 +905,7 @@ function EmployeeDetailPanel({ headers, apiBase }) {
           ? <MiniBarChart data={detail.monthly} />
           : (
             <div className="flex items-center justify-center h-48 rounded-lg border border-gray-800 bg-gray-900/50">
-              <p className="text-xs text-gray-700">Monthly chart akan tampil setelah pilih karyawan</p>
+              <p className="text-xs text-gray-700">Monthly chart will appear after selecting an employee</p>
             </div>
           )
         }
@@ -944,7 +944,7 @@ function AttendanceRateSection() {
   useEffect(() => { loadSummary(); }, [loadSummary]);
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 size={22} className="animate-spin text-gray-600" /></div>;
-  if (!deptData.length) return <p className="py-10 text-center text-xs text-gray-600">Belum ada data absensi. Upload file Excel di tab Upload Absensi.</p>;
+  if (!deptData.length) return <p className="py-10 text-center text-xs text-gray-600">No attendance data yet. Upload Excel in Attendance Upload tab.</p>;
 
   return (
     <div className="space-y-4">
@@ -1127,7 +1127,7 @@ function BudgetMonitoringSection() {
           className="rounded-lg border border-orange-700/60 bg-gray-900 px-3 py-1.5 text-sm text-orange-200 outline-none focus:border-orange-500 min-w-36"
         >
           {departments.length === 0
-            ? <option value="">Memuat dept...</option>
+            ? <option value="">Loading dept...</option>
             : departments.map(d => (
                 <option key={d.dept_code} value={d.dept_code}>
                   {d.dept_code}{d.dept_name ? ` — ${d.dept_name}` : ""}
@@ -1150,7 +1150,7 @@ function BudgetMonitoringSection() {
           onChange={e => setMonth(+e.target.value)}
           className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
         >
-          <option value={0}>Semua Bulan</option>
+          <option value={0}>All Months</option>
           {MONTHS_ID.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
         </select>
 
@@ -1159,7 +1159,7 @@ function BudgetMonitoringSection() {
           disabled={!dept}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-700 bg-gray-900 text-xs text-gray-400 hover:text-gray-200 hover:border-gray-600 disabled:opacity-40 transition-colors"
         >
-          <RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh dari Oracle
+          <RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh from Oracle
         </button>
 
         <div className="flex-1" />
@@ -1194,13 +1194,13 @@ function BudgetMonitoringSection() {
         <div className="py-16 text-center space-y-2">
           <Wallet size={32} className="mx-auto text-gray-700" />
           <p className="text-xs text-gray-600">
-            Tidak ada data budget untuk department <strong className="text-gray-400">{dept}</strong> tahun {year}.
+            No budget data for department <strong className="text-gray-400">{dept}</strong> year {year}.
           </p>
         </div>
       )}
       {!loading && !dept && (
         <div className="py-16 text-center">
-          <p className="text-xs text-gray-600">Pilih department untuk melihat data budget.</p>
+          <p className="text-xs text-gray-600">Select department to view budget data.</p>
         </div>
       )}
 
@@ -1208,9 +1208,9 @@ function BudgetMonitoringSection() {
       {!loading && summary && accounts.length > 0 && (
         <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
           <BudgetSummaryCard label="Total Budget (GL)"    value={fmtRp(summary.total_budget)} color="text-blue-400"  bg="bg-blue-500/10  border-blue-500/20" />
-          <BudgetSummaryCard label="Total Realisasi (AP)" value={fmtRp(summary.total_actual)} color="text-violet-400" bg="bg-violet-500/10 border-violet-500/20" />
+          <BudgetSummaryCard label="Total Actual (AP)" value={fmtRp(summary.total_actual)} color="text-violet-400" bg="bg-violet-500/10 border-violet-500/20" />
           <BudgetSummaryCard
-            label="Sisa (Budget − Realisasi)"
+            label="Remaining (Budget − Actual)"
             value={fmtRp(summary.total_remain)}
             color={summary.total_remain >= 0 ? "text-green-400" : "text-red-400"}
             bg={summary.total_remain >= 0 ? "bg-green-500/10 border-green-500/20" : "bg-red-500/10 border-red-500/20"}
@@ -1223,10 +1223,10 @@ function BudgetMonitoringSection() {
         <div className="rounded-lg border border-gray-800 overflow-hidden">
           {/* Header */}
           <div className="bg-gray-800/60 grid grid-cols-12 px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            <div className="col-span-5">Akun</div>
+            <div className="col-span-5">Account</div>
             <div className="col-span-3 text-right">Budget (GL)</div>
-            <div className="col-span-2 text-right">Realisasi (AP)</div>
-            <div className="col-span-2 text-right">Sisa</div>
+            <div className="col-span-2 text-right">Actual (AP)</div>
+            <div className="col-span-2 text-right">Remaining</div>
           </div>
 
           {accounts.map((acc) => {
@@ -1262,7 +1262,7 @@ function BudgetMonitoringSection() {
                     {!detail ? (
                       <div className="flex justify-center py-6"><Loader2 size={16} className="animate-spin text-gray-600" /></div>
                     ) : detail.monthly.length === 0 ? (
-                      <p className="text-xs text-gray-600 text-center py-4">Tidak ada data bulanan untuk akun ini.</p>
+                      <p className="text-xs text-gray-600 text-center py-4">No monthly data for this account.</p>
                     ) : (
                       <div className="space-y-4">
                         {detail.monthly.map((m) => (
@@ -1299,17 +1299,17 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
         <thead>
           <tr className="bg-gray-800/40 text-gray-500 uppercase tracking-wider text-xs">
             <th className="px-3 py-2 text-left font-semibold" style={{width:"45%"}}>Actual Expense (AP Invoice)</th>
-            <th className="px-3 py-2 text-right font-semibold">Jumlah (Rp)</th>
-            <th className="px-3 py-2 text-right font-semibold">Tanggal</th>
+            <th className="px-3 py-2 text-right font-semibold">Amount (Rp)</th>
+            <th className="px-3 py-2 text-right font-semibold">Date</th>
             <th className="px-3 py-2 text-right font-semibold">No. Invoice</th>
-            <th className="px-3 py-2 text-right font-semibold">Sisa</th>
+            <th className="px-3 py-2 text-right font-semibold">Remaining</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-800/60">
           {m.items.length === 0 ? (
             <tr>
               <td colSpan={5} className="px-3 py-3 text-gray-700 italic">
-                Belum ada data AP Invoice untuk periode ini.
+                No AP Invoice data for this period.
               </td>
             </tr>
           ) : (
@@ -1338,7 +1338,7 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
 
           {/* Baris total */}
           <tr className="bg-gray-800/40 font-semibold border-t-2 border-gray-700">
-            <td className="px-3 py-2 text-gray-400 uppercase tracking-wider">Total Realisasi</td>
+            <td className="px-3 py-2 text-gray-400 uppercase tracking-wider">Total Actual</td>
             <td className="px-3 py-2 text-right text-violet-300 tabular-nums">
               {m.total_actual.toLocaleString("id-ID")}
             </td>
@@ -1410,7 +1410,7 @@ function DataTable({ headers, rows, placeholder }) {
           ) : (
             <tr>
               <td colSpan={headers.length} className="px-3 py-10 text-center text-xs text-gray-600">
-                {placeholder || "Tidak ada data"}
+                {placeholder || "No data"}
               </td>
             </tr>
           )}

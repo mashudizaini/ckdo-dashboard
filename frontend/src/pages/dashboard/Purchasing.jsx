@@ -376,7 +376,7 @@ function PurchaseHistorySection() {
   }), [f]);
 
   const handleSearch = async () => {
-    if (!f.year_from || !f.year_to) { setFilterErr("Year From dan Year To wajib diisi"); return; }
+    if (!f.year_from || !f.year_to) { setFilterErr("Year From and Year To are required"); return; }
     setFilterErr(null);
     setSearched(true);
     setLoadingMap({ detail: true, "by-item": true, "by-supplier": true });
@@ -409,11 +409,11 @@ function PurchaseHistorySection() {
       {/* Filter Panel */}
       <SectionCard
         title="Purchase History"
-        subtitle="Filter data history pembelian dari Oracle EBS"
+        subtitle="Filter purchase history data from Oracle EBS"
         action={
           <div className="flex gap-2">
             <ActionBtn icon={RefreshCw} label="Reset" color="bg-gray-700 hover:bg-gray-600" onClick={handleReset} />
-            <ActionBtn icon={Filter} label="Cari" color="bg-orange-600 hover:bg-orange-700" onClick={handleSearch} />
+            <ActionBtn icon={Filter} label="Search" color="bg-orange-600 hover:bg-orange-700" onClick={handleSearch} />
           </div>
         }
       >
@@ -425,7 +425,7 @@ function PurchaseHistorySection() {
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
           <Field label="Organization">
             <select className={SELECT} value={f.org_id} onChange={e => setF(p => ({ ...p, org_id: e.target.value }))}>
-              <option value="">— Semua —</option>
+              <option value="">— All —</option>
               {orgs.map(o => <option key={o.organization_id} value={o.organization_id}>{o.name}</option>)}
             </select>
           </Field>
@@ -439,25 +439,25 @@ function PurchaseHistorySection() {
             {inp("exchange_rate_type", { placeholder: "Corporate" })}
           </Field>
           <Field label="Item Code">{inp("item_code", { placeholder: "e.g. CKD24Q0062" })}</Field>
-          <Field label="Item Description">{inp("item_desc", { placeholder: "Pencarian partial..." })}</Field>
-          <Field label="Vendor Name">{inp("vendor_name", { placeholder: "Pencarian partial..." })}</Field>
-          <Field label="Manufacturer">{inp("manufacturer", { placeholder: "Pencarian partial..." })}</Field>
+          <Field label="Item Description">{inp("item_desc", { placeholder: "Partial search..." })}</Field>
+          <Field label="Vendor Name">{inp("vendor_name", { placeholder: "Partial search..." })}</Field>
+          <Field label="Manufacturer">{inp("manufacturer", { placeholder: "Partial search..." })}</Field>
           <Field label="Country of Origin">{inp("country_of_origin", { placeholder: "e.g. INDONESIA" })}</Field>
           <Field label="Category">
             <select className={SELECT} value={f.category} onChange={e => setF(p => ({ ...p, category: e.target.value }))}>
-              <option value="">— Semua —</option>
+              <option value="">— All —</option>
               {categories.map(c => <option key={c.category} value={c.category}>{c.category}</option>)}
             </select>
           </Field>
           <Field label="Currency">
             <select className={SELECT} value={f.currency_code} onChange={e => setF(p => ({ ...p, currency_code: e.target.value }))}>
-              <option value="">— Semua —</option>
+              <option value="">— All —</option>
               {currencies.map(c => <option key={c.currency_code} value={c.currency_code}>{c.currency_code}</option>)}
             </select>
           </Field>
           <Field label="Material Type">
             <select className={SELECT} value={f.material_type} onChange={e => setF(p => ({ ...p, material_type: e.target.value }))}>
-              <option value="">— Semua —</option>
+              <option value="">— All —</option>
               <option value="Direct Material">Direct Material</option>
               <option value="Indirect Material">Indirect Material</option>
             </select>
@@ -526,7 +526,7 @@ function Pagination({ total, page, onPage }) {
       background: "#e8edf5",
     }}>
       <span style={{ fontSize: 12, color: "#475569", fontWeight: 600 }}>
-        {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} dari {total} baris
+        {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total} rows
       </span>
       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
         <button onClick={() => onPage(page - 1)} disabled={page === 1}
@@ -590,7 +590,7 @@ function PHDetailTable({ data, loading, error }) {
   return (
     <div className="rounded-lg border border-gray-800">
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 bg-gray-900/50">
-        <span className="text-xs text-gray-500">{data.length} baris</span>
+        <span className="text-xs text-gray-500">{data.length} rows</span>
         {data.length > 0 && (
           <button onClick={handleDownload}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium text-green-400 border border-green-500/30 bg-green-500/10 hover:bg-green-500/20 transition-colors">
@@ -603,11 +603,11 @@ function PHDetailTable({ data, loading, error }) {
           <thead><tr className="bg-gray-800/60">{cols.map(h => <th key={h} className={TH}>{h}</th>)}</tr></thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={cols.length} className="px-3 py-10 text-center text-xs text-gray-500"><Loader2 size={14} className="animate-spin inline mr-2" />Memuat data...</td></tr>
+              <tr><td colSpan={cols.length} className="px-3 py-10 text-center text-xs text-gray-500"><Loader2 size={14} className="animate-spin inline mr-2" />Loading data...</td></tr>
             ) : error ? (
               <tr><td colSpan={cols.length} className="px-3 py-6 text-center text-xs text-red-400">{error}</td></tr>
             ) : paged.length === 0 ? (
-              <tr><td colSpan={cols.length} className="px-3 py-10 text-center text-xs text-gray-600">Tidak ada data ditemukan</td></tr>
+              <tr><td colSpan={cols.length} className="px-3 py-10 text-center text-xs text-gray-600">No data found</td></tr>
             ) : paged.map((r, i) => (
               <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
                 <td className={`${TD} text-gray-400 font-mono`}>{r.organization_id}</td>
@@ -658,7 +658,7 @@ function PHByItemTable({ data, years, loading, error }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-gray-500">{data.length} baris ditemukan</span>
+        <span className="text-xs text-gray-500">{data.length} rows ditemukan</span>
         <button onClick={handleDownload} disabled={data.length === 0}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600/20 hover:bg-green-600/30 text-green-400 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
           <Download size={12} /> Download Excel
@@ -688,11 +688,11 @@ function PHByItemTable({ data, years, loading, error }) {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={totalCols} className="px-3 py-10 text-center text-xs text-gray-500"><Loader2 size={14} className="animate-spin inline mr-2" />Memuat data...</td></tr>
+              <tr><td colSpan={totalCols} className="px-3 py-10 text-center text-xs text-gray-500"><Loader2 size={14} className="animate-spin inline mr-2" />Loading data...</td></tr>
             ) : error ? (
               <tr><td colSpan={totalCols} className="px-3 py-6 text-center text-xs text-red-400">{error}</td></tr>
             ) : data.length === 0 ? (
-              <tr><td colSpan={totalCols} className="px-3 py-10 text-center text-xs text-gray-600">Tidak ada data ditemukan</td></tr>
+              <tr><td colSpan={totalCols} className="px-3 py-10 text-center text-xs text-gray-600">No data found</td></tr>
             ) : paged.map((r, i) => (
               <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
                 <td className={`${TD} text-gray-400 font-mono`}>{r.organization_id}</td>
@@ -744,7 +744,7 @@ function PHBySupplierTable({ data, years, loading, error }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-gray-500">{data.length} baris ditemukan</span>
+        <span className="text-xs text-gray-500">{data.length} rows ditemukan</span>
         <button onClick={handleDownload} disabled={data.length === 0}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600/20 hover:bg-green-600/30 text-green-400 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
           <Download size={12} /> Download Excel
@@ -774,11 +774,11 @@ function PHBySupplierTable({ data, years, loading, error }) {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={totalCols} className="px-3 py-10 text-center text-xs text-gray-500"><Loader2 size={14} className="animate-spin inline mr-2" />Memuat data...</td></tr>
+              <tr><td colSpan={totalCols} className="px-3 py-10 text-center text-xs text-gray-500"><Loader2 size={14} className="animate-spin inline mr-2" />Loading data...</td></tr>
             ) : error ? (
               <tr><td colSpan={totalCols} className="px-3 py-6 text-center text-xs text-red-400">{error}</td></tr>
             ) : data.length === 0 ? (
-              <tr><td colSpan={totalCols} className="px-3 py-10 text-center text-xs text-gray-600">Tidak ada data ditemukan</td></tr>
+              <tr><td colSpan={totalCols} className="px-3 py-10 text-center text-xs text-gray-600">No data found</td></tr>
             ) : paged.map((r, i) => (
               <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
                 <td className={`${TD} text-gray-300 max-w-[180px] truncate font-medium`} title={r.supplier_name}>{r.supplier_name}</td>
@@ -1682,7 +1682,7 @@ function ManufacturerMasterSection() {
   useEffect(() => { loadList(); }, []);
 
   const handleDelete = async (id) => {
-    if (!window.confirm("Hapus record ini?")) return;
+    if (!window.confirm("Delete this record?")) return;
     setDeletingId(id);
     try {
       const r = await purchasingApi.deleteManufacturer(id);
@@ -1695,11 +1695,11 @@ function ManufacturerMasterSection() {
     <>
       <SectionCard
         title="Manufacturer Master"
-        subtitle="Data master pabrik/manufacturer per item Oracle"
+        subtitle="Factory/manufacturer master data per Oracle item"
         action={
           <div className="flex gap-2">
             <ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-gray-700 hover:bg-gray-600" onClick={loadList} />
-            <ActionBtn icon={Plus} label="Tambah" color="bg-purple-600 hover:bg-purple-700" onClick={() => setShowForm(true)} />
+            <ActionBtn icon={Plus} label="Add" color="bg-purple-600 hover:bg-purple-700" onClick={() => setShowForm(true)} />
           </div>
         }
       >
@@ -1720,7 +1720,7 @@ function ManufacturerMasterSection() {
               {data.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-3 py-10 text-center text-xs text-gray-600">
-                    {loading ? "Memuat data..." : "Belum ada data. Klik Tambah untuk menambah record."}
+                    {loading ? "Loading data..." : "No data yet. Click Add to create a record."}
                   </td>
                 </tr>
               ) : (
@@ -1826,7 +1826,7 @@ function ManufacturerForm({ onClose, onSaved }) {
 
   const handleSave = async () => {
     if (!form.organization_id || !form.item_code.trim() || !form.manufacturer_name.trim()) {
-      setError("Organization, Item Code, dan Manufacturer Name wajib diisi");
+      setError("Organization, Item Code, and Manufacturer Name are required");
       return;
     }
     setSaving(true); setError(null);
@@ -1850,7 +1850,7 @@ function ManufacturerForm({ onClose, onSaved }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="w-full max-w-lg rounded-xl border border-gray-700 bg-gray-900 shadow-2xl overflow-visible">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
-          <h3 className="text-sm font-semibold text-gray-200">Tambah Manufacturer Master</h3>
+          <h3 className="text-sm font-semibold text-gray-200">Add Manufacturer Master</h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors">
             <X size={16} />
           </button>
@@ -1861,11 +1861,11 @@ function ManufacturerForm({ onClose, onSaved }) {
           <Field label="Organization *">
             {orgLoading ? (
               <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Loader2 size={12} className="animate-spin" /> Memuat organizations...
+                <Loader2 size={12} className="animate-spin" /> Loading organizations...
               </div>
             ) : (
               <select value={form.organization_id} onChange={handleOrgChange} className={SELECT}>
-                <option value="">-- Pilih Organization --</option>
+                <option value="">-- Select Organization --</option>
                 {orgs.map((o) => (
                   <option key={o.organization_id} value={o.organization_id}>
                     {o.name}
@@ -1885,7 +1885,7 @@ function ManufacturerForm({ onClose, onSaved }) {
                   onChange={handleItemInput}
                   onFocus={() => { if (items.length > 0) setShowDrop(true); }}
                   onBlur={() => setTimeout(() => setShowDrop(false), 150)}
-                  placeholder={form.organization_id ? "Ketik kode item untuk mencari..." : "Pilih organization dulu"}
+                  placeholder={form.organization_id ? "Type item code to search..." : "Select organization first"}
                   disabled={!form.organization_id}
                 />
                 <span className="absolute right-3 top-2 text-gray-600">
@@ -1906,7 +1906,7 @@ function ManufacturerForm({ onClose, onSaved }) {
                       <p className="text-xs text-gray-400 truncate">{item.item_description}</p>
                     </button>
                   )) : (
-                    <p className="px-3 py-2.5 text-xs text-gray-500">Tidak ada item ditemukan di organization ini</p>
+                    <p className="px-3 py-2.5 text-xs text-gray-500">No items found in this organization</p>
                   )}
                 </div>
               )}
@@ -1922,7 +1922,7 @@ function ManufacturerForm({ onClose, onSaved }) {
               className={INPUT}
               value={form.manufacturer_name}
               onChange={(e) => setForm((p) => ({ ...p, manufacturer_name: e.target.value }))}
-              placeholder="Nama pabrik / manufacturer"
+              placeholder="Factory / manufacturer name"
             />
           </Field>
 
@@ -1932,7 +1932,7 @@ function ManufacturerForm({ onClose, onSaved }) {
               className={INPUT}
               value={form.country_of_origin}
               onChange={(e) => setForm((p) => ({ ...p, country_of_origin: e.target.value }))}
-              placeholder="Contoh: Indonesia, Germany, USA"
+              placeholder="e.g. Indonesia, Germany, USA"
             />
           </Field>
 
@@ -1945,11 +1945,11 @@ function ManufacturerForm({ onClose, onSaved }) {
 
         <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-800">
           <button onClick={onClose} className="px-3 py-1.5 rounded-md text-xs font-medium text-gray-400 hover:text-gray-200 transition-colors">
-            Batal
+            Cancel
           </button>
           <ActionBtn
             icon={saving ? Loader2 : CheckCircle}
-            label={saving ? "Menyimpan..." : "Simpan"}
+            label={saving ? "Saving..." : "Save"}
             color="bg-purple-600 hover:bg-purple-700"
             onClick={handleSave}
           />
