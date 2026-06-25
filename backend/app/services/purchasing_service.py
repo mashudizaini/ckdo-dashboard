@@ -284,7 +284,7 @@ class PurchasingService:
                 COALESCE(mfr.country_of_origin,'UNKNOWN'),
                 EXTRACT(YEAR FROM poh.creation_date),
                 NVL(msi.primary_uom_code, pol.unit_meas_lookup_code)
-            ORDER BY msi.segment1, EXTRACT(YEAR FROM poh.creation_date)
+            ORDER BY NVL(msi.segment1, TO_CHAR(pol.item_id)), EXTRACT(YEAR FROM poh.creation_date)
         """
         try:
             rows = await asyncio.to_thread(self._query, sql, self._ph_params(filters))
