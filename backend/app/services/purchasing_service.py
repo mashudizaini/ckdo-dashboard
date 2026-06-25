@@ -608,30 +608,33 @@ class PurchasingService:
 
         sql = f"""
             SELECT
-                msi.organization_id                                          AS organization_id,
-                hou.name                                                     AS organization_name,
-                msi.segment1                                                 AS item_code,
-                msi.description                                              AS item_desc,
-                msi.primary_uom_code                                         AS uom,
+                NVL(msi.organization_id, poll.ship_to_organization_id)       AS organization_id,
+                NVL(hou.name, TO_CHAR(poll.ship_to_organization_id))         AS organization_name,
+                NVL(msi.segment1, TO_CHAR(pol.item_id))                      AS item_code,
+                NVL(msi.description, pol.item_description)                   AS item_desc,
+                NVL(msi.primary_uom_code, pol.unit_meas_lookup_code)         AS uom,
                 aps.vendor_name                                              AS supplier_name,
                 COALESCE(mfr.manufacturer_name, 'UNKNOWN')                  AS manufacturer_name,
                 COALESCE(mfr.country_of_origin, 'UNKNOWN')                  AS country_of_origin,
                 poh.currency_code,
                 EXTRACT(YEAR FROM poh.creation_date)                        AS trx_year,
                 COUNT(DISTINCT poh.po_header_id)                            AS po_count,
-                ROUND(SUM(poll.quantity), 2)                                AS total_qty,
-                ROUND(AVG(poll.price_override), 4)                          AS avg_price_orig,
-                ROUND(AVG(poll.price_override * ({self._RATE_CASE})), 4)    AS avg_price_idr
+                ROUND(SUM(pol.quantity), 2)                                 AS total_qty,
+                ROUND(AVG(pol.unit_price), 4)                               AS avg_price_orig,
+                ROUND(AVG(pol.unit_price * ({self._RATE_CASE})), 4)         AS avg_price_idr
             FROM {self._PH_FROM}
             WHERE {self._PH_WHERE}
             GROUP BY
-                msi.organization_id, hou.name,
-                msi.segment1, msi.description, msi.primary_uom_code,
+                NVL(msi.organization_id, poll.ship_to_organization_id),
+                NVL(hou.name, TO_CHAR(poll.ship_to_organization_id)),
+                NVL(msi.segment1, TO_CHAR(pol.item_id)),
+                NVL(msi.description, pol.item_description),
+                NVL(msi.primary_uom_code, pol.unit_meas_lookup_code),
                 aps.vendor_name, mfr.manufacturer_name, mfr.country_of_origin,
                 poh.currency_code,
                 EXTRACT(YEAR FROM poh.creation_date)
             ORDER BY aps.vendor_name, EXTRACT(YEAR FROM poh.creation_date)
-            FETCH FIRST 500 ROWS ONLY
+            FETCH FIRST 10 ROWS ONLY
         """
         params = self._ph_params(filters)
         try:

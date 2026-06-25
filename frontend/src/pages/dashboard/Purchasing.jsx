@@ -1383,8 +1383,10 @@ function PriceAnalysisSection() {
       if (filters.category)     p.category    = filters.category;
       const r = await purchasingApi.getPriceAnalysis(p);
       if (r?.success) {
-        setData(r.data || []);
-        setYears(r.years || []);
+        const newData = r.data || [];
+        const actualYears = [...new Set(newData.map(d => d.trx_year))].sort((a, b) => a - b);
+        setData(newData);
+        setYears(actualYears.length > 0 ? actualYears : (r.years || []));
         setSearched(true);
       } else {
         setError(r?.error || "Request failed");
