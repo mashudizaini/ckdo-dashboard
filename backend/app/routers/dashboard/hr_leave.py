@@ -66,6 +66,36 @@ def _to_date(val) -> Optional[date]:
         return None
 
 
+def _parse_leave_excel(content: bytes) -> list[dict]:
+    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+    ws = wb.active
+    records = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if row is None:
+            continue
+        cells = list(row)
+        if len(cells) < 13:
+            continue
+        timeoff_code = _to_str(cells[COL_TIMEOFF])
+        if not timeoff_code:
+            continue
+        emp_id = _to_str(cells[COL_EMP_ID])
+        leave_dt = _to_date(cells[COL_DATE])
+        if not emp_id or not leave_dt:
+            continue
+        records.append({
+            "employee_id": emp_id,
+            "employee_name": _to_str(cells[COL_NAME]),
+            "organization": _to_str(cells[COL_ORG]),
+            "job_position": _to_str(cells[COL_POSITION]),
+            "leave_date": leave_dt,
+            "leave_code": timeoff_code,
+            "leave_type": LEAVE_CODE_MAP.get(timeoff_code, timeoff_code),
+        })
+    wb.close()
+    return records
+
+
 @router.post("/upload")
 async def upload_leave(
     file: UploadFile = File(...),
@@ -82,66 +112,43 @@ async def upload_leave(
         raise HTTPException(500, f"Failed to read file: {str(e)}")
 
     try:
-        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+        import asyncio
+        records = await asyncio.to_thread(_parse_leave_excel, content)
     except Exception as e:
         raise HTTPException(422, f"Failed to parse Excel: {str(e)}")
-    ws = wb.active
 
     batch_id = datetime.utcnow().strftime("LV%Y%m%d%H%M%S")
     inserted = 0
     updated = 0
-    total = 0
-
-    records = []
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if not row or len(row) < 13:
-            continue
-
-        timeoff_code = _to_str(row[COL_TIMEOFF])
-        if not timeoff_code:
-            continue
-
-        emp_id = _to_str(row[COL_EMP_ID])
-        leave_dt = _to_date(row[COL_DATE])
-        if not emp_id or not leave_dt:
-            continue
-
-        total += 1
-        leave_type = LEAVE_CODE_MAP.get(timeoff_code, timeoff_code)
-        records.append({
-            "employee_id": emp_id,
-            "employee_name": _to_str(row[COL_NAME]),
-            "organization": _to_str(row[COL_ORG]),
-            "job_position": _to_str(row[COL_POSITION]),
-            "leave_date": leave_dt,
-            "leave_code": timeoff_code,
-            "leave_type": leave_type,
-            "upload_batch_id": batch_id,
-            "uploaded_at": datetime.utcnow(),
-        })
-
-    wb.close()
+    total = len(records)
 
     try:
         for rec in records:
             existing = await db.execute(
-                select(LeaveRecord).where(
+                select(LeaveRecord.id).where(
                     LeaveRecord.employee_id == rec["employee_id"],
                     LeaveRecord.leave_date == rec["leave_date"],
                 )
             )
-            row = existing.scalars().first()
-            if row:
-                for k, v in rec.items():
-                    if k not in ("employee_id", "leave_date"):
-                        setattr(row, k, v)
+            if existing.scalar():
+                await db.execute(
+                    text("""
+                        UPDATE leave_records
+                        SET employee_name = :employee_name, organization = :organization,
+                            job_position = :job_position, leave_code = :leave_code,
+                            leave_type = :leave_type, upload_batch_id = :batch_id,
+                            uploaded_at = :now
+                        WHERE employee_id = :employee_id AND leave_date = :leave_date
+                    """),
+                    {**rec, "batch_id": batch_id, "now": datetime.utcnow()},
+                )
                 updated += 1
             else:
-                db.add(LeaveRecord(**rec))
+                db.add(LeaveRecord(**rec, upload_batch_id=batch_id, uploaded_at=datetime.utcnow()))
                 inserted += 1
         await db.flush()
     except Exception as e:
-        raise HTTPException(500, f"Database error after {inserted}/{total} records: {str(e)}")
+        raise HTTPException(500, f"Database error after {inserted+updated}/{total} records: {traceback.format_exc()}")
 
     log = LeaveUploadLog(
         batch_id=batch_id,
