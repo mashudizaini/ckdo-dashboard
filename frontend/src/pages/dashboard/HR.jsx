@@ -660,38 +660,46 @@ function AttendanceTodaySection() {
 
 // ── Sub-komponen untuk Attendance Ratio ───────────────────────────────────────
 
+const NEU_CARD = {
+  background: "#e8edf5",
+  borderRadius: 16,
+  boxShadow: "6px 6px 14px #c5cad8, -6px -6px 14px #ffffff",
+  padding: 16,
+};
+const NEU_IN = { background: "#e8edf5", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff" };
+
 function DeptBarChart({ data }) {
-  if (!data.length) return <p className="text-xs text-gray-600 py-6 text-center">No data</p>;
+  if (!data.length) return <p style={{ padding: "24px 0", textAlign: "center", color: "#94a3b8", fontSize: 13 }}>No data</p>;
   const maxVal = Math.max(...data.map((d) => d.plan), 1);
-  const BAR_H  = 120;
+  const BAR_H  = 130;
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h4 className="text-xs font-semibold text-gray-400">Attendance Ratio per Department</h4>
-        <div className="flex gap-3 text-xs text-gray-600">
-          <span className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-blue-500" /> Plan</span>
-          <span className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded bg-orange-500" /> Actual</span>
+    <div style={NEU_CARD}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>Attendance Ratio per Department</h4>
+        <div style={{ display: "flex", gap: 14, fontSize: 11, color: "#64748b", fontWeight: 600 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: "#3b82f6" }} /> Plan</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: "#f97316" }} /> Actual</span>
         </div>
       </div>
-      <div className="flex items-end justify-around gap-1" style={{ height: BAR_H + 44 }}>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-around", gap: 4, height: BAR_H + 50 }}>
         {data.map((dept) => {
-          const planH   = Math.max(Math.round((dept.plan   / maxVal) * BAR_H), 2);
-          const actualH = Math.max(Math.round((dept.actual / maxVal) * BAR_H), dept.actual > 0 ? 2 : 0);
+          const planH   = Math.max(Math.round((dept.plan / maxVal) * BAR_H), 4);
+          const actualH = Math.max(Math.round((dept.actual / maxVal) * BAR_H), dept.actual > 0 ? 4 : 0);
           const short   = dept.department.split(/[\s/&]/)[0];
           return (
-            <div key={dept.department} className="flex-1 flex flex-col items-center" title={dept.department}>
-              <div className="w-full flex items-end justify-center gap-0.5" style={{ height: BAR_H }}>
-                <div className="flex flex-col items-center" style={{ width: "42%" }}>
-                  <span className="text-xs text-gray-400 font-semibold">{dept.plan}</span>
-                  <div className="w-full bg-blue-500 rounded-t" style={{ height: planH }} />
+            <div key={dept.department} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }} title={dept.department}>
+              <div style={{ width: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 2, height: BAR_H }}>
+                <div style={{ width: "40%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  <span style={{ fontSize: 11, color: "#1e293b", fontWeight: 700 }}>{dept.plan}</span>
+                  <div style={{ width: "100%", height: planH, background: "linear-gradient(180deg, #60a5fa, #3b82f6)", borderRadius: "6px 6px 0 0", boxShadow: "2px 2px 4px #c5cad8" }} />
                 </div>
-                <div className="flex flex-col items-center" style={{ width: "42%" }}>
-                  <span className="text-xs text-orange-400 font-semibold">{dept.actual}</span>
-                  <div className="w-full bg-orange-500 rounded-t" style={{ height: actualH }} />
+                <div style={{ width: "40%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  <span style={{ fontSize: 11, color: "#ea580c", fontWeight: 700 }}>{dept.actual}</span>
+                  <div style={{ width: "100%", height: actualH, background: "linear-gradient(180deg, #fb923c, #f97316)", borderRadius: "6px 6px 0 0", boxShadow: "2px 2px 4px #c5cad8" }} />
                 </div>
               </div>
-              <p className="text-xs text-gray-500 mt-1 truncate max-w-full text-center">{short}</p>
-              <p className="text-xs font-bold text-orange-400">{dept.rate}%</p>
+              <p style={{ fontSize: 10, color: "#475569", fontWeight: 600, marginTop: 4, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "center" }}>{short}</p>
+              <p style={{ fontSize: 12, fontWeight: 800, color: "#ea580c" }}>{dept.rate}%</p>
             </div>
           );
         })}
@@ -703,32 +711,38 @@ function DeptBarChart({ data }) {
 function WhosOffWidget({ data }) {
   const fmtShort = (iso) => {
     if (!iso) return "";
-    try { return new Date(iso + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "short" }); }
+    try { return new Date(iso + "T00:00:00").toLocaleDateString("en-US", { day: "numeric", month: "short" }); }
     catch (_) { return iso; }
   };
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-3">
-      <div className="flex items-center justify-between mb-2">
-        <h4 className="text-xs font-semibold text-gray-400">Who's Off</h4>
-        {data.date && <span className="text-xs text-gray-600">{fmtShort(data.date)}</span>}
+    <div style={NEU_CARD}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <h4 style={{ fontSize: 12, fontWeight: 700, color: "#1e293b" }}>Who's Off</h4>
+        {data.date && <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>{fmtShort(data.date)}</span>}
       </div>
       {!data.data?.length ? (
-        <p className="text-xs text-gray-600 py-2 text-center">All present</p>
+        <p style={{ fontSize: 12, color: "#94a3b8", padding: "8px 0", textAlign: "center" }}>All present</p>
       ) : (
-        <div className="space-y-1.5">
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {data.data.slice(0, 5).map((emp, i) => (
-            <div key={i} className="flex items-center gap-1.5">
-              <div className="h-5 w-5 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-400 shrink-0">
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{
+                width: 26, height: 26, borderRadius: "50%",
+                background: "linear-gradient(135deg, #3b82f6, #60a5fa)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 11, fontWeight: 700, color: "#fff", flexShrink: 0,
+                boxShadow: "2px 2px 4px #c5cad8",
+              }}>
                 {emp.name?.charAt(0) || "?"}
               </div>
-              <div className="min-w-0">
-                <p className="text-xs text-gray-300 truncate leading-tight">{emp.name}</p>
-                <p className="text-xs text-gray-600 leading-tight">{emp.reason}</p>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{emp.name}</p>
+                <p style={{ fontSize: 10, color: "#64748b", fontWeight: 500 }}>{emp.reason}</p>
               </div>
             </div>
           ))}
           {data.data.length > 5 && (
-            <p className="text-xs text-gray-600 text-center">+{data.data.length - 5} more</p>
+            <p style={{ fontSize: 11, color: "#94a3b8", textAlign: "center", fontWeight: 500 }}>+{data.data.length - 5} more</p>
           )}
         </div>
       )}
@@ -738,20 +752,26 @@ function WhosOffWidget({ data }) {
 
 function StatBreakdown({ title, data }) {
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-3">
-      <h4 className="text-xs font-semibold text-gray-400 mb-2">{title}</h4>
+    <div style={NEU_CARD}>
+      <h4 style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", marginBottom: 10 }}>{title}</h4>
       {!data?.length ? (
-        <p className="text-xs text-gray-600 py-2 text-center">—</p>
+        <p style={{ fontSize: 12, color: "#94a3b8", padding: "8px 0", textAlign: "center" }}>—</p>
       ) : (
-        <div className="space-y-2.5">
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {data.map((item) => (
             <div key={item.label}>
-              <div className="flex justify-between text-xs mb-0.5">
-                <span className="text-gray-400 truncate max-w-[65%]">{item.label}</span>
-                <span className="text-blue-400 font-bold">{item.rate}%</span>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                <span style={{ color: "#334155", fontWeight: 600, maxWidth: "65%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.label}</span>
+                <span style={{ color: "#2563eb", fontWeight: 800 }}>{item.rate}%</span>
               </div>
-              <div className="h-4 rounded-full bg-gray-800 overflow-hidden">
-                <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.max(item.rate, 1)}%` }} />
+              <div style={{ height: 18, borderRadius: 99, ...NEU_IN, overflow: "hidden" }}>
+                <div style={{
+                  height: "100%", borderRadius: 99,
+                  background: "linear-gradient(90deg, #3b82f6, #60a5fa)",
+                  width: `${Math.max(item.rate, 2)}%`,
+                  boxShadow: "2px 2px 4px #c5cad8",
+                  transition: "width 0.5s ease",
+                }} />
               </div>
             </div>
           ))}
@@ -953,62 +973,86 @@ function AttendanceRateSection() {
 
   return (
     <div className="space-y-4">
-      {/* Header orange */}
-      <div className="rounded-lg py-2.5 text-center" style={{ background: "linear-gradient(90deg, #ea580c, #f97316)" }}>
-        <h2 className="text-sm font-bold text-white tracking-widest uppercase">Attendance Ratio</h2>
+      {/* Header */}
+      <div style={{
+        borderRadius: 14, padding: "12px 0", textAlign: "center",
+        background: "linear-gradient(135deg, #2563eb, #3b82f6)",
+        boxShadow: "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff",
+      }}>
+        <h2 style={{ fontSize: 14, fontWeight: 800, color: "#fff", letterSpacing: "0.12em", textTransform: "uppercase" }}>Attendance Ratio</h2>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-0 border-b border-gray-700">
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         {[["summary", "Summary"], ["detail", "Detail"]].map(([id, label]) => (
           <button key={id} onClick={() => setActiveTab(id)}
-            className={`px-5 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors ${
-              activeTab === id ? "border-blue-500 text-blue-400 bg-blue-500/5" : "border-transparent text-gray-500 hover:text-gray-300"
-            }`}>
+            style={{
+              padding: "8px 20px", borderRadius: 10, border: "none", fontSize: 12, fontWeight: 700,
+              background: "#e8edf5", cursor: "pointer",
+              color: activeTab === id ? "#2563eb" : "#64748b",
+              boxShadow: activeTab === id
+                ? "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff"
+                : "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff",
+              transition: "all 0.2s ease",
+            }}>
             {label}
           </button>
         ))}
-        <div className="flex-1" />
-        <button onClick={loadSummary} className="px-3 text-gray-600 hover:text-gray-400">
-          <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
+        <div style={{ flex: 1 }} />
+        <button onClick={loadSummary} style={{
+          padding: 8, borderRadius: 8, border: "none", cursor: "pointer",
+          background: "#e8edf5", color: "#64748b",
+          boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff",
+        }}>
+          <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
         </button>
       </div>
 
       {/* ── Summary ── */}
       {activeTab === "summary" && (
-        <div className="grid grid-cols-5 gap-4">
-          {/* Left 3/5: dept chart + bottom row */}
-          <div className="col-span-3 space-y-3">
+        <div style={{ display: "grid", gridTemplateColumns: "3fr 2fr", gap: 16 }}>
+          {/* Left: dept chart + bottom row */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <DeptBarChart data={deptData} />
-            <div className="grid grid-cols-3 gap-3">
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
               <WhosOffWidget data={whosOff} />
-              <StatBreakdown title="Base on Gender"        data={workforce.by_gender}   />
-              <StatBreakdown title="Base on Work Location" data={workforce.by_location} />
+              <StatBreakdown title="Based on Gender"        data={workforce.by_gender}   />
+              <StatBreakdown title="Based on Work Location" data={workforce.by_location} />
             </div>
           </div>
 
-          {/* Right 2/5: monthly overall */}
-          <div className="col-span-2 space-y-3">
-            <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-4">
-              <h4 className="text-xs font-semibold text-gray-400 mb-3">Monthly Overall Rate</h4>
-              <div className="space-y-2">
-                {[...monthly].reverse().map((m) => (
-                  <div key={m.period} className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500 w-14 shrink-0 text-right">{m.period}</span>
-                    <div className="flex-1 h-5 rounded bg-gray-800 overflow-hidden relative">
-                      <div className={`h-full rounded transition-all ${m.rate >= 80 ? "bg-green-500" : m.rate >= 60 ? "bg-amber-500" : "bg-red-500"}`}
-                        style={{ width: `${m.rate}%` }} />
-                      <span className="absolute inset-0 flex items-center pl-2 text-xs font-semibold text-white">{m.rate}%</span>
+          {/* Right: monthly overall */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={NEU_CARD}>
+              <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 12 }}>Monthly Overall Rate</h4>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {[...monthly].reverse().map((m) => {
+                  const barColor = m.rate >= 80 ? "linear-gradient(90deg, #22c55e, #4ade80)" : m.rate >= 60 ? "linear-gradient(90deg, #f59e0b, #fbbf24)" : "linear-gradient(90deg, #ef4444, #f87171)";
+                  return (
+                    <div key={m.period} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 11, color: "#475569", fontWeight: 600, width: 52, textAlign: "right", flexShrink: 0 }}>{m.period}</span>
+                      <div style={{ flex: 1, height: 22, borderRadius: 99, position: "relative", ...NEU_IN, overflow: "hidden" }}>
+                        <div style={{
+                          height: "100%", borderRadius: 99, background: barColor,
+                          width: `${m.rate}%`, transition: "width 0.5s ease",
+                          boxShadow: "2px 2px 4px rgba(0,0,0,0.1)",
+                        }} />
+                        <span style={{
+                          position: "absolute", inset: 0, display: "flex", alignItems: "center",
+                          paddingLeft: 10, fontSize: 11, fontWeight: 800, color: "#fff",
+                          textShadow: "0 1px 2px rgba(0,0,0,0.3)",
+                        }}>{m.rate}%</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
-            <div className="rounded-lg border border-gray-800 bg-gray-900/60 px-4 py-3">
-              <div className="flex gap-4 text-xs text-gray-500">
-                <span className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-green-500" /> ≥ 80%</span>
-                <span className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-amber-500" /> 60–79%</span>
-                <span className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-red-500" /> &lt; 60%</span>
+            <div style={{ ...NEU_CARD, padding: 12 }}>
+              <div style={{ display: "flex", gap: 16, fontSize: 11, color: "#475569", fontWeight: 600 }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 12, height: 12, borderRadius: 3, background: "#22c55e" }} /> ≥ 80%</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 12, height: 12, borderRadius: 3, background: "#f59e0b" }} /> 60–79%</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 12, height: 12, borderRadius: 3, background: "#ef4444" }} /> &lt; 60%</span>
               </div>
             </div>
           </div>
