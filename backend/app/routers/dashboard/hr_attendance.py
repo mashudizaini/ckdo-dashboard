@@ -359,29 +359,50 @@ async def get_today_attendance(
 
 # ── Monthly attendance rate ────────────────────────────────────────────────────
 
+@router.get("/departments")
+async def get_attendance_departments(
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    result = await db.execute(
+        select(AttendanceRecord.department)
+        .where(AttendanceRecord.department.isnot(None))
+        .distinct()
+        .order_by(AttendanceRecord.department)
+    )
+    return [r[0] for r in result.all() if r[0]]
+
+
 @router.get("/monthly-rate")
 async def get_monthly_attendance_rate(
+    department: Optional[str] = Query(None),
+    year: Optional[int] = Query(None),
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Attendance rate per bulan (12 bulan terakhir)."""
+    """Attendance rate per bulan."""
     from sqlalchemy import extract
 
+    q = select(
+        extract("year",  AttendanceRecord.attendance_date).label("year"),
+        extract("month", AttendanceRecord.attendance_date).label("month"),
+        func.sum(case(
+            (AttendanceRecord.week_day.notin_(WEEKENDS), 1), else_=0
+        )).label("working"),
+        func.sum(case(
+            (and_(
+                AttendanceRecord.actual_checkin.isnot(None),
+                AttendanceRecord.week_day.notin_(WEEKENDS),
+            ), 1), else_=0
+        )).label("hadir"),
+    )
+    if department:
+        q = q.where(AttendanceRecord.department == department)
+    if year:
+        q = q.where(extract("year", AttendanceRecord.attendance_date) == year)
+
     result = await db.execute(
-        select(
-            extract("year",  AttendanceRecord.attendance_date).label("year"),
-            extract("month", AttendanceRecord.attendance_date).label("month"),
-            func.sum(case(
-                (AttendanceRecord.week_day.notin_(WEEKENDS), 1), else_=0
-            )).label("working"),
-            func.sum(case(
-                (and_(
-                    AttendanceRecord.actual_checkin.isnot(None),
-                    AttendanceRecord.week_day.notin_(WEEKENDS),
-                ), 1), else_=0
-            )).label("hadir"),
-        )
-        .group_by(
+        q.group_by(
             extract("year",  AttendanceRecord.attendance_date),
             extract("month", AttendanceRecord.attendance_date),
         )
@@ -418,20 +439,32 @@ async def get_monthly_attendance_rate(
 
 @router.get("/dept-summary")
 async def get_dept_summary(
+    department: Optional[str] = Query(None),
+    month: Optional[int] = Query(None),
+    year: Optional[int] = Query(None),
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Attendance Plan vs Actual per department (seluruh data yang tersedia)."""
+    """Attendance Plan vs Actual per department."""
+    from sqlalchemy import extract
+
+    q = select(
+        AttendanceRecord.department,
+        func.sum(case((AttendanceRecord.week_day.notin_(WEEKENDS), 1), else_=0)).label("plan"),
+        func.sum(case((and_(
+            AttendanceRecord.actual_checkin.isnot(None),
+            AttendanceRecord.week_day.notin_(WEEKENDS),
+        ), 1), else_=0)).label("actual"),
+    )
+    if department:
+        q = q.where(AttendanceRecord.department == department)
+    if month:
+        q = q.where(extract("month", AttendanceRecord.attendance_date) == month)
+    if year:
+        q = q.where(extract("year", AttendanceRecord.attendance_date) == year)
+
     result = await db.execute(
-        select(
-            AttendanceRecord.department,
-            func.sum(case((AttendanceRecord.week_day.notin_(WEEKENDS), 1), else_=0)).label("plan"),
-            func.sum(case((and_(
-                AttendanceRecord.actual_checkin.isnot(None),
-                AttendanceRecord.week_day.notin_(WEEKENDS),
-            ), 1), else_=0)).label("actual"),
-        )
-        .group_by(AttendanceRecord.department)
+        q.group_by(AttendanceRecord.department)
         .order_by(AttendanceRecord.department)
     )
     rows = result.fetchall()

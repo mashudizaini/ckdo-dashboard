@@ -48,7 +48,6 @@ export default function HRDashboard() {
 
   const kpiCards = [
     { id: "employees",  icon: Users,         color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Employee Data" },
-    { id: "present",    icon: UserCheck,     color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Present Today" },
     { id: "leave",      icon: Umbrella,      color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Leave" },
     { id: "attendance", icon: BarChart2,     color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40", label: "Attendance Rate" },
     { id: "budget",     icon: Wallet,        color: "text-orange-400", bg: "bg-orange-500/10", activeBorder: "border-orange-500/40", label: "Budget Monitoring" },
@@ -57,7 +56,7 @@ export default function HRDashboard() {
   return (
     <div className="p-6 space-y-4">
       {/* Tab Buttons — 5 tabs */}
-      <div className="grid grid-cols-2 xl:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
         {kpiCards.map((c) => (
           <button
             key={c.id}
@@ -87,12 +86,6 @@ export default function HRDashboard() {
           />
           {empSub === "list" && <EmployeeTable />}
           {empSub === "upload" && <EmployeeUpload />}
-        </SectionCard>
-      )}
-
-      {activeSection === "present" && (
-        <SectionCard title="Attendance Today">
-          <AttendanceTodaySection />
         </SectionCard>
       )}
 
@@ -1024,31 +1017,48 @@ function AttendanceRateSection() {
   const headers    = { Authorization: `Bearer ${token}` };
   const ATT_API    = "/api/v1/dashboard/hr/attendance";
 
+  const curYear = new Date().getFullYear();
+  const curMonth = new Date().getMonth() + 1;
+
   const [activeTab, setActiveTab] = useState("summary");
   const [deptData,  setDeptData]  = useState([]);
   const [whosOff,   setWhosOff]   = useState({ date: null, data: [] });
   const [workforce, setWorkforce] = useState({ by_gender: [], by_location: [] });
   const [monthly,   setMonthly]   = useState([]);
   const [loading,   setLoading]   = useState(false);
+  const [departments, setDepartments] = useState([]);
+  const [fDept,  setFDept]  = useState("");
+  const [fMonth, setFMonth] = useState("");
+  const [fYear,  setFYear]  = useState(curYear);
+
+  useEffect(() => {
+    fetch(`${ATT_API}/departments`, { headers }).then(r => r.ok ? r.json() : []).then(setDepartments).catch(() => {});
+  }, []); // eslint-disable-line
 
   const loadSummary = useCallback(async () => {
     setLoading(true);
     try {
+      const p = new URLSearchParams();
+      if (fDept)  p.set("department", fDept);
+      if (fMonth) p.set("month", fMonth);
+      if (fYear)  p.set("year", fYear);
+      const qs = p.toString() ? `?${p}` : "";
+
       const [d, w, ws, m] = await Promise.all([
-        fetch(`${ATT_API}/dept-summary`,    { headers }).then((r) => r.ok ? r.json() : []),
-        fetch(`${ATT_API}/whos-off`,        { headers }).then((r) => r.ok ? r.json() : { date: null, data: [] }),
-        fetch(`${ATT_API}/workforce-stats`, { headers }).then((r) => r.ok ? r.json() : { by_gender: [], by_location: [] }),
-        fetch(`${ATT_API}/monthly-rate`,    { headers }).then((r) => r.ok ? r.json() : []),
+        fetch(`${ATT_API}/dept-summary${qs}`,    { headers }).then((r) => r.ok ? r.json() : []),
+        fetch(`${ATT_API}/whos-off`,             { headers }).then((r) => r.ok ? r.json() : { date: null, data: [] }),
+        fetch(`${ATT_API}/workforce-stats`,      { headers }).then((r) => r.ok ? r.json() : { by_gender: [], by_location: [] }),
+        fetch(`${ATT_API}/monthly-rate?${new URLSearchParams({ ...(fDept ? {department: fDept} : {}), ...(fYear ? {year: fYear} : {}) })}`, { headers }).then((r) => r.ok ? r.json() : []),
       ]);
       setDeptData(d); setWhosOff(w); setWorkforce(ws); setMonthly(m);
     } catch (_) {}
     finally { setLoading(false); }
-  }, []); // eslint-disable-line
+  }, [fDept, fMonth, fYear]); // eslint-disable-line
 
   useEffect(() => { loadSummary(); }, [loadSummary]);
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 size={22} className="animate-spin text-gray-600" /></div>;
-  if (!deptData.length) return <p className="py-10 text-center text-xs text-gray-600">No attendance data yet. Upload Excel in Attendance Upload tab.</p>;
+  if (loading && !deptData.length) return <div className="flex justify-center py-20"><Loader2 size={22} className="animate-spin" style={{ color: "#94a3b8" }} /></div>;
+  if (!loading && !deptData.length && !monthly.length) return <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No attendance data yet. Upload Excel in the Upload tab.</p>;
 
   return (
     <div className="space-y-4">
@@ -1063,7 +1073,7 @@ function AttendanceRateSection() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        {[["summary", "Summary"], ["detail", "Detail"], ["upload", "Upload"]].map(([id, label]) => (
+        {[["summary", "Summary"], ["today", "Attendance Today"], ["detail", "Detail"], ["calendar", "Working Calendar"], ["upload", "Upload"]].map(([id, label]) => (
           <button key={id} onClick={() => setActiveTab(id)}
             style={{
               padding: "8px 20px", borderRadius: 10, border: "none", fontSize: 12, fontWeight: 700,
@@ -1086,6 +1096,46 @@ function AttendanceRateSection() {
           <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
         </button>
       </div>
+
+      {/* Filters */}
+      {activeTab === "summary" && (
+        <div style={{
+          display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap",
+          padding: "12px 16px", borderRadius: 14,
+          background: "#e8edf5", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff",
+        }}>
+          <div>
+            <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Department</label>
+            <select value={fDept} onChange={e => setFDept(e.target.value)}
+              style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", cursor: "pointer", outline: "none" }}>
+              <option value="">All Departments</option>
+              {departments.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Month</label>
+            <select value={fMonth} onChange={e => setFMonth(e.target.value)}
+              style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", cursor: "pointer", outline: "none" }}>
+              <option value="">All Months</option>
+              {MONTHS_ID.map((m, i) => <option key={i+1} value={i+1}>{m}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Year</label>
+            <select value={fYear} onChange={e => setFYear(e.target.value)}
+              style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", cursor: "pointer", outline: "none" }}>
+              {[curYear, curYear - 1, curYear - 2].map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          {(fDept || fMonth) && (
+            <button onClick={() => { setFDept(""); setFMonth(""); setFYear(curYear); }}
+              style={{ fontSize: 11, fontWeight: 700, padding: "6px 14px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#dc2626", cursor: "pointer", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff" }}>
+              Reset
+            </button>
+          )}
+          {loading && <Loader2 size={14} className="animate-spin" style={{ color: "#2563eb" }} />}
+        </div>
+      )}
 
       {/* ── Summary ── */}
       {activeTab === "summary" && (
@@ -1139,11 +1189,19 @@ function AttendanceRateSection() {
       )}
 
       {/* ── Detail ── */}
+      {activeTab === "today" && (
+        <AttendanceTodaySection />
+      )}
+
       {activeTab === "detail" && (
         <EmployeeDetailPanel headers={headers} apiBase={ATT_API} />
       )}
 
       {/* ── Upload ── */}
+      {activeTab === "calendar" && (
+        <WorkingCalendarPanel />
+      )}
+
       {activeTab === "upload" && (
         <AttendanceUpload />
       )}
@@ -1157,6 +1215,259 @@ function AttendanceRateSection() {
 //   - "Import Realisasi"  → Oracle modul AP Invoice → /upload/actual
 //
 // Kalkulasi:  Remain = Available + Reclass − Total Actual
+
+const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const WDAY_LABELS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const HTYPE_CFG = {
+  national:   { label: "National Holiday",  color: "#dc2626", bg: "#fee2e2" },
+  collective: { label: "Collective Leave",   color: "#16a34a", bg: "#dcfce7" },
+  company:    { label: "Company Holiday",    color: "#2563eb", bg: "#dbeafe" },
+};
+
+function WorkingCalendarPanel() {
+  const curYear = new Date().getFullYear();
+  const [year, setYear] = useState(curYear);
+  const [holidays, setHolidays] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState({ holiday_date: "", name: "", holiday_type: "national" });
+  const [adding, setAdding] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [h, s] = await Promise.all([
+        hrApi.getCalendarHolidays(year),
+        hrApi.getCalendarSummary(year),
+      ]);
+      setHolidays(h); setSummary(s);
+    } catch (_) {}
+    finally { setLoading(false); }
+  }, [year]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleAdd = async () => {
+    if (!form.holiday_date || !form.name) return;
+    setAdding(true);
+    try {
+      await hrApi.addCalendarHoliday(form);
+      setForm({ holiday_date: "", name: "", holiday_type: "national" });
+      load();
+    } catch (_) {}
+    finally { setAdding(false); }
+  };
+
+  const handleDelete = async (id) => {
+    try { await hrApi.deleteCalendarHoliday(id); load(); } catch (_) {}
+  };
+
+  const holidayMap = {};
+  holidays.forEach(h => { holidayMap[h.holiday_date] = h; });
+
+  const buildMonth = (m) => {
+    const first = new Date(year, m, 1);
+    const daysInMonth = new Date(year, m + 1, 0).getDate();
+    let startDay = first.getDay();
+    startDay = startDay === 0 ? 6 : startDay - 1;
+    const cells = [];
+    for (let i = 0; i < startDay; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+    return cells;
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 800, color: "#1e293b", margin: 0 }}>
+            PT CKD OTTO PHARMACEUTICALS
+          </h3>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#64748b" }}>Year {year} Working Calendar</span>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <select value={year} onChange={e => setYear(Number(e.target.value))}
+            style={{ fontSize: 12, fontWeight: 600, padding: "6px 12px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", cursor: "pointer", outline: "none" }}>
+            {[curYear - 1, curYear, curYear + 1].map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <button onClick={() => setShowForm(!showForm)}
+            style={{ fontSize: 12, fontWeight: 700, padding: "6px 14px", borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff" }}>
+            + Add Holiday
+          </button>
+        </div>
+      </div>
+
+      {/* Add form */}
+      {showForm && (
+        <div style={{
+          display: "flex", gap: 8, alignItems: "flex-end", padding: "12px 16px", borderRadius: 14,
+          background: "#e8edf5", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff",
+        }}>
+          <div>
+            <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>DATE</label>
+            <input type="date" value={form.holiday_date} onChange={e => setForm(p => ({ ...p, holiday_date: e.target.value }))}
+              style={{ fontSize: 12, padding: "6px 10px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", outline: "none" }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>HOLIDAY NAME</label>
+            <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Hari Raya Idul Fitri"
+              style={{ width: "100%", fontSize: 12, padding: "6px 10px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", outline: "none", boxSizing: "border-box" }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>TYPE</label>
+            <select value={form.holiday_type} onChange={e => setForm(p => ({ ...p, holiday_type: e.target.value }))}
+              style={{ fontSize: 12, padding: "6px 10px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", cursor: "pointer", outline: "none" }}>
+              {Object.entries(HTYPE_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </div>
+          <button onClick={handleAdd} disabled={adding || !form.holiday_date || !form.name}
+            style={{ fontSize: 12, fontWeight: 700, padding: "6px 16px", borderRadius: 8, border: "none", background: "#059669", color: "#fff", cursor: "pointer", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", opacity: adding ? 0.5 : 1 }}>
+            {adding ? "..." : "Save"}
+          </button>
+        </div>
+      )}
+
+      {/* Legend */}
+      <div style={{ display: "flex", gap: 16, fontSize: 11, fontWeight: 600 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 14, height: 14, borderRadius: 3, background: "#e2e8f0" }} /> Weekend</span>
+        {Object.entries(HTYPE_CFG).map(([k, v]) => (
+          <span key={k} style={{ display: "flex", alignItems: "center", gap: 5, color: "#475569" }}>
+            <div style={{ width: 14, height: 14, borderRadius: 3, background: v.bg, border: `2px solid ${v.color}` }} /> {v.label}
+          </span>
+        ))}
+      </div>
+
+      {/* 12-month grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+        {Array.from({ length: 12 }, (_, m) => {
+          const cells = buildMonth(m);
+          return (
+            <div key={m} style={{ ...NEU_CARD, padding: 10 }}>
+              <h4 style={{ fontSize: 12, fontWeight: 800, color: "#1e293b", textAlign: "center", marginBottom: 6, textTransform: "uppercase" }}>
+                {MONTH_NAMES[m]}
+              </h4>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 1, textAlign: "center" }}>
+                {WDAY_LABELS.map(w => (
+                  <div key={w} style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", padding: "2px 0" }}>{w}</div>
+                ))}
+                {cells.map((day, i) => {
+                  if (day === null) return <div key={`e${i}`} />;
+                  const dt = `${year}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                  const dow = new Date(year, m, day).getDay();
+                  const isWeekend = dow === 0 || dow === 6;
+                  const hol = holidayMap[dt];
+
+                  let bg = "#fff";
+                  let color = "#1e293b";
+                  let border = "1px solid transparent";
+                  let title = "";
+
+                  if (hol) {
+                    const cfg = HTYPE_CFG[hol.holiday_type];
+                    bg = cfg?.bg || "#fee2e2";
+                    color = cfg?.color || "#dc2626";
+                    border = `1.5px solid ${cfg?.color || "#dc2626"}`;
+                    title = `${hol.name} (${cfg?.label})`;
+                  } else if (isWeekend) {
+                    bg = "#e2e8f0";
+                    color = "#94a3b8";
+                  }
+
+                  return (
+                    <div key={day} title={title || `${dt}`}
+                      style={{
+                        fontSize: 10, fontWeight: hol ? 800 : 600, color, background: bg, border,
+                        borderRadius: 4, padding: "3px 0", cursor: hol ? "pointer" : "default",
+                        position: "relative",
+                      }}
+                      onClick={() => hol && handleDelete(hol.id)}
+                    >
+                      {day}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Summary table */}
+      {summary && (
+        <div style={{ ...NEU_CARD }}>
+          <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 10 }}>Summary — {year}</h4>
+          <div style={{ borderRadius: 12, overflow: "hidden", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
+                  {["Month", "Calendar Days", "Weekends", "National Holidays", "Collective Leave", "Company Holiday", "Working Days"].map(h => (
+                    <th key={h} style={{ padding: "10px 10px", fontSize: 10, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: h === "Month" ? "left" : "center", borderBottom: "2px solid rgba(0,0,0,0.06)" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {summary.months.map((m, i) => (
+                  <tr key={m.month} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                    <td style={{ padding: "8px 10px", fontSize: 12, fontWeight: 700, color: "#1e293b" }}>{MONTH_NAMES[m.month - 1]}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 12, fontWeight: 500, color: "#475569", textAlign: "center" }}>{m.calendar_days}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 12, fontWeight: 500, color: "#475569", textAlign: "center" }}>{m.weekends}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 12, fontWeight: 700, color: m.national > 0 ? "#dc2626" : "#94a3b8", textAlign: "center" }}>{m.national}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 12, fontWeight: 700, color: m.collective > 0 ? "#16a34a" : "#94a3b8", textAlign: "center" }}>{m.collective}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 12, fontWeight: 700, color: m.company > 0 ? "#2563eb" : "#94a3b8", textAlign: "center" }}>{m.company}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 13, fontWeight: 800, color: "#1e293b", textAlign: "center" }}>{m.working_days}</td>
+                  </tr>
+                ))}
+                <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
+                  <td style={{ padding: "10px 10px", fontSize: 12, fontWeight: 800, color: "#1e293b" }}>TOTAL</td>
+                  <td style={{ padding: "10px 10px", fontSize: 13, fontWeight: 800, color: "#1e293b", textAlign: "center" }}>{summary.totals.calendar_days}</td>
+                  <td style={{ padding: "10px 10px", fontSize: 13, fontWeight: 800, color: "#475569", textAlign: "center" }}>{summary.totals.weekends}</td>
+                  <td style={{ padding: "10px 10px", fontSize: 13, fontWeight: 800, color: "#dc2626", textAlign: "center" }}>{summary.totals.national}</td>
+                  <td style={{ padding: "10px 10px", fontSize: 13, fontWeight: 800, color: "#16a34a", textAlign: "center" }}>{summary.totals.collective}</td>
+                  <td style={{ padding: "10px 10px", fontSize: 13, fontWeight: 800, color: "#2563eb", textAlign: "center" }}>{summary.totals.company}</td>
+                  <td style={{ padding: "10px 10px", fontSize: 14, fontWeight: 800, color: "#1e293b", textAlign: "center" }}>{summary.totals.working_days}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Holiday list */}
+      {holidays.length > 0 && (
+        <div style={{ ...NEU_CARD }}>
+          <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 10 }}>Holiday List — {year} ({holidays.length})</h4>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {holidays.map(h => {
+              const cfg = HTYPE_CFG[h.holiday_type];
+              return (
+                <div key={h.id} style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "6px 12px", borderRadius: 8,
+                  background: cfg?.bg || "#f1f5f9",
+                  border: `1px solid ${cfg?.color || "#cbd5e1"}20`,
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#475569", minWidth: 80 }}>{h.holiday_date}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>{h.name}</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: cfg?.color || "#64748b", padding: "1px 8px", borderRadius: 10, background: "#fff" }}>
+                      {cfg?.label || h.holiday_type}
+                    </span>
+                  </div>
+                  <button onClick={() => handleDelete(h.id)}
+                    style={{ fontSize: 11, fontWeight: 600, color: "#dc2626", background: "none", border: "none", cursor: "pointer", padding: "2px 6px" }}>
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function BudgetMonitoringSection() {
   const { token } = useAuthStore();

@@ -5,7 +5,7 @@ Required role: hr_staff OR admin
 """
 from fastapi import APIRouter, Depends
 from app.dependencies import require_role, CurrentUser, Roles
-from app.routers.dashboard import hr_employees, hr_attendance, hr_budget, hr_leave
+from app.routers.dashboard import hr_employees, hr_attendance, hr_budget, hr_leave, hr_calendar
 
 router = APIRouter()
 
@@ -24,6 +24,9 @@ router.include_router(hr_attendance.router, prefix="/attendance", tags=["Dashboa
 
 # Sub-router: leave upload & query
 router.include_router(hr_leave.router,      prefix="/leave",      tags=["Dashboard - HR Leave"])
+
+# Sub-router: working calendar
+router.include_router(hr_calendar.router,   prefix="/calendar",   tags=["Dashboard - HR Calendar"])
 
 # Sub-router: budget monitoring
 router.include_router(hr_budget.router,     prefix="/budget",     tags=["Dashboard - HR Budget"])

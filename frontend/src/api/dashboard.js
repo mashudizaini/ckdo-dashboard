@@ -36,6 +36,10 @@ export const hrApi = {
   getLeaveData:    (p)    => api.get("/dashboard/hr/leave/data", { params: p }),
   getLeaveSummary: (p)    => api.get("/dashboard/hr/leave/summary", { params: p }),
   getLeaveOrgs:    ()     => api.get("/dashboard/hr/leave/organizations"),
+  getCalendarHolidays: (y) => api.get("/dashboard/hr/calendar/holidays", { params: { year: y } }),
+  addCalendarHoliday:  (d) => api.post("/dashboard/hr/calendar/holidays", d),
+  deleteCalendarHoliday: (id) => api.delete(`/dashboard/hr/calendar/holidays/${id}`),
+  getCalendarSummary:  (y) => api.get("/dashboard/hr/calendar/summary", { params: { year: y } }),
 };
 
 export const pacApi = {
