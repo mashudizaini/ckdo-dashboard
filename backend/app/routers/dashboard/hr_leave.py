@@ -1,24 +1,24 @@
 """
 HR Leave Router
 Route prefix: /api/v1/dashboard/hr/leave
-Upload Talenta attendance Excel → extract leave records → PostgreSQL.
 
-Source: Attendance Talenta Excel
-  Col A: Employee ID
-  Col B: Full Name
-  Col D: Organization
-  Col E: Job Position
-  Col F: Date
-  Col M: Time Off Code (SL, AL, EM, UL, ML, BT, ALAB, ULBB, etc.)
+Source: AttendanceLeave Excel (revised format)
+  Col 0: Employee ID
+  Col 1: Full Name
+  Col 2: Date
+  Col 3: Shift
+  Col 4: Schedule Check In
+  Col 5: Schedule Check Out
+  Col 6: Attendance Code
+  Col 7: Time Off Code
 """
 import io
-import traceback
 from datetime import datetime, date
 from typing import Optional
 
 import openpyxl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
-from sqlalchemy import select, func, and_, text, delete
+from sqlalchemy import select, func, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -40,10 +40,10 @@ LEAVE_CODE_MAP = {
 
 COL_EMP_ID   = 0
 COL_NAME     = 1
-COL_ORG      = 3
-COL_POSITION = 4
-COL_DATE     = 5
-COL_TIMEOFF  = 12
+COL_DATE     = 2
+COL_SHIFT    = 3
+COL_ATT_CODE = 6
+COL_TIMEOFF  = 7
 
 
 def _to_str(val) -> Optional[str]:
@@ -88,7 +88,7 @@ async def upload_leave(
 
     records = []
     for row in ws.iter_rows(min_row=2, values_only=True):
-        if not row or len(row) < 13:
+        if not row or len(row) < 8:
             continue
         timeoff_code = _to_str(row[COL_TIMEOFF])
         if not timeoff_code:
@@ -100,8 +100,8 @@ async def upload_leave(
         records.append({
             "employee_id": emp_id,
             "employee_name": _to_str(row[COL_NAME]),
-            "organization": _to_str(row[COL_ORG]),
-            "job_position": _to_str(row[COL_POSITION]),
+            "organization": _to_str(row[COL_SHIFT]) if len(row) > COL_SHIFT else None,
+            "job_position": None,
             "leave_date": leave_dt,
             "leave_code": timeoff_code,
             "leave_type": LEAVE_CODE_MAP.get(timeoff_code, timeoff_code),
