@@ -15,62 +15,78 @@ const BUDGET_API = "/api/v1/dashboard/hr/budget";
 
 const MONTHS_ID = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
 
+const NEU_TAB = {
+  bg: "#e8edf5",
+  out: "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff",
+  inset: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff",
+};
+
+function SubTabs({ tabs, active, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+      {tabs.map(t => (
+        <button key={t.id} onClick={() => onChange(t.id)}
+          style={{
+            padding: "7px 16px", borderRadius: 10, border: "none", fontSize: 12, fontWeight: 700,
+            background: NEU_TAB.bg, cursor: "pointer",
+            color: active === t.id ? "#2563eb" : "#64748b",
+            boxShadow: active === t.id ? NEU_TAB.inset : NEU_TAB.out,
+            transition: "all 0.2s ease",
+          }}>
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function HRDashboard() {
   const [activeSection, setActiveSection] = useState("employees");
+  const [empSub, setEmpSub] = useState("list");
+  const [attSub, setAttSub] = useState("summary");
+  const [leaveSub, setLeaveSub] = useState("data");
 
   const kpiCards = [
     { id: "employees",  icon: Users,         color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Employee Data" },
     { id: "present",    icon: UserCheck,     color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Present Today" },
     { id: "leave",      icon: Umbrella,      color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Leave" },
     { id: "attendance", icon: BarChart2,     color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40", label: "Attendance Rate" },
-    { id: "upload",     icon: Upload,        color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Employee Upload" },
-    { id: "upload-att", icon: CalendarCheck, color: "text-teal-400",   bg: "bg-teal-500/10",   activeBorder: "border-teal-500/40",   label: "Attendance Upload" },
-    { id: "upload-lv",  icon: Umbrella,      color: "text-pink-400",   bg: "bg-pink-500/10",   activeBorder: "border-pink-500/40",   label: "Leave Upload" },
     { id: "budget",     icon: Wallet,        color: "text-orange-400", bg: "bg-orange-500/10", activeBorder: "border-orange-500/40", label: "Budget Monitoring" },
   ];
 
   return (
     <div className="p-6 space-y-4">
-      {/* Tab Buttons */}
-      <div className="grid grid-cols-2 xl:grid-cols-8 gap-2">
+      {/* Tab Buttons — 5 tabs */}
+      <div className="grid grid-cols-2 xl:grid-cols-5 gap-2">
         {kpiCards.map((c) => (
           <button
             key={c.id}
             onClick={() => setActiveSection(activeSection === c.id ? null : c.id)}
-            className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 transition-all ${
+            className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 transition-all ${
               activeSection === c.id
                 ? `${c.bg} ${c.activeBorder} ring-1 ring-inset ${c.activeBorder}`
                 : "bg-gray-900 border-gray-800 hover:border-gray-700 hover:bg-gray-800/60"
             }`}
           >
-            <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${c.bg} border ${c.activeBorder}`}>
-              <c.icon size={12} className={c.color} />
+            <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${c.bg} border ${c.activeBorder}`}>
+              <c.icon size={14} className={c.color} />
             </div>
-            <span className={`text-xs font-medium leading-tight ${activeSection === c.id ? "text-white" : "text-gray-400"}`}>
+            <span className={`text-sm font-semibold leading-tight ${activeSection === c.id ? "text-white" : "text-gray-400"}`}>
               {c.label}
             </span>
           </button>
         ))}
       </div>
 
-      {/* ── Data Karyawan (tabel + search) ─────────────────────────────────── */}
+      {/* ── Employee Data (list + upload) ── */}
       {activeSection === "employees" && (
-        <SectionCard title="List Of Employee">
-          <EmployeeTable />
-        </SectionCard>
-      )}
-
-      {/* ── Upload Karyawan ──────────────────────────────────────────────────── */}
-      {activeSection === "upload" && (
-        <SectionCard title="Upload Employee Excel File">
-          <EmployeeUpload />
-        </SectionCard>
-      )}
-
-      {/* ── Upload Absensi ───────────────────────────────────────────────────── */}
-      {activeSection === "upload-att" && (
-        <SectionCard title="Upload Attendance Excel File">
-          <AttendanceUpload />
+        <SectionCard title="Employee Data">
+          <SubTabs
+            tabs={[{ id: "list", label: "Employee List" }, { id: "upload", label: "Upload Excel" }]}
+            active={empSub} onChange={setEmpSub}
+          />
+          {empSub === "list" && <EmployeeTable />}
+          {empSub === "upload" && <EmployeeUpload />}
         </SectionCard>
       )}
 
@@ -80,20 +96,21 @@ export default function HRDashboard() {
         </SectionCard>
       )}
 
+      {/* ── Leave (data + upload) ── */}
       {activeSection === "leave" && (
         <SectionCard title="Employee Leave">
-          <LeaveDataSection />
+          <SubTabs
+            tabs={[{ id: "data", label: "Leave Data" }, { id: "upload", label: "Upload Leave" }]}
+            active={leaveSub} onChange={setLeaveSub}
+          />
+          {leaveSub === "data" && <LeaveDataSection />}
+          {leaveSub === "upload" && <LeaveUpload />}
         </SectionCard>
       )}
 
-      {activeSection === "upload-lv" && (
-        <SectionCard title="Upload Leave Data (Talenta Excel)">
-          <LeaveUpload />
-        </SectionCard>
-      )}
-
+      {/* ── Attendance Rate (summary/detail + upload) ── */}
       {activeSection === "attendance" && (
-        <SectionCard title="Attendance Rate — Monthly">
+        <SectionCard title="Attendance Rate">
           <AttendanceRateSection />
         </SectionCard>
       )}
@@ -784,34 +801,34 @@ function StatBreakdown({ title, data }) {
 function MiniBarChart({ data }) {
   if (!data?.length) return null;
   const maxVal = Math.max(...data.map((d) => d.plan), 1);
-  const H = 130;
+  const H = 140;
   return (
-    <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-4">
-      <div className="flex items-center gap-3 mb-3">
-        <h4 className="text-xs font-semibold text-gray-400">Monthly Attendance</h4>
-        <div className="flex gap-2 text-xs text-gray-600">
-          <span className="flex items-center gap-1"><div className="w-2 h-2 bg-blue-500 rounded" />Plan</span>
-          <span className="flex items-center gap-1"><div className="w-2 h-2 bg-orange-500 rounded" />Actual</span>
+    <div style={NEU_CARD}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+        <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>Monthly Attendance</h4>
+        <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#64748b", fontWeight: 600 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: "#3b82f6" }} />Plan</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: "#f97316" }} />Actual</span>
         </div>
       </div>
-      <div className="flex items-end gap-2" style={{ height: H }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: H }}>
         {data.map((m) => {
-          const planH   = Math.max(Math.round((m.plan   / maxVal) * (H - 35)), 2);
-          const actualH = Math.max(Math.round((m.actual / maxVal) * (H - 35)), m.actual > 0 ? 2 : 0);
+          const planH   = Math.max(Math.round((m.plan / maxVal) * (H - 40)), 4);
+          const actualH = Math.max(Math.round((m.actual / maxVal) * (H - 40)), m.actual > 0 ? 4 : 0);
           return (
-            <div key={m.period} className="flex-1 flex flex-col items-center">
-              <div className="w-full flex items-end justify-center gap-0.5" style={{ height: H - 35 }}>
-                <div className="flex flex-col items-center" style={{ width: "42%" }}>
-                  <span className="text-xs text-gray-500">{m.plan}</span>
-                  <div className="w-full bg-blue-500 rounded-t" style={{ height: planH }} />
+            <div key={m.period} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <div style={{ width: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 2, height: H - 40 }}>
+                <div style={{ width: "40%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  <span style={{ fontSize: 10, color: "#475569", fontWeight: 700 }}>{m.plan}</span>
+                  <div style={{ width: "100%", height: planH, background: "linear-gradient(180deg, #60a5fa, #3b82f6)", borderRadius: "5px 5px 0 0", boxShadow: "2px 2px 4px #c5cad8" }} />
                 </div>
-                <div className="flex flex-col items-center" style={{ width: "42%" }}>
-                  <span className="text-xs text-orange-400">{m.actual}</span>
-                  <div className="w-full bg-orange-500 rounded-t" style={{ height: actualH }} />
+                <div style={{ width: "40%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  <span style={{ fontSize: 10, color: "#ea580c", fontWeight: 700 }}>{m.actual}</span>
+                  <div style={{ width: "100%", height: actualH, background: "linear-gradient(180deg, #fb923c, #f97316)", borderRadius: "5px 5px 0 0", boxShadow: "2px 2px 4px #c5cad8" }} />
                 </div>
               </div>
-              <p className="text-xs text-gray-600 mt-0.5">{m.period}</p>
-              <p className="text-xs font-bold text-orange-400">{m.rate}%</p>
+              <p style={{ fontSize: 10, color: "#475569", fontWeight: 600, marginTop: 3 }}>{m.period}</p>
+              <p style={{ fontSize: 11, fontWeight: 800, color: "#ea580c" }}>{m.rate}%</p>
             </div>
           );
         })}
@@ -845,71 +862,90 @@ function EmployeeDetailPanel({ headers, apiBase }) {
 
   const fmtDate = (iso) => {
     if (!iso) return "—";
-    try { return new Date(iso + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }); }
+    try { return new Date(iso + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" }); }
     catch (_) { return iso; }
   };
 
   return (
-    <div className="grid grid-cols-2 gap-5">
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
       {/* Left: search + info + absence */}
-      <div className="space-y-3">
-        <div className="relative">
-          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ position: "relative" }}>
+          <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
           <input
             value={query}
             onChange={(e) => { setQuery(e.target.value); doSearch(e.target.value); }}
             placeholder="Type employee name..."
-            className="w-full rounded-lg border border-gray-700 bg-gray-900 pl-8 pr-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500"
+            style={{
+              width: "100%", paddingLeft: 32, paddingRight: 12, padding: "9px 12px 9px 32px",
+              borderRadius: 12, border: "none", fontSize: 13, fontWeight: 500,
+              color: "#1e293b", background: "#e8edf5",
+              boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff",
+              outline: "none", boxSizing: "border-box",
+            }}
           />
           {results.length > 0 && (
-            <div className="absolute top-full left-0 right-0 z-20 mt-1 rounded-lg border border-gray-700 bg-gray-800 shadow-xl max-h-52 overflow-y-auto">
+            <div style={{
+              position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20, marginTop: 4,
+              borderRadius: 12, background: "#fff", boxShadow: "6px 6px 14px #c5cad8, -6px -6px 14px #ffffff",
+              maxHeight: 200, overflowY: "auto",
+            }}>
               {results.map((r) => (
                 <button key={r.id} onClick={() => loadDetail(r)}
-                  className="w-full text-left px-3 py-2 hover:bg-gray-700 transition-colors border-b border-gray-700/40 last:border-0">
-                  <p className="text-sm text-gray-200">{r.name}</p>
-                  <p className="text-xs text-gray-500">{r.id} · {r.department}</p>
+                  style={{
+                    width: "100%", textAlign: "left", padding: "8px 12px", border: "none",
+                    background: "transparent", cursor: "pointer", borderBottom: "1px solid rgba(0,0,0,0.04)",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = "rgba(37,99,235,0.06)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                >
+                  <p style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>{r.name}</p>
+                  <p style={{ fontSize: 11, color: "#64748b" }}>{r.id} · {r.department}</p>
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        {loading && <div className="flex justify-center py-8"><Loader2 size={18} className="animate-spin text-gray-600" /></div>}
+        {loading && <div style={{ display: "flex", justifyContent: "center", padding: "32px 0" }}><Loader2 size={18} className="animate-spin" style={{ color: "#94a3b8" }} /></div>}
 
         {detail && !loading && (
           <>
-            <div className="grid grid-cols-2 gap-2">
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               {[
                 { label: "ID",         val: detail.employee.id },
                 { label: "Department", val: detail.employee.department },
                 { label: "Team",       val: detail.employee.team },
                 { label: "Location",   val: detail.employee.work_placement },
               ].map(({ label, val }) => (
-                <div key={label} className="rounded-lg bg-gray-800/60 border border-gray-700 px-3 py-2">
-                  <p className="text-xs text-gray-500">{label}</p>
-                  <p className="text-xs font-semibold text-gray-200 truncate">{val || "—"}</p>
+                <div key={label} style={{
+                  padding: "8px 12px", borderRadius: 12, background: "#e8edf5",
+                  boxShadow: "4px 4px 8px #c5cad8, -4px -4px 8px #ffffff",
+                }}>
+                  <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</p>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{val || "—"}</p>
                 </div>
               ))}
             </div>
 
             <div>
-              <h4 className="text-xs font-semibold text-gray-400 mb-1.5">Absence Records</h4>
-              <div className="overflow-auto max-h-52 rounded-lg border border-gray-800">
-                <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-gray-800">
-                    <tr>
+              <h4 style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", marginBottom: 8 }}>Absence Records</h4>
+              <div style={{ maxHeight: 200, overflowY: "auto", borderRadius: 12, boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)", position: "sticky", top: 0 }}>
                       {["Date", "Note"].map((h) => (
-                        <th key={h} className="px-2 py-2 text-left font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
+                        <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-800">
+                  <tbody>
                     {!detail.absences.length ? (
-                      <tr><td colSpan={2} className="px-2 py-4 text-center text-gray-600">No absence records</td></tr>
+                      <tr><td colSpan={2} style={{ padding: "16px 12px", textAlign: "center", color: "#94a3b8", fontSize: 12 }}>No absence records</td></tr>
                     ) : detail.absences.map((a, i) => (
-                      <tr key={i} className="hover:bg-gray-800/40">
-                        <td className="px-2 py-2 text-gray-400 whitespace-nowrap">{fmtDate(a.date)}</td>
-                        <td className="px-2 py-2 text-gray-500">{a.reason}</td>
+                      <tr key={i} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                        <td style={{ padding: "6px 12px", fontSize: 12, color: "#475569", fontWeight: 500, whiteSpace: "nowrap" }}>{fmtDate(a.date)}</td>
+                        <td style={{ padding: "6px 12px", fontSize: 12, color: "#64748b", fontWeight: 500 }}>{a.reason}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -920,7 +956,7 @@ function EmployeeDetailPanel({ headers, apiBase }) {
         )}
 
         {!detail && !loading && (
-          <p className="py-10 text-center text-xs text-gray-600">Type employee name to view attendance details</p>
+          <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>Type employee name to view attendance details</p>
         )}
       </div>
 
@@ -929,8 +965,12 @@ function EmployeeDetailPanel({ headers, apiBase }) {
         {detail?.monthly?.length > 0
           ? <MiniBarChart data={detail.monthly} />
           : (
-            <div className="flex items-center justify-center h-48 rounded-lg border border-gray-800 bg-gray-900/50">
-              <p className="text-xs text-gray-700">Monthly chart will appear after selecting an employee</p>
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "center", height: 200,
+              borderRadius: 16, background: "#e8edf5",
+              boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+            }}>
+              <p style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>Monthly chart will appear after selecting an employee</p>
             </div>
           )
         }
@@ -984,7 +1024,7 @@ function AttendanceRateSection() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        {[["summary", "Summary"], ["detail", "Detail"]].map(([id, label]) => (
+        {[["summary", "Summary"], ["detail", "Detail"], ["upload", "Upload"]].map(([id, label]) => (
           <button key={id} onClick={() => setActiveTab(id)}
             style={{
               padding: "8px 20px", borderRadius: 10, border: "none", fontSize: 12, fontWeight: 700,
@@ -1062,6 +1102,11 @@ function AttendanceRateSection() {
       {/* ── Detail ── */}
       {activeTab === "detail" && (
         <EmployeeDetailPanel headers={headers} apiBase={ATT_API} />
+      )}
+
+      {/* ── Upload ── */}
+      {activeTab === "upload" && (
+        <AttendanceUpload />
       )}
     </div>
   );
@@ -1492,26 +1537,73 @@ function LeaveDataSection() {
   };
 
   return (
-    <div className="space-y-4">
-      {/* Summary badges */}
-      {summary && (
-        <div className="flex flex-wrap gap-2">
-          <div className="px-3 py-1.5 rounded-lg bg-gray-800 text-xs font-semibold text-gray-300">
-            Total: {summary.total}
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Top: Chart + Summary side by side */}
+      {summary && summary.by_code?.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          {/* Donut-style bar chart */}
+          <div style={NEU_CARD}>
+            <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 14 }}>Leave Distribution</h4>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {summary.by_code.map(c => {
+                const cfg = LEAVE_CODES.find(l => l.code === c.code);
+                const pct = summary.total > 0 ? Math.round((c.count / summary.total) * 100) : 0;
+                return (
+                  <div key={c.code}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ fontWeight: 600, color: "#334155" }}>
+                        <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 3, background: cfg?.color || "#94a3b8", marginRight: 6, verticalAlign: "middle" }} />
+                        {c.code} — {cfg?.label || c.code}
+                      </span>
+                      <span style={{ fontWeight: 800, color: cfg?.color || "#64748b" }}>{c.count} <span style={{ fontWeight: 500, color: "#94a3b8" }}>({pct}%)</span></span>
+                    </div>
+                    <div style={{ height: 14, borderRadius: 99, ...NEU_IN, overflow: "hidden" }}>
+                      <div style={{
+                        height: "100%", borderRadius: 99,
+                        background: `linear-gradient(90deg, ${cfg?.color || "#94a3b8"}, ${cfg?.color || "#94a3b8"}aa)`,
+                        width: `${Math.max(pct, 2)}%`, transition: "width 0.5s ease",
+                        boxShadow: "1px 1px 3px rgba(0,0,0,0.1)",
+                      }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-          {summary.by_code?.map(c => {
-            const cfg = LEAVE_CODES.find(l => l.code === c.code);
-            return (
-              <div key={c.code} style={{
-                padding: "4px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
-                background: cfg ? `${cfg.color}18` : "#f1f5f9",
-                color: cfg?.color || "#64748b",
-                border: `1px solid ${cfg ? `${cfg.color}30` : "#e2e8f0"}`,
-              }}>
-                {c.code}: {c.count}
+
+          {/* Summary cards */}
+          <div style={NEU_CARD}>
+            <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 14 }}>Summary</h4>
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              padding: "16px 0", marginBottom: 14, borderRadius: 14,
+              background: "linear-gradient(135deg, #2563eb, #3b82f6)",
+              boxShadow: "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff",
+            }}>
+              <div style={{ textAlign: "center" }}>
+                <p style={{ fontSize: 32, fontWeight: 800, color: "#fff" }}>{summary.total}</p>
+                <p style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.8)" }}>Total Leave Days</p>
               </div>
-            );
-          })}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {summary.by_code.slice(0, 6).map(c => {
+                const cfg = LEAVE_CODES.find(l => l.code === c.code);
+                return (
+                  <div key={c.code} style={{
+                    padding: "10px 12px", borderRadius: 12,
+                    background: "#e8edf5", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff",
+                    display: "flex", alignItems: "center", gap: 8,
+                  }}>
+                    <div style={{ width: 8, height: 28, borderRadius: 4, background: cfg?.color || "#94a3b8" }} />
+                    <div>
+                      <p style={{ fontSize: 16, fontWeight: 800, color: "#1e293b" }}>{c.count}</p>
+                      <p style={{ fontSize: 10, fontWeight: 600, color: "#64748b" }}>{c.code}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
 
