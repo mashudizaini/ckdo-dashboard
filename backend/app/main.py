@@ -7,6 +7,7 @@ from app.config import get_settings
 from app.database import async_engine, Base, init_oracle_client
 import app.models.employee    # noqa: F401 — register models ke Base.metadata
 import app.models.attendance   # noqa: F401 — register models ke Base.metadata
+import app.models.leave        # noqa: F401
 
 # ── Dashboard Routers ──
 from app.routers.dashboard import it, hr, pac, accounting, purchasing, ap_invoice

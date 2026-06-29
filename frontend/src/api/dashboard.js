@@ -31,6 +31,11 @@ export const hrApi = {
   getSummary: () => api.get("/dashboard/hr/summary"),
   getEmployees: (params) => api.get("/dashboard/hr/employees", { params }),
   getAttendance: (params) => api.get("/dashboard/hr/attendance", { params }),
+  uploadLeave:     (form) => api.post("/dashboard/hr/leave/upload", form, { headers: { "Content-Type": "multipart/form-data" } }),
+  getLeaveHistory: ()     => api.get("/dashboard/hr/leave/history"),
+  getLeaveData:    (p)    => api.get("/dashboard/hr/leave/data", { params: p }),
+  getLeaveSummary: (p)    => api.get("/dashboard/hr/leave/summary", { params: p }),
+  getLeaveOrgs:    ()     => api.get("/dashboard/hr/leave/organizations"),
 };
 
 export const pacApi = {

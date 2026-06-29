@@ -6,7 +6,9 @@ import {
 } from "lucide-react";
 import EmployeeUpload from "./EmployeeUpload";
 import AttendanceUpload from "./AttendanceUpload";
+import LeaveUpload from "./LeaveUpload";
 import { useAuthStore } from "@/store/authStore";
+import { hrApi } from "@/api/dashboard";
 
 const API        = "/api/v1/dashboard/hr/employees";
 const BUDGET_API = "/api/v1/dashboard/hr/budget";
@@ -23,13 +25,14 @@ export default function HRDashboard() {
     { id: "attendance", icon: BarChart2,     color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40", label: "Attendance Rate" },
     { id: "upload",     icon: Upload,        color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Employee Upload" },
     { id: "upload-att", icon: CalendarCheck, color: "text-teal-400",   bg: "bg-teal-500/10",   activeBorder: "border-teal-500/40",   label: "Attendance Upload" },
+    { id: "upload-lv",  icon: Umbrella,      color: "text-pink-400",   bg: "bg-pink-500/10",   activeBorder: "border-pink-500/40",   label: "Leave Upload" },
     { id: "budget",     icon: Wallet,        color: "text-orange-400", bg: "bg-orange-500/10", activeBorder: "border-orange-500/40", label: "Budget Monitoring" },
   ];
 
   return (
     <div className="p-6 space-y-4">
       {/* Tab Buttons */}
-      <div className="grid grid-cols-2 xl:grid-cols-7 gap-2">
+      <div className="grid grid-cols-2 xl:grid-cols-8 gap-2">
         {kpiCards.map((c) => (
           <button
             key={c.id}
@@ -78,12 +81,14 @@ export default function HRDashboard() {
       )}
 
       {activeSection === "leave" && (
-        <SectionCard title="Employee Leave"
-          action={<ActionBtn icon={RefreshCw} label="Refresh" color="bg-blue-600 hover:bg-blue-700" />}>
-          <DataTable
-            headers={["Name", "NIK", "Department", "Leave Type", "Start", "End"]}
-            placeholder="Click Refresh to load leave data"
-          />
+        <SectionCard title="Employee Leave">
+          <LeaveDataSection />
+        </SectionCard>
+      )}
+
+      {activeSection === "upload-lv" && (
+        <SectionCard title="Upload Leave Data (Talenta Excel)">
+          <LeaveUpload />
         </SectionCard>
       )}
 
@@ -1365,6 +1370,211 @@ function BudgetSummaryCard({ label, value, color, bg }) {
 // ── Shared helpers ─────────────────────────────────────────────────────────────
 function Loader({ size = 16, className = "" }) {
   return <Loader2 size={size} className={className} />;
+}
+
+const LEAVE_CODES = [
+  { code: "SL",   label: "Sick Leave",         color: "#ef4444" },
+  { code: "AL",   label: "Annual Leave",       color: "#3b82f6" },
+  { code: "ALAB", label: "Annual Leave",       color: "#60a5fa" },
+  { code: "EM",   label: "Employee Marriage",  color: "#f59e0b" },
+  { code: "UL",   label: "Unpaid Leave",       color: "#8b5cf6" },
+  { code: "ULBB", label: "Unpaid Leave",       color: "#a78bfa" },
+  { code: "ML",   label: "Maternity Leave",    color: "#ec4899" },
+  { code: "BT",   label: "Business Trip",      color: "#06b6d4" },
+];
+
+function LeaveDataSection() {
+  const { token } = useAuthStore();
+  const [data, setData] = useState({ data: [], total: 0, pages: 1 });
+  const [summary, setSummary] = useState(null);
+  const [orgs, setOrgs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [filters, setFilters] = useState({
+    year: new Date().getFullYear(),
+    month: new Date().getMonth() + 1,
+    leave_code: "",
+    organization: "",
+    search: "",
+  });
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const p = { page, page_size: 25 };
+      if (filters.year)         p.year = filters.year;
+      if (filters.month)        p.month = filters.month;
+      if (filters.leave_code)   p.leave_code = filters.leave_code;
+      if (filters.organization) p.organization = filters.organization;
+      if (filters.search)       p.search = filters.search;
+      const res = await hrApi.getLeaveData(p);
+      setData(res);
+    } catch (_) {}
+    finally { setLoading(false); }
+  }, [page, filters]);
+
+  const fetchSummary = useCallback(async () => {
+    try {
+      const p = {};
+      if (filters.year)  p.year = filters.year;
+      if (filters.month) p.month = filters.month;
+      const res = await hrApi.getLeaveSummary(p);
+      setSummary(res);
+    } catch (_) {}
+  }, [filters.year, filters.month]);
+
+  useEffect(() => {
+    hrApi.getLeaveOrgs().then(setOrgs).catch(() => {});
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchSummary(); }, [fetchSummary]);
+
+  const handleFilter = (k, v) => { setFilters(p => ({ ...p, [k]: v })); setPage(1); };
+
+  const codeBadge = (code) => {
+    const c = LEAVE_CODES.find(l => l.code === code);
+    return (
+      <span style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 600,
+        background: c ? `${c.color}18` : "#e2e8f0",
+        color: c?.color || "#64748b",
+        border: `1px solid ${c ? `${c.color}30` : "#cbd5e1"}`,
+      }}>
+        {code} — {c?.label || code}
+      </span>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Summary badges */}
+      {summary && (
+        <div className="flex flex-wrap gap-2">
+          <div className="px-3 py-1.5 rounded-lg bg-gray-800 text-xs font-semibold text-gray-300">
+            Total: {summary.total}
+          </div>
+          {summary.by_code?.map(c => {
+            const cfg = LEAVE_CODES.find(l => l.code === c.code);
+            return (
+              <div key={c.code} style={{
+                padding: "4px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
+                background: cfg ? `${cfg.color}18` : "#f1f5f9",
+                color: cfg?.color || "#64748b",
+                border: `1px solid ${cfg ? `${cfg.color}30` : "#e2e8f0"}`,
+              }}>
+                {c.code}: {c.count}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-2 items-end">
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Year</label>
+          <select value={filters.year} onChange={e => handleFilter("year", e.target.value ? Number(e.target.value) : "")}
+            className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5">
+            {[2024,2025,2026,2027].map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Month</label>
+          <select value={filters.month} onChange={e => handleFilter("month", e.target.value ? Number(e.target.value) : "")}
+            className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5">
+            <option value="">All</option>
+            {Array.from({length:12},(_,i)=>i+1).map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Leave Code</label>
+          <select value={filters.leave_code} onChange={e => handleFilter("leave_code", e.target.value)}
+            className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5">
+            <option value="">All</option>
+            {LEAVE_CODES.map(c => <option key={c.code} value={c.code}>{c.code} — {c.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Organization</label>
+          <select value={filters.organization} onChange={e => handleFilter("organization", e.target.value)}
+            className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5">
+            <option value="">All</option>
+            {orgs.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Search</label>
+          <input value={filters.search} onChange={e => handleFilter("search", e.target.value)}
+            placeholder="Name / ID..."
+            className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5 w-36" />
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-x-auto rounded-lg border border-gray-800">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-800/60">
+              {["Employee ID","Name","Organization","Position","Date","Leave Code","Leave Type"].map(h => (
+                <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800">
+            {loading ? (
+              <tr><td colSpan={7} className="py-10 text-center"><Loader2 size={14} className="animate-spin inline mr-2 text-gray-500" />Loading...</td></tr>
+            ) : data.data.length === 0 ? (
+              <tr><td colSpan={7} className="py-10 text-center text-xs text-gray-600">
+                No leave data. Upload Talenta Excel in the Leave Upload tab.
+              </td></tr>
+            ) : data.data.map((r, i) => (
+              <tr key={i} className="hover:bg-gray-800/40 transition-colors">
+                <td className="px-3 py-2 text-xs font-mono text-gray-500">{r.employee_id}</td>
+                <td className="px-3 py-2 text-sm font-medium text-gray-200 whitespace-nowrap">{r.employee_name}</td>
+                <td className="px-3 py-2 text-xs text-gray-400">{r.organization || "—"}</td>
+                <td className="px-3 py-2 text-xs text-gray-400 max-w-[180px] truncate" title={r.job_position}>{r.job_position || "—"}</td>
+                <td className="px-3 py-2 text-xs text-gray-300 whitespace-nowrap">{r.leave_date}</td>
+                <td className="px-3 py-2">{codeBadge(r.leave_code)}</td>
+                <td className="px-3 py-2 text-xs text-gray-400">{r.leave_type}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      {data.pages > 1 && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "10px 0", fontSize: 12,
+        }}>
+          <span style={{ color: "#475569", fontWeight: 600 }}>
+            {data.total} records · page {page} of {data.pages}
+          </span>
+          <div style={{ display: "flex", gap: 4 }}>
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+              style={{
+                padding: 6, borderRadius: 8, border: "none", cursor: page === 1 ? "not-allowed" : "pointer",
+                background: "#e8edf5", color: page === 1 ? "#cbd5e1" : "#475569",
+                boxShadow: "2px 2px 5px #c5cad8, -2px -2px 5px #ffffff",
+              }}>
+              <ChevronLeft size={13} />
+            </button>
+            <button onClick={() => setPage(p => Math.min(data.pages, p + 1))} disabled={page === data.pages}
+              style={{
+                padding: 6, borderRadius: 8, border: "none", cursor: page === data.pages ? "not-allowed" : "pointer",
+                background: "#e8edf5", color: page === data.pages ? "#cbd5e1" : "#475569",
+                boxShadow: "2px 2px 5px #c5cad8, -2px -2px 5px #ffffff",
+              }}>
+              <ChevronRight size={13} />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function SectionCard({ title, action, children }) {
