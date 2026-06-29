@@ -12,13 +12,13 @@ Source: Attendance Talenta Excel
   Col M: Time Off Code (SL, AL, EM, UL, ML, BT, ALAB, ULBB, etc.)
 """
 import io
+import traceback
 from datetime import datetime, date
 from typing import Optional
 
 import openpyxl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
-from sqlalchemy import select, func, and_
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import select, func, and_, text, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -124,12 +124,22 @@ async def upload_leave(
 
     try:
         for rec in records:
-            stmt = pg_insert(LeaveRecord).values(**rec).on_conflict_do_update(
-                constraint="uq_leave_emp_date",
-                set_={k: v for k, v in rec.items() if k not in ("employee_id", "leave_date")},
+            existing = await db.execute(
+                select(LeaveRecord).where(
+                    LeaveRecord.employee_id == rec["employee_id"],
+                    LeaveRecord.leave_date == rec["leave_date"],
+                )
             )
-            await db.execute(stmt)
-            inserted += 1
+            row = existing.scalars().first()
+            if row:
+                for k, v in rec.items():
+                    if k not in ("employee_id", "leave_date"):
+                        setattr(row, k, v)
+                updated += 1
+            else:
+                db.add(LeaveRecord(**rec))
+                inserted += 1
+        await db.flush()
     except Exception as e:
         raise HTTPException(500, f"Database error after {inserted}/{total} records: {str(e)}")
 

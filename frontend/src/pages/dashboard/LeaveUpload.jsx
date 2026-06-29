@@ -48,7 +48,8 @@ export default function LeaveUpload() {
       if (inputRef.current) inputRef.current.value = "";
       fetchHistory();
     } catch (e) {
-      setError(e?.detail || e?.message || "Upload failed");
+      const msg = typeof e === "string" ? e : (e?.detail || e?.message || JSON.stringify(e) || "Upload failed");
+      setError(msg);
     } finally {
       setUploading(false);
     }
