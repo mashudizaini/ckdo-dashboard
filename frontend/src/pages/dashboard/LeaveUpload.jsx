@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { Upload, Loader2, CheckCircle, X, FileText } from "lucide-react";
-import { hrApi } from "@/api/dashboard";
+import { useAuthStore } from "@/store/authStore";
+
+const API = "/api/v1/dashboard/hr/leave";
 
 export default function LeaveUpload() {
   const [file, setFile] = useState(null);
@@ -11,10 +13,13 @@ export default function LeaveUpload() {
   const [history, setHistory] = useState([]);
   const inputRef = useRef(null);
 
+  const { token } = useAuthStore();
+  const headers = { Authorization: `Bearer ${token}` };
+
   const fetchHistory = async () => {
     try {
-      const data = await hrApi.getLeaveHistory();
-      setHistory(data || []);
+      const res = await fetch(`${API}/history`, { headers });
+      if (res.ok) setHistory(await res.json());
     } catch (_) {}
   };
 
@@ -38,18 +43,24 @@ export default function LeaveUpload() {
     setError("");
     setResult(null);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("notes", notes);
-      const res = await hrApi.uploadLeave(form);
-      setResult(res);
+      const fd = new FormData();
+      fd.append("file", file);
+      if (notes.trim()) fd.append("notes", notes.trim());
+
+      const res = await fetch(`${API}/upload`, {
+        method: "POST",
+        headers,
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
+      setResult(data);
       setFile(null);
       setNotes("");
       if (inputRef.current) inputRef.current.value = "";
       fetchHistory();
     } catch (e) {
-      const msg = typeof e === "string" ? e : (e?.detail || e?.message || JSON.stringify(e) || "Upload failed");
-      setError(msg);
+      setError(e?.message || "Upload failed");
     } finally {
       setUploading(false);
     }
