@@ -156,7 +156,7 @@ async def upload_leave(
         total_rows=total,
         inserted=inserted,
         updated=updated,
-        uploaded_by=user.get("preferred_username", ""),
+        uploaded_by=user.username,
         notes=notes,
     )
     db.add(log)
