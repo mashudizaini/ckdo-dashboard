@@ -66,36 +66,6 @@ def _to_date(val) -> Optional[date]:
         return None
 
 
-def _parse_leave_excel(content: bytes) -> list[dict]:
-    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-    ws = wb.active
-    records = []
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if row is None:
-            continue
-        cells = list(row)
-        if len(cells) < 13:
-            continue
-        timeoff_code = _to_str(cells[COL_TIMEOFF])
-        if not timeoff_code:
-            continue
-        emp_id = _to_str(cells[COL_EMP_ID])
-        leave_dt = _to_date(cells[COL_DATE])
-        if not emp_id or not leave_dt:
-            continue
-        records.append({
-            "employee_id": emp_id,
-            "employee_name": _to_str(cells[COL_NAME]),
-            "organization": _to_str(cells[COL_ORG]),
-            "job_position": _to_str(cells[COL_POSITION]),
-            "leave_date": leave_dt,
-            "leave_code": timeoff_code,
-            "leave_type": LEAVE_CODE_MAP.get(timeoff_code, timeoff_code),
-        })
-    wb.close()
-    return records
-
-
 @router.post("/upload")
 async def upload_leave(
     file: UploadFile = File(...),
@@ -103,57 +73,78 @@ async def upload_leave(
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.HR)),
 ):
-    if not file.filename.lower().endswith((".xlsx", ".xlsm")):
-        raise HTTPException(400, "File must be .xlsx or .xlsm format")
+    if not file.filename.endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="File must be .xlsx or .xlsm format")
 
-    try:
-        content = await file.read()
-    except Exception as e:
-        raise HTTPException(500, f"Failed to read file: {str(e)}")
-
-    try:
-        import asyncio
-        records = await asyncio.to_thread(_parse_leave_excel, content)
-    except Exception as e:
-        raise HTTPException(422, f"Failed to parse Excel: {str(e)}")
-
+    contents = await file.read()
     batch_id = datetime.utcnow().strftime("LV%Y%m%d%H%M%S")
+
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid Excel file: {e}")
+
+    ws = wb.active
+
+    records = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or len(row) < 13:
+            continue
+        timeoff_code = _to_str(row[COL_TIMEOFF])
+        if not timeoff_code:
+            continue
+        emp_id = _to_str(row[COL_EMP_ID])
+        leave_dt = _to_date(row[COL_DATE])
+        if not emp_id or not leave_dt:
+            continue
+        records.append({
+            "employee_id": emp_id,
+            "employee_name": _to_str(row[COL_NAME]),
+            "organization": _to_str(row[COL_ORG]),
+            "job_position": _to_str(row[COL_POSITION]),
+            "leave_date": leave_dt,
+            "leave_code": timeoff_code,
+            "leave_type": LEAVE_CODE_MAP.get(timeoff_code, timeoff_code),
+            "upload_batch_id": batch_id,
+            "uploaded_at": datetime.utcnow(),
+        })
+
+    wb.close()
+
+    if not records:
+        raise HTTPException(status_code=422, detail="No leave data found in file (column Time Off Code is empty)")
+
     inserted = 0
     updated = 0
-    total = len(records)
 
-    try:
-        for rec in records:
-            existing = await db.execute(
-                select(LeaveRecord.id).where(
-                    LeaveRecord.employee_id == rec["employee_id"],
-                    LeaveRecord.leave_date == rec["leave_date"],
-                )
+    for rec in records:
+        existing = await db.execute(
+            select(LeaveRecord.id).where(
+                LeaveRecord.employee_id == rec["employee_id"],
+                LeaveRecord.leave_date == rec["leave_date"],
             )
-            if existing.scalar():
-                await db.execute(
-                    text("""
-                        UPDATE leave_records
-                        SET employee_name = :employee_name, organization = :organization,
-                            job_position = :job_position, leave_code = :leave_code,
-                            leave_type = :leave_type, upload_batch_id = :batch_id,
-                            uploaded_at = :now
-                        WHERE employee_id = :employee_id AND leave_date = :leave_date
-                    """),
-                    {**rec, "batch_id": batch_id, "now": datetime.utcnow()},
-                )
-                updated += 1
-            else:
-                db.add(LeaveRecord(**rec, upload_batch_id=batch_id, uploaded_at=datetime.utcnow()))
-                inserted += 1
-        await db.flush()
-    except Exception as e:
-        raise HTTPException(500, f"Database error after {inserted+updated}/{total} records: {traceback.format_exc()}")
+        )
+        if existing.scalar():
+            await db.execute(
+                text("""
+                    UPDATE leave_records
+                    SET employee_name = :employee_name, organization = :organization,
+                        job_position = :job_position, leave_code = :leave_code,
+                        leave_type = :leave_type, upload_batch_id = :upload_batch_id,
+                        uploaded_at = :uploaded_at
+                    WHERE employee_id = :employee_id AND leave_date = :leave_date
+                """),
+                rec,
+            )
+            updated += 1
+        else:
+            db.add(LeaveRecord(**rec))
+            inserted += 1
 
     log = LeaveUploadLog(
         batch_id=batch_id,
         filename=file.filename,
-        total_rows=total,
+        total_rows=len(records),
         inserted=inserted,
         updated=updated,
         uploaded_by=user.username,
@@ -164,7 +155,7 @@ async def upload_leave(
     return {
         "batch_id": batch_id,
         "filename": file.filename,
-        "total_rows": total,
+        "total_rows": len(records),
         "inserted": inserted,
         "updated": updated,
     }
