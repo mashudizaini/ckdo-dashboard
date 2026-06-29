@@ -76,8 +76,15 @@ async def upload_leave(
     if not file.filename.lower().endswith((".xlsx", ".xlsm")):
         raise HTTPException(400, "File must be .xlsx or .xlsm format")
 
-    content = await file.read()
-    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+    try:
+        content = await file.read()
+    except Exception as e:
+        raise HTTPException(500, f"Failed to read file: {str(e)}")
+
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+    except Exception as e:
+        raise HTTPException(422, f"Failed to parse Excel: {str(e)}")
     ws = wb.active
 
     batch_id = datetime.utcnow().strftime("LV%Y%m%d%H%M%S")
@@ -85,6 +92,7 @@ async def upload_leave(
     updated = 0
     total = 0
 
+    records = []
     for row in ws.iter_rows(min_row=2, values_only=True):
         if not row or len(row) < 13:
             continue
@@ -100,37 +108,30 @@ async def upload_leave(
 
         total += 1
         leave_type = LEAVE_CODE_MAP.get(timeoff_code, timeoff_code)
-
-        stmt = pg_insert(LeaveRecord).values(
-            employee_id=emp_id,
-            employee_name=_to_str(row[COL_NAME]),
-            organization=_to_str(row[COL_ORG]),
-            job_position=_to_str(row[COL_POSITION]),
-            leave_date=leave_dt,
-            leave_code=timeoff_code,
-            leave_type=leave_type,
-            upload_batch_id=batch_id,
-            uploaded_at=datetime.utcnow(),
-        ).on_conflict_do_update(
-            constraint="uq_leave_emp_date",
-            set_={
-                "employee_name": _to_str(row[COL_NAME]),
-                "organization": _to_str(row[COL_ORG]),
-                "job_position": _to_str(row[COL_POSITION]),
-                "leave_code": timeoff_code,
-                "leave_type": leave_type,
-                "upload_batch_id": batch_id,
-                "uploaded_at": datetime.utcnow(),
-            },
-        )
-
-        result = await db.execute(stmt)
-        if result.rowcount == 1:
-            inserted += 1
-        else:
-            updated += 1
+        records.append({
+            "employee_id": emp_id,
+            "employee_name": _to_str(row[COL_NAME]),
+            "organization": _to_str(row[COL_ORG]),
+            "job_position": _to_str(row[COL_POSITION]),
+            "leave_date": leave_dt,
+            "leave_code": timeoff_code,
+            "leave_type": leave_type,
+            "upload_batch_id": batch_id,
+            "uploaded_at": datetime.utcnow(),
+        })
 
     wb.close()
+
+    try:
+        for rec in records:
+            stmt = pg_insert(LeaveRecord).values(**rec).on_conflict_do_update(
+                constraint="uq_leave_emp_date",
+                set_={k: v for k, v in rec.items() if k not in ("employee_id", "leave_date")},
+            )
+            await db.execute(stmt)
+            inserted += 1
+    except Exception as e:
+        raise HTTPException(500, f"Database error after {inserted}/{total} records: {str(e)}")
 
     log = LeaveUploadLog(
         batch_id=batch_id,
