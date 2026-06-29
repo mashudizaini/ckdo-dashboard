@@ -184,33 +184,72 @@ function EmployeeTable() {
   useEffect(() => { fetchDepts(); fetchSummary(); fetchTeams(""); }, []); // eslint-disable-line
   useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
 
-  // Reset page kalau filter/search berubah
+  const [genderFilter, setGenderFilter] = useState("");
+  const [activeCard,   setActiveCard]   = useState("");
+
   const handleSearch   = (v) => { setSearch(v);       setPage(1); };
   const handleDept     = (v) => { setDeptFilter(v);   setTeamFilter(""); fetchTeams(v); setPage(1); };
   const handleStatus   = (v) => { setStatusFilter(v); setPage(1); };
   const handleTeam     = (v) => { setTeamFilter(v);   setPage(1); };
+
+  const handleCardClick = (id) => {
+    if (activeCard === id) {
+      setActiveCard(""); setStatusFilter(""); setGenderFilter(""); setPage(1);
+    } else {
+      setActiveCard(id);
+      if (id === "permanent")  { setStatusFilter("Permanent"); setGenderFilter(""); }
+      else if (id === "contract") { setStatusFilter("Contract"); setGenderFilter(""); }
+      else if (id === "male")   { setStatusFilter(""); setGenderFilter("Male"); }
+      else if (id === "female") { setStatusFilter(""); setGenderFilter("Female"); }
+      else { setStatusFilter(""); setGenderFilter(""); }
+      setPage(1);
+    }
+  };
 
   const STATUS_BADGE = {
     "Permanent": "bg-green-500/15 text-green-400 border-green-500/30",
     "Contract":  "bg-amber-500/15 text-amber-400 border-amber-500/30",
   };
 
+  const filteredEmployees = genderFilter
+    ? { ...data, employees: data.employees.filter(e => {
+        const g = (e.gender || "").toLowerCase();
+        return genderFilter === "Male" ? g === "male" || g === "m" || g === "laki-laki"
+             : g === "female" || g === "f" || g === "perempuan" || g === "wanita";
+      })}
+    : data;
+
   return (
     <div className="space-y-4">
-      {/* Summary cards */}
+      {/* Summary cards — clickable */}
       {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10 }}>
           {[
-            { label: "Total Employees", val: summary.total,     color: "text-blue-400" },
-            { label: "Permanent",      val: summary.permanent, color: "text-green-400" },
-            { label: "Contract",       val: summary.contract,  color: "text-amber-400" },
-            { label: "Male / Female", val: `${summary.male} / ${summary.female}`, color: "text-purple-400" },
-          ].map(({ label, val, color }) => (
-            <div key={label} className="rounded-lg border border-gray-800 bg-gray-800/40 px-4 py-3 text-center">
-              <div className={`text-2xl font-bold ${color}`}>{val}</div>
-              <div className="text-xs text-gray-500 mt-0.5">{label}</div>
-            </div>
-          ))}
+            { id: "total",     label: "Total Employees", val: summary.total,     color: "#2563eb", icon: "👥" },
+            { id: "permanent", label: "Permanent",       val: summary.permanent, color: "#22c55e", icon: "✓" },
+            { id: "contract",  label: "Contract",        val: summary.contract,  color: "#f59e0b", icon: "📋" },
+            { id: "male",      label: "Male",            val: summary.male,      color: "#3b82f6", icon: "♂" },
+            { id: "female",    label: "Female",          val: summary.female,    color: "#ec4899", icon: "♀" },
+          ].map(({ id, label, val, color, icon }) => {
+            const isActive = activeCard === id;
+            return (
+              <button key={id} onClick={() => handleCardClick(id)}
+                style={{
+                  padding: "14px 12px", borderRadius: 16, border: "none",
+                  background: isActive ? color : "#e8edf5",
+                  boxShadow: isActive
+                    ? "inset 3px 3px 6px rgba(0,0,0,0.2)"
+                    : "5px 5px 12px #c5cad8, -5px -5px 12px #ffffff",
+                  cursor: "pointer", textAlign: "center",
+                  transform: isActive ? "scale(0.97)" : "scale(1)",
+                  transition: "all 0.2s ease",
+                }}
+              >
+                <div style={{ fontSize: 26, fontWeight: 800, color: isActive ? "#fff" : color }}>{val}</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: isActive ? "rgba(255,255,255,0.85)" : "#64748b", marginTop: 2 }}>{label}</div>
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -285,16 +324,16 @@ function EmployeeTable() {
                   <Loader size={16} className="mx-auto animate-spin text-gray-600" />
                 </td>
               </tr>
-            ) : data.employees.length === 0 ? (
+            ) : filteredEmployees.employees.length === 0 ? (
               <tr>
                 <td colSpan={8} className="py-12 text-center text-xs text-gray-600">
-                  {search || deptFilter || statusFilter
+                  {search || deptFilter || statusFilter || genderFilter
                     ? "No employees matching filter"
                     : "No employee data yet. Upload Excel in Employee Upload tab."}
                 </td>
               </tr>
             ) : (
-              data.employees.map((e) => (
+              filteredEmployees.employees.map((e) => (
                 <tr key={e.user_id} className="hover:bg-gray-800/40 transition-colors">
                   <td className="px-3 py-2.5 font-mono text-xs text-gray-500">{e.user_id}</td>
                   <td className="px-3 py-2.5 font-medium text-gray-200 whitespace-nowrap">{e.full_name}</td>
