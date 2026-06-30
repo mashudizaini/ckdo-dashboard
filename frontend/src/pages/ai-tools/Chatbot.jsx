@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { MessageSquare, Send, Bot, User, BookOpen, Upload, Trash2, X, Loader2 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
+import { useChatStream } from "@/hooks/useChatStream";
 
 const SUGGESTIONS = [
   "What's the total revenue this month?",
@@ -9,18 +10,47 @@ const SUGGESTIONS = [
   "How many POs are pending approval?",
 ];
 
+const DEPT_COLORS = {
+  General:    { bg: "#e2e8f0", color: "#475569" },
+  HR:         { bg: "#fef3c7", color: "#d97706" },
+  Accounting: { bg: "#dbeafe", color: "#1d4ed8" },
+  PAC:        { bg: "#dcfce7", color: "#16a34a" },
+  Purchasing: { bg: "#ede9fe", color: "#7c3aed" },
+  IT:         { bg: "#fee2e2", color: "#dc2626" },
+};
+
+function DeptBadge({ department }) {
+  const cfg = DEPT_COLORS[department] || DEPT_COLORS.General;
+  return (
+    <span className="text-[10px] font-semibold rounded-full px-2 py-0.5" style={{ background: cfg.bg, color: cfg.color }}>
+      {department}
+    </span>
+  );
+}
+
 function KnowledgeBasePanel({ onClose }) {
   const { token } = useAuthStore();
   const [docs, setDocs] = useState([]);
+  const [departments, setDepartments] = useState(["General", "HR", "Accounting", "PAC", "Purchasing", "IT"]);
   const [loading, setLoading] = useState(false);
   const [ragConfigured, setRagConfigured] = useState(true);
-  const [form, setForm] = useState({ source: "", title: "", text: "" });
+  const [form, setForm] = useState({ source: "", title: "", text: "", department: "General" });
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
   const fileRef = useRef(null);
 
   const headers = { Authorization: `Bearer ${token}` };
+
+  const fetchStatus = async () => {
+    try {
+      const res = await fetch("/api/v1/ai/chatbot/status", { headers });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.departments?.length) setDepartments(data.departments);
+      }
+    } catch (_) {}
+  };
 
   const fetchDocs = async () => {
     setLoading(true);
@@ -32,7 +62,7 @@ function KnowledgeBasePanel({ onClose }) {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchDocs(); }, []); // eslint-disable-line
+  useEffect(() => { fetchStatus(); fetchDocs(); }, []); // eslint-disable-line
 
   const handleSubmit = async () => {
     if (!form.source.trim() || !form.title.trim() || (!form.text.trim() && !file)) return;
@@ -43,12 +73,13 @@ function KnowledgeBasePanel({ onClose }) {
       fd.append("source", form.source.trim());
       fd.append("title", form.title.trim());
       fd.append("text", form.text);
+      fd.append("department", form.department);
       if (file) fd.append("file", file);
       const res = await fetch("/api/v1/ai/chatbot/documents", { method: "POST", headers, body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Upload failed");
       setMsg({ type: "success", text: data.message });
-      setForm({ source: "", title: "", text: "" });
+      setForm({ source: "", title: "", text: "", department: form.department });
       setFile(null);
       if (fileRef.current) fileRef.current.value = "";
       fetchDocs();
@@ -88,10 +119,11 @@ function KnowledgeBasePanel({ onClose }) {
             <>
               <p className="text-xs text-gray-500">
                 Dokumen yang ditambahkan di sini akan dipakai chatbot untuk menjawab pertanyaan terkait perusahaan (SOP, prosedur, knowledge base helpdesk, dll).
+                Pilih <strong>Department</strong> dengan benar — chatbot hanya akan menampilkan dokumen sesuai departemen user yang bertanya (IT/Admin bisa lihat semua).
               </p>
 
               <div className="rounded-lg border border-gray-800 bg-gray-800/40 p-4 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="text-xs text-gray-500 mb-1 block">Source / Category</label>
                     <input value={form.source} onChange={e => setForm(p => ({ ...p, source: e.target.value }))}
@@ -101,6 +133,13 @@ function KnowledgeBasePanel({ onClose }) {
                     <label className="text-xs text-gray-500 mb-1 block">Title</label>
                     <input value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))}
                       placeholder="e.g. Prosedur Pengajuan PR" className="w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">Department</label>
+                    <select value={form.department} onChange={e => setForm(p => ({ ...p, department: e.target.value }))}
+                      className="w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 outline-none focus:border-blue-500 cursor-pointer">
+                      {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
                   </div>
                 </div>
                 <div>
@@ -132,9 +171,12 @@ function KnowledgeBasePanel({ onClose }) {
                   <div className="space-y-1.5">
                     {docs.map((d, i) => (
                       <div key={i} className="flex items-center justify-between rounded-lg bg-gray-800/50 border border-gray-700 px-3 py-2">
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium text-gray-200 truncate">{d.title}</p>
-                          <p className="text-xs text-gray-500">{d.source} · {d.chunks} chunk(s)</p>
+                        <div className="min-w-0 flex items-center gap-2">
+                          <DeptBadge department={d.department} />
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-gray-200 truncate">{d.title}</p>
+                            <p className="text-xs text-gray-500">{d.source} · {d.chunks} chunk(s)</p>
+                          </div>
                         </div>
                         <button onClick={() => handleDelete(d.source, d.title)} className="text-gray-500 hover:text-red-400 ml-2 shrink-0">
                           <Trash2 size={13} />
@@ -153,89 +195,18 @@ function KnowledgeBasePanel({ onClose }) {
 }
 
 export default function Chatbot() {
-  const { token, hasAnyRole } = useAuthStore();
-  const canManageKB = hasAnyRole("it_staff", "admin");
+  const { hasAnyRole } = useAuthStore();
+  const canManageKB = hasAnyRole("it_staff", "hr_staff", "accounting_staff", "pac_staff", "purchasing_staff", "admin");
 
-  const [messages, setMessages] = useState([
-    {
-      role: "assistant",
-      text: "Hello! I'm the CKDO Dashboard AI Assistant. Ask me anything about company data.",
-    },
-  ]);
-  const [input, setInput] = useState("");
-  const [streaming, setStreaming] = useState(false);
+  const { messages, input, setInput, streaming, sendMessage } = useChatStream(
+    "Hello! I'm the CKDO Dashboard AI Assistant. Ask me anything about company data."
+  );
   const [showKB, setShowKB] = useState(false);
   const bottomRef = useRef(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  const handleSend = async () => {
-    const text = input.trim();
-    if (!text || streaming) return;
-
-    const history = messages
-      .filter(m => !m.error)
-      .map(m => ({ role: m.role, content: m.text }));
-
-    setMessages(prev => [...prev, { role: "user", text }, { role: "assistant", text: "", sources: [] }]);
-    setInput("");
-    setStreaming(true);
-
-    try {
-      const res = await fetch("/api/v1/ai/chatbot/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ message: text, conversation_history: history }),
-      });
-
-      if (!res.ok || !res.body) throw new Error(`Request failed (${res.status})`);
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split("\n\n");
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const payload = line.slice(6);
-          if (payload === "[DONE]") continue;
-          try {
-            const evt = JSON.parse(payload);
-            if (evt.type === "token") {
-              setMessages(prev => {
-                const next = [...prev];
-                next[next.length - 1] = { ...next[next.length - 1], text: next[next.length - 1].text + evt.text };
-                return next;
-              });
-            } else if (evt.type === "sources") {
-              setMessages(prev => {
-                const next = [...prev];
-                next[next.length - 1] = { ...next[next.length - 1], sources: evt.sources };
-                return next;
-              });
-            }
-          } catch (_) {}
-        }
-      }
-    } catch (e) {
-      setMessages(prev => {
-        const next = [...prev];
-        next[next.length - 1] = { role: "assistant", text: `Sorry, something went wrong: ${e.message}`, error: true };
-        return next;
-      });
-    } finally {
-      setStreaming(false);
-    }
-  };
 
   return (
     <div className="flex flex-col h-full p-6">
@@ -295,7 +266,7 @@ export default function Chatbot() {
                 {msg.sources?.length > 0 && (
                   <div className="mt-2 pt-2 border-t border-gray-700 flex flex-wrap gap-1.5">
                     {msg.sources.map((s, j) => (
-                      <span key={j} title={`similarity: ${s.similarity}`}
+                      <span key={j} title={`${s.department} · similarity: ${s.similarity}`}
                         className="text-[10px] rounded-full border border-gray-600 bg-gray-900 px-2 py-0.5 text-gray-400">
                         📄 {s.title}
                       </span>
@@ -327,13 +298,13 @@ export default function Chatbot() {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSend()}
+            onKeyDown={(e) => e.key === "Enter" && sendMessage()}
             disabled={streaming}
             placeholder="Type your question..."
             className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 transition-colors disabled:opacity-50"
           />
           <button
-            onClick={handleSend}
+            onClick={() => sendMessage()}
             disabled={streaming || !input.trim()}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors"
           >

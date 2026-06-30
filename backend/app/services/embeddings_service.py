@@ -19,7 +19,11 @@ _client = None
 def _get_client():
     global _client
     if _client is None:
-        _client = voyageai.Client(api_key=settings.voyage_api_key)
+        try:
+            _client = voyageai.Client(api_key=settings.voyage_api_key, timeout=5)
+        except TypeError:
+            # Older/newer SDK versions may not accept `timeout` in the constructor
+            _client = voyageai.Client(api_key=settings.voyage_api_key)
     return _client
 
 

@@ -5,6 +5,7 @@ If Voyage AI is configured and relevant company documents are found,
 answers are grounded in those documents (with cited sources). Otherwise
 falls back to a plain Claude chat — the chatbot always works either way.
 """
+import asyncio
 import json
 import anthropic
 from app.config import get_settings
@@ -14,16 +15,30 @@ import structlog
 logger = structlog.get_logger()
 settings = get_settings()
 
+RAG_TIMEOUT_SECONDS = 6.0
+
 
 class AIService:
     def __init__(self):
         self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
-    async def stream_chat(self, message: str, history: list[dict], user):
-        """Stream chat response from Claude API as SSE, grounded in company docs when available."""
-        import asyncio
+    async def stream_chat(self, message: str, history: list[dict], user, department_filter: list[str] = None):
+        """
+        Stream chat response from Claude API as SSE, grounded in company docs when available.
+        department_filter: list of departments the user may see (None = unrestricted, e.g. IT/Admin).
+        """
+        try:
+            retrieval = await asyncio.wait_for(
+                asyncio.to_thread(rag_service.retrieve_context, message, department_filter),
+                timeout=RAG_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("rag_retrieval_timeout", message=message[:80])
+            retrieval = {"context": None, "sources": []}
+        except Exception as e:
+            logger.warning("rag_retrieval_error", error=str(e))
+            retrieval = {"context": None, "sources": []}
 
-        retrieval = await asyncio.to_thread(rag_service.retrieve_context, message)
         context = retrieval["context"]
         sources = retrieval["sources"]
 
@@ -33,6 +48,11 @@ class AIService:
             "Jawab dalam Bahasa Indonesia kecuali diminta selainnya. "
             "Fokus pada topik pekerjaan: Oracle EBS, produksi farmasi, HR, keuangan, dan IT."
         )
+        if department_filter is not None:
+            base_system += (
+                f" User ini hanya berhak mengakses dokumen internal departemen: {', '.join(department_filter)}. "
+                "Jangan membocorkan isi dokumen departemen lain meskipun ditanya."
+            )
 
         if context:
             system = (

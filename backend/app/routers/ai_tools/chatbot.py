@@ -2,7 +2,7 @@
 AI Chatbot Router
 ─────────────────────────────────────────
 Route prefix : /api/v1/ai/chatbot
-Required role: any authenticated user (chat) / admin or it_staff (knowledge base)
+Required role: any authenticated user (chat) / any staff role (knowledge base)
 
 Endpoints:
   POST   /chat                — Send message, get AI response (streaming, RAG-grounded)
@@ -36,22 +36,29 @@ async def chat(
     request: ChatRequest,
     user: CurrentUser = Depends(get_current_user),
 ):
-    """AI Chatbot dengan Claude API — streaming response, otomatis grounded ke dokumen perusahaan jika relevan."""
+    """
+    AI Chatbot dengan Claude API — streaming response, otomatis grounded ke
+    dokumen perusahaan jika relevan. Dokumen yang bisa diakses dibatasi sesuai
+    departemen user (IT/Admin bebas akses semua departemen).
+    """
+    is_unrestricted = user.has_any_role("it_staff", "admin")
+    department_filter = rag_service.departments_for_roles(user.roles, is_unrestricted)
+
     service = AIService()
     return StreamingResponse(
-        service.stream_chat(request.message, request.conversation_history, user),
+        service.stream_chat(request.message, request.conversation_history, user, department_filter),
         media_type="text/event-stream",
     )
 
 
 @router.get("/status")
 async def rag_status(user: CurrentUser = Depends(get_current_user)):
-    return {"rag_configured": rag_service.is_configured()}
+    return {"rag_configured": rag_service.is_configured(), "departments": rag_service.DEPARTMENTS}
 
 
 @router.get("/documents")
 async def list_documents(
-    user: CurrentUser = Depends(require_role(Roles.IT, Roles.ADMIN)),
+    user: CurrentUser = Depends(require_role(Roles.IT, Roles.HR, Roles.ACCOUNTING, Roles.PAC, Roles.PURCHASING, Roles.ADMIN)),
 ):
     if not rag_service.is_configured():
         raise HTTPException(400, "VOYAGE_API_KEY belum diset — knowledge base belum aktif")
@@ -63,9 +70,12 @@ async def ingest_document(
     source: str = Form(...),
     title: str = Form(...),
     text: str = Form(""),
+    department: str = Form("General"),
     file: UploadFile = File(None),
-    user: CurrentUser = Depends(require_role(Roles.IT, Roles.ADMIN)),
+    user: CurrentUser = Depends(require_role(Roles.IT, Roles.HR, Roles.ACCOUNTING, Roles.PAC, Roles.PURCHASING, Roles.ADMIN)),
 ):
+    if department not in rag_service.DEPARTMENTS:
+        raise HTTPException(400, f"Department harus salah satu dari: {', '.join(rag_service.DEPARTMENTS)}")
     if not rag_service.is_configured():
         raise HTTPException(400, "VOYAGE_API_KEY belum diset di environment. Tambahkan dulu lalu restart backend.")
 
@@ -100,7 +110,7 @@ async def ingest_document(
         raise HTTPException(400, "Tidak ada teks untuk di-ingest (isi text atau upload file)")
 
     try:
-        ids = rag_service.ingest_text(source.strip(), title.strip(), content, user.username)
+        ids = rag_service.ingest_text(source.strip(), title.strip(), content, user.username, department)
     except Exception as e:
         raise HTTPException(500, f"Gagal ingest dokumen: {str(e)}")
 
@@ -111,7 +121,7 @@ async def ingest_document(
 async def delete_document(
     source: str,
     title: str,
-    user: CurrentUser = Depends(require_role(Roles.IT, Roles.ADMIN)),
+    user: CurrentUser = Depends(require_role(Roles.IT, Roles.HR, Roles.ACCOUNTING, Roles.PAC, Roles.PURCHASING, Roles.ADMIN)),
 ):
     rag_service.delete_document(source, title)
     return {"message": "Deleted"}
