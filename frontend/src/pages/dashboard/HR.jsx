@@ -1251,7 +1251,7 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
   );
 
   return (
-    <div id="working-calendar-print" style={{ fontFamily: "Arial, sans-serif", color: "#000", padding: 10 }}>
+    <div id="working-calendar-print" style={{ fontFamily: "Arial, sans-serif", color: "#000", padding: 10, width: "100%", boxSizing: "border-box" }}>
       <div style={{ textAlign: "center", marginBottom: 10 }}>
         <h1 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>PT CKD OTTO PHARMACEUTICALS</h1>
         <h2 style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>YEAR {year} WORKING CALENDAR</h2>
@@ -1259,14 +1259,19 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
 
       {/* 3 rows x 4 months, with holiday list to the right of each row */}
       {[0, 1, 2].map(rowIdx => (
-        <div key={rowIdx} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1.3fr", gap: 6, marginBottom: 6 }}>
+        <div key={rowIdx} style={{
+          display: "grid", gridTemplateColumns: "repeat(4, 1fr) 145px", gap: 8,
+          marginBottom: 8, width: "100%", boxSizing: "border-box", alignItems: "start",
+        }}>
           {[0, 1, 2, 3].map(col => {
             const m = rowIdx * 4 + col;
+            // Always render 6 week-rows so every month table has equal height
             const cells = buildMonthSun(m);
+            while (cells.length < 42) cells.push(null);
             return (
               <table key={m} style={{
-                borderCollapse: "collapse", width: "100%", fontSize: 7, tableLayout: "fixed",
-                WebkitPrintColorAdjust: "exact", printColorAdjust: "exact",
+                borderCollapse: "collapse", width: "100%", fontSize: 8.5, tableLayout: "fixed",
+                WebkitPrintColorAdjust: "exact", printColorAdjust: "exact", boxSizing: "border-box",
               }}>
                 <colgroup>
                   {WDAY_LABELS_SUN.map(w => <col key={w} style={{ width: "14.2857%" }} />)}
@@ -1275,7 +1280,8 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
                   <tr>
                     <th colSpan={7} style={{
                       border: `1.5px solid ${PRINT_BORDER}`, background: PRINT_MONTH_HEADER_BG,
-                      padding: "3px 0", fontSize: 8.5, fontWeight: 800, letterSpacing: "0.03em",
+                      padding: "4px 0", fontSize: 9.5, fontWeight: 800, letterSpacing: "0.04em",
+                      boxSizing: "border-box",
                     }}>
                       {MONTH_NAMES_SHORT[m]}
                     </th>
@@ -1283,8 +1289,9 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
                   <tr>
                     {WDAY_LABELS_SUN.map(w => (
                       <th key={w} style={{
-                        border: `1px solid ${PRINT_BORDER}`, padding: "2px 0", fontWeight: 800,
-                        background: PRINT_DOW_HEADER_BG, fontSize: 6.5, whiteSpace: "nowrap", overflow: "hidden",
+                        border: `1px solid ${PRINT_BORDER}`, padding: "3px 0", fontWeight: 800,
+                        background: PRINT_DOW_HEADER_BG, fontSize: 7.5, whiteSpace: "nowrap",
+                        overflow: "hidden", textAlign: "center", boxSizing: "border-box",
                       }}>{w}</th>
                     ))}
                   </tr>
@@ -1293,7 +1300,7 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
                   {Array.from({ length: Math.ceil(cells.length / 7) }, (_, wk) => (
                     <tr key={wk}>
                       {cells.slice(wk * 7, wk * 7 + 7).map((day, di) => {
-                        if (day === null) return <td key={di} style={{ border: `1px solid ${PRINT_BORDER}`, padding: "2px 0", background: "#fff" }} />;
+                        if (day === null) return <td key={di} style={{ border: `1px solid ${PRINT_BORDER}`, padding: "3px 0", background: "#fff", boxSizing: "border-box" }} />;
                         const dt = `${year}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
                         const dow = new Date(year, m, day).getDay();
                         const isWeekend = dow === 0 || dow === 6;
@@ -1303,9 +1310,9 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
                         if (hol) { bg = HTYPE_PRINT_COLOR[hol.holiday_type] || "#cc1f3d"; color = "#000"; }
                         return (
                           <td key={di} style={{
-                            border: `1px solid ${PRINT_BORDER}`, padding: "2px 0", textAlign: "center",
+                            border: `1px solid ${PRINT_BORDER}`, padding: "3px 0", textAlign: "center",
                             background: bg, color, fontWeight: hol ? 800 : (isWeekend ? 700 : 500),
-                            WebkitPrintColorAdjust: "exact", printColorAdjust: "exact",
+                            WebkitPrintColorAdjust: "exact", printColorAdjust: "exact", boxSizing: "border-box",
                           }}>
                             {day}
                           </td>
@@ -1319,16 +1326,16 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
           })}
 
           {/* Holiday list for this row's months */}
-          <div style={{ fontSize: 7 }}>
+          <div style={{ fontSize: 6.5, width: "145px", boxSizing: "border-box", overflow: "hidden", paddingLeft: 4 }}>
             {[0, 1, 2, 3].map(col => {
               const m = rowIdx * 4 + col;
               const list = holidaysByMonth[m];
               if (!list.length) return null;
               return (
                 <div key={m} style={{ marginBottom: 4 }}>
-                  <p style={{ fontWeight: 800, margin: 0, fontSize: 7.5 }}>{MONTH_NAMES[m]}</p>
+                  <p style={{ fontWeight: 800, margin: 0, fontSize: 7 }}>{MONTH_NAMES[m]}</p>
                   {list.map(h => (
-                    <p key={h.id} style={{ margin: 0, paddingLeft: 4 }}>
+                    <p key={h.id} style={{ margin: 0, paddingLeft: 4, wordBreak: "break-word" }}>
                       {new Date(h.holiday_date + "T00:00:00").getDate()} : {h.name}
                     </p>
                   ))}
