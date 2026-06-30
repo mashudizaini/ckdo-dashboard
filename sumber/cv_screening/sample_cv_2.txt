@@ -1,0 +1,51 @@
+SARAH WIJAYA
+IT Specialist
+
+Contact: sarah.wijaya@gmail.com | 0812-9876-5432
+LinkedIn: linkedin.com/in/sarahwijaya
+
+SUMMARY
+Junior IT professional with 2 years experience in database management and basic programming. Eager to learn Oracle EBS and grow in enterprise software development.
+
+SKILLS
+• SQL Database Management
+• Python Programming
+• Basic Oracle Database
+• Microsoft Excel
+• Team Collaboration
+
+EXPERIENCE
+
+IT Support Staff | PT Maju Jaya
+Jakarta | March 2022 - Present (2 years)
+- Manage company database using MySQL
+- Basic SQL query writing for reports
+- User support and troubleshooting
+- Data entry and validation
+
+Intern - Software Developer | Digital Solutions
+Bandung | Jan 2021 - Feb 2022 (1 year)
+- Assisted in web development projects
+- Learned Python for data processing
+- Created simple database queries
+- Documentation and testing
+
+EDUCATION
+
+Diploma 3 (D3) - Information Technology
+Universitas Teknologi Indonesia, 2020
+
+TRAINING & COURSES
+- SQL Fundamentals - Online Course (2021)
+- Python for Beginners - Coursera (2022)
+- Basic Oracle Database - Workshop (2023)
+
+LANGUAGES
+- Indonesian (Native)
+- English (Limited Working Proficiency)
+
+PERSONAL ATTRIBUTES
+- Quick learner
+- Detail-oriented
+- Good team player
+- Willing to work overtime

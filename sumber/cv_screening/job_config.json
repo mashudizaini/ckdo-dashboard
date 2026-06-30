@@ -1,0 +1,33 @@
+{
+  "position_title": "Oracle EBS Technical Consultant",
+  "required_skills": [
+    "Oracle EBS",
+    "Oracle Forms",
+    "Oracle Reports",
+    "PL/SQL",
+    "SQL",
+    "Database Administration",
+    "Oracle Developer",
+    "Unix/Linux"
+  ],
+  "min_experience": 3,
+  "education_keywords": [
+    "S1 Teknik Informatika",
+    "S1 Sistem Informasi",
+    "Bachelor Computer Science",
+    "Bachelor Information Technology",
+    "S1 Komputer"
+  ],
+  "certification_keywords": [
+    "OCP",
+    "Oracle Certified Professional",
+    "Oracle Certified Associate",
+    "OCA"
+  ],
+  "weights": {
+    "skills": 40,
+    "experience": 30,
+    "education": 20,
+    "certification": 10
+  }
+}

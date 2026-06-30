@@ -46,6 +46,13 @@ export const hrApi = {
   createTodoTask:  (d)     => api.post("/dashboard/hr/todo/tasks", d),
   updateTodoTask:  (id, d) => api.put(`/dashboard/hr/todo/tasks/${id}`, d),
   deleteTodoTask:  (id)    => api.delete(`/dashboard/hr/todo/tasks/${id}`),
+  getCvJobs:       ()       => api.get("/dashboard/hr/cv-screening/jobs"),
+  createCvJob:     (d)      => api.post("/dashboard/hr/cv-screening/jobs", d),
+  deleteCvJob:     (id)     => api.delete(`/dashboard/hr/cv-screening/jobs/${id}`),
+  getCvCandidates: (id, p)  => api.get(`/dashboard/hr/cv-screening/jobs/${id}/candidates`, { params: p }),
+  deleteCvCandidate: (id)   => api.delete(`/dashboard/hr/cv-screening/candidates/${id}`),
+  getCvStats:      (id)     => api.get(`/dashboard/hr/cv-screening/jobs/${id}/stats`),
+  exportCvExcel:   (id)     => `/api/v1/dashboard/hr/cv-screening/jobs/${id}/export`,
 };
 
 export const pacApi = {
