@@ -5,12 +5,14 @@
 /* ── Print: Working Calendar ───────────────────────────────────── */
 #working-calendar-print { display: none; }
 @media print {
-  body * { visibility: hidden; }
+  html, body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+  body * { visibility: hidden; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
   #working-calendar-print, #working-calendar-print * { visibility: visible; }
   #working-calendar-print {
     display: block !important;
     position: absolute; top: 0; left: 0; width: 100%;
   }
+  #working-calendar-print table { table-layout: fixed; }
   @page { size: A4 landscape; margin: 10mm; }
 }
 

@@ -1264,7 +1264,13 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
             const m = rowIdx * 4 + col;
             const cells = buildMonthSun(m);
             return (
-              <table key={m} style={{ borderCollapse: "collapse", width: "100%", fontSize: 7, tableLayout: "fixed" }}>
+              <table key={m} style={{
+                borderCollapse: "collapse", width: "100%", fontSize: 7, tableLayout: "fixed",
+                WebkitPrintColorAdjust: "exact", printColorAdjust: "exact",
+              }}>
+                <colgroup>
+                  {WDAY_LABELS_SUN.map(w => <col key={w} style={{ width: "14.2857%" }} />)}
+                </colgroup>
                 <thead>
                   <tr>
                     <th colSpan={7} style={{
@@ -1276,7 +1282,10 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
                   </tr>
                   <tr>
                     {WDAY_LABELS_SUN.map(w => (
-                      <th key={w} style={{ border: `1px solid ${PRINT_BORDER}`, padding: "2px 0", fontWeight: 800, background: PRINT_DOW_HEADER_BG }}>{w}</th>
+                      <th key={w} style={{
+                        border: `1px solid ${PRINT_BORDER}`, padding: "2px 0", fontWeight: 800,
+                        background: PRINT_DOW_HEADER_BG, fontSize: 6.5, whiteSpace: "nowrap", overflow: "hidden",
+                      }}>{w}</th>
                     ))}
                   </tr>
                 </thead>
@@ -1293,7 +1302,11 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
                         let color = isWeekend ? "#cc1f3d" : "#000";
                         if (hol) { bg = HTYPE_PRINT_COLOR[hol.holiday_type] || "#cc1f3d"; color = "#000"; }
                         return (
-                          <td key={di} style={{ border: `1px solid ${PRINT_BORDER}`, padding: "2px 0", textAlign: "center", background: bg, color, fontWeight: hol ? 800 : (isWeekend ? 700 : 500) }}>
+                          <td key={di} style={{
+                            border: `1px solid ${PRINT_BORDER}`, padding: "2px 0", textAlign: "center",
+                            background: bg, color, fontWeight: hol ? 800 : (isWeekend ? 700 : 500),
+                            WebkitPrintColorAdjust: "exact", printColorAdjust: "exact",
+                          }}>
                             {day}
                           </td>
                         );
@@ -2136,23 +2149,35 @@ function LeaveDataSection() {
         {/* Employee Data — appears when a row is clicked */}
         <EmployeeLeaveDataCard employee={selectedEmp} />
 
-        {/* Leave Distribution chart with total */}
+        {/* Leave Distribution chart with total — click a bar to filter the table below */}
         {summary && summary.by_code?.length > 0 ? (
           <div style={NEU_CARD}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
               <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>Leave Distribution</h4>
               <span style={{ fontSize: 12, fontWeight: 600, color: "#64748b" }}>
                 Total: <span style={{ fontSize: 16, fontWeight: 800, color: "#2563eb" }}>{summary.total}</span> days
               </span>
             </div>
+            <p style={{ fontSize: 10.5, color: "#94a3b8", fontWeight: 500, marginBottom: 10 }}>
+              Click a leave type to filter the table below{filters.leave_code ? " — click again to clear" : ""}
+            </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {summary.by_code.map(c => {
                 const cfg = LEAVE_CODES.find(l => l.code === c.code);
                 const pct = summary.total > 0 ? Math.round((c.count / summary.total) * 100) : 0;
+                const isActive = filters.leave_code === c.code;
                 return (
-                  <div key={c.code}>
+                  <div key={c.code}
+                    onClick={() => handleFilter("leave_code", isActive ? "" : c.code)}
+                    style={{
+                      cursor: "pointer", padding: "6px 8px", borderRadius: 10,
+                      background: isActive ? `${cfg?.color || "#94a3b8"}14` : "transparent",
+                      boxShadow: isActive ? `inset 0 0 0 1.5px ${cfg?.color || "#94a3b8"}` : "none",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-                      <span style={{ fontWeight: 600, color: "#334155" }}>
+                      <span style={{ fontWeight: isActive ? 800 : 600, color: "#334155" }}>
                         <span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 3, background: cfg?.color || "#94a3b8", marginRight: 6, verticalAlign: "middle" }} />
                         {c.code} — {cfg?.label || c.code}
                       </span>
