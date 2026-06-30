@@ -1289,9 +1289,9 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
                   <tr>
                     {WDAY_LABELS_SUN.map(w => (
                       <th key={w} style={{
-                        border: `1px solid ${PRINT_BORDER}`, padding: "3px 0", fontWeight: 800,
-                        background: PRINT_DOW_HEADER_BG, fontSize: 7.5, whiteSpace: "nowrap",
-                        overflow: "hidden", textAlign: "center", boxSizing: "border-box",
+                        border: `1px solid ${PRINT_BORDER}`, padding: "2px 0 2px 2px", fontWeight: 800,
+                        background: PRINT_DOW_HEADER_BG, fontSize: 7, whiteSpace: "nowrap",
+                        overflow: "hidden", textAlign: "left", boxSizing: "border-box",
                       }}>{w}</th>
                     ))}
                   </tr>
@@ -1300,7 +1300,7 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
                   {Array.from({ length: Math.ceil(cells.length / 7) }, (_, wk) => (
                     <tr key={wk}>
                       {cells.slice(wk * 7, wk * 7 + 7).map((day, di) => {
-                        if (day === null) return <td key={di} style={{ border: `1px solid ${PRINT_BORDER}`, padding: "3px 0", background: "#fff", boxSizing: "border-box" }} />;
+                        if (day === null) return <td key={di} style={{ border: `1px solid ${PRINT_BORDER}`, padding: "1px 0", background: "#fff", boxSizing: "border-box" }} />;
                         const dt = `${year}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
                         const dow = new Date(year, m, day).getDay();
                         const isWeekend = dow === 0 || dow === 6;
@@ -1310,7 +1310,7 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
                         if (hol) { bg = HTYPE_PRINT_COLOR[hol.holiday_type] || "#cc1f3d"; color = "#000"; }
                         return (
                           <td key={di} style={{
-                            border: `1px solid ${PRINT_BORDER}`, padding: "3px 0", textAlign: "center",
+                            border: `1px solid ${PRINT_BORDER}`, padding: "1px 0", textAlign: "center",
                             background: bg, color, fontWeight: hol ? 800 : (isWeekend ? 700 : 500),
                             WebkitPrintColorAdjust: "exact", printColorAdjust: "exact", boxSizing: "border-box",
                           }}>
