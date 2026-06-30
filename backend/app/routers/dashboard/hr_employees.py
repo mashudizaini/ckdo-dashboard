@@ -209,9 +209,14 @@ async def get_employee_summary(
     permanent = perm_q.scalar() or 0
 
     contract_q = await db.execute(
-        select(func.count()).select_from(Employee).where(Employee.status != "Permanent").where(Employee.status != None)
+        select(func.count()).select_from(Employee).where(Employee.status == "Contract")
     )
     contract  = contract_q.scalar() or 0
+
+    probation_q = await db.execute(
+        select(func.count()).select_from(Employee).where(Employee.status == "Probation")
+    )
+    probation = probation_q.scalar() or 0
 
     by_dept_q = await db.execute(
         select(Employee.department, func.count().label("total"))
@@ -237,6 +242,7 @@ async def get_employee_summary(
         "total":     total,
         "permanent": permanent,
         "contract":  contract,
+        "probation": probation,
         "by_dept":   by_dept,
         "by_level":  by_level,
         "male":      by_sex.get("M", 0),
@@ -251,6 +257,7 @@ async def list_employees(
     status:     Optional[str] = Query(None),
     level:      Optional[str] = Query(None),
     team:       Optional[str] = Query(None),
+    sex:        Optional[str] = Query(None),
     page:       int           = Query(1, ge=1),
     page_size:  int           = Query(25, ge=1, le=100),
     db:         AsyncSession  = Depends(get_db),
@@ -268,6 +275,8 @@ async def list_employees(
         )
     if department:
         q = q.where(Employee.department == department)
+    if sex:
+        q = q.where(Employee.sex == sex)
     if status:
         q = q.where(Employee.status == status)
     if level:

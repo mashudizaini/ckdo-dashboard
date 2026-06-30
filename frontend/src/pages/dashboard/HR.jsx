@@ -128,6 +128,7 @@ function EmployeeTable() {
   const [search,     setSearch]     = useState("");
   const [deptFilter, setDeptFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [genderFilter, setGenderFilter] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
   const [departments, setDepartments]   = useState([]);
   const [teams,       setTeams]         = useState([]);
@@ -167,18 +168,18 @@ function EmployeeTable() {
         ...(deptFilter   ? { department: deptFilter } : {}),
         ...(statusFilter ? { status: statusFilter }  : {}),
         ...(teamFilter   ? { team: teamFilter }      : {}),
+        ...(genderFilter ? { sex: genderFilter === "Male" ? "M" : "F" } : {}),
       });
       const res = await fetch(`${API}?${params}`, { headers });
       if (res.ok) setData(await res.json());
     } catch (_) {}
     finally { setLoading(false); }
-  }, [page, search, deptFilter, statusFilter, teamFilter]); // eslint-disable-line
+  }, [page, search, deptFilter, statusFilter, teamFilter, genderFilter]); // eslint-disable-line
 
   useEffect(() => { fetchDepts(); fetchSummary(); fetchTeams(""); }, []); // eslint-disable-line
   useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
 
-  const [genderFilter, setGenderFilter] = useState("");
-  const [activeCard,   setActiveCard]   = useState("");
+  const [activeCard, setActiveCard] = useState("");
 
   const handleSearch   = (v) => { setSearch(v);       setPage(1); };
   const handleDept     = (v) => { setDeptFilter(v);   setTeamFilter(""); fetchTeams(v); setPage(1); };
@@ -191,7 +192,8 @@ function EmployeeTable() {
     } else {
       setActiveCard(id);
       if (id === "permanent")  { setStatusFilter("Permanent"); setGenderFilter(""); }
-      else if (id === "contract") { setStatusFilter("Contract"); setGenderFilter(""); }
+      else if (id === "contract")  { setStatusFilter("Contract");  setGenderFilter(""); }
+      else if (id === "probation") { setStatusFilter("Probation"); setGenderFilter(""); }
       else if (id === "male")   { setStatusFilter(""); setGenderFilter("Male"); }
       else if (id === "female") { setStatusFilter(""); setGenderFilter("Female"); }
       else { setStatusFilter(""); setGenderFilter(""); }
@@ -202,27 +204,21 @@ function EmployeeTable() {
   const STATUS_BADGE = {
     "Permanent": "bg-green-500/15 text-green-400 border-green-500/30",
     "Contract":  "bg-amber-500/15 text-amber-400 border-amber-500/30",
+    "Probation": "bg-purple-500/15 text-purple-400 border-purple-500/30",
   };
-
-  const filteredEmployees = genderFilter
-    ? { ...data, employees: data.employees.filter(e => {
-        const g = (e.gender || "").toLowerCase();
-        return genderFilter === "Male" ? g === "male" || g === "m" || g === "laki-laki"
-             : g === "female" || g === "f" || g === "perempuan" || g === "wanita";
-      })}
-    : data;
 
   return (
     <div className="space-y-4">
       {/* Summary cards — clickable */}
       {summary && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 10 }}>
           {[
-            { id: "total",     label: "Total Employees", val: summary.total,     color: "#2563eb", icon: "👥" },
-            { id: "permanent", label: "Permanent",       val: summary.permanent, color: "#22c55e", icon: "✓" },
-            { id: "contract",  label: "Contract",        val: summary.contract,  color: "#f59e0b", icon: "📋" },
-            { id: "male",      label: "Male",            val: summary.male,      color: "#3b82f6", icon: "♂" },
-            { id: "female",    label: "Female",          val: summary.female,    color: "#ec4899", icon: "♀" },
+            { id: "total",      label: "Total Employees", val: summary.total,      color: "#2563eb", icon: "👥" },
+            { id: "permanent",  label: "Permanent",       val: summary.permanent,  color: "#22c55e", icon: "✓" },
+            { id: "contract",   label: "Contract",        val: summary.contract,   color: "#f59e0b", icon: "📋" },
+            { id: "probation",  label: "Probation",       val: summary.probation,  color: "#a855f7", icon: "⏳" },
+            { id: "male",       label: "Male",            val: summary.male,       color: "#3b82f6", icon: "♂" },
+            { id: "female",     label: "Female",          val: summary.female,     color: "#ec4899", icon: "♀" },
           ].map(({ id, label, val, color, icon }) => {
             const isActive = activeCard === id;
             return (
@@ -281,6 +277,7 @@ function EmployeeTable() {
           <option value="">All Statuses</option>
           <option value="Permanent">Permanent</option>
           <option value="Contract">Contract</option>
+          <option value="Probation">Probation</option>
         </select>
 
         <select
@@ -317,7 +314,7 @@ function EmployeeTable() {
                   <Loader size={16} className="mx-auto animate-spin text-gray-600" />
                 </td>
               </tr>
-            ) : filteredEmployees.employees.length === 0 ? (
+            ) : data.employees.length === 0 ? (
               <tr>
                 <td colSpan={8} className="py-12 text-center text-xs text-gray-600">
                   {search || deptFilter || statusFilter || genderFilter
@@ -326,7 +323,7 @@ function EmployeeTable() {
                 </td>
               </tr>
             ) : (
-              filteredEmployees.employees.map((e) => (
+              data.employees.map((e) => (
                 <tr key={e.user_id} className="hover:bg-gray-800/40 transition-colors">
                   <td className="px-3 py-2.5 font-mono text-xs text-gray-500">{e.user_id}</td>
                   <td className="px-3 py-2.5 font-medium text-gray-200 whitespace-nowrap">{e.full_name}</td>
@@ -1226,9 +1223,13 @@ const HTYPE_CFG = {
 
 const WDAY_LABELS_SUN = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
 const MONTH_NAMES_SHORT = ["JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE","JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"];
+// Colors sampled directly from the reference "2026 working calendar.pdf"
 const HTYPE_PRINT_COLOR = {
-  national: "#dc2626", collective: "#16a34a", company: "#2563eb",
+  national: "#cc1f3d", collective: "#79bb57", company: "#008dde",
 };
+const PRINT_BORDER = "#000";
+const PRINT_MONTH_HEADER_BG = "linear-gradient(180deg, #e5e7eb, #9ca3af)";
+const PRINT_DOW_HEADER_BG = "#b9e1eb";
 
 function PrintableWorkingCalendar({ year, holidays, summary }) {
   const holidayMap = {};
@@ -1263,16 +1264,19 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
             const m = rowIdx * 4 + col;
             const cells = buildMonthSun(m);
             return (
-              <table key={m} style={{ borderCollapse: "collapse", width: "100%", fontSize: 7 }}>
+              <table key={m} style={{ borderCollapse: "collapse", width: "100%", fontSize: 7, tableLayout: "fixed" }}>
                 <thead>
                   <tr>
-                    <th colSpan={7} style={{ border: "1px solid #333", background: "#dbeafe", padding: "2px 0", fontSize: 8, fontWeight: 800 }}>
+                    <th colSpan={7} style={{
+                      border: `1.5px solid ${PRINT_BORDER}`, background: PRINT_MONTH_HEADER_BG,
+                      padding: "3px 0", fontSize: 8.5, fontWeight: 800, letterSpacing: "0.03em",
+                    }}>
                       {MONTH_NAMES_SHORT[m]}
                     </th>
                   </tr>
                   <tr>
                     {WDAY_LABELS_SUN.map(w => (
-                      <th key={w} style={{ border: "1px solid #333", padding: "1px 0", fontWeight: 700, background: "#f1f5f9" }}>{w}</th>
+                      <th key={w} style={{ border: `1px solid ${PRINT_BORDER}`, padding: "2px 0", fontWeight: 800, background: PRINT_DOW_HEADER_BG }}>{w}</th>
                     ))}
                   </tr>
                 </thead>
@@ -1280,17 +1284,16 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
                   {Array.from({ length: Math.ceil(cells.length / 7) }, (_, wk) => (
                     <tr key={wk}>
                       {cells.slice(wk * 7, wk * 7 + 7).map((day, di) => {
-                        if (day === null) return <td key={di} style={{ border: "1px solid #333", padding: "1px 0" }} />;
+                        if (day === null) return <td key={di} style={{ border: `1px solid ${PRINT_BORDER}`, padding: "2px 0", background: "#fff" }} />;
                         const dt = `${year}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
                         const dow = new Date(year, m, day).getDay();
                         const isWeekend = dow === 0 || dow === 6;
                         const hol = holidayMap[dt];
                         let bg = "#fff";
-                        let color = "#000";
-                        if (hol) { bg = HTYPE_PRINT_COLOR[hol.holiday_type] || "#dc2626"; color = "#fff"; }
-                        else if (isWeekend) { bg = "#cbd5e1"; }
+                        let color = isWeekend ? "#cc1f3d" : "#000";
+                        if (hol) { bg = HTYPE_PRINT_COLOR[hol.holiday_type] || "#cc1f3d"; color = "#000"; }
                         return (
-                          <td key={di} style={{ border: "1px solid #333", padding: "1px 0", textAlign: "center", background: bg, color, fontWeight: hol ? 800 : 500 }}>
+                          <td key={di} style={{ border: `1px solid ${PRINT_BORDER}`, padding: "2px 0", textAlign: "center", background: bg, color, fontWeight: hol ? 800 : (isWeekend ? 700 : 500) }}>
                             {day}
                           </td>
                         );
@@ -1327,24 +1330,24 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
       <table style={{ borderCollapse: "collapse", fontSize: 8, marginTop: 8, width: "55%" }}>
         <tbody>
           <tr>
-            <td style={{ border: "1px solid #333", background: HTYPE_PRINT_COLOR.national, width: 16 }} />
-            <td style={{ border: "1px solid #333", padding: "2px 6px", fontWeight: 600 }}>National Holidays</td>
-            <td style={{ border: "1px solid #333", padding: "2px 10px", textAlign: "right", fontWeight: 700 }}>{summary.totals.national}</td>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, background: HTYPE_PRINT_COLOR.national, width: 18 }} />
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "2px 6px", fontWeight: 700 }}>National Holidays</td>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "2px 10px", textAlign: "right", fontWeight: 800 }}>{summary.totals.national}</td>
           </tr>
           <tr>
-            <td style={{ border: "1px solid #333", background: HTYPE_PRINT_COLOR.collective }} />
-            <td style={{ border: "1px solid #333", padding: "2px 6px", fontWeight: 600 }}>Collective Leave</td>
-            <td style={{ border: "1px solid #333", padding: "2px 10px", textAlign: "right", fontWeight: 700 }}>{summary.totals.collective}</td>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, background: HTYPE_PRINT_COLOR.collective }} />
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "2px 6px", fontWeight: 700 }}>Collective Leave</td>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "2px 10px", textAlign: "right", fontWeight: 800 }}>{summary.totals.collective}</td>
           </tr>
           <tr>
-            <td style={{ border: "1px solid #333", background: HTYPE_PRINT_COLOR.company }} />
-            <td style={{ border: "1px solid #333", padding: "2px 6px", fontWeight: 600 }}>Company Holiday</td>
-            <td style={{ border: "1px solid #333", padding: "2px 10px", textAlign: "right", fontWeight: 700 }}>{summary.totals.company}</td>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, background: HTYPE_PRINT_COLOR.company }} />
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "2px 6px", fontWeight: 700 }}>Company Holiday</td>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "2px 10px", textAlign: "right", fontWeight: 800 }}>{summary.totals.company}</td>
           </tr>
           <tr>
-            <td style={{ border: "1px solid #333", background: "#cbd5e1" }} />
-            <td style={{ border: "1px solid #333", padding: "2px 6px", fontWeight: 600 }}>Working Days</td>
-            <td style={{ border: "1px solid #333", padding: "2px 10px", textAlign: "right", fontWeight: 700 }}>{summary.totals.working_days}</td>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, background: "#fff" }} />
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "2px 6px", fontWeight: 700 }}>Working Days <span style={{ color: "#cc1f3d", fontWeight: 500 }}>(red text = weekend)</span></td>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "2px 10px", textAlign: "right", fontWeight: 800 }}>{summary.totals.working_days}</td>
           </tr>
         </tbody>
       </table>
@@ -1354,20 +1357,20 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
         <thead>
           <tr>
             {["Year", "Calendar Days", "Week End Days", "Working Days", "National Holidays", "Collective Leave", "Company Holiday", "Total Days"].map(h => (
-              <th key={h} style={{ border: "1px solid #333", padding: "3px 10px", background: "#dbeafe", fontWeight: 800 }}>{h}</th>
+              <th key={h} style={{ border: `1.5px solid ${PRINT_BORDER}`, padding: "4px 10px", background: PRINT_MONTH_HEADER_BG, fontWeight: 800 }}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center", fontWeight: 700 }}>{year}</td>
-            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center" }}>{summary.totals.calendar_days}</td>
-            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center" }}>{summary.totals.weekends}</td>
-            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center", fontWeight: 700 }}>{summary.totals.working_days}</td>
-            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center" }}>{summary.totals.national}</td>
-            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center" }}>{summary.totals.collective}</td>
-            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center" }}>{summary.totals.company}</td>
-            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center", fontWeight: 700 }}>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "3px 10px", textAlign: "center", fontWeight: 700, background: "#fff" }}>{year}</td>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "3px 10px", textAlign: "center", background: "#fff" }}>{summary.totals.calendar_days}</td>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "3px 10px", textAlign: "center", background: "#fff" }}>{summary.totals.weekends}</td>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "3px 10px", textAlign: "center", fontWeight: 700, background: "#fff" }}>{summary.totals.working_days}</td>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "3px 10px", textAlign: "center", background: "#fff" }}>{summary.totals.national}</td>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "3px 10px", textAlign: "center", background: "#fff" }}>{summary.totals.collective}</td>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "3px 10px", textAlign: "center", background: "#fff" }}>{summary.totals.company}</td>
+            <td style={{ border: `1px solid ${PRINT_BORDER}`, padding: "3px 10px", textAlign: "center", fontWeight: 700, background: "#fff" }}>
               {summary.totals.weekends + summary.totals.national + summary.totals.collective + summary.totals.company}
             </td>
           </tr>
@@ -1379,12 +1382,12 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
         <div style={{ textAlign: "center" }}>
           <p style={{ margin: 0 }}>Prepared by,</p>
           <div style={{ height: 40 }} />
-          <p style={{ margin: 0, borderTop: "1px solid #333", paddingTop: 2, fontWeight: 700 }}>HR</p>
+          <p style={{ margin: 0, borderTop: `1px solid ${PRINT_BORDER}`, paddingTop: 2, fontWeight: 700 }}>HR</p>
         </div>
         <div style={{ textAlign: "center" }}>
           <p style={{ margin: 0 }}>Approved by,</p>
           <div style={{ height: 40 }} />
-          <p style={{ margin: 0, borderTop: "1px solid #333", paddingTop: 2, fontWeight: 700 }}>Administration GM</p>
+          <p style={{ margin: 0, borderTop: `1px solid ${PRINT_BORDER}`, paddingTop: 2, fontWeight: 700 }}>Administration GM</p>
         </div>
       </div>
     </div>
