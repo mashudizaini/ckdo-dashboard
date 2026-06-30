@@ -1265,63 +1265,68 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
         }}>
           {[0, 1, 2, 3].map(col => {
             const m = rowIdx * 4 + col;
-            // Always render 6 week-rows so every month table has equal height
+            // Always render 6 week-rows so every month block has equal height
             const cells = buildMonthSun(m);
             while (cells.length < 42) cells.push(null);
             return (
-              <table key={m} style={{
-                borderCollapse: "collapse", width: "100%", fontSize: 8.5, tableLayout: "fixed",
-                WebkitPrintColorAdjust: "exact", printColorAdjust: "exact", boxSizing: "border-box",
+              <div key={m} style={{
+                border: `1.5px solid ${PRINT_BORDER}`, boxSizing: "border-box",
+                WebkitPrintColorAdjust: "exact", printColorAdjust: "exact",
               }}>
-                <colgroup>
-                  {WDAY_LABELS_SUN.map(w => <col key={w} style={{ width: "14.2857%" }} />)}
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th colSpan={7} style={{
-                      border: `1.5px solid ${PRINT_BORDER}`, background: PRINT_MONTH_HEADER_BG,
-                      padding: "4px 0", fontSize: 9.5, fontWeight: 800, letterSpacing: "0.04em",
-                      boxSizing: "border-box",
-                    }}>
-                      {MONTH_NAMES_SHORT[m]}
-                    </th>
-                  </tr>
-                  <tr>
-                    {WDAY_LABELS_SUN.map(w => (
-                      <th key={w} style={{
-                        border: `1px solid ${PRINT_BORDER}`, padding: "2px 0 2px 2px", fontWeight: 800,
-                        background: PRINT_DOW_HEADER_BG, fontSize: 7, whiteSpace: "nowrap",
-                        overflow: "hidden", textAlign: "left", boxSizing: "border-box",
-                      }}>{w}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {Array.from({ length: Math.ceil(cells.length / 7) }, (_, wk) => (
-                    <tr key={wk}>
-                      {cells.slice(wk * 7, wk * 7 + 7).map((day, di) => {
-                        if (day === null) return <td key={di} style={{ border: `1px solid ${PRINT_BORDER}`, padding: "1px 0", background: "#fff", boxSizing: "border-box" }} />;
-                        const dt = `${year}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-                        const dow = new Date(year, m, day).getDay();
-                        const isWeekend = dow === 0 || dow === 6;
-                        const hol = holidayMap[dt];
-                        let bg = "#fff";
-                        let color = isWeekend ? "#cc1f3d" : "#000";
-                        if (hol) { bg = HTYPE_PRINT_COLOR[hol.holiday_type] || "#cc1f3d"; color = "#000"; }
-                        return (
-                          <td key={di} style={{
-                            border: `1px solid ${PRINT_BORDER}`, padding: "1px 0", textAlign: "center",
-                            background: bg, color, fontWeight: hol ? 800 : (isWeekend ? 700 : 500),
-                            WebkitPrintColorAdjust: "exact", printColorAdjust: "exact", boxSizing: "border-box",
-                          }}>
-                            {day}
-                          </td>
-                        );
-                      })}
-                    </tr>
+                {/* Month title bar */}
+                <div style={{
+                  background: PRINT_MONTH_HEADER_BG, textAlign: "center", padding: "4px 0",
+                  fontSize: 9.5, fontWeight: 800, letterSpacing: "0.04em",
+                  borderBottom: `1.5px solid ${PRINT_BORDER}`, boxSizing: "border-box",
+                }}>
+                  {MONTH_NAMES_SHORT[m]}
+                </div>
+
+                {/* Day-of-week header row */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)" }}>
+                  {WDAY_LABELS_SUN.map((w, i) => (
+                    <div key={w} style={{
+                      background: PRINT_DOW_HEADER_BG, fontWeight: 800, fontSize: 7,
+                      padding: "2px 0 2px 3px", textAlign: "left", boxSizing: "border-box",
+                      borderRight: i < 6 ? `1px solid ${PRINT_BORDER}` : "none",
+                      borderBottom: `1px solid ${PRINT_BORDER}`,
+                    }}>{w}</div>
                   ))}
-                </tbody>
-              </table>
+                </div>
+
+                {/* Date grid */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)" }}>
+                  {cells.map((day, idx) => {
+                    const colIdx = idx % 7;
+                    const rowIdx2 = Math.floor(idx / 7);
+                    const isLastRow = rowIdx2 === 5;
+                    const baseBorder = {
+                      borderRight: colIdx < 6 ? `1px solid ${PRINT_BORDER}` : "none",
+                      borderBottom: isLastRow ? "none" : `1px solid ${PRINT_BORDER}`,
+                      boxSizing: "border-box",
+                    };
+                    if (day === null) {
+                      return <div key={idx} style={{ ...baseBorder, background: "#fff", padding: "1px 0" }} />;
+                    }
+                    const dt = `${year}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                    const dow = new Date(year, m, day).getDay();
+                    const isWeekend = dow === 0 || dow === 6;
+                    const hol = holidayMap[dt];
+                    let bg = "#fff";
+                    let color = isWeekend ? "#cc1f3d" : "#000";
+                    if (hol) { bg = HTYPE_PRINT_COLOR[hol.holiday_type] || "#cc1f3d"; color = "#000"; }
+                    return (
+                      <div key={idx} style={{
+                        ...baseBorder, padding: "1px 0", textAlign: "center", fontSize: 8.5,
+                        background: bg, color, fontWeight: hol ? 800 : (isWeekend ? 700 : 500),
+                        WebkitPrintColorAdjust: "exact", printColorAdjust: "exact",
+                      }}>
+                        {day}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             );
           })}
 
