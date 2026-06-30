@@ -119,7 +119,7 @@ services:
   # POSTGRESQL — Database
   # ─────────────────────────────────────────
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     container_name: ckdo_postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER}

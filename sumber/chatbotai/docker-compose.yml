@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  pgvector-db:
+    image: pgvector/pgvector:pg16
+    container_name: rag_pgvector
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rag_user
+      POSTGRES_PASSWORD: rag_password_ganti_ini
+      POSTGRES_DB: rag_db
+    ports:
+      - "5433:5432"   # pakai port 5433 di host biar tidak bentrok kalau sudah ada postgres lain
+    volumes:
+      - pgvector_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+
+volumes:
+  pgvector_data:

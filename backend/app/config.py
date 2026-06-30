@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # Anthropic
     anthropic_api_key: str = ""
 
+    # Voyage AI (embeddings for RAG chatbot)
+    voyage_api_key: str = ""
+
     class Config:
         env_file = ".env"
         case_sensitive = False

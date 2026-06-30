@@ -48,6 +48,10 @@ async def lifespan(app: FastAPI):
     from app.routers.dashboard.ap_invoice import ensure_staging_table
     ensure_staging_table()
 
+    # Create RAG chatbot schema (pgvector extension + company_documents table)
+    from app.services import rag_service
+    rag_service.ensure_schema()
+
     yield
 
     logger.info("Shutting down CKDO Dashboard API")
