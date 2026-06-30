@@ -291,3 +291,57 @@ async def get_leave_organizations(
     )
     result = await db.execute(stmt)
     return [r[0] for r in result.all()]
+
+
+ANNUAL_LEAVE_QUOTA = 12
+
+
+@router.get("/employee/{employee_id}/detail")
+async def get_employee_leave_detail(
+    employee_id: str,
+    year: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    from app.models.employee import Employee
+
+    emp_result = await db.execute(select(Employee).where(Employee.user_id == employee_id))
+    emp = emp_result.scalars().first()
+
+    yr = year or datetime.utcnow().year
+
+    from sqlalchemy import extract
+    al_count_result = await db.execute(
+        select(func.count()).select_from(LeaveRecord).where(
+            LeaveRecord.employee_id == employee_id,
+            LeaveRecord.leave_code.in_(["AL", "ALAB"]),
+            extract("year", LeaveRecord.leave_date) == yr,
+        )
+    )
+    al_taken = al_count_result.scalar() or 0
+
+    history_result = await db.execute(
+        select(LeaveRecord)
+        .where(LeaveRecord.employee_id == employee_id)
+        .order_by(LeaveRecord.leave_date.desc())
+        .limit(20)
+    )
+    history = history_result.scalars().all()
+
+    return {
+        "employee": {
+            "id": employee_id,
+            "name": emp.full_name if emp else None,
+            "job_title": emp.job_title if emp else None,
+            "department": emp.department if emp else None,
+            "date_of_joining": emp.date_of_joining.isoformat() if emp and emp.date_of_joining else None,
+        },
+        "annual_leave_amount": ANNUAL_LEAVE_QUOTA,
+        "annual_leave_taken": al_taken,
+        "annual_leave_remaining": max(ANNUAL_LEAVE_QUOTA - al_taken, 0),
+        "year": yr,
+        "history": [
+            {"leave_date": h.leave_date.isoformat(), "leave_code": h.leave_code, "leave_type": h.leave_type}
+            for h in history
+        ],
+    }

@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Print: Working Calendar ───────────────────────────────────── */
+#working-calendar-print { display: none; }
+@media print {
+  body * { visibility: hidden; }
+  #working-calendar-print, #working-calendar-print * { visibility: visible; }
+  #working-calendar-print {
+    display: block !important;
+    position: absolute; top: 0; left: 0; width: 100%;
+  }
+  @page { size: A4 landscape; margin: 10mm; }
+}
+
 @layer base {
   html {
     background-color: var(--bg-main, #e8edf5);

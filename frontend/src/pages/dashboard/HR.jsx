@@ -1224,6 +1224,173 @@ const HTYPE_CFG = {
   company:    { label: "Company Holiday",    color: "#2563eb", bg: "#dbeafe" },
 };
 
+const WDAY_LABELS_SUN = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
+const MONTH_NAMES_SHORT = ["JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE","JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"];
+const HTYPE_PRINT_COLOR = {
+  national: "#dc2626", collective: "#16a34a", company: "#2563eb",
+};
+
+function PrintableWorkingCalendar({ year, holidays, summary }) {
+  const holidayMap = {};
+  holidays.forEach(h => { holidayMap[h.holiday_date] = h; });
+
+  const buildMonthSun = (m) => {
+    const daysInMonth = new Date(year, m + 1, 0).getDate();
+    const startDay = new Date(year, m, 1).getDay(); // 0=Sun
+    const cells = [];
+    for (let i = 0; i < startDay; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+    return cells;
+  };
+
+  const holidaysByMonth = Array.from({ length: 12 }, (_, m) =>
+    holidays
+      .filter(h => new Date(h.holiday_date + "T00:00:00").getMonth() === m)
+      .sort((a, b) => a.holiday_date.localeCompare(b.holiday_date))
+  );
+
+  return (
+    <div id="working-calendar-print" style={{ fontFamily: "Arial, sans-serif", color: "#000", padding: 10 }}>
+      <div style={{ textAlign: "center", marginBottom: 10 }}>
+        <h1 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>PT CKD OTTO PHARMACEUTICALS</h1>
+        <h2 style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>YEAR {year} WORKING CALENDAR</h2>
+      </div>
+
+      {/* 3 rows x 4 months, with holiday list to the right of each row */}
+      {[0, 1, 2].map(rowIdx => (
+        <div key={rowIdx} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1.3fr", gap: 6, marginBottom: 6 }}>
+          {[0, 1, 2, 3].map(col => {
+            const m = rowIdx * 4 + col;
+            const cells = buildMonthSun(m);
+            return (
+              <table key={m} style={{ borderCollapse: "collapse", width: "100%", fontSize: 7 }}>
+                <thead>
+                  <tr>
+                    <th colSpan={7} style={{ border: "1px solid #333", background: "#dbeafe", padding: "2px 0", fontSize: 8, fontWeight: 800 }}>
+                      {MONTH_NAMES_SHORT[m]}
+                    </th>
+                  </tr>
+                  <tr>
+                    {WDAY_LABELS_SUN.map(w => (
+                      <th key={w} style={{ border: "1px solid #333", padding: "1px 0", fontWeight: 700, background: "#f1f5f9" }}>{w}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: Math.ceil(cells.length / 7) }, (_, wk) => (
+                    <tr key={wk}>
+                      {cells.slice(wk * 7, wk * 7 + 7).map((day, di) => {
+                        if (day === null) return <td key={di} style={{ border: "1px solid #333", padding: "1px 0" }} />;
+                        const dt = `${year}-${String(m + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                        const dow = new Date(year, m, day).getDay();
+                        const isWeekend = dow === 0 || dow === 6;
+                        const hol = holidayMap[dt];
+                        let bg = "#fff";
+                        let color = "#000";
+                        if (hol) { bg = HTYPE_PRINT_COLOR[hol.holiday_type] || "#dc2626"; color = "#fff"; }
+                        else if (isWeekend) { bg = "#cbd5e1"; }
+                        return (
+                          <td key={di} style={{ border: "1px solid #333", padding: "1px 0", textAlign: "center", background: bg, color, fontWeight: hol ? 800 : 500 }}>
+                            {day}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            );
+          })}
+
+          {/* Holiday list for this row's months */}
+          <div style={{ fontSize: 7 }}>
+            {[0, 1, 2, 3].map(col => {
+              const m = rowIdx * 4 + col;
+              const list = holidaysByMonth[m];
+              if (!list.length) return null;
+              return (
+                <div key={m} style={{ marginBottom: 4 }}>
+                  <p style={{ fontWeight: 800, margin: 0, fontSize: 7.5 }}>{MONTH_NAMES[m]}</p>
+                  {list.map(h => (
+                    <p key={h.id} style={{ margin: 0, paddingLeft: 4 }}>
+                      {new Date(h.holiday_date + "T00:00:00").getDate()} : {h.name}
+                    </p>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+
+      {/* Legend */}
+      <table style={{ borderCollapse: "collapse", fontSize: 8, marginTop: 8, width: "55%" }}>
+        <tbody>
+          <tr>
+            <td style={{ border: "1px solid #333", background: HTYPE_PRINT_COLOR.national, width: 16 }} />
+            <td style={{ border: "1px solid #333", padding: "2px 6px", fontWeight: 600 }}>National Holidays</td>
+            <td style={{ border: "1px solid #333", padding: "2px 10px", textAlign: "right", fontWeight: 700 }}>{summary.totals.national}</td>
+          </tr>
+          <tr>
+            <td style={{ border: "1px solid #333", background: HTYPE_PRINT_COLOR.collective }} />
+            <td style={{ border: "1px solid #333", padding: "2px 6px", fontWeight: 600 }}>Collective Leave</td>
+            <td style={{ border: "1px solid #333", padding: "2px 10px", textAlign: "right", fontWeight: 700 }}>{summary.totals.collective}</td>
+          </tr>
+          <tr>
+            <td style={{ border: "1px solid #333", background: HTYPE_PRINT_COLOR.company }} />
+            <td style={{ border: "1px solid #333", padding: "2px 6px", fontWeight: 600 }}>Company Holiday</td>
+            <td style={{ border: "1px solid #333", padding: "2px 10px", textAlign: "right", fontWeight: 700 }}>{summary.totals.company}</td>
+          </tr>
+          <tr>
+            <td style={{ border: "1px solid #333", background: "#cbd5e1" }} />
+            <td style={{ border: "1px solid #333", padding: "2px 6px", fontWeight: 600 }}>Working Days</td>
+            <td style={{ border: "1px solid #333", padding: "2px 10px", textAlign: "right", fontWeight: 700 }}>{summary.totals.working_days}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* Summary table */}
+      <table style={{ borderCollapse: "collapse", fontSize: 8, marginTop: 8 }}>
+        <thead>
+          <tr>
+            {["Year", "Calendar Days", "Week End Days", "Working Days", "National Holidays", "Collective Leave", "Company Holiday", "Total Days"].map(h => (
+              <th key={h} style={{ border: "1px solid #333", padding: "3px 10px", background: "#dbeafe", fontWeight: 800 }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center", fontWeight: 700 }}>{year}</td>
+            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center" }}>{summary.totals.calendar_days}</td>
+            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center" }}>{summary.totals.weekends}</td>
+            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center", fontWeight: 700 }}>{summary.totals.working_days}</td>
+            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center" }}>{summary.totals.national}</td>
+            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center" }}>{summary.totals.collective}</td>
+            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center" }}>{summary.totals.company}</td>
+            <td style={{ border: "1px solid #333", padding: "3px 10px", textAlign: "center", fontWeight: 700 }}>
+              {summary.totals.weekends + summary.totals.national + summary.totals.collective + summary.totals.company}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* Signature block */}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 60, marginTop: 30, fontSize: 9 }}>
+        <div style={{ textAlign: "center" }}>
+          <p style={{ margin: 0 }}>Prepared by,</p>
+          <div style={{ height: 40 }} />
+          <p style={{ margin: 0, borderTop: "1px solid #333", paddingTop: 2, fontWeight: 700 }}>HR</p>
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <p style={{ margin: 0 }}>Approved by,</p>
+          <div style={{ height: 40 }} />
+          <p style={{ margin: 0, borderTop: "1px solid #333", paddingTop: 2, fontWeight: 700 }}>Administration GM</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WorkingCalendarPanel() {
   const curYear = new Date().getFullYear();
   const [year, setYear] = useState(curYear);
@@ -1296,8 +1463,14 @@ function WorkingCalendarPanel() {
             style={{ fontSize: 12, fontWeight: 700, padding: "6px 14px", borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff" }}>
             + Add Holiday
           </button>
+          <button onClick={() => window.print()} disabled={!summary}
+            style={{ fontSize: 12, fontWeight: 700, padding: "6px 14px", borderRadius: 8, border: "none", background: "#059669", color: "#fff", cursor: summary ? "pointer" : "not-allowed", opacity: summary ? 1 : 0.5, boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff" }}>
+            🖨 Print Calendar
+          </button>
         </div>
       </div>
+
+      {summary && <PrintableWorkingCalendar year={year} holidays={holidays} summary={summary} />}
 
       {/* Add form */}
       {showForm && (
@@ -1822,6 +1995,65 @@ const LEAVE_CODES = [
   { code: "BT",   label: "Business Trip",      color: "#06b6d4" },
 ];
 
+function EmployeeLeaveDataCard({ employee }) {
+  if (!employee) {
+    return (
+      <div style={{
+        ...NEU_CARD, display: "flex", alignItems: "center", justifyContent: "center",
+        minHeight: 260,
+      }}>
+        <p style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500, textAlign: "center", padding: "0 20px" }}>
+          Click a row in the table to view employee leave data
+        </p>
+      </div>
+    );
+  }
+
+  const fmtDate = (iso) => {
+    if (!iso) return "—";
+    try { return new Date(iso + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" }); }
+    catch (_) { return iso; }
+  };
+
+  const rows = [
+    ["Name", employee.employee.name || employee.employee.id],
+    ["ID", employee.employee.id],
+    ["Job Title", employee.employee.job_title || "—"],
+    ["Department", employee.employee.department || "—"],
+    ["Join Date", fmtDate(employee.employee.date_of_joining)],
+    ["Annual Leave Amount", `${employee.annual_leave_amount} days`],
+    ["Annual Leave Remaining", `${employee.annual_leave_remaining} days`],
+  ];
+
+  return (
+    <div style={NEU_CARD}>
+      <div style={{
+        borderRadius: 12, overflow: "hidden",
+        border: "2px solid #3b82f6",
+      }}>
+        <div style={{
+          background: "linear-gradient(135deg, #2563eb, #3b82f6)",
+          padding: "10px 14px",
+        }}>
+          <h4 style={{ fontSize: 13, fontWeight: 800, color: "#fff" }}>Employee Data</h4>
+        </div>
+        <div style={{ background: "#fff" }}>
+          {rows.map(([label, val], i) => (
+            <div key={label} style={{
+              display: "grid", gridTemplateColumns: "150px 1fr",
+              padding: "7px 14px", background: i % 2 === 0 ? "#eff6ff" : "#fff",
+              borderBottom: i < rows.length - 1 ? "1px solid #dbeafe" : "none",
+            }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>{label}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>: {val}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LeaveDataSection() {
   const { token } = useAuthStore();
   const [data, setData] = useState({ data: [], total: 0, pages: 1 });
@@ -1829,6 +2061,7 @@ function LeaveDataSection() {
   const [orgs, setOrgs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
+  const [selectedEmp, setSelectedEmp] = useState(null);
   const [filters, setFilters] = useState({
     year: new Date().getFullYear(),
     month: new Date().getMonth() + 1,
@@ -1871,6 +2104,13 @@ function LeaveDataSection() {
 
   const handleFilter = (k, v) => { setFilters(p => ({ ...p, [k]: v })); setPage(1); };
 
+  const handleRowClick = async (r) => {
+    try {
+      const detail = await hrApi.getLeaveEmployeeDetail(r.employee_id, filters.year);
+      setSelectedEmp(detail);
+    } catch (_) {}
+  };
+
   const codeBadge = (code) => {
     const c = LEAVE_CODES.find(l => l.code === code);
     return (
@@ -1888,12 +2128,20 @@ function LeaveDataSection() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Top: Chart + Summary side by side */}
-      {summary && summary.by_code?.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          {/* Donut-style bar chart */}
+      {/* Top: Employee Data (left) + Leave Distribution (right) */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        {/* Employee Data — appears when a row is clicked */}
+        <EmployeeLeaveDataCard employee={selectedEmp} />
+
+        {/* Leave Distribution chart with total */}
+        {summary && summary.by_code?.length > 0 ? (
           <div style={NEU_CARD}>
-            <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 14 }}>Leave Distribution</h4>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 }}>
+              <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>Leave Distribution</h4>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#64748b" }}>
+                Total: <span style={{ fontSize: 16, fontWeight: 800, color: "#2563eb" }}>{summary.total}</span> days
+              </span>
+            </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {summary.by_code.map(c => {
                 const cfg = LEAVE_CODES.find(l => l.code === c.code);
@@ -1920,42 +2168,12 @@ function LeaveDataSection() {
               })}
             </div>
           </div>
-
-          {/* Summary cards */}
-          <div style={NEU_CARD}>
-            <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 14 }}>Summary</h4>
-            <div style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              padding: "16px 0", marginBottom: 14, borderRadius: 14,
-              background: "linear-gradient(135deg, #2563eb, #3b82f6)",
-              boxShadow: "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff",
-            }}>
-              <div style={{ textAlign: "center" }}>
-                <p style={{ fontSize: 32, fontWeight: 800, color: "#fff" }}>{summary.total}</p>
-                <p style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.8)" }}>Total Leave Days</p>
-              </div>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              {summary.by_code.slice(0, 6).map(c => {
-                const cfg = LEAVE_CODES.find(l => l.code === c.code);
-                return (
-                  <div key={c.code} style={{
-                    padding: "10px 12px", borderRadius: 12,
-                    background: "#e8edf5", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff",
-                    display: "flex", alignItems: "center", gap: 8,
-                  }}>
-                    <div style={{ width: 8, height: 28, borderRadius: 4, background: cfg?.color || "#94a3b8" }} />
-                    <div>
-                      <p style={{ fontSize: 16, fontWeight: 800, color: "#1e293b" }}>{c.count}</p>
-                      <p style={{ fontSize: 10, fontWeight: 600, color: "#64748b" }}>{c.code}</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+        ) : (
+          <div style={{ ...NEU_CARD, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 260 }}>
+            <p style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>No leave data for this period</p>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2 items-end">
@@ -2016,7 +2234,8 @@ function LeaveDataSection() {
                 No leave data. Upload Talenta Excel in the Leave Upload tab.
               </td></tr>
             ) : data.data.map((r, i) => (
-              <tr key={i} className="hover:bg-gray-800/40 transition-colors">
+              <tr key={i} onClick={() => handleRowClick(r)}
+                className="hover:bg-gray-800/40 transition-colors" style={{ cursor: "pointer" }}>
                 <td className="px-3 py-2 text-xs font-mono text-gray-500">{r.employee_id}</td>
                 <td className="px-3 py-2 text-sm font-medium text-gray-200 whitespace-nowrap">{r.employee_name}</td>
                 <td className="px-3 py-2 text-xs text-gray-400">{r.organization || "—"}</td>
