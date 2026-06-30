@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Users, UserCheck, Umbrella, BarChart2, RefreshCw,
   Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck,
-  Wallet, Download, ChevronDown,
+  Wallet, Download, ChevronDown, ListChecks,
 } from "lucide-react";
 import EmployeeUpload from "./EmployeeUpload";
 import AttendanceUpload from "./AttendanceUpload";
 import LeaveUpload from "./LeaveUpload";
+import HRTodoList from "./HRTodoList";
 import { useAuthStore } from "@/store/authStore";
 import { hrApi } from "@/api/dashboard";
 
@@ -50,13 +51,14 @@ export default function HRDashboard() {
     { id: "employees",  icon: Users,         color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Employee Data" },
     { id: "leave",      icon: Umbrella,      color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Leave" },
     { id: "attendance", icon: BarChart2,     color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40", label: "Attendance Rate" },
+    { id: "todo",       icon: ListChecks,    color: "text-rose-400",   bg: "bg-rose-500/10",   activeBorder: "border-rose-500/40",   label: "To Do List" },
     { id: "budget",     icon: Wallet,        color: "text-orange-400", bg: "bg-orange-500/10", activeBorder: "border-orange-500/40", label: "Budget Monitoring" },
   ];
 
   return (
     <div className="p-6 space-y-4">
       {/* Tab Buttons — 5 tabs */}
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 xl:grid-cols-5 gap-2">
         {kpiCards.map((c) => (
           <button
             key={c.id}
@@ -105,6 +107,12 @@ export default function HRDashboard() {
       {activeSection === "attendance" && (
         <SectionCard title="Attendance Rate">
           <AttendanceRateSection />
+        </SectionCard>
+      )}
+
+      {activeSection === "todo" && (
+        <SectionCard title="HRGA To Do List">
+          <HRTodoList />
         </SectionCard>
       )}
 

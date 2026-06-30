@@ -41,6 +41,11 @@ export const hrApi = {
   addCalendarHoliday:  (d) => api.post("/dashboard/hr/calendar/holidays", d),
   deleteCalendarHoliday: (id) => api.delete(`/dashboard/hr/calendar/holidays/${id}`),
   getCalendarSummary:  (y) => api.get("/dashboard/hr/calendar/summary", { params: { year: y } }),
+  getTodoTasks:    (p)     => api.get("/dashboard/hr/todo/tasks", { params: p }),
+  getTodoSummary:  ()      => api.get("/dashboard/hr/todo/summary"),
+  createTodoTask:  (d)     => api.post("/dashboard/hr/todo/tasks", d),
+  updateTodoTask:  (id, d) => api.put(`/dashboard/hr/todo/tasks/${id}`, d),
+  deleteTodoTask:  (id)    => api.delete(`/dashboard/hr/todo/tasks/${id}`),
 };
 
 export const pacApi = {
