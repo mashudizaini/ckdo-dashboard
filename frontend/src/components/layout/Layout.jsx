@@ -1,6 +1,5 @@
 import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
-import ChatWidget from "./ChatWidget";
 
 export default function Layout() {
   return (
@@ -12,7 +11,6 @@ export default function Layout() {
       <main className="flex-1 overflow-y-auto">
         <Outlet />
       </main>
-      <ChatWidget />
     </div>
   );
 }

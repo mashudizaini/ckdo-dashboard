@@ -24,11 +24,6 @@ services:
         condition: service_healthy
     networks:
       - ckdo_net
-    extra_hosts:
-      - "oauth2.googleapis.com:142.250.4.95"
-      - "accounts.google.com:74.125.200.84"
-      - "openidconnect.googleapis.com:216.239.34.223"
-      - "www.googleapis.com:74.125.68.95"
     restart: unless-stopped
 
   # ─────────────────────────────────────────
@@ -124,7 +119,7 @@ services:
   # POSTGRESQL — Database
   # ─────────────────────────────────────────
   postgres:
-    image: pgvector/pgvector:pg15
+    image: postgres:15-alpine
     container_name: ckdo_postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
