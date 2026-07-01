@@ -11,6 +11,7 @@ Endpoints:
   DELETE /documents           — Delete a document by source+title
   GET    /status               — Whether RAG (Voyage AI) is configured
 """
+import asyncio
 import os
 from datetime import datetime
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -110,11 +111,18 @@ async def ingest_document(
         raise HTTPException(400, "Tidak ada teks untuk di-ingest (isi text atau upload file)")
 
     try:
-        ids = rag_service.ingest_text(source.strip(), title.strip(), content, user.username, department)
+        ids = await asyncio.wait_for(
+            asyncio.to_thread(
+                rag_service.ingest_text, source.strip(), title.strip(), content, user.username, department
+            ),
+            timeout=40.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Timeout: Voyage AI tidak merespons dalam 40 detik. Periksa koneksi server ke api.voyageai.com")
     except Exception as e:
         raise HTTPException(500, f"Gagal ingest dokumen: {str(e)}")
 
-    return {"message": f"Tersimpan {len(ids)} chunk", "chunk_ids": ids}
+    return {"message": f"Berhasil menyimpan {len(ids)} chunk dari dokumen '{title}'", "chunk_ids": ids}
 
 
 @router.delete("/documents")

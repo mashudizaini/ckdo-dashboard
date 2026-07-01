@@ -34,13 +34,21 @@ function KnowledgeBasePanel({ onClose }) {
   const [departments, setDepartments] = useState(["General", "HR", "Accounting", "PAC", "Purchasing", "IT"]);
   const [loading, setLoading] = useState(false);
   const [ragConfigured, setRagConfigured] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
   const [form, setForm] = useState({ source: "", title: "", text: "", department: "General" });
   const [file, setFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
   const fileRef = useRef(null);
+  const msgTimerRef = useRef(null);
 
   const headers = { Authorization: `Bearer ${token}` };
+
+  const showMsg = (type, text) => {
+    setMsg({ type, text });
+    if (msgTimerRef.current) clearTimeout(msgTimerRef.current);
+    if (type === "success") msgTimerRef.current = setTimeout(() => setMsg(null), 6000);
+  };
 
   const fetchStatus = async () => {
     try {
@@ -54,18 +62,31 @@ function KnowledgeBasePanel({ onClose }) {
 
   const fetchDocs = async () => {
     setLoading(true);
+    setFetchError(null);
     try {
       const res = await fetch("/api/v1/ai/chatbot/documents", { headers });
       if (res.status === 400) { setRagConfigured(false); setDocs([]); return; }
-      if (res.ok) { setRagConfigured(true); setDocs(await res.json()); }
-    } catch (_) {}
-    finally { setLoading(false); }
+      if (res.ok) {
+        setRagConfigured(true);
+        setDocs(await res.json());
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setFetchError(err.detail || `Error ${res.status} memuat daftar dokumen`);
+      }
+    } catch (e) {
+      setFetchError(`Gagal memuat daftar: ${e.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { fetchStatus(); fetchDocs(); }, []); // eslint-disable-line
 
   const handleSubmit = async () => {
-    if (!form.source.trim() || !form.title.trim() || (!form.text.trim() && !file)) return;
+    if (!form.source.trim() || !form.title.trim() || (!form.text.trim() && !file)) {
+      showMsg("error", "Isi Source, Title, dan Content/File terlebih dahulu");
+      return;
+    }
     setSaving(true);
     setMsg(null);
     try {
@@ -77,52 +98,50 @@ function KnowledgeBasePanel({ onClose }) {
       if (file) fd.append("file", file);
       const res = await fetch("/api/v1/ai/chatbot/documents", { method: "POST", headers, body: fd });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Upload failed");
-      setMsg({ type: "success", text: data.message });
+      if (!res.ok) throw new Error(data.detail || "Upload gagal");
+      showMsg("success", `✓ ${data.message}`);
       setForm({ source: "", title: "", text: "", department: form.department });
       setFile(null);
       if (fileRef.current) fileRef.current.value = "";
       fetchDocs();
     } catch (e) {
-      setMsg({ type: "error", text: e.message });
+      showMsg("error", e.message);
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async (source, title) => {
-    if (!confirm(`Delete document "${title}"?`)) return;
+    if (!confirm(`Hapus dokumen "${title}"?`)) return;
     try {
       const params = new URLSearchParams({ source, title });
-      await fetch(`/api/v1/ai/chatbot/documents?${params}`, { method: "DELETE", headers });
-      fetchDocs();
-    } catch (_) {}
+      const res = await fetch(`/api/v1/ai/chatbot/documents?${params}`, { method: "DELETE", headers });
+      if (res.ok) { showMsg("success", `Dokumen "${title}" dihapus`); fetchDocs(); }
+    } catch (e) { showMsg("error", `Gagal hapus: ${e.message}`); }
   };
 
+  const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "-";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
-      <div className="rounded-xl border border-gray-800 bg-gray-900 w-full max-w-2xl max-h-[85vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800 sticky top-0 bg-gray-900">
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)" }}>
+      <div className="rounded-xl border border-gray-800 bg-gray-900 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800 sticky top-0 bg-gray-900 z-10">
           <h3 className="text-sm font-semibold text-gray-200 flex items-center gap-2">
             <BookOpen size={16} className="text-blue-400" /> Knowledge Base
           </h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300"><X size={16} /></button>
         </div>
 
-        <div className="p-5 space-y-4">
+        <div className="p-5 space-y-5">
           {!ragConfigured ? (
             <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-4 py-3 text-sm text-amber-400">
               RAG belum aktif: <code>VOYAGE_API_KEY</code> belum diset di environment backend.
-              Chatbot tetap berfungsi sebagai chat umum tanpa konteks dokumen perusahaan.
             </div>
           ) : (
             <>
-              <p className="text-xs text-gray-500">
-                Dokumen yang ditambahkan di sini akan dipakai chatbot untuk menjawab pertanyaan terkait perusahaan (SOP, prosedur, knowledge base helpdesk, dll).
-                Pilih <strong>Department</strong> dengan benar — chatbot hanya akan menampilkan dokumen sesuai departemen user yang bertanya (IT/Admin bisa lihat semua).
-              </p>
-
-              <div className="rounded-lg border border-gray-800 bg-gray-800/40 p-4 space-y-3">
+              {/* Upload Form */}
+              <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-4 space-y-3">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Tambah Dokumen Baru</p>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="text-xs text-gray-500 mb-1 block">Source / Category</label>
@@ -143,42 +162,71 @@ function KnowledgeBasePanel({ onClose }) {
                   </div>
                 </div>
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Content (paste text, or upload a file below)</label>
-                  <textarea value={form.text} onChange={e => setForm(p => ({ ...p, text: e.target.value }))} rows={4}
+                  <label className="text-xs text-gray-500 mb-1 block">Content (paste teks atau upload file)</label>
+                  <textarea value={form.text} onChange={e => setForm(p => ({ ...p, text: e.target.value }))} rows={3}
                     placeholder="Paste dokumen di sini..." className="w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 resize-vertical" />
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                   <input ref={fileRef} type="file" accept=".pdf,.docx,.doc,.txt" onChange={e => setFile(e.target.files?.[0] || null)}
-                    className="text-xs text-gray-400" />
+                    className="text-xs text-gray-400 flex-1" />
                   <button onClick={handleSubmit} disabled={saving}
-                    className="ml-auto flex items-center gap-1.5 rounded-md bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-3 py-1.5 text-xs font-semibold text-white">
+                    className="flex items-center gap-1.5 rounded-md bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white shrink-0">
                     {saving ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                    {saving ? "Ingesting..." : "Add Document"}
+                    {saving ? "Memproses... (maks 40 detik)" : "Upload & Simpan"}
                   </button>
                 </div>
                 {msg && (
-                  <p className={`text-xs ${msg.type === "error" ? "text-red-400" : "text-green-400"}`}>{msg.text}</p>
+                  <div className={`rounded-md px-3 py-2 text-xs font-medium ${msg.type === "error" ? "bg-red-500/10 border border-red-500/30 text-red-400" : "bg-green-500/10 border border-green-500/30 text-green-400"}`}>
+                    {msg.text}
+                  </div>
                 )}
               </div>
 
+              {/* Document History */}
               <div>
-                <h4 className="text-xs font-semibold text-gray-400 mb-2">Documents ({docs.length})</h4>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                    Riwayat Dokumen ({docs.length})
+                  </h4>
+                  <button onClick={fetchDocs} disabled={loading}
+                    className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 disabled:opacity-50">
+                    <Loader2 size={11} className={loading ? "animate-spin" : ""} /> Refresh
+                  </button>
+                </div>
+
+                {fetchError && (
+                  <div className="rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-400 mb-3">
+                    {fetchError}
+                  </div>
+                )}
+
                 {loading ? (
-                  <div className="flex justify-center py-6"><Loader2 size={16} className="animate-spin text-gray-600" /></div>
+                  <div className="flex justify-center py-8"><Loader2 size={18} className="animate-spin text-gray-600" /></div>
                 ) : docs.length === 0 ? (
-                  <p className="text-xs text-gray-600 py-4 text-center">No documents yet.</p>
+                  <div className="rounded-lg border border-dashed border-gray-700 py-10 text-center">
+                    <BookOpen size={28} className="mx-auto text-gray-700 mb-2" />
+                    <p className="text-xs text-gray-600">Belum ada dokumen.</p>
+                    <p className="text-xs text-gray-700 mt-1">Upload dokumen pertama menggunakan form di atas.</p>
+                  </div>
                 ) : (
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     {docs.map((d, i) => (
-                      <div key={i} className="flex items-center justify-between rounded-lg bg-gray-800/50 border border-gray-700 px-3 py-2">
-                        <div className="min-w-0 flex items-center gap-2">
+                      <div key={i} className="flex items-center justify-between rounded-lg bg-gray-800/50 border border-gray-700 px-3 py-2.5 hover:border-gray-600 transition-colors">
+                        <div className="min-w-0 flex items-start gap-2 flex-1">
                           <DeptBadge department={d.department} />
-                          <div className="min-w-0">
-                            <p className="text-xs font-medium text-gray-200 truncate">{d.title}</p>
-                            <p className="text-xs text-gray-500">{d.source} · {d.chunks} chunk(s)</p>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-semibold text-gray-200 truncate">{d.title}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              <span className="text-gray-400">{d.source}</span>
+                              {" · "}{d.chunks} chunk
+                              {" · "}{fmtDate(d.created_at)}
+                              {d.created_by && <span className="text-gray-600"> · {d.created_by}</span>}
+                            </p>
                           </div>
                         </div>
-                        <button onClick={() => handleDelete(d.source, d.title)} className="text-gray-500 hover:text-red-400 ml-2 shrink-0">
+                        <button onClick={() => handleDelete(d.source, d.title)}
+                          className="text-gray-600 hover:text-red-400 ml-3 shrink-0 p-1 rounded hover:bg-red-400/10 transition-colors"
+                          title="Hapus dokumen">
                           <Trash2 size={13} />
                         </button>
                       </div>
