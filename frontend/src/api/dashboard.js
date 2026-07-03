@@ -21,7 +21,9 @@ export const itApi = {
   getServerMetrics: () => api.get("/dashboard/it/server-monitoring/metrics"),
 
   // Other sections
-  getTablespace:    () => api.get("/dashboard/it/tablespace-usage"),
+  getTablespace:           () => api.get("/dashboard/it/tablespace-usage"),
+  getTablespaceDatafiles:  (ts) => api.get("/dashboard/it/tablespace-datafiles", { params: { tablespace_name: ts } }),
+  addTablespaceDatafile:   (body) => api.post("/dashboard/it/tablespace-add-datafile", body),
   getDiskUsage:     () => api.get("/dashboard/it/disk-usage"),
   getPendingJobs:   () => api.get("/dashboard/it/pending-jobs"),
   getWorkflowError: () => api.get("/dashboard/it/workflow-error"),

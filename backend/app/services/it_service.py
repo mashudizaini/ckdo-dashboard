@@ -95,6 +95,69 @@ class OracleITService:
             logger.error("tablespace_query_error", error=str(e))
             return {"success": False, "error": str(e), "data": []}
 
+    # ── Tablespace Datafiles ─────────────────────────────────────────────────
+
+    async def get_tablespace_datafiles(self, tablespace_name: str) -> dict:
+        """List existing datafiles for a tablespace — shown as reference in the Add Datafile form."""
+        sql = """
+            SELECT
+                file_name,
+                ROUND(bytes / 1024 / 1024, 2)           AS size_mb,
+                ROUND(bytes / 1024 / 1024 / 1024, 2)    AS size_gb,
+                autoextensible,
+                status
+            FROM dba_data_files
+            WHERE tablespace_name = :ts_name
+            ORDER BY file_id
+        """
+        try:
+            rows = await asyncio.to_thread(self._query, sql, {"ts_name": tablespace_name})
+            return {"success": True, "data": rows}
+        except Exception as e:
+            logger.error("tablespace_datafiles_error", error=str(e))
+            return {"success": False, "error": str(e), "data": []}
+
+    async def add_tablespace_datafile(
+        self,
+        tablespace_name: str,
+        file_path: str,
+        size_value: float,
+        size_unit: str,
+        autoextend: bool = False,
+    ) -> dict:
+        """Execute ALTER TABLESPACE … ADD DATAFILE to extend a tablespace."""
+        import re
+        if not re.match(r"^[A-Z0-9_\$#]+$", tablespace_name.upper()):
+            return {"success": False, "error": "Nama tablespace tidak valid"}
+        if size_unit not in ("MB", "GB"):
+            return {"success": False, "error": "Unit harus MB atau GB"}
+        if size_value <= 0 or size_value > 102400:
+            return {"success": False, "error": "Ukuran tidak valid (1 – 102400)"}
+
+        ddl = (
+            f"ALTER TABLESPACE {tablespace_name} ADD DATAFILE '{file_path}'"
+            f" SIZE {int(size_value) if size_value == int(size_value) else size_value}{size_unit}"
+        )
+        if autoextend:
+            ddl += " AUTOEXTEND ON NEXT 100M MAXSIZE UNLIMITED"
+
+        try:
+            def _exec():
+                with get_oracle_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(ddl)
+                    conn.commit()
+
+            await asyncio.to_thread(_exec)
+            return {
+                "success": True,
+                "message": f"Datafile berhasil ditambahkan ke tablespace {tablespace_name}",
+                "ddl": ddl,
+            }
+        except Exception as e:
+            logger.error("add_tablespace_datafile_error", error=str(e), ddl=ddl)
+            return {"success": False, "error": str(e)}
+
     # ── Pending Jobs ─────────────────────────────────────────────────────────
 
     async def get_pending_jobs(self) -> dict:

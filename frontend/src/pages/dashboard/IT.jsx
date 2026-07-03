@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   Server, Activity, HardDrive, Clock, AlertTriangle,
   RefreshCw, Settings, Wifi, WifiOff, Loader2, X, CheckCircle,
+  PlusCircle, Database, AlertCircle,
 } from "lucide-react";
 import {
   AreaChart, Area,
@@ -386,9 +387,11 @@ const TS_COLORS = {
 };
 
 function TablespaceSection() {
-  const [data,    setData]    = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState(null);
+  const [data,       setData]       = useState([]);
+  const [loading,    setLoading]    = useState(false);
+  const [error,      setError]      = useState(null);
+  const [modalTs,    setModalTs]    = useState(null);   // row object when modal open
+  const [successMsg, setSuccessMsg] = useState(null);
 
   const refresh = async () => {
     setLoading(true);
@@ -407,68 +410,390 @@ function TablespaceSection() {
     }
   };
 
-  // Chart data: short name + usage_percent
+  const handleSuccess = (msg) => {
+    setSuccessMsg(msg);
+    setTimeout(() => setSuccessMsg(null), 6000);
+    refresh(); // reload usage after adding datafile
+  };
+
   const chartData = data.map((r) => ({
-    name:    r.tablespace_name,
-    pct:     parseFloat(r.usage_percent),
-    status:  r.status,
+    name:   r.tablespace_name,
+    pct:    parseFloat(r.usage_percent),
+    status: r.status,
   }));
 
   return (
-    <SectionCard
-      title="Top 5 Tablespaces by Usage"
-      action={<ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-blue-600 hover:bg-blue-700" onClick={refresh} />}
-    >
-      {error && (
-        <div className="mb-4 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
-          {error}
-        </div>
-      )}
+    <>
+      <SectionCard
+        title="Top 5 Tablespaces by Usage"
+        action={<ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-blue-600 hover:bg-blue-700" onClick={refresh} />}
+      >
+        {successMsg && (
+          <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-lg bg-green-500/10 border border-green-500/30 text-green-600 text-sm">
+            <CheckCircle size={14} /> {successMsg}
+          </div>
+        )}
+        {error && (
+          <div className="mb-4 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+            {error}
+          </div>
+        )}
 
-      {/* Horizontal Bar Chart */}
-      {chartData.length > 0 ? (
-        <div className="mb-5 h-44">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={chartData}
-              layout="vertical"
-              margin={{ top: 4, right: 48, bottom: 4, left: 8 }}
+        {/* Horizontal Bar Chart */}
+        {chartData.length > 0 ? (
+          <div className="mb-5 h-44">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={chartData}
+                layout="vertical"
+                margin={{ top: 4, right: 48, bottom: 4, left: 8 }}
+              >
+                <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: "#6b7280" }} tickFormatter={(v) => `${v}%`} />
+                <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 10, fill: "#475569" }} />
+                <Tooltip
+                  formatter={(v) => [`${v}%`, "Usage"]}
+                  contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 6, fontSize: 11, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
+                  labelStyle={{ color: "#9ca3af" }}
+                />
+                <Bar dataKey="pct" radius={[0, 4, 4, 0]} maxBarSize={22}>
+                  {chartData.map((entry, i) => (
+                    <Cell key={i} fill={TS_COLORS[entry.status]?.bar ?? "#22c55e"} />
+                  ))}
+                  <LabelList dataKey="pct" position="right" formatter={(v) => `${v}%`} style={{ fontSize: 10, fill: "#9ca3af" }} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <ChartPlaceholder label="Click Refresh to load tablespace data" className="mb-5" />
+        )}
+
+        {/* Table */}
+        <DataTable
+          headers={["Tablespace Name", "Usage (%)", "Used (GB)", "Total (GB)", "Status", "Action"]}
+          rows={data.map((r) => [
+            r.tablespace_name,
+            <UsageBar key={r.tablespace_name} pct={parseFloat(r.usage_percent)} />,
+            `${r.used_gb} GB`,
+            `${r.total_gb} GB`,
+            <span key={r.tablespace_name + "-s"} className={`px-2 py-0.5 rounded-full text-xs font-medium ${TS_COLORS[r.status]?.badge}`}>
+              {r.status}
+            </span>,
+            <button
+              key={r.tablespace_name + "-add"}
+              onClick={() => setModalTs(r)}
+              title="Tambah Datafile"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                padding: "4px 10px", borderRadius: 8, border: "none",
+                background: "#e8edf5",
+                boxShadow: "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff",
+                color: "#2563eb", fontSize: 11, fontWeight: 700,
+                cursor: "pointer", whiteSpace: "nowrap",
+                transition: "box-shadow 0.15s ease",
+              }}
+              onMouseDown={e => e.currentTarget.style.boxShadow = "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff"}
+              onMouseUp={e => e.currentTarget.style.boxShadow = "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff"}
+              onMouseLeave={e => e.currentTarget.style.boxShadow = "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff"}
             >
-              <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10, fill: "#6b7280" }} tickFormatter={(v) => `${v}%`} />
-              <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 10, fill: "#475569" }} />
-              <Tooltip
-                formatter={(v) => [`${v}%`, "Usage"]}
-                contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 6, fontSize: 11, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
-                labelStyle={{ color: "#9ca3af" }}
-              />
-              <Bar dataKey="pct" radius={[0, 4, 4, 0]} maxBarSize={22}>
-                {chartData.map((entry, i) => (
-                  <Cell key={i} fill={TS_COLORS[entry.status]?.bar ?? "#22c55e"} />
-                ))}
-                <LabelList dataKey="pct" position="right" formatter={(v) => `${v}%`} style={{ fontSize: 10, fill: "#9ca3af" }} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      ) : (
-        <ChartPlaceholder label="Click Refresh to load tablespace data" className="mb-5" />
-      )}
+              <PlusCircle size={11} /> Tambah File
+            </button>,
+          ])}
+          placeholder="Click Refresh to load tablespace data"
+        />
+      </SectionCard>
 
-      {/* Table */}
-      <DataTable
-        headers={["Tablespace Name", "Usage (%)", "Used (GB)", "Total (GB)", "Status"]}
-        rows={data.map((r) => [
-          r.tablespace_name,
-          <UsageBar key={r.tablespace_name} pct={parseFloat(r.usage_percent)} />,
-          `${r.used_gb} GB`,
-          `${r.total_gb} GB`,
-          <span key={r.tablespace_name + "-s"} className={`px-2 py-0.5 rounded-full text-xs font-medium ${TS_COLORS[r.status]?.badge}`}>
-            {r.status}
-          </span>,
-        ])}
-        placeholder="Click Refresh to load tablespace data"
-      />
-    </SectionCard>
+      {/* Add Datafile Modal */}
+      {modalTs && (
+        <AddDatafileModal
+          tablespace={modalTs}
+          onClose={() => setModalTs(null)}
+          onSuccess={handleSuccess}
+        />
+      )}
+    </>
+  );
+}
+
+/* ─── Add Datafile Modal ─────────────────────────────── */
+
+function AddDatafileModal({ tablespace, onClose, onSuccess }) {
+  const [files,       setFiles]       = useState([]);
+  const [loadingFiles,setLoadingFiles] = useState(true);
+  const [filePath,    setFilePath]    = useState("");
+  const [sizeValue,   setSizeValue]   = useState("500");
+  const [sizeUnit,    setSizeUnit]    = useState("MB");
+  const [autoextend,  setAutoextend]  = useState(false);
+  const [step,        setStep]        = useState("form"); // "form" | "confirm"
+  const [saving,      setSaving]      = useState(false);
+  const [saveError,   setSaveError]   = useState(null);
+
+  // Load existing datafiles for reference
+  useEffect(() => {
+    itApi.getTablespaceDatafiles(tablespace.tablespace_name)
+      .then(res => {
+        if (res?.success) {
+          setFiles(res.data ?? []);
+          // Auto-suggest path based on last file
+          const arr = res.data ?? [];
+          if (arr.length > 0) {
+            const last = arr[arr.length - 1].file_name ?? "";
+            const suggested = last.replace(
+              /(\d+)(\.dbf)$/i,
+              (_, n, ext) => `${String(parseInt(n, 10) + 1).padStart(String(n).length, "0")}${ext}`
+            );
+            setFilePath(suggested !== last ? suggested : last.replace(/\.dbf$/i, "_ext.dbf"));
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingFiles(false));
+  }, [tablespace.tablespace_name]);
+
+  const sizeNum   = parseFloat(sizeValue) || 0;
+  const canSubmit = filePath.trim().length > 0 && sizeNum > 0;
+
+  const ddlPreview = canSubmit
+    ? `ALTER TABLESPACE ${tablespace.tablespace_name} ADD DATAFILE '${filePath.trim()}' SIZE ${sizeNum}${sizeUnit}${autoextend ? " AUTOEXTEND ON NEXT 100M MAXSIZE UNLIMITED" : ""}`
+    : "";
+
+  const handleConfirm = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const res = await itApi.addTablespaceDatafile({
+        tablespace_name: tablespace.tablespace_name,
+        file_path:       filePath.trim(),
+        size_value:      sizeNum,
+        size_unit:       sizeUnit,
+        autoextend,
+      });
+      if (res?.success) {
+        onSuccess?.(res.message);
+        onClose();
+      } else {
+        setSaveError(res?.error ?? "Gagal menambahkan datafile");
+        setStep("form");
+      }
+    } catch (e) {
+      setSaveError(String(e?.message ?? e));
+      setStep("form");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const neu    = { background: "#e8edf5" };
+  const shadow = "10px 10px 30px #b0b5c3, -10px -10px 30px #ffffff";
+  const divider= { borderBottom: "1px solid rgba(0,0,0,0.06)" };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)" }}>
+      <div style={{ width: "100%", maxWidth: 520, borderRadius: 20, ...neu, boxShadow: shadow }}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4" style={divider}>
+          <div className="flex items-center gap-2">
+            <Database size={15} color="#2563eb" />
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: "#1e293b" }}>
+              {step === "form" ? "Tambah Datafile" : "Konfirmasi DDL"} — {tablespace.tablespace_name}
+            </h3>
+          </div>
+          <button onClick={onClose} style={{ color: "#94a3b8" }}
+            onMouseEnter={e => e.currentTarget.style.color = "#1e293b"}
+            onMouseLeave={e => e.currentTarget.style.color = "#94a3b8"}>
+            <X size={16} />
+          </button>
+        </div>
+
+        {step === "form" ? (
+          <>
+            <div className="p-5 space-y-4">
+
+              {/* Existing files reference */}
+              <div>
+                <p style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  Datafile yang sudah ada:
+                </p>
+                <div style={{
+                  borderRadius: 10, padding: "10px 12px",
+                  background: "#e8edf5",
+                  boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+                  maxHeight: 100, overflowY: "auto",
+                }}>
+                  {loadingFiles ? (
+                    <p style={{ fontSize: 11, color: "#94a3b8" }}>Memuat...</p>
+                  ) : files.length === 0 ? (
+                    <p style={{ fontSize: 11, color: "#94a3b8" }}>Tidak ada datafile ditemukan</p>
+                  ) : (
+                    files.map((f, i) => (
+                      <div key={i} style={{ fontSize: 11, color: "#475569", marginBottom: i < files.length - 1 ? 4 : 0, fontFamily: "monospace" }}>
+                        <span style={{ color: "#2563eb" }}>•</span> {f.file_name}
+                        <span style={{ color: "#94a3b8", marginLeft: 8 }}>
+                          ({f.size_gb ?? f.size_mb} {f.size_gb != null ? "GB" : "MB"}, AUTOEXTEND: {f.autoextensible})
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* File path */}
+              <Field label="Lokasi File Baru">
+                <input
+                  className={INPUT}
+                  value={filePath}
+                  onChange={e => setFilePath(e.target.value)}
+                  placeholder="/u01/app/oracle/oradata/CKDO/tablespace01.dbf"
+                  style={{ fontFamily: "monospace", fontSize: 12 }}
+                />
+              </Field>
+
+              {/* Size */}
+              <Field label="Ukuran">
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    className={INPUT}
+                    value={sizeValue}
+                    onChange={e => setSizeValue(e.target.value)}
+                    type="number"
+                    min="1"
+                    max="102400"
+                    placeholder="500"
+                    style={{ flex: 1 }}
+                  />
+                  <select
+                    value={sizeUnit}
+                    onChange={e => setSizeUnit(e.target.value)}
+                    className={INPUT}
+                    style={{ width: 80, flex: "none" }}
+                  >
+                    <option value="MB">MB</option>
+                    <option value="GB">GB</option>
+                  </select>
+                </div>
+              </Field>
+
+              {/* Autoextend */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <input
+                  type="checkbox"
+                  id="autoextend"
+                  checked={autoextend}
+                  onChange={e => setAutoextend(e.target.checked)}
+                  style={{ width: 14, height: 14, cursor: "pointer", accentColor: "#2563eb" }}
+                />
+                <label htmlFor="autoextend" style={{ fontSize: 12, color: "#475569", cursor: "pointer", userSelect: "none" }}>
+                  AUTOEXTEND ON <span style={{ color: "#94a3b8" }}>(NEXT 100M, MAXSIZE UNLIMITED)</span>
+                </label>
+              </div>
+
+              {/* DDL Preview */}
+              {ddlPreview && (
+                <div>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    Preview DDL:
+                  </p>
+                  <div style={{
+                    borderRadius: 10, padding: "10px 12px",
+                    background: "#e8edf5",
+                    boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+                    fontSize: 11, fontFamily: "monospace", color: "#1e40af",
+                    wordBreak: "break-all", lineHeight: 1.6,
+                  }}>
+                    {ddlPreview}
+                  </div>
+                </div>
+              )}
+
+              {saveError && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs">
+                  <AlertCircle size={12} /> {saveError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 px-5 py-4" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+              <ActionBtn icon={X} label="Batal" color="bg-gray-700 hover:bg-gray-600" onClick={onClose} />
+              <ActionBtn
+                icon={PlusCircle}
+                label="Lanjut ke Konfirmasi"
+                color={canSubmit ? "bg-blue-600 hover:bg-blue-700" : "bg-gray-500 cursor-not-allowed"}
+                onClick={() => canSubmit && setStep("confirm")}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="p-5 space-y-4">
+
+              {/* Warning */}
+              <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                <AlertCircle size={16} color="#d97706" style={{ flexShrink: 0, marginTop: 1 }} />
+                <div>
+                  <p style={{ fontSize: 12, fontWeight: 700, color: "#92400e", marginBottom: 2 }}>Perhatian</p>
+                  <p style={{ fontSize: 11.5, color: "#78350f", lineHeight: 1.5 }}>
+                    DDL di bawah akan dieksekusi langsung ke database Oracle. Operasi ini tidak dapat dibatalkan setelah dijalankan.
+                  </p>
+                </div>
+              </div>
+
+              {/* DDL box */}
+              <div>
+                <p style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  DDL yang akan dijalankan:
+                </p>
+                <div style={{
+                  borderRadius: 10, padding: "12px 14px",
+                  background: "#e8edf5",
+                  boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+                  fontSize: 12, fontFamily: "monospace", color: "#1e40af",
+                  wordBreak: "break-all", lineHeight: 1.7,
+                }}>
+                  {ddlPreview}
+                </div>
+              </div>
+
+              {/* Details */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {[
+                  ["Tablespace",  tablespace.tablespace_name],
+                  ["Ukuran",      `${sizeNum} ${sizeUnit}`],
+                  ["Autoextend",  autoextend ? "ON (NEXT 100M, MAXSIZE UNLIMITED)" : "OFF"],
+                  ["Penggunaan",  `${tablespace.usage_percent}% (${tablespace.used_gb} / ${tablespace.total_gb} GB)`],
+                ].map(([k, v]) => (
+                  <div key={k} style={{
+                    borderRadius: 8, padding: "8px 12px",
+                    background: "#e8edf5",
+                    boxShadow: "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff",
+                  }}>
+                    <p style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>{k}</p>
+                    <p style={{ fontSize: 11.5, color: "#1e293b", fontWeight: 600 }}>{v}</p>
+                  </div>
+                ))}
+              </div>
+
+              {saveError && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs">
+                  <AlertCircle size={12} /> {saveError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-between px-5 py-4" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+              <ActionBtn icon={X} label="Kembali" color="bg-gray-700 hover:bg-gray-600" onClick={() => setStep("form")} />
+              <ActionBtn
+                icon={saving ? Loader2 : CheckCircle}
+                label={saving ? "Menjalankan DDL..." : "Ya, Jalankan DDL"}
+                color="bg-green-600 hover:bg-green-700"
+                onClick={handleConfirm}
+              />
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 

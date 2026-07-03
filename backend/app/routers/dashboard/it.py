@@ -11,6 +11,8 @@ Endpoints:
   GET  /server-monitoring/test        — Test SSH connection
   GET  /server-monitoring/metrics     — CPU / Memory / Load / Uptime
   GET  /tablespace-usage              — Top-5 tablespace (Oracle)
+  GET  /tablespace-datafiles          — Existing datafiles for a tablespace
+  POST /tablespace-add-datafile       — ALTER TABLESPACE ADD DATAFILE
   GET  /disk-usage                    — Disk usage via SSH df
   GET  /pending-jobs                  — Concurrent requests Oracle
   GET  /workflow-error                — Oracle Workflow errors
@@ -86,10 +88,38 @@ async def get_metrics(user: CurrentUser = Depends(require_role(Roles.IT))):
 
 # ── Tablespace ───────────────────────────────────────────────────────────────
 
+class AddDatafileIn(BaseModel):
+    tablespace_name: str
+    file_path: str
+    size_value: float
+    size_unit: str        # "MB" or "GB"
+    autoextend: bool = False
+
+
 @router.get("/tablespace-usage")
 async def get_tablespace(user: CurrentUser = Depends(require_role(Roles.IT))):
     """Top-5 tablespace usage from Oracle DBA_TABLESPACE_USAGE_METRICS."""
     return await OracleITService().get_tablespace()
+
+
+@router.get("/tablespace-datafiles")
+async def get_tablespace_datafiles(
+    tablespace_name: str,
+    user: CurrentUser = Depends(require_role(Roles.IT)),
+):
+    """Existing datafiles for a tablespace (DBA_DATA_FILES) — for location reference."""
+    return await OracleITService().get_tablespace_datafiles(tablespace_name)
+
+
+@router.post("/tablespace-add-datafile")
+async def add_tablespace_datafile(
+    body: AddDatafileIn,
+    user: CurrentUser = Depends(require_role(Roles.IT)),
+):
+    """Execute ALTER TABLESPACE … ADD DATAFILE to extend a tablespace."""
+    return await OracleITService().add_tablespace_datafile(
+        body.tablespace_name, body.file_path, body.size_value, body.size_unit, body.autoextend
+    )
 
 
 # ── Disk Usage ───────────────────────────────────────────────────────────────
