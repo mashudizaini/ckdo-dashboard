@@ -94,32 +94,72 @@ def insert_document(source: str, title: str, content: str, embedding: list, crea
         conn.close()
 
 
-def ingest_text(source: str, title: str, text: str, created_by: str, department: str = "General") -> list[int]:
+def ingest_text(source: str, title: str, text: str, created_by: str,
+                department: str = "General", from_file: bool = False,
+                file_name: str = None) -> list[int]:
     """Chunk + embed + store one document. Returns list of inserted chunk ids."""
     chunks = emb.chunk_text(text.strip())
     if not chunks:
         return []
     vectors = emb.embed_texts_batch(chunks, input_type="document")
     ids = []
+    base_meta = {"from_file": from_file, "file_name": file_name or ""}
     for chunk, vec in zip(chunks, vectors):
-        doc_id = insert_document(source, title, chunk, vec, created_by, department, {"length": len(chunk)})
+        meta = {**base_meta, "length": len(chunk)}
+        doc_id = insert_document(source, title, chunk, vec, created_by, department, meta)
         ids.append(doc_id)
     return ids
 
 
 def list_documents() -> list[dict]:
-    """List distinct documents (grouped by source+title) with chunk counts."""
+    """List distinct documents (grouped by source+title) with chunk counts and origin info."""
     conn = _get_pg()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT source, title, MAX(department) AS department, COUNT(*) AS chunks,
-                       MIN(id) AS first_id, MAX(created_at) AS created_at, MAX(created_by) AS created_by
+                SELECT source, title,
+                       MAX(department)                                            AS department,
+                       COUNT(*)                                                   AS chunks,
+                       MIN(id)                                                    AS first_id,
+                       MAX(created_at)                                            AS created_at,
+                       MAX(created_by)                                            AS created_by,
+                       BOOL_OR((metadata->>'from_file')::boolean)                AS from_file,
+                       MAX(metadata->>'file_name')                               AS file_name
                 FROM company_documents
                 GROUP BY source, title
                 ORDER BY MAX(created_at) DESC
             """)
             return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def delete_text_only_documents() -> int:
+    """Delete all documents that were ingested from text-paste (not from a real file upload).
+    Returns number of rows deleted."""
+    conn = _get_pg()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                DELETE FROM company_documents
+                WHERE (metadata->>'from_file')::boolean IS NOT TRUE
+            """)
+            count = cur.rowcount
+        conn.commit()
+        return count
+    finally:
+        conn.close()
+
+
+def delete_all_documents() -> int:
+    """Delete ALL documents from the knowledge base. Returns rows deleted."""
+    conn = _get_pg()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM company_documents")
+            count = cur.rowcount
+        conn.commit()
+        return count
     finally:
         conn.close()
 

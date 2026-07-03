@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { MessageSquare, Send, Bot, User, BookOpen, Upload, Trash2, X, Loader2 } from "lucide-react";
+import { MessageSquare, Send, Bot, User, BookOpen, Upload, Trash2, X, Loader2, FileText, AlignLeft, AlertTriangle } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStream } from "@/hooks/useChatStream";
 
@@ -184,19 +184,55 @@ function KnowledgeBasePanel({ onClose }) {
 
               {/* Document History */}
               <div>
-                <div className="flex items-center justify-between mb-3">
+                {/* Header row */}
+                <div className="flex items-center justify-between mb-2">
                   <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-                    Riwayat Dokumen ({docs.length})
+                    Uploaded Documents ({docs.length})
                   </h4>
-                  <button onClick={fetchDocs} disabled={loading}
-                    className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 disabled:opacity-50">
-                    <Loader2 size={11} className={loading ? "animate-spin" : ""} /> Refresh
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button onClick={fetchDocs} disabled={loading}
+                      className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 disabled:opacity-50">
+                      <Loader2 size={11} className={loading ? "animate-spin" : ""} /> Refresh
+                    </button>
+                  </div>
                 </div>
 
+                {/* Summary counts */}
+                {docs.length > 0 && (() => {
+                  const fileCount = docs.filter(d => d.from_file).length;
+                  const textCount = docs.filter(d => !d.from_file).length;
+                  return (
+                    <div className="flex items-center gap-3 mb-3 text-xs">
+                      <span className="flex items-center gap-1 text-blue-400">
+                        <FileText size={11} /> {fileCount} file upload{fileCount !== 1 ? "s" : ""}
+                      </span>
+                      {textCount > 0 && (
+                        <>
+                          <span className="flex items-center gap-1 text-amber-400">
+                            <AlignLeft size={11} /> {textCount} text-paste
+                          </span>
+                          <button
+                            onClick={async () => {
+                              if (!confirm(`Delete all ${textCount} text-paste entries from the knowledge base?`)) return;
+                              try {
+                                const res = await fetch("/api/v1/ai/chatbot/documents/cleanup/text-only", { method: "DELETE", headers });
+                                const d = await res.json();
+                                showMsg("success", d.message);
+                                fetchDocs();
+                              } catch (e) { showMsg("error", `Cleanup failed: ${e.message}`); }
+                            }}
+                            className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 border border-red-500/30 rounded px-2 py-0.5 hover:bg-red-500/10 transition-colors">
+                            <Trash2 size={10} /> Delete text-paste entries
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {fetchError && (
-                  <div className="rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-400 mb-3">
-                    {fetchError}
+                  <div className="rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-400 mb-3 flex items-center gap-2">
+                    <AlertTriangle size={12} /> {fetchError}
                   </div>
                 )}
 
@@ -205,20 +241,27 @@ function KnowledgeBasePanel({ onClose }) {
                 ) : docs.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-gray-700 py-10 text-center">
                     <BookOpen size={28} className="mx-auto text-gray-700 mb-2" />
-                    <p className="text-xs text-gray-600">Belum ada dokumen.</p>
-                    <p className="text-xs text-gray-700 mt-1">Upload dokumen pertama menggunakan form di atas.</p>
+                    <p className="text-xs text-gray-600">No documents yet.</p>
+                    <p className="text-xs text-gray-700 mt-1">Upload a file or paste text using the form above.</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
                     {docs.map((d, i) => (
-                      <div key={i} className="flex items-center justify-between rounded-lg bg-gray-800/50 border border-gray-700 px-3 py-2.5 hover:border-gray-600 transition-colors">
+                      <div key={i} className={`flex items-center justify-between rounded-lg border px-3 py-2.5 transition-colors ${d.from_file ? 'bg-blue-500/5 border-blue-800/40 hover:border-blue-700/60' : 'bg-amber-500/5 border-amber-800/30 hover:border-amber-700/40'}`}>
                         <div className="min-w-0 flex items-start gap-2 flex-1">
+                          {/* File vs Text badge */}
+                          <span title={d.from_file ? (d.file_name || "File upload") : "Text paste"}
+                            className={`shrink-0 mt-0.5 flex items-center gap-1 text-[10px] font-semibold rounded px-1.5 py-0.5 ${d.from_file ? 'bg-blue-500/15 text-blue-400' : 'bg-amber-500/15 text-amber-400'}`}>
+                            {d.from_file ? <FileText size={9} /> : <AlignLeft size={9} />}
+                            {d.from_file ? "FILE" : "TEXT"}
+                          </span>
                           <DeptBadge department={d.department} />
                           <div className="min-w-0 flex-1">
                             <p className="text-xs font-semibold text-gray-200 truncate">{d.title}</p>
-                            <p className="text-xs text-gray-500 mt-0.5">
+                            <p className="text-xs text-gray-500 mt-0.5 truncate">
                               <span className="text-gray-400">{d.source}</span>
-                              {" · "}{d.chunks} chunk
+                              {d.from_file && d.file_name && <span className="text-blue-500/80"> · {d.file_name}</span>}
+                              {" · "}{d.chunks} chunk{d.chunks !== 1 ? "s" : ""}
                               {" · "}{fmtDate(d.created_at)}
                               {d.created_by && <span className="text-gray-600"> · {d.created_by}</span>}
                             </p>
@@ -226,7 +269,7 @@ function KnowledgeBasePanel({ onClose }) {
                         </div>
                         <button onClick={() => handleDelete(d.source, d.title)}
                           className="text-gray-600 hover:text-red-400 ml-3 shrink-0 p-1 rounded hover:bg-red-400/10 transition-colors"
-                          title="Hapus dokumen">
+                          title="Delete document">
                           <Trash2 size={13} />
                         </button>
                       </div>

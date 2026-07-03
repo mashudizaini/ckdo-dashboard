@@ -80,9 +80,13 @@ async def ingest_document(
     if not rag_service.is_configured():
         raise HTTPException(400, "VOYAGE_API_KEY belum diset di environment. Tambahkan dulu lalu restart backend.")
 
-    content = text.strip()
+    content    = text.strip()
+    from_file  = False
+    file_name  = None
 
     if file is not None and file.filename:
+        from_file = True
+        file_name = file.filename
         ext = os.path.splitext(file.filename)[1].lower()
         raw = await file.read()
         tmp_path = os.path.join(_UPLOAD_DIR, f"{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}{ext}")
@@ -113,7 +117,9 @@ async def ingest_document(
     try:
         ids = await asyncio.wait_for(
             asyncio.to_thread(
-                rag_service.ingest_text, source.strip(), title.strip(), content, user.username, department
+                rag_service.ingest_text,
+                source.strip(), title.strip(), content, user.username,
+                department, from_file, file_name,
             ),
             timeout=40.0,
         )
@@ -122,7 +128,12 @@ async def ingest_document(
     except Exception as e:
         raise HTTPException(500, f"Gagal ingest dokumen: {str(e)}")
 
-    return {"message": f"Berhasil menyimpan {len(ids)} chunk dari dokumen '{title}'", "chunk_ids": ids}
+    return {
+        "message":   f"Berhasil menyimpan {len(ids)} chunk dari dokumen '{title}'",
+        "chunk_ids": ids,
+        "from_file": from_file,
+        "file_name": file_name,
+    }
 
 
 @router.delete("/documents")
@@ -133,3 +144,21 @@ async def delete_document(
 ):
     rag_service.delete_document(source, title)
     return {"message": "Deleted"}
+
+
+@router.delete("/documents/cleanup/text-only")
+async def cleanup_text_only(
+    user: CurrentUser = Depends(require_role(Roles.IT, Roles.ADMIN)),
+):
+    """IT/Admin only: delete all knowledge base entries that came from text-paste (no real file)."""
+    deleted = await asyncio.to_thread(rag_service.delete_text_only_documents)
+    return {"message": f"Deleted {deleted} text-paste chunks from knowledge base", "deleted_chunks": deleted}
+
+
+@router.delete("/documents/cleanup/all")
+async def cleanup_all(
+    user: CurrentUser = Depends(require_role(Roles.IT, Roles.ADMIN)),
+):
+    """IT/Admin only: wipe the entire knowledge base."""
+    deleted = await asyncio.to_thread(rag_service.delete_all_documents)
+    return {"message": f"Knowledge base wiped — {deleted} chunks removed", "deleted_chunks": deleted}
