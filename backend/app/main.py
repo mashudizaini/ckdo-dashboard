@@ -10,7 +10,8 @@ import app.models.attendance   # noqa: F401 — register models ke Base.metadata
 import app.models.leave        # noqa: F401
 import app.models.working_calendar  # noqa: F401
 import app.models.hrga_task    # noqa: F401
-import app.models.cv_screening # noqa: F401
+import app.models.cv_screening  # noqa: F401
+import app.models.business_plan  # noqa: F401
 
 # ── Dashboard Routers ──
 from app.routers.dashboard import it, hr, pac, accounting, purchasing, ap_invoice

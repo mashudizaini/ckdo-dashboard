@@ -66,6 +66,12 @@ export const pacApi = {
   getSummary:      ()  => api.get("/dashboard/pac/summary"),
   getBudgetUsage:  (p) => api.get("/dashboard/pac/budget-usage", { params: p }),
   getLedgers:      ()  => api.get("/dashboard/pac/lov/ledgers"),
+
+  // Business Plan
+  listBusinessPlans:   (p)    => api.get("/dashboard/pac/business-plans", { params: p }),
+  getBusinessPlan:     (id)   => api.get(`/dashboard/pac/business-plans/${id}`),
+  upsertBusinessPlan:  (body) => api.post("/dashboard/pac/business-plans", body),
+  deleteBusinessPlan:  (id)   => api.delete(`/dashboard/pac/business-plans/${id}`),
 };
 
 export const accountingApi = {
