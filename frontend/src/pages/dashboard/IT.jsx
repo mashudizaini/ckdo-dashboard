@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   Server, Activity, HardDrive, Clock, AlertTriangle,
@@ -97,85 +97,91 @@ function buildAnalysis(m) {
 
   // CPU
   const cpu = m.cpu;
-  let cpuLvl, cpuTitle, cpuMsg, cpuRecs;
+  let cpuLvl, cpuTitle, cpuMsg, cpuRecs, cpuActions;
   if (cpu >= 90) {
     cpuLvl = "critical"; cpuTitle = "CPU Critical";
-    cpuMsg = `CPU sangat tinggi (${cpu}%) — kemungkinan full table scan Oracle, batch besar, atau proses runaway`;
-    cpuRecs = ["Lihat Top Processes di bawah untuk identifikasi pelaku", "Di Oracle: periksa v$session + v$sql untuk SQL berat yang berjalan", "Pertimbangkan batasi Oracle EBS Concurrent Request sementara"];
+    cpuMsg = `CPU is critically high (${cpu}%) — likely a full table scan, large Oracle batch job, or runaway process`;
+    cpuRecs = ["Check Top Processes panel below to identify the culprit", "In Oracle: query v$session + v$sql to find heavy SQL currently running", "Consider temporarily reducing Oracle EBS Concurrent Request limit"];
+    cpuActions = [{ key: "sessions", label: "→ View Oracle Sessions" }];
   } else if (cpu >= 70) {
-    cpuLvl = "warning"; cpuTitle = "CPU Tinggi";
-    cpuMsg = `CPU tinggi (${cpu}%) — jika bertahan > 15 menit, perlu investigasi`;
-    cpuRecs = ["Cek apakah ada Oracle batch job terjadwal", "Periksa index rebuild atau gather statistics yang sedang berjalan"];
+    cpuLvl = "warning"; cpuTitle = "CPU High";
+    cpuMsg = `CPU is elevated (${cpu}%) — investigate if this persists beyond 15 minutes`;
+    cpuRecs = ["Check for scheduled Oracle batch jobs", "Verify if an index rebuild or gather statistics is running"];
+    cpuActions = [{ key: "sessions", label: "→ View Oracle Sessions" }];
   } else if (cpu >= 50) {
-    cpuLvl = "elevated"; cpuTitle = "CPU Sedang";
-    cpuMsg = `CPU (${cpu}%) di atas rata-rata tapi masih dalam toleransi`;
-    cpuRecs = [];
+    cpuLvl = "elevated"; cpuTitle = "CPU Moderate";
+    cpuMsg = `CPU (${cpu}%) is above average but within acceptable range`;
+    cpuRecs = []; cpuActions = [];
   } else {
     cpuLvl = "normal"; cpuTitle = "CPU Normal";
-    cpuMsg = `CPU dalam batas aman (${cpu}%)`;
-    cpuRecs = [];
+    cpuMsg = `CPU is within safe limits (${cpu}%)`;
+    cpuRecs = []; cpuActions = [];
   }
-  items.push({ key: "cpu", label: "CPU", icon: <Cpu size={12} />, title: cpuTitle, value: `${cpu}%`, level: cpuLvl, msg: cpuMsg, recs: cpuRecs });
+  items.push({ key: "cpu", label: "CPU", icon: <Cpu size={12} />, title: cpuTitle, value: `${cpu}%`, level: cpuLvl, msg: cpuMsg, recs: cpuRecs, actions: cpuActions });
 
   // Memory
   const mem = m.memory_percent;
-  let memLvl, memTitle, memMsg, memRecs;
+  let memLvl, memTitle, memMsg, memRecs, memActions;
   if (mem >= 95) {
     memLvl = "critical"; memTitle = "Memory Critical";
-    memMsg = `Memory hampir habis (${mem}%) — sistem mulai pakai swap, Oracle akan sangat lambat`;
-    memRecs = ["Segera kill idle Oracle sessions: ALTER SYSTEM DISCONNECT SESSION 'sid,serial#' IMMEDIATE", "Review Oracle SGA_TARGET — kemungkinan terlalu besar untuk RAM server", "Pertimbangkan restart Oracle app tier jika ada memory leak"];
+    memMsg = `Memory is nearly exhausted (${mem}%) — system will start swapping, Oracle performance will degrade severely`;
+    memRecs = ["Immediately kill long-idle Oracle sessions to free memory", "Review Oracle SGA_TARGET — may be oversized for available RAM", "Consider restarting Oracle app tier if a memory leak is suspected"];
+    memActions = [{ key: "sessions", label: "→ View & Kill Oracle Sessions" }];
   } else if (mem >= 85) {
-    memLvl = "warning"; memTitle = "Memory Tinggi";
-    memMsg = `Memory tinggi (${mem}%) — risiko pakai swap, pantau ketat`;
-    memRecs = ["Periksa jumlah Oracle session aktif via v$session", "Cek Oracle PGA_AGGREGATE_TARGET vs kebutuhan aktual"];
+    memLvl = "warning"; memTitle = "Memory High";
+    memMsg = `Memory is high (${mem}%) — swap risk, monitor closely`;
+    memRecs = ["Check active Oracle session count via v$session", "Review Oracle PGA_AGGREGATE_TARGET vs actual usage"];
+    memActions = [{ key: "sessions", label: "→ View Oracle Sessions" }];
   } else if (mem >= 70) {
-    memLvl = "elevated"; memTitle = "Memory Sedang";
-    memMsg = `Memory (${mem}%) di atas rata-rata — normal untuk Oracle EBS dengan SGA besar`;
-    memRecs = [];
+    memLvl = "elevated"; memTitle = "Memory Moderate";
+    memMsg = `Memory (${mem}%) is above average — normal for Oracle EBS with a large SGA`;
+    memRecs = []; memActions = [];
   } else {
     memLvl = "normal"; memTitle = "Memory Normal";
-    memMsg = `Memory dalam batas aman (${mem}%, ${m.memory_used}/${m.memory_total} GB)`;
-    memRecs = [];
+    memMsg = `Memory is within safe limits (${mem}%, ${m.memory_used}/${m.memory_total} GB)`;
+    memRecs = []; memActions = [];
   }
-  items.push({ key: "mem", label: "Memory", icon: <TrendingUp size={12} />, title: memTitle, value: `${mem}%`, level: memLvl, msg: memMsg, recs: memRecs });
+  items.push({ key: "mem", label: "Memory", icon: <TrendingUp size={12} />, title: memTitle, value: `${mem}%`, level: memLvl, msg: memMsg, recs: memRecs, actions: memActions });
 
   // Load Average
   let loadLvl, loadTitle, loadMsg, loadRecs;
   if (loadRatio >= 2) {
     loadLvl = "critical"; loadTitle = "Load Critical";
-    loadMsg = `Load average sangat tinggi (${load} / ${cpuCount} CPU) — banyak proses antri, kemungkinan I/O bottleneck`;
-    loadRecs = ["Ini bukan sekadar CPU tinggi — kemungkinan besar ada disk I/O wait", "Di Oracle: periksa v$session_wait untuk wait event terbesar", "Pertimbangkan kurangi Oracle concurrent request"];
+    loadMsg = `Load average is critically high (${load} / ${cpuCount} CPUs) — many processes are queuing, likely an I/O bottleneck`;
+    loadRecs = ["Not just high CPU — likely disk I/O wait or blocked processes", "In Oracle: check v$session_wait for the top wait events", "Consider reducing Oracle Concurrent Request limit"];
   } else if (loadRatio >= 1) {
-    loadLvl = "warning"; loadTitle = "Load Tinggi";
-    loadMsg = `Load melebihi jumlah CPU (${load} / ${cpuCount} CPU) — ada antrian proses`;
-    loadRecs = ["Periksa Oracle redo log archiving — bottleneck I/O sering dari sini", "Cek apakah ada operasi besar sedang berjalan (backup, export)"];
+    loadLvl = "warning"; loadTitle = "Load High";
+    loadMsg = `Load average exceeds CPU count (${load} / ${cpuCount} CPUs) — process queue is building up`;
+    loadRecs = ["Check Oracle redo log archiving — common source of I/O bottleneck", "Verify no large backup or export operation is running"];
   } else {
     loadLvl = "normal"; loadTitle = "Load Normal";
-    loadMsg = `Load average proporsional (${load} / ${cpuCount} CPU) — tidak ada antrian`;
+    loadMsg = `Load average is proportional (${load} / ${cpuCount} CPUs) — no process queuing`;
     loadRecs = [];
   }
-  items.push({ key: "load", label: "Load", icon: <Activity size={12} />, title: loadTitle, value: load.toFixed(2), level: loadLvl, msg: loadMsg, recs: loadRecs });
+  items.push({ key: "load", label: "Load", icon: <Activity size={12} />, title: loadTitle, value: load.toFixed(2), level: loadLvl, msg: loadMsg, recs: loadRecs, actions: [] });
 
   // Swap
-  let swapLvl, swapTitle, swapMsg, swapRecs;
+  let swapLvl, swapTitle, swapMsg, swapRecs, swapActions;
   if (swapPct >= 50) {
     swapLvl = "critical"; swapTitle = "Swap Critical";
-    swapMsg = `Swap sangat tinggi (${swapPct}%) — Oracle pasti melambat drastis, risiko OOM kill`;
-    swapRecs = ["SEGERA kurangi Oracle SGA — pakai swap = RAM habis", "Kill non-essential processes secepatnya", "Koordinasikan reboot terjadwal dengan user jika tidak ada jalan lain"];
+    swapMsg = `Swap usage is critically high (${swapPct}%) — Oracle performance is severely impacted, OOM risk`;
+    swapRecs = ["Immediately reduce Oracle SGA — active swap means RAM is exhausted", "Kill non-essential processes immediately", "Coordinate a scheduled reboot with users if no other option"];
+    swapActions = [{ key: "sessions", label: "→ View & Kill Oracle Sessions" }];
   } else if (swapPct >= 10) {
-    swapLvl = "warning"; swapTitle = "Swap Aktif";
-    swapMsg = `Swap digunakan (${swapPct}%) — RAM sudah tidak cukup menampung semua proses`;
-    swapRecs = ["Kurangi Oracle SGA_TARGET atau PGA_AGGREGATE_TARGET", "Kill idle Oracle sessions untuk bebaskan memory"];
+    swapLvl = "warning"; swapTitle = "Swap Active";
+    swapMsg = `Swap is in use (${swapPct}%) — RAM is insufficient for all running processes`;
+    swapRecs = ["Reduce Oracle SGA_TARGET or PGA_AGGREGATE_TARGET", "Kill idle Oracle sessions to free memory"];
+    swapActions = [{ key: "sessions", label: "→ View Oracle Sessions" }];
   } else if (swapPct > 0) {
     swapLvl = "elevated"; swapTitle = "Swap Minimal";
-    swapMsg = `Sedikit swap digunakan (${swapPct}%) — normal, pantau tren`;
-    swapRecs = [];
+    swapMsg = `Minimal swap in use (${swapPct}%) — normal, monitor the trend`;
+    swapRecs = []; swapActions = [];
   } else {
-    swapLvl = "normal"; swapTitle = "Swap Tidak Aktif";
-    swapMsg = "Tidak ada penggunaan swap — memory masih lebih dari cukup";
-    swapRecs = [];
+    swapLvl = "normal"; swapTitle = "Swap Inactive";
+    swapMsg = "No swap in use — memory is more than sufficient";
+    swapRecs = []; swapActions = [];
   }
-  items.push({ key: "swap", label: "Swap", icon: <HardDrive size={12} />, title: swapTitle, value: `${swapPct}%`, level: swapLvl, msg: swapMsg, recs: swapRecs });
+  items.push({ key: "swap", label: "Swap", icon: <HardDrive size={12} />, title: swapTitle, value: `${swapPct}%`, level: swapLvl, msg: swapMsg, recs: swapRecs, actions: swapActions });
 
   return items;
 }
@@ -207,7 +213,7 @@ function AutoRefreshSelector({ value, onChange }) {
 
 // ── Analysis card ────────────────────────────────────────────────────────
 
-function AnalysisCard({ item }) {
+function AnalysisCard({ item, onViewSessions }) {
   const [open, setOpen] = useState(item.level !== "normal");
   const lc = LEVEL_CFG[item.level];
   return (
@@ -215,9 +221,7 @@ function AnalysisCard({ item }) {
       <div className="flex items-center justify-between cursor-pointer select-none" onClick={() => setOpen(o => !o)}>
         <div className="flex items-center gap-2">
           <span style={{ fontSize: 13 }}>{lc.icon}</span>
-          <div style={{ color: lc.text }}>
-            {item.icon}
-          </div>
+          <div style={{ color: lc.text }}>{item.icon}</div>
           <span style={{ fontSize: 11.5, fontWeight: 800, color: lc.text }}>{item.title}</span>
           <span style={{ fontSize: 11, color: "#94a3b8", fontFamily: "monospace", marginLeft: 2 }}>{item.value}</span>
         </div>
@@ -225,10 +229,10 @@ function AnalysisCard({ item }) {
       </div>
       {open && (
         <div style={{ marginTop: 8 }}>
-          <p style={{ fontSize: 11.5, color: "#475569", lineHeight: 1.55, marginBottom: item.recs.length > 0 ? 8 : 0 }}>{item.msg}</p>
+          <p style={{ fontSize: 11.5, color: "#475569", lineHeight: 1.55, marginBottom: (item.recs.length > 0 || item.actions?.length > 0) ? 8 : 0 }}>{item.msg}</p>
           {item.recs.length > 0 && (
             <>
-              <p style={{ fontSize: 9.5, fontWeight: 800, color: lc.text, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 5 }}>Rekomendasi:</p>
+              <p style={{ fontSize: 9.5, fontWeight: 800, color: lc.text, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 5 }}>Recommendations:</p>
               <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 4 }}>
                 {item.recs.map((r, i) => (
                   <li key={i} style={{ fontSize: 11, color: "#475569", display: "flex", gap: 6 }}>
@@ -238,6 +242,17 @@ function AnalysisCard({ item }) {
                 ))}
               </ul>
             </>
+          )}
+          {item.actions?.length > 0 && (
+            <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {item.actions.map(a => (
+                <button key={a.key} onClick={() => a.key === "sessions" && onViewSessions?.()}
+                  style={{ padding: "4px 12px", fontSize: 10.5, fontWeight: 700, borderRadius: 8, border: `1.5px solid ${lc.border}`, background: "transparent", color: lc.text, cursor: "pointer", transition: "all 0.15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = lc.border; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                >{a.label}</button>
+              ))}
+            </div>
           )}
         </div>
       )}
@@ -288,9 +303,9 @@ function TopProcessesPanel({ processes, loading, onRefresh }) {
           </thead>
           <tbody>
             {processes === null ? (
-              <tr><td colSpan={5} style={{ padding: "28px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>Klik Refresh untuk memuat data proses</td></tr>
+              <tr><td colSpan={5} style={{ padding: "28px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>Click Refresh to load process data</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={5} style={{ padding: "28px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>Tidak ada data</td></tr>
+              <tr><td colSpan={5} style={{ padding: "28px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No data</td></tr>
             ) : (
               rows.map((p, i) => {
                 const cpuNum = parseFloat(p.cpu);
@@ -322,18 +337,169 @@ function TopProcessesPanel({ processes, loading, onRefresh }) {
   );
 }
 
+// ── Oracle Sessions panel ─────────────────────────────────────────────────
+
+function fmtIdleTime(secs) {
+  secs = Number(secs) || 0;
+  if (secs < 60)    return `${secs}s`;
+  if (secs < 3600)  return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  if (secs < 86400) return `${h}h ${m}m`;
+  const d = Math.floor(secs / 86400);
+  return `${d}d ${h % 24}h`;
+}
+
+function OracleSessionsPanel({ sessions, loading, onLoad, onKill, panelRef }) {
+  return (
+    <div ref={panelRef} style={{ marginTop: 20 }}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Database size={13} color="#7c3aed" />
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.08em" }}>Oracle Sessions (v$session)</span>
+          {sessions && (
+            <span style={{ fontSize: 10, color: "#64748b", background: "#e8edf5", borderRadius: 99, padding: "1px 8px", boxShadow: "inset 1px 1px 3px #c5cad8, inset -1px -1px 3px #fff" }}>
+              {sessions.count} sessions
+            </span>
+          )}
+        </div>
+        <ActionBtn icon={loading ? Loader2 : RefreshCw} label={sessions ? "Refresh" : "Load Sessions"} color="bg-purple-600 hover:bg-purple-700" onClick={onLoad} />
+      </div>
+
+      {sessions === null ? (
+        <div style={{ padding: "28px", textAlign: "center", fontSize: 12, color: "#94a3b8", background: "#f0f3f9", borderRadius: 12, boxShadow: "inset 2px 2px 6px #c5cad8, inset -2px -2px 6px #fff" }}>
+          Click "Load Sessions" to view active Oracle sessions from v$session
+        </div>
+      ) : (
+        <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff" }}>
+          <div style={{ overflowX: "auto" }}>
+            <table className="w-full" style={{ minWidth: 760 }}>
+              <thead>
+                <tr style={{ background: "linear-gradient(135deg,#dfe5ed,#d8dee8)" }}>
+                  {["SID", "User", "Status", "Machine", "Program", "Event", "Wait Class", "Idle", "Action"].map(h => (
+                    <th key={h} style={{ padding: "10px 10px", fontSize: 10, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap", textAlign: "left", borderBottom: "2px solid rgba(0,0,0,0.06)" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.data?.length === 0 ? (
+                  <tr><td colSpan={9} style={{ padding: "20px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No active user sessions</td></tr>
+                ) : sessions.data?.map((s, i) => {
+                  const idleSecs        = Number(s.seconds_in_wait) || 0;
+                  const isActive        = s.status === "ACTIVE";
+                  const isUserIO        = s.wait_class === "User I/O";
+                  const isVeryLongIdle  = !isActive && idleSecs > 86400;
+                  const isLongIdle      = !isActive && idleSecs > 3600;
+                  const rowBg           = isVeryLongIdle ? "rgba(239,68,68,0.05)" : isActive ? "rgba(34,197,94,0.05)" : i % 2 === 0 ? "#f0f3f9" : "#e8edf5";
+                  const killDisabled    = isActive && isUserIO;
+                  return (
+                    <tr key={s.sid} style={{ background: rowBg, transition: "background 0.12s" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(37,99,235,0.06)"}
+                      onMouseLeave={e => e.currentTarget.style.background = rowBg}
+                    >
+                      <td style={{ padding: "7px 10px", fontSize: 11, color: "#334155", fontFamily: "monospace", fontWeight: 700 }}>{s.sid}</td>
+                      <td style={{ padding: "7px 10px", fontSize: 11, color: "#334155", fontWeight: 600 }}>{s.username}</td>
+                      <td style={{ padding: "7px 10px" }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: isActive ? "#16a34a" : "#64748b", background: isActive ? "rgba(34,197,94,0.12)" : "rgba(100,116,139,0.1)", borderRadius: 99, padding: "2px 7px" }}>
+                          {s.status}
+                        </span>
+                      </td>
+                      <td style={{ padding: "7px 10px", fontSize: 10.5, color: "#475569", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.machine}>{s.machine}</td>
+                      <td style={{ padding: "7px 10px", fontSize: 10.5, color: "#475569", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.program}>{s.program}</td>
+                      <td style={{ padding: "7px 10px", fontSize: 10.5, color: "#334155", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.event}>{s.event}</td>
+                      <td style={{ padding: "7px 10px" }}>
+                        <span style={{ fontSize: 10, color: isUserIO ? "#d97706" : s.wait_class === "Idle" ? "#94a3b8" : "#334155" }}>{s.wait_class}</span>
+                      </td>
+                      <td style={{ padding: "7px 10px" }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "monospace", color: isVeryLongIdle ? "#ef4444" : isLongIdle ? "#f59e0b" : "#22c55e" }}>
+                          {fmtIdleTime(idleSecs)}
+                        </span>
+                      </td>
+                      <td style={{ padding: "7px 10px" }}>
+                        <button onClick={() => !killDisabled && onKill(s)} disabled={killDisabled}
+                          title={killDisabled ? "Session is actively doing I/O — do not kill" : `Kill SID ${s.sid}`}
+                          style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, border: "none", cursor: killDisabled ? "not-allowed" : "pointer", background: killDisabled ? "#e8edf5" : "rgba(239,68,68,0.12)", color: killDisabled ? "#94a3b8" : "#dc2626", boxShadow: killDisabled ? "none" : "1px 1px 3px rgba(239,68,68,0.2)", transition: "all 0.15s" }}
+                        >Kill</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Kill Session confirmation modal ───────────────────────────────────────
+
+function KillSessionModal({ session, loading, onClose, onConfirm }) {
+  if (!session) return null;
+  const ddl = `ALTER SYSTEM DISCONNECT SESSION '${session.sid},${session.serial_num}' IMMEDIATE`;
+  const INFO = [
+    ["SID", session.sid, true],
+    ["Serial#", session.serial_num, true],
+    ["Username", session.username, false],
+    ["Status", session.status, false],
+    ["Machine", session.machine, false],
+    ["Program", session.program, false],
+    ["Event", session.event, false],
+    ["Idle Time", fmtIdleTime(session.seconds_in_wait), true],
+  ];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)" }}>
+      <div style={{ width: "100%", maxWidth: 500, borderRadius: 20, background: "#e8edf5", boxShadow: "10px 10px 30px #b0b5c3, -10px -10px 30px #ffffff" }}>
+        <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: "#dc2626" }}>Kill Oracle Session</h3>
+          <button onClick={onClose} style={{ color: "#94a3b8" }}><X size={16} /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 16px" }}>
+            {INFO.map(([k, v, mono]) => (
+              <div key={k}>
+                <p style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>{k}</p>
+                <p style={{ fontSize: 12, color: "#1e293b", fontWeight: 600, fontFamily: mono ? "monospace" : undefined, wordBreak: "break-all" }}>{v}</p>
+              </div>
+            ))}
+          </div>
+          <div style={{ background: "#1e293b", borderRadius: 10, padding: "10px 14px" }}>
+            <p style={{ fontSize: 9.5, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>DDL to Execute</p>
+            <code style={{ fontSize: 11.5, color: "#fbbf24", fontFamily: "monospace", wordBreak: "break-all" }}>{ddl}</code>
+          </div>
+          <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 10, padding: "10px 14px" }}>
+            <p style={{ fontSize: 11.5, color: "#dc2626" }}>⚠️ This will immediately terminate the session. Any uncommitted transactions will be rolled back.</p>
+          </div>
+          <div className="flex gap-3 justify-end">
+            <button onClick={onClose} style={{ padding: "8px 18px", fontSize: 12, fontWeight: 700, borderRadius: 10, border: "none", background: "#e8edf5", color: "#475569", cursor: "pointer", boxShadow: "3px 3px 8px #c5cad8, -3px -3px 8px #ffffff" }}>Cancel</button>
+            <button onClick={onConfirm} disabled={loading} style={{ padding: "8px 18px", fontSize: 12, fontWeight: 700, borderRadius: 10, border: "none", background: loading ? "#94a3b8" : "#dc2626", color: "#fff", cursor: loading ? "not-allowed" : "pointer", boxShadow: loading ? "none" : "3px 3px 8px rgba(220,38,38,0.3)" }}>
+              {loading ? "Killing..." : "Kill Session"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main section ─────────────────────────────────────────────────────────
 
 function ServerMonitoringSection() {
-  const [config,       setConfig]       = useState(null);
-  const [metrics,      setMetrics]      = useState(null);
-  const [history,      setHistory]      = useState([]);
-  const [loading,      setLoading]      = useState(false);
-  const [autoInterval, setAutoInterval] = useState(0);    // 0 = off
-  const [processes,    setProcesses]    = useState(null); // null = not yet loaded
-  const [procLoading,  setProcLoading]  = useState(false);
-  const [showModal,    setShowModal]    = useState(false);
-  const [testResult,   setTestResult]   = useState(null);
+  const [config,        setConfig]        = useState(null);
+  const [metrics,       setMetrics]       = useState(null);
+  const [history,       setHistory]       = useState([]);
+  const [loading,       setLoading]       = useState(false);
+  const [autoInterval,  setAutoInterval]  = useState(0);    // 0 = off
+  const [processes,     setProcesses]     = useState(null); // null = not yet loaded
+  const [procLoading,   setProcLoading]   = useState(false);
+  const [sessions,      setSessions]      = useState(null); // null = not yet loaded
+  const [sessLoading,   setSessLoading]   = useState(false);
+  const [killTarget,    setKillTarget]    = useState(null);
+  const [killLoading,   setKillLoading]   = useState(false);
+  const [showModal,     setShowModal]     = useState(false);
+  const [testResult,    setTestResult]    = useState(null);
+  const sessionsRef = useRef(null);
 
   useEffect(() => {
     itApi.getServerConfig().then(res => setConfig(res.data)).catch(() => {});
@@ -371,6 +537,31 @@ function ServerMonitoringSection() {
   const fetchAll = useCallback(async () => {
     await Promise.all([fetchMetrics(), fetchProcesses()]);
   }, [fetchMetrics, fetchProcesses]);
+
+  const fetchSessions = useCallback(async () => {
+    setSessLoading(true);
+    try {
+      const res = await itApi.getOracleSessions();
+      if (res?.success) setSessions({ count: res.count, data: res.data });
+    } catch (_) {}
+    finally { setSessLoading(false); }
+  }, []);
+
+  const handleKillSession = useCallback(async () => {
+    if (!killTarget) return;
+    setKillLoading(true);
+    try {
+      await itApi.killOracleSession({ sid: killTarget.sid, serial_num: killTarget.serial_num });
+      setKillTarget(null);
+      fetchSessions();
+    } catch (_) {}
+    finally { setKillLoading(false); }
+  }, [killTarget, fetchSessions]);
+
+  const scrollToSessions = useCallback(() => {
+    fetchSessions();
+    setTimeout(() => sessionsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+  }, [fetchSessions]);
 
   // Auto-refresh at selected interval
   useEffect(() => {
@@ -421,7 +612,7 @@ function ServerMonitoringSection() {
         )}
         {statusNotConf && (
           <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
-            <Settings size={14} /> SSH belum dikonfigurasi. Klik Configure untuk memasukkan kredensial.
+            <Settings size={14} /> SSH not configured. Click Configure to enter credentials.
           </div>
         )}
 
@@ -456,16 +647,16 @@ function ServerMonitoringSection() {
           <div style={{ marginTop: 20 }}>
             <div className="flex items-center gap-2 mb-3">
               <Lightbulb size={13} color="#f59e0b" />
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.08em" }}>Analisa & Rekomendasi</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.08em" }}>Analysis & Recommendations</span>
               <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${LEVEL_CFG[worstLevel.level].badge}`}>
-                {worstLevel.level === "critical" ? "Ada masalah kritis"
-                  : worstLevel.level === "warning"  ? "Perlu perhatian"
-                  : worstLevel.level === "elevated" ? "Normal, pantau tren"
-                  : "Sistem sehat ✓"}
+                {worstLevel.level === "critical" ? "Critical issue detected"
+                  : worstLevel.level === "warning"  ? "Needs attention"
+                  : worstLevel.level === "elevated" ? "Normal, monitor trend"
+                  : "System healthy ✓"}
               </span>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              {analysis.map(item => <AnalysisCard key={item.key} item={item} />)}
+              {analysis.map(item => <AnalysisCard key={item.key} item={item} onViewSessions={scrollToSessions} />)}
             </div>
           </div>
         )}
@@ -474,7 +665,27 @@ function ServerMonitoringSection() {
         {statusOnline && (
           <TopProcessesPanel processes={processes} loading={procLoading} onRefresh={fetchProcesses} />
         )}
+
+        {/* ── Oracle Sessions ── */}
+        {statusOnline && (
+          <OracleSessionsPanel
+            sessions={sessions}
+            loading={sessLoading}
+            onLoad={fetchSessions}
+            onKill={setKillTarget}
+            panelRef={sessionsRef}
+          />
+        )}
       </SectionCard>
+
+      {killTarget && (
+        <KillSessionModal
+          session={killTarget}
+          loading={killLoading}
+          onClose={() => setKillTarget(null)}
+          onConfirm={handleKillSession}
+        />
+      )}
 
       {showModal && (
         <ConfigModal

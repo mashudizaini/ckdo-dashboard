@@ -22,6 +22,9 @@ export const itApi = {
   getTopProcesses:   () => api.get("/dashboard/it/server-monitoring/top-processes"),
 
   // Other sections
+  getOracleSessions:       () => api.get("/dashboard/it/oracle-sessions"),
+  killOracleSession:       (body) => api.post("/dashboard/it/oracle-kill-session", body),
+
   getTablespace:           () => api.get("/dashboard/it/tablespace-usage"),
   getTablespaceDatafiles:  (ts) => api.get("/dashboard/it/tablespace-datafiles", { params: { tablespace_name: ts } }),
   addTablespaceDatafile:   (body) => api.post("/dashboard/it/tablespace-add-datafile", body),

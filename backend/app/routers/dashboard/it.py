@@ -145,6 +145,28 @@ async def resize_tablespace_datafile(
     )
 
 
+# ── Oracle Sessions ──────────────────────────────────────────────────────────
+
+class KillSessionIn(BaseModel):
+    sid: int
+    serial_num: int
+
+
+@router.get("/oracle-sessions")
+async def get_oracle_sessions(user: CurrentUser = Depends(require_role(Roles.IT))):
+    """Active Oracle user sessions from v$session + v$session_wait."""
+    return await OracleITService().get_oracle_sessions()
+
+
+@router.post("/oracle-kill-session")
+async def kill_oracle_session(
+    body: KillSessionIn,
+    user: CurrentUser = Depends(require_role(Roles.IT)),
+):
+    """Kill Oracle session via ALTER SYSTEM DISCONNECT SESSION 'sid,serial#' IMMEDIATE."""
+    return await OracleITService().kill_oracle_session(body.sid, body.serial_num)
+
+
 # ── Disk Usage ───────────────────────────────────────────────────────────────
 
 @router.get("/disk-usage")

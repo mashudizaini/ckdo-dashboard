@@ -317,6 +317,61 @@ class OracleITService:
             }
 
 
+    # ── Oracle Sessions ──────────────────────────────────────────────────────
+
+    async def get_oracle_sessions(self) -> dict:
+        """Active user sessions from v$session + v$session_wait, ordered by idle time desc."""
+        sql = """
+            SELECT
+                s.sid,
+                s.serial#                               AS serial_num,
+                NVL(s.username, '(background)')         AS username,
+                s.status,
+                SUBSTR(NVL(s.machine, '-'), 1, 40)      AS machine,
+                SUBSTR(NVL(s.program, '-'), 1, 40)      AS program,
+                NVL(s.sql_id, '-')                      AS sql_id,
+                NVL(s.last_call_et, 0)                  AS idle_seconds,
+                NVL(w.event, '-')                       AS event,
+                NVL(w.wait_class, '-')                  AS wait_class,
+                NVL(w.seconds_in_wait, 0)               AS seconds_in_wait,
+                NVL(w.state, '-')                       AS state
+            FROM v$session s
+            LEFT JOIN v$session_wait w ON s.sid = w.sid
+            WHERE s.username IS NOT NULL
+              AND s.type = 'USER'
+            ORDER BY
+                CASE WHEN s.status = 'ACTIVE' THEN 0 ELSE 1 END,
+                NVL(w.seconds_in_wait, 0) DESC
+            FETCH FIRST 50 ROWS ONLY
+        """
+        try:
+            rows = await asyncio.to_thread(self._query, sql)
+            return {"success": True, "count": len(rows), "data": rows}
+        except Exception as e:
+            logger.error("oracle_sessions_error", error=str(e))
+            return {"success": False, "error": str(e), "data": []}
+
+    async def kill_oracle_session(self, sid: int, serial_num: int) -> dict:
+        """Execute ALTER SYSTEM DISCONNECT SESSION 'sid,serial#' IMMEDIATE."""
+        if not (1 <= sid <= 99999) or not (1 <= serial_num <= 9999999):
+            return {"success": False, "error": "Invalid SID or serial number"}
+        ddl = f"ALTER SYSTEM DISCONNECT SESSION '{sid},{serial_num}' IMMEDIATE"
+        try:
+            def _exec():
+                with get_oracle_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(ddl)
+            await asyncio.to_thread(_exec)
+            return {
+                "success": True,
+                "message": f"Session SID {sid} (Serial# {serial_num}) disconnected successfully",
+                "ddl": ddl,
+            }
+        except Exception as e:
+            logger.error("kill_session_error", error=str(e), sid=sid, serial=serial_num)
+            return {"success": False, "error": str(e)}
+
+
 class ServerMonitorService:
     """SSH-based server monitoring — mirrors CKDO_DASHBOARD monitor_bp logic."""
 
