@@ -117,6 +117,66 @@ class OracleITService:
             logger.error("tablespace_datafiles_error", error=str(e))
             return {"success": False, "error": str(e), "data": []}
 
+    async def resize_tablespace_datafile(
+        self,
+        file_path: str,
+        add_value: float,
+        add_unit: str,
+    ) -> dict:
+        """
+        Extend an existing datafile by a given amount.
+        Calculates new_size = current_size + add_amount, then runs
+        ALTER DATABASE DATAFILE '<path>' RESIZE <new_size>M
+        """
+        if add_unit not in ("MB", "GB"):
+            return {"success": False, "error": "Unit harus MB atau GB"}
+        if add_value <= 0 or add_value > 102400:
+            return {"success": False, "error": "Tambahan ukuran tidak valid (1 – 102400)"}
+
+        # Fetch current size in MB
+        size_sql = """
+            SELECT ROUND(bytes / 1024 / 1024, 2) AS size_mb
+            FROM dba_data_files
+            WHERE file_name = :fp
+        """
+        try:
+            rows = await asyncio.to_thread(self._query, size_sql, {"fp": file_path})
+        except Exception as e:
+            logger.error("resize_fetch_size_error", error=str(e))
+            return {"success": False, "error": f"Gagal membaca ukuran file: {str(e)}"}
+
+        if not rows:
+            return {"success": False, "error": f"Datafile tidak ditemukan: {file_path}"}
+
+        current_mb  = float(rows[0]["size_mb"])
+        add_mb      = add_value * 1024 if add_unit == "GB" else add_value
+        new_total_mb = current_mb + add_mb
+
+        ddl = f"ALTER DATABASE DATAFILE '{file_path}' RESIZE {int(new_total_mb)}M"
+
+        try:
+            def _exec():
+                with get_oracle_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(ddl)
+                    conn.commit()
+
+            await asyncio.to_thread(_exec)
+            return {
+                "success": True,
+                "message": (
+                    f"Datafile berhasil di-resize: {current_mb:.0f} MB → {new_total_mb:.0f} MB"
+                    f" (+{add_mb:.0f} MB)"
+                ),
+                "ddl":          ddl,
+                "current_mb":   current_mb,
+                "add_mb":       add_mb,
+                "new_total_mb": new_total_mb,
+            }
+        except Exception as e:
+            logger.error("resize_tablespace_datafile_error", error=str(e), ddl=ddl)
+            return {"success": False, "error": str(e)}
+
     async def add_tablespace_datafile(
         self,
         tablespace_name: str,
@@ -310,6 +370,28 @@ class ServerMonitorService:
             raise Exception(err)
         return out
 
+    def _ssh_multi(self, commands: list[str], config: dict | None = None) -> list[str]:
+        """Run multiple commands on ONE SSH connection — avoids repeated auth handshakes."""
+        import paramiko
+        cfg = config or self.load_config()
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            cfg["ip"],
+            port=int(cfg.get("port", 22)),
+            username=cfg["username"],
+            password=cfg["password"],
+            timeout=8,
+        )
+        results = []
+        try:
+            for cmd in commands:
+                _, stdout, _ = client.exec_command(cmd)
+                results.append(stdout.read().decode("utf-8").strip())
+        finally:
+            client.close()
+        return results
+
     # ── Test connection ──────────────────────────────────────────────────────
 
     async def test_connection(self) -> dict:
@@ -333,28 +415,85 @@ class ServerMonitorService:
                 "cpu": 0, "memory_percent": 0,
                 "memory_used": 0, "memory_total": 0,
                 "load": "0.0", "uptime": "-",
+                "swap_percent": 0, "swap_used_mb": 0, "swap_total_mb": 0,
+                "cpu_count": 4,
             }
 
-        cpu_raw = self._ssh("top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | cut -d'%' -f1", cfg)
-        mem_raw = self._ssh("free -g | grep Mem | awk '{print $3,$2}'", cfg)
-        load_raw = self._ssh("cat /proc/loadavg | awk '{print $1}'", cfg)
-        uptime_raw = self._ssh("uptime -p", cfg)
+        # All 6 commands in ONE SSH connection (was 4 separate connections before)
+        cpu_raw, mem_raw, swap_raw, load_raw, uptime_raw, ncpu_raw = self._ssh_multi([
+            "top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | cut -d'%' -f1",
+            "free -g | grep Mem | awk '{print $3,$2}'",
+            "free -m | grep Swap | awk '{print $2,$3}'",
+            "cat /proc/loadavg | awk '{print $1}'",
+            "uptime -p",
+            "nproc 2>/dev/null || grep -c processor /proc/cpuinfo 2>/dev/null || echo 4",
+        ], cfg)
 
-        mem_parts = mem_raw.split()
-        mem_used = float(mem_parts[0]) if mem_parts else 0
-        mem_total = float(mem_parts[1]) if len(mem_parts) > 1 else 1
-        mem_pct = round((mem_used / mem_total) * 100, 1) if mem_total > 0 else 0
+        mem_parts   = mem_raw.split()
+        mem_used    = float(mem_parts[0]) if mem_parts else 0
+        mem_total   = float(mem_parts[1]) if len(mem_parts) > 1 else 1
+        mem_pct     = round((mem_used / mem_total) * 100, 1) if mem_total > 0 else 0
+
+        swap_parts  = swap_raw.split()
+        swap_total  = float(swap_parts[0]) if swap_parts else 0
+        swap_used   = float(swap_parts[1]) if len(swap_parts) > 1 else 0
+        swap_pct    = round((swap_used / swap_total) * 100, 1) if swap_total > 0 else 0
+
+        cpu_count   = int(ncpu_raw) if (ncpu_raw or "").strip().isdigit() else 4
 
         return {
-            "status": "online",
-            "cpu": round(float(cpu_raw or 0), 1),
+            "status":       "online",
+            "cpu":          round(float(cpu_raw or 0), 1),
             "memory_percent": mem_pct,
-            "memory_used": round(mem_used, 2),
+            "memory_used":  round(mem_used, 2),
             "memory_total": round(mem_total, 2),
-            "load": load_raw or "0.0",
-            "uptime": uptime_raw or "-",
-            "timestamp": datetime.now().isoformat(),
+            "load":         load_raw or "0.0",
+            "uptime":       uptime_raw or "-",
+            "swap_percent": swap_pct,
+            "swap_used_mb": round(swap_used, 0),
+            "swap_total_mb": round(swap_total, 0),
+            "cpu_count":    cpu_count,
+            "timestamp":    datetime.now().isoformat(),
         }
+
+    # ── Top Processes ────────────────────────────────────────────────────────
+
+    def _fetch_top_processes(self) -> dict:
+        cfg = self.load_config()
+        if not cfg.get("username") or not cfg.get("password"):
+            return {"status": "not_configured", "cpu": [], "mem": []}
+
+        cpu_raw, mem_raw = self._ssh_multi([
+            "ps -eo user:15,pid:7,pcpu:6,pmem:6,comm:20 --no-headers --sort=-%cpu 2>/dev/null | head -8",
+            "ps -eo user:15,pid:7,pcpu:6,pmem:6,comm:20 --no-headers --sort=-%mem 2>/dev/null | head -8",
+        ], cfg)
+
+        def parse(raw: str) -> list[dict]:
+            rows = []
+            for line in (raw or "").strip().splitlines():
+                parts = line.split()
+                if len(parts) >= 5:
+                    rows.append({
+                        "user":    parts[0],
+                        "pid":     parts[1],
+                        "cpu":     parts[2],
+                        "mem":     parts[3],
+                        "command": parts[4],
+                    })
+            return rows
+
+        return {"status": "online", "cpu": parse(cpu_raw), "mem": parse(mem_raw)}
+
+    async def get_top_processes(self) -> dict:
+        cfg = self.load_config()
+        if not cfg.get("username") or not cfg.get("password"):
+            return {"success": False, "error": "SSH credentials not configured", "cpu": [], "mem": []}
+        try:
+            data = await asyncio.to_thread(self._fetch_top_processes)
+            return {"success": True, **data}
+        except Exception as e:
+            logger.error("top_processes_error", error=str(e))
+            return {"success": False, "error": str(e), "cpu": [], "mem": []}
 
     # ── Disk Usage (both servers) ────────────────────────────────────────────
 

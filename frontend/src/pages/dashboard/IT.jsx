@@ -3,7 +3,8 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   Server, Activity, HardDrive, Clock, AlertTriangle,
   RefreshCw, Settings, Wifi, WifiOff, Loader2, X, CheckCircle,
-  PlusCircle, Database, AlertCircle,
+  PlusCircle, Database, AlertCircle, Maximize2,
+  Cpu, TrendingUp, List, Lightbulb, Terminal,
 } from "lucide-react";
 import {
   AreaChart, Area,
@@ -77,23 +78,267 @@ export default function ITDashboard() {
 
 /* ─── Section: Server Monitoring ─────────────────── */
 
-function ServerMonitoringSection() {
-  const [config,      setConfig]      = useState(null);
-  const [metrics,     setMetrics]     = useState(null);
-  const [history,     setHistory]     = useState([]);   // [{ts, cpu, mem, load}]
-  const [loading,     setLoading]     = useState(false);
-  const [polling,     setPolling]     = useState(false);
-  const [showModal,   setShowModal]   = useState(false);
-  const [testResult,  setTestResult]  = useState(null);
+// ── Analysis engine (pure JS, no backend needed) ──────────────────────────
 
-  // Load config on mount
+const LEVEL_CFG = {
+  critical: { bg: "rgba(239,68,68,0.08)",  border: "rgba(239,68,68,0.25)",  dot: "#ef4444", text: "#dc2626", badge: "bg-red-500/20 text-red-500",     icon: "🔴" },
+  warning:  { bg: "rgba(245,158,11,0.08)", border: "rgba(245,158,11,0.25)", dot: "#f59e0b", text: "#d97706", badge: "bg-amber-500/20 text-amber-500",  icon: "🟡" },
+  elevated: { bg: "rgba(251,146,60,0.08)", border: "rgba(251,146,60,0.25)", dot: "#fb923c", text: "#ea580c", badge: "bg-orange-500/20 text-orange-500", icon: "🟠" },
+  normal:   { bg: "rgba(34,197,94,0.08)",  border: "rgba(34,197,94,0.25)",  dot: "#22c55e", text: "#16a34a", badge: "bg-green-500/20 text-green-500",   icon: "🟢" },
+};
+
+function buildAnalysis(m) {
+  if (!m || m.status !== "online") return [];
+  const cpuCount  = m.cpu_count || 4;
+  const load      = parseFloat(m.load) || 0;
+  const loadRatio = cpuCount > 0 ? load / cpuCount : load;
+  const swapPct   = m.swap_percent ?? 0;
+  const items     = [];
+
+  // CPU
+  const cpu = m.cpu;
+  let cpuLvl, cpuTitle, cpuMsg, cpuRecs;
+  if (cpu >= 90) {
+    cpuLvl = "critical"; cpuTitle = "CPU Critical";
+    cpuMsg = `CPU sangat tinggi (${cpu}%) — kemungkinan full table scan Oracle, batch besar, atau proses runaway`;
+    cpuRecs = ["Lihat Top Processes di bawah untuk identifikasi pelaku", "Di Oracle: periksa v$session + v$sql untuk SQL berat yang berjalan", "Pertimbangkan batasi Oracle EBS Concurrent Request sementara"];
+  } else if (cpu >= 70) {
+    cpuLvl = "warning"; cpuTitle = "CPU Tinggi";
+    cpuMsg = `CPU tinggi (${cpu}%) — jika bertahan > 15 menit, perlu investigasi`;
+    cpuRecs = ["Cek apakah ada Oracle batch job terjadwal", "Periksa index rebuild atau gather statistics yang sedang berjalan"];
+  } else if (cpu >= 50) {
+    cpuLvl = "elevated"; cpuTitle = "CPU Sedang";
+    cpuMsg = `CPU (${cpu}%) di atas rata-rata tapi masih dalam toleransi`;
+    cpuRecs = [];
+  } else {
+    cpuLvl = "normal"; cpuTitle = "CPU Normal";
+    cpuMsg = `CPU dalam batas aman (${cpu}%)`;
+    cpuRecs = [];
+  }
+  items.push({ key: "cpu", label: "CPU", icon: <Cpu size={12} />, title: cpuTitle, value: `${cpu}%`, level: cpuLvl, msg: cpuMsg, recs: cpuRecs });
+
+  // Memory
+  const mem = m.memory_percent;
+  let memLvl, memTitle, memMsg, memRecs;
+  if (mem >= 95) {
+    memLvl = "critical"; memTitle = "Memory Critical";
+    memMsg = `Memory hampir habis (${mem}%) — sistem mulai pakai swap, Oracle akan sangat lambat`;
+    memRecs = ["Segera kill idle Oracle sessions: ALTER SYSTEM DISCONNECT SESSION 'sid,serial#' IMMEDIATE", "Review Oracle SGA_TARGET — kemungkinan terlalu besar untuk RAM server", "Pertimbangkan restart Oracle app tier jika ada memory leak"];
+  } else if (mem >= 85) {
+    memLvl = "warning"; memTitle = "Memory Tinggi";
+    memMsg = `Memory tinggi (${mem}%) — risiko pakai swap, pantau ketat`;
+    memRecs = ["Periksa jumlah Oracle session aktif via v$session", "Cek Oracle PGA_AGGREGATE_TARGET vs kebutuhan aktual"];
+  } else if (mem >= 70) {
+    memLvl = "elevated"; memTitle = "Memory Sedang";
+    memMsg = `Memory (${mem}%) di atas rata-rata — normal untuk Oracle EBS dengan SGA besar`;
+    memRecs = [];
+  } else {
+    memLvl = "normal"; memTitle = "Memory Normal";
+    memMsg = `Memory dalam batas aman (${mem}%, ${m.memory_used}/${m.memory_total} GB)`;
+    memRecs = [];
+  }
+  items.push({ key: "mem", label: "Memory", icon: <TrendingUp size={12} />, title: memTitle, value: `${mem}%`, level: memLvl, msg: memMsg, recs: memRecs });
+
+  // Load Average
+  let loadLvl, loadTitle, loadMsg, loadRecs;
+  if (loadRatio >= 2) {
+    loadLvl = "critical"; loadTitle = "Load Critical";
+    loadMsg = `Load average sangat tinggi (${load} / ${cpuCount} CPU) — banyak proses antri, kemungkinan I/O bottleneck`;
+    loadRecs = ["Ini bukan sekadar CPU tinggi — kemungkinan besar ada disk I/O wait", "Di Oracle: periksa v$session_wait untuk wait event terbesar", "Pertimbangkan kurangi Oracle concurrent request"];
+  } else if (loadRatio >= 1) {
+    loadLvl = "warning"; loadTitle = "Load Tinggi";
+    loadMsg = `Load melebihi jumlah CPU (${load} / ${cpuCount} CPU) — ada antrian proses`;
+    loadRecs = ["Periksa Oracle redo log archiving — bottleneck I/O sering dari sini", "Cek apakah ada operasi besar sedang berjalan (backup, export)"];
+  } else {
+    loadLvl = "normal"; loadTitle = "Load Normal";
+    loadMsg = `Load average proporsional (${load} / ${cpuCount} CPU) — tidak ada antrian`;
+    loadRecs = [];
+  }
+  items.push({ key: "load", label: "Load", icon: <Activity size={12} />, title: loadTitle, value: load.toFixed(2), level: loadLvl, msg: loadMsg, recs: loadRecs });
+
+  // Swap
+  let swapLvl, swapTitle, swapMsg, swapRecs;
+  if (swapPct >= 50) {
+    swapLvl = "critical"; swapTitle = "Swap Critical";
+    swapMsg = `Swap sangat tinggi (${swapPct}%) — Oracle pasti melambat drastis, risiko OOM kill`;
+    swapRecs = ["SEGERA kurangi Oracle SGA — pakai swap = RAM habis", "Kill non-essential processes secepatnya", "Koordinasikan reboot terjadwal dengan user jika tidak ada jalan lain"];
+  } else if (swapPct >= 10) {
+    swapLvl = "warning"; swapTitle = "Swap Aktif";
+    swapMsg = `Swap digunakan (${swapPct}%) — RAM sudah tidak cukup menampung semua proses`;
+    swapRecs = ["Kurangi Oracle SGA_TARGET atau PGA_AGGREGATE_TARGET", "Kill idle Oracle sessions untuk bebaskan memory"];
+  } else if (swapPct > 0) {
+    swapLvl = "elevated"; swapTitle = "Swap Minimal";
+    swapMsg = `Sedikit swap digunakan (${swapPct}%) — normal, pantau tren`;
+    swapRecs = [];
+  } else {
+    swapLvl = "normal"; swapTitle = "Swap Tidak Aktif";
+    swapMsg = "Tidak ada penggunaan swap — memory masih lebih dari cukup";
+    swapRecs = [];
+  }
+  items.push({ key: "swap", label: "Swap", icon: <HardDrive size={12} />, title: swapTitle, value: `${swapPct}%`, level: swapLvl, msg: swapMsg, recs: swapRecs });
+
+  return items;
+}
+
+// ── Auto-refresh selector ────────────────────────────────────────────────
+
+const AUTO_OPTS = [
+  { label: "Off", v: 0 },
+  { label: "30s", v: 30000 },
+  { label: "1m",  v: 60000 },
+  { label: "2m",  v: 120000 },
+];
+
+function AutoRefreshSelector({ value, onChange }) {
+  return (
+    <div style={{ display: "flex", background: "#e8edf5", borderRadius: 10, padding: 3, boxShadow: "inset 2px 2px 6px #c5cad8, inset -2px -2px 6px #ffffff", gap: 2 }}>
+      {AUTO_OPTS.map(o => (
+        <button key={o.v} onClick={() => onChange(o.v)} style={{
+          padding: "4px 10px", borderRadius: 7, border: "none", cursor: "pointer",
+          background: value === o.v ? "#2563eb" : "transparent",
+          color: value === o.v ? "#fff" : "#64748b",
+          fontSize: 11, fontWeight: 700, transition: "all 0.15s ease",
+          boxShadow: value === o.v ? "2px 2px 6px rgba(37,99,235,0.3)" : "none",
+        }}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
+
+// ── Analysis card ────────────────────────────────────────────────────────
+
+function AnalysisCard({ item }) {
+  const [open, setOpen] = useState(item.level !== "normal");
+  const lc = LEVEL_CFG[item.level];
+  return (
+    <div style={{ borderRadius: 14, padding: "11px 14px", background: lc.bg, border: `1.5px solid ${lc.border}`, transition: "all 0.2s" }}>
+      <div className="flex items-center justify-between cursor-pointer select-none" onClick={() => setOpen(o => !o)}>
+        <div className="flex items-center gap-2">
+          <span style={{ fontSize: 13 }}>{lc.icon}</span>
+          <div style={{ color: lc.text }}>
+            {item.icon}
+          </div>
+          <span style={{ fontSize: 11.5, fontWeight: 800, color: lc.text }}>{item.title}</span>
+          <span style={{ fontSize: 11, color: "#94a3b8", fontFamily: "monospace", marginLeft: 2 }}>{item.value}</span>
+        </div>
+        <span style={{ fontSize: 9, color: "#94a3b8", marginLeft: 4 }}>{open ? "▲" : "▼"}</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          <p style={{ fontSize: 11.5, color: "#475569", lineHeight: 1.55, marginBottom: item.recs.length > 0 ? 8 : 0 }}>{item.msg}</p>
+          {item.recs.length > 0 && (
+            <>
+              <p style={{ fontSize: 9.5, fontWeight: 800, color: lc.text, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 5 }}>Rekomendasi:</p>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+                {item.recs.map((r, i) => (
+                  <li key={i} style={{ fontSize: 11, color: "#475569", display: "flex", gap: 6 }}>
+                    <span style={{ color: lc.dot, flexShrink: 0, fontWeight: 700 }}>→</span>
+                    <span style={{ lineHeight: 1.5 }}>{r}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Top Processes panel ─────────────────────────────────────────────────
+
+function TopProcessesPanel({ processes, loading, onRefresh }) {
+  const [tab, setTab] = useState("cpu");
+
+  const rows = processes?.[tab] ?? [];
+  const TAB_S = { fontSize: 11, fontWeight: 700, padding: "4px 12px", border: "none", cursor: "pointer", transition: "all 0.15s ease" };
+
+  return (
+    <div style={{ marginTop: 20 }}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Terminal size={13} color="#2563eb" />
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.08em" }}>Top Processes</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Tab selector */}
+          <div style={{ display: "flex", background: "#e8edf5", borderRadius: 9, padding: 3, boxShadow: "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff", gap: 2 }}>
+            {[["cpu", "▲ CPU"], ["mem", "▲ Memory"]].map(([k, l]) => (
+              <button key={k} onClick={() => setTab(k)} style={{
+                ...TAB_S,
+                borderRadius: 6,
+                background: tab === k ? "#2563eb" : "transparent",
+                color: tab === k ? "#fff" : "#64748b",
+                boxShadow: tab === k ? "2px 2px 5px rgba(37,99,235,0.3)" : "none",
+              }}>{l}</button>
+            ))}
+          </div>
+          <ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-blue-600 hover:bg-blue-700" onClick={onRefresh} />
+        </div>
+      </div>
+
+      <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff" }}>
+        <table className="w-full">
+          <thead>
+            <tr style={{ background: "linear-gradient(135deg,#dfe5ed,#d8dee8)" }}>
+              {["User", "PID", "%CPU", "%MEM", "Process"].map(h => (
+                <th key={h} style={{ padding: "10px 13px", fontSize: 10, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", whiteSpace: "nowrap", textAlign: "left", borderBottom: "2px solid rgba(0,0,0,0.06)" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {processes === null ? (
+              <tr><td colSpan={5} style={{ padding: "28px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>Klik Refresh untuk memuat data proses</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td colSpan={5} style={{ padding: "28px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>Tidak ada data</td></tr>
+            ) : (
+              rows.map((p, i) => {
+                const cpuNum = parseFloat(p.cpu);
+                const memNum = parseFloat(p.mem);
+                const cpuColor = cpuNum >= 30 ? "#ef4444" : cpuNum >= 10 ? "#f59e0b" : "#22c55e";
+                const memColor = memNum >= 30 ? "#ef4444" : memNum >= 10 ? "#f59e0b" : "#22c55e";
+                return (
+                  <tr key={i} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5", transition: "background 0.12s" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "rgba(37,99,235,0.06)"}
+                    onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f0f3f9" : "#e8edf5"}
+                  >
+                    <td style={{ padding: "8px 13px", fontSize: 12, color: "#334155", fontWeight: 600 }}>{p.user}</td>
+                    <td style={{ padding: "8px 13px", fontSize: 11, color: "#64748b", fontFamily: "monospace" }}>{p.pid}</td>
+                    <td style={{ padding: "8px 13px" }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: cpuColor, fontFamily: "monospace" }}>{p.cpu}%</span>
+                    </td>
+                    <td style={{ padding: "8px 13px" }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: memColor, fontFamily: "monospace" }}>{p.mem}%</span>
+                    </td>
+                    <td style={{ padding: "8px 13px", fontSize: 12, color: "#1e293b", fontFamily: "monospace", fontWeight: 600 }}>{p.command}</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Main section ─────────────────────────────────────────────────────────
+
+function ServerMonitoringSection() {
+  const [config,       setConfig]       = useState(null);
+  const [metrics,      setMetrics]      = useState(null);
+  const [history,      setHistory]      = useState([]);
+  const [loading,      setLoading]      = useState(false);
+  const [autoInterval, setAutoInterval] = useState(0);    // 0 = off
+  const [processes,    setProcesses]    = useState(null); // null = not yet loaded
+  const [procLoading,  setProcLoading]  = useState(false);
+  const [showModal,    setShowModal]    = useState(false);
+  const [testResult,   setTestResult]   = useState(null);
+
   useEffect(() => {
-    itApi.getServerConfig()
-      .then((res) => setConfig(res.data))
-      .catch(() => {});
+    itApi.getServerConfig().then(res => setConfig(res.data)).catch(() => {});
   }, []);
 
-  // Fetch metrics once
   const fetchMetrics = useCallback(async () => {
     setLoading(true);
     try {
@@ -101,14 +346,9 @@ function ServerMonitoringSection() {
       const d = res.data;
       setMetrics(d);
       if (d.status === "online") {
-        setHistory((prev) => [
+        setHistory(prev => [
           ...prev.slice(-29),
-          {
-            ts:   new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-            cpu:  d.cpu,
-            mem:  d.memory_percent,
-            load: parseFloat(d.load) || 0,
-          },
+          { ts: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" }), cpu: d.cpu, mem: d.memory_percent, load: parseFloat(d.load) || 0 },
         ]);
       }
     } catch (e) {
@@ -118,30 +358,47 @@ function ServerMonitoringSection() {
     }
   }, []);
 
-  // Polling
+  const fetchProcesses = useCallback(async () => {
+    setProcLoading(true);
+    try {
+      const res = await itApi.getTopProcesses();
+      if (res?.success) setProcesses({ cpu: res.cpu, mem: res.mem });
+    } catch (_) {}
+    finally { setProcLoading(false); }
+  }, []);
+
+  // Fetch both metrics + processes in parallel on every refresh
+  const fetchAll = useCallback(async () => {
+    await Promise.all([fetchMetrics(), fetchProcesses()]);
+  }, [fetchMetrics, fetchProcesses]);
+
+  // Auto-refresh at selected interval
   useEffect(() => {
-    if (!polling) return;
-    fetchMetrics();
-    const id = setInterval(fetchMetrics, 5000);
+    if (autoInterval === 0) return;
+    fetchAll();
+    const id = setInterval(fetchAll, autoInterval);
     return () => clearInterval(id);
-  }, [polling, fetchMetrics]);
+  }, [autoInterval, fetchAll]);
 
   const statusOnline  = metrics?.status === "online";
   const statusError   = metrics?.status === "error";
   const statusNotConf = metrics?.status === "not_configured";
+  const analysis      = buildAnalysis(metrics);
+
+  // Overall health badge
+  const worstLevel = analysis.reduce((a, b) => {
+    const order = { critical: 3, warning: 2, elevated: 1, normal: 0 };
+    return (order[b.level] ?? 0) > (order[a.level] ?? 0) ? b : a;
+  }, { level: "normal" });
 
   return (
     <>
       <SectionCard
         title="Real-time Server Monitoring"
         action={
-          <div className="flex gap-2">
-            {polling ? (
-              <ActionBtn icon={RefreshCw} label="Stop" color="bg-red-600 hover:bg-red-700" onClick={() => setPolling(false)} />
-            ) : (
-              <ActionBtn icon={RefreshCw} label="Start" color="bg-green-600 hover:bg-green-700" onClick={() => setPolling(true)} />
-            )}
-            <ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-blue-600 hover:bg-blue-700" onClick={fetchMetrics} />
+          <div className="flex items-center gap-2">
+            <AutoRefreshSelector value={autoInterval} onChange={setAutoInterval} />
+            <ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-blue-600 hover:bg-blue-700" onClick={fetchAll} />
           </div>
         }
       >
@@ -149,20 +406,14 @@ function ServerMonitoringSection() {
         <div className="mb-5 flex items-center justify-between p-4 rounded-lg bg-gray-800/50 border border-gray-700">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-400">Server</span>
-            <span className="text-sm font-medium text-gray-200">
-              {config ? `${config.ip}:${config.port}` : "—"}
-            </span>
-            {config?.username && (
-              <span className="text-xs text-gray-500">({config.username})</span>
-            )}
-            {config?.has_password === false && (
-              <span className="text-xs text-amber-400">Password not set</span>
-            )}
+            <span className="text-sm font-medium text-gray-200">{config ? `${config.ip}:${config.port}` : "—"}</span>
+            {config?.username && <span className="text-xs text-gray-500">({config.username})</span>}
+            {config?.has_password === false && <span className="text-xs text-amber-400">Password not set</span>}
           </div>
           <ActionBtn icon={Settings} label="Configure" color="bg-gray-700 hover:bg-gray-600" onClick={() => setShowModal(true)} />
         </div>
 
-        {/* Status banner */}
+        {/* Status banners */}
         {statusError && (
           <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
             <WifiOff size={14} /> {metrics.error}
@@ -170,30 +421,21 @@ function ServerMonitoringSection() {
         )}
         {statusNotConf && (
           <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
-            <Settings size={14} /> SSH configuration incomplete. Click Configure to enter credentials.
+            <Settings size={14} /> SSH belum dikonfigurasi. Klik Configure untuk memasukkan kredensial.
           </div>
         )}
 
-        {/* Metric Cards */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          <MetricCard
-            label="CPU Usage"
-            value={metrics ? `${metrics.cpu}%` : "—"}
-            sub={`Load Average: ${metrics?.load ?? "—"}`}
-            gradient="from-indigo-500 to-purple-600"
-          />
-          <MetricCard
-            label="Memory Usage"
-            value={metrics ? `${metrics.memory_percent}%` : "—"}
-            sub={metrics ? `${metrics.memory_used} / ${metrics.memory_total} GB` : "— / —"}
-            gradient="from-pink-500 to-rose-500"
-          />
+        {/* KPI Cards — now with swap */}
+        <div className="grid grid-cols-4 gap-3 mb-5">
+          <MetricCard label="CPU Usage"     value={metrics ? `${metrics.cpu}%`             : "—"} sub={`Load: ${metrics?.load ?? "—"} / ${metrics?.cpu_count ?? "—"} CPU`}      gradient="from-indigo-500 to-purple-600" />
+          <MetricCard label="Memory Usage"  value={metrics ? `${metrics.memory_percent}%`  : "—"} sub={metrics ? `${metrics.memory_used} / ${metrics.memory_total} GB`  : "—"}   gradient="from-pink-500 to-rose-500" />
+          <MetricCard label="Swap Usage"    value={metrics ? `${metrics.swap_percent ?? 0}%`: "—"} sub={metrics ? `${metrics.swap_used_mb ?? 0} / ${metrics.swap_total_mb ?? 0} MB`: "—"} gradient={metrics?.swap_percent > 10 ? "from-orange-500 to-red-500" : "from-teal-500 to-cyan-500"} />
           <MetricCard
             label="Server Status"
             value={
               <span className="flex items-center justify-center gap-2">
-                {statusOnline  ? <><Wifi size={16} />Online</>   : null}
-                {statusError   ? <><WifiOff size={16} />Error</>  : null}
+                {statusOnline  ? <><Wifi size={16} />Online</>    : null}
+                {statusError   ? <><WifiOff size={16} />Error</>   : null}
                 {!metrics || statusNotConf ? <><Wifi size={16} />Waiting</> : null}
               </span>
             }
@@ -204,13 +446,36 @@ function ServerMonitoringSection() {
 
         {/* Charts */}
         <div className="space-y-4">
-          <MiniChart title="CPU Usage History (%)" data={history} dataKey="cpu" color="#818cf8" domain={[0, 100]} />
-          <MiniChart title="Memory Usage History (%)" data={history} dataKey="mem" color="#f472b6" domain={[0, 100]} />
-          <MiniChart title="Load Average History" data={history} dataKey="load" color="#22d3ee" />
+          <MiniChart title="CPU Usage History (%)"    data={history} dataKey="cpu"  color="#818cf8" domain={[0, 100]} />
+          <MiniChart title="Memory Usage History (%)" data={history} dataKey="mem"  color="#f472b6" domain={[0, 100]} />
+          <MiniChart title="Load Average History"     data={history} dataKey="load" color="#22d3ee" />
         </div>
+
+        {/* ── Analysis & Recommendations ── */}
+        {statusOnline && analysis.length > 0 && (
+          <div style={{ marginTop: 20 }}>
+            <div className="flex items-center gap-2 mb-3">
+              <Lightbulb size={13} color="#f59e0b" />
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.08em" }}>Analisa & Rekomendasi</span>
+              <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${LEVEL_CFG[worstLevel.level].badge}`}>
+                {worstLevel.level === "critical" ? "Ada masalah kritis"
+                  : worstLevel.level === "warning"  ? "Perlu perhatian"
+                  : worstLevel.level === "elevated" ? "Normal, pantau tren"
+                  : "Sistem sehat ✓"}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {analysis.map(item => <AnalysisCard key={item.key} item={item} />)}
+            </div>
+          </div>
+        )}
+
+        {/* ── Top Processes ── */}
+        {statusOnline && (
+          <TopProcessesPanel processes={processes} loading={procLoading} onRefresh={fetchProcesses} />
+        )}
       </SectionCard>
 
-      {/* Configure Modal */}
       {showModal && (
         <ConfigModal
           initial={config}
@@ -390,8 +655,9 @@ function TablespaceSection() {
   const [data,       setData]       = useState([]);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState(null);
-  const [modalTs,    setModalTs]    = useState(null);   // row object when modal open
-  const [successMsg, setSuccessMsg] = useState(null);
+  const [modalTs,       setModalTs]       = useState(null); // Add Datafile modal
+  const [resizeModalTs, setResizeModalTs] = useState(null); // Resize Datafile modal
+  const [successMsg,    setSuccessMsg]    = useState(null);
 
   const refresh = async () => {
     setLoading(true);
@@ -479,25 +745,44 @@ function TablespaceSection() {
             <span key={r.tablespace_name + "-s"} className={`px-2 py-0.5 rounded-full text-xs font-medium ${TS_COLORS[r.status]?.badge}`}>
               {r.status}
             </span>,
-            <button
-              key={r.tablespace_name + "-add"}
-              onClick={() => setModalTs(r)}
-              title="Tambah Datafile"
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 4,
-                padding: "4px 10px", borderRadius: 8, border: "none",
-                background: "#e8edf5",
-                boxShadow: "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff",
-                color: "#2563eb", fontSize: 11, fontWeight: 700,
-                cursor: "pointer", whiteSpace: "nowrap",
-                transition: "box-shadow 0.15s ease",
-              }}
-              onMouseDown={e => e.currentTarget.style.boxShadow = "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff"}
-              onMouseUp={e => e.currentTarget.style.boxShadow = "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff"}
-              onMouseLeave={e => e.currentTarget.style.boxShadow = "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff"}
-            >
-              <PlusCircle size={11} /> Tambah File
-            </button>,
+            <div key={r.tablespace_name + "-actions"} style={{ display: "flex", gap: 5 }}>
+              <button
+                onClick={() => setModalTs(r)}
+                title="Tambah Datafile baru"
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 4,
+                  padding: "4px 9px", borderRadius: 8, border: "none",
+                  background: "#e8edf5",
+                  boxShadow: "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff",
+                  color: "#2563eb", fontSize: 11, fontWeight: 700,
+                  cursor: "pointer", whiteSpace: "nowrap",
+                  transition: "box-shadow 0.15s ease",
+                }}
+                onMouseDown={e => e.currentTarget.style.boxShadow = "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff"}
+                onMouseUp={e => e.currentTarget.style.boxShadow = "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff"}
+                onMouseLeave={e => e.currentTarget.style.boxShadow = "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff"}
+              >
+                <PlusCircle size={11} /> Tambah File
+              </button>
+              <button
+                onClick={() => setResizeModalTs(r)}
+                title="Extend ukuran datafile yang sudah ada"
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 4,
+                  padding: "4px 9px", borderRadius: 8, border: "none",
+                  background: "#e8edf5",
+                  boxShadow: "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff",
+                  color: "#7c3aed", fontSize: 11, fontWeight: 700,
+                  cursor: "pointer", whiteSpace: "nowrap",
+                  transition: "box-shadow 0.15s ease",
+                }}
+                onMouseDown={e => e.currentTarget.style.boxShadow = "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff"}
+                onMouseUp={e => e.currentTarget.style.boxShadow = "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff"}
+                onMouseLeave={e => e.currentTarget.style.boxShadow = "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff"}
+              >
+                <Maximize2 size={11} /> Resize File
+              </button>
+            </div>,
           ])}
           placeholder="Click Refresh to load tablespace data"
         />
@@ -508,6 +793,15 @@ function TablespaceSection() {
         <AddDatafileModal
           tablespace={modalTs}
           onClose={() => setModalTs(null)}
+          onSuccess={handleSuccess}
+        />
+      )}
+
+      {/* Resize Datafile Modal */}
+      {resizeModalTs && (
+        <ResizeDatafileModal
+          tablespace={resizeModalTs}
+          onClose={() => setResizeModalTs(null)}
           onSuccess={handleSuccess}
         />
       )}
@@ -770,6 +1064,308 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
                   }}>
                     <p style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>{k}</p>
                     <p style={{ fontSize: 11.5, color: "#1e293b", fontWeight: 600 }}>{v}</p>
+                  </div>
+                ))}
+              </div>
+
+              {saveError && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs">
+                  <AlertCircle size={12} /> {saveError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-between px-5 py-4" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+              <ActionBtn icon={X} label="Kembali" color="bg-gray-700 hover:bg-gray-600" onClick={() => setStep("form")} />
+              <ActionBtn
+                icon={saving ? Loader2 : CheckCircle}
+                label={saving ? "Menjalankan DDL..." : "Ya, Jalankan DDL"}
+                color="bg-green-600 hover:bg-green-700"
+                onClick={handleConfirm}
+              />
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Resize Datafile Modal ──────────────────────────── */
+
+function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
+  const [files,        setFiles]        = useState([]);
+  const [loadingFiles, setLoadingFiles] = useState(true);
+  const [selected,     setSelected]     = useState(null);  // file object
+  const [addValue,     setAddValue]     = useState("1");
+  const [addUnit,      setAddUnit]      = useState("GB");
+  const [step,         setStep]         = useState("form"); // "form" | "confirm"
+  const [saving,       setSaving]       = useState(false);
+  const [saveError,    setSaveError]    = useState(null);
+
+  useEffect(() => {
+    itApi.getTablespaceDatafiles(tablespace.tablespace_name)
+      .then(res => {
+        if (res?.success) {
+          const arr = res.data ?? [];
+          setFiles(arr);
+          if (arr.length > 0) setSelected(arr[0]);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingFiles(false));
+  }, [tablespace.tablespace_name]);
+
+  const addNum    = parseFloat(addValue) || 0;
+  const addMb     = addNum * (addUnit === "GB" ? 1024 : 1);
+  const currMb    = selected ? parseFloat(selected.size_mb) : 0;
+  const newTotalMb = currMb + addMb;
+
+  const fmtSize = (mb) => mb >= 1024
+    ? `${(mb / 1024).toFixed(2)} GB`
+    : `${mb.toFixed(0)} MB`;
+
+  const canSubmit = selected && addNum > 0;
+
+  const ddlPreview = canSubmit
+    ? `ALTER DATABASE DATAFILE '${selected.file_name}' RESIZE ${Math.round(newTotalMb)}M`
+    : "";
+
+  const handleConfirm = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const res = await itApi.resizeTablespaceDatafile({
+        file_path: selected.file_name,
+        add_value: addNum,
+        add_unit:  addUnit,
+      });
+      if (res?.success) {
+        onSuccess?.(res.message);
+        onClose();
+      } else {
+        setSaveError(res?.error ?? "Gagal resize datafile");
+        setStep("form");
+      }
+    } catch (e) {
+      setSaveError(String(e?.message ?? e));
+      setStep("form");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const neu    = { background: "#e8edf5" };
+  const shadow = "10px 10px 30px #b0b5c3, -10px -10px 30px #ffffff";
+  const divider= { borderBottom: "1px solid rgba(0,0,0,0.06)" };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)" }}>
+      <div style={{ width: "100%", maxWidth: 540, borderRadius: 20, ...neu, boxShadow: shadow }}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4" style={divider}>
+          <div className="flex items-center gap-2">
+            <Maximize2 size={15} color="#7c3aed" />
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: "#1e293b" }}>
+              {step === "form" ? "Resize Datafile" : "Konfirmasi DDL"} — {tablespace.tablespace_name}
+            </h3>
+          </div>
+          <button onClick={onClose} style={{ color: "#94a3b8" }}
+            onMouseEnter={e => e.currentTarget.style.color = "#1e293b"}
+            onMouseLeave={e => e.currentTarget.style.color = "#94a3b8"}>
+            <X size={16} />
+          </button>
+        </div>
+
+        {step === "form" ? (
+          <>
+            <div className="p-5 space-y-4">
+
+              {/* Pilih datafile */}
+              <div>
+                <p style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  Pilih Datafile:
+                </p>
+                {loadingFiles ? (
+                  <p style={{ fontSize: 11, color: "#94a3b8", padding: "10px 0" }}>Memuat datafile...</p>
+                ) : files.length === 0 ? (
+                  <p style={{ fontSize: 11, color: "#ef4444", padding: "10px 0" }}>Tidak ada datafile ditemukan di tablespace ini.</p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {files.map((f, i) => {
+                      const isSelected = selected?.file_name === f.file_name;
+                      return (
+                        <div
+                          key={i}
+                          onClick={() => setSelected(f)}
+                          style={{
+                            borderRadius: 10, padding: "10px 14px",
+                            background: "#e8edf5",
+                            boxShadow: isSelected
+                              ? "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff"
+                              : "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff",
+                            cursor: "pointer",
+                            border: isSelected ? "1.5px solid #7c3aed" : "1.5px solid transparent",
+                            transition: "all 0.15s ease",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <div style={{
+                              width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                              background: isSelected ? "#7c3aed" : "#c5cad8",
+                              boxShadow: isSelected ? "0 0 5px #7c3aed" : "none",
+                              transition: "all 0.15s ease",
+                            }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <p style={{ fontSize: 11, fontFamily: "monospace", color: "#1e293b", fontWeight: isSelected ? 700 : 500, wordBreak: "break-all" }}>
+                                {f.file_name}
+                              </p>
+                              <p style={{ fontSize: 10.5, color: "#64748b", marginTop: 2 }}>
+                                Ukuran: <strong>{fmtSize(parseFloat(f.size_mb))}</strong>
+                                <span style={{ marginLeft: 10, color: "#94a3b8" }}>AUTOEXTEND: {f.autoextensible}</span>
+                                <span style={{ marginLeft: 10, color: "#94a3b8" }}>Status: {f.status}</span>
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Tambah ukuran */}
+              <Field label="Tambah Ukuran">
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    className={INPUT}
+                    value={addValue}
+                    onChange={e => setAddValue(e.target.value)}
+                    type="number"
+                    min="1"
+                    max="102400"
+                    placeholder="1"
+                    style={{ flex: 1 }}
+                  />
+                  <select
+                    value={addUnit}
+                    onChange={e => setAddUnit(e.target.value)}
+                    className={INPUT}
+                    style={{ width: 80, flex: "none" }}
+                  >
+                    <option value="MB">MB</option>
+                    <option value="GB">GB</option>
+                  </select>
+                </div>
+              </Field>
+
+              {/* Size summary */}
+              {selected && addNum > 0 && (
+                <div style={{
+                  borderRadius: 12, padding: "12px 14px",
+                  background: "#e8edf5",
+                  boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+                  display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10,
+                }}>
+                  {[
+                    { label: "Ukuran Sekarang", value: fmtSize(currMb),     color: "#64748b"  },
+                    { label: `+ Tambahan`,       value: fmtSize(addMb),      color: "#7c3aed"  },
+                    { label: "Ukuran Baru",      value: fmtSize(newTotalMb), color: "#16a34a"  },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} style={{ textAlign: "center" }}>
+                      <p style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>{label}</p>
+                      <p style={{ fontSize: 14, fontWeight: 800, color }}>{value}</p>
+                      <p style={{ fontSize: 9.5, color: "#94a3b8" }}>({Math.round(color === "#7c3aed" ? addMb : color === "#16a34a" ? newTotalMb : currMb).toLocaleString()} MB)</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* DDL Preview */}
+              {ddlPreview && (
+                <div>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    Preview DDL:
+                  </p>
+                  <div style={{
+                    borderRadius: 10, padding: "10px 12px",
+                    background: "#e8edf5",
+                    boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+                    fontSize: 11, fontFamily: "monospace", color: "#5b21b6",
+                    wordBreak: "break-all", lineHeight: 1.6,
+                  }}>
+                    {ddlPreview}
+                  </div>
+                </div>
+              )}
+
+              {saveError && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs">
+                  <AlertCircle size={12} /> {saveError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 px-5 py-4" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+              <ActionBtn icon={X} label="Batal" color="bg-gray-700 hover:bg-gray-600" onClick={onClose} />
+              <ActionBtn
+                icon={Maximize2}
+                label="Lanjut ke Konfirmasi"
+                color={canSubmit ? "bg-purple-600 hover:bg-purple-700" : "bg-gray-500 cursor-not-allowed"}
+                onClick={() => canSubmit && setStep("confirm")}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="p-5 space-y-4">
+
+              {/* Warning */}
+              <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                <AlertCircle size={16} color="#d97706" style={{ flexShrink: 0, marginTop: 1 }} />
+                <div>
+                  <p style={{ fontSize: 12, fontWeight: 700, color: "#92400e", marginBottom: 2 }}>Perhatian</p>
+                  <p style={{ fontSize: 11.5, color: "#78350f", lineHeight: 1.5 }}>
+                    DDL di bawah akan mengubah ukuran datafile secara langsung di database Oracle. Ukuran tidak dapat dikurangi setelah di-resize.
+                  </p>
+                </div>
+              </div>
+
+              {/* DDL box */}
+              <div>
+                <p style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  DDL yang akan dijalankan:
+                </p>
+                <div style={{
+                  borderRadius: 10, padding: "12px 14px",
+                  background: "#e8edf5",
+                  boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+                  fontSize: 12, fontFamily: "monospace", color: "#5b21b6",
+                  wordBreak: "break-all", lineHeight: 1.7,
+                }}>
+                  {ddlPreview}
+                </div>
+              </div>
+
+              {/* Details grid */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {[
+                  ["Tablespace",      tablespace.tablespace_name],
+                  ["Datafile",        selected?.file_name?.split("/").pop() ?? "-"],
+                  ["Ukuran Sekarang", fmtSize(currMb)],
+                  ["Ukuran Baru",     fmtSize(newTotalMb)],
+                  ["Tambahan",        `+${fmtSize(addMb)} (+${Math.round(addMb).toLocaleString()} MB)`],
+                  ["Penggunaan TS",   `${tablespace.usage_percent}%`],
+                ].map(([k, v]) => (
+                  <div key={k} style={{
+                    borderRadius: 8, padding: "8px 12px",
+                    background: "#e8edf5",
+                    boxShadow: "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff",
+                  }}>
+                    <p style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>{k}</p>
+                    <p style={{ fontSize: 11.5, color: "#1e293b", fontWeight: 600, wordBreak: "break-all" }}>{v}</p>
                   </div>
                 ))}
               </div>

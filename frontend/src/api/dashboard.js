@@ -18,12 +18,14 @@ export const itApi = {
   getServerConfig:  () => api.get("/dashboard/it/server-monitoring/config"),
   saveServerConfig: (cfg) => api.post("/dashboard/it/server-monitoring/config", cfg),
   testConnection:   () => api.get("/dashboard/it/server-monitoring/test"),
-  getServerMetrics: () => api.get("/dashboard/it/server-monitoring/metrics"),
+  getServerMetrics:  () => api.get("/dashboard/it/server-monitoring/metrics"),
+  getTopProcesses:   () => api.get("/dashboard/it/server-monitoring/top-processes"),
 
   // Other sections
   getTablespace:           () => api.get("/dashboard/it/tablespace-usage"),
   getTablespaceDatafiles:  (ts) => api.get("/dashboard/it/tablespace-datafiles", { params: { tablespace_name: ts } }),
   addTablespaceDatafile:   (body) => api.post("/dashboard/it/tablespace-add-datafile", body),
+  resizeTablespaceDatafile:(body) => api.post("/dashboard/it/tablespace-resize-datafile", body),
   getDiskUsage:     () => api.get("/dashboard/it/disk-usage"),
   getPendingJobs:   () => api.get("/dashboard/it/pending-jobs"),
   getWorkflowError: () => api.get("/dashboard/it/workflow-error"),

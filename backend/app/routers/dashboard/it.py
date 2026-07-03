@@ -82,8 +82,14 @@ async def test_connection(user: CurrentUser = Depends(require_role(Roles.IT))):
 
 @router.get("/server-monitoring/metrics")
 async def get_metrics(user: CurrentUser = Depends(require_role(Roles.IT))):
-    """Get CPU / Memory / Load / Uptime from server via SSH."""
+    """Get CPU / Memory / Load / Uptime / Swap / CPU-count from server via SSH."""
     return await ServerMonitorService().get_metrics()
+
+
+@router.get("/server-monitoring/top-processes")
+async def get_top_processes(user: CurrentUser = Depends(require_role(Roles.IT))):
+    """Top 8 processes by CPU and by Memory via SSH ps."""
+    return await ServerMonitorService().get_top_processes()
 
 
 # ── Tablespace ───────────────────────────────────────────────────────────────
@@ -94,6 +100,12 @@ class AddDatafileIn(BaseModel):
     size_value: float
     size_unit: str        # "MB" or "GB"
     autoextend: bool = False
+
+
+class ResizeDatafileIn(BaseModel):
+    file_path: str
+    add_value: float      # amount to add (not the new total)
+    add_unit: str         # "MB" or "GB"
 
 
 @router.get("/tablespace-usage")
@@ -119,6 +131,17 @@ async def add_tablespace_datafile(
     """Execute ALTER TABLESPACE … ADD DATAFILE to extend a tablespace."""
     return await OracleITService().add_tablespace_datafile(
         body.tablespace_name, body.file_path, body.size_value, body.size_unit, body.autoextend
+    )
+
+
+@router.post("/tablespace-resize-datafile")
+async def resize_tablespace_datafile(
+    body: ResizeDatafileIn,
+    user: CurrentUser = Depends(require_role(Roles.IT)),
+):
+    """Extend an existing datafile by <add_value><add_unit> via ALTER DATABASE DATAFILE … RESIZE."""
+    return await OracleITService().resize_tablespace_datafile(
+        body.file_path, body.add_value, body.add_unit
     )
 
 
