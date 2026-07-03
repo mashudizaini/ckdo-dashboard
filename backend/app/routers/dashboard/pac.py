@@ -112,3 +112,47 @@ async def get_exchange_rates(
 ):
     """Kurs Transaksi Bank Indonesia — scraped daily, cached 4 hours."""
     return await asyncio.to_thread(exchange_rate_service.get_rates, refresh)
+
+
+class PushToEBSRequest(BaseModel):
+    rate_date:   str        # "2026-07-03"
+    rate_type:   str        = "Corporate"       # Corporate | Spot | user-defined
+    rate_source: str        = "tengah"          # jual | beli | tengah
+    currencies:  list[str]  = ["USD", "EUR", "SGD", "JPY", "GBP", "AUD", "CNY", "MYR"]
+
+
+@router.post("/exchange-rates/push-to-ebs")
+async def push_exchange_rates_to_ebs(
+    body: PushToEBSRequest,
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """
+    Push Kurs Transaksi BI ke Oracle EBS GL Daily Rates menggunakan
+    GL_DAILY_RATES_API.INSERT_RATE / UPDATE_RATE.
+    """
+    # Get current cached rates (don't re-scrape unless cache is empty)
+    cached = await asyncio.to_thread(exchange_rate_service.get_rates, False)
+    if not cached.get("rates"):
+        return {"success": False, "error": "Tidak ada data kurs — ambil data dari BI terlebih dahulu", "results": []}
+
+    results = await asyncio.to_thread(
+        exchange_rate_service.push_rates_to_ebs,
+        cached["rates"],
+        body.rate_date,
+        body.rate_type,
+        body.rate_source,
+        body.currencies,
+    )
+
+    success_count = sum(1 for r in results if r["status"] == "success")
+    error_count   = sum(1 for r in results if r["status"] == "error")
+    return {
+        "success":       error_count == 0,
+        "rate_date":     body.rate_date,
+        "rate_type":     body.rate_type,
+        "rate_source":   body.rate_source,
+        "total":         len(results),
+        "success_count": success_count,
+        "error_count":   error_count,
+        "results":       results,
+    }

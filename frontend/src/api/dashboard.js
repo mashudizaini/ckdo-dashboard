@@ -75,6 +75,7 @@ export const pacApi = {
 
   // Exchange Rates
   getExchangeRates:    (refresh = false) => api.get("/dashboard/pac/exchange-rates", { params: { refresh } }),
+  pushExchangeRatesToEBS: (body) => api.post("/dashboard/pac/exchange-rates/push-to-ebs", body),
 };
 
 export const accountingApi = {

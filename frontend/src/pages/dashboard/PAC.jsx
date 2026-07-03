@@ -3,7 +3,7 @@ import {
   Banknote, ExternalLink, RefreshCw, Filter, X,
   Download, Loader2, TrendingUp, TrendingDown, Minus,
   BookOpen, Plus, Trash2, Save, Printer, ChevronDown, ChevronRight,
-  CheckCircle, Clock, Edit3, FileText, Globe,
+  CheckCircle, Clock, Edit3, FileText, Globe, Upload, AlertCircle,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line,
@@ -1125,10 +1125,277 @@ function CurrencyBadge({ code, size = 36 }) {
   );
 }
 
+/* ── Oracle EBS Push Dialog ─────────────────────────────────────────────── */
+const EBS_CURRENCIES = ["USD", "EUR", "SGD", "JPY", "GBP", "AUD", "CNY", "MYR",
+                        "HKD", "CHF", "CAD", "AED", "SAR", "THB", "MYR", "PHP",
+                        "NOK", "SEK", "DKK", "NZD", "KRW"];
+const UNIQUE_EBS_CCY = [...new Set(EBS_CURRENCIES)];
+
+function PushToEBSDialog({ rates, onClose }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [rateDate,   setRateDate]   = useState(today);
+  const [rateType,   setRateType]   = useState("Corporate");
+  const [rateSource, setRateSource] = useState("tengah");
+  const [selected,   setSelected]   = useState(["USD", "EUR", "SGD", "JPY", "GBP", "AUD", "CNY", "MYR"]);
+  const [pushing,    setPushing]     = useState(false);
+  const [results,    setResults]     = useState(null);
+
+  const rateMap = Object.fromEntries(rates.map(r => [r.code, r]));
+
+  const toggleCcy = (code) =>
+    setSelected(s => s.includes(code) ? s.filter(c => c !== code) : [...s, code]);
+
+  const getDisplayRate = (code) => {
+    const r = rateMap[code];
+    if (!r) return null;
+    const denom = r.denomination || 1;
+    let val;
+    if (rateSource === "jual")   val = r.sell;
+    else if (rateSource === "beli") val = r.buy;
+    else val = r.sell && r.buy ? (r.sell + r.buy) / 2 : (r.sell || r.buy);
+    if (!val) return null;
+    return denom > 1 ? val / denom : val;
+  };
+
+  const handlePush = async () => {
+    setPushing(true);
+    setResults(null);
+    try {
+      const res = await pacApi.pushExchangeRatesToEBS({
+        rate_date:   rateDate,
+        rate_type:   rateType,
+        rate_source: rateSource,
+        currencies:  selected,
+      });
+      setResults(res.data);
+    } catch (e) {
+      setResults({ success: false, error: e.response?.data?.detail || "Gagal terhubung ke server", results: [] });
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  const fmtR = (n) => n == null ? "—"
+    : Number(n).toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-2xl rounded-2xl border border-gray-700 bg-gray-900 shadow-2xl overflow-hidden"
+           onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800 bg-gray-900/80">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-500/15 border border-red-500/30">
+              <Upload size={16} className="text-red-400" />
+            </div>
+            <div>
+              <h3 className="text-white font-semibold text-sm">Push Kurs ke Oracle EBS</h3>
+              <p className="text-gray-500 text-xs">GL_DAILY_RATES_API — GL Daily Rates</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
+          {!results ? (
+            <>
+              {/* Config row */}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Tanggal Kurs</label>
+                  <input type="date" value={rateDate} onChange={e => setRateDate(e.target.value)}
+                    className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-amber-500/50 focus:outline-none" />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Rate Type</label>
+                  <select value={rateType} onChange={e => setRateType(e.target.value)}
+                    className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-amber-500/50 focus:outline-none">
+                    <option value="Corporate">Corporate</option>
+                    <option value="Spot">Spot</option>
+                    <option value="User">User</option>
+                    <option value="EMU Fixed">EMU Fixed</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Sumber Rate BI</label>
+                  <select value={rateSource} onChange={e => setRateSource(e.target.value)}
+                    className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-amber-500/50 focus:outline-none">
+                    <option value="tengah">Tengah (Rata-rata Jual+Beli)</option>
+                    <option value="jual">Kurs Jual</option>
+                    <option value="beli">Kurs Beli</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Currency selection */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs text-gray-400">Mata Uang yang akan di-push ({selected.length} dipilih)</label>
+                  <div className="flex gap-2">
+                    <button onClick={() => setSelected(UNIQUE_EBS_CCY.filter(c => rateMap[c]))}
+                      className="text-xs text-amber-400 hover:text-amber-300">Pilih Semua</button>
+                    <span className="text-gray-700">·</span>
+                    <button onClick={() => setSelected([])}
+                      className="text-xs text-gray-500 hover:text-gray-400">Hapus Semua</button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {UNIQUE_EBS_CCY.filter(c => rateMap[c]).map(code => {
+                    const r    = rateMap[code];
+                    const val  = getDisplayRate(code);
+                    const isOn = selected.includes(code);
+                    return (
+                      <button key={code} onClick={() => toggleCcy(code)}
+                        className={`flex items-center justify-between rounded-lg border px-3 py-2 text-left transition-colors ${
+                          isOn
+                            ? "border-amber-500/50 bg-amber-500/10 text-white"
+                            : "border-gray-800 bg-gray-800/50 text-gray-500 hover:border-gray-700"
+                        }`}>
+                        <div className="flex items-center gap-2">
+                          <CurrencyBadge code={code} size={20} />
+                          <span className="text-xs font-mono font-semibold">{code}</span>
+                          {r.denomination > 1 && (
+                            <span className="text-[9px] text-amber-500/70">/{r.denomination}</span>
+                          )}
+                        </div>
+                        <span className="text-[10px] font-mono text-gray-400">
+                          {val ? Number(val).toLocaleString("id-ID", {maximumFractionDigits: 2}) : "—"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Note */}
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-400/80 flex gap-2">
+                <AlertCircle size={13} className="shrink-0 mt-0.5" />
+                <span>
+                  Proses ini akan INSERT atau UPDATE GL Daily Rates di Oracle EBS untuk tanggal <strong>{rateDate}</strong>.
+                  Rate yang sudah ada akan di-UPDATE secara otomatis.
+                </span>
+              </div>
+
+              {/* Action */}
+              <div className="flex justify-end gap-3">
+                <button onClick={onClose}
+                  className="rounded-lg border border-gray-700 px-4 py-2 text-sm text-gray-400 hover:text-white hover:border-gray-600 transition-colors">
+                  Batal
+                </button>
+                <button onClick={handlePush} disabled={pushing || selected.length === 0}
+                  className="flex items-center gap-2 rounded-lg bg-red-600 hover:bg-red-500 disabled:opacity-50 px-4 py-2 text-sm text-white font-medium transition-colors">
+                  {pushing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                  {pushing ? "Mengirim ke EBS…" : `Push ${selected.length} Mata Uang ke Oracle EBS`}
+                </button>
+              </div>
+            </>
+          ) : (
+            /* Results */
+            <div className="space-y-4">
+              <div className={`rounded-lg border px-4 py-3 flex items-center gap-3 ${
+                results.success
+                  ? "border-green-500/30 bg-green-500/10"
+                  : results.error_count > 0
+                    ? "border-red-500/30 bg-red-500/10"
+                    : "border-gray-700 bg-gray-800"
+              }`}>
+                {results.success
+                  ? <CheckCircle size={18} className="text-green-400 shrink-0" />
+                  : results.error_count > 0
+                    ? <AlertCircle size={18} className="text-red-400 shrink-0" />
+                    : <AlertCircle size={18} className="text-gray-400 shrink-0" />
+                }
+                <div>
+                  {results.error && (
+                    <p className="text-sm text-red-300">{results.error}</p>
+                  )}
+                  {results.success_count !== undefined && (
+                    <p className="text-sm text-white">
+                      Berhasil: <span className="text-green-400 font-semibold">{results.success_count}</span>
+                      {results.error_count > 0 && (
+                        <span className="ml-2">Gagal: <span className="text-red-400 font-semibold">{results.error_count}</span></span>
+                      )}
+                    </p>
+                  )}
+                  {results.rate_date && (
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Tanggal: {results.rate_date} · Rate Type: {results.rate_type}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {(results.results || []).length > 0 && (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-800">
+                      {["Kode", "Action", "Rate (IDR)", "Status", "Keterangan"].map(h => (
+                        <th key={h} className="px-3 py-2 text-left text-xs text-gray-500">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(results.results || []).map(r => (
+                      <tr key={r.code} className="border-b border-gray-800/50">
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <CurrencyBadge code={r.code} size={20} />
+                            <span className="font-mono font-semibold text-xs text-white">{r.code}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                            r.action === "inserted" ? "bg-green-500/20 text-green-400" :
+                            r.action === "updated"  ? "bg-blue-500/20 text-blue-400" :
+                            r.action === "failed"   ? "bg-red-500/20 text-red-400" :
+                                                      "bg-gray-700 text-gray-400"
+                          }`}>{r.action ?? r.status}</span>
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs text-gray-300">
+                          {r.rate != null ? fmtR(r.rate) : "—"}
+                        </td>
+                        <td className="px-3 py-2">
+                          {r.status === "success"
+                            ? <CheckCircle size={13} className="text-green-400" />
+                            : r.status === "skipped"
+                              ? <span className="text-xs text-gray-500">skip</span>
+                              : <AlertCircle size={13} className="text-red-400" />
+                          }
+                        </td>
+                        <td className="px-3 py-2 text-[10px] text-gray-500 max-w-[200px] truncate">
+                          {r.reason || r.error || ""}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              <div className="flex justify-end gap-3">
+                <button onClick={() => setResults(null)}
+                  className="rounded-lg border border-gray-700 px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">
+                  ← Kembali
+                </button>
+                <button onClick={onClose}
+                  className="rounded-lg bg-gray-700 hover:bg-gray-600 px-4 py-2 text-sm text-white transition-colors">
+                  Tutup
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ExchangeRateSection() {
-  const [data,    setData]    = useState(null);
-  const [loading, setLoading] = useState(true);   // true → skeleton on first render
-  const [error,   setError]   = useState(null);
+  const [data,       setData]       = useState(null);
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState(null);
+  const [showPushDlg, setShowPushDlg] = useState(false);
 
   const load = useCallback(async (refresh = false) => {
     setLoading(true);
@@ -1143,6 +1410,7 @@ function ExchangeRateSection() {
       setLoading(false);
     }
   }, []);
+
 
   useEffect(() => { load(); }, [load]);
 
@@ -1164,6 +1432,11 @@ function ExchangeRateSection() {
 
   return (
     <div className="space-y-5">
+      {/* ── Push Dialog ───────────────────────────────────── */}
+      {showPushDlg && allRates.length > 0 && (
+        <PushToEBSDialog rates={allRates} onClose={() => setShowPushDlg(false)} />
+      )}
+
       {/* ── Header ───────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -1186,14 +1459,25 @@ function ExchangeRateSection() {
             )}
           </p>
         </div>
-        <button
-          onClick={() => load(true)}
-          disabled={loading}
-          className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-400 hover:bg-amber-500/20 disabled:opacity-50 transition-colors whitespace-nowrap"
-        >
-          <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {allRates.length > 0 && (
+            <button
+              onClick={() => setShowPushDlg(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/20 transition-colors whitespace-nowrap"
+            >
+              <Upload size={13} />
+              Push ke Oracle EBS
+            </button>
+          )}
+          <button
+            onClick={() => load(true)}
+            disabled={loading}
+            className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-400 hover:bg-amber-500/20 disabled:opacity-50 transition-colors whitespace-nowrap"
+          >
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* ── Error Banner ── */}
