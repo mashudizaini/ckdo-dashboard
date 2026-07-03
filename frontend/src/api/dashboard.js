@@ -69,7 +69,9 @@ export const pacApi = {
 };
 
 export const accountingApi = {
-  getSummary: () => api.get("/dashboard/accounting/summary"),
+  getSummary:              () => api.get("/dashboard/accounting/summary"),
+  getItemCostComponents:   (period) => api.get("/dashboard/accounting/item-cost-components", { params: { period } }),
+  getMaterialTransactions: (p) => api.get("/dashboard/accounting/material-transactions", { params: p }),
 };
 
 export const apInvoiceApi = {
