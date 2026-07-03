@@ -141,10 +141,10 @@ function COGSReport() {
 const MONTHS_SHORT = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
 
 function monthInputToOPM(monthStr) {
-  // "2025-01" → "JAN-2025"
+  // "2026-02" → "FEB-26"
   const [y, m] = (monthStr || "").split("-");
   if (!y || !m) return "";
-  return `${MONTHS_SHORT[parseInt(m, 10) - 1]}-${y}`;
+  return `${MONTHS_SHORT[parseInt(m, 10) - 1]}-${y.slice(2)}`;
 }
 
 function currentMonthInput() {
@@ -352,7 +352,6 @@ const MTX_HEADERS = [
   { key: "trx_value",      label: "Value",          mono: true  },
   { key: "subinventory",   label: "Subinventory",   mono: false },
   { key: "transfer_subinv", label: "Transfer Sub",  mono: false },
-  { key: "lot_number",     label: "Lot",            mono: true  },
   { key: "reference",      label: "Reference",      mono: false },
   { key: "source_code",    label: "Source",         mono: false },
 ];

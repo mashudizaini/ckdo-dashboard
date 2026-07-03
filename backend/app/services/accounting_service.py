@@ -116,7 +116,6 @@ class AccountingService:
                       * ABS(mmt.transaction_quantity), 2)        AS trx_value,
                 NVL(mmt.subinventory_code, '-')                  AS subinventory,
                 NVL(mmt.transfer_subinventory, '-')              AS transfer_subinv,
-                NVL(mmt.lot_number, '-')                         AS lot_number,
                 NVL(mmt.transaction_reference, '-')              AS reference,
                 NVL(mmt.source_code, '-')                        AS source_code,
                 mmt.transaction_id
