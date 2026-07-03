@@ -12,6 +12,7 @@ Endpoints:
   POST /business-plans            — Create / update document (upsert)
   DELETE /business-plans/{id}     — Delete document
 """
+import asyncio
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
 from pydantic import BaseModel
@@ -20,6 +21,7 @@ from app.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.pac_service import PACService
 from app.services.business_plan_service import BusinessPlanService
+from app.services import exchange_rate_service
 
 router = APIRouter()
 
@@ -99,3 +101,14 @@ async def delete_business_plan(
     user: CurrentUser = Depends(require_role(Roles.PAC)),
 ):
     return await BusinessPlanService().delete_plan(db, plan_id)
+
+
+# ── Exchange Rates ─────────────────────────────────────────────────────────────
+
+@router.get("/exchange-rates")
+async def get_exchange_rates(
+    refresh: bool = Query(False, description="Force re-scrape even if cache is fresh"),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Kurs Transaksi Bank Indonesia — scraped daily, cached 4 hours."""
+    return await asyncio.to_thread(exchange_rate_service.get_rates, refresh)

@@ -3,7 +3,7 @@ import {
   Banknote, ExternalLink, RefreshCw, Filter, X,
   Download, Loader2, TrendingUp, TrendingDown, Minus,
   BookOpen, Plus, Trash2, Save, Printer, ChevronDown, ChevronRight,
-  CheckCircle, Clock, Edit3, FileText,
+  CheckCircle, Clock, Edit3, FileText, Globe,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line,
@@ -15,9 +15,10 @@ import { pacApi } from "@/api/dashboard";
 
 /* ─── Tabs ────────────────────────────────────────── */
 const TABS = [
-  { id: "bizplan", icon: BookOpen,  color: "text-violet-400", bg: "bg-violet-500/10", activeBorder: "border-violet-500/40", label: "Business Plan"       },
-  { id: "budget",  icon: Banknote,  color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Budget Usage Report" },
-  { id: "mt940",   icon: Banknote,  color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "BCA MT940 Upload"    },
+  { id: "bizplan",  icon: BookOpen, color: "text-violet-400", bg: "bg-violet-500/10", activeBorder: "border-violet-500/40", label: "Business Plan"       },
+  { id: "budget",   icon: Banknote, color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Budget Usage Report" },
+  { id: "mt940",    icon: Banknote, color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "BCA MT940 Upload"    },
+  { id: "exchange", icon: Globe,    color: "text-amber-400",  bg: "bg-amber-500/10",  activeBorder: "border-amber-500/40",  label: "Exchange Rate"       },
 ];
 
 const CY = new Date().getFullYear();
@@ -49,7 +50,7 @@ export default function PACDashboard() {
   return (
     <div className="p-6 space-y-4">
       {/* Tab Buttons */}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-4 gap-2">
         {TABS.map((tab) => {
           const active = activeTab === tab.id;
           return (
@@ -70,9 +71,10 @@ export default function PACDashboard() {
         })}
       </div>
 
-      {activeTab === "bizplan" && <BusinessPlanSection />}
-      {activeTab === "budget"  && <BudgetUsageSection />}
-      {activeTab === "mt940"   && <MT940Section />}
+      {activeTab === "bizplan"  && <BusinessPlanSection />}
+      {activeTab === "budget"   && <BudgetUsageSection />}
+      {activeTab === "mt940"    && <MT940Section />}
+      {activeTab === "exchange" && <ExchangeRateSection />}
     </div>
   );
 }
@@ -1088,6 +1090,198 @@ function MetricCard({ label, value, gradient }) {
     <div className={`rounded-xl bg-gradient-to-br ${gradient} p-5 text-white text-center`}>
       <p className="text-xs opacity-80 mb-2">{label}</p>
       <p className="text-2xl font-bold">{value}</p>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════
+   EXCHANGE RATE — Bank Indonesia Kurs Transaksi
+   ══════════════════════════════════════════════════ */
+
+const FEATURED_CODES = ["USD", "EUR", "SGD", "JPY", "GBP", "AUD", "CNY", "MYR"];
+
+function ExchangeRateSection() {
+  const [data,    setData]    = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState(null);
+
+  const load = useCallback(async (refresh = false) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await pacApi.getExchangeRates(refresh);
+      setData(res.data);
+      if (res.data?.error) setError(res.data.error);
+    } catch (e) {
+      setError(e.response?.data?.detail || "Gagal memuat data kurs");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const ratesMap  = Object.fromEntries((data?.rates ?? []).map(r => [r.code, r]));
+  const allRates  = data?.rates ?? [];
+
+  const fmtRate = (n) =>
+    n == null ? "—" : Number(n).toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const fmtTs = (iso) => {
+    if (!iso) return "—";
+    try {
+      return new Date(iso).toLocaleString("id-ID", {
+        day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta",
+      }) + " WIB";
+    } catch { return iso; }
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* ── Header ───────────────────────────────────────── */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-white font-semibold text-base flex items-center gap-2">
+            <Globe size={16} className="text-amber-400" />
+            Kurs Transaksi Bank Indonesia
+          </h2>
+          <p className="text-gray-400 text-xs mt-1">
+            {data?.date ? `Tanggal kurs: ${data.date}` : "Memuat tanggal…"} &nbsp;·&nbsp;
+            Diperbarui: {fmtTs(data?.cached_at)}
+            {data?.from_cache && <span className="ml-2 text-amber-500/70">(cache)</span>}
+          </p>
+        </div>
+        <button
+          onClick={() => load(true)}
+          disabled={loading}
+          className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-400 hover:bg-amber-500/20 disabled:opacity-50 transition-colors"
+        >
+          <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+          Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs text-red-400">
+          {error}
+          {allRates.length > 0 && " — Menampilkan data cache terakhir."}
+        </div>
+      )}
+
+      {/* ── Featured Cards ────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {FEATURED_CODES.map((code) => {
+          const r = ratesMap[code];
+          return (
+            <div key={code}
+              className="rounded-xl border border-gray-800 bg-gray-900/80 p-4 flex flex-col gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl leading-none">{r?.flag ?? "🏳"}</span>
+                <div>
+                  <div className="text-white font-bold text-sm leading-tight">{code}</div>
+                  <div className="text-gray-500 text-[10px] leading-tight">
+                    {r?.name ?? code}
+                    {r?.denomination > 1 && <span className="ml-1 text-amber-500">per {r.denomination}</span>}
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500 text-xs">Jual</span>
+                  <span className="text-red-400 font-mono text-xs font-semibold">
+                    {loading ? "…" : fmtRate(r?.sell)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500 text-xs">Beli</span>
+                  <span className="text-green-400 font-mono text-xs font-semibold">
+                    {loading ? "…" : fmtRate(r?.buy)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Full Table ────────────────────────────────────── */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900 overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+          <span className="text-gray-300 text-sm font-medium">Semua Kurs Transaksi BI</span>
+          <span className="text-gray-500 text-xs">{allRates.length} mata uang</span>
+        </div>
+
+        {loading && allRates.length === 0 ? (
+          <div className="flex items-center justify-center py-12 gap-2 text-gray-500">
+            <Loader2 size={16} className="animate-spin" />
+            <span className="text-sm">Mengambil data dari Bank Indonesia…</span>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-800">
+                  {["Mata Uang", "Nama", "Nilai", "Kurs Jual (IDR)", "Kurs Beli (IDR)"].map(h => (
+                    <th key={h}
+                      className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 bg-gray-900/80 whitespace-nowrap">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {allRates.map((r, i) => {
+                  const isFeatured = FEATURED_CODES.includes(r.code);
+                  return (
+                    <tr key={r.code}
+                      className={`border-b border-gray-800/50 transition-colors hover:bg-gray-800/40 ${
+                        isFeatured ? "bg-amber-500/5" : i % 2 === 0 ? "" : "bg-gray-800/20"
+                      }`}
+                    >
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">{r.flag}</span>
+                          <span className={`font-mono font-semibold text-sm ${isFeatured ? "text-amber-300" : "text-white"}`}>
+                            {r.code}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5 text-gray-400 text-xs">{r.name}</td>
+                      <td className="px-4 py-2.5 text-center">
+                        {r.denomination > 1
+                          ? <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-400 font-mono">{r.denomination}</span>
+                          : <span className="text-gray-600 text-xs">1</span>
+                        }
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-mono text-xs text-red-400 font-medium">
+                        {fmtRate(r.sell)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-mono text-xs text-green-400 font-medium">
+                        {fmtRate(r.buy)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="px-4 py-2.5 border-t border-gray-800 bg-gray-900/50 flex items-center justify-between">
+          <span className="text-gray-600 text-xs">
+            Sumber: Bank Indonesia — Kurs Transaksi BI (diperbarui setiap hari kerja)
+          </span>
+          <a
+            href="https://www.bi.go.id/id/statistik/informasi-kurs/transaksi-bi/Default.aspx"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 text-xs text-amber-400/70 hover:text-amber-400 transition-colors"
+          >
+            Lihat di BI <ExternalLink size={10} />
+          </a>
+        </div>
+      </div>
     </div>
   );
 }

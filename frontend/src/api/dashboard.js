@@ -72,6 +72,9 @@ export const pacApi = {
   getBusinessPlan:     (id)   => api.get(`/dashboard/pac/business-plans/${id}`),
   upsertBusinessPlan:  (body) => api.post("/dashboard/pac/business-plans", body),
   deleteBusinessPlan:  (id)   => api.delete(`/dashboard/pac/business-plans/${id}`),
+
+  // Exchange Rates
+  getExchangeRates:    (refresh = false) => api.get("/dashboard/pac/exchange-rates", { params: { refresh } }),
 };
 
 export const accountingApi = {
