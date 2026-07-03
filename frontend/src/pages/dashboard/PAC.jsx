@@ -1100,9 +1100,34 @@ function MetricCard({ label, value, gradient }) {
 
 const FEATURED_CODES = ["USD", "EUR", "SGD", "JPY", "GBP", "AUD", "CNY", "MYR"];
 
+// Color badges per currency (no emoji — works on all platforms incl. Windows)
+const CC_BG = {
+  USD:"#1a56db", EUR:"#1c3fa8", SGD:"#c8102e", JPY:"#bc002d",
+  GBP:"#c8102e", AUD:"#005aa3", CNY:"#de2910", MYR:"#cc0001",
+  HKD:"#ba0c2f", CHF:"#d52b1e", CAD:"#d52b1e", AED:"#00732f",
+  BND:"#0d6e3a", KRW:"#003087", KWD:"#007a3d", SAR:"#006c35",
+  THB:"#00247d", PHP:"#0038a8", NOK:"#ef2b2d", SEK:"#006aa7",
+  DKK:"#c60c30", NZD:"#00247d", CNH:"#c41e3a", PGK:"#ce1126",
+  LAK:"#ce1126", VND:"#da251d",
+};
+
+function CurrencyBadge({ code, size = 36 }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: Math.round(size * 0.22),
+      background: CC_BG[code] || "#374151", flexShrink: 0,
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      <span style={{ color: "#fff", fontSize: Math.round(size * 0.3), fontWeight: 700, letterSpacing: 0.3 }}>
+        {code.slice(0, 2)}
+      </span>
+    </div>
+  );
+}
+
 function ExchangeRateSection() {
   const [data,    setData]    = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);   // true → skeleton on first render
   const [error,   setError]   = useState(null);
 
   const load = useCallback(async (refresh = false) => {
@@ -1113,7 +1138,7 @@ function ExchangeRateSection() {
       setData(res.data);
       if (res.data?.error) setError(res.data.error);
     } catch (e) {
-      setError(e.response?.data?.detail || "Gagal memuat data kurs");
+      setError(e.response?.data?.detail || "Gagal memuat data kurs dari Bank Indonesia");
     } finally {
       setLoading(false);
     }
@@ -1121,14 +1146,14 @@ function ExchangeRateSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const ratesMap  = Object.fromEntries((data?.rates ?? []).map(r => [r.code, r]));
-  const allRates  = data?.rates ?? [];
+  const ratesMap = Object.fromEntries((data?.rates ?? []).map(r => [r.code, r]));
+  const allRates = data?.rates ?? [];
 
   const fmtRate = (n) =>
     n == null ? "—" : Number(n).toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const fmtTs = (iso) => {
-    if (!iso) return "—";
+    if (!iso) return null;
     try {
       return new Date(iso).toLocaleString("id-ID", {
         day: "2-digit", month: "short", year: "numeric",
@@ -1147,25 +1172,40 @@ function ExchangeRateSection() {
             Kurs Transaksi Bank Indonesia
           </h2>
           <p className="text-gray-400 text-xs mt-1">
-            {data?.date ? `Tanggal kurs: ${data.date}` : "Memuat tanggal…"} &nbsp;·&nbsp;
-            Diperbarui: {fmtTs(data?.cached_at)}
-            {data?.from_cache && <span className="ml-2 text-amber-500/70">(cache)</span>}
+            {loading
+              ? "Mengambil data dari Bank Indonesia…"
+              : data?.date
+                ? `Tanggal kurs: ${data.date}`
+                : "Tanggal tidak tersedia"
+            }
+            {!loading && fmtTs(data?.cached_at) && (
+              <span className="ml-2 text-gray-600">
+                · Diperbarui: {fmtTs(data.cached_at)}
+                {data?.from_cache && <span className="ml-1 text-amber-500/60">(cache)</span>}
+              </span>
+            )}
           </p>
         </div>
         <button
           onClick={() => load(true)}
           disabled={loading}
-          className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-400 hover:bg-amber-500/20 disabled:opacity-50 transition-colors"
+          className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-400 hover:bg-amber-500/20 disabled:opacity-50 transition-colors whitespace-nowrap"
         >
           <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
           Refresh
         </button>
       </div>
 
+      {/* ── Error Banner ── */}
       {error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs text-red-400">
-          {error}
-          {allRates.length > 0 && " — Menampilkan data cache terakhir."}
+        <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300 flex items-start gap-2">
+          <span className="text-red-400 mt-0.5 shrink-0">⚠</span>
+          <div>
+            <span className="font-medium">Gagal mengambil data:</span> {error}
+            {allRates.length > 0 && (
+              <span className="block text-xs text-red-400/70 mt-1">Menampilkan data cache terakhir.</span>
+            )}
+          </div>
         </div>
       )}
 
@@ -1175,31 +1215,42 @@ function ExchangeRateSection() {
           const r = ratesMap[code];
           return (
             <div key={code}
-              className="rounded-xl border border-gray-800 bg-gray-900/80 p-4 flex flex-col gap-3">
-              <div className="flex items-center gap-2">
-                <span className="text-2xl leading-none">{r?.flag ?? "🏳"}</span>
-                <div>
+              className="rounded-xl border border-gray-800 bg-gray-900 p-4 flex flex-col gap-3">
+              {/* Badge + name */}
+              <div className="flex items-center gap-3">
+                <CurrencyBadge code={code} size={38} />
+                <div className="min-w-0">
                   <div className="text-white font-bold text-sm leading-tight">{code}</div>
-                  <div className="text-gray-500 text-[10px] leading-tight">
+                  <div className="text-gray-500 text-[10px] leading-tight truncate">
                     {r?.name ?? code}
-                    {r?.denomination > 1 && <span className="ml-1 text-amber-500">per {r.denomination}</span>}
+                    {r?.denomination > 1 && (
+                      <span className="ml-1 text-amber-500/80">per {r.denomination}</span>
+                    )}
                   </div>
                 </div>
               </div>
-              <div className="space-y-1">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-500 text-xs">Jual</span>
-                  <span className="text-red-400 font-mono text-xs font-semibold">
-                    {loading ? "…" : fmtRate(r?.sell)}
-                  </span>
+              {/* Rates / Skeleton */}
+              {loading ? (
+                <div className="space-y-2 animate-pulse">
+                  <div className="h-3 bg-gray-700/80 rounded w-full" />
+                  <div className="h-3 bg-gray-700/60 rounded w-4/5" />
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-500 text-xs">Beli</span>
-                  <span className="text-green-400 font-mono text-xs font-semibold">
-                    {loading ? "…" : fmtRate(r?.buy)}
-                  </span>
+              ) : (
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-500 text-xs">Jual</span>
+                    <span className="text-red-400 font-mono text-xs font-semibold">
+                      {fmtRate(r?.sell)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-500 text-xs">Beli</span>
+                    <span className="text-green-400 font-mono text-xs font-semibold">
+                      {fmtRate(r?.buy)}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           );
         })}
@@ -1209,13 +1260,24 @@ function ExchangeRateSection() {
       <div className="rounded-xl border border-gray-800 bg-gray-900 overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
           <span className="text-gray-300 text-sm font-medium">Semua Kurs Transaksi BI</span>
-          <span className="text-gray-500 text-xs">{allRates.length} mata uang</span>
+          <span className="text-gray-500 text-xs">
+            {loading ? "memuat…" : `${allRates.length} mata uang`}
+          </span>
         </div>
 
-        {loading && allRates.length === 0 ? (
+        {loading ? (
           <div className="flex items-center justify-center py-12 gap-2 text-gray-500">
             <Loader2 size={16} className="animate-spin" />
             <span className="text-sm">Mengambil data dari Bank Indonesia…</span>
+          </div>
+        ) : allRates.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 gap-2 text-gray-600">
+            <Globe size={32} className="opacity-30" />
+            <span className="text-sm">Tidak ada data kurs tersedia</span>
+            <button onClick={() => load(true)}
+              className="mt-1 text-xs text-amber-400 hover:text-amber-300 transition-colors">
+              Coba lagi
+            </button>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -1241,7 +1303,7 @@ function ExchangeRateSection() {
                     >
                       <td className="px-4 py-2.5 whitespace-nowrap">
                         <div className="flex items-center gap-2">
-                          <span className="text-base">{r.flag}</span>
+                          <CurrencyBadge code={r.code} size={24} />
                           <span className={`font-mono font-semibold text-sm ${isFeatured ? "text-amber-300" : "text-white"}`}>
                             {r.code}
                           </span>
