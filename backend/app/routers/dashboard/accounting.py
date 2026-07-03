@@ -19,6 +19,21 @@ async def get_summary(user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)
     return {"module": "accounting", "status": "ready"}
 
 
+# ── COGS / Inventory RM PM ───────────────────────────────────────────────────
+
+@router.get("/inventory-rm-pm")
+async def get_inventory_rm_pm(
+    period:        str  = Query(...,  description="OPM period code e.g. JAN-26"),
+    include_begin: bool = Query(True, description="Calculate beginning balance (slower)"),
+    user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
+):
+    """
+    Inventory RM PM monthly report — movements + price + beginning/ending balance.
+    Fixed: org 121. Data: MTL_MATERIAL_TRANSACTIONS + CKDO_GET_ITEM_COST.
+    """
+    return await AccountingService().get_inventory_rm_pm(period, include_begin)
+
+
 # ── COGS / Item Cost Components ───────────────────────────────────────────────
 
 @router.get("/item-cost-components")

@@ -22,6 +22,160 @@ class AccountingService:
                 rows.append(dict(zip(columns, row)))
             return rows
 
+    # ── Inventory RM PM ──────────────────────────────────────────────────────
+
+    async def get_inventory_rm_pm(self, period: str, include_begin: bool = True) -> dict:
+        """
+        Inventory RM PM monthly report matching Template_Dashboard_Inventory-monthly.xlsx.
+        - Movements for the period from MTL_MATERIAL_TRANSACTIONS (org 121)
+        - Price from CKDO_GET_ITEM_COST
+        - Beginning balance: sum of 5-year lookback (skippable for speed)
+        """
+        from calendar import monthrange
+
+        MONTHS = {"JAN":1,"FEB":2,"MAR":3,"APR":4,"MAY":5,"JUN":6,
+                  "JUL":7,"AUG":8,"SEP":9,"OCT":10,"NOV":11,"DEC":12}
+        try:
+            mon_str, yr_str = period.upper().split("-")
+            month = MONTHS[mon_str]
+            year  = 2000 + int(yr_str)
+        except Exception:
+            return {"success": False, "error": f"Invalid period: {period}. Use e.g. JAN-26", "data": []}
+
+        _, last_day = monthrange(year, month)
+        date_from = f"{year}-{month:02d}-01"
+        date_to   = f"{year}-{month:02d}-{last_day:02d}"
+
+        mvt_sql = """
+            SELECT
+                msib.segment1                                                     AS item_code,
+                SUBSTR(NVL(msib.description, '-'), 1, 80)                        AS item_name,
+                msib.primary_uom_code                                            AS uom,
+                CASE
+                    WHEN UPPER(msib.segment1) LIKE '02A%' THEN 'API'
+                    WHEN UPPER(msib.segment1) LIKE '02B%' THEN 'EXCIPIENT'
+                    WHEN UPPER(msib.segment1) LIKE '02%'  THEN 'API & EXCIPIENT'
+                    WHEN UPPER(msib.segment1) LIKE '01P%' THEN 'PRIMARY PACKAGING'
+                    WHEN UPPER(msib.segment1) LIKE '01S%' THEN 'SECONDARY PACKAGING'
+                    WHEN UPPER(msib.segment1) LIKE '01%'  THEN 'PACKAGING'
+                    ELSE NVL(msib.item_type, 'OTHER')
+                END                                                              AS material_type,
+                ROUND(NVL(CKDO_GET_ITEM_COST(:period, msib.inventory_item_id), 0), 4) AS unit_price,
+                mtt.transaction_type_name                                        AS trx_type,
+                SUM(mmt.primary_quantity)                                        AS qty,
+                msib.inventory_item_id                                           AS item_id
+            FROM apps.mtl_material_transactions mmt
+            JOIN apps.mtl_system_items_b msib
+                ON  msib.inventory_item_id = mmt.inventory_item_id
+                AND msib.organization_id   = mmt.organization_id
+            JOIN apps.mtl_transaction_types mtt
+                ON  mtt.transaction_type_id = mmt.transaction_type_id
+            WHERE mmt.organization_id = 121
+              AND mmt.transaction_date >= TO_DATE(:date_from, 'YYYY-MM-DD')
+              AND mmt.transaction_date <  TO_DATE(:date_to,   'YYYY-MM-DD') + 1
+            GROUP BY
+                msib.segment1, msib.description, msib.primary_uom_code,
+                msib.item_type, mtt.transaction_type_name, msib.inventory_item_id
+            ORDER BY msib.segment1, mtt.transaction_type_name
+        """
+
+        beg_sql = """
+            SELECT mmt.inventory_item_id AS item_id,
+                   SUM(mmt.primary_quantity) AS begin_qty
+            FROM apps.mtl_material_transactions mmt
+            WHERE mmt.organization_id = 121
+              AND mmt.transaction_date >= ADD_MONTHS(TO_DATE(:date_from, 'YYYY-MM-DD'), -60)
+              AND mmt.transaction_date <  TO_DATE(:date_from, 'YYYY-MM-DD')
+            GROUP BY mmt.inventory_item_id
+        """
+
+        try:
+            mvt_rows = await asyncio.to_thread(
+                self._query, mvt_sql,
+                {"period": period.upper(), "date_from": date_from, "date_to": date_to}
+            )
+            beg_rows = await asyncio.to_thread(self._query, beg_sql, {"date_from": date_from}) \
+                       if include_begin else []
+        except Exception as e:
+            logger.error("inventory_rm_pm_error", error=str(e))
+            return {"success": False, "error": str(e), "data": []}
+
+        begin_map = {r["item_id"]: float(r["begin_qty"] or 0) for r in beg_rows}
+
+        def categorize(name: str) -> str:
+            n = name.lower()
+            if any(k in n for k in ["receipt", "purchase", "receiving"]) \
+               and "return" not in n: return "purchase"
+            if any(k in n for k in ["return to vendor", "return to receiving",
+                                     "return to supplier"]): return "return_vendor"
+            if "wip" in n and "return" in n:  return "wip_return"
+            if "wip" in n and "issue" in n:   return "wip_issue"
+            if "wip" in n:                    return "wip_issue"
+            if any(k in n for k in ["sample", "qc", "quality"]): return "sample"
+            if any(k in n for k in ["trial", "media fill", "project"]): return "misc"
+            if any(k in n for k in ["disposal", "scrap", "written off"]): return "disposal"
+            if any(k in n for k in ["adjustment", "cycle count",
+                                     "physical inventory"]): return "adjustment"
+            return "other"
+
+        CATS = ["purchase", "return_vendor", "sample", "wip_issue",
+                "wip_return", "misc", "disposal", "adjustment", "other"]
+
+        items: dict = {}
+        for r in mvt_rows:
+            iid = r["item_id"]
+            if iid not in items:
+                items[iid] = {
+                    "item_code":     r["item_code"],
+                    "item_name":     r["item_name"],
+                    "uom":           r["uom"],
+                    "material_type": r["material_type"],
+                    "unit_price":    float(r["unit_price"] or 0),
+                    "movements":     [],
+                    **{c: 0.0 for c in CATS},
+                }
+            cat = categorize(r["trx_type"])
+            qty = float(r["qty"] or 0)
+            items[iid][cat] = round(items[iid][cat] + qty, 6)
+            items[iid]["movements"].append({"trx_type": r["trx_type"], "qty": round(qty, 6)})
+
+        result = []
+        for iid, d in sorted(items.items(), key=lambda x: x[1]["item_code"]):
+            begin_qty  = round(begin_map.get(iid, 0), 6)
+            net_mvt    = sum(d[c] for c in CATS)
+            end_qty    = round(begin_qty + net_mvt, 6)
+            price      = d["unit_price"]
+            result.append({
+                "item_code":      d["item_code"],
+                "item_name":      d["item_name"],
+                "uom":            d["uom"],
+                "material_type":  d["material_type"],
+                "unit_price":     price,
+                "begin_qty":      begin_qty,
+                "begin_amount":   round(begin_qty * price, 2),
+                "purchase":       d["purchase"],
+                "return_vendor":  d["return_vendor"],
+                "sample":         d["sample"],
+                "wip_issue":      d["wip_issue"],
+                "wip_return":     d["wip_return"],
+                "misc":           d["misc"],
+                "disposal":       d["disposal"],
+                "adjustment":     d["adjustment"],
+                "other":          d["other"],
+                "end_qty":        end_qty,
+                "end_amount":     round(end_qty * price, 2),
+                "movements":      d["movements"],
+            })
+
+        return {
+            "success":   True,
+            "count":     len(result),
+            "period":    period.upper(),
+            "date_from": date_from,
+            "date_to":   date_to,
+            "data":      result,
+        }
+
     # ── Item Cost Components ─────────────────────────────────────────────────
 
     async def get_item_cost_components(self, period: str) -> dict:
@@ -110,7 +264,7 @@ class AccountingService:
                 mmt.transaction_quantity                         AS quantity,
                 mmt.transaction_uom                              AS uom,
                 mmt.primary_quantity                             AS primary_qty,
-                mmt.primary_uom_code                             AS primary_uom,
+                msib.primary_uom_code                            AS primary_uom,
                 ROUND(NVL(mmt.actual_cost, 0), 4)               AS unit_cost,
                 ROUND(NVL(mmt.actual_cost, 0)
                       * ABS(mmt.transaction_quantity), 2)        AS trx_value,

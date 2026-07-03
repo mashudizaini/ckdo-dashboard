@@ -70,6 +70,7 @@ export const pacApi = {
 
 export const accountingApi = {
   getSummary:              () => api.get("/dashboard/accounting/summary"),
+  getInventoryRmPm:        (p) => api.get("/dashboard/accounting/inventory-rm-pm", { params: p }),
   getItemCostComponents:   (period) => api.get("/dashboard/accounting/item-cost-components", { params: { period } }),
   getMaterialTransactions: (p) => api.get("/dashboard/accounting/material-transactions", { params: p }),
 };
