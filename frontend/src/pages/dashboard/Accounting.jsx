@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import {
   FileText, DollarSign, FileDown, RefreshCw,
   BarChart2, Package, Download, Search, Loader2, Layers, ClipboardList,
+  AlertTriangle,
 } from "lucide-react";
 import CoretaxDownloader from "./CoretaxDownloader";
 import APAutoInvoice from "./APAutoInvoice";
@@ -17,7 +18,7 @@ const NEU = {
 const TABS = [
   { id: "ap-invoice", icon: FileText,   label: "AP Autoinvoice",    color: "#2563eb" },
   { id: "cogs",       icon: BarChart2,  label: "COGS Report",       color: "#10b981" },
-  { id: "profit",     icon: DollarSign, label: "Net Profit",        color: "#3b82f6" },
+  { id: "profit",     icon: DollarSign, label: "AP Outstanding",    color: "#3b82f6" },
   { id: "ar",         icon: FileText,   label: "AR Balance",        color: "#f59e0b" },
   { id: "coretax",    icon: FileDown,   label: "Coretax Download",  color: "#8b5cf6" },
 ];
@@ -69,28 +70,488 @@ export default function AccountingDashboard() {
       {active === "ap-invoice" && <APAutoInvoice />}
       {active === "cogs"       && <COGSReport />}
 
-      {active === "profit" && (
-        <SectionCard title="Net Profit — Monthly Trend"
-          action={<ActionBtn icon={RefreshCw} label="Refresh" onClick={() => {}} />}>
-          <DataTable
-            headers={["Month", "Revenue", "Expense", "Net Profit", "Margin"]}
-            placeholder="Click Refresh to load data"
-          />
-        </SectionCard>
-      )}
+      {active === "profit" && <APOutstandingPanel />}
 
-      {active === "ar" && (
-        <SectionCard title="Accounts Receivable — Outstanding"
-          action={<ActionBtn icon={RefreshCw} label="Refresh" onClick={() => {}} />}>
-          <DataTable
-            headers={["Customer", "Invoice No", "Invoice Date", "Due Date", "Amount", "Status"]}
-            placeholder="Click Refresh to load AR data"
-          />
-        </SectionCard>
-      )}
+      {active === "ar" && <AROutstandingPanel />}
 
       {active === "coretax" && <CoretaxDownloader />}
     </div>
+  );
+}
+
+/* ─── AP Outstanding Panel ───────────────────────────────────────────────── */
+
+const AP_HEADERS = [
+  { key: "operating_unit",       label: "Operating Unit",    width: 140 },
+  { key: "supplier_name",        label: "Supplier",          width: 180 },
+  { key: "transaction_type",     label: "Type",              width: 60  },
+  { key: "transaction_number",   label: "Invoice No",        width: 130 },
+  { key: "invoice_date",         label: "Invoice Date",      width: 100 },
+  { key: "gl_date",              label: "GL Date",           width: 100 },
+  { key: "currency",             label: "Cur",               width: 45  },
+  { key: "coa",                  label: "COA",               width: 180 },
+  { key: "coa_number",           label: "Account",           width: 70  },
+  { key: "coa_descpt",           label: "Account Desc",      width: 160 },
+  { key: "payment_status",       label: "Status",            width: 100 },
+  { key: "original_amount_idr",  label: "Orig Amt (IDR)",    width: 130, num: true },
+  { key: "remaining_amount_idr", label: "Remaining (IDR)",   width: 130, num: true },
+  { key: "original_amount_orig", label: "Orig Amt (FC)",     width: 110, num: true },
+  { key: "remaining_amount_orig",label: "Remaining (FC)",    width: 110, num: true },
+  { key: "description",          label: "Description",       width: 160 },
+];
+
+function exportApCSV(rows) {
+  if (!rows?.length) return;
+  const lines = [
+    "﻿" + AP_HEADERS.map(h => h.label).join(","),
+    ...rows.map(r =>
+      AP_HEADERS.map(h => `"${String(r[h.key] ?? "").replace(/"/g, '""')}"`).join(",")
+    ),
+  ];
+  const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = "ap_outstanding.csv"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function APOutstandingPanel() {
+  const today = new Date().toISOString().slice(0, 10);
+  const [asOfDate,       setAsOfDate]       = useState(today);
+  const [supplierName,   setSupplierName]   = useState("");
+  const [ouFilter,       setOuFilter]       = useState("");
+  const [payStatusFilter,setPayStatusFilter] = useState("ALL");
+  const [limit,          setLimit]          = useState(500);
+  const [data,           setData]           = useState(null);
+  const [loading,        setLoading]        = useState(false);
+  const [error,          setError]          = useState(null);
+  const [search,         setSearch]         = useState("");
+
+  const loadData = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const params = {
+        limit,
+        ...(asOfDate      && { as_of_date:      asOfDate      }),
+        ...(supplierName  && { supplier_name:   supplierName  }),
+        ...(ouFilter      && { operating_unit:  ouFilter      }),
+        ...(payStatusFilter && payStatusFilter !== "ALL" && { payment_status: payStatusFilter }),
+      };
+      const res = await accountingApi.getApOutstanding(params);
+      if (res.success) setData(res);
+      else { setError(res.error || "Failed to load"); setData(null); }
+    } catch (e) {
+      setError(e?.response?.data?.detail || String(e)); setData(null);
+    } finally { setLoading(false); }
+  }, [asOfDate, supplierName, ouFilter, payStatusFilter, limit]);
+
+  const rows = data?.data?.filter(r => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (r.supplier_name        || "").toLowerCase().includes(q)
+        || (r.transaction_number   || "").toLowerCase().includes(q)
+        || (r.coa                  || "").toLowerCase().includes(q)
+        || (r.coa_descpt           || "").toLowerCase().includes(q)
+        || (r.operating_unit       || "").toLowerCase().includes(q);
+  }) ?? [];
+
+  const INPUT = { padding: "7px 11px", borderRadius: 9, border: "none", fontSize: 12, background: NEU.bg, boxShadow: NEU.shadowIn, color: "#1e293b", outline: "none" };
+
+  const payBadge = (s) => {
+    const cfg = {
+      "Not Paid":      { bg: "rgba(239,68,68,0.12)",   color: "#dc2626" },
+      "Partially Paid":{ bg: "rgba(245,158,11,0.12)",  color: "#d97706" },
+      "Paid":          { bg: "rgba(34,197,94,0.12)",   color: "#16a34a" },
+    }[s] || { bg: "#f1f5f9", color: "#64748b" };
+    return (
+      <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 20, fontSize: 10, fontWeight: 700, background: cfg.bg, color: cfg.color }}>
+        {s}
+      </span>
+    );
+  };
+
+  const rowBg = (r, i) => {
+    if (r.payment_status === "Partially Paid") return i%2===0 ? "rgba(245,158,11,0.07)" : "rgba(245,158,11,0.04)";
+    if (r.payment_status === "Not Paid")       return i%2===0 ? "rgba(239,68,68,0.06)"  : "rgba(239,68,68,0.03)";
+    return i % 2 === 0 ? "#f0f3f9" : "#e8edf5";
+  };
+
+  const sm = data?.summary;
+
+  return (
+    <SectionCard
+      title="AP Outstanding — Accounts Payable"
+      subtitle="Oracle EBS 12.2.8 · AP_INVOICES_ALL + AP_PAYMENT_SCHEDULES_ALL · Excludes Paid"
+      action={data?.data?.length > 0 && <ActionBtn icon={Download} label="Export CSV" color="#3b82f6" onClick={() => exportApCSV(data.data)} />}
+    >
+      {/* Filter bar */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>As of Date</p>
+          <input type="date" value={asOfDate} onChange={e => setAsOfDate(e.target.value)} style={{ ...INPUT, width: 150 }} />
+        </div>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Supplier</p>
+          <input value={supplierName} onChange={e => setSupplierName(e.target.value)}
+            placeholder="Search supplier…" style={{ ...INPUT, width: 180 }}
+            onKeyDown={e => e.key === "Enter" && loadData()} />
+        </div>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Operating Unit</p>
+          <input value={ouFilter} onChange={e => setOuFilter(e.target.value)}
+            placeholder="Filter OU…" style={{ ...INPUT, width: 150 }}
+            onKeyDown={e => e.key === "Enter" && loadData()} />
+        </div>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Pay Status</p>
+          <select value={payStatusFilter} onChange={e => setPayStatusFilter(e.target.value)} style={{ ...INPUT, width: 140, cursor: "pointer" }}>
+            <option value="ALL">All Outstanding</option>
+            <option value="Not Paid">Not Paid</option>
+            <option value="Partially Paid">Partially Paid</option>
+          </select>
+        </div>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Limit</p>
+          <select value={limit} onChange={e => setLimit(Number(e.target.value))} style={{ ...INPUT, width: 90, cursor: "pointer" }}>
+            {[200, 500, 1000, 2000].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+        <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#3b82f6" onClick={loadData} disabled={loading} />
+      </div>
+
+      {error && (
+        <div style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 10, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", fontSize: 12, color: "#dc2626", display: "flex", gap: 8, alignItems: "center" }}>
+          <AlertTriangle size={14} /> {error}
+        </div>
+      )}
+
+      {data && (
+        <>
+          {/* Summary cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 14 }}>
+            {[
+              { label: "Total Invoices",       val: (data.count || 0).toLocaleString(),               color: "#3b82f6" },
+              { label: "Not Paid",             val: (sm?.not_paid_count    || 0).toLocaleString(),    color: "#dc2626" },
+              { label: "Partially Paid",       val: (sm?.partial_paid_count|| 0).toLocaleString(),    color: "#d97706" },
+              { label: "Total Outstanding",    val: "Rp " + fmtNum(sm?.total_outstanding_idr || 0),   color: "#2563eb" },
+              { label: "Not Paid Amount",      val: "Rp " + fmtNum(sm?.not_paid_idr          || 0),   color: "#dc2626" },
+            ].map(c => (
+              <div key={c.label} style={{ background: NEU.bg, borderRadius: 12, padding: "10px 14px", boxShadow: NEU.shadowOutSm }}>
+                <p style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{c.label}</p>
+                <p style={{ fontSize: 13, fontWeight: 800, color: c.color, fontFamily: "monospace" }}>{c.val}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Client-side search */}
+          <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Filter by supplier / invoice / COA / OU…"
+              style={{ ...INPUT, width: 340 }} />
+            <span style={{ fontSize: 11, color: "#94a3b8" }}>
+              Showing {rows.length.toLocaleString()} of {data.count.toLocaleString()} rows
+            </span>
+          </div>
+
+          {/* Table */}
+          <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1800 }}>
+                <thead>
+                  <tr style={{ background: "linear-gradient(135deg,#1e3a5f,#1e40af)" }}>
+                    <th style={{ ...TH, color: "#bfdbfe", background: "transparent", fontSize: 9.5 }}>#</th>
+                    {AP_HEADERS.map(h => (
+                      <th key={h.key} style={{ ...TH, color: "#bfdbfe", background: "transparent", fontSize: 9.5, minWidth: h.width, whiteSpace: "nowrap" }}>{h.label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.length === 0 ? (
+                    <tr>
+                      <td colSpan={AP_HEADERS.length + 1} style={{ padding: "40px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
+                        No records found
+                      </td>
+                    </tr>
+                  ) : rows.map((r, i) => (
+                    <tr key={i}
+                      style={{ background: rowBg(r, i) }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(59,130,246,0.07)"}
+                      onMouseLeave={e => e.currentTarget.style.background = rowBg(r, i)}
+                    >
+                      <td style={{ ...TD, color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>{i + 1}</td>
+                      <td style={{ ...TD, fontSize: 11, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.operating_unit}>{r.operating_unit}</td>
+                      <td style={{ ...TD, fontWeight: 700, color: "#1e293b", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.supplier_name}>{r.supplier_name}</td>
+                      <td style={{ ...TD, fontSize: 11 }}>{r.transaction_type}</td>
+                      <td style={{ ...TD, fontFamily: "monospace", fontWeight: 700, color: "#2563eb", whiteSpace: "nowrap" }}>{r.transaction_number}</td>
+                      <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.invoice_date}</td>
+                      <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.gl_date}</td>
+                      <td style={{ ...TD, fontSize: 11, fontWeight: 600 }}>{r.currency}</td>
+                      <td style={{ ...TD, fontFamily: "monospace", fontSize: 10, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.coa}>{r.coa}</td>
+                      <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.coa_number}</td>
+                      <td style={{ ...TD, fontSize: 11, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.coa_descpt}>{r.coa_descpt}</td>
+                      <td style={{ ...TD }}>{payBadge(r.payment_status)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>{fmtNum(r.original_amount_idr)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: r.remaining_amount_idr > 0 ? "#dc2626" : "#16a34a" }}>{fmtNum(r.remaining_amount_idr)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#64748b" }}>{r.original_amount_orig != null ? fmtNum(r.original_amount_orig) : "—"}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#64748b" }}>{r.remaining_amount_orig != null ? fmtNum(r.remaining_amount_orig) : "—"}</td>
+                      <td style={{ ...TD, fontSize: 11, color: "#64748b", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.description}>{r.description}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {!data && !loading && !error && (
+        <div style={{ padding: "48px", textAlign: "center", background: "#f0f3f9", borderRadius: 12, boxShadow: NEU.shadowIn }}>
+          <DollarSign size={28} style={{ color: "#3b82f6", marginBottom: 10 }} />
+          <p style={{ fontSize: 13, fontWeight: 600, color: "#475569", margin: 0 }}>Set as-of date and click Load to fetch AP outstanding data</p>
+          <p style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>Default: today · Excludes fully Paid invoices</p>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+/* ─── AR Outstanding Panel ───────────────────────────────────────────────── */
+
+const AR_HEADERS = [
+  { key: "customer_name",    label: "Customer",        width: 200 },
+  { key: "account_number",   label: "Account #",       width: 100 },
+  { key: "invoice_number",   label: "Invoice No",      width: 120 },
+  { key: "transaction_type", label: "Type",            width: 60  },
+  { key: "invoice_date",     label: "Invoice Date",    width: 100 },
+  { key: "due_date",         label: "Due Date",        width: 100 },
+  { key: "currency",         label: "Cur",             width: 45  },
+  { key: "original_amount",  label: "Original Amt",    width: 120, num: true },
+  { key: "remaining_amount", label: "Remaining Amt",   width: 120, num: true },
+  { key: "days_overdue",     label: "Days Overdue",    width: 90,  num: true },
+  { key: "status",           label: "Status",          width: 60  },
+  { key: "operating_unit",   label: "OU",              width: 120 },
+  { key: "comments",         label: "Comments",        width: 160 },
+];
+
+function exportArCSV(rows) {
+  if (!rows?.length) return;
+  const lines = [
+    "﻿" + AR_HEADERS.map(h => h.label).join(","),
+    ...rows.map(r =>
+      AR_HEADERS.map(h => `"${String(r[h.key] ?? "").replace(/"/g, '""')}"`).join(",")
+    ),
+  ];
+  const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = "ar_outstanding.csv"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function AROutstandingPanel() {
+  const [customerName,   setCustomerName]   = useState("");
+  const [invoiceNumber,  setInvoiceNumber]  = useState("");
+  const [dateFrom,       setDateFrom]       = useState("");
+  const [dateTo,         setDateTo]         = useState("");
+  const [statusFilter,   setStatusFilter]   = useState("OP");
+  const [limit,          setLimit]          = useState(500);
+  const [data,           setData]           = useState(null);
+  const [loading,        setLoading]        = useState(false);
+  const [error,          setError]          = useState(null);
+  const [search,         setSearch]         = useState("");
+
+  const loadData = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const params = {
+        status: statusFilter,
+        limit,
+        ...(customerName  && { customer_name:  customerName  }),
+        ...(invoiceNumber && { invoice_number: invoiceNumber }),
+        ...(dateFrom      && { date_from:       dateFrom      }),
+        ...(dateTo        && { date_to:         dateTo        }),
+      };
+      const res = await accountingApi.getArOutstanding(params);
+      if (res.success) setData(res);
+      else { setError(res.error || "Failed to load"); setData(null); }
+    } catch (e) {
+      setError(e?.response?.data?.detail || String(e)); setData(null);
+    } finally { setLoading(false); }
+  }, [customerName, invoiceNumber, dateFrom, dateTo, statusFilter, limit]);
+
+  // Client-side search on top of fetched data
+  const rows = data?.data?.filter(r => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (r.customer_name  || "").toLowerCase().includes(q)
+        || (r.invoice_number || "").toLowerCase().includes(q)
+        || (r.account_number || "").toLowerCase().includes(q);
+  }) ?? [];
+
+  const INPUT = { padding: "7px 11px", borderRadius: 9, border: "none", fontSize: 12, background: NEU.bg, boxShadow: NEU.shadowIn, color: "#1e293b", outline: "none" };
+
+  const rowBg = (r) => {
+    const days = r.days_overdue || 0;
+    const isOpen = r.status === "OP";
+    if (isOpen && days > 0)   return "rgba(239,68,68,0.06)";
+    if (isOpen && days > -30) return "rgba(245,158,11,0.05)";
+    return undefined;
+  };
+
+  const daysStyle = (days) => {
+    if (!days) return { color: "#94a3b8" };
+    if (days > 90) return { color: "#dc2626", fontWeight: 800 };
+    if (days > 30) return { color: "#ea580c", fontWeight: 700 };
+    if (days > 0)  return { color: "#d97706", fontWeight: 700 };
+    return { color: "#16a34a" };
+  };
+
+  const statusBadge = (s) => (
+    <span style={{
+      display: "inline-block", padding: "2px 8px", borderRadius: 20, fontSize: 10, fontWeight: 700,
+      background: s === "OP" ? "rgba(239,68,68,0.12)" : "rgba(34,197,94,0.12)",
+      color:      s === "OP" ? "#dc2626"               : "#16a34a",
+    }}>{s === "OP" ? "OPEN" : "CLOSED"}</span>
+  );
+
+  const sm = data?.summary;
+
+  return (
+    <SectionCard
+      title="AR Outstanding — Invoice Receivable"
+      subtitle="Oracle EBS 12.2.8 · AR_PAYMENT_SCHEDULES_ALL · Class: INV + DM"
+      action={data?.data?.length > 0 && <ActionBtn icon={Download} label="Export CSV" color="#f59e0b" onClick={() => exportArCSV(data.data)} />}
+    >
+      {/* Filter bar */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Customer</p>
+          <input value={customerName} onChange={e => setCustomerName(e.target.value)}
+            placeholder="Search customer…" style={{ ...INPUT, width: 180 }}
+            onKeyDown={e => e.key === "Enter" && loadData()} />
+        </div>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Invoice No</p>
+          <input value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)}
+            placeholder="e.g. INV-2024…" style={{ ...INPUT, width: 140 }}
+            onKeyDown={e => e.key === "Enter" && loadData()} />
+        </div>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Invoice Date From</p>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...INPUT, width: 140 }} />
+        </div>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>To</p>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...INPUT, width: 140 }} />
+        </div>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Status</p>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ ...INPUT, width: 110, cursor: "pointer" }}>
+            <option value="OP">Open</option>
+            <option value="CL">Closed</option>
+            <option value="ALL">All</option>
+          </select>
+        </div>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Limit</p>
+          <select value={limit} onChange={e => setLimit(Number(e.target.value))} style={{ ...INPUT, width: 90, cursor: "pointer" }}>
+            {[200, 500, 1000, 2000].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+        <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#f59e0b" onClick={loadData} disabled={loading} />
+      </div>
+
+      {error && (
+        <div style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 10, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", fontSize: 12, color: "#dc2626", display: "flex", gap: 8, alignItems: "center" }}>
+          <AlertTriangle size={14} /> {error}
+        </div>
+      )}
+
+      {data && (
+        <>
+          {/* Summary cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 14 }}>
+            {[
+              { label: "Open Invoices",     val: (sm?.open_invoice_count || 0).toLocaleString(),    color: "#f59e0b" },
+              { label: "Overdue Count",      val: (sm?.overdue_count     || 0).toLocaleString(),    color: "#dc2626" },
+              { label: "Total Outstanding",  val: "Rp " + fmtNum(sm?.total_remaining || 0),         color: "#2563eb" },
+              { label: "Total Overdue",      val: "Rp " + fmtNum(sm?.total_overdue   || 0),         color: "#dc2626" },
+            ].map(c => (
+              <div key={c.label} style={{ background: NEU.bg, borderRadius: 12, padding: "10px 14px", boxShadow: NEU.shadowOutSm }}>
+                <p style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{c.label}</p>
+                <p style={{ fontSize: 13, fontWeight: 800, color: c.color, fontFamily: "monospace" }}>{c.val}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Client-side search */}
+          <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Filter results by customer / invoice / account…"
+              style={{ ...INPUT, width: 320 }} />
+            <span style={{ fontSize: 11, color: "#94a3b8" }}>
+              Showing {rows.length.toLocaleString()} of {data.count.toLocaleString()} rows
+            </span>
+          </div>
+
+          {/* Table */}
+          <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1400 }}>
+                <thead>
+                  <tr style={{ background: "linear-gradient(135deg,#92400e,#78350f)" }}>
+                    <th style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5 }}>#</th>
+                    {AR_HEADERS.map(h => (
+                      <th key={h.key} style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5, minWidth: h.width, whiteSpace: "nowrap" }}>{h.label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.length === 0 ? (
+                    <tr>
+                      <td colSpan={AR_HEADERS.length + 1} style={{ padding: "40px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
+                        No records found
+                      </td>
+                    </tr>
+                  ) : rows.map((r, i) => (
+                    <tr key={i}
+                      style={{ background: rowBg(r) || (i % 2 === 0 ? "#f0f3f9" : "#e8edf5") }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(245,158,11,0.08)"}
+                      onMouseLeave={e => e.currentTarget.style.background = rowBg(r) || (i % 2 === 0 ? "#f0f3f9" : "#e8edf5")}
+                    >
+                      <td style={{ ...TD, color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>{i + 1}</td>
+                      <td style={{ ...TD, fontWeight: 700, color: "#1e293b", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.customer_name}>{r.customer_name}</td>
+                      <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.account_number}</td>
+                      <td style={{ ...TD, fontFamily: "monospace", fontWeight: 700, color: "#2563eb", whiteSpace: "nowrap" }}>{r.invoice_number}</td>
+                      <td style={{ ...TD, fontSize: 11 }}>{r.transaction_type}</td>
+                      <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.invoice_date}</td>
+                      <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.due_date}</td>
+                      <td style={{ ...TD, fontSize: 11, fontWeight: 600 }}>{r.currency}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace" }}>{fmtNum(r.original_amount)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: r.remaining_amount > 0 ? "#dc2626" : "#16a34a" }}>{fmtNum(r.remaining_amount)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", ...daysStyle(r.days_overdue) }}>
+                        {r.days_overdue > 0 ? `+${r.days_overdue}d` : r.days_overdue === 0 ? "Today" : r.days_overdue < 0 ? `${Math.abs(r.days_overdue)}d left` : "—"}
+                      </td>
+                      <td style={{ ...TD }}>{statusBadge(r.status)}</td>
+                      <td style={{ ...TD, fontSize: 11, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.operating_unit}>{r.operating_unit}</td>
+                      <td style={{ ...TD, fontSize: 11, color: "#64748b", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.comments}>{r.comments}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {!data && !loading && !error && (
+        <div style={{ padding: "48px", textAlign: "center", background: "#f0f3f9", borderRadius: 12, boxShadow: NEU.shadowIn }}>
+          <AlertTriangle size={28} style={{ color: "#f59e0b", marginBottom: 10 }} />
+          <p style={{ fontSize: 13, fontWeight: 600, color: "#475569", margin: 0 }}>Set filters and click Load to fetch AR outstanding data</p>
+          <p style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>Default: Open invoices (INV + DM), up to 500 rows</p>
+        </div>
+      )}
+    </SectionCard>
   );
 }
 

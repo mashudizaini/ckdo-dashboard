@@ -19,6 +19,47 @@ async def get_summary(user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)
     return {"module": "accounting", "status": "ready"}
 
 
+# ── AP Outstanding ───────────────────────────────────────────────────────────
+
+@router.get("/ap-outstanding")
+async def get_ap_outstanding(
+    as_of_date:     str  = Query(None, description="As-of date YYYY-MM-DD (default: today)"),
+    supplier_name:  str  = Query(None, description="Partial supplier name filter"),
+    operating_unit: str  = Query(None, description="Partial operating unit name filter"),
+    payment_status: str  = Query(None, description="Not Paid | Partially Paid | ALL"),
+    limit:          int  = Query(500, ge=1, le=2000),
+    user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
+):
+    """
+    AP Outstanding — AP_INVOICES_ALL + AP_PAYMENT_SCHEDULES_ALL.
+    Excludes fully Paid invoices. As-of date defaults to SYSDATE.
+    """
+    return await AccountingService().get_ap_outstanding(
+        as_of_date, supplier_name, operating_unit, payment_status, limit
+    )
+
+
+# ── AR Outstanding ───────────────────────────────────────────────────────────
+
+@router.get("/ar-outstanding")
+async def get_ar_outstanding(
+    customer_name:  str  = Query(None, description="Partial customer name filter"),
+    invoice_number: str  = Query(None, description="Partial invoice number filter"),
+    date_from:      str  = Query(None, description="Invoice date from YYYY-MM-DD"),
+    date_to:        str  = Query(None, description="Invoice date to YYYY-MM-DD"),
+    status:         str  = Query("OP",  description="OP=open, CL=closed, ALL=both"),
+    limit:          int  = Query(500, ge=1, le=2000),
+    user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
+):
+    """
+    AR Outstanding from Oracle EBS — AR_PAYMENT_SCHEDULES_ALL + RA_CUSTOMER_TRX_ALL.
+    Class filter: INV + DM (invoices and debit memos only).
+    """
+    return await AccountingService().get_ar_outstanding(
+        customer_name, invoice_number, date_from, date_to, status, limit
+    )
+
+
 # ── COGS / Inventory RM PM ───────────────────────────────────────────────────
 
 @router.get("/inventory-rm-pm")

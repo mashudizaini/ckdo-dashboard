@@ -176,6 +176,251 @@ class AccountingService:
             "data":      result,
         }
 
+    # ── AP Outstanding ───────────────────────────────────────────────────────
+
+    async def get_ap_outstanding(
+        self,
+        as_of_date: str = None,
+        supplier_name: str = None,
+        operating_unit: str = None,
+        payment_status: str = None,
+        limit: int = 500,
+    ) -> dict:
+        """
+        AP Outstanding from Oracle EBS — AP_INVOICES_ALL + AP_PAYMENT_SCHEDULES_ALL.
+        Mirrors the AP Outstanding report; excludes fully Paid invoices.
+        as_of_date defaults to SYSDATE when not provided.
+        """
+        limit = min(max(limit, 1), 2000)
+
+        date_expr = "TO_DATE(:as_of_date, 'YYYY-MM-DD')" if as_of_date else "TRUNC(SYSDATE)"
+        params: dict = {}
+        if as_of_date:
+            params["as_of_date"] = as_of_date
+
+        extra_where = ""
+        if supplier_name:
+            extra_where += " AND UPPER(pv.vendor_name) LIKE UPPER(:supplier_name)"
+            params["supplier_name"] = f"%{supplier_name}%"
+        if operating_unit:
+            extra_where += " AND UPPER(hou.name) LIKE UPPER(:operating_unit)"
+            params["operating_unit"] = f"%{operating_unit}%"
+        if payment_status and payment_status != "ALL":
+            # Will be applied as HAVING-equivalent via subquery wrapping
+            # We include it in the outer filter using CASE expression
+            extra_where += (
+                " AND CASE"
+                "   WHEN NVL(sched_summary.total_remaining, 0) = 0 THEN 'Paid'"
+                "   WHEN NVL(sched_summary.total_remaining, 0) < NVL(sched_summary.total_gross, 0) THEN 'Partially Paid'"
+                "   ELSE 'Not Paid'"
+                " END = :pay_status"
+            )
+            params["pay_status"] = payment_status
+
+        sql = f"""
+            SELECT *
+            FROM (
+                SELECT
+                    hou.name                                                       AS operating_unit,
+                    ai.org_id,
+                    pv.vendor_name                                                 AS supplier_name,
+                    SUBSTR(NVL(ai.description, '-'), 1, 100)                       AS description,
+                    gcc.segment1||'.'||gcc.segment2||'.'||gcc.segment3||'.'||
+                    gcc.segment4||'.'||gcc.segment5||'.'||gcc.segment6             AS coa,
+                    gcc.segment4                                                   AS coa_number,
+                    SUBSTR(NVL(ffvl.description, '-'), 1, 80)                      AS coa_descpt,
+                    ai.invoice_type_lookup_code                                    AS transaction_type,
+                    ai.invoice_num                                                 AS transaction_number,
+                    ai.invoice_id,
+                    TO_CHAR(ai.invoice_date, 'YYYY-MM-DD')                         AS invoice_date,
+                    TO_CHAR(ai.gl_date,      'YYYY-MM-DD')                         AS gl_date,
+                    ai.invoice_currency_code                                       AS currency,
+                    CASE
+                        WHEN NVL(sched_summary.total_remaining, 0) = 0
+                             THEN 'Paid'
+                        WHEN NVL(sched_summary.total_remaining, 0) <
+                             NVL(sched_summary.total_gross, 0)
+                             THEN 'Partially Paid'
+                        ELSE 'Not Paid'
+                    END                                                            AS payment_status,
+                    CASE WHEN ai.invoice_currency_code <> 'IDR'
+                         THEN ai.invoice_amount        END                         AS original_amount_orig,
+                    CASE WHEN ai.invoice_currency_code <> 'IDR'
+                         THEN sched_summary.total_remaining_orig END               AS remaining_amount_orig,
+                    NVL(ai.base_amount, ai.invoice_amount)                         AS original_amount_idr,
+                    sched_summary.total_remaining                                  AS remaining_amount_idr
+                FROM apps.ap_invoices_all              ai
+                   , apps.ap_suppliers                 pv
+                   , apps.gl_code_combinations         gcc
+                   , apps.fnd_flex_values_vl           ffvl
+                   , apps.fnd_flex_value_sets          ffvs
+                   , apps.hr_operating_units           hou
+                   , ( SELECT aps.invoice_id
+                            , SUM(aps.gross_amount)                                AS total_gross
+                            , SUM(aps.amount_remaining)                            AS total_remaining_orig
+                            , SUM( aps.amount_remaining *
+                                   NVL(ai2.base_amount, ai2.invoice_amount) /
+                                   DECODE(ai2.invoice_amount, 0, 1, ai2.invoice_amount) )
+                                                                                   AS total_remaining
+                         FROM apps.ap_payment_schedules_all aps
+                            , apps.ap_invoices_all          ai2
+                        WHERE aps.invoice_id            = ai2.invoice_id
+                          AND aps.payment_status_flag  IN ('N', 'P')
+                          AND ai2.gl_date              <= {date_expr}
+                        GROUP BY aps.invoice_id
+                     ) sched_summary
+                WHERE ai.invoice_id                       = sched_summary.invoice_id
+                  AND ai.vendor_id                        = pv.vendor_id
+                  AND ai.accts_pay_code_combination_id    = gcc.code_combination_id
+                  AND ai.org_id                           = hou.organization_id
+                  AND ai.gl_date                         <= {date_expr}
+                  AND ffvl.flex_value_set_id              = ffvs.flex_value_set_id
+                  AND ffvl.flex_value                     = gcc.segment4
+                  AND CASE
+                          WHEN NVL(sched_summary.total_remaining, 0) = 0
+                               THEN 'Paid'
+                          WHEN NVL(sched_summary.total_remaining, 0) <
+                               NVL(sched_summary.total_gross, 0)
+                               THEN 'Partially Paid'
+                          ELSE 'Not Paid'
+                      END != 'Paid'
+                  {extra_where}
+                ORDER BY hou.name, pv.vendor_name, ai.invoice_date, ai.invoice_num
+            )
+            WHERE ROWNUM <= {limit}
+        """
+        try:
+            rows = await asyncio.to_thread(self._query, sql, params)
+            clean = []
+            for r in rows:
+                clean.append({
+                    k: (float(v) if hasattr(v, "__float__") and not isinstance(v, (int, float, str, type(None), bool)) else v)
+                    for k, v in r.items()
+                })
+            not_paid     = [r for r in clean if r.get("payment_status") == "Not Paid"]
+            partial_paid = [r for r in clean if r.get("payment_status") == "Partially Paid"]
+            total_idr    = sum(r.get("remaining_amount_idr") or 0 for r in clean)
+            return {
+                "success":       True,
+                "count":         len(clean),
+                "as_of_date":    as_of_date or "today",
+                "summary": {
+                    "not_paid_count":    len(not_paid),
+                    "partial_paid_count": len(partial_paid),
+                    "total_outstanding_idr": round(total_idr, 2),
+                    "not_paid_idr":      round(sum(r.get("remaining_amount_idr") or 0 for r in not_paid), 2),
+                    "partial_paid_idr":  round(sum(r.get("remaining_amount_idr") or 0 for r in partial_paid), 2),
+                },
+                "data": clean,
+            }
+        except Exception as e:
+            logger.error("ap_outstanding_error", error=str(e))
+            return {"success": False, "error": str(e), "data": []}
+
+    # ── AR Outstanding ───────────────────────────────────────────────────────
+
+    async def get_ar_outstanding(
+        self,
+        customer_name: str = None,
+        invoice_number: str = None,
+        date_from: str = None,
+        date_to: str = None,
+        status: str = "OP",
+        limit: int = 500,
+    ) -> dict:
+        """
+        AR Outstanding from Oracle EBS Invoice Receivable.
+        Sources: AR_PAYMENT_SCHEDULES_ALL + RA_CUSTOMER_TRX_ALL + HZ_PARTIES.
+        """
+        limit = min(max(limit, 1), 2000)
+        where_extra = ""
+        params: dict = {}
+
+        if status and status != "ALL":
+            where_extra += " AND aps.status = :status"
+            params["status"] = status.upper()
+
+        if customer_name:
+            where_extra += " AND UPPER(hp.party_name) LIKE UPPER(:cust)"
+            params["cust"] = f"%{customer_name}%"
+
+        if invoice_number:
+            where_extra += " AND UPPER(rct.trx_number) LIKE UPPER(:inv_num)"
+            params["inv_num"] = f"%{invoice_number}%"
+
+        if date_from:
+            where_extra += " AND rct.trx_date >= TO_DATE(:date_from, 'YYYY-MM-DD')"
+            params["date_from"] = date_from
+
+        if date_to:
+            where_extra += " AND rct.trx_date <= TO_DATE(:date_to, 'YYYY-MM-DD')"
+            params["date_to"] = date_to
+
+        sql = f"""
+            SELECT
+                hp.party_name                                        AS customer_name,
+                hca.account_number,
+                rct.trx_number                                       AS invoice_number,
+                TO_CHAR(rct.trx_date,  'YYYY-MM-DD')                AS invoice_date,
+                TO_CHAR(aps.due_date,  'YYYY-MM-DD')                AS due_date,
+                ROUND(NVL(aps.amount_due_original,  0), 2)          AS original_amount,
+                ROUND(NVL(aps.amount_due_remaining, 0), 2)          AS remaining_amount,
+                rct.invoice_currency_code                            AS currency,
+                ROUND(TRUNC(SYSDATE) - aps.due_date, 0)             AS days_overdue,
+                rcttt.name                                           AS transaction_type,
+                aps.status,
+                aps.class,
+                SUBSTR(NVL(rct.comments, '-'), 1, 100)               AS comments,
+                hou.name                                             AS operating_unit
+            FROM apps.ar_payment_schedules_all  aps
+            JOIN apps.ra_customer_trx_all        rct
+                ON  rct.customer_trx_id  = aps.customer_trx_id
+            JOIN apps.ra_cust_trx_types_all      rcttt
+                ON  rcttt.cust_trx_type_id = rct.cust_trx_type_id
+                AND rcttt.org_id           = rct.org_id
+            JOIN apps.hz_cust_accounts           hca
+                ON  hca.cust_account_id  = rct.bill_to_customer_id
+            JOIN apps.hz_parties                 hp
+                ON  hp.party_id          = hca.party_id
+            JOIN apps.hr_operating_units         hou
+                ON  hou.organization_id  = rct.org_id
+            WHERE aps.class IN ('INV', 'DM')
+              {where_extra}
+            ORDER BY
+                CASE WHEN aps.status = 'OP' THEN 0 ELSE 1 END,
+                aps.due_date ASC,
+                hp.party_name
+            FETCH FIRST {limit} ROWS ONLY
+        """
+        try:
+            rows = await asyncio.to_thread(self._query, sql, params)
+            clean = []
+            for r in rows:
+                clean.append({
+                    k: (float(v) if hasattr(v, "__float__") and not isinstance(v, (int, float, str, type(None), bool)) else v)
+                    for k, v in r.items()
+                })
+            # Summary aggregates
+            open_rows   = [r for r in clean if r.get("status") == "OP"]
+            overdue     = [r for r in open_rows if (r.get("days_overdue") or 0) > 0]
+            total_remaining = sum(r.get("remaining_amount", 0) for r in open_rows)
+            total_overdue   = sum(r.get("remaining_amount", 0) for r in overdue)
+            return {
+                "success": True,
+                "count":   len(clean),
+                "limit":   limit,
+                "summary": {
+                    "open_invoice_count":  len(open_rows),
+                    "overdue_count":       len(overdue),
+                    "total_remaining":     round(total_remaining, 2),
+                    "total_overdue":       round(total_overdue, 2),
+                },
+                "data": clean,
+            }
+        except Exception as e:
+            logger.error("ar_outstanding_error", error=str(e))
+            return {"success": False, "error": str(e), "data": []}
+
     # ── Item Cost Components ─────────────────────────────────────────────────
 
     async def get_item_cost_components(self, period: str) -> dict:
