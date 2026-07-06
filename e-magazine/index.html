@@ -316,8 +316,7 @@ const els = {
   title:$("magTitle"), book:$("book"),
   halfL:$("halfL"), halfR:$("halfR"), prev:$("prevBtn"), next:$("nextBtn"),
   info:$("pageInfo"), thumbs:$("thumbs"), overlay:$("overlay"),
-  overlayMsg:$("overlayMsg"),
-  bar:$("bar"), barFill:$("barFill"), ribbon:$("ribbonFill"),
+  overlayMsg:$("overlayMsg"), bar:$("bar"), barFill:$("barFill"), ribbon:$("ribbonFill"),
   stage:$("stage"), viewer:$("viewer"),
   editionList:$("editionList"), panel:$("editionsPanel"),
   scrim:$("drawerScrim"), toggle:$("editionsToggle")
@@ -436,7 +435,7 @@ async function loadEdition(src, label){
   resetState();
   els.overlay.classList.remove("hidden");
   els.overlayMsg.textContent = "Loading " + (label||"document") + "…";
-  els.bar.hidden = false; els.overlayOpen.hidden = true;
+  els.bar.hidden = false;
   try{
     const task = pdfjsLib.getDocument(src);
     task.onProgress = p => {
@@ -452,10 +451,8 @@ async function loadEdition(src, label){
     buildThumbs();
   }catch(err){
     els.bar.hidden = true;
-    els.overlayMsg.textContent =
-      "This edition could not be loaded from the server. If you are testing " +
-      "this file locally or in a preview, open a PDF manually below.";
-    els.overlayOpen.hidden = false;
+    els.overlayMsg.textContent = "Edisi gagal dimuat. Pastikan file PDF tersedia di server.";
+    console.error("loadEdition error:", err);
   }
 }
 function resetState(){
@@ -672,7 +669,7 @@ if(new URLSearchParams(location.search).get("embed") === "1"){
     CONFIG.editions = list.map(e => ({
       title: e.title || e.filename,
       date:  e.date  || "",
-      file:  "magazines/" + e.filename,
+      file:  "magazines/" + encodeURIComponent(e.filename),
     }));
   }catch(_){
     CONFIG.editions = [];
