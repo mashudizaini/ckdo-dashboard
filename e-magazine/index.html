@@ -258,9 +258,7 @@
   <button class="btn icon" id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
   <button class="btn icon" id="zoomIn" title="Zoom in" aria-label="Zoom in">+</button>
   <button class="btn icon" id="fsBtn" title="Fullscreen" aria-label="Fullscreen">⛶</button>
-  <button class="btn" id="openBtn">Open PDF…</button>
   <button class="btn" id="editionsToggle">Editions</button>
-  <input type="file" id="fileInput" accept="application/pdf" hidden>
 </header>
 
 <div class="content">
@@ -279,7 +277,6 @@
       <div class="big">Internal Magazine Reading Room</div>
       <p id="overlayMsg">Loading edition…</p>
       <div id="bar" hidden><i id="barFill"></i></div>
-      <button class="btn" id="overlayOpen" hidden>Open a PDF file to preview</button>
     </div>
   </main>
 
@@ -307,12 +304,8 @@
    "cover" is optional (path to a cover image); if omitted, a
    generated spine label is shown instead.
 ═══════════════════════════════════════════════════════════════ */
-const CONFIG = {
-  companyName: "CKDO Magazine",
-  editions: [
-    { title: "1st Edition — July 2026", date: "July 2026", file: "magazines/CKD OTTO e-Magz 1st Edition - July 2026.pdf" },
-  ]
-};
+/* Editions are loaded dynamically from magazines/index.json (managed via HR Dashboard) */
+const CONFIG = { companyName: "CKDO Magazine", editions: [] };
 /* ═══════════════════════════════════════════════════════════════ */
 
 pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -323,9 +316,9 @@ const els = {
   title:$("magTitle"), book:$("book"),
   halfL:$("halfL"), halfR:$("halfR"), prev:$("prevBtn"), next:$("nextBtn"),
   info:$("pageInfo"), thumbs:$("thumbs"), overlay:$("overlay"),
-  overlayMsg:$("overlayMsg"), overlayOpen:$("overlayOpen"),
+  overlayMsg:$("overlayMsg"),
   bar:$("bar"), barFill:$("barFill"), ribbon:$("ribbonFill"),
-  stage:$("stage"), viewer:$("viewer"), fileInput:$("fileInput"),
+  stage:$("stage"), viewer:$("viewer"),
   editionList:$("editionList"), panel:$("editionsPanel"),
   scrim:$("drawerScrim"), toggle:$("editionsToggle")
 };
@@ -481,9 +474,10 @@ async function pageImage(n){
   const c = document.createElement("canvas");
   c.width = vp.width; c.height = vp.height;
   await page.render({canvasContext:c.getContext("2d"), viewport:vp}).promise;
-  // Scan QR before JPEG conversion (lossless canvas data is more reliable)
+  // Scan QR before JPEG conversion (lossless canvas is more reliable)
   dimCache.set(n, {cw:vp.width, ch:vp.height});
-  detectQRs(c).then(qrs=>{ if(qrs.length) qrCache.set(n, qrs); });
+  const qrs = await detectQRs(c);
+  if(qrs.length) qrCache.set(n, qrs);
   const url = c.toDataURL("image/jpeg", .88);
   imgCache.set(n, url);
   return url;
@@ -653,15 +647,6 @@ document.addEventListener("keydown", e=>{
   if(e.key==="ArrowRight") flip(1);
   if(e.key==="ArrowLeft")  flip(-1);
 });
-$("openBtn").onclick = ()=>els.fileInput.click();
-els.overlayOpen.onclick = ()=>els.fileInput.click();
-els.fileInput.onchange = async e=>{
-  const f = e.target.files[0];
-  if(!f) return;
-  activeEdition = -1; markActiveEdition();
-  const buf = await f.arrayBuffer();
-  loadEdition({data:buf}, f.name);
-};
 window.addEventListener("resize", ()=>{
   if(!pdf) return;
   const wasSingle = singleMode;
@@ -679,14 +664,26 @@ if(new URLSearchParams(location.search).get("embed") === "1"){
   document.querySelector("aside").style.display  = "none";
 }
 
-/* ── Start ──────────────────────────────── */
-buildEditionList();
-if(CONFIG.editions.length){
-  selectEdition(0);
-}else{
-  els.overlayMsg.textContent = "No editions registered in CONFIG. Open a PDF file to preview.";
-  els.overlayOpen.hidden = false;
-}
+/* ── Start — load editions from server ───── */
+(async function(){
+  try{
+    const res  = await fetch("magazines/index.json?_=" + Date.now());
+    const list = res.ok ? await res.json() : [];
+    CONFIG.editions = list.map(e => ({
+      title: e.title || e.filename,
+      date:  e.date  || "",
+      file:  "magazines/" + e.filename,
+    }));
+  }catch(_){
+    CONFIG.editions = [];
+  }
+  buildEditionList();
+  if(CONFIG.editions.length){
+    selectEdition(0);
+  }else{
+    els.overlayMsg.textContent = "Belum ada edisi tersedia. Silakan upload melalui HR Dashboard.";
+  }
+})();
 </script>
 </body>
 </html>

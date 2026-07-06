@@ -46,6 +46,7 @@ services:
       - ./backend:/app
       - ./oracle_client:/opt/oracle/instantclient
       - uploads_data:/app/uploads
+      - ./e-magazine/magazines:/app/magazine-uploads
     ports:
       - "8000:8000"
     depends_on:

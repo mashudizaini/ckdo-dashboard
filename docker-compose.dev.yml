@@ -14,6 +14,8 @@ services:
   backend:
     environment:
       - ENVIRONMENT=development
+    volumes:
+      - ./e-magazine/magazines:/app/magazine-uploads
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   nginx:

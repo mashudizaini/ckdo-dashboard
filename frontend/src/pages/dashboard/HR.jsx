@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Users, UserCheck, Umbrella, BarChart2, RefreshCw,
   Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck,
-  Wallet, Download, ChevronDown, ListChecks, FileSearch,
+  Wallet, Download, ChevronDown, ListChecks, FileSearch, BookOpen, Trash2,
 } from "lucide-react";
 import EmployeeUpload from "./EmployeeUpload";
 import AttendanceUpload from "./AttendanceUpload";
@@ -55,12 +55,13 @@ export default function HRDashboard() {
     { id: "todo",       icon: ListChecks,    color: "text-rose-400",   bg: "bg-rose-500/10",   activeBorder: "border-rose-500/40",   label: "To Do List" },
     { id: "cv",         icon: FileSearch,    color: "text-cyan-400",   bg: "bg-cyan-500/10",   activeBorder: "border-cyan-500/40",   label: "CV Screening" },
     { id: "budget",     icon: Wallet,        color: "text-orange-400", bg: "bg-orange-500/10", activeBorder: "border-orange-500/40", label: "Budget Monitoring" },
+    { id: "emagazine",  icon: BookOpen,      color: "text-teal-400",   bg: "bg-teal-500/10",   activeBorder: "border-teal-500/40",   label: "e-Magazine" },
   ];
 
   return (
     <div className="p-6 space-y-4">
       {/* Tab Buttons — 6 tabs */}
-      <div className="grid grid-cols-2 xl:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 xl:grid-cols-7 gap-2">
         {kpiCards.map((c) => (
           <button
             key={c.id}
@@ -127,6 +128,12 @@ export default function HRDashboard() {
       {activeSection === "budget" && (
         <SectionCard title="Budget Monitoring HRGA">
           <BudgetMonitoringSection />
+        </SectionCard>
+      )}
+
+      {activeSection === "emagazine" && (
+        <SectionCard title="e-Magazine Management">
+          <EMagazineSection />
         </SectionCard>
       )}
     </div>
@@ -2387,6 +2394,183 @@ function DataTable({ headers, rows, placeholder }) {
           )}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// ── E-Magazine Management ─────────────────────────────────────────────────────
+function EMagazineSection() {
+  const [list,      setList]      = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [deleting,  setDeleting]  = useState(null);
+  const [error,     setError]     = useState("");
+  const [success,   setSuccess]   = useState("");
+  const [title,     setTitle]     = useState("");
+  const [dateLbl,   setDateLbl]   = useState("");
+  const [file,      setFile]      = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await hrApi.eMagazineList();
+      setList(data);
+    } catch {
+      setError("Gagal memuat daftar e-magazine.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleUpload = async (e) => {
+    e.preventDefault();
+    if (!file || !title.trim()) { setError("Judul dan file PDF wajib diisi."); return; }
+    setError(""); setSuccess(""); setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("title", title.trim());
+      form.append("date_label", dateLbl.trim());
+      await hrApi.eMagazineUpload(form);
+      setSuccess(`"${title}" berhasil diupload.`);
+      setTitle(""); setDateLbl(""); setFile(null);
+      e.target.reset();
+      load();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Upload gagal.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async (filename) => {
+    if (!window.confirm(`Hapus "${filename}"?`)) return;
+    setDeleting(filename); setError(""); setSuccess("");
+    try {
+      await hrApi.eMagazineDelete(filename);
+      setSuccess(`"${filename}" berhasil dihapus.`);
+      load();
+    } catch {
+      setError("Gagal menghapus file.");
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const fmtDate = (iso) => {
+    if (!iso) return "-";
+    try { return new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }); }
+    catch { return iso; }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Upload form */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-5">
+        <h3 className="text-sm font-semibold text-teal-400 mb-4 flex items-center gap-2">
+          <Upload size={14} /> Upload e-Magazine Baru
+        </h3>
+        <form onSubmit={handleUpload} className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="space-y-1">
+            <label className="text-xs text-gray-400 font-medium">Judul Edisi *</label>
+            <input
+              type="text"
+              placeholder="cth: 2nd Edition"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
+              required
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-gray-400 font-medium">Periode</label>
+            <input
+              type="text"
+              placeholder="cth: August 2026"
+              value={dateLbl}
+              onChange={e => setDateLbl(e.target.value)}
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs text-gray-400 font-medium">File PDF * (maks 100 MB)</label>
+            <input
+              type="file"
+              accept="application/pdf"
+              onChange={e => setFile(e.target.files[0] || null)}
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-400 file:mr-3 file:rounded file:border-0 file:bg-teal-600 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white focus:outline-none"
+              required
+            />
+          </div>
+          <div className="md:col-span-3 flex items-center gap-3">
+            <button
+              type="submit"
+              disabled={uploading}
+              className="flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2 text-sm font-semibold text-white hover:bg-teal-500 disabled:opacity-50 transition-colors"
+            >
+              {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+              {uploading ? "Mengupload…" : "Upload"}
+            </button>
+            {success && <span className="text-xs text-teal-400">{success}</span>}
+            {error   && <span className="text-xs text-red-400">{error}</span>}
+          </div>
+        </form>
+      </div>
+
+      {/* Edition list */}
+      <div className="rounded-xl border border-gray-800 overflow-hidden">
+        <div className="bg-gray-800/60 px-4 py-3 flex items-center justify-between">
+          <span className="text-sm font-semibold text-gray-200 flex items-center gap-2">
+            <BookOpen size={14} className="text-teal-400" /> Daftar Edisi ({list.length})
+          </span>
+          <button onClick={load} className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-teal-400 transition-colors">
+            <RefreshCw size={12} /> Refresh
+          </button>
+        </div>
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 size={20} className="animate-spin text-teal-400" />
+          </div>
+        ) : list.length === 0 ? (
+          <p className="py-10 text-center text-xs text-gray-600">Belum ada e-magazine. Upload PDF di atas.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-800/40">
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Judul</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Periode</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Nama File</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Diupload</th>
+                <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Aksi</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800">
+              {list.map((ed, i) => (
+                <tr key={i} className="hover:bg-gray-800/40 transition-colors">
+                  <td className="px-4 py-3 font-medium text-gray-200">{ed.title}</td>
+                  <td className="px-4 py-3 text-gray-400">{ed.date || "-"}</td>
+                  <td className="px-4 py-3 text-gray-500 text-xs font-mono">{ed.filename}</td>
+                  <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(ed.uploaded_at)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={() => handleDelete(ed.filename)}
+                      disabled={deleting === ed.filename}
+                      className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
+                    >
+                      {deleting === ed.filename
+                        ? <Loader2 size={11} className="animate-spin" />
+                        : <Trash2 size={11} />}
+                      Hapus
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }
