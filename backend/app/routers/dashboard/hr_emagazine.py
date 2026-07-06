@@ -60,9 +60,10 @@ async def list_files(user: CurrentUser = Depends(require_role(Roles.HR))):
 
 @router.post("/upload")
 async def upload_magazine(
-    file:       UploadFile = File(...),
-    title:      str        = Form(...),
-    date_label: str        = Form(""),
+    file:          UploadFile = File(...),
+    title:         str        = Form(...),
+    date_label:    str        = Form(""),
+    qr_links_json: str        = Form("[]"),   # JSON: [{"label":"...","url":"..."}]
     user: CurrentUser = Depends(require_role(Roles.HR)),
 ):
     """Upload a PDF magazine and register it in index.json."""
@@ -73,22 +74,49 @@ async def upload_magazine(
     if len(content) > MAX_PDF_MB * 1024 * 1024:
         raise HTTPException(413, f"Ukuran file melebihi {MAX_PDF_MB} MB.")
 
+    try:
+        qr_links = json.loads(qr_links_json) if qr_links_json else []
+        qr_links = [q for q in qr_links if q.get("url","").strip()]
+    except Exception:
+        qr_links = []
+
     safe_name = _safe_filename(file.filename)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     dest = UPLOAD_DIR / safe_name
     dest.write_bytes(content)
 
     entries = _read_index()
-    # Replace if filename already exists, otherwise prepend (newest first)
     entries = [e for e in entries if e["filename"] != safe_name]
     entries.insert(0, {
         "filename":    safe_name,
         "title":       title.strip(),
         "date":        date_label.strip(),
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "qr_links":    qr_links,
     })
     _write_index(entries)
     return {"ok": True, "filename": safe_name, "entries": len(entries)}
+
+
+@router.patch("/files/{filename}/qr-links")
+async def update_qr_links(
+    filename: str,
+    qr_links: list[dict],
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    """Update QR links for an existing edition (without re-uploading the PDF)."""
+    safe_name = _safe_filename(filename)
+    entries   = _read_index()
+    found     = False
+    for e in entries:
+        if e["filename"] == safe_name:
+            e["qr_links"] = [q for q in qr_links if q.get("url","").strip()]
+            found = True
+            break
+    if not found:
+        raise HTTPException(404, "Edisi tidak ditemukan.")
+    _write_index(entries)
+    return {"ok": True, "filename": safe_name}
 
 
 @router.delete("/files/{filename}")

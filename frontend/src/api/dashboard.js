@@ -62,9 +62,10 @@ export const hrApi = {
   exportCvExcel:   (id)     => `/api/v1/dashboard/hr/cv-screening/jobs/${id}/export`,
 
   // E-Magazine
-  eMagazineList:   ()       => api.get("/dashboard/hr/e-magazine/files"),
-  eMagazineUpload: (form)   => api.post("/dashboard/hr/e-magazine/upload", form, { headers: { "Content-Type": "multipart/form-data" } }),
-  eMagazineDelete: (filename) => api.delete(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}`),
+  eMagazineList:       ()              => api.get("/dashboard/hr/e-magazine/files"),
+  eMagazineUpload:     (form)          => api.post("/dashboard/hr/e-magazine/upload", form, { headers: { "Content-Type": "multipart/form-data" } }),
+  eMagazineDelete:     (filename)      => api.delete(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}`),
+  eMagazineUpdateQR:   (filename, qrs) => api.patch(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/qr-links`, qrs),
 };
 
 export const pacApi = {

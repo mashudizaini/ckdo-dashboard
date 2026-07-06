@@ -73,14 +73,14 @@ function AppCard({ app, index, onNavigate, onDashboardClick }) {
         animationDelay: `${index * 0.06}s`,
         opacity: 0,
         cursor: "pointer",
-        width: 120,
+        width: 88,
         background: NEU_BG,
-        borderRadius: 20,
-        padding: "18px 12px 14px",
+        borderRadius: 14,
+        padding: "12px 8px 10px",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: 9,
+        gap: 6,
         boxShadow: pressed ? SHADOW_IN : SHADOW_OUT,
         transform: pressed ? "scale(0.97)" : "scale(1)",
         transition: "box-shadow 0.18s ease, transform 0.18s ease",
@@ -88,41 +88,36 @@ function AppCard({ app, index, onNavigate, onDashboardClick }) {
       }}
     >
       <div style={{
-        width: 54, height: 54, borderRadius: 15,
+        width: 40, height: 40, borderRadius: 11,
         background: NEU_BG,
         boxShadow: pressed ? `inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff` : `4px 4px 10px #c5cad8, -4px -4px 10px #ffffff`,
         display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 26, transition: "box-shadow 0.18s ease", position: "relative",
+        fontSize: 20, transition: "box-shadow 0.18s ease", position: "relative",
       }}>
         {app.emoji}
         <div style={{
-          position: "absolute", bottom: 3, right: 3,
-          width: 10, height: 10, borderRadius: "50%",
+          position: "absolute", bottom: 2, right: 2,
+          width: 8, height: 8, borderRadius: "50%",
           background: cfg.dot, border: `2px solid ${NEU_BG}`,
-          boxShadow: app.status === "sso" ? `0 0 6px ${cfg.dot}` : "none",
+          boxShadow: app.status === "sso" ? `0 0 5px ${cfg.dot}` : "none",
           animation: app.status === "sso" ? "pulseDot 2s infinite" : "none",
         }} />
       </div>
 
-      <div style={{ textAlign: "center", width: "100%" }}>
-        <p style={{ fontSize: 12, fontWeight: 700, color: "#2d3748", letterSpacing: "0.01em", marginBottom: 3, lineHeight: 1.3 }}>
-          {app.name}
-        </p>
-        <p style={{ fontSize: 9.5, color: "#94a3b8", lineHeight: 1.4 }}>
-          {app.desc}
-        </p>
-      </div>
+      <p style={{ fontSize: 10, fontWeight: 700, color: "#2d3748", letterSpacing: "0.01em", lineHeight: 1.3, textAlign: "center", width: "100%" }}>
+        {app.name}
+      </p>
 
       <div style={{
-        display: "inline-flex", alignItems: "center", gap: 4,
-        padding: "3px 9px", borderRadius: 20,
+        display: "inline-flex", alignItems: "center", gap: 3,
+        padding: "2px 6px", borderRadius: 20,
         background: cfg.accent,
         boxShadow: `inset 2px 2px 4px ${cfg.dot}22, inset -1px -1px 3px #ffffff88`,
       }}>
-        {app.status === "sso"     && <Shield size={9} color={cfg.color} />}
-        {app.status === "pending" && <Clock size={9} color={cfg.color} />}
-        {app.status === "direct"  && <ExternalLink size={9} color={cfg.color} />}
-        <span style={{ fontSize: 9, color: cfg.color, fontWeight: 700, letterSpacing: "0.05em" }}>
+        {app.status === "sso"     && <Shield size={7} color={cfg.color} />}
+        {app.status === "pending" && <Clock size={7} color={cfg.color} />}
+        {app.status === "direct"  && <ExternalLink size={7} color={cfg.color} />}
+        <span style={{ fontSize: 7.5, color: cfg.color, fontWeight: 700, letterSpacing: "0.05em" }}>
           {cfg.label.toUpperCase()}
         </span>
       </div>
@@ -193,14 +188,21 @@ export default function AppLauncher() {
   const { pickRandomTheme } = useThemeStore();
   const navigate = useNavigate();
   const [time, setTime] = useState(new Date());
-  const [filter, setFilter] = useState("all");
+  const [qrLinks, setQrLinks] = useState([]);
 
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  const [splitPct, setSplitPct] = useState(40); // left panel width %
+  useEffect(() => {
+    fetch("/e-magazine/magazines/index.json")
+      .then(r => r.ok ? r.json() : [])
+      .then(list => { if (list[0]?.qr_links?.length) setQrLinks(list[0].qr_links); })
+      .catch(() => {});
+  }, []);
+
+  const [splitPct, setSplitPct] = useState(38); // left panel width %
   const isDragging = useRef(false);
   const containerRef = useRef(null);
 
@@ -227,9 +229,8 @@ export default function AppLauncher() {
     document.addEventListener("mouseup", onMouseUp);
   }, []);
 
-  const isAdmin      = roles.includes("admin");
-  const allowedApps  = APPS.filter((a) => isAdmin || roles.includes(a.role));
-  const visibleApps  = filter === "all" ? allowedApps : allowedApps.filter((a) => a.category === filter);
+  const isAdmin     = roles.includes("admin");
+  const allowedApps = APPS.filter((a) => isAdmin || roles.includes(a.role));
 
   let cardIndex = 0;
 
@@ -315,39 +316,25 @@ export default function AppLauncher() {
               <p style={{ fontSize: 12.5, fontWeight: 700, color: "#1e293b", marginTop: 2 }}>{user?.fullName || user?.username || "User"}</p>
             </div>
 
-            {/* Category filter */}
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", flexShrink: 0 }}>
-              <FilterBtn label="All" active={filter === "all"} color="#1d4ed8" onClick={() => setFilter("all")} />
-              {CATEGORIES.map(cat => (
-                <FilterBtn
-                  key={cat.id}
-                  label={cat.emoji + " " + cat.short}
-                  active={filter === cat.id}
-                  color={cat.color}
-                  onClick={() => setFilter(cat.id)}
-                />
-              ))}
-            </div>
-
-            {/* Scrollable app list */}
+            {/* Scrollable app list — all apps, no filter */}
             <div style={{
               flex: 1,
               background: NEU_BG,
               borderRadius: 18,
-              padding: "16px 14px",
+              padding: "14px 12px",
               boxShadow: `inset 4px 4px 12px #c5cad8, inset -4px -4px 12px #ffffff`,
               overflowY: "auto",
               display: "flex",
               flexDirection: "column",
-              gap: 20,
+              gap: 16,
             }}>
-              {visibleApps.length === 0 ? (
+              {allowedApps.length === 0 ? (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1 }}>
                   <p style={{ color: "#94a3b8", fontSize: 12 }}>No apps available.</p>
                 </div>
               ) : (
                 CATEGORIES.map(cat => {
-                  const catApps = visibleApps.filter(a => a.category === cat.id);
+                  const catApps = allowedApps.filter(a => a.category === cat.id);
                   if (catApps.length === 0) return null;
                   const si = cardIndex;
                   cardIndex += catApps.length;
@@ -421,6 +408,13 @@ export default function AppLauncher() {
               >
                 <ExternalLink size={11} /> Open Full Screen
               </a>
+              {qrLinks.map((ql, i) => (
+                <a key={i} href={ql.url} target="_blank" rel="noopener noreferrer"
+                  style={{ padding: "6px 12px", borderRadius: 10, border: "none", background: NEU_BG, color: "#d97706", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, boxShadow: SHADOW_OUT, textDecoration: "none", flexShrink: 0 }}
+                >
+                  <span style={{ fontSize: 12 }}>📷</span> {ql.label}
+                </a>
+              ))}
             </div>
 
             {/* Magazine iframe */}

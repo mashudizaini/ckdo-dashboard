@@ -3,6 +3,7 @@ import {
   Users, UserCheck, Umbrella, BarChart2, RefreshCw,
   Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck,
   Wallet, Download, ChevronDown, ListChecks, FileSearch, BookOpen, Trash2,
+  QrCode, Plus,
 } from "lucide-react";
 import EmployeeUpload from "./EmployeeUpload";
 import AttendanceUpload from "./AttendanceUpload";
@@ -2400,28 +2401,28 @@ function DataTable({ headers, rows, placeholder }) {
 
 // ── E-Magazine Management ─────────────────────────────────────────────────────
 function EMagazineSection() {
-  const [list,      setList]      = useState([]);
-  const [loading,   setLoading]   = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const [deleting,  setDeleting]  = useState(null);
-  const [error,     setError]     = useState("");
-  const [success,   setSuccess]   = useState("");
-  const [title,     setTitle]     = useState("");
-  const [dateLbl,   setDateLbl]   = useState("");
-  const [file,      setFile]      = useState(null);
+  const [list,          setList]          = useState([]);
+  const [loading,       setLoading]       = useState(true);
+  const [uploading,     setUploading]     = useState(false);
+  const [deleting,      setDeleting]      = useState(null);
+  const [error,         setError]         = useState("");
+  const [success,       setSuccess]       = useState("");
+  const [title,         setTitle]         = useState("");
+  const [dateLbl,       setDateLbl]       = useState("");
+  const [file,          setFile]          = useState(null);
+  const [uploadQrLinks, setUploadQrLinks] = useState([]);
+  const [editQr,        setEditQr]        = useState(null); // {filename, links:[{label,url}]}
+  const [savingQr,      setSavingQr]      = useState(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
+    setLoading(true); setError("");
     try {
       const { data } = await hrApi.eMagazineList();
       setList(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err?.response?.data?.detail || "Gagal memuat daftar e-magazine.");
       setList([]);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -2435,16 +2436,15 @@ function EMagazineSection() {
       form.append("file", file);
       form.append("title", title.trim());
       form.append("date_label", dateLbl.trim());
+      form.append("qr_links_json", JSON.stringify(uploadQrLinks.filter(q => q.url.trim())));
       await hrApi.eMagazineUpload(form);
       setSuccess(`"${title}" berhasil diupload.`);
-      setTitle(""); setDateLbl(""); setFile(null);
+      setTitle(""); setDateLbl(""); setFile(null); setUploadQrLinks([]);
       e.target.reset();
       load();
     } catch (err) {
       setError(err?.response?.data?.detail || "Upload gagal.");
-    } finally {
-      setUploading(false);
-    }
+    } finally { setUploading(false); }
   };
 
   const handleDelete = async (filename) => {
@@ -2453,19 +2453,76 @@ function EMagazineSection() {
     try {
       await hrApi.eMagazineDelete(filename);
       setSuccess(`"${filename}" berhasil dihapus.`);
+      if (editQr?.filename === filename) setEditQr(null);
       load();
     } catch {
       setError("Gagal menghapus file.");
-    } finally {
-      setDeleting(null);
-    }
+    } finally { setDeleting(null); }
   };
+
+  const openEditQr = (ed) => {
+    const links = (ed.qr_links || []).map(q => ({ label: q.label || "", url: q.url || "" }));
+    setEditQr({ filename: ed.filename, links });
+  };
+
+  const handleSaveQr = async () => {
+    if (!editQr) return;
+    setSavingQr(editQr.filename);
+    try {
+      await hrApi.eMagazineUpdateQR(editQr.filename, editQr.links.filter(q => q.url.trim()));
+      setSuccess("QR links berhasil disimpan.");
+      setEditQr(null);
+      load();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Gagal menyimpan QR links.");
+    } finally { setSavingQr(null); }
+  };
+
+  const addQrRow    = (setter)          => setter(prev => [...prev, { label: "", url: "" }]);
+  const removeQrRow = (setter, idx)     => setter(prev => prev.filter((_, i) => i !== idx));
+  const updateQrRow = (setter, idx, field, val) =>
+    setter(prev => prev.map((q, i) => i === idx ? { ...q, [field]: val } : q));
 
   const fmtDate = (iso) => {
     if (!iso) return "-";
     try { return new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }); }
     catch { return iso; }
   };
+
+  const QrLinksEditor = ({ links, setter }) => (
+    <div className="space-y-2">
+      {links.map((q, idx) => (
+        <div key={idx} className="flex gap-2 items-center">
+          <input
+            type="text"
+            placeholder="Label (cth: Cek Game)"
+            value={q.label}
+            onChange={e => updateQrRow(setter, idx, "label", e.target.value)}
+            className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
+          />
+          <input
+            type="url"
+            placeholder="URL (https://…)"
+            value={q.url}
+            onChange={e => updateQrRow(setter, idx, "url", e.target.value)}
+            className="flex-[2] rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={() => removeQrRow(setter, idx)}
+            className="rounded p-1 text-red-400 hover:bg-red-500/10"
+          ><Trash2 size={12} /></button>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => addQrRow(setter)}
+        className="flex items-center gap-1.5 text-xs text-teal-400 hover:text-teal-300 transition-colors"
+      >
+        <Plus size={12} /> Tambah Link QR
+      </button>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -2474,39 +2531,47 @@ function EMagazineSection() {
         <h3 className="text-sm font-semibold text-teal-400 mb-4 flex items-center gap-2">
           <Upload size={14} /> Upload e-Magazine Baru
         </h3>
-        <form onSubmit={handleUpload} className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="space-y-1">
-            <label className="text-xs text-gray-400 font-medium">Judul Edisi *</label>
-            <input
-              type="text"
-              placeholder="cth: 2nd Edition"
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
-              required
-            />
+        <form onSubmit={handleUpload} className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400 font-medium">Judul Edisi *</label>
+              <input
+                type="text"
+                placeholder="cth: 2nd Edition"
+                value={title}
+                onChange={e => setTitle(e.target.value)}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
+                required
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400 font-medium">Periode</label>
+              <input
+                type="text"
+                placeholder="cth: August 2026"
+                value={dateLbl}
+                onChange={e => setDateLbl(e.target.value)}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400 font-medium">File PDF * (maks 100 MB)</label>
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={e => setFile(e.target.files[0] || null)}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-400 file:mr-3 file:rounded file:border-0 file:bg-teal-600 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white focus:outline-none"
+                required
+              />
+            </div>
           </div>
-          <div className="space-y-1">
-            <label className="text-xs text-gray-400 font-medium">Periode</label>
-            <input
-              type="text"
-              placeholder="cth: August 2026"
-              value={dateLbl}
-              onChange={e => setDateLbl(e.target.value)}
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
-            />
+          <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-3">
+            <label className="text-xs text-gray-400 font-medium mb-2 flex items-center gap-1.5">
+              <QrCode size={11} /> Link QR Code (opsional)
+            </label>
+            <QrLinksEditor links={uploadQrLinks} setter={setUploadQrLinks} />
           </div>
-          <div className="space-y-1">
-            <label className="text-xs text-gray-400 font-medium">File PDF * (maks 100 MB)</label>
-            <input
-              type="file"
-              accept="application/pdf"
-              onChange={e => setFile(e.target.files[0] || null)}
-              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-400 file:mr-3 file:rounded file:border-0 file:bg-teal-600 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white focus:outline-none"
-              required
-            />
-          </div>
-          <div className="md:col-span-3 flex items-center gap-3">
+          <div className="flex items-center gap-3">
             <button
               type="submit"
               disabled={uploading}
@@ -2550,24 +2615,74 @@ function EMagazineSection() {
             </thead>
             <tbody className="divide-y divide-gray-800">
               {list.map((ed, i) => (
-                <tr key={i} className="hover:bg-gray-800/40 transition-colors">
-                  <td className="px-4 py-3 font-medium text-gray-200">{ed.title}</td>
-                  <td className="px-4 py-3 text-gray-400">{ed.date || "-"}</td>
-                  <td className="px-4 py-3 text-gray-500 text-xs font-mono">{ed.filename}</td>
-                  <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(ed.uploaded_at)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => handleDelete(ed.filename)}
-                      disabled={deleting === ed.filename}
-                      className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
-                    >
-                      {deleting === ed.filename
-                        ? <Loader2 size={11} className="animate-spin" />
-                        : <Trash2 size={11} />}
-                      Hapus
-                    </button>
-                  </td>
-                </tr>
+                <>
+                  <tr key={i} className="hover:bg-gray-800/40 transition-colors">
+                    <td className="px-4 py-3 font-medium text-gray-200">{ed.title}</td>
+                    <td className="px-4 py-3 text-gray-400">{ed.date || "-"}</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs font-mono">{ed.filename}</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(ed.uploaded_at)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => editQr?.filename === ed.filename ? setEditQr(null) : openEditQr(ed)}
+                          className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                            editQr?.filename === ed.filename
+                              ? "bg-teal-500/20 text-teal-300"
+                              : "text-teal-400 hover:bg-teal-500/10"
+                          }`}
+                        >
+                          <QrCode size={11} />
+                          QR{(ed.qr_links?.length || 0) > 0 && (
+                            <span className="rounded-full bg-teal-600/40 px-1">{ed.qr_links.length}</span>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => handleDelete(ed.filename)}
+                          disabled={deleting === ed.filename}
+                          className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
+                        >
+                          {deleting === ed.filename ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                          Hapus
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {editQr?.filename === ed.filename && (
+                    <tr key={`${i}-qr`}>
+                      <td colSpan={5} className="px-4 py-3 bg-gray-900/80 border-t border-teal-800/40">
+                        <div className="max-w-2xl space-y-3">
+                          <p className="text-xs font-semibold text-teal-400 flex items-center gap-1.5">
+                            <QrCode size={11} /> Edit Link QR — {ed.title}
+                          </p>
+                          <QrLinksEditor
+                            links={editQr.links}
+                            setter={(fn) =>
+                              setEditQr(prev =>
+                                prev ? { ...prev, links: typeof fn === "function" ? fn(prev.links) : fn } : prev
+                              )
+                            }
+                          />
+                          <div className="flex items-center gap-2 pt-1">
+                            <button
+                              onClick={handleSaveQr}
+                              disabled={!!savingQr}
+                              className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-teal-500 disabled:opacity-50 transition-colors"
+                            >
+                              {savingQr ? <Loader2 size={11} className="animate-spin" /> : null}
+                              Simpan
+                            </button>
+                            <button
+                              onClick={() => setEditQr(null)}
+                              className="rounded-lg px-4 py-1.5 text-xs font-semibold text-gray-400 hover:text-gray-200 transition-colors"
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
               ))}
             </tbody>
           </table>

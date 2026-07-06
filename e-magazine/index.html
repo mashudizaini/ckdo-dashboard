@@ -205,6 +205,17 @@
     footer{padding:8px 12px}
   }
 
+  /* ── QR link buttons in header ─────────── */
+  .qr-btn{
+    font-family:'Inter',sans-serif;font-size:12px;font-weight:600;
+    color:var(--copper-soft);background:var(--panel-2);
+    border:1px solid var(--copper);border-radius:8px;
+    padding:6px 12px;cursor:pointer;
+    text-decoration:none;display:inline-flex;align-items:center;gap:6px;
+    transition:background .15s,border-color .15s;white-space:nowrap;
+  }
+  .qr-btn:hover{background:rgba(196,118,59,.18);border-color:var(--copper-soft)}
+
   /* ── QR overlay link ───────────────────── */
   .qr-link{
     position:absolute;
@@ -257,6 +268,7 @@
     <h1 id="magTitle">Reading Room</h1>
   </div>
   <div class="spacer"></div>
+  <div id="qrLinksBar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"></div>
   <button class="btn icon" id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
   <button class="btn icon" id="zoomIn" title="Zoom in" aria-label="Zoom in">+</button>
   <button class="btn icon" id="fsBtn" title="Fullscreen" aria-label="Fullscreen">⛶</button>
@@ -473,11 +485,27 @@ function markActiveEdition(){
   [...els.editionList.querySelectorAll(".edition")].forEach((b,i)=>
     b.classList.toggle("active", i===activeEdition));
 }
+function updateQRLinksBar(edition){
+  const bar = document.getElementById("qrLinksBar");
+  if(!bar) return;
+  bar.innerHTML = "";
+  const links = edition?.qr_links || [];
+  links.forEach(ql => {
+    const a = document.createElement("a");
+    a.className = "qr-btn";
+    a.href = ql.url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.innerHTML = `<span>📷</span> ${ql.label}`;
+    bar.appendChild(a);
+  });
+}
 function selectEdition(i){
   const e = CONFIG.editions[i];
   if(!e) return;
   activeEdition = i;
   markActiveEdition();
+  updateQRLinksBar(e);
   loadEdition(e.file, e.title);
 }
 
