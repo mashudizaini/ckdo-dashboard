@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
 import { useThemeStore } from "@/store/themeStore";
@@ -200,6 +200,33 @@ export default function AppLauncher() {
     return () => clearInterval(t);
   }, []);
 
+  const [splitPct, setSplitPct] = useState(40); // left panel width %
+  const isDragging = useRef(false);
+  const containerRef = useRef(null);
+
+  const onDividerMouseDown = useCallback((e) => {
+    e.preventDefault();
+    isDragging.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onMouseMove = (ev) => {
+      if (!isDragging.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const pct = Math.round(((ev.clientX - rect.left) / rect.width) * 100);
+      setSplitPct(Math.min(Math.max(pct, 20), 75)); // clamp 20–75%
+    };
+    const onMouseUp = () => {
+      isDragging.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, []);
+
   const isAdmin      = roles.includes("admin");
   const allowedApps  = APPS.filter((a) => isAdmin || roles.includes(a.role));
   const visibleApps  = filter === "all" ? allowedApps : allowedApps.filter((a) => a.category === filter);
@@ -217,6 +244,7 @@ export default function AppLauncher() {
         ::-webkit-scrollbar { width: 5px; }
         ::-webkit-scrollbar-track { background: #e8edf5; }
         ::-webkit-scrollbar-thumb { background: #c5cad8; border-radius: 4px; }
+        .drag-divider:hover > div { background: linear-gradient(180deg, #2563eb88, #2563eb44, #2563eb88) !important; }
       `}</style>
 
       <div style={{ height: "100vh", background: NEU_BG, fontFamily: "'Inter', sans-serif", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -273,11 +301,11 @@ export default function AppLauncher() {
         </header>
 
         {/* ── MAIN — split layout ── */}
-        <main style={{ flex: 1, padding: "14px 20px 14px", display: "flex", gap: 14, minHeight: 0, overflow: "hidden" }}>
+        <main ref={containerRef} style={{ flex: 1, padding: "14px 20px 14px", display: "flex", gap: 0, minHeight: 0, overflow: "hidden" }}>
 
-          {/* ── LEFT PANEL — App cards (25%) ── */}
+          {/* ── LEFT PANEL — App cards (draggable width) ── */}
           <div style={{
-            width: "25%", minWidth: 260, maxWidth: 360, flexShrink: 0,
+            width: `${splitPct}%`, flexShrink: 0, marginRight: 0,
             display: "flex", flexDirection: "column", gap: 10,
             animation: "fadeUp 0.5s ease 0.1s forwards", opacity: 0,
           }}>
@@ -348,7 +376,26 @@ export default function AppLauncher() {
             </div>
           </div>
 
-          {/* ── RIGHT PANEL — E-Magazine (75%) ── */}
+          {/* ── DRAG DIVIDER ── */}
+          <div
+            className="drag-divider"
+            onMouseDown={onDividerMouseDown}
+            style={{
+              width: 14, flexShrink: 0, cursor: "col-resize",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              position: "relative", zIndex: 10,
+            }}
+            title="Drag to resize"
+          >
+            <div style={{
+              width: 4, height: "60%", minHeight: 80, borderRadius: 4,
+              background: "linear-gradient(180deg, #c5cad8, #ffffff88, #c5cad8)",
+              boxShadow: "1px 0 3px #c5cad888, -1px 0 3px #c5cad888",
+              transition: "background 0.15s",
+            }} />
+          </div>
+
+          {/* ── RIGHT PANEL — E-Magazine (remaining width) ── */}
           <div style={{
             flex: 1,
             display: "flex",
