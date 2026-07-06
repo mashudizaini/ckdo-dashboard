@@ -208,17 +208,19 @@
   /* ── QR overlay link ───────────────────── */
   .qr-link{
     position:absolute;
-    border:2px solid rgba(196,118,59,.55);
+    border:2px solid rgba(196,118,59,.75);
     border-radius:5px;
-    background:rgba(196,118,59,.08);
+    background:rgba(196,118,59,.12);
     cursor:pointer;
     z-index:15;
-    transition:background .18s, border-color .18s;
-    -webkit-tap-highlight-color:rgba(196,118,59,.25);
+    transition:background .18s, border-color .18s, box-shadow .18s;
+    -webkit-tap-highlight-color:rgba(196,118,59,.35);
+    box-shadow:0 0 0 3px rgba(196,118,59,.15);
   }
   .qr-link:hover,.qr-link:active{
-    background:rgba(196,118,59,.22);
-    border-color:rgba(196,118,59,.9);
+    background:rgba(196,118,59,.28);
+    border-color:var(--copper);
+    box-shadow:0 0 0 4px rgba(196,118,59,.3);
   }
   .qr-link::after{
     content:attr(data-tip);
@@ -330,34 +332,75 @@ const qrCache  = new Map(); // pageNum -> [{x,y,w,h,url}] in canvas-space
 const dimCache = new Map(); // pageNum -> {cw, ch}
 
 /* ── QR detection ───────────────────────── */
-async function detectQRs(canvas){
+function _jsqrOnCanvas(c){
+  if(typeof jsQR === "undefined") return null;
+  const ctx = c.getContext("2d");
+  const img = ctx.getImageData(0, 0, c.width, c.height);
+  return jsQR(img.data, img.width, img.height, {inversionAttempts:"attemptBoth"});
+}
+function _jsqrResultToQr(code, scaleX, scaleY){
+  const p = code.location;
+  const xs = [p.topLeftCorner.x,p.topRightCorner.x,p.bottomRightCorner.x,p.bottomLeftCorner.x];
+  const ys = [p.topLeftCorner.y,p.topRightCorner.y,p.bottomRightCorner.y,p.bottomLeftCorner.y];
+  const x = Math.min(...xs)*scaleX, y = Math.min(...ys)*scaleY;
+  const w = (Math.max(...xs)-Math.min(...xs))*scaleX;
+  const h = (Math.max(...ys)-Math.min(...ys))*scaleY;
+  return {x, y, w, h, url: code.data};
+}
+
+async function detectQRs(srcCanvas){
   const results = [];
-  // 1. BarcodeDetector (Chrome 83+, Edge, Safari 17.4+, Android Chrome)
+
+  // 1. BarcodeDetector — try on ImageBitmap (more reliable than raw canvas)
   if(typeof BarcodeDetector !== "undefined"){
     try{
-      const bd = new BarcodeDetector({formats:["qr_code"]});
-      const codes = await bd.detect(canvas);
-      for(const code of codes){
-        if(!code.rawValue) continue;
-        const {x,y,width,height} = code.boundingBox;
-        results.push({x,y,w:width,h:height,url:code.rawValue});
+      const supported = await BarcodeDetector.getSupportedFormats();
+      if(supported.includes("qr_code")){
+        const bm = await createImageBitmap(srcCanvas);
+        const bd = new BarcodeDetector({formats:["qr_code"]});
+        const codes = await bd.detect(bm);
+        bm.close();
+        for(const code of codes){
+          if(!code.rawValue) continue;
+          const {x,y,width,height} = code.boundingBox;
+          results.push({x, y, w:width, h:height, url:code.rawValue});
+        }
+        if(results.length){
+          console.log("[QR] BarcodeDetector found:", results.map(r=>r.url));
+          return results;
+        }
       }
-      if(results.length) return results;
-    }catch(_){}
+    }catch(e){ console.warn("[QR] BarcodeDetector error:", e); }
   }
-  // 2. jsQR fallback (all browsers)
-  if(typeof jsQR !== "undefined"){
-    const ctx = canvas.getContext("2d");
-    const img = ctx.getImageData(0,0,canvas.width,canvas.height);
-    const code = jsQR(img.data, img.width, img.height, {inversionAttempts:"dontInvert"});
+
+  // 2. jsQR on the full-resolution canvas
+  {
+    const code = _jsqrOnCanvas(srcCanvas);
     if(code && code.data){
-      const pts = code.location;
-      const xs = [pts.topLeftCorner.x,pts.topRightCorner.x,pts.bottomRightCorner.x,pts.bottomLeftCorner.x];
-      const ys = [pts.topLeftCorner.y,pts.topRightCorner.y,pts.bottomRightCorner.y,pts.bottomLeftCorner.y];
-      const x=Math.min(...xs), y=Math.min(...ys);
-      results.push({x, y, w:Math.max(...xs)-x, h:Math.max(...ys)-y, url:code.data});
+      console.log("[QR] jsQR full-res found:", code.data);
+      results.push(_jsqrResultToQr(code, 1, 1));
+      return results;
     }
   }
+
+  // 3. jsQR on a downscaled canvas (better for large pages)
+  if(typeof jsQR !== "undefined"){
+    const TARGET = 800;
+    const scale  = Math.min(TARGET / srcCanvas.width, TARGET / srcCanvas.height, 1);
+    if(scale < 0.99){
+      const sc = document.createElement("canvas");
+      sc.width  = Math.round(srcCanvas.width  * scale);
+      sc.height = Math.round(srcCanvas.height * scale);
+      sc.getContext("2d").drawImage(srcCanvas, 0, 0, sc.width, sc.height);
+      const code = _jsqrOnCanvas(sc);
+      if(code && code.data){
+        console.log("[QR] jsQR downscaled found:", code.data);
+        results.push(_jsqrResultToQr(code, 1/scale, 1/scale));
+        return results;
+      }
+    }
+  }
+
   return results;
 }
 
@@ -369,16 +412,30 @@ function addQROverlays(halfEl, pageNum){
   const ph = parseFloat(getComputedStyle(els.book).getPropertyValue("--ph")) || halfEl.clientHeight;
   const sx = pw / dim.cw, sy = ph / dim.ch;
   for(const qr of qrs){
+    const isUrl = /^https?:\/\//i.test(qr.url);
     const a = document.createElement("a");
     a.className = "qr-link";
-    a.href = qr.url;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    a["data-tip"] = qr.url.length > 40 ? qr.url.slice(0,40)+"…" : qr.url;
-    a.setAttribute("data-tip", a["data-tip"]);
+    if(isUrl){
+      a.href = qr.url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+    } else {
+      a.href = "#";
+      a.addEventListener("click", e => {
+        e.preventDefault();
+        if(qr.url.startsWith("http") || qr.url.startsWith("www")){
+          window.open("https://"+qr.url.replace(/^https?:\/\//,""), "_blank");
+        } else {
+          alert("QR Code:\n" + qr.url);
+        }
+      });
+    }
+    const tip = qr.url.length > 50 ? qr.url.slice(0,50)+"…" : qr.url;
+    a.setAttribute("data-tip", tip);
     a.title = qr.url;
     a.style.cssText = `left:${Math.round(qr.x*sx)}px;top:${Math.round(qr.y*sy)}px;width:${Math.round(qr.w*sx)}px;height:${Math.round(qr.h*sy)}px`;
     halfEl.appendChild(a);
+    console.log(`[QR] Overlay page ${pageNum}: ${qr.url} at (${Math.round(qr.x*sx)},${Math.round(qr.y*sy)}) ${Math.round(qr.w*sx)}×${Math.round(qr.h*sy)}px`);
   }
 }
 

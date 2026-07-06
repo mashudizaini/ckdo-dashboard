@@ -2412,11 +2412,13 @@ function EMagazineSection() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError("");
     try {
       const { data } = await hrApi.eMagazineList();
-      setList(data);
-    } catch {
-      setError("Gagal memuat daftar e-magazine.");
+      setList(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Gagal memuat daftar e-magazine.");
+      setList([]);
     } finally {
       setLoading(false);
     }
