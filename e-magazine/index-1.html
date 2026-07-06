@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
 <style>
   :root{
     --ink:#0F2422;
@@ -74,6 +75,20 @@
   .half.right{border-radius:0 6px 6px 0}
   .half.empty{background:transparent}
   .half img{display:block;width:100%;height:100%;object-fit:contain;background:var(--paper)}
+  /* clickable hotspots (QR codes & PDF hyperlinks) */
+  .hot{
+    position:absolute;z-index:6;border-radius:6px;cursor:pointer;
+    outline:2px dashed rgba(196,118,59,0);outline-offset:2px;
+    transition:outline-color .15s, background .15s;
+  }
+  .hot:hover,.hot:focus-visible{outline-color:var(--copper);background:rgba(196,118,59,.12)}
+  .hot::after{
+    content:"Open link ↗";position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);
+    background:var(--panel);color:var(--mist);border:1px solid var(--copper);
+    font-family:'Inter',sans-serif;font-size:11px;font-weight:600;white-space:nowrap;
+    padding:4px 9px;border-radius:6px;opacity:0;pointer-events:none;transition:opacity .15s;
+  }
+  .hot:hover::after,.hot:focus-visible::after{opacity:1}
   .book::after{
     content:"";position:absolute;top:0;bottom:0;left:50%;width:70px;transform:translateX(-50%);
     background:linear-gradient(90deg, transparent, rgba(0,0,0,.16) 46%, rgba(0,0,0,.26) 50%, rgba(0,0,0,.16) 54%, transparent);
@@ -267,8 +282,22 @@
 ═══════════════════════════════════════════════════════════════ */
 const CONFIG = {
   companyName: "CKDO Magazine",
+
+  // Automatically scan rendered pages for QR codes and turn them
+  // into clickable areas that open the QR's link. Set false to disable.
+  detectQRCodes: true,
+
   editions: [
-    { title: "1st Edition — July 2026", date: "July 2026", file: "magazines/CKD OTTO e-Magz 1st Edition - July 2026.pdf" },
+    { title: "Latest Edition",   date: "July 2026",  file: "magazines/2026-07.pdf" },
+    // { title: "June 2026 Edition", date: "June 2026", file: "magazines/2026-06.pdf", cover: "magazines/covers/2026-06.jpg" },
+
+    // Manual fallback: if a QR is not auto-detected, define the clickable
+    // area yourself. rect = [left%, top%, width%, height%] of the page.
+    // { title: "May 2026 Edition", date: "May 2026", file: "magazines/2026-05.pdf",
+    //   hotspots: [
+    //     { page: 19, url: "https://forms.office.com/xxxx", rect: [30, 52, 40, 22] },
+    //   ]
+    // },
   ]
 };
 /* ═══════════════════════════════════════════════════════════════ */
@@ -292,6 +321,8 @@ let pdf = null, numPages = 0, aspect = 0.707;
 let spread = 0, singleMode = false, singlePage = 1;
 let zoom = 1, flipping = false, activeEdition = -1;
 const imgCache = new Map();
+const linkCache = new Map();      // page number -> [{x,y,w,h,url}] in % of page
+let manualHotspots = [];          // hotspots from CONFIG for the active edition
 
 els.title.textContent = CONFIG.companyName;
 
@@ -332,6 +363,7 @@ function selectEdition(i){
   if(!e) return;
   activeEdition = i;
   markActiveEdition();
+  manualHotspots = e.hotspots || [];
   loadEdition(e.file, e.title);
 }
 
@@ -370,7 +402,7 @@ async function loadEdition(src, label){
 }
 function resetState(){
   pdf=null; numPages=0; spread=0; singlePage=1; zoom=1;
-  imgCache.clear(); els.thumbs.innerHTML=""; applyZoom();
+  imgCache.clear(); linkCache.clear(); els.thumbs.innerHTML=""; applyZoom();
 }
 
 /* ── Page -> image rendering ────────────── */
@@ -381,11 +413,83 @@ async function pageImage(n){
   const scale = 1400 / page.getViewport({scale:1}).height;
   const vp = page.getViewport({scale});
   const c = document.createElement("canvas");
+  const ctx = c.getContext("2d");
   c.width = vp.width; c.height = vp.height;
-  await page.render({canvasContext:c.getContext("2d"), viewport:vp}).promise;
+  await page.render({canvasContext:ctx, viewport:vp}).promise;
   const url = c.toDataURL("image/jpeg", .88);
   imgCache.set(n, url);
+  extractLinks(page, n, ctx, c.width, c.height);   // runs in background
   return url;
+}
+
+/* ── Clickable links: PDF hyperlinks + QR codes ── */
+async function extractLinks(page, n, ctx, cw, ch){
+  if(linkCache.has(n)) return;
+  const links = [];
+
+  // 1) Hyperlinks embedded in the PDF (link annotations)
+  try{
+    const vp1 = page.getViewport({scale:1});
+    const anns = await page.getAnnotations();
+    anns.forEach(a=>{
+      if(a.subtype==="Link" && a.url && a.rect){
+        const x1=Math.min(a.rect[0],a.rect[2]), x2=Math.max(a.rect[0],a.rect[2]);
+        const y1=Math.min(a.rect[1],a.rect[3]), y2=Math.max(a.rect[1],a.rect[3]);
+        links.push({
+          x: x1/vp1.width*100,
+          y: (1 - y2/vp1.height)*100,      // PDF origin is bottom-left
+          w: (x2-x1)/vp1.width*100,
+          h: (y2-y1)/vp1.height*100,
+          url: a.url
+        });
+      }
+    });
+  }catch(e){}
+
+  // 2) QR code detection on the rendered page
+  if(CONFIG.detectQRCodes && window.jsQR){
+    try{
+      const img = ctx.getImageData(0,0,cw,ch);
+      const qr = jsQR(img.data, cw, ch);
+      if(qr && /^https?:\/\//i.test(qr.data.trim())){
+        const xs=[qr.location.topLeftCorner.x, qr.location.topRightCorner.x,
+                  qr.location.bottomLeftCorner.x, qr.location.bottomRightCorner.x];
+        const ys=[qr.location.topLeftCorner.y, qr.location.topRightCorner.y,
+                  qr.location.bottomLeftCorner.y, qr.location.bottomRightCorner.y];
+        const pad = 12; // a little breathing room around the QR
+        const x1=Math.max(0,Math.min(...xs)-pad), x2=Math.min(cw,Math.max(...xs)+pad);
+        const y1=Math.max(0,Math.min(...ys)-pad), y2=Math.min(ch,Math.max(...ys)+pad);
+        links.push({ x:x1/cw*100, y:y1/ch*100, w:(x2-x1)/cw*100, h:(y2-y1)/ch*100, url:qr.data.trim() });
+      }
+    }catch(e){}
+  }
+
+  linkCache.set(n, links);
+  refreshHotspots();    // if this page is currently on screen, attach them now
+}
+function linksFor(n){
+  const auto = linkCache.get(n) || [];
+  const manual = manualHotspots
+    .filter(h=>h.page===n && h.url && h.rect)
+    .map(h=>({x:h.rect[0], y:h.rect[1], w:h.rect[2], h:h.rect[3], url:h.url}));
+  return auto.concat(manual);
+}
+function attachHotspots(el, n){
+  el.querySelectorAll(".hot").forEach(a=>a.remove());
+  if(!n) return;
+  linksFor(n).forEach(l=>{
+    const a = document.createElement("a");
+    a.className = "hot";
+    a.href = l.url; a.target = "_blank"; a.rel = "noopener";
+    a.title = l.url;
+    a.style.left = l.x+"%"; a.style.top = l.y+"%";
+    a.style.width = l.w+"%"; a.style.height = l.h+"%";
+    el.appendChild(a);
+  });
+}
+function refreshHotspots(){
+  attachHotspots(els.halfL, els.halfL.dataset.page ? +els.halfL.dataset.page : 0);
+  attachHotspots(els.halfR, els.halfR.dataset.page ? +els.halfR.dataset.page : 0);
 }
 
 /* ── Layout & sizing ────────────────────── */
@@ -410,24 +514,26 @@ function spreadPages(k){
   const r = 2*k+1;
   return [2*k, r<=numPages ? r : null];
 }
-function setHalf(el, url){
+function setHalf(el, url, page){
   el.innerHTML = "";
   el.classList.toggle("empty", !url);
+  el.dataset.page = url && page ? page : "";
   if(url){ const im=document.createElement("img"); im.src=url; el.appendChild(im); }
+  attachHotspots(el, url && page ? page : 0);
 }
 async function showSpread(k){
   if(singleMode){ return showSingle(1); }
   spread = Math.max(0, Math.min(k, maxSpread()));
   const [l,r] = spreadPages(spread);
   const [li,ri] = await Promise.all([pageImage(l), pageImage(r)]);
-  setHalf(els.halfL, li); setHalf(els.halfR, ri);
+  setHalf(els.halfL, li, l); setHalf(els.halfR, ri, r);
   updateChrome();
   preloadAround();
 }
 async function showSingle(p){
   singlePage = Math.max(1, Math.min(p, numPages));
   const url = await pageImage(singlePage);
-  setHalf(els.halfR, url);
+  setHalf(els.halfR, url, singlePage);
   updateChrome();
 }
 
@@ -438,7 +544,7 @@ async function flip(dir){
     const t = singlePage + dir;
     if(t<1 || t>numPages) return;
     singlePage = t;
-    setHalf(els.halfR, await pageImage(t));
+    setHalf(els.halfR, await pageImage(t), t);
     updateChrome(); preloadAround();
     return;
   }
@@ -457,20 +563,20 @@ async function flip(dir){
     const [fi,bi,ui] = await Promise.all([pageImage(cr), pageImage(nl), pageImage(nr)]);
     if(fi){ front.innerHTML = `<img src="${fi}">`; }
     if(bi){ back.innerHTML  = `<img src="${bi}">`; }
-    setHalf(els.halfR, ui);
+    setHalf(els.halfR, ui, nr);
   }else{
     const [fi,bi,ui] = await Promise.all([pageImage(cl), pageImage(nr), pageImage(nl)]);
     if(fi){ front.innerHTML = `<img src="${fi}">`; }
     if(bi){ back.innerHTML  = `<img src="${bi}">`; }
-    setHalf(els.halfL, ui);
+    setHalf(els.halfL, ui, nl);
   }
   els.book.appendChild(sheet);
   requestAnimationFrame(()=>sheet.classList.add("go"));
   sheet.addEventListener("animationend", async ()=>{
     spread = target;
     const [l,r] = spreadPages(spread);
-    if(dir>0) setHalf(els.halfL, await pageImage(l));
-    else      setHalf(els.halfR, await pageImage(r));
+    if(dir>0) setHalf(els.halfL, await pageImage(l), l);
+    else      setHalf(els.halfR, await pageImage(r), r);
     sheet.remove();
     flipping = false;
     updateChrome(); preloadAround();
@@ -567,13 +673,6 @@ window.addEventListener("resize", ()=>{
     else { showSpread(singlePage<=1?0:Math.floor(singlePage/2)); }
   }
 });
-
-/* ── Embed mode: hide chrome when ?embed=1 ── */
-if(new URLSearchParams(location.search).get("embed") === "1"){
-  document.querySelector("header").style.display = "none";
-  document.querySelector("footer").style.display = "none";
-  document.querySelector("aside").style.display  = "none";
-}
 
 /* ── Start ──────────────────────────────── */
 buildEditionList();
