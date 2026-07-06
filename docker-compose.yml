@@ -109,6 +109,7 @@ services:
     container_name: ckdo_nginx
     volumes:
       - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+      - ./e-magazine:/usr/share/nginx/html/e-magazine:ro
     ports:
       - "80:80"
       - "443:443"

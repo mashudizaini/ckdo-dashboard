@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Internal Magazine — Reading Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{
+    --ink:#0F2422;
+    --panel:#173330;
+    --panel-2:#1D3F3B;
+    --paper:#F6F1E7;
+    --copper:#C4763B;
+    --copper-soft:#D8935B;
+    --mist:#DCE7E2;
+    --mist-dim:#93A8A1;
+    --line:rgba(220,231,226,.14);
+    --shadow:0 30px 60px -20px rgba(0,0,0,.55);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:'Inter',system-ui,sans-serif;
+    background:
+      radial-gradient(1200px 600px at 45% -10%, #1A3B37 0%, transparent 60%),
+      var(--ink);
+    color:var(--mist);
+    display:flex;flex-direction:column;
+    overflow:hidden;
+  }
+
+  /* ── Top bar ────────────────────────────── */
+  header{
+    display:flex;align-items:center;gap:16px;
+    padding:14px 22px;
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg, rgba(23,51,48,.85), rgba(23,51,48,.55));
+    backdrop-filter:blur(6px);
+    flex-shrink:0;
+  }
+  .masthead{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .masthead .eyebrow{
+    font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--copper-soft);
+  }
+  .masthead h1{
+    font-family:'Fraunces',serif;font-weight:700;font-size:20px;line-height:1.1;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .spacer{flex:1}
+  .btn{
+    font-family:'Inter',sans-serif;font-size:13px;font-weight:500;
+    color:var(--mist);background:var(--panel-2);
+    border:1px solid var(--line);border-radius:8px;
+    padding:8px 12px;cursor:pointer;transition:border-color .15s;
+  }
+  .btn:hover{border-color:var(--copper)}
+  .btn:focus-visible{outline:2px solid var(--copper);outline-offset:2px}
+  .btn.icon{width:36px;height:36px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:15px}
+  #editionsToggle{display:none}
+
+  /* ── Content row: stage + sidebar ───────── */
+  .content{flex:1;display:flex;min-height:0}
+
+  main{flex:1;position:relative;display:flex;align-items:center;justify-content:center;overflow:auto;padding:28px;min-width:0}
+  #stage{position:relative;transition:transform .25s ease;transform-origin:center}
+
+  .book{position:relative;display:flex;filter:drop-shadow(var(--shadow));perspective:2600px}
+  .half{position:relative;background:var(--paper);overflow:hidden;width:var(--pw);height:var(--ph)}
+  .half.left{border-radius:6px 0 0 6px}
+  .half.right{border-radius:0 6px 6px 0}
+  .half.empty{background:transparent}
+  .half img{display:block;width:100%;height:100%;object-fit:contain;background:var(--paper)}
+  .book::after{
+    content:"";position:absolute;top:0;bottom:0;left:50%;width:70px;transform:translateX(-50%);
+    background:linear-gradient(90deg, transparent, rgba(0,0,0,.16) 46%, rgba(0,0,0,.26) 50%, rgba(0,0,0,.16) 54%, transparent);
+    pointer-events:none;z-index:5;
+  }
+  .book.single::after{display:none}
+
+  .sheet{position:absolute;top:0;width:var(--pw);height:var(--ph);transform-style:preserve-3d;z-index:8}
+  .sheet .face{position:absolute;inset:0;backface-visibility:hidden;background:var(--paper);overflow:hidden}
+  .sheet .face img{display:block;width:100%;height:100%;object-fit:contain;background:var(--paper)}
+  .sheet .face.back{transform:rotateY(180deg)}
+  .sheet.fwd{left:50%;transform-origin:left center}
+  .sheet.bwd{left:0;transform-origin:right center}
+  .sheet.fwd .face.front{border-radius:0 6px 6px 0}
+  .sheet.bwd .face.front{border-radius:6px 0 0 6px}
+  @keyframes flipFwd{from{transform:rotateY(0)}to{transform:rotateY(-180deg)}}
+  @keyframes flipBwd{from{transform:rotateY(0)}to{transform:rotateY(180deg)}}
+  .sheet.fwd.go{animation:flipFwd .65s cubic-bezier(.4,.1,.3,1) forwards}
+  .sheet.bwd.go{animation:flipBwd .65s cubic-bezier(.4,.1,.3,1) forwards}
+  @media (prefers-reduced-motion: reduce){.sheet.fwd.go,.sheet.bwd.go{animation-duration:.01s}}
+
+  .ribbon{position:absolute;left:0;bottom:-14px;height:5px;width:100%;background:rgba(220,231,226,.12);border-radius:3px;overflow:hidden}
+  .ribbon i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--copper),var(--copper-soft));transition:width .4s ease}
+
+  .navBtn{
+    position:absolute;top:50%;transform:translateY(-50%);
+    width:44px;height:44px;border-radius:50%;
+    background:var(--panel-2);border:1px solid var(--line);color:var(--mist);
+    font-size:18px;cursor:pointer;z-index:20;
+    display:flex;align-items:center;justify-content:center;
+    transition:border-color .15s, opacity .2s;
+  }
+  .navBtn:hover{border-color:var(--copper)}
+  .navBtn:focus-visible{outline:2px solid var(--copper);outline-offset:2px}
+  .navBtn[disabled]{opacity:.25;cursor:default}
+  #prevBtn{left:18px} #nextBtn{right:18px}
+
+  /* ── Editions sidebar (right) ───────────── */
+  aside{
+    width:280px;flex-shrink:0;
+    border-left:1px solid var(--line);
+    background:rgba(23,51,48,.5);
+    display:flex;flex-direction:column;
+    min-height:0;
+  }
+  aside .head{
+    padding:16px 18px 12px;
+    border-bottom:1px solid var(--line);
+  }
+  aside .head .eyebrow{
+    font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--copper-soft);
+  }
+  aside .head h2{font-family:'Fraunces',serif;font-size:17px;font-weight:700;margin-top:2px}
+  #editionList{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin}
+  .edition{
+    display:flex;gap:12px;align-items:center;
+    padding:10px;border-radius:10px;cursor:pointer;
+    border:1px solid transparent;background:transparent;
+    text-align:left;color:var(--mist);font-family:'Inter',sans-serif;
+    transition:background .15s, border-color .15s;width:100%;
+  }
+  .edition:hover{background:var(--panel-2)}
+  .edition:focus-visible{outline:2px solid var(--copper);outline-offset:2px}
+  .edition.active{background:var(--panel-2);border-color:var(--copper)}
+  .edition .spine{
+    width:42px;height:56px;border-radius:4px;flex-shrink:0;overflow:hidden;
+    background:linear-gradient(160deg,var(--panel-2),var(--ink));
+    border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;
+    font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--copper-soft);
+    letter-spacing:.05em;text-align:center;line-height:1.3;
+  }
+  .edition .spine img{width:100%;height:100%;object-fit:cover}
+  .edition .meta{min-width:0}
+  .edition .meta .t{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .edition .meta .d{font-size:11.5px;color:var(--mist-dim);margin-top:2px}
+  .edition.active .meta .d{color:var(--copper-soft)}
+  #editionEmpty{padding:18px;font-size:13px;color:var(--mist-dim);line-height:1.6}
+
+  /* ── Bottom bar ─────────────────────────── */
+  footer{
+    flex-shrink:0;display:flex;align-items:center;gap:14px;
+    padding:10px 22px;border-top:1px solid var(--line);
+    background:rgba(23,51,48,.6);
+  }
+  #pageInfo{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--mist-dim);letter-spacing:.08em;white-space:nowrap}
+  #thumbs{display:flex;gap:8px;overflow-x:auto;padding:4px 2px;flex:1;scrollbar-width:thin}
+  #thumbs canvas{
+    height:56px;border-radius:3px;cursor:pointer;flex-shrink:0;
+    border:2px solid transparent;transition:border-color .15s;background:var(--paper);
+  }
+  #thumbs canvas.active{border-color:var(--copper)}
+
+  /* ── Overlay ────────────────────────────── */
+  #overlay{
+    position:absolute;inset:0;display:flex;flex-direction:column;gap:18px;
+    align-items:center;justify-content:center;text-align:center;
+    background:var(--ink);z-index:50;padding:32px;
+  }
+  #overlay.hidden{display:none}
+  #overlay .big{font-family:'Fraunces',serif;font-size:26px;font-weight:700}
+  #overlay p{color:var(--mist-dim);font-size:14px;max-width:460px;line-height:1.6}
+  #overlay .btn{padding:10px 20px}
+  #bar{width:220px;height:4px;border-radius:2px;background:rgba(220,231,226,.12);overflow:hidden}
+  #bar i{display:block;height:100%;width:0;background:var(--copper);transition:width .2s}
+
+  /* ── Responsive: sidebar becomes drawer ─── */
+  @media (max-width:960px){
+    #editionsToggle{display:inline-flex}
+    aside{
+      position:fixed;top:0;right:0;bottom:0;z-index:60;
+      transform:translateX(100%);transition:transform .25s ease;
+      background:var(--panel);box-shadow:-20px 0 50px rgba(0,0,0,.4);
+    }
+    aside.open{transform:translateX(0)}
+    #drawerScrim{
+      position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:55;
+      opacity:0;pointer-events:none;transition:opacity .25s;
+    }
+    #drawerScrim.show{opacity:1;pointer-events:auto}
+  }
+  @media (max-width:720px){
+    header{padding:10px 14px;gap:10px}
+    .masthead h1{font-size:16px}
+    main{padding:16px}
+    #prevBtn{left:6px} #nextBtn{right:6px}
+    footer{padding:8px 12px}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="masthead">
+    <span class="eyebrow">Internal Magazine</span>
+    <h1 id="magTitle">Reading Room</h1>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn icon" id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
+  <button class="btn icon" id="zoomIn" title="Zoom in" aria-label="Zoom in">+</button>
+  <button class="btn icon" id="fsBtn" title="Fullscreen" aria-label="Fullscreen">⛶</button>
+  <button class="btn" id="openBtn">Open PDF…</button>
+  <button class="btn" id="editionsToggle">Editions</button>
+  <input type="file" id="fileInput" accept="application/pdf" hidden>
+</header>
+
+<div class="content">
+  <main id="viewer">
+    <button class="navBtn" id="prevBtn" aria-label="Previous page">‹</button>
+    <div id="stage">
+      <div class="book" id="book">
+        <div class="half left empty" id="halfL"></div>
+        <div class="half right" id="halfR"></div>
+        <div class="ribbon"><i id="ribbonFill"></i></div>
+      </div>
+    </div>
+    <button class="navBtn" id="nextBtn" aria-label="Next page">›</button>
+
+    <div id="overlay">
+      <div class="big">Internal Magazine Reading Room</div>
+      <p id="overlayMsg">Loading edition…</p>
+      <div id="bar" hidden><i id="barFill"></i></div>
+      <button class="btn" id="overlayOpen" hidden>Open a PDF file to preview</button>
+    </div>
+  </main>
+
+  <aside id="editionsPanel" aria-label="Edition list">
+    <div class="head">
+      <span class="eyebrow">Library</span>
+      <h2>Editions</h2>
+    </div>
+    <div id="editionList" role="list"></div>
+  </aside>
+</div>
+<div id="drawerScrim"></div>
+
+<footer>
+  <span id="pageInfo">— / —</span>
+  <div id="thumbs" aria-label="Page navigation"></div>
+</footer>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   CONFIG — the only section you need to edit.
+   Put your PDF files inside the "magazines/" folder next to this
+   index.html, then register each edition below.
+   The first edition in the list loads automatically.
+   "cover" is optional (path to a cover image); if omitted, a
+   generated spine label is shown instead.
+═══════════════════════════════════════════════════════════════ */
+const CONFIG = {
+  companyName: "CKDO Magazine",
+  editions: [
+    { title: "Latest Edition",   date: "July 2026",  file: "magazines/2026-07.pdf" },
+    { title: "June 2026 Edition", date: "June 2026", file: "magazines/2026-06.pdf", cover: "magazines/covers/2026-06.jpg" },
+    // { title: "May 2026 Edition",  date: "May 2026",  file: "magazines/2026-05.pdf" },
+  ]
+};
+/* ═══════════════════════════════════════════════════════════════ */
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const $ = id => document.getElementById(id);
+const els = {
+  title:$("magTitle"), book:$("book"),
+  halfL:$("halfL"), halfR:$("halfR"), prev:$("prevBtn"), next:$("nextBtn"),
+  info:$("pageInfo"), thumbs:$("thumbs"), overlay:$("overlay"),
+  overlayMsg:$("overlayMsg"), overlayOpen:$("overlayOpen"),
+  bar:$("bar"), barFill:$("barFill"), ribbon:$("ribbonFill"),
+  stage:$("stage"), viewer:$("viewer"), fileInput:$("fileInput"),
+  editionList:$("editionList"), panel:$("editionsPanel"),
+  scrim:$("drawerScrim"), toggle:$("editionsToggle")
+};
+
+let pdf = null, numPages = 0, aspect = 0.707;
+let spread = 0, singleMode = false, singlePage = 1;
+let zoom = 1, flipping = false, activeEdition = -1;
+const imgCache = new Map();
+
+els.title.textContent = CONFIG.companyName;
+
+/* ── Editions sidebar ───────────────────── */
+function buildEditionList(){
+  els.editionList.innerHTML = "";
+  if(!CONFIG.editions.length){
+    const d = document.createElement("div");
+    d.id = "editionEmpty";
+    d.textContent = "No editions registered yet. Edit the CONFIG section in index.html to add them.";
+    els.editionList.appendChild(d);
+    return;
+  }
+  CONFIG.editions.forEach((e,i)=>{
+    const b = document.createElement("button");
+    b.className = "edition"; b.setAttribute("role","listitem");
+    const spine = document.createElement("div"); spine.className = "spine";
+    if(e.cover){ spine.innerHTML = `<img src="${e.cover}" alt="">`; }
+    else { spine.textContent = (e.date||e.title||"ED").split(" ").map(w=>w.slice(0,4)).slice(0,2).join("\n"); }
+    const meta = document.createElement("div"); meta.className = "meta";
+    meta.innerHTML = `<div class="t"></div><div class="d"></div>`;
+    meta.querySelector(".t").textContent = e.title;
+    meta.querySelector(".d").textContent = e.date || "";
+    b.append(spine, meta);
+    b.addEventListener("click", ()=>{
+      selectEdition(i);
+      closeDrawer();
+    });
+    els.editionList.appendChild(b);
+  });
+}
+function markActiveEdition(){
+  [...els.editionList.querySelectorAll(".edition")].forEach((b,i)=>
+    b.classList.toggle("active", i===activeEdition));
+}
+function selectEdition(i){
+  const e = CONFIG.editions[i];
+  if(!e) return;
+  activeEdition = i;
+  markActiveEdition();
+  loadEdition(e.file, e.title);
+}
+
+/* drawer (mobile) */
+function openDrawer(){ els.panel.classList.add("open"); els.scrim.classList.add("show"); }
+function closeDrawer(){ els.panel.classList.remove("open"); els.scrim.classList.remove("show"); }
+els.toggle.onclick = openDrawer;
+els.scrim.onclick = closeDrawer;
+
+/* ── Document loading ───────────────────── */
+async function loadEdition(src, label){
+  resetState();
+  els.overlay.classList.remove("hidden");
+  els.overlayMsg.textContent = "Loading " + (label||"document") + "…";
+  els.bar.hidden = false; els.overlayOpen.hidden = true;
+  try{
+    const task = pdfjsLib.getDocument(src);
+    task.onProgress = p => {
+      if(p.total) els.barFill.style.width = Math.round(p.loaded/p.total*100)+"%";
+    };
+    pdf = await task.promise;
+    numPages = pdf.numPages;
+    const vp = (await pdf.getPage(1)).getViewport({scale:1});
+    aspect = vp.width / vp.height;
+    els.overlay.classList.add("hidden");
+    layout();
+    await showSpread(0, true);
+    buildThumbs();
+  }catch(err){
+    els.bar.hidden = true;
+    els.overlayMsg.textContent =
+      "This edition could not be loaded from the server. If you are testing " +
+      "this file locally or in a preview, open a PDF manually below.";
+    els.overlayOpen.hidden = false;
+  }
+}
+function resetState(){
+  pdf=null; numPages=0; spread=0; singlePage=1; zoom=1;
+  imgCache.clear(); els.thumbs.innerHTML=""; applyZoom();
+}
+
+/* ── Page -> image rendering ────────────── */
+async function pageImage(n){
+  if(!n || n<1 || n>numPages) return null;
+  if(imgCache.has(n)) return imgCache.get(n);
+  const page = await pdf.getPage(n);
+  const scale = 1400 / page.getViewport({scale:1}).height;
+  const vp = page.getViewport({scale});
+  const c = document.createElement("canvas");
+  c.width = vp.width; c.height = vp.height;
+  await page.render({canvasContext:c.getContext("2d"), viewport:vp}).promise;
+  const url = c.toDataURL("image/jpeg", .88);
+  imgCache.set(n, url);
+  return url;
+}
+
+/* ── Layout & sizing ────────────────────── */
+function layout(){
+  singleMode = window.innerWidth < 720;
+  const availW = els.viewer.clientWidth - 140;
+  const availH = els.viewer.clientHeight - 70;
+  let ph = availH;
+  let pw = ph * aspect;
+  const maxW = singleMode ? availW : availW/2;
+  if(pw > maxW){ pw = maxW; ph = pw / aspect; }
+  els.book.style.setProperty("--pw", pw+"px");
+  els.book.style.setProperty("--ph", ph+"px");
+  els.book.classList.toggle("single", singleMode);
+  els.halfL.style.display = singleMode ? "none" : "";
+}
+
+/* ── Spread logic ───────────────────────── */
+const maxSpread = () => Math.floor(numPages/2);
+function spreadPages(k){
+  if(k===0) return [null, 1];
+  const r = 2*k+1;
+  return [2*k, r<=numPages ? r : null];
+}
+function setHalf(el, url){
+  el.innerHTML = "";
+  el.classList.toggle("empty", !url);
+  if(url){ const im=document.createElement("img"); im.src=url; el.appendChild(im); }
+}
+async function showSpread(k){
+  if(singleMode){ return showSingle(1); }
+  spread = Math.max(0, Math.min(k, maxSpread()));
+  const [l,r] = spreadPages(spread);
+  const [li,ri] = await Promise.all([pageImage(l), pageImage(r)]);
+  setHalf(els.halfL, li); setHalf(els.halfR, ri);
+  updateChrome();
+  preloadAround();
+}
+async function showSingle(p){
+  singlePage = Math.max(1, Math.min(p, numPages));
+  const url = await pageImage(singlePage);
+  setHalf(els.halfR, url);
+  updateChrome();
+}
+
+/* ── Flip animation ─────────────────────── */
+async function flip(dir){
+  if(flipping || !pdf) return;
+  if(singleMode){
+    const t = singlePage + dir;
+    if(t<1 || t>numPages) return;
+    singlePage = t;
+    setHalf(els.halfR, await pageImage(t));
+    updateChrome(); preloadAround();
+    return;
+  }
+  const target = spread + dir;
+  if(target<0 || target>maxSpread()) return;
+  flipping = true;
+  const [cl,cr] = spreadPages(spread);
+  const [nl,nr] = spreadPages(target);
+  const sheet = document.createElement("div");
+  sheet.className = "sheet " + (dir>0?"fwd":"bwd");
+  const front = document.createElement("div"); front.className="face front";
+  const back  = document.createElement("div"); back.className="face back";
+  sheet.append(front, back);
+
+  if(dir>0){
+    const [fi,bi,ui] = await Promise.all([pageImage(cr), pageImage(nl), pageImage(nr)]);
+    if(fi){ front.innerHTML = `<img src="${fi}">`; }
+    if(bi){ back.innerHTML  = `<img src="${bi}">`; }
+    setHalf(els.halfR, ui);
+  }else{
+    const [fi,bi,ui] = await Promise.all([pageImage(cl), pageImage(nr), pageImage(nl)]);
+    if(fi){ front.innerHTML = `<img src="${fi}">`; }
+    if(bi){ back.innerHTML  = `<img src="${bi}">`; }
+    setHalf(els.halfL, ui);
+  }
+  els.book.appendChild(sheet);
+  requestAnimationFrame(()=>sheet.classList.add("go"));
+  sheet.addEventListener("animationend", async ()=>{
+    spread = target;
+    const [l,r] = spreadPages(spread);
+    if(dir>0) setHalf(els.halfL, await pageImage(l));
+    else      setHalf(els.halfR, await pageImage(r));
+    sheet.remove();
+    flipping = false;
+    updateChrome(); preloadAround();
+  }, {once:true});
+}
+function preloadAround(){
+  if(!pdf) return;
+  if(singleMode){
+    pageImage(singlePage+1); pageImage(singlePage-1);
+  }else{
+    [spread-1, spread+1].forEach(k=>{
+      if(k>=0 && k<=maxSpread()) spreadPages(k).forEach(p=>p&&pageImage(p));
+    });
+  }
+}
+
+/* ── Info, ribbon, thumbnails ───────────── */
+function currentLabel(){
+  if(singleMode) return `PAGE ${singlePage} / ${numPages}`;
+  const [l,r] = spreadPages(spread);
+  if(l&&r) return `PAGES ${l}–${r} / ${numPages}`;
+  return `PAGE ${l||r} / ${numPages}`;
+}
+function updateChrome(){
+  els.info.textContent = currentLabel();
+  const prog = singleMode ? singlePage/numPages
+             : (spreadPages(spread)[1]||spreadPages(spread)[0])/numPages;
+  els.ribbon.style.width = Math.round(prog*100)+"%";
+  if(singleMode){
+    els.prev.disabled = singlePage<=1;
+    els.next.disabled = singlePage>=numPages;
+  }else{
+    els.prev.disabled = spread<=0;
+    els.next.disabled = spread>=maxSpread();
+  }
+  [...els.thumbs.children].forEach(c=>{
+    const p = +c.dataset.page;
+    const active = singleMode ? p===singlePage : spreadPages(spread).includes(p);
+    c.classList.toggle("active", active);
+  });
+}
+async function buildThumbs(){
+  els.thumbs.innerHTML = "";
+  for(let n=1;n<=numPages;n++){
+    const page = await pdf.getPage(n);
+    const scale = 56 / page.getViewport({scale:1}).height * (window.devicePixelRatio||1);
+    const vp = page.getViewport({scale});
+    const c = document.createElement("canvas");
+    c.width=vp.width; c.height=vp.height;
+    c.style.height="56px";
+    c.dataset.page = n;
+    c.title = "Page "+n;
+    await page.render({canvasContext:c.getContext("2d"), viewport:vp}).promise;
+    c.addEventListener("click", ()=>{
+      if(singleMode) showSingle(n);
+      else showSpread(n===1?0:Math.floor(n/2));
+    });
+    els.thumbs.appendChild(c);
+  }
+  updateChrome();
+}
+
+/* ── Zoom & fullscreen ──────────────────── */
+function applyZoom(){ els.stage.style.transform = `scale(${zoom})`; }
+$("zoomIn").onclick  = ()=>{ zoom=Math.min(2.5, zoom+.2); applyZoom(); };
+$("zoomOut").onclick = ()=>{ zoom=Math.max(.6, zoom-.2); applyZoom(); };
+$("fsBtn").onclick = ()=>{
+  if(document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen();
+};
+
+/* ── Interaction ────────────────────────── */
+els.prev.onclick = ()=>flip(-1);
+els.next.onclick = ()=>flip(1);
+document.addEventListener("keydown", e=>{
+  if(e.key==="ArrowRight") flip(1);
+  if(e.key==="ArrowLeft")  flip(-1);
+});
+$("openBtn").onclick = ()=>els.fileInput.click();
+els.overlayOpen.onclick = ()=>els.fileInput.click();
+els.fileInput.onchange = async e=>{
+  const f = e.target.files[0];
+  if(!f) return;
+  activeEdition = -1; markActiveEdition();
+  const buf = await f.arrayBuffer();
+  loadEdition({data:buf}, f.name);
+};
+window.addEventListener("resize", ()=>{
+  if(!pdf) return;
+  const wasSingle = singleMode;
+  layout();
+  if(wasSingle!==singleMode){
+    if(singleMode){ showSingle(spreadPages(spread)[1]||spreadPages(spread)[0]||1); }
+    else { showSpread(singlePage<=1?0:Math.floor(singlePage/2)); }
+  }
+});
+
+/* ── Start ──────────────────────────────── */
+buildEditionList();
+if(CONFIG.editions.length){
+  selectEdition(0);
+}else{
+  els.overlayMsg.textContent = "No editions registered in CONFIG. Open a PDF file to preview.";
+  els.overlayOpen.hidden = false;
+}
+</script>
+</body>
+</html>
