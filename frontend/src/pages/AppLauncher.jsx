@@ -433,7 +433,7 @@ export default function AppLauncher() {
               minHeight: 0,
             }}>
               <iframe
-                src="/e-magazine/"
+                src="/e-magazine/?embed=1"
                 title="CKDO e-Magazine"
                 style={{ width: "100%", height: "100%", border: "none", borderRadius: 18, display: "block" }}
                 allow="fullscreen"

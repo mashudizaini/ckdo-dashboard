@@ -568,6 +568,13 @@ window.addEventListener("resize", ()=>{
   }
 });
 
+/* ── Embed mode: hide chrome when ?embed=1 ── */
+if(new URLSearchParams(location.search).get("embed") === "1"){
+  document.querySelector("header").style.display = "none";
+  document.querySelector("footer").style.display = "none";
+  document.querySelector("aside").style.display  = "none";
+}
+
 /* ── Start ──────────────────────────────── */
 buildEditionList();
 if(CONFIG.editions.length){
