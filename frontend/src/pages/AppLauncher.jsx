@@ -73,7 +73,7 @@ function AppCard({ app, index, onNavigate, onDashboardClick }) {
         animationDelay: `${index * 0.06}s`,
         opacity: 0,
         cursor: "pointer",
-        width: 144,
+        width: 120,
         background: NEU_BG,
         borderRadius: 20,
         padding: "18px 12px 14px",
@@ -219,7 +219,7 @@ export default function AppLauncher() {
         ::-webkit-scrollbar-thumb { background: #c5cad8; border-radius: 4px; }
       `}</style>
 
-      <div style={{ minHeight: "100vh", background: NEU_BG, fontFamily: "'Inter', sans-serif", display: "flex", flexDirection: "column" }}>
+      <div style={{ height: "100vh", background: NEU_BG, fontFamily: "'Inter', sans-serif", display: "flex", flexDirection: "column", overflow: "hidden" }}>
 
         {/* ── HEADER ── */}
         <header style={{
@@ -272,78 +272,126 @@ export default function AppLauncher() {
           </div>
         </header>
 
-        {/* ── MAIN ── */}
-        <main style={{ flex: 1, padding: "14px 32px 14px", display: "flex", flexDirection: "column", gap: 12, minHeight: 0 }}>
+        {/* ── MAIN — split layout ── */}
+        <main style={{ flex: 1, padding: "14px 20px 14px", display: "flex", gap: 14, minHeight: 0, overflow: "hidden" }}>
 
-          {/* Top bar */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", animation: "fadeUp 0.5s ease 0.1s forwards", opacity: 0, flexWrap: "wrap", gap: 10 }}>
-            <div style={{ background: NEU_BG, borderRadius: 12, padding: "7px 16px", boxShadow: `inset 2px 2px 6px #c5cad8, inset -2px -2px 6px #ffffff` }}>
-              <span style={{ fontSize: 10, color: "#2563eb", fontWeight: 700, letterSpacing: "0.1em" }}>WELCOME BACK</span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginLeft: 10 }}>{user?.fullName || user?.username || "User"}</span>
-              <span style={{ fontSize: 10.5, color: "#94a3b8", marginLeft: 8 }}>— Select an application to get started</span>
+          {/* ── LEFT PANEL — App cards (25%) ── */}
+          <div style={{
+            width: "25%", minWidth: 260, maxWidth: 360, flexShrink: 0,
+            display: "flex", flexDirection: "column", gap: 10,
+            animation: "fadeUp 0.5s ease 0.1s forwards", opacity: 0,
+          }}>
+            {/* Welcome strip */}
+            <div style={{ background: NEU_BG, borderRadius: 12, padding: "7px 14px", boxShadow: `inset 2px 2px 6px #c5cad8, inset -2px -2px 6px #ffffff`, flexShrink: 0 }}>
+              <span style={{ fontSize: 9.5, color: "#2563eb", fontWeight: 700, letterSpacing: "0.1em" }}>WELCOME BACK</span>
+              <p style={{ fontSize: 12.5, fontWeight: 700, color: "#1e293b", marginTop: 2 }}>{user?.fullName || user?.username || "User"}</p>
             </div>
 
             {/* Category filter */}
-            <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-              <FilterBtn label="All Apps" active={filter === "all"} color="#1d4ed8" onClick={() => setFilter("all")} />
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", flexShrink: 0 }}>
+              <FilterBtn label="All" active={filter === "all"} color="#1d4ed8" onClick={() => setFilter("all")} />
               {CATEGORIES.map(cat => (
                 <FilterBtn
                   key={cat.id}
-                  label={`${cat.emoji} ${cat.short}`}
+                  label={cat.emoji + " " + cat.short}
                   active={filter === cat.id}
                   color={cat.color}
                   onClick={() => setFilter(cat.id)}
                 />
               ))}
             </div>
+
+            {/* Scrollable app list */}
+            <div style={{
+              flex: 1,
+              background: NEU_BG,
+              borderRadius: 18,
+              padding: "16px 14px",
+              boxShadow: `inset 4px 4px 12px #c5cad8, inset -4px -4px 12px #ffffff`,
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 20,
+            }}>
+              {visibleApps.length === 0 ? (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1 }}>
+                  <p style={{ color: "#94a3b8", fontSize: 12 }}>No apps available.</p>
+                </div>
+              ) : (
+                CATEGORIES.map(cat => {
+                  const catApps = visibleApps.filter(a => a.category === cat.id);
+                  if (catApps.length === 0) return null;
+                  const si = cardIndex;
+                  cardIndex += catApps.length;
+                  return (
+                    <CategorySection
+                      key={cat.id}
+                      cat={cat}
+                      apps={catApps}
+                      onNavigate={navigate}
+                      onDashboardClick={pickRandomTheme}
+                      startIndex={si}
+                    />
+                  );
+                })
+              )}
+            </div>
+
+            {/* Legend */}
+            <div style={{ display: "flex", justifyContent: "center", flexWrap: "wrap", gap: 10, flexShrink: 0 }}>
+              {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
+                <div key={key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <div style={{ width: 7, height: 7, borderRadius: "50%", background: cfg.dot, boxShadow: key === "sso" ? `0 0 5px ${cfg.dot}` : "none" }} />
+                  <span style={{ fontSize: 9, color: "#94a3b8", fontWeight: 600, letterSpacing: "0.04em" }}>{cfg.label.toUpperCase()}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
-          {/* Category sections inside scrollable container */}
+          {/* ── RIGHT PANEL — E-Magazine (75%) ── */}
           <div style={{
             flex: 1,
-            background: NEU_BG,
-            borderRadius: 22,
-            padding: "20px 24px",
-            boxShadow: `inset 4px 4px 12px #c5cad8, inset -4px -4px 12px #ffffff`,
-            overflowY: "auto",
             display: "flex",
             flexDirection: "column",
-            gap: 24,
-            animation: "fadeUp 0.5s ease 0.2s forwards",
-            opacity: 0,
+            gap: 8,
+            animation: "fadeUp 0.5s ease 0.2s forwards", opacity: 0,
+            minWidth: 0,
           }}>
-            {visibleApps.length === 0 ? (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1 }}>
-                <p style={{ color: "#94a3b8", fontSize: 13 }}>No applications available for your account.</p>
+            {/* Magazine header label */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+              <div style={{ background: NEU_BG, borderRadius: 10, padding: "6px 14px", boxShadow: `inset 2px 2px 6px #c5cad8, inset -2px -2px 6px #ffffff`, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 16 }}>📰</span>
+                <div>
+                  <span style={{ fontSize: 9.5, color: "#2563eb", fontWeight: 700, letterSpacing: "0.1em", display: "block" }}>INTERNAL MAGAZINE</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>CKDO e-Magazine Reading Room</span>
+                </div>
               </div>
-            ) : (
-              CATEGORIES.map(cat => {
-                const catApps = visibleApps.filter(a => a.category === cat.id);
-                if (catApps.length === 0) return null;
-                const si = cardIndex;
-                cardIndex += catApps.length;
-                return (
-                  <CategorySection
-                    key={cat.id}
-                    cat={cat}
-                    apps={catApps}
-                    onNavigate={navigate}
-                    onDashboardClick={pickRandomTheme}
-                    startIndex={si}
-                  />
-                );
-              })
-            )}
-          </div>
+              <a
+                href="/e-magazine/"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ padding: "6px 12px", borderRadius: 10, border: "none", background: NEU_BG, color: "#2563eb", fontSize: 11, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, boxShadow: SHADOW_OUT, textDecoration: "none", transition: "box-shadow 0.18s ease", flexShrink: 0 }}
+              >
+                <ExternalLink size={11} /> Open Full Screen
+              </a>
+            </div>
 
-          {/* Legend */}
-          <div style={{ display: "flex", justifyContent: "center", gap: 18, animation: "fadeUp 0.5s ease 0.4s forwards", opacity: 0 }}>
-            {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-              <div key={key} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <div style={{ width: 7, height: 7, borderRadius: "50%", background: cfg.dot, boxShadow: key === "sso" ? `0 0 5px ${cfg.dot}` : "none" }} />
-                <span style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, letterSpacing: "0.04em" }}>{cfg.label.toUpperCase()}</span>
-              </div>
-            ))}
+            {/* Magazine iframe */}
+            <div style={{
+              flex: 1,
+              background: NEU_BG,
+              borderRadius: 18,
+              boxShadow: `inset 4px 4px 12px #c5cad8, inset -4px -4px 12px #ffffff`,
+              overflow: "hidden",
+              minHeight: 0,
+            }}>
+              <iframe
+                src="/e-magazine/"
+                title="CKDO e-Magazine"
+                style={{ width: "100%", height: "100%", border: "none", borderRadius: 18, display: "block" }}
+                allow="fullscreen"
+              />
+            </div>
           </div>
         </main>
       </div>

@@ -20,6 +20,7 @@ services:
     volumes:
       - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./e-magazine:/usr/share/nginx/html/e-magazine:ro
     ports:
       - "80:80"
       - "443:443"
