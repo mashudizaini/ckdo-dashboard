@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import {
-  LineChart, Line, BarChart, Bar,
+  LineChart, Line, BarChart, Bar, Cell,
   XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
@@ -41,23 +41,23 @@ export default function PurchasingDashboard() {
   return (
     <div className="p-6 space-y-4">
       {/* Tab Buttons */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
         {TABS.map((tab) => {
           const active = activeId === tab.id;
           return (
             <button
               key={tab.id}
               onClick={() => navigate(`/dashboard/purchasing/${tab.id}`)}
-              className={`flex items-center gap-3 rounded-lg border px-4 py-3 transition-all ${
+              className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 transition-all ${
                 active
                   ? `${tab.bg} ${tab.activeBorder} ring-1 ring-inset ${tab.activeBorder}`
                   : "bg-gray-900 border-gray-800 hover:border-gray-700 hover:bg-gray-800/60"
               }`}
             >
-              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${tab.bg} border ${tab.activeBorder}`}>
-                <tab.icon size={15} className={tab.color} />
+              <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${tab.bg} border ${tab.activeBorder}`}>
+                <tab.icon size={14} className={tab.color} />
               </div>
-              <span className={`text-sm font-medium truncate ${active ? "text-white" : "text-gray-400"}`}>
+              <span className={`text-sm font-semibold leading-tight truncate ${active ? "text-white" : "text-gray-400"}`}>
                 {tab.label}
               </span>
             </button>
@@ -331,6 +331,8 @@ const CY = new Date().getFullYear();
 const PAGE_SIZE = 10;
 const VIEWS = [
   { id: "detail",      label: "Detail View" },
+  { id: "summary",     label: "Summary" },
+  { id: "graph",       label: "Graph" },
   { id: "by-item",     label: "By Item (Pivot)" },
   { id: "by-supplier", label: "By Supplier (Pivot)" },
 ];
@@ -485,9 +487,13 @@ function PurchaseHistorySection() {
             ))}
           </div>
 
-          {view === "detail"      && <PHDetailTable      data={results.detail?.data ?? []}        loading={loadingMap.detail}      error={results.detail?.error} />}
-          {view === "by-item"     && <PHByItemTable      data={results["by-item"]?.data ?? []}    loading={loadingMap["by-item"]}  error={results["by-item"]?.error}    years={results["by-item"]?.years ?? []} />}
-          {view === "by-supplier" && <PHBySupplierTable  data={results["by-supplier"]?.data ?? []}loading={loadingMap["by-supplier"]} error={results["by-supplier"]?.error} years={results["by-supplier"]?.years ?? []} />}
+          {view === "detail"      && <PHDetailTable      data={results.detail?.data ?? []}           loading={loadingMap.detail}           error={results.detail?.error} />}
+          {view === "summary"     && <PHSummaryView      data={results.detail?.data ?? []}           loading={loadingMap.detail}           error={results.detail?.error} />}
+          {view === "graph"       && <PHGraphView        data={results.detail?.data ?? []}           loading={loadingMap.detail}           error={results.detail?.error}
+                                                         byItemData={results["by-item"]?.data ?? []}  byItemYears={results["by-item"]?.years ?? []}
+                                                         bySupData={results["by-supplier"]?.data ?? []} bySupYears={results["by-supplier"]?.years ?? []} />}
+          {view === "by-item"     && <PHByItemTable      data={results["by-item"]?.data ?? []}       loading={loadingMap["by-item"]}       error={results["by-item"]?.error}       years={results["by-item"]?.years ?? []} />}
+          {view === "by-supplier" && <PHBySupplierTable  data={results["by-supplier"]?.data ?? []}   loading={loadingMap["by-supplier"]}   error={results["by-supplier"]?.error}   years={results["by-supplier"]?.years ?? []} />}
         </div>
       )}
     </div>
@@ -808,6 +814,398 @@ function PHBySupplierTable({ data, years, loading, error }) {
         </table>
       </div>
       <Pagination total={data.length} page={page} onPage={setPage} />
+    </div>
+  );
+}
+
+/* ─── Purchase History: Summary View ────────────── */
+
+function PHSummaryView({ data, loading, error }) {
+  const TH = "px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
+  const TD = "px-3 py-2 text-xs";
+
+  const summary = useMemo(() => {
+    if (!data.length) return null;
+    const totalIDR   = data.reduce((s, r) => s + (Number(r.amount_idr)  || 0), 0);
+    const totalOrig  = data.reduce((s, r) => s + (Number(r.amount_orig) || 0), 0);
+    const uniquePOs  = new Set(data.map(r => r.po_number)).size;
+    const uniqueItems= new Set(data.map(r => r.item_code).filter(Boolean)).size;
+
+    const byCat = {};
+    const byType= {};
+    const bySup = {};
+    const byYear= {};
+    data.forEach(r => {
+      const cat  = r.category      || "(Uncategorized)";
+      const type = r.material_type || "(Unknown)";
+      const sup  = r.supplier_name || "(Unknown)";
+      const yr   = r.creation_date ? r.creation_date.slice(0, 4) : "(Unknown)";
+      const idr  = Number(r.amount_idr)  || 0;
+      const orig = Number(r.amount_orig) || 0;
+      const qty  = Number(r.quantity)    || 0;
+
+      if (!byCat[cat])  byCat[cat]  = { label: cat,  idr: 0, orig: 0, qty: 0, lines: 0 };
+      byCat[cat].idr   += idr; byCat[cat].orig += orig; byCat[cat].qty += qty; byCat[cat].lines++;
+
+      if (!byType[type]) byType[type] = { label: type, idr: 0, orig: 0, qty: 0, lines: 0 };
+      byType[type].idr  += idr; byType[type].orig += orig; byType[type].qty += qty; byType[type].lines++;
+
+      if (!bySup[sup])  bySup[sup]  = { label: sup,  idr: 0, orig: 0, qty: 0, pos: new Set() };
+      bySup[sup].idr   += idr; bySup[sup].orig += orig; bySup[sup].qty += qty; bySup[sup].pos.add(r.po_number);
+
+      if (!byYear[yr])  byYear[yr]  = { label: yr,   idr: 0, orig: 0, qty: 0, lines: 0, pos: new Set() };
+      byYear[yr].idr   += idr; byYear[yr].orig += orig; byYear[yr].qty += qty; byYear[yr].lines++; byYear[yr].pos.add(r.po_number);
+    });
+
+    const topCats = Object.values(byCat).sort((a, b) => b.idr - a.idr);
+    const topSups = Object.values(bySup).map(s => ({ ...s, pos: s.pos.size })).sort((a, b) => b.idr - a.idr).slice(0, 15);
+    const typeArr = Object.values(byType).sort((a, b) => b.idr - a.idr);
+    const yearArr = Object.values(byYear).sort((a, b) => a.label.localeCompare(b.label))
+                          .map(y => ({ ...y, pos: y.pos.size }));
+    return { totalIDR, totalOrig, uniquePOs, uniqueItems, lines: data.length, topCats, topSups, typeArr, yearArr };
+  }, [data]);
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-12 text-gray-500 text-xs gap-2">
+      <Loader2 size={14} className="animate-spin" /> Loading...
+    </div>
+  );
+  if (error)   return <div className="py-6 text-center text-xs text-red-400">{error}</div>;
+  if (!summary) return <div className="py-10 text-center text-xs text-gray-600">No data. Run a search first.</div>;
+
+  const pct = (v) => summary.totalIDR > 0 ? ((v / summary.totalIDR) * 100).toFixed(1) + "%" : "—";
+  const KpiCard = ({ label, value, sub, color }) => (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
+      <p className="text-xs text-gray-500 mb-1">{label}</p>
+      <p className={`text-xl font-bold ${color}`}>{value}</p>
+      {sub && <p className="text-xs text-gray-600 mt-0.5">{sub}</p>}
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* KPI row */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <KpiCard label="Total Amount IDR" value={fmtIDRShort(summary.totalIDR)} sub="All PO lines" color="text-green-400" />
+        <KpiCard label="Total Amount (Orig)" value={fmtIDRShort(summary.totalOrig)} sub="Original currency" color="text-blue-400" />
+        <KpiCard label="Unique POs" value={summary.uniquePOs.toLocaleString()} sub="Purchase orders" color="text-orange-400" />
+        <KpiCard label="Unique Items" value={summary.uniqueItems.toLocaleString()} sub="Item codes" color="text-purple-400" />
+        <KpiCard label="PO Lines" value={summary.lines.toLocaleString()} sub="Total rows" color="text-teal-400" />
+      </div>
+
+      {/* By Year */}
+      {summary.yearArr.length > 1 && (
+        <div className="rounded-xl border border-gray-800 overflow-hidden">
+          <div className="px-4 py-2.5 bg-gray-800/60 text-xs font-semibold text-gray-400">By Year</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="bg-gray-800/40">
+                <th className={TH}>Year</th>
+                <th className={`${TH} text-right`}>Amount IDR</th>
+                <th className={`${TH} text-right`}>% of Total</th>
+                <th className={`${TH} text-right`}>Amount Orig</th>
+                <th className={`${TH} text-right`}>Qty</th>
+                <th className={`${TH} text-right`}>POs</th>
+                <th className={`${TH} text-right`}>Lines</th>
+              </tr></thead>
+              <tbody>
+                {summary.yearArr.map((y, i) => (
+                  <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30">
+                    <td className={`${TD} font-semibold text-gray-200`}>{y.label}</td>
+                    <td className={`${TD} text-right text-green-400 font-medium`}>{fmtIDR(y.idr)}</td>
+                    <td className={`${TD} text-right text-gray-400`}>{pct(y.idr)}</td>
+                    <td className={`${TD} text-right text-gray-300`}>{fmtIDR(y.orig)}</td>
+                    <td className={`${TD} text-right text-gray-400`}>{fmtQty(y.qty)}</td>
+                    <td className={`${TD} text-right text-blue-400`}>{y.pos}</td>
+                    <td className={`${TD} text-right text-gray-500`}>{y.lines}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* By Material Type */}
+      <div className="rounded-xl border border-gray-800 overflow-hidden">
+        <div className="px-4 py-2.5 bg-gray-800/60 text-xs font-semibold text-gray-400">By Material Type</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="bg-gray-800/40">
+              <th className={TH}>Type</th>
+              <th className={`${TH} text-right`}>Amount IDR</th>
+              <th className={`${TH} text-right`}>% of Total</th>
+              <th className={`${TH} text-right`}>Amount Orig</th>
+              <th className={`${TH} text-right`}>Qty</th>
+              <th className={`${TH} text-right`}>Lines</th>
+            </tr></thead>
+            <tbody>
+              {summary.typeArr.map((t, i) => (
+                <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30">
+                  <td className={`${TD} font-medium ${t.label === "Direct Material" ? "text-emerald-400" : "text-blue-400"}`}>{t.label}</td>
+                  <td className={`${TD} text-right text-green-400 font-medium`}>{fmtIDR(t.idr)}</td>
+                  <td className={`${TD} text-right text-gray-400`}>{pct(t.idr)}</td>
+                  <td className={`${TD} text-right text-gray-300`}>{fmtIDR(t.orig)}</td>
+                  <td className={`${TD} text-right text-gray-400`}>{fmtQty(t.qty)}</td>
+                  <td className={`${TD} text-right text-gray-500`}>{t.lines}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* By Category */}
+      <div className="rounded-xl border border-gray-800 overflow-hidden">
+        <div className="px-4 py-2.5 bg-gray-800/60 text-xs font-semibold text-gray-400">By Category</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="bg-gray-800/40">
+              <th className={`${TH} w-8`}>#</th>
+              <th className={TH}>Category</th>
+              <th className={`${TH} text-right`}>Amount IDR</th>
+              <th className={`${TH} text-right`}>% of Total</th>
+              <th className={`${TH} text-right`}>Amount Orig</th>
+              <th className={`${TH} text-right`}>Qty</th>
+              <th className={`${TH} text-right`}>Lines</th>
+            </tr></thead>
+            <tbody>
+              {summary.topCats.map((c, i) => (
+                <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30">
+                  <td className={`${TD} text-gray-600 text-center`}>{i + 1}</td>
+                  <td className={`${TD} text-gray-200 max-w-[220px] truncate font-medium`} title={c.label}>{c.label}</td>
+                  <td className={`${TD} text-right text-green-400 font-medium`}>{fmtIDR(c.idr)}</td>
+                  <td className={`${TD} text-right`}>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <div className="h-1.5 rounded-full bg-orange-500/30 overflow-hidden" style={{ width: 60 }}>
+                        <div className="h-full rounded-full bg-orange-400" style={{ width: pct(c.idr) }} />
+                      </div>
+                      <span className="text-gray-400 w-10 text-right">{pct(c.idr)}</span>
+                    </div>
+                  </td>
+                  <td className={`${TD} text-right text-gray-300`}>{fmtIDR(c.orig)}</td>
+                  <td className={`${TD} text-right text-gray-400`}>{fmtQty(c.qty)}</td>
+                  <td className={`${TD} text-right text-gray-500`}>{c.lines}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* By Supplier (top 15) */}
+      <div className="rounded-xl border border-gray-800 overflow-hidden">
+        <div className="px-4 py-2.5 bg-gray-800/60 text-xs font-semibold text-gray-400">By Supplier (Top 15)</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="bg-gray-800/40">
+              <th className={`${TH} w-8`}>#</th>
+              <th className={TH}>Supplier</th>
+              <th className={`${TH} text-right`}>Amount IDR</th>
+              <th className={`${TH} text-right`}>% of Total</th>
+              <th className={`${TH} text-right`}>Amount Orig</th>
+              <th className={`${TH} text-right`}>Qty</th>
+              <th className={`${TH} text-right`}>POs</th>
+            </tr></thead>
+            <tbody>
+              {summary.topSups.map((s, i) => (
+                <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30">
+                  <td className={`${TD} text-gray-600 text-center`}>{i + 1}</td>
+                  <td className={`${TD} text-gray-200 max-w-[220px] truncate font-medium`} title={s.label}>{s.label}</td>
+                  <td className={`${TD} text-right text-green-400 font-medium`}>{fmtIDR(s.idr)}</td>
+                  <td className={`${TD} text-right`}>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <div className="h-1.5 rounded-full bg-blue-500/30 overflow-hidden" style={{ width: 60 }}>
+                        <div className="h-full rounded-full bg-blue-400" style={{ width: pct(s.idr) }} />
+                      </div>
+                      <span className="text-gray-400 w-10 text-right">{pct(s.idr)}</span>
+                    </div>
+                  </td>
+                  <td className={`${TD} text-right text-gray-300`}>{fmtIDR(s.orig)}</td>
+                  <td className={`${TD} text-right text-gray-400`}>{fmtQty(s.qty)}</td>
+                  <td className={`${TD} text-right text-blue-400`}>{s.pos}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Purchase History: Graph View ──────────────── */
+
+const PH_CHART_COLORS = ["#f97316","#34d399","#60a5fa","#a78bfa","#f59e0b","#fb923c","#4ade80","#38bdf8","#c084fc","#fbbf24"];
+
+function PHGraphView({ data, loading, error, byItemData, byItemYears, bySupData, bySupYears }) {
+  const chartData = useMemo(() => {
+    if (!data.length) return null;
+
+    const totalIDR = data.reduce((s, r) => s + (Number(r.amount_idr) || 0), 0);
+
+    const byCat = {};
+    const byType= {};
+    const bySup = {};
+    const byYear= {};
+    data.forEach(r => {
+      const cat  = r.category      || "(Uncategorized)";
+      const type = r.material_type || "(Unknown)";
+      const sup  = r.supplier_name || "(Unknown)";
+      const yr   = r.creation_date ? r.creation_date.slice(0, 4) : "(Unknown)";
+      const idr  = Number(r.amount_idr) || 0;
+
+      if (!byCat[cat])  byCat[cat]  = { name: cat,  value: 0 };
+      byCat[cat].value += idr;
+
+      if (!byType[type]) byType[type] = { name: type, value: 0 };
+      byType[type].value += idr;
+
+      if (!bySup[sup])  bySup[sup]  = { name: sup,  value: 0 };
+      bySup[sup].value += idr;
+
+      if (!byYear[yr])  byYear[yr]  = { name: yr,   value: 0 };
+      byYear[yr].value += idr;
+    });
+
+    const topCats = Object.values(byCat).sort((a, b) => b.value - a.value).slice(0, 10).reverse();
+    const topSups = Object.values(bySup).sort((a, b) => b.value - a.value).slice(0, 10).reverse();
+    const typeArr = Object.values(byType).sort((a, b) => b.value - a.value);
+    const yearArr = Object.values(byYear).sort((a, b) => a.name.localeCompare(b.name));
+
+    // Year trend from by-item pivot
+    const itemYearTrend = byItemYears.map(yr => ({
+      name: String(yr),
+      value: byItemData.reduce((s, r) => s + (Number(r[`value_idr_${yr}`]) || 0), 0),
+    }));
+
+    // Year trend from by-supplier pivot
+    const supYearTrend = bySupYears.map(yr => ({
+      name: String(yr),
+      direct:   bySupData.reduce((s, r) => s + (Number(r[`value_idr_${yr}`]) || 0), 0),
+    }));
+
+    return { totalIDR, topCats, topSups, typeArr, yearArr, itemYearTrend, supYearTrend };
+  }, [data, byItemData, byItemYears, bySupData, bySupYears]);
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-12 text-gray-500 text-xs gap-2">
+      <Loader2 size={14} className="animate-spin" /> Loading...
+    </div>
+  );
+  if (error)    return <div className="py-6 text-center text-xs text-red-400">{error}</div>;
+  if (!chartData) return <div className="py-10 text-center text-xs text-gray-600">No data. Run a search first.</div>;
+
+  const ChartCard = ({ title, children, height = 260 }) => (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
+      <p className="text-xs font-semibold text-gray-400 mb-3">{title}</p>
+      <div style={{ height }}>{children}</div>
+    </div>
+  );
+
+  const tooltipStyle = {
+    contentStyle: { background: "#111827", border: "1px solid #374151", borderRadius: 8, fontSize: 11 },
+    labelStyle:   { color: "#e5e7eb" },
+    itemStyle:    { color: "#d1d5db" },
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Yearly Spend Trend */}
+      {chartData.yearArr.length > 1 && (
+        <ChartCard title="Yearly Spend — Amount IDR" height={220}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData.yearArr} margin={{ top: 4, right: 12, left: 8, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+              <XAxis dataKey="name" tick={{ fill: "#6b7280", fontSize: 10 }} />
+              <YAxis tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} width={72} />
+              <Tooltip {...tooltipStyle} formatter={(v) => [fmtIDR(v), "Amount IDR"]} />
+              <Bar dataKey="value" fill="#f97316" radius={[4, 4, 0, 0]} name="Amount IDR" />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* By Material Type */}
+        <ChartCard title="By Material Type — Amount IDR" height={180}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData.typeArr} layout="vertical" margin={{ top: 4, right: 40, left: 4, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" horizontal={false} />
+              <XAxis type="number" tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} />
+              <YAxis type="category" dataKey="name" tick={{ fill: "#9ca3af", fontSize: 10 }} width={120} />
+              <Tooltip {...tooltipStyle} formatter={(v) => [fmtIDR(v), "Amount IDR"]} />
+              <Bar dataKey="value" fill="#34d399" radius={[0, 4, 4, 0]} name="Amount IDR" />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        {/* Summary KPI as visual bar */}
+        <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4 space-y-3">
+          <p className="text-xs font-semibold text-gray-400">Spend Share by Type</p>
+          {chartData.typeArr.map((t, i) => {
+            const pct = chartData.totalIDR > 0 ? (t.value / chartData.totalIDR) * 100 : 0;
+            const color = t.name === "Direct Material" ? "bg-emerald-400" : "bg-blue-400";
+            return (
+              <div key={i} className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className={t.name === "Direct Material" ? "text-emerald-400" : "text-blue-400"}>{t.name}</span>
+                  <span className="text-gray-400">{pct.toFixed(1)}% · {fmtIDRShort(t.value)}</span>
+                </div>
+                <div className="h-2 rounded-full bg-gray-800">
+                  <div className={`h-2 rounded-full ${color}`} style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Top 10 Categories */}
+      <ChartCard title="Top 10 Categories — Amount IDR" height={320}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData.topCats} layout="vertical" margin={{ top: 4, right: 60, left: 8, bottom: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" horizontal={false} />
+            <XAxis type="number" tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} />
+            <YAxis type="category" dataKey="name" tick={{ fill: "#9ca3af", fontSize: 10 }} width={180} />
+            <Tooltip {...tooltipStyle} formatter={(v) => [fmtIDR(v), "Amount IDR"]} />
+            <Bar dataKey="value" radius={[0, 4, 4, 0]} name="Amount IDR">
+              {chartData.topCats.map((_, i) => (
+                <Cell key={i} fill={PH_CHART_COLORS[i % PH_CHART_COLORS.length]} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+      {/* Top 10 Suppliers */}
+      <ChartCard title="Top 10 Suppliers — Amount IDR" height={320}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData.topSups} layout="vertical" margin={{ top: 4, right: 60, left: 8, bottom: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" horizontal={false} />
+            <XAxis type="number" tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} />
+            <YAxis type="category" dataKey="name" tick={{ fill: "#9ca3af", fontSize: 10 }} width={200}
+              tickFormatter={v => v.length > 28 ? v.slice(0, 28) + "…" : v} />
+            <Tooltip {...tooltipStyle} formatter={(v) => [fmtIDR(v), "Amount IDR"]} />
+            <Bar dataKey="value" fill="#60a5fa" radius={[0, 4, 4, 0]} name="Amount IDR" />
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartCard>
+
+      {/* By-Item Year Trend (from pivot) */}
+      {chartData.itemYearTrend.length > 1 && (
+        <ChartCard title="Yearly Spend Trend — By Item Pivot (IDR)" height={220}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData.itemYearTrend} margin={{ top: 4, right: 12, left: 8, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+              <XAxis dataKey="name" tick={{ fill: "#6b7280", fontSize: 10 }} />
+              <YAxis tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} width={72} />
+              <Tooltip {...tooltipStyle} formatter={(v) => [fmtIDR(v), "Amount IDR"]} />
+              <Line type="monotone" dataKey="value" stroke="#f97316" strokeWidth={2} dot={{ fill: "#f97316", r: 4 }} name="Amount IDR" />
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      )}
     </div>
   );
 }
