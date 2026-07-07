@@ -407,18 +407,9 @@ function PurchaseHistorySection() {
   );
 
   return (
-    <div className="space-y-4">
-      {/* Filter Panel */}
-      <SectionCard
-        title="Purchase History"
-        subtitle="Filter purchase history data from Oracle EBS"
-        action={
-          <div className="flex gap-2">
-            <ActionBtn icon={RefreshCw} label="Reset" color="bg-gray-700 hover:bg-gray-600" onClick={handleReset} />
-            <ActionBtn icon={Filter} label="Search" color="bg-orange-600 hover:bg-orange-700" onClick={handleSearch} />
-          </div>
-        }
-      >
+    <div className="space-y-3">
+      {/* Filter Panel — no title/subtitle */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900 p-4">
         {filterErr && (
           <div className="mb-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
             <X size={12} />{filterErr}
@@ -465,28 +456,34 @@ function PurchaseHistorySection() {
             </select>
           </Field>
         </div>
-      </SectionCard>
+      </div>
+
+      {/* Sub-tabs + Search/Reset — always visible */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap">
+          {VIEWS.map(v => (
+            <button key={v.id} onClick={() => setView(v.id)}
+              className={`px-4 py-2 rounded-lg text-xs font-medium border transition-all ${
+                view === v.id
+                  ? "bg-orange-500/10 border-orange-500/40 text-orange-400"
+                  : "bg-gray-900 border-gray-800 text-gray-500 hover:border-gray-700"
+              }`}>
+              {v.label}
+              {results[v.id]?.count != null && (
+                <span className="ml-2 px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">{results[v.id].count}</span>
+              )}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <ActionBtn icon={RefreshCw} label="Reset"  color="bg-gray-700 hover:bg-gray-600"     onClick={handleReset} />
+          <ActionBtn icon={Filter}    label="Search" color="bg-orange-600 hover:bg-orange-700" onClick={handleSearch} />
+        </div>
+      </div>
 
       {/* Results */}
       {searched && (
         <div className="space-y-3">
-          {/* View Selector */}
-          <div className="flex gap-2">
-            {VIEWS.map(v => (
-              <button key={v.id} onClick={() => setView(v.id)}
-                className={`px-4 py-2 rounded-lg text-xs font-medium border transition-all ${
-                  view === v.id
-                    ? "bg-orange-500/10 border-orange-500/40 text-orange-400"
-                    : "bg-gray-900 border-gray-800 text-gray-500 hover:border-gray-700"
-                }`}>
-                {v.label}
-                {results[v.id]?.count != null && (
-                  <span className="ml-2 px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">{results[v.id].count}</span>
-                )}
-              </button>
-            ))}
-          </div>
-
           {view === "detail"      && <PHDetailTable      data={results.detail?.data ?? []}           loading={loadingMap.detail}           error={results.detail?.error} />}
           {view === "summary"     && <PHSummaryView      data={results.detail?.data ?? []}           loading={loadingMap.detail}           error={results.detail?.error} />}
           {view === "graph"       && <PHGraphView        data={results.detail?.data ?? []}           loading={loadingMap.detail}           error={results.detail?.error}
@@ -1098,15 +1095,18 @@ function PHGraphView({ data, loading, error, byItemData, byItemYears, bySupData,
 
   const ChartCard = ({ title, children, height = 260 }) => (
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
-      <p className="text-xs font-semibold text-gray-400 mb-3">{title}</p>
+      <p className="text-xs font-semibold text-gray-200 mb-3">{title}</p>
       <div style={{ height }}>{children}</div>
     </div>
   );
 
+  const TICK  = { fill: "#d1d5db", fontSize: 10 };
+  const TICK_DIM = { fill: "#9ca3af", fontSize: 10 };
   const tooltipStyle = {
-    contentStyle: { background: "#111827", border: "1px solid #374151", borderRadius: 8, fontSize: 11 },
-    labelStyle:   { color: "#e5e7eb" },
-    itemStyle:    { color: "#d1d5db" },
+    contentStyle: { background: "#0f172a", border: "1px solid #374151", borderRadius: 8, fontSize: 11 },
+    labelStyle:   { color: "#f3f4f6", fontWeight: 600 },
+    itemStyle:    { color: "#e5e7eb" },
+    cursor:       { fill: "rgba(255,255,255,0.04)" },
   };
 
   return (
@@ -1117,8 +1117,8 @@ function PHGraphView({ data, loading, error, byItemData, byItemYears, bySupData,
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData.yearArr} margin={{ top: 4, right: 12, left: 8, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-              <XAxis dataKey="name" tick={{ fill: "#6b7280", fontSize: 10 }} />
-              <YAxis tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} width={72} />
+              <XAxis dataKey="name" tick={TICK} />
+              <YAxis tickFormatter={fmtIDRShort} tick={TICK_DIM} width={72} />
               <Tooltip {...tooltipStyle} formatter={(v) => [fmtIDR(v), "Amount IDR"]} />
               <Bar dataKey="value" fill="#f97316" radius={[4, 4, 0, 0]} name="Amount IDR" />
             </BarChart>
@@ -1132,25 +1132,25 @@ function PHGraphView({ data, loading, error, byItemData, byItemYears, bySupData,
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={chartData.typeArr} layout="vertical" margin={{ top: 4, right: 40, left: 4, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" horizontal={false} />
-              <XAxis type="number" tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} />
-              <YAxis type="category" dataKey="name" tick={{ fill: "#9ca3af", fontSize: 10 }} width={120} />
+              <XAxis type="number" tickFormatter={fmtIDRShort} tick={TICK_DIM} />
+              <YAxis type="category" dataKey="name" tick={TICK} width={130} />
               <Tooltip {...tooltipStyle} formatter={(v) => [fmtIDR(v), "Amount IDR"]} />
               <Bar dataKey="value" fill="#34d399" radius={[0, 4, 4, 0]} name="Amount IDR" />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        {/* Summary KPI as visual bar */}
+        {/* Spend Share by Type — progress bars */}
         <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4 space-y-3">
-          <p className="text-xs font-semibold text-gray-400">Spend Share by Type</p>
+          <p className="text-xs font-semibold text-gray-200">Spend Share by Type</p>
           {chartData.typeArr.map((t, i) => {
             const pct = chartData.totalIDR > 0 ? (t.value / chartData.totalIDR) * 100 : 0;
             const color = t.name === "Direct Material" ? "bg-emerald-400" : "bg-blue-400";
             return (
               <div key={i} className="space-y-1">
                 <div className="flex justify-between text-xs">
-                  <span className={t.name === "Direct Material" ? "text-emerald-400" : "text-blue-400"}>{t.name}</span>
-                  <span className="text-gray-400">{pct.toFixed(1)}% · {fmtIDRShort(t.value)}</span>
+                  <span className={t.name === "Direct Material" ? "text-emerald-300 font-medium" : "text-blue-300 font-medium"}>{t.name}</span>
+                  <span className="text-gray-200">{pct.toFixed(1)}% · {fmtIDRShort(t.value)}</span>
                 </div>
                 <div className="h-2 rounded-full bg-gray-800">
                   <div className={`h-2 rounded-full ${color}`} style={{ width: `${pct}%` }} />
@@ -1166,8 +1166,8 @@ function PHGraphView({ data, loading, error, byItemData, byItemYears, bySupData,
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={chartData.topCats} layout="vertical" margin={{ top: 4, right: 60, left: 8, bottom: 4 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" horizontal={false} />
-            <XAxis type="number" tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} />
-            <YAxis type="category" dataKey="name" tick={{ fill: "#9ca3af", fontSize: 10 }} width={180} />
+            <XAxis type="number" tickFormatter={fmtIDRShort} tick={TICK_DIM} />
+            <YAxis type="category" dataKey="name" tick={TICK} width={180} />
             <Tooltip {...tooltipStyle} formatter={(v) => [fmtIDR(v), "Amount IDR"]} />
             <Bar dataKey="value" radius={[0, 4, 4, 0]} name="Amount IDR">
               {chartData.topCats.map((_, i) => (
@@ -1183,8 +1183,8 @@ function PHGraphView({ data, loading, error, byItemData, byItemYears, bySupData,
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={chartData.topSups} layout="vertical" margin={{ top: 4, right: 60, left: 8, bottom: 4 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" horizontal={false} />
-            <XAxis type="number" tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} />
-            <YAxis type="category" dataKey="name" tick={{ fill: "#9ca3af", fontSize: 10 }} width={200}
+            <XAxis type="number" tickFormatter={fmtIDRShort} tick={TICK_DIM} />
+            <YAxis type="category" dataKey="name" tick={TICK} width={200}
               tickFormatter={v => v.length > 28 ? v.slice(0, 28) + "…" : v} />
             <Tooltip {...tooltipStyle} formatter={(v) => [fmtIDR(v), "Amount IDR"]} />
             <Bar dataKey="value" fill="#60a5fa" radius={[0, 4, 4, 0]} name="Amount IDR" />
@@ -1198,8 +1198,8 @@ function PHGraphView({ data, loading, error, byItemData, byItemYears, bySupData,
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData.itemYearTrend} margin={{ top: 4, right: 12, left: 8, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-              <XAxis dataKey="name" tick={{ fill: "#6b7280", fontSize: 10 }} />
-              <YAxis tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} width={72} />
+              <XAxis dataKey="name" tick={TICK} />
+              <YAxis tickFormatter={fmtIDRShort} tick={TICK_DIM} width={72} />
               <Tooltip {...tooltipStyle} formatter={(v) => [fmtIDR(v), "Amount IDR"]} />
               <Line type="monotone" dataKey="value" stroke="#f97316" strokeWidth={2} dot={{ fill: "#f97316", r: 4 }} name="Amount IDR" />
             </LineChart>
