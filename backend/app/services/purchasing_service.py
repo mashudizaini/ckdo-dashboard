@@ -137,14 +137,14 @@ class PurchasingService:
     # ── LOV: Categories, Currencies & Material Types ─────────────────────────
 
     async def get_material_types(self) -> dict:
-        """LOV: distinct material type meanings from CKDO_MTRL_TYPE_DIRECT_INDIRECT lookup."""
+        """LOV: distinct material type tags from CKDO_MTRL_TYPE_DIRECT_INDIRECT lookup."""
         sql = """
-            SELECT lv.lookup_code, lv.meaning
+            SELECT DISTINCT lv.lookup_code, lv.tag, lv.meaning
             FROM fnd_lookup_values_vl lv
             WHERE lv.view_application_id = 700
               AND lv.lookup_type         = 'CKDO_MTRL_TYPE_DIRECT_INDIRECT'
-              AND lv.meaning             IS NOT NULL
-            ORDER BY lv.meaning
+              AND lv.tag                 IS NOT NULL
+            ORDER BY lv.tag
         """
         try:
             rows = await asyncio.to_thread(self._query, sql)
@@ -228,7 +228,7 @@ class PurchasingService:
         AND (:p_country      IS NULL OR mfr.country_of_origin            = :p_country)
         AND (:p_category     IS NULL OR NVL(mcb.segment1,'—')             = :p_category)
         AND (:p_currency     IS NULL OR poh.currency_code                = :p_currency)
-        AND (:p_mat_type IS NULL OR NVL(lv_mt.meaning, 'Indirect Material') = :p_mat_type)
+        AND (:p_mat_type IS NULL OR lv_mt.tag = :p_mat_type)
     """
 
     _RATE_CASE = """
@@ -248,7 +248,7 @@ class PurchasingService:
         ), 1) END
     """
 
-    _MAT_TYPE = "NVL(lv_mt.meaning, 'Indirect Material')"
+    _MAT_TYPE = "lv_mt.tag"
 
     def _ph_params(self, f: dict) -> dict:
         return {
