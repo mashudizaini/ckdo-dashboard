@@ -343,6 +343,7 @@ function PurchaseHistorySection() {
   const [orgs,       setOrgs]       = useState([]);
   const [categories, setCategories] = useState([]);
   const [currencies, setCurrencies] = useState([]);
+  const [matTypes,   setMatTypes]   = useState([]);
   const [view,       setView]       = useState("detail");
   const [searched,   setSearched]   = useState(false);
   const [loadingMap, setLoadingMap] = useState({ detail: false, "by-item": false, "by-supplier": false });
@@ -360,6 +361,7 @@ function PurchaseHistorySection() {
     purchasingApi.getOrganizations().then(r => { if (r.success) setOrgs(r.data ?? []); }).catch(() => {});
     purchasingApi.getCategories().then(r => { if (r.success) setCategories(r.data ?? []); }).catch(() => {});
     purchasingApi.getCurrencies().then(r => { if (r.success) setCurrencies(r.data ?? []); }).catch(() => {});
+    purchasingApi.getMaterialTypes().then(r => { if (r.success) setMatTypes(r.data ?? []); }).catch(() => {});
   }, []);
 
   const params = useMemo(() => ({
@@ -451,8 +453,7 @@ function PurchaseHistorySection() {
           <Field label="Material Type">
             <select className={SELECT} value={f.material_type} onChange={e => setF(p => ({ ...p, material_type: e.target.value }))}>
               <option value="">— All —</option>
-              <option value="Direct Material">Direct Material</option>
-              <option value="Indirect Material">Indirect Material</option>
+              {matTypes.map(t => <option key={t.lookup_code} value={t.meaning}>{t.meaning}</option>)}
             </select>
           </Field>
         </div>

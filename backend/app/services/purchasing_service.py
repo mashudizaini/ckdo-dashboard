@@ -134,7 +134,24 @@ class PurchasingService:
             logger.error("manufacturer_delete_error", error=str(e))
             return {"success": False, "error": str(e)}
 
-    # ── LOV: Categories & Currencies ──────────────────────────────────────────
+    # ── LOV: Categories, Currencies & Material Types ─────────────────────────
+
+    async def get_material_types(self) -> dict:
+        """LOV: distinct material type meanings from CKDO_MTRL_TYPE_DIRECT_INDIRECT lookup."""
+        sql = """
+            SELECT lv.lookup_code, lv.meaning
+            FROM fnd_lookup_values_vl lv
+            WHERE lv.view_application_id = 700
+              AND lv.lookup_type         = 'CKDO_MTRL_TYPE_DIRECT_INDIRECT'
+              AND lv.meaning             IS NOT NULL
+            ORDER BY lv.meaning
+        """
+        try:
+            rows = await asyncio.to_thread(self._query, sql)
+            return {"success": True, "data": rows}
+        except Exception as e:
+            logger.error("material_types_lov_error", error=str(e))
+            return {"success": False, "error": str(e), "data": []}
 
     async def get_categories(self) -> dict:
         sql = """
@@ -188,6 +205,10 @@ class PurchasingService:
                                        AND mfr.organization_id   = msi.organization_id
         LEFT JOIN hr_all_organization_units hou
                                         ON hou.organization_id   = msi.organization_id
+        LEFT JOIN fnd_lookup_values_vl  lv_mt
+                                        ON  lv_mt.lookup_code         = msi.item_type
+                                        AND lv_mt.view_application_id = 700
+                                        AND lv_mt.lookup_type         = 'CKDO_MTRL_TYPE_DIRECT_INDIRECT'
     """
 
     _PH_WHERE = """
@@ -207,13 +228,7 @@ class PurchasingService:
         AND (:p_country      IS NULL OR mfr.country_of_origin            = :p_country)
         AND (:p_category     IS NULL OR NVL(mcb.segment1,'—')             = :p_category)
         AND (:p_currency     IS NULL OR poh.currency_code                = :p_currency)
-        AND (
-            :p_mat_type IS NULL
-            OR (:p_mat_type = 'Direct Material'
-                AND NVL(mcb.segment1,'') IN ('RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS'))
-            OR (:p_mat_type = 'Indirect Material'
-                AND NVL(mcb.segment1,'') NOT IN ('RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS'))
-        )
+        AND (:p_mat_type IS NULL OR NVL(lv_mt.meaning, 'Indirect Material') = :p_mat_type)
     """
 
     _RATE_CASE = """
@@ -233,10 +248,7 @@ class PurchasingService:
         ), 1) END
     """
 
-    _MAT_TYPE = """
-        CASE WHEN NVL(mcb.segment1,'') IN ('RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS')
-             THEN 'Direct Material' ELSE 'Indirect Material' END
-    """
+    _MAT_TYPE = "NVL(lv_mt.meaning, 'Indirect Material')"
 
     def _ph_params(self, f: dict) -> dict:
         return {

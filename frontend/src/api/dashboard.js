@@ -118,10 +118,11 @@ export const purchasingApi = {
   getPurchaseHistoryBySupplier: (p) => api.get("/dashboard/purchasing/purchase-history/by-supplier", { params: p }),
 
   // LOV
-  getOrganizations: () => api.get("/dashboard/purchasing/lov/organizations"),
-  getItems:         (orgId, search) => api.get("/dashboard/purchasing/lov/items", { params: { org_id: orgId, search } }),
-  getCategories:    () => api.get("/dashboard/purchasing/lov/categories"),
-  getCurrencies:    () => api.get("/dashboard/purchasing/lov/currencies"),
+  getOrganizations:  () => api.get("/dashboard/purchasing/lov/organizations"),
+  getItems:          (orgId, search) => api.get("/dashboard/purchasing/lov/items", { params: { org_id: orgId, search } }),
+  getCategories:     () => api.get("/dashboard/purchasing/lov/categories"),
+  getCurrencies:     () => api.get("/dashboard/purchasing/lov/currencies"),
+  getMaterialTypes:  () => api.get("/dashboard/purchasing/lov/material-types"),
 
   // Price Analysis
   getPriceAnalysis: (p) => api.get("/dashboard/purchasing/price-analysis", { params: p }),

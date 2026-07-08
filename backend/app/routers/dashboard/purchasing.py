@@ -206,6 +206,11 @@ async def get_currencies(user: CurrentUser = Depends(require_role(Roles.PURCHASI
     return await PurchasingService().get_currencies()
 
 
+@router.get("/lov/material-types")
+async def get_material_types(user: CurrentUser = Depends(require_role(Roles.PURCHASING))):
+    return await PurchasingService().get_material_types()
+
+
 # ── Manufacturer Master ───────────────────────────────────────────────────────
 
 class ManufacturerIn(BaseModel):
