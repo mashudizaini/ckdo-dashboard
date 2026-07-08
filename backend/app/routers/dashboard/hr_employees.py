@@ -258,12 +258,14 @@ async def list_employees(
     level:      Optional[str] = Query(None),
     team:       Optional[str] = Query(None),
     sex:        Optional[str] = Query(None),
+    sort_by:    str           = Query("full_name"),
+    sort_dir:   str           = Query("asc"),
     page:       int           = Query(1, ge=1),
     page_size:  int           = Query(25, ge=1, le=100),
     db:         AsyncSession  = Depends(get_db),
     user:       CurrentUser   = Depends(require_role(Roles.HR)),
 ):
-    """List karyawan dengan search, filter, dan pagination."""
+    """List karyawan dengan search, filter, pagination, dan sorting."""
     q = select(Employee)
 
     if search:
@@ -288,8 +290,19 @@ async def list_employees(
     count_q  = await db.execute(select(func.count()).select_from(q.subquery()))
     total    = count_q.scalar() or 0
 
-    # Paginated result
-    q        = q.order_by(Employee.department, Employee.full_name)
+    # Dynamic sort
+    _SORT_COLS = {
+        "user_id":         Employee.user_id,
+        "full_name":       Employee.full_name,
+        "department":      Employee.department,
+        "division":        Employee.division,
+        "job_title":       Employee.job_title,
+        "work_placement":  Employee.work_placement,
+        "status":          Employee.status,
+        "date_of_joining": Employee.date_of_joining,
+    }
+    sort_col = _SORT_COLS.get(sort_by, Employee.full_name)
+    q        = q.order_by(sort_col.desc() if sort_dir == "desc" else sort_col.asc())
     q        = q.offset((page - 1) * page_size).limit(page_size)
     result   = await db.execute(q)
     employees = result.scalars().all()

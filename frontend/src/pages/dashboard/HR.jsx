@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Users, UserCheck, Umbrella, BarChart2, RefreshCw,
   Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck,
-  Wallet, Download, ChevronDown, ListChecks, FileSearch, BookOpen, Trash2,
-  QrCode, Plus,
+  Wallet, Download, ChevronDown, ChevronUp, ListChecks, FileSearch, BookOpen, Trash2,
+  QrCode, Plus, ArrowUpDown,
 } from "lucide-react";
 import EmployeeUpload from "./EmployeeUpload";
 import AttendanceUpload from "./AttendanceUpload";
@@ -157,6 +157,8 @@ function EmployeeTable() {
   const [departments, setDepartments]   = useState([]);
   const [teams,       setTeams]         = useState([]);
   const [summary,    setSummary]    = useState(null);
+  const [sortBy,     setSortBy]     = useState("full_name");
+  const [sortDir,    setSortDir]    = useState("asc");
 
   const PAGE_SIZE = 25;
 
@@ -188,6 +190,8 @@ function EmployeeTable() {
       const params = new URLSearchParams({
         page:      page,
         page_size: PAGE_SIZE,
+        sort_by:   sortBy,
+        sort_dir:  sortDir,
         ...(search       ? { search }               : {}),
         ...(deptFilter   ? { department: deptFilter } : {}),
         ...(statusFilter ? { status: statusFilter }  : {}),
@@ -198,7 +202,7 @@ function EmployeeTable() {
       if (res.ok) setData(await res.json());
     } catch (_) {}
     finally { setLoading(false); }
-  }, [page, search, deptFilter, statusFilter, teamFilter, genderFilter]); // eslint-disable-line
+  }, [page, search, deptFilter, statusFilter, teamFilter, genderFilter, sortBy, sortDir]); // eslint-disable-line
 
   useEffect(() => { fetchDepts(); fetchSummary(); fetchTeams(""); }, []); // eslint-disable-line
   useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
@@ -209,6 +213,16 @@ function EmployeeTable() {
   const handleDept     = (v) => { setDeptFilter(v);   setTeamFilter(""); fetchTeams(v); setPage(1); };
   const handleStatus   = (v) => { setStatusFilter(v); setPage(1); };
   const handleTeam     = (v) => { setTeamFilter(v);   setPage(1); };
+
+  const handleSort = (field) => {
+    if (sortBy === field) {
+      setSortDir((d) => d === "asc" ? "desc" : "asc");
+    } else {
+      setSortBy(field);
+      setSortDir("asc");
+    }
+    setPage(1);
+  };
 
   const handleCardClick = (id) => {
     if (activeCard === id) {
@@ -326,9 +340,38 @@ function EmployeeTable() {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-800/60">
-              {["NIK", "Name", "Department", "Division / Team", "Position", "Placement", "Status", "Join Date"].map((h) => (
-                <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
-              ))}
+              {[
+                { label: "NIK",             field: "user_id" },
+                { label: "Name",            field: "full_name" },
+                { label: "Department",      field: "department" },
+                { label: "Division / Team", field: "division" },
+                { label: "Position",        field: "job_title" },
+                { label: "Placement",       field: "work_placement" },
+                { label: "Status",          field: "status" },
+                { label: "Join Date",       field: "date_of_joining" },
+              ].map(({ label, field }) => {
+                const active = sortBy === field;
+                return (
+                  <th
+                    key={field}
+                    onClick={() => handleSort(field)}
+                    className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer select-none group"
+                    style={{ color: active ? "#a5b4fc" : "#6b7280" }}
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {label}
+                      <span className={`transition-opacity ${active ? "opacity-100" : "opacity-0 group-hover:opacity-50"}`}>
+                        {active
+                          ? (sortDir === "asc"
+                            ? <ChevronUp size={11} className="text-indigo-400" />
+                            : <ChevronDown size={11} className="text-indigo-400" />)
+                          : <ArrowUpDown size={10} />
+                        }
+                      </span>
+                    </span>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800">
