@@ -9,6 +9,9 @@ RUN apt-get update && apt-get install -y \
     curl \
     ffmpeg \
     libaio1t64 \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-ind \
     && ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1 \
     && rm -rf /var/lib/apt/lists/*
 

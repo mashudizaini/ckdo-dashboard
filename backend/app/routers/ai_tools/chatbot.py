@@ -96,8 +96,19 @@ async def ingest_document(
             if ext == ".pdf":
                 import fitz
                 doc = fitz.open(tmp_path)
-                content = "\n".join(page.get_text() for page in doc)
+                pages_text = []
+                for page in doc:
+                    text = page.get_text()
+                    if not text.strip():
+                        # Scanned/image PDF — try OCR via Tesseract
+                        try:
+                            tp = page.get_textpage_ocr(dpi=200, language="ind+eng", full=True)
+                            text = page.get_text(textpage=tp)
+                        except Exception:
+                            pass
+                    pages_text.append(text)
                 doc.close()
+                content = "\n".join(pages_text)
             elif ext in (".docx", ".doc"):
                 import docx
                 d = docx.Document(tmp_path)
@@ -112,7 +123,10 @@ async def ingest_document(
                 os.remove(tmp_path)
 
     if not content.strip():
-        raise HTTPException(400, "Tidak ada teks untuk di-ingest (isi text atau upload file)")
+        detail = "Tidak ada teks yang berhasil diekstrak dari file."
+        if from_file and file_name and file_name.lower().endswith(".pdf"):
+            detail += " PDF ini mungkin merupakan file scan (image-only). Pastikan Tesseract OCR terinstall di server, atau konversi PDF ke format digital terlebih dahulu."
+        raise HTTPException(400, detail)
 
     try:
         ids = await asyncio.wait_for(
