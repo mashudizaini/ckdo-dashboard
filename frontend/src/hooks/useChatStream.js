@@ -1,19 +1,42 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useAuthStore } from "@/store/authStore";
 
 /**
  * Shared streaming-chat logic for the AI Chatbot — used by both the full
  * /ai/chatbot page and the floating mini ChatWidget so the SSE parsing
  * logic lives in exactly one place.
+ *
+ * storageKey: optional localStorage key to persist messages across sessions.
  */
-export function useChatStream(initialGreeting) {
+export function useChatStream(initialGreeting, storageKey = null) {
   const { token } = useAuthStore();
-  const [messages, setMessages] = useState(
-    initialGreeting ? [{ role: "assistant", text: initialGreeting }] : []
-  );
-  const [input, setInput] = useState("");
+
+  const [messages, setMessages] = useState(() => {
+    if (storageKey) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(storageKey));
+        if (Array.isArray(saved) && saved.length > 0) return saved;
+      } catch {}
+    }
+    return initialGreeting ? [{ role: "assistant", text: initialGreeting }] : [];
+  });
+
+  const [input, setInput]       = useState("");
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef(null);
+
+  // Persist to localStorage after each completed response
+  useEffect(() => {
+    if (streaming || !storageKey) return;
+    const toSave = messages.filter(m => m.text).slice(-100);
+    try { localStorage.setItem(storageKey, JSON.stringify(toSave)); } catch {}
+  }, [messages, streaming]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const clearHistory = () => {
+    const fresh = initialGreeting ? [{ role: "assistant", text: initialGreeting }] : [];
+    setMessages(fresh);
+    if (storageKey) { try { localStorage.removeItem(storageKey); } catch {} }
+  };
 
   const sendMessage = async (textOverride) => {
     const text = (textOverride ?? input).trim();
@@ -40,9 +63,9 @@ export function useChatStream(initialGreeting) {
 
       if (!res.ok || !res.body) throw new Error(`Request failed (${res.status})`);
 
-      const reader = res.body.getReader();
+      const reader  = res.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = "";
+      let buffer    = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -78,7 +101,7 @@ export function useChatStream(initialGreeting) {
       if (e.name === "AbortError") return;
       setMessages((prev) => {
         const next = [...prev];
-        next[next.length - 1] = { role: "assistant", text: `Sorry, something went wrong: ${e.message}`, error: true };
+        next[next.length - 1] = { role: "assistant", text: `Maaf, terjadi kesalahan: ${e.message}`, error: true };
         return next;
       });
     } finally {
@@ -86,5 +109,5 @@ export function useChatStream(initialGreeting) {
     }
   };
 
-  return { messages, input, setInput, streaming, sendMessage };
+  return { messages, input, setInput, streaming, sendMessage, clearHistory };
 }
