@@ -95,8 +95,10 @@ async def ingest_document(
         try:
             if ext == ".pdf":
                 import fitz
+                import subprocess, shutil
                 doc = fitz.open(tmp_path)
                 pages_text = []
+                ocr_errors = []
                 for page in doc:
                     text = page.get_text()
                     if not text.strip():
@@ -104,11 +106,15 @@ async def ingest_document(
                         try:
                             tp = page.get_textpage_ocr(dpi=200, language="ind+eng", full=True)
                             text = page.get_text(textpage=tp)
-                        except Exception:
-                            pass
+                        except Exception as ocr_err:
+                            ocr_errors.append(str(ocr_err))
                     pages_text.append(text)
                 doc.close()
                 content = "\n".join(pages_text)
+                if not content.strip() and ocr_errors:
+                    # Expose OCR error so admin can diagnose
+                    tess_path = shutil.which("tesseract") or "not found"
+                    raise HTTPException(500, f"OCR gagal (tesseract: {tess_path}): {ocr_errors[0]}")
             elif ext in (".docx", ".doc"):
                 import docx
                 d = docx.Document(tmp_path)
