@@ -292,14 +292,20 @@ async def list_employees(
 
     # Dynamic sort
     _SORT_COLS = {
-        "user_id":         Employee.user_id,
-        "full_name":       Employee.full_name,
-        "department":      Employee.department,
-        "division":        Employee.division,
-        "job_title":       Employee.job_title,
-        "work_placement":  Employee.work_placement,
-        "status":          Employee.status,
-        "date_of_joining": Employee.date_of_joining,
+        "user_id":          Employee.user_id,
+        "full_name":        Employee.full_name,
+        "level":            Employee.level,
+        "department":       Employee.department,
+        "division":         Employee.division,
+        "job_title":        Employee.job_title,
+        "work_placement":   Employee.work_placement,
+        "status":           Employee.status,
+        "sex":              Employee.sex,
+        "employee_grade":   Employee.employee_grade,
+        "education_degree": Employee.education_degree,
+        "marital_status":   Employee.marital_status,
+        "date_of_joining":  Employee.date_of_joining,
+        "end_pkwt":         Employee.end_pkwt,
     }
     sort_col = _SORT_COLS.get(sort_by, Employee.full_name)
     q        = q.order_by(sort_col.desc() if sort_dir == "desc" else sort_col.asc())
@@ -309,27 +315,35 @@ async def list_employees(
 
     def _emp_dict(e: Employee) -> dict:
         return {
-            "id":              e.id,
-            "user_id":         e.user_id,
-            "full_name":       e.full_name,
-            "sex":             e.sex,
-            "level":           e.level,
-            "department":      e.department,
-            "division":        e.division,
-            "team":            e.team,
-            "job_title":       e.job_title,
-            "work_placement":  e.work_placement,
-            "status":          e.status,
-            "date_of_joining": str(e.date_of_joining) if e.date_of_joining else None,
-            "date_of_birth":   str(e.date_of_birth)   if e.date_of_birth   else None,
-            "retire_date":     str(e.retire_date)      if e.retire_date     else None,
-            "end_pkwt":        str(e.end_pkwt)         if e.end_pkwt        else None,
-            "marital_status":  e.marital_status,
-            "religion":        e.religion,
-            "education_degree":e.education_degree,
-            "company_email":   e.company_email,
-            "phone_number":    e.phone_number,
-            "employee_grade":  e.employee_grade,
+            "id":               e.id,
+            "user_id":          e.user_id,
+            "full_name":        e.full_name,
+            "sex":              e.sex,
+            "level":            e.level,
+            "department":       e.department,
+            "division":         e.division,
+            "team":             e.team,
+            "job_title":        e.job_title,
+            "work_placement":   e.work_placement,
+            "status":           e.status,
+            "employee_grade":   e.employee_grade,
+            "education_degree": e.education_degree,
+            "education_school": e.education_school,
+            "education_major":  e.education_major,
+            "marital_status":   e.marital_status,
+            "religion":         e.religion,
+            "blood_type":       e.blood_type,
+            "phone_number":     e.phone_number,
+            "company_email":    e.company_email,
+            "personal_email":   e.personal_email,
+            "date_of_joining":  str(e.date_of_joining)  if e.date_of_joining  else None,
+            "date_of_birth":    str(e.date_of_birth)    if e.date_of_birth    else None,
+            "retire_date":      str(e.retire_date)       if e.retire_date      else None,
+            "end_pkwt":         str(e.end_pkwt)          if e.end_pkwt         else None,
+            "starting_pkwt":    str(e.starting_pkwt)     if e.starting_pkwt    else None,
+            "pkwt_ke":          e.pkwt_ke,
+            "permanent_date":   str(e.permanent_date)    if e.permanent_date   else None,
+            "resign_date":      str(e.resign_date)        if e.resign_date      else None,
         }
 
     return {
@@ -338,6 +352,104 @@ async def list_employees(
         "page_size":  page_size,
         "pages":      (total + page_size - 1) // page_size,
         "employees":  [_emp_dict(e) for e in employees],
+    }
+
+
+@router.get("/monthly-summary")
+async def get_monthly_summary(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Monthly headcount trend + demographic breakdowns."""
+    from datetime import date
+    from calendar import monthrange
+
+    MN = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+
+    # Monthly joinings map
+    joins_q = await db.execute(
+        select(
+            func.to_char(Employee.date_of_joining, "YYYY-MM").label("month"),
+            func.count().label("cnt"),
+        )
+        .where(Employee.date_of_joining.isnot(None))
+        .group_by(func.to_char(Employee.date_of_joining, "YYYY-MM"))
+    )
+    joins_map = {r[0]: r[1] for r in joins_q.fetchall()}
+
+    # All join/resign pairs for cumulative headcount
+    emps_q = await db.execute(
+        select(Employee.date_of_joining, Employee.resign_date)
+        .where(Employee.date_of_joining.isnot(None))
+    )
+    emps = emps_q.fetchall()
+
+    today = date.today()
+
+    def _month_back(base_year, base_month, n):
+        """Return (year, month) n months before (base_year, base_month)."""
+        m = base_month - n
+        y = base_year
+        while m <= 0:
+            m += 12
+            y -= 1
+        return y, m
+
+    # Headcount trend — last 36 months
+    headcount_trend = []
+    for i in range(35, -1, -1):
+        y, m = _month_back(today.year, today.month, i)
+        last_day  = date(y, m, monthrange(y, m)[1])
+        first_day = date(y, m, 1)
+        cnt = sum(
+            1 for join, resign in emps
+            if join <= last_day and (resign is None or resign >= first_day)
+        )
+        headcount_trend.append({"month": f"{y}-{m:02d}", "label": f"{MN[m-1]} '{str(y)[2:]}", "count": cnt})
+
+    # Monthly joinings — last 24 months
+    monthly_joins = []
+    for i in range(23, -1, -1):
+        y, m = _month_back(today.year, today.month, i)
+        key = f"{y}-{m:02d}"
+        monthly_joins.append({"month": key, "label": f"{MN[m-1]} '{str(y)[2:]}", "joins": joins_map.get(key, 0)})
+
+    # Generic breakdown helper
+    async def _breakdown(col):
+        q = await db.execute(
+            select(col, func.count().label("total"))
+            .where(col.isnot(None), col != "")
+            .group_by(col)
+            .order_by(func.count().desc())
+        )
+        return [{"name": r[0], "total": r[1]} for r in q.fetchall()]
+
+    by_dept    = await _breakdown(Employee.department)
+    by_level   = await _breakdown(Employee.level)
+    by_edu     = await _breakdown(Employee.education_degree)
+    by_marital = await _breakdown(Employee.marital_status)
+    by_status  = await _breakdown(Employee.status)
+    by_grade   = await _breakdown(Employee.employee_grade)
+    by_religion= await _breakdown(Employee.religion)
+
+    sex_q = await db.execute(select(Employee.sex, func.count().label("t")).group_by(Employee.sex))
+    sex_map = {r[0]: r[1] for r in sex_q.fetchall()}
+    by_gender = [
+        {"name": "Laki-laki", "total": sex_map.get("M", 0)},
+        {"name": "Perempuan", "total": sex_map.get("F", 0)},
+    ]
+
+    return {
+        "headcount_trend": headcount_trend,
+        "monthly_joins":   monthly_joins,
+        "by_dept":         by_dept,
+        "by_level":        by_level,
+        "by_education":    by_edu,
+        "by_marital":      by_marital,
+        "by_status":       by_status,
+        "by_grade":        by_grade,
+        "by_religion":     by_religion,
+        "by_gender":       by_gender,
     }
 
 

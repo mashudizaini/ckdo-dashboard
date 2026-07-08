@@ -87,11 +87,12 @@ export default function HRDashboard() {
       {activeSection === "employees" && (
         <SectionCard title="Employee Data">
           <SubTabs
-            tabs={[{ id: "list", label: "Employee List" }, { id: "upload", label: "Upload Excel" }]}
+            tabs={[{ id: "list", label: "Employee List" }, { id: "summary", label: "Employee Summary" }, { id: "upload", label: "Upload Excel" }]}
             active={empSub} onChange={setEmpSub}
           />
-          {empSub === "list" && <EmployeeTable />}
-          {empSub === "upload" && <EmployeeUpload />}
+          {empSub === "list"    && <EmployeeTable />}
+          {empSub === "summary" && <EmployeeSummarySection />}
+          {empSub === "upload"  && <EmployeeUpload />}
         </SectionCard>
       )}
 
@@ -336,88 +337,95 @@ function EmployeeTable() {
       </div>
 
       {/* Tabel */}
-      <div className="overflow-x-auto rounded-lg border border-gray-800">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-gray-800/60">
-              {[
-                { label: "NIK",             field: "user_id" },
-                { label: "Name",            field: "full_name" },
-                { label: "Department",      field: "department" },
-                { label: "Division / Team", field: "division" },
-                { label: "Position",        field: "job_title" },
-                { label: "Placement",       field: "work_placement" },
-                { label: "Status",          field: "status" },
-                { label: "Join Date",       field: "date_of_joining" },
-              ].map(({ label, field }) => {
-                const active = sortBy === field;
-                return (
-                  <th
-                    key={field}
-                    onClick={() => handleSort(field)}
-                    className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer select-none group"
-                    style={{ color: active ? "#a5b4fc" : "#6b7280" }}
-                  >
-                    <span className="inline-flex items-center gap-1">
-                      {label}
-                      <span className={`transition-opacity ${active ? "opacity-100" : "opacity-0 group-hover:opacity-50"}`}>
-                        {active
-                          ? (sortDir === "asc"
-                            ? <ChevronUp size={11} className="text-indigo-400" />
-                            : <ChevronDown size={11} className="text-indigo-400" />)
-                          : <ArrowUpDown size={10} />
-                        }
-                      </span>
-                    </span>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-800">
-            {loading ? (
-              <tr>
-                <td colSpan={8} className="py-12 text-center">
-                  <Loader size={16} className="mx-auto animate-spin text-gray-600" />
-                </td>
-              </tr>
-            ) : data.employees.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="py-12 text-center text-xs text-gray-600">
-                  {search || deptFilter || statusFilter || genderFilter
-                    ? "No employees matching filter"
-                    : "No employee data yet. Upload Excel in Employee Upload tab."}
-                </td>
-              </tr>
-            ) : (
-              data.employees.map((e) => (
-                <tr key={e.user_id} className="hover:bg-gray-800/40 transition-colors">
-                  <td className="px-3 py-2.5 font-mono text-xs text-gray-500">{e.user_id}</td>
-                  <td className="px-3 py-2.5 font-medium text-gray-200 whitespace-nowrap">{e.full_name}</td>
-                  <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap">{e.department || "—"}</td>
-                  <td className="px-3 py-2.5 text-gray-500 text-xs">
-                    {[e.division, e.team].filter(Boolean).join(" / ") || "—"}
-                  </td>
-                  <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap max-w-[180px] truncate" title={e.job_title}>{e.job_title || "—"}</td>
-                  <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{e.work_placement || "—"}</td>
-                  <td className="px-3 py-2.5">
-                    {e.status ? (
-                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[e.status] || "bg-gray-700 text-gray-400 border-gray-600"}`}>
-                        {e.status}
-                      </span>
-                    ) : "—"}
-                  </td>
-                  <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap text-xs">
-                    {e.date_of_joining
-                      ? new Date(e.date_of_joining).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
-                      : "—"}
-                  </td>
+      {(() => {
+        const COLS = [
+          { label: "NIK",             field: "user_id",          align: "left" },
+          { label: "Name",            field: "full_name",         align: "left" },
+          { label: "Level",           field: "level",             align: "left" },
+          { label: "Department",      field: "department",        align: "left" },
+          { label: "Division / Team", field: "division",          align: "left" },
+          { label: "Position",        field: "job_title",         align: "left" },
+          { label: "Placement",       field: "work_placement",    align: "left" },
+          { label: "Status",          field: "status",            align: "left" },
+          { label: "Gender",          field: "sex",               align: "center" },
+          { label: "Grade",           field: "employee_grade",    align: "center" },
+          { label: "Education",       field: "education_degree",  align: "left" },
+          { label: "Marital",         field: "marital_status",    align: "left" },
+          { label: "Join Date",       field: "date_of_joining",   align: "left" },
+          { label: "End PKWT",        field: "end_pkwt",          align: "left" },
+          { label: "Phone",           field: "phone_number",      align: "left" },
+        ];
+        const fmtDate = (v) => v
+          ? new Date(v).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
+          : "—";
+        return (
+          <div className="overflow-x-auto rounded-lg border border-gray-800">
+            <table className="w-full text-sm" style={{ minWidth: 1400 }}>
+              <thead>
+                <tr className="bg-gray-800/60">
+                  {COLS.map(({ label, field, align }) => {
+                    const active = sortBy === field;
+                    return (
+                      <th
+                        key={field}
+                        onClick={() => handleSort(field)}
+                        className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer select-none group"
+                        style={{ color: active ? "#a5b4fc" : "#6b7280", textAlign: align }}
+                      >
+                        <span className={`inline-flex items-center gap-1 ${align === "center" ? "justify-center" : ""}`}>
+                          {label}
+                          <span className={`transition-opacity ${active ? "opacity-100" : "opacity-0 group-hover:opacity-50"}`}>
+                            {active
+                              ? (sortDir === "asc" ? <ChevronUp size={11} className="text-indigo-400" /> : <ChevronDown size={11} className="text-indigo-400" />)
+                              : <ArrowUpDown size={10} />}
+                          </span>
+                        </span>
+                      </th>
+                    );
+                  })}
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+              </thead>
+              <tbody className="divide-y divide-gray-800">
+                {loading ? (
+                  <tr><td colSpan={COLS.length} className="py-12 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></td></tr>
+                ) : data.employees.length === 0 ? (
+                  <tr><td colSpan={COLS.length} className="py-12 text-center text-xs text-gray-600">
+                    {search || deptFilter || statusFilter || genderFilter ? "No employees matching filter" : "No employee data yet. Upload Excel in Employee Upload tab."}
+                  </td></tr>
+                ) : data.employees.map((e) => (
+                  <tr key={e.user_id} className="hover:bg-gray-800/40 transition-colors">
+                    <td className="px-3 py-2.5 font-mono text-xs text-gray-500 whitespace-nowrap">{e.user_id}</td>
+                    <td className="px-3 py-2.5 font-medium text-gray-200 whitespace-nowrap">{e.full_name}</td>
+                    <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap text-xs">{e.level || "—"}</td>
+                    <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap">{e.department || "—"}</td>
+                    <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{[e.division, e.team].filter(Boolean).join(" / ") || "—"}</td>
+                    <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap max-w-[200px] truncate" title={e.job_title}>{e.job_title || "—"}</td>
+                    <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{e.work_placement || "—"}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      {e.status
+                        ? <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[e.status] || "bg-gray-700 text-gray-400 border-gray-600"}`}>{e.status}</span>
+                        : "—"}
+                    </td>
+                    <td className="px-3 py-2.5 text-center text-xs text-gray-500">
+                      {e.sex === "M" ? <span className="text-blue-400 font-semibold">M</span> : e.sex === "F" ? <span className="text-pink-400 font-semibold">F</span> : "—"}
+                    </td>
+                    <td className="px-3 py-2.5 text-center text-xs text-gray-400 font-mono">{e.employee_grade || "—"}</td>
+                    <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap text-xs">{e.education_degree || "—"}</td>
+                    <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap text-xs">{e.marital_status || "—"}</td>
+                    <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap text-xs">{fmtDate(e.date_of_joining)}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap text-xs">
+                      {e.end_pkwt
+                        ? <span className={`${new Date(e.end_pkwt) < new Date() ? "text-red-400" : "text-amber-400"}`}>{fmtDate(e.end_pkwt)}</span>
+                        : <span className="text-gray-700">—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap text-xs font-mono">{e.phone_number || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
 
       {/* Pagination */}
       {data.pages > 1 && (
@@ -454,6 +462,197 @@ function EmployeeTable() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Employee Monthly Summary + Charts ────────────────────────────────────────
+function EmployeeSummarySection() {
+  const { token } = useAuthStore();
+  const [data, setData]       = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/v1/dashboard/hr/employees/monthly-summary", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => r.json())
+      .then((d) => setData(d))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []); // eslint-disable-line
+
+  if (loading) return <div className="py-20 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-600" /></div>;
+  if (!data)   return <div className="py-10 text-center text-xs text-gray-600">Gagal memuat data summary.</div>;
+
+  const {
+    headcount_trend = [], monthly_joins = [],
+    by_dept = [], by_level = [], by_education = [],
+    by_marital = [], by_status = [], by_grade = [], by_gender = [],
+  } = data;
+
+  const latest     = headcount_trend[headcount_trend.length - 1]?.count ?? 0;
+  const prev       = headcount_trend[headcount_trend.length - 2]?.count ?? 0;
+  const delta      = latest - prev;
+  const avgJoin12  = Math.round(monthly_joins.slice(-12).reduce((s, m) => s + m.joins, 0) / 12);
+  const CHART_H    = 200;
+
+  const COLORS = ["#6366f1","#34d399","#f59e0b","#f43f5e","#60a5fa","#a78bfa","#fb923c","#4ade80","#38bdf8","#c084fc"];
+
+  const {
+    AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
+    ResponsiveContainer, Cell, PieChart, Pie, Legend,
+  } = window.Recharts || {};
+
+  // Recharts might not be available as a global — import properly
+  const [RC, setRC] = useState(null);
+  useEffect(() => {
+    import("recharts").then((mod) => setRC(mod)).catch(() => {});
+  }, []);
+
+  const tickStyle = { fill: "#9ca3af", fontSize: 10 };
+  const tooltipStyle = {
+    contentStyle: { background: "#0f172a", border: "1px solid #374151", borderRadius: 8, fontSize: 11 },
+    labelStyle: { color: "#f3f4f6", fontWeight: 600 },
+    itemStyle: { color: "#e5e7eb" },
+    cursor: { fill: "rgba(255,255,255,0.04)" },
+  };
+
+  function ChartCard({ title, children }) {
+    return (
+      <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{title}</p>
+        {children}
+      </div>
+    );
+  }
+
+  function HBarList({ items, max, color = "#6366f1" }) {
+    return (
+      <div className="space-y-1.5">
+        {items.slice(0, 15).map((it, i) => (
+          <div key={i} className="flex items-center gap-2 text-xs">
+            <div className="w-28 text-gray-400 truncate shrink-0" title={it.name}>{it.name}</div>
+            <div className="flex-1 bg-gray-800 rounded-full h-3 overflow-hidden">
+              <div className="h-3 rounded-full" style={{ width: `${Math.round((it.total / max) * 100)}%`, background: COLORS[i % COLORS.length] }} />
+            </div>
+            <div className="w-8 text-right font-semibold text-gray-300">{it.total}</div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  const deptMax  = Math.max(...by_dept.map(d => d.total), 1);
+  const levelMax = Math.max(...by_level.map(d => d.total), 1);
+  const eduMax   = Math.max(...by_education.map(d => d.total), 1);
+
+  return (
+    <div className="space-y-4 mt-2">
+      {/* KPI Row */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Total Karyawan",     val: latest,    sub: delta >= 0 ? `+${delta} bulan ini` : `${delta} bulan ini`, color: "#6366f1" },
+          { label: "Rata-rata Join/Bln", val: avgJoin12, sub: "12 bulan terakhir", color: "#34d399" },
+          { label: "Laki-laki",          val: by_gender.find(g => g.name === "Laki-laki")?.total ?? 0,  sub: "M", color: "#60a5fa" },
+          { label: "Perempuan",          val: by_gender.find(g => g.name === "Perempuan")?.total ?? 0,  sub: "F", color: "#f43f5e" },
+        ].map(({ label, val, sub, color }) => (
+          <div key={label} className="rounded-xl border border-gray-800 bg-gray-900 p-4">
+            <div className="text-2xl font-bold" style={{ color }}>{val}</div>
+            <div className="text-xs font-semibold text-gray-300 mt-0.5">{label}</div>
+            <div className="text-xs text-gray-600 mt-0.5">{sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Charts row 1: headcount trend + monthly joins */}
+      {RC ? (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <ChartCard title="Tren Headcount (36 Bulan)">
+              <RC.ResponsiveContainer width="100%" height={CHART_H}>
+                <RC.AreaChart data={headcount_trend} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
+                  <defs>
+                    <linearGradient id="hcGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <RC.XAxis dataKey="label" tick={tickStyle} interval={5} />
+                  <RC.YAxis tick={tickStyle} />
+                  <RC.Tooltip {...tooltipStyle} formatter={(v) => [v, "Headcount"]} />
+                  <RC.Area type="monotone" dataKey="count" stroke="#6366f1" strokeWidth={2} fill="url(#hcGrad)" dot={false} />
+                </RC.AreaChart>
+              </RC.ResponsiveContainer>
+            </ChartCard>
+
+            <ChartCard title="Penerimaan Karyawan per Bulan (24 Bln)">
+              <RC.ResponsiveContainer width="100%" height={CHART_H}>
+                <RC.BarChart data={monthly_joins} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
+                  <RC.XAxis dataKey="label" tick={tickStyle} interval={3} />
+                  <RC.YAxis tick={tickStyle} allowDecimals={false} />
+                  <RC.Tooltip {...tooltipStyle} formatter={(v) => [v, "Karyawan Baru"]} />
+                  <RC.Bar dataKey="joins" fill="#34d399" radius={[3, 3, 0, 0]}>
+                    {monthly_joins.map((_, i) => <RC.Cell key={i} fill={i === monthly_joins.length - 1 ? "#6366f1" : "#34d399"} />)}
+                  </RC.Bar>
+                </RC.BarChart>
+              </RC.ResponsiveContainer>
+            </ChartCard>
+          </div>
+
+          {/* Charts row 2: status + gender + grade */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <ChartCard title="Status Karyawan">
+              <RC.ResponsiveContainer width="100%" height={160}>
+                <RC.PieChart>
+                  <RC.Pie data={by_status} cx="50%" cy="50%" outerRadius={65} dataKey="total" nameKey="name" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false} fontSize={10}>
+                    {by_status.map((_, i) => <RC.Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                  </RC.Pie>
+                  <RC.Tooltip {...tooltipStyle} />
+                </RC.PieChart>
+              </RC.ResponsiveContainer>
+            </ChartCard>
+
+            <ChartCard title="Jenis Kelamin">
+              <RC.ResponsiveContainer width="100%" height={160}>
+                <RC.PieChart>
+                  <RC.Pie data={by_gender} cx="50%" cy="50%" outerRadius={65} dataKey="total" nameKey="name" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false} fontSize={10}>
+                    <RC.Cell fill="#60a5fa" />
+                    <RC.Cell fill="#f43f5e" />
+                  </RC.Pie>
+                  <RC.Tooltip {...tooltipStyle} />
+                </RC.PieChart>
+              </RC.ResponsiveContainer>
+            </ChartCard>
+
+            <ChartCard title="Status Pernikahan">
+              <RC.ResponsiveContainer width="100%" height={160}>
+                <RC.PieChart>
+                  <RC.Pie data={by_marital} cx="50%" cy="50%" outerRadius={65} dataKey="total" nameKey="name" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false} fontSize={10}>
+                    {by_marital.map((_, i) => <RC.Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                  </RC.Pie>
+                  <RC.Tooltip {...tooltipStyle} />
+                </RC.PieChart>
+              </RC.ResponsiveContainer>
+            </ChartCard>
+          </div>
+        </>
+      ) : (
+        <div className="py-6 text-center text-xs text-gray-600">Loading charts…</div>
+      )}
+
+      {/* Breakdown lists row */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <ChartCard title="Per Departemen">
+          <HBarList items={by_dept} max={deptMax} />
+        </ChartCard>
+        <ChartCard title="Per Level Jabatan">
+          <HBarList items={by_level} max={levelMax} />
+        </ChartCard>
+        <ChartCard title="Per Pendidikan">
+          <HBarList items={by_education} max={eduMax} />
+        </ChartCard>
+      </div>
     </div>
   );
 }
