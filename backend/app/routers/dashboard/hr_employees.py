@@ -361,33 +361,40 @@ async def get_monthly_summary(
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
     """Monthly headcount trend + demographic breakdowns."""
+    import traceback
     from datetime import date
     from calendar import monthrange
+    from sqlalchemy import and_, cast, String
 
     MN = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 
-    # Monthly joinings map
-    joins_q = await db.execute(
-        select(
-            func.to_char(Employee.date_of_joining, "YYYY-MM").label("month"),
-            func.count().label("cnt"),
+    try:
+        # Monthly joinings map — cast date to text for grouping
+        joins_q = await db.execute(
+            select(
+                func.to_char(Employee.date_of_joining, "YYYY-MM").label("month"),
+                func.count().label("cnt"),
+            )
+            .where(Employee.date_of_joining.isnot(None))
+            .group_by(func.to_char(Employee.date_of_joining, "YYYY-MM"))
         )
-        .where(Employee.date_of_joining.isnot(None))
-        .group_by(func.to_char(Employee.date_of_joining, "YYYY-MM"))
-    )
-    joins_map = {r[0]: r[1] for r in joins_q.fetchall()}
+        joins_map = {r[0]: r[1] for r in joins_q.fetchall()}
+    except Exception as e:
+        raise HTTPException(500, f"joins_q error: {e}\n{traceback.format_exc()}")
 
-    # All join/resign pairs for cumulative headcount
-    emps_q = await db.execute(
-        select(Employee.date_of_joining, Employee.resign_date)
-        .where(Employee.date_of_joining.isnot(None))
-    )
-    emps = emps_q.fetchall()
+    try:
+        # All join/resign pairs for cumulative headcount
+        emps_q = await db.execute(
+            select(Employee.date_of_joining, Employee.resign_date)
+            .where(Employee.date_of_joining.isnot(None))
+        )
+        emps = [(r[0], r[1]) for r in emps_q.fetchall()]
+    except Exception as e:
+        raise HTTPException(500, f"emps_q error: {e}")
 
     today = date.today()
 
     def _month_back(base_year, base_month, n):
-        """Return (year, month) n months before (base_year, base_month)."""
         m = base_month - n
         y = base_year
         while m <= 0:
@@ -414,26 +421,33 @@ async def get_monthly_summary(
         key = f"{y}-{m:02d}"
         monthly_joins.append({"month": key, "label": f"{MN[m-1]} '{str(y)[2:]}", "joins": joins_map.get(key, 0)})
 
-    # Generic breakdown helper
-    async def _breakdown(col):
-        q = await db.execute(
-            select(col, func.count().label("total"))
-            .where(col.isnot(None), col != "")
-            .group_by(col)
-            .order_by(func.count().desc())
-        )
-        return [{"name": r[0], "total": r[1]} for r in q.fetchall()]
+    # Generic breakdown helper — explicit AND to avoid any dialect issues
+    async def _bd(col):
+        try:
+            q = await db.execute(
+                select(col, func.count().label("total"))
+                .where(and_(col.isnot(None), col != ""))
+                .group_by(col)
+                .order_by(func.count().desc())
+            )
+            return [{"name": r[0], "total": r[1]} for r in q.fetchall()]
+        except Exception:
+            return []
 
-    by_dept    = await _breakdown(Employee.department)
-    by_level   = await _breakdown(Employee.level)
-    by_edu     = await _breakdown(Employee.education_degree)
-    by_marital = await _breakdown(Employee.marital_status)
-    by_status  = await _breakdown(Employee.status)
-    by_grade   = await _breakdown(Employee.employee_grade)
-    by_religion= await _breakdown(Employee.religion)
+    by_dept    = await _bd(Employee.department)
+    by_level   = await _bd(Employee.level)
+    by_edu     = await _bd(Employee.education_degree)
+    by_marital = await _bd(Employee.marital_status)
+    by_status  = await _bd(Employee.status)
+    by_grade   = await _bd(Employee.employee_grade)
+    by_religion= await _bd(Employee.religion)
 
-    sex_q = await db.execute(select(Employee.sex, func.count().label("t")).group_by(Employee.sex))
-    sex_map = {r[0]: r[1] for r in sex_q.fetchall()}
+    try:
+        sex_q   = await db.execute(select(Employee.sex, func.count().label("t")).group_by(Employee.sex))
+        sex_map = {r[0]: r[1] for r in sex_q.fetchall()}
+    except Exception:
+        sex_map = {}
+
     by_gender = [
         {"name": "Laki-laki", "total": sex_map.get("M", 0)},
         {"name": "Perempuan", "total": sex_map.get("F", 0)},

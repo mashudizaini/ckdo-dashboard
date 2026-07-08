@@ -471,19 +471,29 @@ function EmployeeSummarySection() {
   const { token } = useAuthStore();
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
+  const [errMsg, setErrMsg]   = useState("");
 
   useEffect(() => {
     fetch("/api/v1/dashboard/hr/employees/monthly-summary", {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then((r) => r.json())
+      .then(async (r) => {
+        const body = await r.json();
+        if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
+        return body;
+      })
       .then((d) => setData(d))
-      .catch(() => {})
+      .catch((e) => setErrMsg(e.message || "Network error"))
       .finally(() => setLoading(false));
   }, []); // eslint-disable-line
 
   if (loading) return <div className="py-20 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-600" /></div>;
-  if (!data)   return <div className="py-10 text-center text-xs text-gray-600">Gagal memuat data summary.</div>;
+  if (errMsg || !data) return (
+    <div className="py-10 text-center space-y-2">
+      <p className="text-xs text-red-400 font-semibold">Gagal memuat data summary</p>
+      {errMsg && <pre className="text-xs text-gray-500 max-w-xl mx-auto whitespace-pre-wrap text-left bg-gray-900 rounded p-3">{errMsg}</pre>}
+    </div>
+  );
 
   const {
     headcount_trend = [], monthly_joins = [],
