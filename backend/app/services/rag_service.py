@@ -242,7 +242,7 @@ def departments_for_roles(roles: list[str], is_unrestricted: bool) -> list[str] 
     return list(depts)
 
 
-def retrieve_context(question: str, department_filter: list[str] = None, top_k: int = 5, min_similarity: float = 0.3) -> dict:
+def retrieve_context(question: str, department_filter: list[str] = None, top_k: int = 10, min_similarity: float = 0.25) -> dict:
     """
     Embed question + search similar chunks (scoped to department_filter). Returns
     {context, sources} or {context: None, sources: []} if RAG isn't configured,
