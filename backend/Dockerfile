@@ -26,6 +26,7 @@ COPY . .
 
 # Oracle Instant Client will be mounted as volume at /opt/oracle
 ENV LD_LIBRARY_PATH=/opt/oracle/instantclient
+ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/4.00/tessdata
 
 EXPOSE 8000
 

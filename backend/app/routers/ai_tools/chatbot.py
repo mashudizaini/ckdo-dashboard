@@ -96,6 +96,8 @@ async def ingest_document(
             if ext == ".pdf":
                 import fitz
                 import subprocess, shutil
+                import os as _os
+                _os.environ.setdefault("TESSDATA_PREFIX", "/usr/share/tesseract-ocr/4.00/tessdata")
                 doc = fitz.open(tmp_path)
                 pages_text = []
                 ocr_errors = []
