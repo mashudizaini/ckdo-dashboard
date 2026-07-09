@@ -94,14 +94,27 @@ class AIService:
 
         messages = history + [{"role": "user", "content": message}]
 
-        with self.client.messages.stream(
-            model="claude-sonnet-4-6",
-            max_tokens=2048,
-            system=system,
-            messages=messages,
-        ) as stream:
-            for text in stream.text_stream:
-                yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+        # The SSE response has already committed a 200 OK by the time this
+        # generator runs (StreamingResponse sends headers before iterating
+        # the body), so an unhandled exception here doesn't become a clean
+        # HTTP error — it just drops the connection mid-stream and the
+        # browser reports it to fetch() as an opaque "network error" with no
+        # indication of what went wrong. Catch it and emit a proper SSE
+        # error event so the frontend can show a real message instead.
+        try:
+            with self.client.messages.stream(
+                model="claude-sonnet-4-6",
+                max_tokens=2048,
+                system=system,
+                messages=messages,
+            ) as stream:
+                for text in stream.text_stream:
+                    yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+        except Exception as e:
+            logger.error("claude_stream_error", error=str(e))
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
 
         if sources:
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"

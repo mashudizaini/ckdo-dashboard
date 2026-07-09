@@ -42,7 +42,12 @@ export function useChatStream(initialGreeting, storageKey = null) {
     const text = (textOverride ?? input).trim();
     if (!text || streaming) return;
 
-    const history = messages
+    // Anthropic requires the first message in a conversation to have role
+    // "user" — the seeded greeting is assistant-role with no prior user turn,
+    // so strip everything before the first user message (drops the greeting
+    // on turn 1, otherwise a no-op) to avoid a 400 that kills the SSE stream.
+    const firstUserIdx = messages.findIndex((m) => m.role === "user");
+    const history = (firstUserIdx === -1 ? [] : messages.slice(firstUserIdx))
       .filter((m) => !m.error)
       .map((m) => ({ role: m.role, content: m.text }));
 
@@ -91,6 +96,12 @@ export function useChatStream(initialGreeting, storageKey = null) {
               setMessages((prev) => {
                 const next = [...prev];
                 next[next.length - 1] = { ...next[next.length - 1], sources: evt.sources };
+                return next;
+              });
+            } else if (evt.type === "error") {
+              setMessages((prev) => {
+                const next = [...prev];
+                next[next.length - 1] = { role: "assistant", text: `Maaf, terjadi kesalahan: ${evt.message || "AI service error"}`, error: true };
                 return next;
               });
             }
