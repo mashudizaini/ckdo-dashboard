@@ -415,19 +415,23 @@ async def get_monthly_summary(
     import traceback
     from datetime import date
     from calendar import monthrange
-    from sqlalchemy import and_, cast, String
+    from sqlalchemy import and_, cast, String, literal_column
 
     MN = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 
     try:
-        # Monthly joinings map — cast date to text for grouping
+        # Monthly joinings map — cast date to text for grouping.
+        # group_by references the SELECT alias ("month") rather than repeating
+        # the to_char(...) expression: with a bound literal format string,
+        # Postgres sees the SELECT and GROUP BY occurrences as two distinct
+        # parameters ($1/$2) and can't prove they're equal, raising GroupingError.
         joins_q = await db.execute(
             select(
                 func.to_char(Employee.date_of_joining, "YYYY-MM").label("month"),
                 func.count().label("cnt"),
             )
             .where(Employee.date_of_joining.isnot(None))
-            .group_by(func.to_char(Employee.date_of_joining, "YYYY-MM"))
+            .group_by(literal_column("month"))
         )
         joins_map = {r[0]: r[1] for r in joins_q.fetchall()}
     except Exception as e:
@@ -515,6 +519,112 @@ async def get_monthly_summary(
         "by_grade":        by_grade,
         "by_religion":     by_religion,
         "by_gender":       by_gender,
+    }
+
+
+@router.get("/turnover-summary")
+async def get_turnover_summary(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Laporan turnover: tren resign bulanan, turnover rate, breakdown per departemen/level."""
+    from datetime import date
+    from calendar import monthrange
+
+    MN = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+
+    emps_q = await db.execute(
+        select(Employee.date_of_joining, Employee.resign_date, Employee.department,
+               Employee.level, Employee.status)
+        .where(Employee.date_of_joining.isnot(None))
+    )
+    emps = emps_q.fetchall()
+
+    today = date.today()
+
+    def _month_back(base_year, base_month, n):
+        m = base_month - n
+        y = base_year
+        while m <= 0:
+            m += 12
+            y -= 1
+        return y, m
+
+    # Tren resign + turnover rate bulanan — 24 bulan terakhir
+    resign_trend = []
+    for i in range(23, -1, -1):
+        y, m = _month_back(today.year, today.month, i)
+        last_day  = date(y, m, monthrange(y, m)[1])
+        first_day = date(y, m, 1)
+        resigns_in_month = sum(
+            1 for join, resign, *_ in emps
+            if resign is not None and first_day <= resign <= last_day
+        )
+        headcount_start = sum(
+            1 for join, resign, *_ in emps
+            if join < first_day and (resign is None or resign >= first_day)
+        )
+        headcount_end = sum(
+            1 for join, resign, *_ in emps
+            if join <= last_day and (resign is None or resign >= first_day)
+        )
+        avg_headcount = (headcount_start + headcount_end) / 2 if (headcount_start + headcount_end) > 0 else 0
+        rate = round((resigns_in_month / avg_headcount) * 100, 2) if avg_headcount > 0 else 0
+        resign_trend.append({
+            "month":          f"{y}-{m:02d}",
+            "label":          f"{MN[m-1]} '{str(y)[2:]}",
+            "resigns":        resigns_in_month,
+            "avg_headcount":  round(avg_headcount, 1),
+            "turnover_rate":  rate,
+        })
+
+    # Turnover rate rolling 12 bulan terakhir
+    last_12 = resign_trend[-12:]
+    total_resigns_12m = sum(r["resigns"] for r in last_12)
+    avg_headcount_12m = sum(r["avg_headcount"] for r in last_12) / len(last_12) if last_12 else 0
+    annual_turnover_rate = round((total_resigns_12m / avg_headcount_12m) * 100, 2) if avg_headcount_12m > 0 else 0
+
+    # Breakdown karyawan resign 12 bulan terakhir — per departemen / level / status
+    cutoff = date(today.year - 1, today.month, 1)
+    resigned_recent = [
+        row for row in emps
+        if row[1] is not None and row[1] >= cutoff
+    ]
+
+    def _bd(idx):
+        counts = {}
+        for row in resigned_recent:
+            key = row[idx] or "—"
+            counts[key] = counts.get(key, 0) + 1
+        return sorted(
+            [{"name": k, "total": v} for k, v in counts.items()],
+            key=lambda x: x["total"], reverse=True,
+        )
+
+    by_dept   = _bd(2)
+    by_level  = _bd(3)
+    by_status = _bd(4)
+
+    # Rata-rata masa kerja karyawan yang resign
+    tenures = [
+        (row[1] - row[0]).days / 365.25
+        for row in resigned_recent
+        if row[0] and row[1]
+    ]
+    avg_tenure_years = round(sum(tenures) / len(tenures), 1) if tenures else 0
+
+    current_headcount = sum(1 for join, resign, *_ in emps if resign is None)
+
+    return {
+        "resign_trend":         resign_trend,
+        "annual_turnover_rate": annual_turnover_rate,
+        "total_resigns_12m":    total_resigns_12m,
+        "avg_headcount_12m":    round(avg_headcount_12m, 1),
+        "avg_tenure_years":     avg_tenure_years,
+        "current_headcount":    current_headcount,
+        "by_dept":              by_dept,
+        "by_level":             by_level,
+        "by_status":            by_status,
     }
 
 

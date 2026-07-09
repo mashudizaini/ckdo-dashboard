@@ -87,12 +87,13 @@ export default function HRDashboard() {
       {activeSection === "employees" && (
         <SectionCard title="Employee Data">
           <SubTabs
-            tabs={[{ id: "list", label: "Employee List" }, { id: "summary", label: "Employee Summary" }, { id: "upload", label: "Upload Excel" }]}
+            tabs={[{ id: "list", label: "Employee List" }, { id: "summary", label: "Employee Summary" }, { id: "turnover", label: "Turnover Report" }, { id: "upload", label: "Upload Excel" }]}
             active={empSub} onChange={setEmpSub}
           />
-          {empSub === "list"    && <EmployeeTable />}
-          {empSub === "summary" && <EmployeeSummarySection />}
-          {empSub === "upload"  && <EmployeeUpload />}
+          {empSub === "list"     && <EmployeeTable />}
+          {empSub === "summary"  && <EmployeeSummarySection />}
+          {empSub === "turnover" && <TurnoverSection />}
+          {empSub === "upload"   && <EmployeeUpload />}
         </SectionCard>
       )}
 
@@ -663,6 +664,141 @@ function EmployeeSummarySection() {
           <HBarList items={by_education} max={eduMax} />
         </ChartCard>
       </div>
+    </div>
+  );
+}
+
+// ── Turnover Report ───────────────────────────────────────────────────────────
+function TurnoverSection() {
+  const { token } = useAuthStore();
+  const [data, setData]       = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [errMsg, setErrMsg]   = useState("");
+
+  useEffect(() => {
+    fetch("/api/v1/dashboard/hr/employees/turnover-summary", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (r) => {
+        const body = await r.json();
+        if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
+        return body;
+      })
+      .then((d) => setData(d))
+      .catch((e) => setErrMsg(e.message || "Network error"))
+      .finally(() => setLoading(false));
+  }, []); // eslint-disable-line
+
+  if (loading) return <div className="py-20 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-600" /></div>;
+  if (errMsg || !data) return (
+    <div className="py-10 text-center space-y-2">
+      <p className="text-xs text-red-400 font-semibold">Gagal memuat laporan turnover</p>
+      {errMsg && <pre className="text-xs text-gray-500 max-w-xl mx-auto whitespace-pre-wrap text-left bg-gray-900 rounded p-3">{errMsg}</pre>}
+    </div>
+  );
+
+  const {
+    resign_trend = [], annual_turnover_rate = 0, total_resigns_12m = 0,
+    avg_tenure_years = 0, current_headcount = 0,
+    by_dept = [], by_level = [], by_status = [],
+  } = data;
+
+  const CHART_H = 200;
+  const COLORS = ["#f43f5e","#f59e0b","#6366f1","#34d399","#60a5fa","#a78bfa","#fb923c","#4ade80","#38bdf8","#c084fc"];
+
+  const [RC, setRC] = useState(null);
+  useEffect(() => {
+    import("recharts").then((mod) => setRC(mod)).catch(() => {});
+  }, []);
+
+  const tickStyle = { fill: "#9ca3af", fontSize: 10 };
+  const tooltipStyle = {
+    contentStyle: { background: "#0f172a", border: "1px solid #374151", borderRadius: 8, fontSize: 11 },
+    labelStyle: { color: "#f3f4f6", fontWeight: 600 },
+    itemStyle: { color: "#e5e7eb" },
+    cursor: { fill: "rgba(255,255,255,0.04)" },
+  };
+
+  function ChartCard({ title, children }) {
+    return (
+      <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{title}</p>
+        {children}
+      </div>
+    );
+  }
+
+  function HBarList({ items, max, color = "#f43f5e" }) {
+    return (
+      <div className="space-y-1.5">
+        {items.slice(0, 15).map((it, i) => (
+          <div key={i} className="flex items-center gap-2 text-xs">
+            <div className="w-28 text-gray-400 truncate shrink-0" title={it.name}>{it.name}</div>
+            <div className="flex-1 bg-gray-800 rounded-full h-3 overflow-hidden">
+              <div className="h-3 rounded-full" style={{ width: `${Math.round((it.total / max) * 100)}%`, background: COLORS[i % COLORS.length] }} />
+            </div>
+            <div className="w-8 text-right font-semibold text-gray-300">{it.total}</div>
+          </div>
+        ))}
+        {items.length === 0 && <p className="text-xs text-gray-600">Tidak ada karyawan resign 12 bulan terakhir.</p>}
+      </div>
+    );
+  }
+
+  const deptMax   = Math.max(...by_dept.map(d => d.total), 1);
+  const levelMax  = Math.max(...by_level.map(d => d.total), 1);
+  const statusMax = Math.max(...by_status.map(d => d.total), 1);
+
+  return (
+    <div className="space-y-4 mt-2">
+      {/* KPI Row */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Turnover Rate (12 Bln)", val: `${annual_turnover_rate}%`, sub: "annualized",             color: "#f43f5e" },
+          { label: "Total Resign (12 Bln)",  val: total_resigns_12m,          sub: "karyawan keluar",         color: "#f59e0b" },
+          { label: "Rata-rata Masa Kerja",   val: `${avg_tenure_years} thn`,  sub: "karyawan yang resign",    color: "#6366f1" },
+          { label: "Headcount Saat Ini",     val: current_headcount,          sub: "karyawan aktif",          color: "#34d399" },
+        ].map(({ label, val, sub, color }) => (
+          <div key={label} className="rounded-xl border border-gray-800 bg-gray-900 p-4">
+            <div className="text-2xl font-bold" style={{ color }}>{val}</div>
+            <div className="text-xs font-semibold text-gray-300 mt-0.5">{label}</div>
+            <div className="text-xs text-gray-600 mt-0.5">{sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Chart: resign trend + turnover rate */}
+      {RC ? (
+        <>
+          <ChartCard title="Tren Resign & Turnover Rate (24 Bulan)">
+            <RC.ResponsiveContainer width="100%" height={CHART_H}>
+              <RC.ComposedChart data={resign_trend} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
+                <RC.XAxis dataKey="label" tick={tickStyle} interval={3} />
+                <RC.YAxis yAxisId="left" tick={tickStyle} allowDecimals={false} />
+                <RC.YAxis yAxisId="right" orientation="right" tick={tickStyle} unit="%" />
+                <RC.Tooltip {...tooltipStyle} formatter={(v, name) => name === "turnover_rate" ? [`${v}%`, "Turnover Rate"] : [v, "Resign"]} />
+                <RC.Bar yAxisId="left" dataKey="resigns" fill="#f43f5e" radius={[3, 3, 0, 0]} />
+                <RC.Line yAxisId="right" type="monotone" dataKey="turnover_rate" stroke="#f59e0b" strokeWidth={2} dot={false} />
+              </RC.ComposedChart>
+            </RC.ResponsiveContainer>
+          </ChartCard>
+
+          {/* Breakdown lists row */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <ChartCard title="Resign per Departemen (12 Bln)">
+              <HBarList items={by_dept} max={deptMax} />
+            </ChartCard>
+            <ChartCard title="Resign per Level Jabatan (12 Bln)">
+              <HBarList items={by_level} max={levelMax} />
+            </ChartCard>
+            <ChartCard title="Resign per Status Karyawan (12 Bln)">
+              <HBarList items={by_status} max={statusMax} />
+            </ChartCard>
+          </div>
+        </>
+      ) : (
+        <div className="py-6 text-center text-xs text-gray-600">Loading charts…</div>
+      )}
     </div>
   );
 }
