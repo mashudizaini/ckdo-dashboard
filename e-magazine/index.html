@@ -581,11 +581,11 @@ function layout(){
 }
 
 /* ── Spread logic ───────────────────────── */
-const maxSpread = () => Math.floor(numPages/2);
+const maxSpread = () => Math.floor((numPages-1)/2);
 function spreadPages(k){
-  if(k===0) return [null, 1];
-  const r = 2*k+1;
-  return [2*k, r<=numPages ? r : null];
+  const l = 2*k+1;
+  const r = l+1;
+  return [l, r<=numPages ? r : null];
 }
 function setHalf(el, url, pageNum){
   el.innerHTML = "";
@@ -706,7 +706,7 @@ async function buildThumbs(){
     await page.render({canvasContext:c.getContext("2d"), viewport:vp}).promise;
     c.addEventListener("click", ()=>{
       if(singleMode) showSingle(n);
-      else showSpread(n===1?0:Math.floor(n/2));
+      else showSpread(Math.floor((n-1)/2));
     });
     els.thumbs.appendChild(c);
   }
@@ -735,7 +735,7 @@ window.addEventListener("resize", ()=>{
   layout();
   if(wasSingle!==singleMode){
     if(singleMode){ showSingle(spreadPages(spread)[1]||spreadPages(spread)[0]||1); }
-    else { showSpread(singlePage<=1?0:Math.floor(singlePage/2)); }
+    else { showSpread(Math.floor((singlePage-1)/2)); }
   }
 });
 
