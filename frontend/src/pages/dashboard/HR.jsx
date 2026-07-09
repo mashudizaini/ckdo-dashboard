@@ -473,6 +473,11 @@ function EmployeeSummarySection() {
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [errMsg, setErrMsg]   = useState("");
+  // Semua hook harus dipanggil unconditionally di setiap render (Rules of Hooks) —
+  // RC dulu dideklarasikan setelah early-return loading/error, yang menyebabkan
+  // jumlah hook berbeda antar render begitu fetch sukses ("Rendered more hooks
+  // than during the previous render").
+  const [RC, setRC] = useState(null);
 
   useEffect(() => {
     fetch("/api/v1/dashboard/hr/employees/monthly-summary", {
@@ -487,6 +492,10 @@ function EmployeeSummarySection() {
       .catch((e) => setErrMsg(e.message || "Network error"))
       .finally(() => setLoading(false));
   }, []); // eslint-disable-line
+
+  useEffect(() => {
+    import("recharts").then((mod) => setRC(mod)).catch(() => {});
+  }, []);
 
   if (loading) return <div className="py-20 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-600" /></div>;
   if (errMsg || !data) return (
@@ -509,17 +518,6 @@ function EmployeeSummarySection() {
   const CHART_H    = 200;
 
   const COLORS = ["#6366f1","#34d399","#f59e0b","#f43f5e","#60a5fa","#a78bfa","#fb923c","#4ade80","#38bdf8","#c084fc"];
-
-  const {
-    AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
-    ResponsiveContainer, Cell, PieChart, Pie, Legend,
-  } = window.Recharts || {};
-
-  // Recharts might not be available as a global — import properly
-  const [RC, setRC] = useState(null);
-  useEffect(() => {
-    import("recharts").then((mod) => setRC(mod)).catch(() => {});
-  }, []);
 
   const tickStyle = { fill: "#9ca3af", fontSize: 10 };
   const tooltipStyle = {
@@ -674,6 +672,9 @@ function TurnoverSection() {
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [errMsg, setErrMsg]   = useState("");
+  // Semua hook harus dipanggil unconditionally di setiap render — RC dideklarasikan
+  // di sini (sebelum early-return loading/error), bukan setelahnya.
+  const [RC, setRC] = useState(null);
 
   useEffect(() => {
     fetch("/api/v1/dashboard/hr/employees/turnover-summary", {
@@ -688,6 +689,10 @@ function TurnoverSection() {
       .catch((e) => setErrMsg(e.message || "Network error"))
       .finally(() => setLoading(false));
   }, []); // eslint-disable-line
+
+  useEffect(() => {
+    import("recharts").then((mod) => setRC(mod)).catch(() => {});
+  }, []);
 
   if (loading) return <div className="py-20 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-600" /></div>;
   if (errMsg || !data) return (
@@ -705,11 +710,6 @@ function TurnoverSection() {
 
   const CHART_H = 200;
   const COLORS = ["#f43f5e","#f59e0b","#6366f1","#34d399","#60a5fa","#a78bfa","#fb923c","#4ade80","#38bdf8","#c084fc"];
-
-  const [RC, setRC] = useState(null);
-  useEffect(() => {
-    import("recharts").then((mod) => setRC(mod)).catch(() => {});
-  }, []);
 
   const tickStyle = { fill: "#9ca3af", fontSize: 10 };
   const tooltipStyle = {
