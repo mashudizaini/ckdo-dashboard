@@ -22,6 +22,7 @@ from app.database import get_db
 from app.dependencies import require_role, CurrentUser, Roles
 from app.models.cv_screening import CvScreeningJob, CvScreeningCandidate
 from app.services import cv_screening_service as svc
+from app.services import jd_generator_service as jd_svc
 
 router = APIRouter()
 
@@ -73,8 +74,11 @@ def _candidate_to_dict(c: CvScreeningCandidate) -> dict:
         "education": c.education,
         "experience_years": c.experience_years,
         "total_experience_years": c.total_experience_years,
+        "positions": json.loads(c.positions or "[]"),
         "skills_found": json.loads(c.skills_found or "[]"),
         "missing_skills": json.loads(c.missing_skills or "[]"),
+        "additional_relevant_skills": json.loads(c.additional_relevant_skills or "[]"),
+        "certifications": json.loads(c.certifications or "[]"),
         "skills_score": c.skills_score,
         "experience_score": c.experience_score,
         "education_score": c.education_score,
@@ -83,6 +87,7 @@ def _candidate_to_dict(c: CvScreeningCandidate) -> dict:
         "recommendation": c.recommendation,
         "confidence": c.confidence,
         "reasoning": c.reasoning,
+        "interview_focus": json.loads(c.interview_focus or "[]"),
         "red_flags": json.loads(c.red_flags or "[]"),
         "strengths": json.loads(c.strengths or "[]"),
         "error": c.error,
@@ -246,6 +251,55 @@ async def get_stats(
         "errors": by_rec.get("Error Processing", 0),
         "average_score": round(sum(scores) / len(scores), 1) if scores else 0,
     }
+
+
+# ── Job Description Generator ──────────────────────────────────────
+
+class JdGenerateRequest(BaseModel):
+    jd_text: str
+    method: str = "template"  # "ai" or "template"
+
+
+@router.post("/jd/upload")
+async def upload_jd(
+    file: UploadFile = File(...),
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_EXT:
+        raise HTTPException(400, f"File type not supported. Allowed: {', '.join(ALLOWED_EXT)}")
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+    file_path = os.path.join(svc.UPLOAD_DIR, f"jd_{timestamp}_{file.filename}")
+    content = await file.read()
+    with open(file_path, "wb") as out:
+        out.write(content)
+
+    try:
+        jd_text = svc.extract_cv_text(file_path)
+    finally:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+    return {"filename": file.filename, "text": jd_text, "length": len(jd_text)}
+
+
+@router.post("/jd/generate")
+async def generate_jd(
+    body: JdGenerateRequest,
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    if not body.jd_text.strip():
+        raise HTTPException(400, "No job description text provided")
+
+    if body.method == "ai":
+        result = jd_svc.generate_jd_with_ai(body.jd_text)
+    elif body.method == "template":
+        result = jd_svc.generate_jd_template_based(body.jd_text)
+    else:
+        raise HTTPException(400, f'Invalid method: {body.method}. Use "ai" or "template"')
+
+    return {"result": result, "method": body.method}
 
 
 # ── Export ──────────────────────────────────────────────────────────

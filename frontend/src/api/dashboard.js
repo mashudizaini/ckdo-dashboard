@@ -60,6 +60,8 @@ export const hrApi = {
   deleteCvCandidate: (id)   => api.delete(`/dashboard/hr/cv-screening/candidates/${id}`),
   getCvStats:      (id)     => api.get(`/dashboard/hr/cv-screening/jobs/${id}/stats`),
   exportCvExcel:   (id)     => `/api/v1/dashboard/hr/cv-screening/jobs/${id}/export`,
+  uploadCvJd:      (form)   => api.post("/dashboard/hr/cv-screening/jd/upload", form, { headers: { "Content-Type": undefined } }),
+  generateCvJd:    (d)      => api.post("/dashboard/hr/cv-screening/jd/generate", d),
 
   // E-Magazine
   eMagazineList:       ()              => api.get("/dashboard/hr/e-magazine/files"),

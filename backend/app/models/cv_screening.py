@@ -34,8 +34,11 @@ class CvScreeningCandidate(Base):
     education                = Column(String(300))
     experience_years         = Column(Integer, default=0)
     total_experience_years   = Column(Integer, default=0)
+    positions                 = Column(Text)   # JSON list of {title, company, duration, relevant}
     skills_found              = Column(Text)   # JSON list
     missing_skills             = Column(Text)  # JSON list
+    additional_relevant_skills  = Column(Text) # JSON list
+    certifications                = Column(Text)  # JSON list of {name, year, relevant}
     skills_score                = Column(Float, default=0)
     experience_score             = Column(Float, default=0)
     education_score               = Column(Float, default=0)
@@ -44,6 +47,7 @@ class CvScreeningCandidate(Base):
     recommendation                   = Column(String(50), index=True)
     confidence                        = Column(String(20))
     reasoning                          = Column(Text)
+    interview_focus                     = Column(Text)  # JSON list
     red_flags                           = Column(Text)  # JSON list
     strengths                            = Column(Text) # JSON list
     error                                 = Column(Text)

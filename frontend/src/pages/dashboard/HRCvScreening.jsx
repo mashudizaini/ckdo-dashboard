@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Plus, Upload, Loader2, Trash2, Download, X, ChevronDown, ChevronUp,
-  AlertTriangle, CheckCircle, Search,
+  AlertTriangle, CheckCircle, Search, FileText, Sparkles,
 } from "lucide-react";
 import { hrApi } from "@/api/dashboard";
 import { useAuthStore } from "@/store/authStore";
@@ -31,10 +31,13 @@ function RecBadge({ rec }) {
   );
 }
 
-function JobForm({ onSave, onCancel, saving }) {
+function JobForm({ onSave, onCancel, saving, initial }) {
   const [form, setForm] = useState({
-    position_title: "", required_skills: "", min_experience: 0,
-    education_keywords: "", certification_keywords: "",
+    position_title: initial?.position_title || "",
+    required_skills: (initial?.required_skills || []).join(", "),
+    min_experience: initial?.min_experience || 0,
+    education_keywords: (initial?.education_keywords || []).join(", "),
+    certification_keywords: (initial?.certification_keywords || []).join(", "),
   });
   const set = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }));
 
@@ -89,6 +92,127 @@ function JobForm({ onSave, onCancel, saving }) {
   );
 }
 
+function JdGeneratorPanel({ onUseCriteria, onCancel }) {
+  const [jdText, setJdText] = useState("");
+  const [method, setMethod] = useState("template");
+  const [uploading, setUploading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const fileRef = useRef(null);
+
+  const handleUploadFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await hrApi.uploadCvJd(fd);
+      setJdText(res.text || "");
+    } catch (err) {
+      setError(err.response?.data?.detail || "Upload failed");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const handleGenerate = async () => {
+    if (!jdText.trim()) return;
+    setGenerating(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await hrApi.generateCvJd({ jd_text: jdText, method });
+      setResult(res.result);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const improved = result?.improved_jd;
+  const inputStyle = { width: "100%", fontSize: 12.5, padding: "10px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff", outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
+
+  return (
+    <div style={{ background: NEU.bg, boxShadow: NEU.shadowOut, borderRadius: 16, padding: 18, marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", display: "flex", alignItems: "center", gap: 6 }}>
+          <Sparkles size={14} /> Generate Position from Job Description
+        </h4>
+        <button onClick={onCancel} style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8" }}>
+          <X size={16} />
+        </button>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+        <label>
+          <input ref={fileRef} type="file" accept=".pdf,.docx,.doc,.txt" onChange={handleUploadFile} style={{ display: "none" }} />
+          <span onClick={() => fileRef.current?.click()}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, background: NEU.bg, color: "#64748b", fontSize: 11.5, fontWeight: 700, cursor: "pointer", boxShadow: NEU.shadowOutSm }}>
+            {uploading ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />} Upload JD File
+          </span>
+        </label>
+        <select value={method} onChange={e => setMethod(e.target.value)}
+          style={{ fontSize: 11.5, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: NEU.shadowOutSm, cursor: "pointer", outline: "none" }}>
+          <option value="template">Template (free)</option>
+          <option value="ai">AI-Powered (Claude)</option>
+        </select>
+      </div>
+
+      <textarea value={jdText} onChange={e => setJdText(e.target.value)} rows={6}
+        placeholder="Paste job description text here, or upload a file..."
+        style={{ ...inputStyle, resize: "vertical" }} />
+
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <button onClick={handleGenerate} disabled={generating || !jdText.trim()}
+          style={{ fontSize: 12, fontWeight: 700, padding: "8px 18px", borderRadius: 10, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer", boxShadow: NEU.shadowBtn, opacity: (generating || !jdText.trim()) ? 0.5 : 1, display: "flex", alignItems: "center", gap: 6 }}>
+          {generating ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+          {generating ? "Generating..." : "Generate"}
+        </button>
+      </div>
+
+      {error && <p style={{ color: "#dc2626", fontSize: 12, marginTop: 10 }}>{error}</p>}
+
+      {improved && (
+        <div style={{ marginTop: 14, padding: 14, borderRadius: 12, background: "#f0f3f9", boxShadow: NEU.shadowIn }}>
+          <p style={{ fontSize: 13, fontWeight: 800, color: "#1e293b" }}>{improved.position_title}</p>
+          <p style={{ fontSize: 11.5, color: "#64748b", marginTop: 4 }}>{improved.overview}</p>
+
+          {improved.key_responsibilities?.length > 0 && (
+            <>
+              <p style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginTop: 10 }}>Key Responsibilities</p>
+              <ul style={{ fontSize: 11.5, color: "#475569", paddingLeft: 16, marginTop: 4 }}>
+                {improved.key_responsibilities.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </>
+          )}
+
+          <p style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginTop: 10 }}>Required Qualifications</p>
+          <p style={{ fontSize: 11.5, color: "#475569", marginTop: 2 }}>
+            Education: {improved.required_qualifications?.education} · Experience: {improved.required_qualifications?.experience}
+          </p>
+          <p style={{ fontSize: 11.5, color: "#475569", marginTop: 2 }}>
+            Skills: {(improved.required_qualifications?.technical_skills || []).join(", ")}
+          </p>
+
+          {result.hr_notes && (
+            <p style={{ fontSize: 11, color: "#7c3aed", marginTop: 10, fontStyle: "italic" }}>{result.hr_notes}</p>
+          )}
+
+          <button onClick={() => onUseCriteria(improved.screening_criteria)}
+            style={{ marginTop: 12, fontSize: 12, fontWeight: 700, padding: "8px 18px", borderRadius: 10, border: "none", background: "#16a34a", color: "#fff", cursor: "pointer", boxShadow: NEU.shadowBtn }}>
+            Use as New Position
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CandidateRow({ c, i, onDelete }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -118,10 +242,34 @@ function CandidateRow({ c, i, onDelete }) {
                 <div>
                   <p style={{ fontWeight: 700, color: "#374151", marginBottom: 4 }}>Skills Found</p>
                   <p style={{ color: "#475569" }}>{(c.skills_found || []).join(", ") || "None"}</p>
+                  {c.additional_relevant_skills?.length > 0 && (
+                    <>
+                      <p style={{ fontWeight: 700, color: "#374151", marginTop: 6, marginBottom: 4 }}>Additional Relevant Skills</p>
+                      <p style={{ color: "#475569" }}>{c.additional_relevant_skills.join(", ")}</p>
+                    </>
+                  )}
                   {c.missing_skills?.length > 0 && (
                     <>
                       <p style={{ fontWeight: 700, color: "#dc2626", marginTop: 6, marginBottom: 4 }}>Missing Critical Skills</p>
                       <p style={{ color: "#dc2626" }}>{c.missing_skills.join(", ")}</p>
+                    </>
+                  )}
+                  {c.positions?.length > 0 && (
+                    <>
+                      <p style={{ fontWeight: 700, color: "#374151", marginTop: 6, marginBottom: 4 }}>Work History</p>
+                      <ul style={{ color: "#475569", paddingLeft: 16 }}>
+                        {c.positions.map((p, j) => (
+                          <li key={j}>{p.title} — {p.company} ({p.duration}){p.relevant === false ? " · not relevant" : ""}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  {c.certifications?.length > 0 && (
+                    <>
+                      <p style={{ fontWeight: 700, color: "#374151", marginTop: 6, marginBottom: 4 }}>Certifications</p>
+                      <p style={{ color: "#475569" }}>
+                        {c.certifications.map((cert, j) => `${cert.name}${cert.year ? ` (${cert.year})` : ""}`).join(", ")}
+                      </p>
                     </>
                   )}
                   <p style={{ fontWeight: 700, color: "#374151", marginTop: 6, marginBottom: 4 }}>Score Breakdown</p>
@@ -154,6 +302,14 @@ function CandidateRow({ c, i, onDelete }) {
                       </ul>
                     </>
                   )}
+                  {c.interview_focus?.length > 0 && (
+                    <>
+                      <p style={{ fontWeight: 700, color: "#7c3aed", marginTop: 6, marginBottom: 4 }}>Interview Focus</p>
+                      <ul style={{ color: "#475569", paddingLeft: 16 }}>
+                        {c.interview_focus.map((s, j) => <li key={j}>{s}</li>)}
+                      </ul>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -169,6 +325,8 @@ export default function HRCvScreening() {
   const [jobs, setJobs] = useState([]);
   const [activeJobId, setActiveJobId] = useState(null);
   const [showJobForm, setShowJobForm] = useState(false);
+  const [showJdPanel, setShowJdPanel] = useState(false);
+  const [jdPrefill, setJdPrefill] = useState(null);
   const [savingJob, setSavingJob] = useState(false);
   const [candidates, setCandidates] = useState([]);
   const [stats, setStats] = useState(null);
@@ -214,10 +372,17 @@ export default function HRCvScreening() {
     try {
       const j = await hrApi.createCvJob(data);
       setShowJobForm(false);
+      setJdPrefill(null);
       await fetchJobs();
       setActiveJobId(j.id);
     } catch (_) {}
     finally { setSavingJob(false); }
+  };
+
+  const handleUseJdCriteria = (criteria) => {
+    setJdPrefill(criteria);
+    setShowJdPanel(false);
+    setShowJobForm(true);
   };
 
   const handleDeleteJob = async (id) => {
@@ -295,13 +460,21 @@ export default function HRCvScreening() {
             </button>
           ))}
         </div>
-        <button onClick={() => setShowJobForm(!showJobForm)}
-          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 10, border: "none", background: "#2563eb", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", boxShadow: NEU.shadowBtn }}>
-          <Plus size={14} /> New Position
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => { setShowJdPanel(!showJdPanel); setShowJobForm(false); }}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 10, border: "none", background: NEU.bg, color: "#7c3aed", fontSize: 12, fontWeight: 700, cursor: "pointer", boxShadow: showJdPanel ? NEU.shadowIn : NEU.shadowOutSm }}>
+            <Sparkles size={14} /> Generate from JD
+          </button>
+          <button onClick={() => { setShowJobForm(!showJobForm); setJdPrefill(null); setShowJdPanel(false); }}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 10, border: "none", background: "#2563eb", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", boxShadow: NEU.shadowBtn }}>
+            <Plus size={14} /> New Position
+          </button>
+        </div>
       </div>
 
-      {showJobForm && <JobForm onSave={handleCreateJob} onCancel={() => setShowJobForm(false)} saving={savingJob} />}
+      {showJdPanel && <JdGeneratorPanel onUseCriteria={handleUseJdCriteria} onCancel={() => setShowJdPanel(false)} />}
+
+      {showJobForm && <JobForm onSave={handleCreateJob} onCancel={() => { setShowJobForm(false); setJdPrefill(null); }} saving={savingJob} initial={jdPrefill} />}
 
       {!activeJob && !showJobForm && (
         <div style={{ background: NEU.bg, boxShadow: NEU.shadowOut, borderRadius: 16, padding: "40px 20px", textAlign: "center" }}>

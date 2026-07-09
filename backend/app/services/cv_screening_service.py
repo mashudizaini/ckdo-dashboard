@@ -64,18 +64,26 @@ Analyze this CV deeply and extract structured information. Be smart about:
 2. Assess skill proficiency level (beginner/intermediate/expert) based on context
 3. Detect if candidate just "wants to learn" vs "has experience with"
 4. Identify red flags (job hopping, employment gaps, skill mismatches)
+5. List each past position with its relevance to this job
+6. List certifications found on the CV, relevant or not
+7. Suggest interview focus areas based on gaps or claims worth verifying
 
 **Return a JSON response with this EXACT structure:**
 
 ```json
 {{
   "candidate_info": {{"name": "Full name", "email": "email@example.com or null", "phone": "phone number or null"}},
-  "experience": {{"total_years": 5, "relevant_years": 3, "details": "Brief summary"}},
+  "experience": {{
+    "total_years": 5, "relevant_years": 3, "details": "Brief summary",
+    "positions": [{{"title": "Job Title", "company": "Company Name", "duration": "2020-2023", "relevant": true}}]
+  }},
   "education": {{"highest_degree": "S1/S2/S3/Bachelor/Master/PhD", "major": "Computer Science", "matches_requirement": true}},
   "skills": {{
     "matched_skills": [{{"skill": "Python", "level": "expert", "evidence": "5 years Python development"}}],
-    "missing_critical_skills": ["Skill1"]
+    "missing_critical_skills": ["Skill1"],
+    "additional_relevant_skills": ["Skill not in requirements but relevant to the role"]
   }},
+  "certifications": [{{"name": "Oracle Certified Professional", "year": 2022, "relevant": true}}],
   "red_flags": ["Job hopping (3 jobs in 2 years)"],
   "strengths": ["Strong technical background"],
   "scoring": {{
@@ -85,7 +93,8 @@ Analyze this CV deeply and extract structured information. Be smart about:
   "recommendation": {{
     "decision": "Highly Recommended / Recommended / Consider / Not Recommended",
     "confidence": "high / medium / low",
-    "reasoning": "Detailed reasoning"
+    "reasoning": "Detailed reasoning",
+    "interview_focus": ["Topic worth probing in the interview"]
   }}
 }}
 ```
@@ -103,9 +112,8 @@ def analyze_cv_with_ai(cv_text: str, job: dict) -> dict:
     prompt = _build_prompt(cv_text, job)
 
     response = client.messages.create(
-        model="claude-sonnet-4-6",
+        model="claude-opus-4-8",
         max_tokens=2000,
-        temperature=0,
         messages=[{"role": "user", "content": prompt}],
     )
 
@@ -126,7 +134,9 @@ def screen_cv(file_path: str, filename: str, job: dict) -> dict:
 
         scoring = ai.get("scoring", {})
         rec = ai.get("recommendation", {})
-        matched = ai.get("skills", {}).get("matched_skills", [])
+        experience = ai.get("experience", {})
+        skills = ai.get("skills", {})
+        matched = skills.get("matched_skills", [])
 
         return {
             "filename": filename,
@@ -134,10 +144,13 @@ def screen_cv(file_path: str, filename: str, job: dict) -> dict:
             "email": ai.get("candidate_info", {}).get("email"),
             "phone": ai.get("candidate_info", {}).get("phone"),
             "education": f"{ai.get('education', {}).get('highest_degree', '')} {ai.get('education', {}).get('major', '')}".strip() or "Not Found",
-            "experience_years": int(ai.get("experience", {}).get("relevant_years", 0) or 0),
-            "total_experience_years": int(ai.get("experience", {}).get("total_years", 0) or 0),
+            "experience_years": int(experience.get("relevant_years", 0) or 0),
+            "total_experience_years": int(experience.get("total_years", 0) or 0),
+            "positions": json.dumps(experience.get("positions", [])),
             "skills_found": json.dumps([s["skill"] for s in matched]),
-            "missing_skills": json.dumps(ai.get("skills", {}).get("missing_critical_skills", [])),
+            "missing_skills": json.dumps(skills.get("missing_critical_skills", [])),
+            "additional_relevant_skills": json.dumps(skills.get("additional_relevant_skills", [])),
+            "certifications": json.dumps(ai.get("certifications", [])),
             "skills_score": float(scoring.get("skills_score", 0) or 0),
             "experience_score": float(scoring.get("experience_score", 0) or 0),
             "education_score": float(scoring.get("education_score", 0) or 0),
@@ -146,6 +159,7 @@ def screen_cv(file_path: str, filename: str, job: dict) -> dict:
             "recommendation": rec.get("decision", "Consider"),
             "confidence": rec.get("confidence"),
             "reasoning": rec.get("reasoning") or scoring.get("reasoning"),
+            "interview_focus": json.dumps(rec.get("interview_focus", [])),
             "red_flags": json.dumps(ai.get("red_flags", [])),
             "strengths": json.dumps(ai.get("strengths", [])),
             "error": None,
@@ -156,10 +170,12 @@ def screen_cv(file_path: str, filename: str, job: dict) -> dict:
             "name": "Unknown",
             "email": None, "phone": None, "education": None,
             "experience_years": 0, "total_experience_years": 0,
-            "skills_found": "[]", "missing_skills": "[]",
+            "positions": "[]",
+            "skills_found": "[]", "missing_skills": "[]", "additional_relevant_skills": "[]",
+            "certifications": "[]",
             "skills_score": 0, "experience_score": 0, "education_score": 0, "certification_score": 0,
             "total_score": 0, "recommendation": "Error Processing",
-            "confidence": None, "reasoning": None,
+            "confidence": None, "reasoning": None, "interview_focus": "[]",
             "red_flags": "[]", "strengths": "[]",
             "error": str(e),
         }
