@@ -113,7 +113,7 @@ def analyze_cv_with_ai(cv_text: str, job: dict) -> dict:
 
     response = client.messages.create(
         model="claude-opus-4-8",
-        max_tokens=2000,
+        max_tokens=4000,
         messages=[{"role": "user", "content": prompt}],
     )
 
