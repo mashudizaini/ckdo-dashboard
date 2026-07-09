@@ -137,9 +137,17 @@ class PurchasingService:
     # ── LOV: Categories, Currencies & Material Types ─────────────────────────
 
     async def get_material_types(self) -> dict:
-        """LOV: distinct material type tags from CKDO_MTRL_TYPE_DIRECT_INDIRECT lookup."""
+        """LOV: distinct material type tags from CKDO_MTRL_TYPE_DIRECT_INDIRECT lookup.
+
+        fnd_lookup_values_vl returns one row per SECURITY_GROUP_ID for lookup
+        types that aren't security-group-enabled (a well-known Oracle EBS
+        quirk) — lookup_code differs between those duplicate rows, so
+        selecting it alongside tag defeats DISTINCT and doubles every option.
+        Only select tag, which is the only column actually used (both for
+        display and as the filter value in _MAT_TYPE / p_mat_type).
+        """
         sql = """
-            SELECT DISTINCT lv.lookup_code, lv.tag, lv.meaning
+            SELECT DISTINCT lv.tag
             FROM fnd_lookup_values_vl lv
             WHERE lv.view_application_id = 700
               AND lv.lookup_type         = 'CKDO_MTRL_TYPE_DIRECT_INDIRECT'

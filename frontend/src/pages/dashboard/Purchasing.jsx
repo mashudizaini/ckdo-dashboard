@@ -453,7 +453,7 @@ function PurchaseHistorySection() {
           <Field label="Material Type">
             <select className={SELECT} value={f.material_type} onChange={e => setF(p => ({ ...p, material_type: e.target.value }))}>
               <option value="">— All —</option>
-              {matTypes.map(t => <option key={t.lookup_code} value={t.tag}>{t.tag}</option>)}
+              {matTypes.map(t => <option key={t.tag} value={t.tag}>{t.tag}</option>)}
             </select>
           </Field>
         </div>
