@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import structlog
 
@@ -84,6 +85,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ─────────────────────────────────────────
+# GLOBAL EXCEPTION HANDLER
+# ─────────────────────────────────────────
+# FastAPI only JSON-ifies HTTPException / validation errors by default — any
+# other unhandled exception falls through to Starlette's plain-text 500,
+# which breaks every frontend `res.json()` call ("Unexpected token '<'/'I'...").
+# This guarantees every response is valid JSON.
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error("Unhandled exception", path=request.url.path, error=str(exc), exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {exc}" if settings.environment == "development" else "Internal server error"},
+    )
 
 
 # ─────────────────────────────────────────

@@ -1,16 +1,15 @@
 """
 HR Employee Router
 Route prefix : /api/v1/dashboard/hr/employees
-Upload file Excel karyawan → UPSERT ke PostgreSQL.
+Upload file Excel karyawan (export standar Talenta) → REPLACE seluruh data di PostgreSQL.
 """
 import io
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional
 
 import openpyxl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
-from sqlalchemy import func, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -20,84 +19,148 @@ from app.models.employee import Employee, EmployeeUploadLog
 router = APIRouter()
 
 # ── Mapping kolom Excel → field model ─────────────────────────────────────────
-# Index berdasarkan posisi kolom di baris 8 (0-based)
+# Index berdasarkan posisi kolom di baris 1 (0-based), sesuai export standar Talenta
+# (sheet "Employee Data", header di baris 1, data mulai baris 2).
 COL = {
-    "user_id":                  1,
-    "full_name":                2,
-    "sex":                      3,
-    "level":                    4,
-    "department":               5,
-    "division":                 6,
-    "team":                     7,
-    "job_title":                8,
-    "work_placement":           9,
-    "status":                   10,
-    "date_of_joining":          11,
-    "retire_date":              15,
-    "pkwt_ke":                  16,
-    "starting_pkwt":            17,
-    "end_pkwt":                 18,
-    "permanent_date":           19,
-    "resign_date":              20,
-    "place_of_birth":           21,
-    "date_of_birth":            23,
-    "no_bpjs_health":           27,
-    "no_bpjs_employee":         28,
-    "education_degree":         29,
-    "education_school":         30,
-    "education_major":          31,
-    "employee_grade":           32,
-    "working_experience_years": 33,
-    "previous_company":         34,
-    "address":                  38,
-    "marital_status":           41,
-    "phone_number":             42,
-    "emergency_phone":          43,
-    "religion":                 44,
-    "blood_type":               45,
-    "npwp_number":              47,
-    "bank_account_bca":         52,
-    "bank_account_name":        53,
-    "personal_email":           79,
-    "company_email":            80,
+    "user_id":                  0,
+    "full_name":                1,
+    "sex":                      2,
+    "level":                    3,
+    "department":               4,
+    "division":                 5,
+    "team":                     6,
+    "job_title":                7,
+    "work_placement":           8,
+    "status":                   9,
+    "date_of_joining":          10,
+    "retire_date":              14,
+    "pkwt_ke":                  15,
+    "starting_pkwt":            16,
+    "end_pkwt":                 17,
+    "permanent_date":           18,
+    "resign_date":              19,
+    "place_of_birth":           20,
+    "date_of_birth":            22,
+    "no_bpjs_health":           26,
+    "no_bpjs_employee":         27,
+    "education_degree":         28,   # "Master, Chung-Ang University" — dipecah jadi degree + school
+    "education_major":          29,
+    "employee_grade":           30,
+    "working_experience_years": 31,
+    "previous_company":         32,
+    "address":                  36,
+    "marital_status":           39,
+    "phone_number":             40,
+    "emergency_phone":          41,
+    "religion":                 42,
+    "blood_type":               43,
+    "npwp_number":               45,
+    "bank_account_bca":         50,
+    "bank_account_name":        51,
+    "personal_email":           77,
+    "company_email":            78,
 }
 
 DATE_FIELDS = {"date_of_joining", "retire_date", "starting_pkwt", "end_pkwt",
                "permanent_date", "resign_date", "date_of_birth"}
 
+# Panjang maksimum kolom String() di model Employee — dipakai untuk truncate defensif
+# supaya upload tidak crash kalau data dari Talenta lebih panjang dari perkiraan.
+MAXLEN = {
+    "user_id": 20, "full_name": 200, "sex": 1, "level": 80, "department": 100,
+    "division": 100, "team": 100, "job_title": 200, "work_placement": 100,
+    "status": 50, "pkwt_ke": 30, "place_of_birth": 100, "no_bpjs_health": 50,
+    "no_bpjs_employee": 50, "education_degree": 50, "education_school": 200,
+    "education_major": 200, "employee_grade": 20, "working_experience_years": 20,
+    "previous_company": 200, "marital_status": 50, "phone_number": 50,
+    "emergency_phone": 50, "religion": 50, "blood_type": 5, "npwp_number": 50,
+    "bank_account_bca": 50, "bank_account_name": 200, "personal_email": 200,
+    "company_email": 200,
+}
 
-def _to_str(val) -> Optional[str]:
+_EMPTY_MARKERS = ("", "-", "none", "n/a", "na", "null")
+
+
+def _to_str(val, field: str = None) -> Optional[str]:
     if val is None:
         return None
-    s = str(val).strip()
-    return None if s in ("", "-", "None") else s
+    if isinstance(val, float) and val.is_integer():
+        s = str(int(val))
+    else:
+        s = str(val).strip()
+    if s.lower() in _EMPTY_MARKERS:
+        return None
+    max_len = MAXLEN.get(field) if field else None
+    return s[:max_len] if max_len else s
 
 
 def _to_date(val) -> Optional[date]:
     if val is None:
         return None
-    if isinstance(val, (datetime, date)):
-        return val.date() if isinstance(val, datetime) else val
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, date):
+        return val
+    if isinstance(val, (int, float)):
+        # Excel serial date (1900 date system) — fallback untuk cell yang belum
+        # ter-format sebagai tanggal saat file di-convert dari .xls lama.
+        try:
+            return (datetime(1899, 12, 30) + timedelta(days=val)).date()
+        except (OverflowError, ValueError):
+            return None
+    s = str(val).strip()
+    if s.lower() in _EMPTY_MARKERS:
+        return None
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
     return None
 
 
 def _parse_row(row: tuple, batch_id: str) -> Optional[dict]:
     """Ubah satu baris Excel → dict field. Return None jika baris kosong."""
-    user_id = _to_str(row[COL["user_id"]])
+    def cell(idx):
+        return row[idx] if idx < len(row) else None
+
+    user_id = _to_str(cell(COL["user_id"]), "user_id")
     if not user_id:
         return None
 
-    data = {"upload_batch_id": batch_id, "uploaded_at": datetime.utcnow()}
+    data = {"upload_batch_id": batch_id, "uploaded_at": datetime.utcnow(), "user_id": user_id}
     for field, col_idx in COL.items():
-        if col_idx >= len(row):
-            data[field] = None
+        if field == "user_id":
             continue
-        val = row[col_idx]
+        val = cell(col_idx)
         if field in DATE_FIELDS:
             data[field] = _to_date(val)
+        elif field == "education_degree":
+            # Talenta menggabungkan "Degree, School" dalam satu sel.
+            raw = _to_str(val)
+            if raw and "," in raw:
+                degree, school = raw.split(",", 1)
+                data["education_degree"] = degree.strip()[:MAXLEN["education_degree"]]
+                data["education_school"] = school.strip()[:MAXLEN["education_school"]]
+            else:
+                data["education_degree"] = (raw or "")[:MAXLEN["education_degree"]] or None
+                data["education_school"] = None
         else:
-            data[field] = _to_str(val)
+            data[field] = _to_str(val, field)
     return data
+
+
+def _extract_rows(contents: bytes, filename: str) -> list:
+    """Baca file Excel (.xls lama atau .xlsx/.xlsm) → list of row tuples, data mulai baris 2."""
+    if filename.lower().endswith(".xls"):
+        import xlrd
+        wb = xlrd.open_workbook(file_contents=contents)
+        sheet = wb.sheet_by_name("Employee Data") if "Employee Data" in wb.sheet_names() else wb.sheet_by_index(0)
+        return [tuple(sheet.row_values(r)) for r in range(1, sheet.nrows)]
+
+    wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
+    ws = wb["Employee Data"] if "Employee Data" in wb.sheetnames else wb.active
+    return list(ws.iter_rows(min_row=2, values_only=True))
 
 
 # ── Upload endpoint ────────────────────────────────────────────────────────────
@@ -110,71 +173,58 @@ async def upload_employees(
     user:     CurrentUser  = Depends(require_role(Roles.HR)),
 ):
     """
-    Upload file Excel karyawan (format sesuai template ckdo employee.xlsx).
-    Header di baris 8, data mulai baris 10.
-    Logic: UPSERT berdasarkan user_id — insert baru atau update jika sudah ada.
+    Upload file Excel karyawan (export standar Talenta, sheet "Employee Data").
+    Header di baris 1, data mulai baris 2.
+    Logic: REPLACE — seluruh data karyawan lama dihapus, diganti data dari file baru.
     """
-    if not file.filename.endswith((".xlsx", ".xlsm")):
-        raise HTTPException(status_code=400, detail="File harus berformat .xlsx atau .xlsm")
+    if not file.filename.lower().endswith((".xls", ".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="File harus berformat .xls, .xlsx, atau .xlsm")
 
     contents = await file.read()
     batch_id = f"batch_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
     try:
-        wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
+        data_rows = _extract_rows(contents, file.filename)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"File Excel tidak valid: {e}")
 
-    if "Employee Data" not in wb.sheetnames:
-        # Coba sheet pertama jika nama sheet berbeda
-        ws = wb.active
-    else:
-        ws = wb["Employee Data"]
-
-    inserted = 0
-    updated  = 0
-    skipped  = 0
     rows_parsed = []
-
-    for row in ws.iter_rows(min_row=10, values_only=True):
-        parsed = _parse_row(row, batch_id)
-        if parsed is None:
-            continue
-        rows_parsed.append(parsed)
+    seen_ids = set()
+    skipped = 0
+    try:
+        for row in data_rows:
+            parsed = _parse_row(row, batch_id)
+            if parsed is None:
+                continue
+            if parsed["user_id"] in seen_ids:
+                skipped += 1
+                continue
+            seen_ids.add(parsed["user_id"])
+            rows_parsed.append(parsed)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Gagal membaca baris data: {e}")
 
     if not rows_parsed:
         raise HTTPException(status_code=422, detail="Tidak ada data karyawan ditemukan di file. "
-                            "Pastikan format file sesuai template (header di baris 8, data mulai baris 10).")
+                            "Pastikan sheet bernama 'Employee Data' dengan header di baris pertama.")
 
-    # Cek user_id mana yang sudah ada
-    existing_ids_result = await db.execute(
-        select(Employee.user_id)
-    )
-    existing_ids = {r[0] for r in existing_ids_result.fetchall()}
+    try:
+        # REPLACE — hapus seluruh data lama, ganti dengan data dari file baru
+        deleted_result = await db.execute(delete(Employee))
+        replaced_count = deleted_result.rowcount or 0
 
-    for data in rows_parsed:
-        uid = data["user_id"]
-        if uid in existing_ids:
-            # UPDATE — semua field kecuali id
-            await db.execute(
-                update(Employee)
-                .where(Employee.user_id == uid)
-                .values(**{k: v for k, v in data.items()})
-            )
-            updated += 1
-        else:
-            db.add(Employee(**data))
-            inserted += 1
-
-    await db.flush()
+        db.add_all(Employee(**data) for data in rows_parsed)
+        await db.flush()
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Gagal menyimpan data ke database: {e}")
 
     # Simpan log upload
     log = EmployeeUploadLog(
         batch_id    = batch_id,
         filename    = file.filename,
         total_rows  = len(rows_parsed),
-        inserted    = inserted,
-        updated     = updated,
+        inserted    = len(rows_parsed),
+        updated     = 0,
         skipped     = skipped,
         uploaded_by = user.username or "unknown",
         notes       = notes or None,
@@ -182,13 +232,14 @@ async def upload_employees(
     db.add(log)
 
     return {
-        "batch_id":   batch_id,
-        "filename":   file.filename,
-        "total_rows": len(rows_parsed),
-        "inserted":   inserted,
-        "updated":    updated,
-        "skipped":    skipped,
-        "message":    f"Upload berhasil: {inserted} karyawan baru, {updated} diperbarui.",
+        "batch_id":          batch_id,
+        "filename":          file.filename,
+        "total_rows":        len(rows_parsed),
+        "inserted":          len(rows_parsed),
+        "updated":           0,
+        "skipped":           skipped,
+        "replaced_previous": replaced_count,
+        "message":           f"Upload berhasil: {len(rows_parsed)} data karyawan menggantikan {replaced_count} data lama.",
     }
 
 
