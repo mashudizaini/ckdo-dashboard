@@ -11,7 +11,7 @@ Format file: Attendance HO.xlsx
            Actual Check-In Time | Actual Check-Out Time | Notes
 """
 import io
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional
 
 import openpyxl
@@ -433,6 +433,100 @@ async def get_monthly_attendance_rate(
             "rate":     rate,
         })
     return data
+
+
+# ── Target vs Achievement (Attendance Ratio) ──────────────────────────────────
+
+@router.get("/target-vs-achievement")
+async def get_target_vs_achievement(
+    year: Optional[int] = Query(None),
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """
+    Target vs Achievement per bulan (Attendance Ratio).
+
+    Target (Man-Days)  = Total Employees (aktif bulan itu) x Effective Working Days
+    Achievement         = man-days hadir aktual (actual_checkin tercatat, hari kerja)
+    Rate                = Achievement / Target x 100%
+    """
+    from sqlalchemy import extract
+    from app.models.employee import Employee
+    from app.models.working_calendar import WorkingCalendarHoliday
+
+    yr = year or date.today().year
+    MONTHS = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"]
+
+    def _month_range(m: int):
+        first = date(yr, m, 1)
+        last  = date(yr, 12, 31) if m == 12 else date(yr, m + 1, 1) - timedelta(days=1)
+        return first, last
+
+    # 1) Effective Working Days per bulan — kalender kerja (exclude weekend + holiday)
+    holidays_q = await db.execute(
+        select(WorkingCalendarHoliday.holiday_date)
+        .where(extract("year", WorkingCalendarHoliday.holiday_date) == yr)
+    )
+    holiday_dates = {r[0] for r in holidays_q.fetchall()}
+
+    def _effective_working_days(m: int) -> int:
+        first, last = _month_range(m)
+        working = 0
+        d = first
+        while d <= last:
+            if d.weekday() < 5 and d not in holiday_dates:
+                working += 1
+            d += timedelta(days=1)
+        return working
+
+    # 2) Total Employees aktif per bulan — sama seperti /employees/monthly-summary
+    emps_q = await db.execute(
+        select(Employee.date_of_joining, Employee.resign_date)
+        .where(Employee.date_of_joining.isnot(None))
+    )
+    emps = emps_q.fetchall()
+
+    def _active_headcount(m: int) -> int:
+        first, last = _month_range(m)
+        return sum(
+            1 for join, resign in emps
+            if join <= last and (resign is None or resign >= first)
+        )
+
+    # 3) Achievement — man-days hadir aktual per bulan (sama definisi dgn /monthly-rate)
+    achievement_q = await db.execute(
+        select(
+            extract("month", AttendanceRecord.attendance_date).label("month"),
+            func.sum(case(
+                (and_(
+                    AttendanceRecord.actual_checkin.isnot(None),
+                    AttendanceRecord.week_day.notin_(WEEKENDS),
+                ), 1), else_=0,
+            )).label("achievement"),
+        )
+        .where(extract("year", AttendanceRecord.attendance_date) == yr)
+        .group_by(extract("month", AttendanceRecord.attendance_date))
+    )
+    achievement_map = {int(r[0]): int(r[1] or 0) for r in achievement_q.fetchall()}
+
+    result = []
+    for m in range(1, 13):
+        headcount    = _active_headcount(m)
+        working_days = _effective_working_days(m)
+        target       = headcount * working_days
+        achievement  = achievement_map.get(m, 0)
+        rate         = round(achievement / target * 100, 1) if target > 0 else 0
+        result.append({
+            "period":       f"{MONTHS[m-1]} {yr}",
+            "month":        m,
+            "year":         yr,
+            "headcount":    headcount,
+            "working_days": working_days,
+            "target":       target,
+            "achievement":  achievement,
+            "rate":         rate,
+        })
+    return {"year": yr, "months": result}
 
 
 # ── Department summary (plan vs actual) ───────────────────────────────────────

@@ -1455,6 +1455,80 @@ function EmployeeDetailPanel({ headers, apiBase }) {
   );
 }
 
+// ── Target vs Achievement (Attendance Ratio formula) ──────────────────────────
+// Target (Man-Days) = Total Employees x Effective Working Days
+// Achievement         = man-days hadir aktual
+function TargetAchievementPanel({ apiBase, headers }) {
+  const curYear = new Date().getFullYear();
+  const [year, setYear]   = useState(curYear);
+  const [rows, setRows]   = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`${apiBase}/target-vs-achievement?year=${year}`, { headers })
+      .then((r) => r.ok ? r.json() : { months: [] })
+      .then((d) => setRows(d.months || []))
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  }, [year]); // eslint-disable-line
+
+  const years = Array.from({ length: 5 }, (_, i) => curYear - i);
+
+  return (
+    <div style={NEU_CARD}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+        <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>Target vs Achievement</h4>
+        <select value={year} onChange={(e) => setYear(Number(e.target.value))}
+          style={{ fontSize: 11, fontWeight: 700, padding: "5px 12px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#2563eb", boxShadow: NEU_IN.boxShadow, outline: "none", cursor: "pointer" }}>
+          {years.map((y) => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+      <p style={{ fontSize: 10.5, color: "#64748b", marginBottom: 12 }}>
+        Target (Man-Days) = Total Employees × Effective Working Days &nbsp;·&nbsp; Achievement = man-days hadir aktual
+      </p>
+
+      {loading ? (
+        <div style={{ padding: "30px 0", textAlign: "center" }}><Loader2 size={16} className="animate-spin" style={{ color: "#94a3b8" }} /></div>
+      ) : !rows.length ? (
+        <p style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>Belum ada data untuk tahun ini.</p>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+            <thead>
+              <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
+                {["Bulan", "Karyawan", "Hari Kerja Efektif", "Target (Man-Days)", "Achievement", "Rate"].map((h) => (
+                  <th key={h} style={{ padding: "8px 10px", textAlign: h === "Bulan" ? "left" : "center", fontSize: 10, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((m, i) => (
+                <tr key={m.period} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                  <td style={{ padding: "7px 10px", fontWeight: 700, color: "#1e293b" }}>{m.period}</td>
+                  <td style={{ padding: "7px 10px", textAlign: "center", color: "#475569" }}>{m.headcount}</td>
+                  <td style={{ padding: "7px 10px", textAlign: "center", color: "#475569" }}>{m.working_days}</td>
+                  <td style={{ padding: "7px 10px", textAlign: "center", fontWeight: 700, color: "#2563eb" }}>{m.target.toLocaleString()}</td>
+                  <td style={{ padding: "7px 10px", textAlign: "center", fontWeight: 700, color: "#16a34a" }}>{m.achievement.toLocaleString()}</td>
+                  <td style={{ padding: "7px 10px", textAlign: "center" }}>
+                    <span style={{
+                      padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800,
+                      background: m.rate >= 80 ? "#dcfce7" : m.rate >= 60 ? "#fef3c7" : "#fee2e2",
+                      color:      m.rate >= 80 ? "#16a34a" : m.rate >= 60 ? "#d97706" : "#dc2626",
+                    }}>
+                      {m.rate}%
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Attendance Ratio Dashboard ─────────────────────────────────────────────────
 function AttendanceRateSection() {
   const { token }  = useAuthStore();
@@ -1583,6 +1657,7 @@ function AttendanceRateSection() {
 
       {/* ── Summary ── */}
       {activeTab === "summary" && (
+        <div className="space-y-4">
         <div style={{ display: "grid", gridTemplateColumns: "3fr 2fr", gap: 16 }}>
           {/* Left: dept chart + bottom row */}
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1629,6 +1704,9 @@ function AttendanceRateSection() {
               </div>
             </div>
           </div>
+        </div>
+
+        <TargetAchievementPanel apiBase={ATT_API} headers={headers} />
         </div>
       )}
 
