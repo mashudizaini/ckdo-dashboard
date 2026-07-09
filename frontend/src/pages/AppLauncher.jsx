@@ -276,7 +276,7 @@ export default function AppLauncher() {
       .catch(() => {});
   }, [token]);
 
-  const [splitPct, setSplitPct] = useState(38); // left panel width %
+  const [splitPct, setSplitPct] = useState(22); // left panel width % (kept narrow by default so the e-magazine spread has room to breathe)
   const isDragging = useRef(false);
   const containerRef = useRef(null);
 
