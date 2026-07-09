@@ -161,6 +161,69 @@ function CategorySection({ cat, apps, onNavigate, onDashboardClick, startIndex }
   );
 }
 
+// ─── Birthday row (one item in the announcement marquee) ──────────
+function BirthdayRow({ emp }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 10,
+      padding: "9px 12px", marginBottom: 8, borderRadius: 12,
+      background: emp.is_today ? "linear-gradient(135deg, #fef3c7, #fde68a)" : "#fff",
+      boxShadow: emp.is_today ? "0 0 0 1.5px #f59e0b, 3px 3px 8px #c5cad8" : "2px 2px 6px #c5cad8, -2px -2px 6px #ffffff",
+    }}>
+      <div style={{
+        width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+        background: emp.is_today ? "#f59e0b" : "linear-gradient(135deg,#2563eb,#0891b2)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 14,
+      }}>
+        🎂
+      </div>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <p style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {emp.name}
+        </p>
+        <p style={{ fontSize: 10, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {[emp.job_title, emp.department].filter(Boolean).join(" · ") || "—"}
+        </p>
+      </div>
+      <div style={{
+        flexShrink: 0, textAlign: "center", padding: "3px 9px", borderRadius: 10,
+        background: emp.is_today ? "#f59e0b" : "#dbeafe",
+        color: emp.is_today ? "#fff" : "#1d4ed8",
+        fontSize: 10.5, fontWeight: 800,
+      }}>
+        {emp.is_today ? "TODAY" : new Date(emp.date + "T00:00:00").toLocaleDateString("en-US", { day: "numeric", month: "short" })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Auto-scrolling vertical marquee (loops seamlessly, pauses on hover) ──
+function BirthdayMarquee({ items }) {
+  if (!items.length) {
+    return (
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <p style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500, textAlign: "center" }}>No birthdays this month.</p>
+      </div>
+    );
+  }
+  // Short lists don't need to scroll — only animate when content overflows.
+  const shouldScroll = items.length > 4;
+  const duration = Math.max(items.length * 3.2, 10);
+  return (
+    <div className="birthday-marquee" style={{ flex: 1, overflow: "hidden", position: "relative", minHeight: 0 }}>
+      <div
+        className={shouldScroll ? "birthday-marquee__track birthday-marquee__track--scroll" : "birthday-marquee__track"}
+        style={shouldScroll ? { animationDuration: `${duration}s` } : undefined}
+      >
+        {(shouldScroll ? [...items, ...items] : items).map((emp, i) => (
+          <BirthdayRow key={i} emp={emp} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Filter Button ────────────────────────────────────────────────
 function FilterBtn({ label, active, color, onClick }) {
   return (
@@ -184,11 +247,12 @@ function FilterBtn({ label, active, color, onClick }) {
 
 // ─── Main ─────────────────────────────────────────────────────────
 export default function AppLauncher() {
-  const { user, logout, roles } = useAuthStore();
+  const { user, logout, roles, token } = useAuthStore();
   const { pickRandomTheme } = useThemeStore();
   const navigate = useNavigate();
   const [time, setTime] = useState(new Date());
   const [qrLinks, setQrLinks] = useState([]);
+  const [birthdays, setBirthdays] = useState([]);
 
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000);
@@ -201,6 +265,16 @@ export default function AppLauncher() {
       .then(list => { if (list[0]?.qr_links?.length) setQrLinks(list[0].qr_links); })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    fetch("/api/v1/dashboard/hr/employees/birthdays-this-month", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : [])
+      .then(setBirthdays)
+      .catch(() => {});
+  }, [token]);
 
   const [splitPct, setSplitPct] = useState(38); // left panel width %
   const isDragging = useRef(false);
@@ -241,6 +315,10 @@ export default function AppLauncher() {
         @keyframes fadeUp  { from { opacity:0; transform:translateY(18px); } to { opacity:1; transform:translateY(0); } }
         @keyframes pulseDot{ 0%,100%{opacity:1;transform:scale(1);}50%{opacity:.5;transform:scale(.8);} }
         @keyframes slideIn { from { opacity:0; transform:translateY(-14px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes marqueeUp { from { transform: translateY(0); } to { transform: translateY(-50%); } }
+        .birthday-marquee__track { display: flex; flex-direction: column; }
+        .birthday-marquee__track--scroll { animation-name: marqueeUp; animation-timing-function: linear; animation-iteration-count: infinite; }
+        .birthday-marquee:hover .birthday-marquee__track--scroll { animation-play-state: paused; }
         * { box-sizing:border-box; margin:0; padding:0; }
         ::-webkit-scrollbar { width: 5px; }
         ::-webkit-scrollbar-track { background: #e8edf5; }
@@ -432,6 +510,48 @@ export default function AppLauncher() {
                 style={{ width: "100%", height: "100%", border: "none", borderRadius: 18, display: "block" }}
                 allow="fullscreen"
               />
+            </div>
+          </div>
+
+          {/* ── STATIC DIVIDER ── */}
+          <div style={{ width: 14, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{
+              width: 4, height: "60%", minHeight: 80, borderRadius: 4,
+              background: "linear-gradient(180deg, #c5cad8, #ffffff88, #c5cad8)",
+              boxShadow: "1px 0 3px #c5cad888, -1px 0 3px #c5cad888",
+            }} />
+          </div>
+
+          {/* ── RIGHT PANEL — Announcement & Notification (same width as app-card column) ── */}
+          <div style={{
+            width: `${splitPct}%`, flexShrink: 0,
+            display: "flex", flexDirection: "column", gap: 8,
+            animation: "fadeUp 0.5s ease 0.3s forwards", opacity: 0,
+            minWidth: 0,
+          }}>
+            {/* Header label */}
+            <div style={{ background: NEU_BG, borderRadius: 10, padding: "6px 14px", boxShadow: `inset 2px 2px 6px #c5cad8, inset -2px -2px 6px #ffffff`, display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              <span style={{ fontSize: 16 }}>📢</span>
+              <div>
+                <span style={{ fontSize: 9.5, color: "#2563eb", fontWeight: 700, letterSpacing: "0.1em", display: "block" }}>ANNOUNCEMENT & NOTIFICATION</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>
+                  🎂 Birthdays This Month — {time.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+                </span>
+              </div>
+            </div>
+
+            {/* Marquee card */}
+            <div style={{
+              flex: 1,
+              background: NEU_BG,
+              borderRadius: 18,
+              padding: "14px 12px",
+              boxShadow: `inset 4px 4px 12px #c5cad8, inset -4px -4px 12px #ffffff`,
+              display: "flex",
+              flexDirection: "column",
+              minHeight: 0,
+            }}>
+              <BirthdayMarquee items={birthdays} />
             </div>
           </div>
         </main>

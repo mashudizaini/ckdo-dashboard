@@ -9,11 +9,11 @@ from typing import Optional
 
 import openpyxl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
-from sqlalchemy import func, select, delete
+from sqlalchemy import func, select, delete, extract, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import require_role, CurrentUser, Roles
+from app.dependencies import require_role, get_current_user, CurrentUser, Roles
 from app.models.employee import Employee, EmployeeUploadLog
 
 router = APIRouter()
@@ -260,6 +260,37 @@ async def upload_employees(
 
 
 # ── Query endpoints ────────────────────────────────────────────────────────────
+
+@router.get("/birthdays-this-month")
+async def get_birthdays_this_month(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(get_current_user),
+):
+    """Active employees whose birthday falls in the current month — powers the
+    Application Center's Announcement panel. Open to any authenticated user
+    (not just HR), unlike the rest of this router."""
+    today = date.today()
+    q = await db.execute(
+        select(Employee.full_name, Employee.department, Employee.job_title, Employee.date_of_birth)
+        .where(
+            Employee.date_of_birth.isnot(None),
+            extract("month", Employee.date_of_birth) == today.month,
+            or_(Employee.resign_date.is_(None), Employee.resign_date > today),
+        )
+        .order_by(extract("day", Employee.date_of_birth))
+    )
+    return [
+        {
+            "name":       r[0],
+            "department": r[1],
+            "job_title":  r[2],
+            "day":        r[3].day,
+            "date":       r[3].isoformat(),
+            "is_today":   r[3].month == today.month and r[3].day == today.day,
+        }
+        for r in q.fetchall()
+    ]
+
 
 @router.get("/summary")
 async def get_employee_summary(
