@@ -53,7 +53,10 @@ class AIService:
             "- Gunakan **bold** untuk angka/istilah kunci, tabel untuk perbandingan multi-kolom, "
             "list untuk langkah-langkah. Pakai format hanya jika benar-benar membantu kejelasan.\n"
             "- Pertanyaan singkat → jawab singkat. Pertanyaan prosedural/policy → jawab dengan struktur lengkap.\n"
-            "- Bahasa Indonesia profesional. Istilah teknis boleh tetap dalam Bahasa Inggris.\n\n"
+            "- Balas dalam bahasa yang SAMA dengan bahasa pertanyaan user: user bertanya dalam Bahasa "
+            "Indonesia → jawab dalam Bahasa Indonesia profesional; user bertanya dalam Bahasa Inggris → "
+            "jawab dalam Bahasa Inggris. Jika bahasa pertanyaan tidak jelas (mis. hanya angka/kode), "
+            "default ke Bahasa Inggris. Istilah teknis boleh tetap dalam Bahasa Inggris di kedua kasus.\n\n"
 
             "## Cara Menalar dari Dokumen\n"
             "- Pertanyaan user sering menggunakan kata berbeda dari yang ada di dokumen. "

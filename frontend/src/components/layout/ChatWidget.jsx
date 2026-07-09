@@ -111,7 +111,7 @@ const FAB_W     = 168;
 const FAB_H     = 48;
 const POPUP_W   = 380;
 const POPUP_H   = 500;
-const GREETING  = "Halo! Ada yang bisa saya bantu mengenai data perusahaan?";
+const GREETING  = "Hello! How can I help you with company data?";
 const STORAGE_KEY = "ckdo_chat_widget";
 
 export default function ChatWidget() {
@@ -237,13 +237,13 @@ export default function ChatWidget() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ fontSize: 12, fontWeight: 700, color: "#fff", margin: 0 }}>CKDO Intelligence</p>
               <p style={{ fontSize: 10, color: "rgba(255,255,255,0.75)", margin: 0 }}>
-                {streaming ? "Sedang mengetik…" : "Online · AI Assistant"}
+                {streaming ? "Typing…" : "Online · AI Assistant"}
               </p>
             </div>
             {/* Clear history */}
             <button
               onClick={handleClearClick}
-              title={confirmClear ? "Klik lagi untuk konfirmasi" : "Hapus riwayat percakapan"}
+              title={confirmClear ? "Click again to confirm" : "Clear conversation history"}
               style={{
                 color: confirmClear ? "#fca5a5" : "rgba(255,255,255,0.65)",
                 background: confirmClear ? "rgba(239,68,68,0.2)" : "none",
@@ -255,7 +255,7 @@ export default function ChatWidget() {
               }}
             >
               <Trash2 size={12} />
-              {confirmClear && "Hapus?"}
+              {confirmClear && "Delete?"}
             </button>
             <button
               onClick={() => { setOpen(false); setConfirmClear(false); }}
@@ -326,7 +326,7 @@ export default function ChatWidget() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
               disabled={streaming}
-              placeholder="Ketik pertanyaan…"
+              placeholder="Type your question…"
               style={{
                 flex: 1, fontSize: 12, padding: "8px 12px", borderRadius: 10, border: "none",
                 background: "#fff", color: "#1e293b", outline: "none",

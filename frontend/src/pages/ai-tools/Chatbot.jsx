@@ -71,10 +71,10 @@ function KnowledgeBasePanel({ onClose }) {
         setDocs(await res.json());
       } else {
         const err = await res.json().catch(() => ({}));
-        setFetchError(err.detail || `Error ${res.status} memuat daftar dokumen`);
+        setFetchError(err.detail || `Error ${res.status} loading document list`);
       }
     } catch (e) {
-      setFetchError(`Gagal memuat daftar: ${e.message}`);
+      setFetchError(`Failed to load list: ${e.message}`);
     } finally {
       setLoading(false);
     }
@@ -84,7 +84,7 @@ function KnowledgeBasePanel({ onClose }) {
 
   const handleSubmit = async () => {
     if (!form.source.trim() || !form.title.trim() || (!form.text.trim() && !file)) {
-      showMsg("error", "Isi Source, Title, dan Content/File terlebih dahulu");
+      showMsg("error", "Fill in Source, Title, and Content/File first");
       return;
     }
     setSaving(true);
@@ -98,7 +98,7 @@ function KnowledgeBasePanel({ onClose }) {
       if (file) fd.append("file", file);
       const res = await fetch("/api/v1/ai/chatbot/documents", { method: "POST", headers, body: fd });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Upload gagal");
+      if (!res.ok) throw new Error(data.detail || "Upload failed");
       showMsg("success", `✓ ${data.message}`);
       setForm({ source: "", title: "", text: "", department: form.department });
       setFile(null);
@@ -112,15 +112,15 @@ function KnowledgeBasePanel({ onClose }) {
   };
 
   const handleDelete = async (source, title) => {
-    if (!confirm(`Hapus dokumen "${title}"?`)) return;
+    if (!confirm(`Delete document "${title}"?`)) return;
     try {
       const params = new URLSearchParams({ source, title });
       const res = await fetch(`/api/v1/ai/chatbot/documents?${params}`, { method: "DELETE", headers });
-      if (res.ok) { showMsg("success", `Dokumen "${title}" dihapus`); fetchDocs(); }
-    } catch (e) { showMsg("error", `Gagal hapus: ${e.message}`); }
+      if (res.ok) { showMsg("success", `Document "${title}" deleted`); fetchDocs(); }
+    } catch (e) { showMsg("error", `Failed to delete: ${e.message}`); }
   };
 
-  const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }) : "-";
+  const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" }) : "-";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)" }}>
@@ -135,13 +135,13 @@ function KnowledgeBasePanel({ onClose }) {
         <div className="p-5 space-y-5">
           {!ragConfigured ? (
             <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-4 py-3 text-sm text-amber-400">
-              RAG belum aktif: <code>VOYAGE_API_KEY</code> belum diset di environment backend.
+              RAG is not active yet: <code>VOYAGE_API_KEY</code> is not set in the backend environment.
             </div>
           ) : (
             <>
               {/* Upload Form */}
               <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-4 space-y-3">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Tambah Dokumen Baru</p>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Add New Document</p>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="text-xs text-gray-500 mb-1 block">Source / Category</label>
@@ -151,7 +151,7 @@ function KnowledgeBasePanel({ onClose }) {
                   <div>
                     <label className="text-xs text-gray-500 mb-1 block">Title</label>
                     <input value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))}
-                      placeholder="e.g. Prosedur Pengajuan PR" className="w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500" />
+                      placeholder="e.g. PR Submission Procedure" className="w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500" />
                   </div>
                   <div>
                     <label className="text-xs text-gray-500 mb-1 block">Department</label>
@@ -162,9 +162,9 @@ function KnowledgeBasePanel({ onClose }) {
                   </div>
                 </div>
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Content (paste teks atau upload file)</label>
+                  <label className="text-xs text-gray-500 mb-1 block">Content (paste text or upload file)</label>
                   <textarea value={form.text} onChange={e => setForm(p => ({ ...p, text: e.target.value }))} rows={3}
-                    placeholder="Paste dokumen di sini..." className="w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 resize-vertical" />
+                    placeholder="Paste document text here..." className="w-full rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 resize-vertical" />
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
                   <input ref={fileRef} type="file" accept=".pdf,.docx,.doc,.txt" onChange={e => setFile(e.target.files?.[0] || null)}
@@ -172,7 +172,7 @@ function KnowledgeBasePanel({ onClose }) {
                   <button onClick={handleSubmit} disabled={saving}
                     className="flex items-center gap-1.5 rounded-md bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white shrink-0">
                     {saving ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                    {saving ? "Memproses... (maks 40 detik)" : "Upload & Simpan"}
+                    {saving ? "Processing... (max 40 sec)" : "Upload & Save"}
                   </button>
                 </div>
                 {msg && (
