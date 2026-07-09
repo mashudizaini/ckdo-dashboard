@@ -44,8 +44,8 @@ export default function EmployeeUpload() {
   // ── File handling ──────────────────────────────────────────────────────────
   const onFileSelect = (f) => {
     if (!f) return;
-    if (!f.name.endsWith(".xlsx") && !f.name.endsWith(".xlsm")) {
-      setError("File must be .xlsx or .xlsm format"); return;
+    if (!f.name.endsWith(".xlsx") && !f.name.endsWith(".xlsm") && !f.name.endsWith(".xls")) {
+      setError("File must be .xls, .xlsx, or .xlsm format"); return;
     }
     setFile(f); setError(null); setResult(null);
   };
@@ -85,7 +85,7 @@ export default function EmployeeUpload() {
 
   const fmtDate = (iso) => {
     if (!iso) return "—";
-    try { return new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }); }
+    try { return new Date(iso).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }); }
     catch (_) { return iso; }
   };
 
@@ -98,9 +98,8 @@ export default function EmployeeUpload() {
       <div className="flex gap-3 rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3 text-sm text-blue-300">
         <AlertCircle size={15} className="mt-0.5 shrink-0" />
         <span>
-          Upload employee Excel file (format <strong>ckdo employee.xlsx</strong>).
-          Existing data will be updated based on <strong>User ID</strong>.
-          New employees will be added automatically.
+          Upload the standard Talenta employee export (sheet <strong>"Employee Data"</strong>, .xls/.xlsx/.xlsm).
+          This <strong>replaces all existing employee data</strong> with the contents of the uploaded file.
         </span>
       </div>
 
@@ -120,7 +119,7 @@ export default function EmployeeUpload() {
         <input
           ref={inputRef}
           type="file"
-          accept=".xlsx,.xlsm"
+          accept=".xls,.xlsx,.xlsm"
           className="hidden"
           onChange={(e) => onFileSelect(e.target.files[0])}
         />
@@ -142,7 +141,7 @@ export default function EmployeeUpload() {
             </div>
             <div className="text-center">
               <p className="text-sm font-medium text-gray-300">Drag & drop Excel file here</p>
-              <p className="text-xs text-gray-600 mt-1">or click to select file (.xlsx / .xlsm)</p>
+              <p className="text-xs text-gray-600 mt-1">or click to select file (.xls / .xlsx / .xlsm)</p>
             </div>
           </>
         )}
@@ -193,9 +192,9 @@ export default function EmployeeUpload() {
           </div>
           <div className="grid grid-cols-3 gap-3">
             {[
-              { icon: Users,     color: "text-blue-400",  bg: "bg-blue-500/10",   label: "Total Read",    val: result.total_rows },
-              { icon: UserPlus,  color: "text-green-400", bg: "bg-green-500/10",  label: "New Employees", val: result.inserted },
-              { icon: RotateCcw, color: "text-amber-400", bg: "bg-amber-500/10",  label: "Updated",       val: result.updated },
+              { icon: Users,     color: "text-blue-400",  bg: "bg-blue-500/10",   label: "Total Read",       val: result.total_rows },
+              { icon: UserPlus,  color: "text-green-400", bg: "bg-green-500/10",  label: "Employees Loaded", val: result.inserted },
+              { icon: RotateCcw, color: "text-amber-400", bg: "bg-amber-500/10",  label: "Previous Records Replaced", val: result.replaced_previous },
             ].map(({ icon: Icon, color, bg, label, val }) => (
               <div key={label} className="rounded-lg border border-white/5 bg-white/3 p-3 text-center">
                 <div className={`mx-auto mb-1.5 flex h-7 w-7 items-center justify-center rounded-lg ${bg}`}>

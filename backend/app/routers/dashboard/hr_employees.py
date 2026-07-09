@@ -80,6 +80,19 @@ MAXLEN = {
 
 _EMPTY_MARKERS = ("", "-", "none", "n/a", "na", "null")
 
+# Talenta exports mix Indonesian and English marital-status values depending on
+# who entered the data — normalize to English so the dashboard is consistent
+# (this is a foreign company, all UI/data labels must read in English).
+_MARITAL_MAP = {
+    "menikah": "Married",
+    "belum menikah": "Single",
+    "cerai": "Divorced",
+    "cerai hidup": "Divorced",
+    "cerai mati": "Widow",
+    "duda": "Widower",
+    "janda": "Widow",
+}
+
 
 def _to_str(val, field: str = None) -> Optional[str]:
     if val is None:
@@ -145,6 +158,9 @@ def _parse_row(row: tuple, batch_id: str) -> Optional[dict]:
             else:
                 data["education_degree"] = (raw or "")[:MAXLEN["education_degree"]] or None
                 data["education_school"] = None
+        elif field == "marital_status":
+            raw = _to_str(val, field)
+            data["marital_status"] = _MARITAL_MAP.get(raw.lower(), raw) if raw else None
         else:
             data[field] = _to_str(val, field)
     return data
@@ -178,7 +194,7 @@ async def upload_employees(
     Logic: REPLACE — seluruh data karyawan lama dihapus, diganti data dari file baru.
     """
     if not file.filename.lower().endswith((".xls", ".xlsx", ".xlsm")):
-        raise HTTPException(status_code=400, detail="File harus berformat .xls, .xlsx, atau .xlsm")
+        raise HTTPException(status_code=400, detail="File must be .xls, .xlsx, or .xlsm format")
 
     contents = await file.read()
     batch_id = f"batch_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
@@ -186,7 +202,7 @@ async def upload_employees(
     try:
         data_rows = _extract_rows(contents, file.filename)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"File Excel tidak valid: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid Excel file: {e}")
 
     rows_parsed = []
     seen_ids = set()
@@ -202,21 +218,21 @@ async def upload_employees(
             seen_ids.add(parsed["user_id"])
             rows_parsed.append(parsed)
     except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Gagal membaca baris data: {e}")
+        raise HTTPException(status_code=422, detail=f"Failed to read data rows: {e}")
 
     if not rows_parsed:
-        raise HTTPException(status_code=422, detail="Tidak ada data karyawan ditemukan di file. "
-                            "Pastikan sheet bernama 'Employee Data' dengan header di baris pertama.")
+        raise HTTPException(status_code=422, detail="No employee data found in file. "
+                            "Make sure the sheet is named 'Employee Data' with headers in the first row.")
 
     try:
-        # REPLACE — hapus seluruh data lama, ganti dengan data dari file baru
+        # REPLACE — delete all previous data, replace with the new file's data
         deleted_result = await db.execute(delete(Employee))
         replaced_count = deleted_result.rowcount or 0
 
         db.add_all(Employee(**data) for data in rows_parsed)
         await db.flush()
     except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Gagal menyimpan data ke database: {e}")
+        raise HTTPException(status_code=422, detail=f"Failed to save data to database: {e}")
 
     # Simpan log upload
     log = EmployeeUploadLog(
@@ -239,7 +255,7 @@ async def upload_employees(
         "updated":           0,
         "skipped":           skipped,
         "replaced_previous": replaced_count,
-        "message":           f"Upload berhasil: {len(rows_parsed)} data karyawan menggantikan {replaced_count} data lama.",
+        "message":           f"Upload successful: {len(rows_parsed)} employee records replaced {replaced_count} previous records.",
     }
 
 
@@ -504,8 +520,8 @@ async def get_monthly_summary(
         sex_map = {}
 
     by_gender = [
-        {"name": "Laki-laki", "total": sex_map.get("M", 0)},
-        {"name": "Perempuan", "total": sex_map.get("F", 0)},
+        {"name": "Male",   "total": sex_map.get("M", 0)},
+        {"name": "Female", "total": sex_map.get("F", 0)},
     ]
 
     return {

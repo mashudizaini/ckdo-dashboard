@@ -16,7 +16,7 @@ import { hrApi } from "@/api/dashboard";
 const API        = "/api/v1/dashboard/hr/employees";
 const BUDGET_API = "/api/v1/dashboard/hr/budget";
 
-const MONTHS_ID = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+const MONTHS_ID = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 const NEU_TAB = {
   bg: "#e8edf5",
@@ -364,7 +364,7 @@ function EmployeeTable() {
           { label: "Phone",           field: "phone_number",      align: "left" },
         ];
         const fmtDate = (v) => v
-          ? new Date(v).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
+          ? new Date(v).toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })
           : "—";
         return (
           <div className="overflow-x-auto rounded-lg border border-gray-800">
@@ -521,7 +521,7 @@ function SummaryHBarList({ items, max }) {
           <div className="w-8 text-right font-bold text-white">{it.total}</div>
         </div>
       ))}
-      {items.length === 0 && <p className="text-xs text-gray-400">Tidak ada data.</p>}
+      {items.length === 0 && <p className="text-xs text-gray-400">No data.</p>}
     </div>
   );
 }
@@ -533,7 +533,7 @@ function EmployeeSummarySection() {
   if (loading) return <div className="py-20 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-300" /></div>;
   if (errMsg || !data) return (
     <div className="py-10 text-center space-y-2">
-      <p className="text-xs text-red-400 font-semibold">Gagal memuat data summary</p>
+      <p className="text-xs text-red-400 font-semibold">Failed to load summary data</p>
       {errMsg && <pre className="text-xs text-gray-300 max-w-xl mx-auto whitespace-pre-wrap text-left bg-gray-900 rounded p-3">{errMsg}</pre>}
     </div>
   );
@@ -561,10 +561,10 @@ function EmployeeSummarySection() {
       {/* KPI Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: "Total Karyawan",     val: latest,    sub: delta >= 0 ? `+${delta} bulan ini` : `${delta} bulan ini`, color: "#818cf8" },
-          { label: "Rata-rata Join/Bln", val: avgJoin12, sub: "12 bulan terakhir", color: "#34d399" },
-          { label: "Laki-laki",          val: by_gender.find(g => g.name === "Laki-laki")?.total ?? 0,  sub: "M", color: "#60a5fa" },
-          { label: "Perempuan",          val: by_gender.find(g => g.name === "Perempuan")?.total ?? 0,  sub: "F", color: "#fb7185" },
+          { label: "Total Employees",    val: latest,    sub: delta >= 0 ? `+${delta} this month` : `${delta} this month`, color: "#818cf8" },
+          { label: "Avg. Joins/Month",   val: avgJoin12, sub: "last 12 months", color: "#34d399" },
+          { label: "Male",               val: by_gender.find(g => g.name === "Male")?.total ?? 0,  sub: "M", color: "#60a5fa" },
+          { label: "Female",             val: by_gender.find(g => g.name === "Female")?.total ?? 0,  sub: "F", color: "#fb7185" },
         ].map(({ label, val, sub, color }) => (
           <div key={label} className="rounded-xl border border-gray-800 bg-gray-900 p-4">
             <div className="text-2xl font-bold" style={{ color }}>{val}</div>
@@ -576,26 +576,26 @@ function EmployeeSummarySection() {
 
       {/* Breakdown lists row 1 */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <SummaryChartCard title="Per Departemen">
+        <SummaryChartCard title="By Department">
           <SummaryHBarList items={by_dept} max={deptMax} />
         </SummaryChartCard>
-        <SummaryChartCard title="Per Level Jabatan">
+        <SummaryChartCard title="By Job Level">
           <SummaryHBarList items={by_level} max={levelMax} />
         </SummaryChartCard>
-        <SummaryChartCard title="Per Pendidikan">
+        <SummaryChartCard title="By Education">
           <SummaryHBarList items={by_education} max={eduMax} />
         </SummaryChartCard>
       </div>
 
       {/* Breakdown lists row 2 */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <SummaryChartCard title="Per Grade">
+        <SummaryChartCard title="By Grade">
           <SummaryHBarList items={by_grade} max={gradeMax} />
         </SummaryChartCard>
-        <SummaryChartCard title="Status Karyawan">
+        <SummaryChartCard title="Employee Status">
           <SummaryHBarList items={by_status} max={statusMax} />
         </SummaryChartCard>
-        <SummaryChartCard title="Status Pernikahan">
+        <SummaryChartCard title="Marital Status">
           <SummaryHBarList items={by_marital} max={maritalMax} />
         </SummaryChartCard>
       </div>
@@ -615,7 +615,7 @@ function EmployeeGraphSection() {
   if (loading) return <div className="py-20 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-300" /></div>;
   if (errMsg || !data) return (
     <div className="py-10 text-center space-y-2">
-      <p className="text-xs text-red-400 font-semibold">Gagal memuat data graph</p>
+      <p className="text-xs text-red-400 font-semibold">Failed to load graph data</p>
       {errMsg && <pre className="text-xs text-gray-300 max-w-xl mx-auto whitespace-pre-wrap text-left bg-gray-900 rounded p-3">{errMsg}</pre>}
     </div>
   );
@@ -654,7 +654,7 @@ function EmployeeGraphSection() {
     <div className="space-y-4 mt-2">
       {/* Charts row 1: headcount trend + monthly joins */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SummaryChartCard title="Tren Headcount (36 Bulan)">
+        <SummaryChartCard title="Headcount Trend (36 Months)">
           <RC.ResponsiveContainer width="100%" height={CHART_H}>
             <RC.AreaChart data={headcount_trend} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
               <defs>
@@ -671,12 +671,12 @@ function EmployeeGraphSection() {
           </RC.ResponsiveContainer>
         </SummaryChartCard>
 
-        <SummaryChartCard title="Penerimaan Karyawan per Bulan (24 Bln)">
+        <SummaryChartCard title="New Hires per Month (24 Months)">
           <RC.ResponsiveContainer width="100%" height={CHART_H}>
             <RC.BarChart data={monthly_joins} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
               <RC.XAxis dataKey="label" tick={tickStyle} interval={3} />
               <RC.YAxis tick={tickStyle} allowDecimals={false} />
-              <RC.Tooltip {...tooltipStyle} formatter={(v) => [v, "Karyawan Baru"]} />
+              <RC.Tooltip {...tooltipStyle} formatter={(v) => [v, "New Hires"]} />
               <RC.Bar dataKey="joins" fill="#34d399" radius={[3, 3, 0, 0]}>
                 {monthly_joins.map((_, i) => <RC.Cell key={i} fill={i === monthly_joins.length - 1 ? "#818cf8" : "#34d399"} />)}
               </RC.Bar>
@@ -687,7 +687,7 @@ function EmployeeGraphSection() {
 
       {/* Charts row 2: status + gender + marital */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <SummaryChartCard title="Status Karyawan">
+        <SummaryChartCard title="Employee Status">
           <RC.ResponsiveContainer width="100%" height={170}>
             <RC.PieChart>
               <RC.Pie data={by_status} cx="50%" cy="50%" outerRadius={65} dataKey="total" nameKey="name" label={renderPieLabel} labelLine={false}>
@@ -699,7 +699,7 @@ function EmployeeGraphSection() {
           </RC.ResponsiveContainer>
         </SummaryChartCard>
 
-        <SummaryChartCard title="Jenis Kelamin">
+        <SummaryChartCard title="Gender">
           <RC.ResponsiveContainer width="100%" height={170}>
             <RC.PieChart>
               <RC.Pie data={by_gender} cx="50%" cy="50%" outerRadius={65} dataKey="total" nameKey="name" label={renderPieLabel} labelLine={false}>
@@ -712,7 +712,7 @@ function EmployeeGraphSection() {
           </RC.ResponsiveContainer>
         </SummaryChartCard>
 
-        <SummaryChartCard title="Status Pernikahan">
+        <SummaryChartCard title="Marital Status">
           <RC.ResponsiveContainer width="100%" height={170}>
             <RC.PieChart>
               <RC.Pie data={by_marital} cx="50%" cy="50%" outerRadius={65} dataKey="total" nameKey="name" label={renderPieLabel} labelLine={false}>
@@ -759,7 +759,7 @@ function TurnoverSection() {
   if (loading) return <div className="py-20 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-300" /></div>;
   if (errMsg || !data) return (
     <div className="py-10 text-center space-y-2">
-      <p className="text-xs text-red-400 font-semibold">Gagal memuat laporan turnover</p>
+      <p className="text-xs text-red-400 font-semibold">Failed to load turnover report</p>
       {errMsg && <pre className="text-xs text-gray-300 max-w-xl mx-auto whitespace-pre-wrap text-left bg-gray-900 rounded p-3">{errMsg}</pre>}
     </div>
   );
@@ -789,10 +789,10 @@ function TurnoverSection() {
       {/* KPI Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: "Turnover Rate (12 Bln)", val: `${annual_turnover_rate}%`, sub: "annualized",             color: "#fb7185" },
-          { label: "Total Resign (12 Bln)",  val: total_resigns_12m,          sub: "karyawan keluar",         color: "#fbbf24" },
-          { label: "Rata-rata Masa Kerja",   val: `${avg_tenure_years} thn`,  sub: "karyawan yang resign",    color: "#818cf8" },
-          { label: "Headcount Saat Ini",     val: current_headcount,          sub: "karyawan aktif",          color: "#34d399" },
+          { label: "Turnover Rate (12 Mo)",  val: `${annual_turnover_rate}%`, sub: "annualized",              color: "#fb7185" },
+          { label: "Total Resigned (12 Mo)", val: total_resigns_12m,          sub: "employees left",          color: "#fbbf24" },
+          { label: "Avg. Tenure",            val: `${avg_tenure_years} yrs`,  sub: "of resigned employees",   color: "#818cf8" },
+          { label: "Current Headcount",      val: current_headcount,          sub: "active employees",        color: "#34d399" },
         ].map(({ label, val, sub, color }) => (
           <div key={label} className="rounded-xl border border-gray-800 bg-gray-900 p-4">
             <div className="text-2xl font-bold" style={{ color }}>{val}</div>
@@ -805,13 +805,13 @@ function TurnoverSection() {
       {/* Chart: resign trend + turnover rate */}
       {RC ? (
         <>
-          <SummaryChartCard title="Tren Resign & Turnover Rate (24 Bulan)">
+          <SummaryChartCard title="Resign & Turnover Rate Trend (24 Months)">
             <RC.ResponsiveContainer width="100%" height={CHART_H}>
               <RC.ComposedChart data={resign_trend} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
                 <RC.XAxis dataKey="label" tick={tickStyle} interval={3} />
                 <RC.YAxis yAxisId="left" tick={tickStyle} allowDecimals={false} />
                 <RC.YAxis yAxisId="right" orientation="right" tick={tickStyle} unit="%" />
-                <RC.Tooltip {...tooltipStyle} formatter={(v, name) => name === "turnover_rate" ? [`${v}%`, "Turnover Rate"] : [v, "Resign"]} />
+                <RC.Tooltip {...tooltipStyle} formatter={(v, name) => name === "turnover_rate" ? [`${v}%`, "Turnover Rate"] : [v, "Resigned"]} />
                 <RC.Bar yAxisId="left" dataKey="resigns" fill="#fb7185" radius={[3, 3, 0, 0]} />
                 <RC.Line yAxisId="right" type="monotone" dataKey="turnover_rate" stroke="#fbbf24" strokeWidth={2} dot={false} />
               </RC.ComposedChart>
@@ -820,13 +820,13 @@ function TurnoverSection() {
 
           {/* Breakdown lists row */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <SummaryChartCard title="Resign per Departemen (12 Bln)">
+            <SummaryChartCard title="Resigned by Department (12 Mo)">
               <SummaryHBarList items={by_dept} max={deptMax} />
             </SummaryChartCard>
-            <SummaryChartCard title="Resign per Level Jabatan (12 Bln)">
+            <SummaryChartCard title="Resigned by Job Level (12 Mo)">
               <SummaryHBarList items={by_level} max={levelMax} />
             </SummaryChartCard>
-            <SummaryChartCard title="Resign per Status Karyawan (12 Bln)">
+            <SummaryChartCard title="Resigned by Employee Status (12 Mo)">
               <SummaryHBarList items={by_status} max={statusMax} />
             </SummaryChartCard>
           </div>
@@ -962,7 +962,7 @@ function AttendanceTodaySection() {
 
   const fmtDate = (iso) => {
     if (!iso) return "—";
-    try { return new Date(iso + "T00:00:00").toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); }
+    try { return new Date(iso + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); }
     catch (_) { return iso; }
   };
 
@@ -1097,7 +1097,7 @@ function AttendanceTodaySection() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-gray-800/60">
-                        {["Department", "Total", "Hadir", "Absen", "Rate"].map((h) => (
+                        {["Department", "Total", "Present", "Absent", "Rate"].map((h) => (
                           <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -1485,20 +1485,20 @@ function TargetAchievementPanel({ apiBase, headers }) {
         </select>
       </div>
       <p style={{ fontSize: 10.5, color: "#64748b", marginBottom: 12 }}>
-        Target (Man-Days) = Total Employees × Effective Working Days &nbsp;·&nbsp; Achievement = man-days hadir aktual
+        Target (Man-Days) = Total Employees × Effective Working Days &nbsp;·&nbsp; Achievement = actual man-days present
       </p>
 
       {loading ? (
         <div style={{ padding: "30px 0", textAlign: "center" }}><Loader2 size={16} className="animate-spin" style={{ color: "#94a3b8" }} /></div>
       ) : !rows.length ? (
-        <p style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>Belum ada data untuk tahun ini.</p>
+        <p style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No data available for this year yet.</p>
       ) : (
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
             <thead>
               <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
-                {["Bulan", "Karyawan", "Hari Kerja Efektif", "Target (Man-Days)", "Achievement", "Rate"].map((h) => (
-                  <th key={h} style={{ padding: "8px 10px", textAlign: h === "Bulan" ? "left" : "center", fontSize: 10, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</th>
+                {["Month", "Employees", "Effective Working Days", "Target (Man-Days)", "Achievement", "Rate"].map((h) => (
+                  <th key={h} style={{ padding: "8px 10px", textAlign: h === "Month" ? "left" : "center", fontSize: 10, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -2038,7 +2038,7 @@ function WorkingCalendarPanel() {
           </div>
           <div style={{ flex: 1 }}>
             <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>HOLIDAY NAME</label>
-            <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Hari Raya Idul Fitri"
+            <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Eid al-Fitr"
               style={{ width: "100%", fontSize: 12, padding: "6px 10px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", outline: "none", boxSizing: "border-box" }} />
           </div>
           <div>
@@ -2921,7 +2921,7 @@ function EMagazineSection() {
       const { data } = await hrApi.eMagazineList();
       setList(Array.isArray(data) ? data : []);
     } catch (err) {
-      setError(err?.response?.data?.detail || "Gagal memuat daftar e-magazine.");
+      setError(err?.response?.data?.detail || "Failed to load e-magazine list.");
       setList([]);
     } finally { setLoading(false); }
   }, []);
@@ -2930,7 +2930,7 @@ function EMagazineSection() {
 
   const handleUpload = async (e) => {
     e.preventDefault();
-    if (!file || !title.trim()) { setError("Judul dan file PDF wajib diisi."); return; }
+    if (!file || !title.trim()) { setError("Title and PDF file are required."); return; }
     setError(""); setSuccess(""); setUploading(true);
     try {
       const form = new FormData();
@@ -2939,25 +2939,25 @@ function EMagazineSection() {
       form.append("date_label", dateLbl.trim());
       form.append("qr_links_json", JSON.stringify(uploadQrLinks.filter(q => q.url.trim())));
       await hrApi.eMagazineUpload(form);
-      setSuccess(`"${title}" berhasil diupload.`);
+      setSuccess(`"${title}" uploaded successfully.`);
       setTitle(""); setDateLbl(""); setFile(null); setUploadQrLinks([]);
       e.target.reset();
       load();
     } catch (err) {
-      setError(err?.response?.data?.detail || "Upload gagal.");
+      setError(err?.response?.data?.detail || "Upload failed.");
     } finally { setUploading(false); }
   };
 
   const handleDelete = async (filename) => {
-    if (!window.confirm(`Hapus "${filename}"?`)) return;
+    if (!window.confirm(`Delete "${filename}"?`)) return;
     setDeleting(filename); setError(""); setSuccess("");
     try {
       await hrApi.eMagazineDelete(filename);
-      setSuccess(`"${filename}" berhasil dihapus.`);
+      setSuccess(`"${filename}" deleted successfully.`);
       if (editQr?.filename === filename) setEditQr(null);
       load();
     } catch {
-      setError("Gagal menghapus file.");
+      setError("Failed to delete file.");
     } finally { setDeleting(null); }
   };
 
@@ -2971,11 +2971,11 @@ function EMagazineSection() {
     setSavingQr(editQr.filename);
     try {
       await hrApi.eMagazineUpdateQR(editQr.filename, editQr.links.filter(q => q.url.trim()));
-      setSuccess("QR links berhasil disimpan.");
+      setSuccess("QR links saved successfully.");
       setEditQr(null);
       load();
     } catch (err) {
-      setError(err?.response?.data?.detail || "Gagal menyimpan QR links.");
+      setError(err?.response?.data?.detail || "Failed to save QR links.");
     } finally { setSavingQr(null); }
   };
 
@@ -2986,7 +2986,7 @@ function EMagazineSection() {
 
   const fmtDate = (iso) => {
     if (!iso) return "-";
-    try { return new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }); }
+    try { return new Date(iso).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }); }
     catch { return iso; }
   };
 
@@ -2996,7 +2996,7 @@ function EMagazineSection() {
         <div key={idx} className="flex gap-2 items-center">
           <input
             type="text"
-            placeholder="Label (cth: Cek Game)"
+            placeholder="Label (e.g. Check Game)"
             value={q.label}
             onChange={e => updateQrRow(setter, idx, "label", e.target.value)}
             className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-xs text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
@@ -3020,7 +3020,7 @@ function EMagazineSection() {
         onClick={() => addQrRow(setter)}
         className="flex items-center gap-1.5 text-xs text-teal-400 hover:text-teal-300 transition-colors"
       >
-        <Plus size={12} /> Tambah Link QR
+        <Plus size={12} /> Add QR Link
       </button>
     </div>
   );
@@ -3030,15 +3030,15 @@ function EMagazineSection() {
       {/* Upload form */}
       <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-5">
         <h3 className="text-sm font-semibold text-teal-400 mb-4 flex items-center gap-2">
-          <Upload size={14} /> Upload e-Magazine Baru
+          <Upload size={14} /> Upload New e-Magazine
         </h3>
         <form onSubmit={handleUpload} className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="space-y-1">
-              <label className="text-xs text-gray-400 font-medium">Judul Edisi *</label>
+              <label className="text-xs text-gray-400 font-medium">Edition Title *</label>
               <input
                 type="text"
-                placeholder="cth: 2nd Edition"
+                placeholder="e.g. 2nd Edition"
                 value={title}
                 onChange={e => setTitle(e.target.value)}
                 className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
@@ -3046,17 +3046,17 @@ function EMagazineSection() {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs text-gray-400 font-medium">Periode</label>
+              <label className="text-xs text-gray-400 font-medium">Period</label>
               <input
                 type="text"
-                placeholder="cth: August 2026"
+                placeholder="e.g. August 2026"
                 value={dateLbl}
                 onChange={e => setDateLbl(e.target.value)}
                 className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs text-gray-400 font-medium">File PDF * (maks 100 MB)</label>
+              <label className="text-xs text-gray-400 font-medium">PDF File * (max 100 MB)</label>
               <input
                 type="file"
                 accept="application/pdf"
@@ -3068,7 +3068,7 @@ function EMagazineSection() {
           </div>
           <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-3">
             <label className="text-xs text-gray-400 font-medium mb-2 flex items-center gap-1.5">
-              <QrCode size={11} /> Link QR Code (opsional)
+              <QrCode size={11} /> QR Code Link (optional)
             </label>
             <QrLinksEditor links={uploadQrLinks} setter={setUploadQrLinks} />
           </div>
@@ -3079,7 +3079,7 @@ function EMagazineSection() {
               className="flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2 text-sm font-semibold text-white hover:bg-teal-500 disabled:opacity-50 transition-colors"
             >
               {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-              {uploading ? "Mengupload…" : "Upload"}
+              {uploading ? "Uploading…" : "Upload"}
             </button>
             {success && <span className="text-xs text-teal-400">{success}</span>}
             {error   && <span className="text-xs text-red-400">{error}</span>}
@@ -3091,7 +3091,7 @@ function EMagazineSection() {
       <div className="rounded-xl border border-gray-800 overflow-hidden">
         <div className="bg-gray-800/60 px-4 py-3 flex items-center justify-between">
           <span className="text-sm font-semibold text-gray-200 flex items-center gap-2">
-            <BookOpen size={14} className="text-teal-400" /> Daftar Edisi ({list.length})
+            <BookOpen size={14} className="text-teal-400" /> Edition List ({list.length})
           </span>
           <button onClick={load} className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-teal-400 transition-colors">
             <RefreshCw size={12} /> Refresh
@@ -3102,16 +3102,16 @@ function EMagazineSection() {
             <Loader2 size={20} className="animate-spin text-teal-400" />
           </div>
         ) : list.length === 0 ? (
-          <p className="py-10 text-center text-xs text-gray-600">Belum ada e-magazine. Upload PDF di atas.</p>
+          <p className="py-10 text-center text-xs text-gray-600">No e-magazines yet. Upload a PDF above.</p>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-800/40">
-                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Judul</th>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Periode</th>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Nama File</th>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Diupload</th>
-                <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Aksi</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Title</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Period</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">File Name</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Uploaded</th>
+                <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
@@ -3143,7 +3143,7 @@ function EMagazineSection() {
                           className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
                         >
                           {deleting === ed.filename ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
-                          Hapus
+                          Delete
                         </button>
                       </div>
                     </td>
@@ -3153,7 +3153,7 @@ function EMagazineSection() {
                       <td colSpan={5} className="px-4 py-3 bg-gray-900/80 border-t border-teal-800/40">
                         <div className="max-w-2xl space-y-3">
                           <p className="text-xs font-semibold text-teal-400 flex items-center gap-1.5">
-                            <QrCode size={11} /> Edit Link QR — {ed.title}
+                            <QrCode size={11} /> Edit QR Link — {ed.title}
                           </p>
                           <QrLinksEditor
                             links={editQr.links}
@@ -3170,13 +3170,13 @@ function EMagazineSection() {
                               className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-teal-500 disabled:opacity-50 transition-colors"
                             >
                               {savingQr ? <Loader2 size={11} className="animate-spin" /> : null}
-                              Simpan
+                              Save
                             </button>
                             <button
                               onClick={() => setEditQr(null)}
                               className="rounded-lg px-4 py-1.5 text-xs font-semibold text-gray-400 hover:text-gray-200 transition-colors"
                             >
-                              Batal
+                              Cancel
                             </button>
                           </div>
                         </div>

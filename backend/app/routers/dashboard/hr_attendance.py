@@ -103,7 +103,7 @@ async def upload_attendance(
     UPSERT berdasarkan employee_id + attendance_date.
     """
     if not file.filename.endswith((".xlsx", ".xlsm")):
-        raise HTTPException(status_code=400, detail="File harus berformat .xlsx atau .xlsm")
+        raise HTTPException(status_code=400, detail="File must be .xlsx or .xlsm format")
 
     contents = await file.read()
     batch_id = f"att_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
@@ -111,7 +111,7 @@ async def upload_attendance(
     try:
         wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"File Excel tidak valid: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid Excel file: {e}")
 
     ws = wb.active
 
@@ -125,8 +125,8 @@ async def upload_attendance(
     if not rows_parsed:
         raise HTTPException(
             status_code=422,
-            detail="Tidak ada data absensi ditemukan. "
-                   "Pastikan format file sesuai template (header baris 1, data mulai baris 2).",
+            detail="No attendance data found. "
+                   "Make sure the file matches the template (header row 1, data starting row 2).",
         )
 
     # Kumpulkan key (employee_id, date) yang sudah ada di DB
@@ -174,7 +174,7 @@ async def upload_attendance(
         "inserted":   inserted,
         "updated":    updated,
         "skipped":    skipped,
-        "message":    f"Upload berhasil: {inserted} record baru, {updated} diperbarui.",
+        "message":    f"Upload successful: {inserted} new records, {updated} updated.",
     }
 
 
@@ -364,13 +364,20 @@ async def get_attendance_departments(
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.HR)),
 ):
-    result = await db.execute(
-        select(AttendanceRecord.department)
-        .where(AttendanceRecord.department.isnot(None))
-        .distinct()
-        .order_by(AttendanceRecord.department)
+    """All departments that exist — union of the Employee master list and
+    whatever department names show up in uploaded attendance records, so the
+    filter always covers every department even if attendance hasn't been
+    uploaded for all of them yet."""
+    from app.models.employee import Employee
+
+    emp_result = await db.execute(
+        select(Employee.department).where(Employee.department.isnot(None)).distinct()
     )
-    return [r[0] for r in result.all() if r[0]]
+    att_result = await db.execute(
+        select(AttendanceRecord.department).where(AttendanceRecord.department.isnot(None)).distinct()
+    )
+    names = {r[0] for r in emp_result.all() if r[0]} | {r[0] for r in att_result.all() if r[0]}
+    return sorted(names)
 
 
 @router.get("/monthly-rate")
@@ -414,7 +421,7 @@ async def get_monthly_attendance_rate(
     )
     rows = result.fetchall()
 
-    MONTHS = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"]
+    MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
     data = []
     for r in rows:
         year    = int(r[0])
@@ -455,7 +462,7 @@ async def get_target_vs_achievement(
     from app.models.working_calendar import WorkingCalendarHoliday
 
     yr = year or date.today().year
-    MONTHS = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"]
+    MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 
     def _month_range(m: int):
         first = date(yr, m, 1)
@@ -862,7 +869,7 @@ async def get_employee_detail(
     )
     absences = absence_q.scalars().all()
 
-    MONTHS = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"]
+    MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 
     first_absence = absences[0] if absences else None
     return {
