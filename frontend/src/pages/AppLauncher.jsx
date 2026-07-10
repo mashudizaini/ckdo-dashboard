@@ -161,18 +161,50 @@ function CategorySection({ cat, apps, onNavigate, onDashboardClick, startIndex }
   );
 }
 
-// ─── Birthday row (one item in the announcement marquee) ──────────
-function BirthdayRow({ emp }) {
+// ─── Announcement row — one item in the marquee (birthday or task alert) ──
+function AnnouncementRow({ item }) {
+  if (item.kind === "task_alert") {
+    const badgeBg = item.is_overdue ? "#fee2e2" : "#fef3c7";
+    const badgeColor = item.is_overdue ? "#dc2626" : "#d97706";
+    return (
+      <div style={{
+        display: "flex", alignItems: "center", gap: 10,
+        padding: "9px 12px", marginBottom: 8, borderRadius: 12,
+        background: item.is_overdue ? "linear-gradient(135deg, #fee2e2, #fecaca)" : "#fff",
+        boxShadow: item.is_overdue ? "0 0 0 1.5px #dc2626, 3px 3px 8px #c5cad8" : "2px 2px 6px #c5cad8, -2px -2px 6px #ffffff",
+      }}>
+        <div style={{
+          width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+          background: item.is_overdue ? "#dc2626" : "linear-gradient(135deg,#f59e0b,#d97706)",
+          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14,
+        }}>
+          {item.is_overdue ? "🔴" : "⏰"}
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {item.title}
+          </p>
+          <p style={{ fontSize: 10, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {[item.assigned_to, item.category].filter(Boolean).join(" · ") || "—"}
+          </p>
+        </div>
+        <div style={{ flexShrink: 0, textAlign: "center", padding: "3px 9px", borderRadius: 10, background: badgeBg, color: badgeColor, fontSize: 10.5, fontWeight: 800 }}>
+          {item.is_overdue ? "OVERDUE" : `${item.days_left}d left`}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 10,
       padding: "9px 12px", marginBottom: 8, borderRadius: 12,
-      background: emp.is_today ? "linear-gradient(135deg, #fef3c7, #fde68a)" : "#fff",
-      boxShadow: emp.is_today ? "0 0 0 1.5px #f59e0b, 3px 3px 8px #c5cad8" : "2px 2px 6px #c5cad8, -2px -2px 6px #ffffff",
+      background: item.is_today ? "linear-gradient(135deg, #fef3c7, #fde68a)" : "#fff",
+      boxShadow: item.is_today ? "0 0 0 1.5px #f59e0b, 3px 3px 8px #c5cad8" : "2px 2px 6px #c5cad8, -2px -2px 6px #ffffff",
     }}>
       <div style={{
         width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
-        background: emp.is_today ? "#f59e0b" : "linear-gradient(135deg,#2563eb,#0891b2)",
+        background: item.is_today ? "#f59e0b" : "linear-gradient(135deg,#2563eb,#0891b2)",
         display: "flex", alignItems: "center", justifyContent: "center",
         fontSize: 14,
       }}>
@@ -180,30 +212,30 @@ function BirthdayRow({ emp }) {
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
         <p style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {emp.name}
+          {item.name}
         </p>
         <p style={{ fontSize: 10, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {[emp.job_title, emp.department].filter(Boolean).join(" · ") || "—"}
+          {[item.job_title, item.department].filter(Boolean).join(" · ") || "—"}
         </p>
       </div>
       <div style={{
         flexShrink: 0, textAlign: "center", padding: "3px 9px", borderRadius: 10,
-        background: emp.is_today ? "#f59e0b" : "#dbeafe",
-        color: emp.is_today ? "#fff" : "#1d4ed8",
+        background: item.is_today ? "#f59e0b" : "#dbeafe",
+        color: item.is_today ? "#fff" : "#1d4ed8",
         fontSize: 10.5, fontWeight: 800,
       }}>
-        {emp.is_today ? "TODAY" : new Date(emp.date + "T00:00:00").toLocaleDateString("en-US", { day: "numeric", month: "short" })}
+        {item.is_today ? "TODAY" : new Date(item.date + "T00:00:00").toLocaleDateString("en-US", { day: "numeric", month: "short" })}
       </div>
     </div>
   );
 }
 
 // ─── Auto-scrolling vertical marquee (loops seamlessly, pauses on hover) ──
-function BirthdayMarquee({ items }) {
+function AnnouncementMarquee({ items }) {
   if (!items.length) {
     return (
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <p style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500, textAlign: "center" }}>No birthdays this month.</p>
+        <p style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500, textAlign: "center" }}>Nothing to announce right now.</p>
       </div>
     );
   }
@@ -216,8 +248,8 @@ function BirthdayMarquee({ items }) {
         className={shouldScroll ? "birthday-marquee__track birthday-marquee__track--scroll" : "birthday-marquee__track"}
         style={shouldScroll ? { animationDuration: `${duration}s` } : undefined}
       >
-        {(shouldScroll ? [...items, ...items] : items).map((emp, i) => (
-          <BirthdayRow key={i} emp={emp} />
+        {(shouldScroll ? [...items, ...items] : items).map((item, i) => (
+          <AnnouncementRow key={i} item={item} />
         ))}
       </div>
     </div>
@@ -252,7 +284,7 @@ export default function AppLauncher() {
   const navigate = useNavigate();
   const [time, setTime] = useState(new Date());
   const [qrLinks, setQrLinks] = useState([]);
-  const [birthdays, setBirthdays] = useState([]);
+  const [announcements, setAnnouncements] = useState([]);
 
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000);
@@ -268,11 +300,17 @@ export default function AppLauncher() {
 
   useEffect(() => {
     if (!token) return;
-    fetch("/api/v1/dashboard/hr/employees/birthdays-this-month", {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.ok ? r.json() : [])
-      .then(setBirthdays)
+    const headers = { Authorization: `Bearer ${token}` };
+    Promise.all([
+      fetch("/api/v1/dashboard/hr/todo/active-alerts", { headers }).then(r => r.ok ? r.json() : []),
+      fetch("/api/v1/dashboard/hr/employees/birthdays-this-month", { headers }).then(r => r.ok ? r.json() : []),
+    ])
+      .then(([alerts, birthdays]) => {
+        setAnnouncements([
+          ...alerts.map(a => ({ ...a, kind: "task_alert" })),
+          ...birthdays.map(b => ({ ...b, kind: "birthday" })),
+        ]);
+      })
       .catch(() => {});
   }, [token]);
 
@@ -535,7 +573,7 @@ export default function AppLauncher() {
               <div>
                 <span style={{ fontSize: 9.5, color: "#2563eb", fontWeight: 700, letterSpacing: "0.1em", display: "block" }}>ANNOUNCEMENT & NOTIFICATION</span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>
-                  🎂 Birthdays This Month — {time.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+                  ⏰ Task Alerts &amp; 🎂 Birthdays — {time.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
                 </span>
               </div>
             </div>
@@ -551,7 +589,7 @@ export default function AppLauncher() {
               flexDirection: "column",
               minHeight: 0,
             }}>
-              <BirthdayMarquee items={birthdays} />
+              <AnnouncementMarquee items={announcements} />
             </div>
           </div>
         </main>

@@ -726,3 +726,17 @@ async def get_teams(
         q = q.where(Employee.department == department)
     result = await db.execute(q)
     return [r[0] for r in result.fetchall() if r[0]]
+
+
+@router.get("/names")
+async def get_employee_names(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Lightweight active-employee list for LOV/multi-select fields (e.g. To Do List Assigned To)."""
+    result = await db.execute(
+        select(Employee.user_id, Employee.full_name, Employee.department)
+        .where(Employee.full_name.isnot(None), Employee.resign_date.is_(None))
+        .order_by(Employee.full_name)
+    )
+    return [{"user_id": r[0], "full_name": r[1], "department": r[2]} for r in result.fetchall()]

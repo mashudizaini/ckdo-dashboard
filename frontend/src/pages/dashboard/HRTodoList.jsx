@@ -35,13 +35,96 @@ function StatusBadge({ status }) {
   );
 }
 
-function TaskForm({ initial, onSave, onCancel, saving }) {
-  const [form, setForm] = useState(initial || {
-    title: "", description: "", category: "Event", is_vendor: false,
-    assigned_to: "", role: "Officer", status: "Not Started", due_date: "",
-  });
+// ── Multi-select "Assigned To", sourced from the Employee master list ──────
+function AssignedToSelect({ value, onChange, employees }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const selected = (value || "").split(",").map(s => s.trim()).filter(Boolean);
+
+  const addName = (name) => {
+    if (!selected.includes(name)) onChange([...selected, name].join(", "));
+    setQuery(""); setOpen(false);
+  };
+  const removeName = (name) => onChange(selected.filter(n => n !== name).join(", "));
+
+  const q = query.trim().toLowerCase();
+  const matches = employees
+    .filter(e => !selected.includes(e.full_name))
+    .filter(e => !q || e.full_name.toLowerCase().includes(q))
+    .slice(0, 30);
+
+  return (
+    <div style={{ position: "relative" }}>
+      <div
+        onClick={() => setOpen(true)}
+        style={{
+          width: "100%", minHeight: 34, padding: "5px 8px", borderRadius: 10, boxSizing: "border-box",
+          background: NEU.bg, boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff",
+          display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center", cursor: "text",
+        }}>
+        {selected.map(name => (
+          <span key={name} style={{
+            display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 20,
+            background: "#dbeafe", color: "#1d4ed8", fontSize: 11, fontWeight: 700,
+          }}>
+            {name}
+            <button type="button" onClick={(e) => { e.stopPropagation(); removeName(name); }}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "#1d4ed8", padding: 0, display: "flex" }}>
+              <X size={10} />
+            </button>
+          </span>
+        ))}
+        <input
+          value={query}
+          onChange={e => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          placeholder={selected.length ? "" : "Search employee name..."}
+          style={{ flex: 1, minWidth: 100, border: "none", background: "transparent", outline: "none", fontSize: 12, color: "#1e293b" }}
+        />
+      </div>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 20 }} />
+          <div style={{
+            position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 21,
+            maxHeight: 220, overflowY: "auto", borderRadius: 10, background: "#fff",
+            boxShadow: "6px 6px 14px #c5cad8, -6px -6px 14px #ffffff",
+          }}>
+            {matches.length === 0 ? (
+              <p style={{ fontSize: 11.5, color: "#94a3b8", padding: "10px 12px" }}>No matching employees.</p>
+            ) : matches.map(e => (
+              <button key={e.user_id} type="button" onClick={() => addName(e.full_name)}
+                style={{
+                  display: "block", width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
+                  background: "none", cursor: "pointer", fontSize: 12,
+                }}
+                onMouseEnter={ev => ev.currentTarget.style.background = "#f0f3f9"}
+                onMouseLeave={ev => ev.currentTarget.style.background = "none"}
+              >
+                <span style={{ fontWeight: 600, color: "#1e293b" }}>{e.full_name}</span>
+                {e.department && <span style={{ color: "#94a3b8", marginLeft: 6, fontSize: 10.5 }}>{e.department}</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function TaskForm({ initial, onSave, onCancel, saving, employees }) {
+  const [form, setForm] = useState(() => initial
+    ? { ...initial, alert_days_before: initial.alert_days_before ?? "" }
+    : { title: "", description: "", category: "Event", is_vendor: false,
+        assigned_to: "", role: "Officer", status: "Not Started", due_date: "", alert_days_before: "" });
 
   const set = (k) => (e) => setForm(p => ({ ...p, [k]: e.target?.type === "checkbox" ? e.target.checked : e.target.value }));
+
+  const handleVendorToggle = (e) => {
+    const checked = e.target.checked;
+    setForm(p => ({ ...p, is_vendor: checked, alert_days_before: checked && !p.alert_days_before ? "7" : p.alert_days_before }));
+  };
 
   return (
     <div style={{ ...{ background: NEU.bg, boxShadow: NEU.shadowOut, borderRadius: 16 }, padding: 18, marginBottom: 16 }}>
@@ -71,10 +154,13 @@ function TaskForm({ initial, onSave, onCancel, saving }) {
           <input type="date" value={form.due_date || ""} onChange={set("due_date")}
             style={{ width: "100%", fontSize: 12, padding: "8px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: NEU.shadowOutSm, outline: "none", boxSizing: "border-box" }} />
         </div>
-        <div>
+        <div style={{ gridColumn: "1 / -1" }}>
           <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>ASSIGNED TO</label>
-          <input value={form.assigned_to} onChange={set("assigned_to")} placeholder="Employee name"
-            style={{ width: "100%", fontSize: 12, padding: "8px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff", outline: "none", boxSizing: "border-box" }} />
+          <AssignedToSelect
+            value={form.assigned_to}
+            onChange={(v) => setForm(p => ({ ...p, assigned_to: v }))}
+            employees={employees}
+          />
         </div>
         <div>
           <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>ROLE</label>
@@ -90,16 +176,21 @@ function TaskForm({ initial, onSave, onCancel, saving }) {
             {Object.keys(STATUS_CFG).map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
+        <div>
+          <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>ALERT (DAYS BEFORE DUE DATE)</label>
+          <input type="number" min="0" value={form.alert_days_before} onChange={set("alert_days_before")} placeholder="e.g. 7 — leave blank for no alert"
+            style={{ width: "100%", fontSize: 12, padding: "8px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff", outline: "none", boxSizing: "border-box" }} />
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 18 }}>
-          <input type="checkbox" checked={!!form.is_vendor} onChange={set("is_vendor")} id="is_vendor"
+          <input type="checkbox" checked={!!form.is_vendor} onChange={handleVendorToggle} id="is_vendor"
             style={{ width: 16, height: 16, accentColor: "#2563eb" }} />
           <label htmlFor="is_vendor" style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>
-            Vendor / TOP related <span style={{ color: "#94a3b8", fontWeight: 500 }}>(enables 7-day due-date alert)</span>
+            Vendor / TOP related <span style={{ color: "#94a3b8", fontWeight: 500 }}>(pre-fills a 7-day alert, still editable)</span>
           </label>
         </div>
       </div>
       <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={() => onSave(form)} disabled={saving || !form.title.trim()}
+        <button onClick={() => onSave({ ...form, alert_days_before: form.alert_days_before === "" ? null : Number(form.alert_days_before) })} disabled={saving || !form.title.trim()}
           style={{ fontSize: 12, fontWeight: 700, padding: "8px 18px", borderRadius: 10, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer", boxShadow: NEU.shadowBtn, opacity: (saving || !form.title.trim()) ? 0.5 : 1 }}>
           {saving ? "Saving..." : "Submit"}
         </button>
@@ -141,9 +232,9 @@ function ListView({ tasks, loading, onEdit, onDelete, onToggleComplete }) {
             <tr key={t.id} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
               <td style={{ padding: "8px 12px", fontSize: 12.5, fontWeight: 700, color: "#1e293b" }}>
                 {t.title}
-                {t.is_vendor && t.vendor_alert && (
+                {t.alert_active && (
                   <span style={{ marginLeft: 6, display: "inline-flex", alignItems: "center", gap: 3, padding: "1px 6px", borderRadius: 8, fontSize: 9.5, fontWeight: 700, background: "#fee2e2", color: "#dc2626" }}>
-                    <AlertTriangle size={9} /> {t.vendor_days_left}d left
+                    <AlertTriangle size={9} /> {t.alert_days_left}d left
                   </span>
                 )}
                 {t.is_overdue && (
@@ -284,6 +375,11 @@ export default function HRTodoList() {
   const [filters, setFilters] = useState({ status: "", role: "", category: "", vendor_only: false, search: "" });
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(new Date().getMonth() + 1);
+  const [employees, setEmployees] = useState([]);
+
+  useEffect(() => {
+    hrApi.getEmployeeNames().then(setEmployees).catch(() => {});
+  }, []);
 
   const fetchTasks = useCallback(async () => {
     setLoading(true);
@@ -392,6 +488,7 @@ export default function HRTodoList() {
           saving={saving}
           onSave={handleSave}
           onCancel={() => { setShowForm(false); setEditingTask(null); }}
+          employees={employees}
         />
       )}
 
