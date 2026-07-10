@@ -117,7 +117,7 @@ function TaskForm({ initial, onSave, onCancel, saving, employees }) {
   const [form, setForm] = useState(() => initial
     ? { ...initial, alert_days_before: initial.alert_days_before ?? "" }
     : { title: "", description: "", category: "Event", is_vendor: false,
-        assigned_to: "", role: "Officer", status: "Not Started", due_date: "", alert_days_before: "" });
+        assigned_to: "", role: "Officer", status: "Not Started", start_date: "", due_date: "", alert_days_before: "" });
 
   const set = (k) => (e) => setForm(p => ({ ...p, [k]: e.target?.type === "checkbox" ? e.target.checked : e.target.value }));
 
@@ -150,8 +150,14 @@ function TaskForm({ initial, onSave, onCancel, saving, employees }) {
           </select>
         </div>
         <div>
-          <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>DUE DATE</label>
+          <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>DATE FROM</label>
+          <input type="date" value={form.start_date || ""} onChange={set("start_date")}
+            style={{ width: "100%", fontSize: 12, padding: "8px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: NEU.shadowOutSm, outline: "none", boxSizing: "border-box" }} />
+        </div>
+        <div>
+          <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>DATE TO</label>
           <input type="date" value={form.due_date || ""} onChange={set("due_date")}
+            min={form.start_date || undefined}
             style={{ width: "100%", fontSize: 12, padding: "8px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: NEU.shadowOutSm, outline: "none", boxSizing: "border-box" }} />
         </div>
         <div style={{ gridColumn: "1 / -1" }}>
@@ -222,7 +228,7 @@ function ListView({ tasks, loading, onEdit, onDelete, onToggleComplete }) {
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
-            {["Activity", "Category", "Assigned To", "Role", "Due Date", "Status", ""].map(h => (
+            {["Activity", "Category", "Assigned To", "Role", "Date From", "Date To", "Status", ""].map(h => (
               <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontSize: 10.5, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "2px solid rgba(0,0,0,0.06)" }}>{h}</th>
             ))}
           </tr>
@@ -246,6 +252,7 @@ function ListView({ tasks, loading, onEdit, onDelete, onToggleComplete }) {
               <td style={{ padding: "8px 12px", fontSize: 12, color: "#64748b", fontWeight: 500 }}>{t.category || "—"}</td>
               <td style={{ padding: "8px 12px", fontSize: 12, color: "#475569", fontWeight: 500 }}>{t.assigned_to || "—"}</td>
               <td style={{ padding: "8px 12px", fontSize: 12, color: "#64748b", fontWeight: 500 }}>{t.role || "—"}</td>
+              <td style={{ padding: "8px 12px", fontSize: 12, color: "#64748b", fontWeight: 500 }}>{fmtDate(t.start_date)}</td>
               <td style={{ padding: "8px 12px", fontSize: 12, color: t.is_overdue ? "#dc2626" : "#475569", fontWeight: t.is_overdue ? 700 : 500 }}>{fmtDate(t.due_date)}</td>
               <td style={{ padding: "8px 12px" }}><StatusBadge status={t.status} /></td>
               <td style={{ padding: "8px 12px", whiteSpace: "nowrap" }}>

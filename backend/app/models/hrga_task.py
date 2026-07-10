@@ -15,7 +15,8 @@ class HrgaTask(Base):
     assigned_to       = Column(String(300))                      # comma-separated employee full names
     role              = Column(String(50))                       # Manager / Supervisor / Officer
     status            = Column(String(20), default="Not Started", index=True)  # Not Started / In Progress / Completed
-    due_date          = Column(Date, index=True)
+    start_date        = Column(Date)                  # "Date From" — when the activity begins
+    due_date          = Column(Date, index=True)       # "Date To" — deadline; also drives alerts/overdue
     alert_days_before = Column(Integer, nullable=True)           # e.g. 7 = start alerting 7 days before due_date
     completed_at      = Column(DateTime)
     created_by        = Column(String(100))

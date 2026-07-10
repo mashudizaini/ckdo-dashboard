@@ -32,6 +32,7 @@ class TaskCreate(BaseModel):
     assigned_to: Optional[str] = None
     role: Optional[str] = None
     status: str = "Not Started"
+    start_date: Optional[str] = None
     due_date: Optional[str] = None
     alert_days_before: Optional[int] = None
 
@@ -44,6 +45,7 @@ class TaskUpdate(BaseModel):
     assigned_to: Optional[str] = None
     role: Optional[str] = None
     status: Optional[str] = None
+    start_date: Optional[str] = None
     due_date: Optional[str] = None
     alert_days_before: Optional[int] = None
 
@@ -81,6 +83,7 @@ def _to_dict(t: HrgaTask) -> dict:
         "assigned_to": t.assigned_to,
         "role": t.role,
         "status": t.status,
+        "start_date": t.start_date.isoformat() if t.start_date else None,
         "due_date": t.due_date.isoformat() if t.due_date else None,
         "alert_days_before": t.alert_days_before,
         "completed_at": t.completed_at.isoformat() if t.completed_at else None,
@@ -201,6 +204,7 @@ async def create_task(
         assigned_to=body.assigned_to,
         role=body.role,
         status=body.status or "Not Started",
+        start_date=_parse_date(body.start_date),
         due_date=_parse_date(body.due_date),
         alert_days_before=body.alert_days_before,
         created_by=user.username,
@@ -223,6 +227,8 @@ async def update_task(
         raise HTTPException(404, "Task not found")
 
     data = body.model_dump(exclude_unset=True)
+    if "start_date" in data:
+        data["start_date"] = _parse_date(data["start_date"])
     if "due_date" in data:
         data["due_date"] = _parse_date(data["due_date"])
 
