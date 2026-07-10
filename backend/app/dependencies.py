@@ -30,11 +30,17 @@ async def get_jwks(force: bool = False) -> dict:
     if _jwks_cache and not force and (now - _jwks_fetched_at) < _JWKS_TTL_SECONDS:
         return _jwks_cache
     jwks_url = f"{settings.keycloak_url}/realms/{settings.keycloak_realm}/protocol/openid-connect/certs"
-    async with httpx.AsyncClient() as client:
-        response = await client.get(jwks_url, timeout=10)
-        response.raise_for_status()
-        _jwks_cache = response.json()
-        _jwks_fetched_at = now
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(jwks_url, timeout=10)
+            response.raise_for_status()
+            _jwks_cache = response.json()
+            _jwks_fetched_at = now
+    except Exception as e:
+        # str(e) is empty for several httpx/connection error types — log the
+        # type + repr too, otherwise failures here are silently unexplainable.
+        logger.error("jwks_fetch_failed", url=jwks_url, error_type=type(e).__name__, error=repr(e))
+        raise
     return _jwks_cache
 
 
@@ -87,14 +93,14 @@ async def get_current_user(
             )
         return CurrentUser(token_data)
     except JWTError as e:
-        logger.warning("Token validation failed", error=str(e))
+        logger.warning("Token validation failed", error_type=type(e).__name__, error=repr(e))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
     except Exception as e:
-        logger.warning("Token validation failed", error=str(e))
+        logger.warning("Token validation failed", error_type=type(e).__name__, error=repr(e))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
