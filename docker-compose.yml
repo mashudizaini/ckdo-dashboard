@@ -13,6 +13,7 @@ services:
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-dashboard-dev.ckd-otto.com}
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_RELATIVE_PATH: "/auth"
     volumes:
