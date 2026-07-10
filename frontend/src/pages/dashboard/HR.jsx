@@ -575,14 +575,19 @@ function EmployeeTable() {
 }
 
 // ── Shared: fetch monthly-summary (dipakai Employee Summary & Employee Graph) ──
-function useMonthlySummary() {
+function useMonthlySummary(month, year) {
   const { token } = useAuthStore();
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [errMsg, setErrMsg]   = useState("");
 
   useEffect(() => {
-    fetch("/api/v1/dashboard/hr/employees/monthly-summary", {
+    const params = new URLSearchParams();
+    if (month) params.set("month", month);
+    if (year)  params.set("year", year);
+    const qs = params.toString() ? `?${params}` : "";
+    setLoading(true);
+    fetch(`/api/v1/dashboard/hr/employees/monthly-summary${qs}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(async (r) => {
@@ -593,7 +598,7 @@ function useMonthlySummary() {
       .then((d) => setData(d))
       .catch((e) => setErrMsg(e.message || "Network error"))
       .finally(() => setLoading(false));
-  }, []); // eslint-disable-line
+  }, [month, year]); // eslint-disable-line
 
   return { data, loading, errMsg };
 }
@@ -628,26 +633,63 @@ function SummaryHBarList({ items, max }) {
 
 // ── Employee Summary — data (KPI + breakdown), tanpa chart ─────────────────────
 function EmployeeSummarySection() {
-  const { data, loading, errMsg } = useMonthlySummary();
+  const curYear = new Date().getFullYear();
+  const [fMonth, setFMonth] = useState("");
+  const [fYear,  setFYear]  = useState("");
+  const { data, loading, errMsg } = useMonthlySummary(fMonth, fYear);
 
-  if (loading) return <div className="py-20 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-300" /></div>;
+  const filterBar = (
+    <div className="flex flex-wrap items-end gap-2">
+      <div>
+        <label className="text-xs text-gray-500 block mb-1">Month</label>
+        <select value={fMonth} onChange={e => setFMonth(e.target.value)}
+          className="text-xs rounded-lg border border-gray-700 bg-gray-900 text-gray-200 px-2 py-1.5">
+          <option value="">All</option>
+          {MONTHS_ID.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="text-xs text-gray-500 block mb-1">Year</label>
+        <select value={fYear} onChange={e => setFYear(e.target.value)}
+          className="text-xs rounded-lg border border-gray-700 bg-gray-900 text-gray-200 px-2 py-1.5">
+          <option value="">Current</option>
+          {[curYear, curYear - 1, curYear - 2, curYear - 3].map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+      {(fMonth || fYear) && (
+        <button onClick={() => { setFMonth(""); setFYear(""); }}
+          className="text-xs font-semibold text-red-400 hover:text-red-300 px-3 py-1.5">
+          Reset
+        </button>
+      )}
+    </div>
+  );
+
+  if (loading) return <div className="space-y-3 mt-2">{filterBar}<div className="py-16 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-300" /></div></div>;
   if (errMsg || !data) return (
-    <div className="py-10 text-center space-y-2">
-      <p className="text-xs text-red-400 font-semibold">Failed to load summary data</p>
-      {errMsg && <pre className="text-xs text-gray-300 max-w-xl mx-auto whitespace-pre-wrap text-left bg-gray-900 rounded p-3">{errMsg}</pre>}
+    <div className="space-y-3 mt-2">
+      {filterBar}
+      <div className="py-10 text-center space-y-2">
+        <p className="text-xs text-red-400 font-semibold">Failed to load summary data</p>
+        {errMsg && <pre className="text-xs text-gray-300 max-w-xl mx-auto whitespace-pre-wrap text-left bg-gray-900 rounded p-3">{errMsg}</pre>}
+      </div>
     </div>
   );
 
   const {
-    headcount_trend = [], monthly_joins = [],
+    monthly_joins = [],
     by_dept = [], by_level = [], by_education = [],
     by_marital = [], by_status = [], by_grade = [], by_gender = [],
+    period = {},
   } = data;
 
-  const latest    = headcount_trend[headcount_trend.length - 1]?.count ?? 0;
-  const prev      = headcount_trend[headcount_trend.length - 2]?.count ?? 0;
-  const delta     = latest - prev;
+  const totalEmployees = period.total_employees ?? 0;
+  const isFiltered = !!(fMonth || fYear);
   const avgJoin12 = Math.round(monthly_joins.slice(-12).reduce((s, m) => s + m.joins, 0) / 12);
+
+  const joinsLabel = isFiltered ? `New Joins — ${period.label}` : "Avg. Joins/Month";
+  const joinsValue = isFiltered ? (period.joins_in_month ?? 0) : avgJoin12;
+  const joinsSub   = isFiltered ? (fMonth ? "this month" : "this year") : "last 12 months";
 
   const deptMax   = Math.max(...by_dept.map(d => d.total), 1);
   const levelMax  = Math.max(...by_level.map(d => d.total), 1);
@@ -658,11 +700,19 @@ function EmployeeSummarySection() {
 
   return (
     <div className="space-y-4 mt-2">
+      {filterBar}
+
+      {isFiltered && (
+        <p className="text-xs text-indigo-300">
+          Showing active-employee roster as of <strong>{period.label}</strong> (snapshot date {period.snapshot_date}). Attribute values (department, status, etc.) reflect each employee's current record.
+        </p>
+      )}
+
       {/* KPI Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: "Total Employees",    val: latest,    sub: delta >= 0 ? `+${delta} this month` : `${delta} this month`, color: "#818cf8" },
-          { label: "Avg. Joins/Month",   val: avgJoin12, sub: "last 12 months", color: "#34d399" },
+          { label: "Total Employees",    val: totalEmployees, sub: period.label || "Current", color: "#818cf8" },
+          { label: joinsLabel,           val: joinsValue,      sub: joinsSub,  color: "#34d399" },
           { label: "Male",               val: by_gender.find(g => g.name === "Male")?.total ?? 0,  sub: "M", color: "#60a5fa" },
           { label: "Female",             val: by_gender.find(g => g.name === "Female")?.total ?? 0,  sub: "F", color: "#fb7185" },
         ].map(({ label, val, sub, color }) => (

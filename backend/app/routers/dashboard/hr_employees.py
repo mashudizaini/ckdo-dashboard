@@ -455,10 +455,20 @@ async def list_employees(
 
 @router.get("/monthly-summary")
 async def get_monthly_summary(
-    db:   AsyncSession = Depends(get_db),
-    user: CurrentUser  = Depends(require_role(Roles.HR)),
+    month: Optional[int] = Query(None, ge=1, le=12),
+    year:  Optional[int] = Query(None),
+    db:    AsyncSession = Depends(get_db),
+    user:  CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Monthly headcount trend + demographic breakdowns."""
+    """Monthly headcount trend + demographic breakdowns.
+
+    month/year are optional — when given, the KPI/breakdown numbers reflect
+    the active-employee roster as of the end of that period (same
+    join/resign-date windowing used by /turnover-summary and
+    /target-vs-achievement) instead of today's live roster. Attributes like
+    department/status/marital status are still each employee's *current*
+    value (the Employee table isn't historized), only *which* employees are
+    counted is period-aware."""
     import traceback
     from datetime import date
     from calendar import monthrange
@@ -487,10 +497,11 @@ async def get_monthly_summary(
     try:
         # All join/resign pairs for cumulative headcount
         emps_q = await db.execute(
-            select(Employee.date_of_joining, Employee.resign_date)
+            select(Employee.user_id, Employee.date_of_joining, Employee.resign_date)
             .where(Employee.date_of_joining.isnot(None))
         )
-        emps = [(r[0], r[1]) for r in emps_q.fetchall()]
+        emps_full = [(r[0], r[1], r[2]) for r in emps_q.fetchall()]
+        emps = [(join, resign) for _uid, join, resign in emps_full]
     except Exception as e:
         raise HTTPException(500, f"emps_q error: {e}")
 
@@ -523,12 +534,29 @@ async def get_monthly_summary(
         key = f"{y}-{m:02d}"
         monthly_joins.append({"month": key, "label": f"{MN[m-1]} '{str(y)[2:]}", "joins": joins_map.get(key, 0)})
 
+    # Period filter — when month/year is given, breakdowns/KPIs reflect the
+    # active roster as of the end of that period instead of today's roster.
+    # Attribute values (department, status, ...) are still each employee's
+    # *current* value; only which employees get counted is period-aware.
+    active_ids = None
+    if year:
+        snapshot_date = date(year, month or 12, monthrange(year, month or 12)[1])
+        active_ids = {
+            uid for uid, join, resign in emps_full
+            if join <= snapshot_date and (resign is None or resign >= snapshot_date)
+        }
+    else:
+        snapshot_date = today
+
     # Generic breakdown helper — explicit AND to avoid any dialect issues
     async def _bd(col):
         try:
+            conditions = [col.isnot(None), col != ""]
+            if active_ids is not None:
+                conditions.append(Employee.user_id.in_(active_ids))
             q = await db.execute(
                 select(col, func.count().label("total"))
-                .where(and_(col.isnot(None), col != ""))
+                .where(and_(*conditions))
                 .group_by(col)
                 .order_by(func.count().desc())
             )
@@ -545,8 +573,12 @@ async def get_monthly_summary(
     by_religion= await _bd(Employee.religion)
 
     try:
-        sex_q   = await db.execute(select(Employee.sex, func.count().label("t")).group_by(Employee.sex))
-        sex_map = {r[0]: r[1] for r in sex_q.fetchall()}
+        sex_q = select(Employee.sex, func.count().label("t"))
+        if active_ids is not None:
+            sex_q = sex_q.where(Employee.user_id.in_(active_ids))
+        sex_q = sex_q.group_by(Employee.sex)
+        sex_result = await db.execute(sex_q)
+        sex_map = {r[0]: r[1] for r in sex_result.fetchall()}
     except Exception:
         sex_map = {}
 
@@ -554,6 +586,19 @@ async def get_monthly_summary(
         {"name": "Male",   "total": sex_map.get("M", 0)},
         {"name": "Female", "total": sex_map.get("F", 0)},
     ]
+
+    period_total = len(active_ids) if active_ids is not None else headcount_trend[-1]["count"]
+    if year and month:
+        period_joins = joins_map.get(f"{year}-{month:02d}", 0)
+    elif year:
+        period_joins = sum(v for k, v in joins_map.items() if k.startswith(f"{year}-"))
+    else:
+        period_joins = None
+    period_label = (
+        f"{MN[month-1]} {year}" if year and month else
+        f"Year {year}" if year else
+        "Current"
+    )
 
     return {
         "headcount_trend": headcount_trend,
@@ -566,6 +611,14 @@ async def get_monthly_summary(
         "by_grade":        by_grade,
         "by_religion":     by_religion,
         "by_gender":       by_gender,
+        "period": {
+            "year":  year,
+            "month": month,
+            "label": period_label,
+            "snapshot_date": str(snapshot_date),
+            "total_employees": period_total,
+            "joins_in_month":  period_joins,
+        },
     }
 
 
