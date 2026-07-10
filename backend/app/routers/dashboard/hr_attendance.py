@@ -546,8 +546,15 @@ async def get_dept_summary(
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Attendance Plan vs Actual per department."""
+    """Attendance Plan vs Actual per department.
+
+    Always includes every department from the Employee master list (as
+    0%) when no department filter is applied, not just departments that
+    already have attendance records — otherwise a department with no
+    attendance uploaded yet silently disappears from the chart even
+    though it's a real department (visible in the filter dropdown)."""
     from sqlalchemy import extract
+    from app.models.employee import Employee
 
     q = select(
         AttendanceRecord.department,
@@ -564,20 +571,27 @@ async def get_dept_summary(
     if year:
         q = q.where(extract("year", AttendanceRecord.attendance_date) == year)
 
-    result = await db.execute(
-        q.group_by(AttendanceRecord.department)
-        .order_by(AttendanceRecord.department)
-    )
-    rows = result.fetchall()
-    return [
-        {
-            "department": r[0] or "—",
-            "plan":   int(r[1] or 0),
-            "actual": int(r[2] or 0),
-            "rate":   round(int(r[2] or 0) / max(int(r[1] or 1), 1) * 100),
-        }
-        for r in rows if r[0]
-    ]
+    result = await db.execute(q.group_by(AttendanceRecord.department))
+    att_map = {r[0]: (int(r[1] or 0), int(r[2] or 0)) for r in result.fetchall() if r[0]}
+
+    if department:
+        dept_names = {department}
+    else:
+        emp_result = await db.execute(
+            select(Employee.department).where(Employee.department.isnot(None)).distinct()
+        )
+        dept_names = {r[0] for r in emp_result.fetchall() if r[0]} | set(att_map.keys())
+
+    rows = []
+    for dept in sorted(dept_names):
+        plan, actual = att_map.get(dept, (0, 0))
+        rows.append({
+            "department": dept,
+            "plan":   plan,
+            "actual": actual,
+            "rate":   round(actual / max(plan, 1) * 100) if plan else 0,
+        })
+    return rows
 
 
 # ── Daftar karyawan untuk filter hadir/absen/semua pada tanggal tertentu ───────

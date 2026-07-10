@@ -1265,6 +1265,7 @@ function DeptBarChart({ data }) {
   if (!data.length) return <p style={{ padding: "24px 0", textAlign: "center", color: "#94a3b8", fontSize: 13 }}>No data</p>;
   const maxVal = Math.max(...data.map((d) => d.plan), 1);
   const BAR_H  = 130;
+  const manyDepts = data.length > 8; // beyond this, fixed-width bars + horizontal scroll stay readable instead of squishing
   return (
     <div style={NEU_CARD}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
@@ -1274,28 +1275,35 @@ function DeptBarChart({ data }) {
           <span style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: "#f97316" }} /> Actual</span>
         </div>
       </div>
-      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-around", gap: 4, height: BAR_H + 50 }}>
-        {data.map((dept) => {
-          const planH   = Math.max(Math.round((dept.plan / maxVal) * BAR_H), 4);
-          const actualH = Math.max(Math.round((dept.actual / maxVal) * BAR_H), dept.actual > 0 ? 4 : 0);
-          const short   = dept.department.split(/[\s/&]/)[0];
-          return (
-            <div key={dept.department} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }} title={dept.department}>
-              <div style={{ width: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 2, height: BAR_H }}>
-                <div style={{ width: "40%", display: "flex", flexDirection: "column", alignItems: "center" }}>
-                  <span style={{ fontSize: 11, color: "#1e293b", fontWeight: 700 }}>{dept.plan}</span>
-                  <div style={{ width: "100%", height: planH, background: "linear-gradient(180deg, #60a5fa, #3b82f6)", borderRadius: "6px 6px 0 0", boxShadow: "2px 2px 4px #c5cad8" }} />
+      <div style={{ overflowX: manyDepts ? "auto" : "visible" }}>
+        <div style={{
+          display: "flex", alignItems: "flex-end",
+          justifyContent: manyDepts ? "flex-start" : "space-around",
+          gap: manyDepts ? 10 : 4, height: BAR_H + 50,
+          minWidth: manyDepts ? data.length * 64 : "auto",
+        }}>
+          {data.map((dept) => {
+            const planH   = Math.max(Math.round((dept.plan / maxVal) * BAR_H), 4);
+            const actualH = Math.max(Math.round((dept.actual / maxVal) * BAR_H), dept.actual > 0 ? 4 : 0);
+            const short   = dept.department.split(/[\s/&]/)[0];
+            return (
+              <div key={dept.department} style={{ flex: manyDepts ? "0 0 56px" : 1, display: "flex", flexDirection: "column", alignItems: "center" }} title={dept.department}>
+                <div style={{ width: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 2, height: BAR_H }}>
+                  <div style={{ width: "40%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: "#1e293b", fontWeight: 700 }}>{dept.plan}</span>
+                    <div style={{ width: "100%", height: planH, background: "linear-gradient(180deg, #60a5fa, #3b82f6)", borderRadius: "6px 6px 0 0", boxShadow: "2px 2px 4px #c5cad8" }} />
+                  </div>
+                  <div style={{ width: "40%", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: "#ea580c", fontWeight: 700 }}>{dept.actual}</span>
+                    <div style={{ width: "100%", height: actualH, background: "linear-gradient(180deg, #fb923c, #f97316)", borderRadius: "6px 6px 0 0", boxShadow: "2px 2px 4px #c5cad8" }} />
+                  </div>
                 </div>
-                <div style={{ width: "40%", display: "flex", flexDirection: "column", alignItems: "center" }}>
-                  <span style={{ fontSize: 11, color: "#ea580c", fontWeight: 700 }}>{dept.actual}</span>
-                  <div style={{ width: "100%", height: actualH, background: "linear-gradient(180deg, #fb923c, #f97316)", borderRadius: "6px 6px 0 0", boxShadow: "2px 2px 4px #c5cad8" }} />
-                </div>
+                <p style={{ fontSize: 10, color: "#475569", fontWeight: 600, marginTop: 4, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "center" }}>{short}</p>
+                <p style={{ fontSize: 12, fontWeight: 800, color: "#ea580c" }}>{dept.rate}%</p>
               </div>
-              <p style={{ fontSize: 10, color: "#475569", fontWeight: 600, marginTop: 4, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "center" }}>{short}</p>
-              <p style={{ fontSize: 12, fontWeight: 800, color: "#ea580c" }}>{dept.rate}%</p>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
