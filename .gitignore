@@ -20,3 +20,6 @@ oracle_client/oci.so*
 
 # Claude Code memory (assistant-specific, not project code)
 .claude/
+
+# Real employee data samples — contains PII, never commit
+sumber/
