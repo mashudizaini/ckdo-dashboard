@@ -1016,14 +1016,22 @@ function AttendanceTodaySection() {
   const [activeFilter, setActiveFilter] = useState(null);
   const [employees,    setEmployees]    = useState([]);
   const [loadingEmps,  setLoadingEmps]  = useState(false);
+  const [selectedDate, setSelectedDate] = useState(""); // "" = today / latest available
 
-  const fetchData = async () => {
+  const fetchData = async (targetDate = selectedDate) => {
     setLoading(true);
     try {
-      const res = await fetch(`${ATT_API}/today`, { headers });
+      const params = targetDate ? `?target_date=${targetDate}` : "";
+      const res = await fetch(`${ATT_API}/today${params}`, { headers });
       if (res.ok) setData(await res.json());
     } catch (_) {}
     finally { setLoading(false); }
+  };
+
+  const handleDateChange = (v) => {
+    setSelectedDate(v);
+    setActiveFilter(null); setEmployees([]);
+    fetchData(v);
   };
 
   const fetchTeamData = async () => {
@@ -1085,26 +1093,45 @@ function AttendanceTodaySection() {
       {/* ── Tab: Kehadiran Hari Ini ── */}
       {innerTab === "today" && (
         <>
+          {/* Date picker — lets you view attendance for any specific date instead of only "today"/latest */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <CalendarCheck size={14} className="text-green-400" />
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => handleDateChange(e.target.value)}
+                className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-green-500 transition-colors"
+              />
+              {selectedDate && (
+                <button onClick={() => handleDateChange("")} className="text-xs text-gray-500 hover:text-gray-300 underline">
+                  Reset to latest
+                </button>
+              )}
+            </div>
+            <button onClick={() => fetchData()} className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+              <RefreshCw size={11} className={loading ? "animate-spin" : ""} /> Refresh
+            </button>
+          </div>
+
           {loading && <div className="flex justify-center py-16"><Loader2 size={20} className="animate-spin text-gray-600" /></div>}
-          {noData && <p className="py-10 text-center text-xs text-gray-600">No attendance data yet. Upload Excel in Attendance Upload tab.</p>}
+          {noData && (
+            <p className="py-10 text-center text-xs text-gray-600">
+              No attendance data for {selectedDate ? fmtDate(selectedDate) : "this period"}. Upload Excel in Attendance Upload tab, or pick a different date.
+            </p>
+          )}
           {data && data.has_data && (() => {
             const { summary, actual_date, is_today } = data;
             return (
               <div className="space-y-4">
-                {/* Date badge */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CalendarCheck size={14} className="text-green-400" />
-                    <span className="text-sm font-semibold text-gray-200">{fmtDate(actual_date)}</span>
-                    {!is_today && (
-                      <span className="rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-xs text-amber-400">
-                        Latest available data
-                      </span>
-                    )}
-                  </div>
-                  <button onClick={fetchData} className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
-                    <RefreshCw size={11} className={loading ? "animate-spin" : ""} /> Refresh
-                  </button>
+                {/* Date confirmation badge */}
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-gray-200">Showing: {fmtDate(actual_date)}</span>
+                  {!is_today && !selectedDate && (
+                    <span className="rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-xs text-amber-400">
+                      Latest available data
+                    </span>
+                  )}
                 </div>
 
                 {/* Summary cards — clickable */}
