@@ -69,6 +69,15 @@ def _qi(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def _pretty_size(num_bytes: int) -> str:
+    size = float(num_bytes or 0)
+    for unit in ("bytes", "kB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.0f} {unit}" if unit == "bytes" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
 async def _validate_object(db: AsyncSession, schema: str, table: str):
     result = await db.execute(
         text("""
@@ -144,16 +153,22 @@ async def list_objects(
           n.nspname AS schema,
           c.relname AS name,
           CASE c.relkind WHEN 'r' THEN 'table' WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized_view' END AS type,
-          pg_catalog.pg_total_relation_size(c.oid)                          AS size_bytes,
-          pg_catalog.pg_size_pretty(pg_catalog.pg_total_relation_size(c.oid)) AS size_pretty,
+          (c.relpages::bigint * 8192)                                       AS size_bytes,
           GREATEST(c.reltuples, 0)::bigint                                  AS row_estimate
         FROM pg_catalog.pg_class c
         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
         WHERE c.relkind IN ('r','v','m')
           AND n.nspname NOT IN ('pg_catalog','information_schema')
+          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.objid = c.oid AND d.deptype = 'e')
         ORDER BY n.nspname, c.relname
     """))
+    # relpages/reltuples come straight from pg_class (updated by autovacuum/
+    # analyze) — reading them is essentially free, unlike pg_total_relation_size()
+    # which does a live size computation per relation and gets noticeably slow
+    # once there are a lot of objects to list.
     relations = [_row_to_dict(r) for r in rel_result.fetchall()]
+    for r in relations:
+        r["size_pretty"] = _pretty_size(r["size_bytes"])
 
     seq_result = await db.execute(text("""
         SELECT sequence_schema AS schema, sequence_name AS name, data_type
@@ -171,6 +186,7 @@ async def list_objects(
         JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
         JOIN pg_catalog.pg_type t ON t.oid = p.prorettype
         WHERE n.nspname NOT IN ('pg_catalog','information_schema')
+          AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
         ORDER BY n.nspname, p.proname
     """))
     functions = [_row_to_dict(r) for r in func_result.fetchall()]
