@@ -102,16 +102,30 @@ def _with_leave_join(q):
     )
 
 
-def _load_workbook(contents: bytes):
-    """Load an .xlsx/.xlsm workbook, falling back to read_only mode (a
-    different, more tolerant streaming XML parser) for files with minor
-    OOXML non-compliance that Excel itself accepts but openpyxl's default
-    parser rejects — a real, recurring issue with some HRIS-generated
-    exports (seen with real Talenta exports)."""
+def _read_data_rows(contents: bytes) -> list:
+    """Read every data row (from row 2 onward, values only) from an
+    .xlsx/.xlsm file's first worksheet. Tries openpyxl first (normal, then
+    read_only mode), then falls back to python-calamine — a Rust-based
+    parser that only reads raw cell values and ignores styles/filters/data
+    validation entirely — for files openpyxl can't parse at all. Real
+    Talenta exports have hit both classes of failure: minor OOXML
+    non-compliance, and a malformed AutoFilter definition openpyxl's strict
+    parser refuses to load even in read_only mode ("Value must be either
+    numerical or a string containing a wildcard")."""
     try:
-        return openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
+        wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
+        return list(wb.active.iter_rows(min_row=2, values_only=True))
     except Exception:
-        return openpyxl.load_workbook(io.BytesIO(contents), data_only=True, read_only=True)
+        pass
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True, read_only=True)
+        return list(wb.active.iter_rows(min_row=2, values_only=True))
+    except Exception:
+        pass
+    from python_calamine import CalamineWorkbook
+    wb = CalamineWorkbook.from_filelike(io.BytesIO(contents))
+    rows = wb.get_sheet_by_name(wb.sheet_names[0]).to_python()
+    return [tuple(r) for r in rows[1:]]
 
 
 def _to_str(val) -> Optional[str]:
@@ -203,7 +217,7 @@ async def upload_attendance(
     batch_id = f"att_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
     try:
-        wb = _load_workbook(contents)
+        data_rows = _read_data_rows(contents)
     except Exception as e:
         raise HTTPException(
             status_code=400,
@@ -211,9 +225,8 @@ async def upload_attendance(
                    f"File > Save As > .xlsx to normalize the file, then re-upload.",
         )
 
-    ws = wb.active
     rows_parsed = [
-        r for r in (_parse_intercom_row(row, batch_id) for row in ws.iter_rows(min_row=2, values_only=True))
+        r for r in (_parse_intercom_row(row, batch_id) for row in data_rows)
         if r is not None
     ]
 
@@ -329,7 +342,7 @@ async def upload_attendance_talenta(
     batch_id = f"tal_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
     try:
-        wb = _load_workbook(contents)
+        data_rows = _read_data_rows(contents)
     except Exception as e:
         raise HTTPException(
             status_code=400,
@@ -337,9 +350,8 @@ async def upload_attendance_talenta(
                    f"File > Save As > .xlsx to normalize the file, then re-upload.",
         )
 
-    ws = wb.active
     rows_parsed = [
-        r for r in (_parse_talenta_row(row, batch_id) for row in ws.iter_rows(min_row=2, values_only=True))
+        r for r in (_parse_talenta_row(row, batch_id) for row in data_rows)
         if r is not None
     ]
 
