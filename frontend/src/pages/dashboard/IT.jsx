@@ -5,6 +5,8 @@ import {
   RefreshCw, Settings, Wifi, WifiOff, Loader2, X, CheckCircle,
   PlusCircle, Database, AlertCircle, Maximize2,
   Cpu, TrendingUp, List, Lightbulb, Terminal,
+  Table2, Layers, Hash, Code2, Key, Link2, Trash2, Search,
+  ChevronLeft, ChevronRight, Play, History,
 } from "lucide-react";
 import {
   AreaChart, Area,
@@ -19,7 +21,7 @@ const TABS = [
   { id: "server-monitoring", icon: Server,        color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Server Monitoring" },
   { id: "tablespace-usage",  icon: Activity,      color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Tablespace Usage"  },
   { id: "disk-usage",        icon: HardDrive,     color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Disk Usage"        },
-  { id: "pending-jobs",      icon: Clock,         color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Pending Jobs"      },
+  { id: "db-browser",        icon: Database,      color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Database Browser"  },
   { id: "workflow-error",    icon: AlertTriangle, color: "text-red-400",    bg: "bg-red-500/10",    activeBorder: "border-red-500/40",    label: "Workflow Error"    },
 ];
 
@@ -70,7 +72,7 @@ export default function ITDashboard() {
       {activeId === "server-monitoring" && <ServerMonitoringSection />}
       {activeId === "tablespace-usage"  && <TablespaceSection />}
       {activeId === "disk-usage"        && <DiskUsageSection />}
-      {activeId === "pending-jobs"      && <PendingJobsSection />}
+      {activeId === "db-browser"        && <DatabaseBrowserSection />}
       {activeId === "workflow-error"    && <WorkflowErrorSection />}
     </div>
   );
@@ -1801,33 +1803,536 @@ function DiskUsageSection() {
   );
 }
 
-/* ─── Section: Pending Jobs ───────────────────────── */
+/* ─── Section: Database Browser ───────────────────── */
 
-function PendingJobsSection() {
-  const [data, setData]       = useState([]);
-  const [loading, setLoading] = useState(false);
+const DB_NEU = {
+  bg: "#e8edf5",
+  out: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff",
+  in:  "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff",
+};
 
-  const refresh = async () => {
-    setLoading(true);
+function DatabaseBrowserSection() {
+  const [subTab, setSubTab] = useState("objects");
+
+  return (
+    <SectionCard title="Database Browser" subtitle="PostgreSQL — ckdo_dashboard · browse, edit & manage database objects">
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        {[["objects", "Objects", Table2], ["console", "SQL Console", Code2], ["audit", "Audit Log", History]].map(([id, label, Icon]) => (
+          <button key={id} onClick={() => setSubTab(id)}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "8px 18px", borderRadius: 10, border: "none", fontSize: 12.5, fontWeight: 700,
+              background: DB_NEU.bg, cursor: "pointer",
+              color: subTab === id ? "#7c3aed" : "#64748b",
+              boxShadow: subTab === id ? DB_NEU.in : DB_NEU.out,
+              transition: "all 0.2s ease",
+            }}>
+            <Icon size={13} /> {label}
+          </button>
+        ))}
+      </div>
+      {subTab === "objects" && <DbObjectsBrowser />}
+      {subTab === "console" && <DbSqlConsole />}
+      {subTab === "audit"   && <DbAuditLog />}
+    </SectionCard>
+  );
+}
+
+const OBJ_TYPE_CFG = {
+  table:             { icon: Table2, color: "#2563eb", label: "Table" },
+  materialized_view: { icon: Table2, color: "#0891b2", label: "Mat. View" },
+  view:              { icon: Layers, color: "#7c3aed", label: "View" },
+  sequence:          { icon: Hash,   color: "#d97706", label: "Sequence" },
+  function:          { icon: Code2,  color: "#16a34a", label: "Function" },
+};
+
+function DbObjectsBrowser() {
+  const [objects, setObjects]   = useState({ tables: [], views: [], sequences: [], functions: [] });
+  const [loading, setLoading]   = useState(true);
+  const [error,   setError]     = useState(null);
+  const [search,  setSearch]    = useState("");
+  const [selected, setSelected] = useState(null); // { schema, name, type }
+
+  const load = async () => {
+    setLoading(true); setError(null);
     try {
-      const res = await itApi.getPendingJobs();
-      setData(res.data ?? []);
+      const res = await itApi.getDbObjects();
+      setObjects(res);
+    } catch (e) {
+      setError(e?.detail || e?.message || "Failed to load database objects");
     } finally {
       setLoading(false);
     }
   };
 
+  useEffect(() => { load(); }, []); // eslint-disable-line
+
+  const groups = [
+    { key: "tables",    label: "Tables",    type: "table",    items: objects.tables },
+    { key: "views",     label: "Views",     type: "view",     items: objects.views },
+    { key: "sequences", label: "Sequences", type: "sequence", items: objects.sequences },
+    { key: "functions", label: "Functions", type: "function", items: objects.functions },
+  ];
+  const q = search.trim().toLowerCase();
+  const filtered = groups.map(g => ({ ...g, items: q ? g.items.filter(o => o.name.toLowerCase().includes(q)) : g.items }));
+  const totalCount = groups.reduce((s, g) => s + g.items.length, 0);
+
   return (
-    <SectionCard
-      title="Concurrent Requests — Pending & Running"
-      action={<ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-blue-600 hover:bg-blue-700" onClick={refresh} />}
-    >
-      <DataTable
-        headers={["Request ID", "Program Name", "User", "Request Date", "Wait Time", "Status"]}
-        rows={data.map((r) => [r.request_id, r.program_name, r.requested_by, r.request_date, r.wait_time, r.phase_code])}
-        placeholder="Click Refresh to load pending jobs"
+    <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16 }}>
+      {/* Left: object list */}
+      <div style={{ background: DB_NEU.bg, borderRadius: 16, boxShadow: DB_NEU.in, padding: 12, maxHeight: 640, overflowY: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <div style={{ position: "relative", flex: 1 }}>
+            <Search size={12} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search objects..."
+              style={{ width: "100%", fontSize: 12, padding: "7px 8px 7px 26px", borderRadius: 8, border: "none", background: "#fff", color: "#1e293b", boxShadow: DB_NEU.in, outline: "none", boxSizing: "border-box" }} />
+          </div>
+          <button onClick={load} title="Refresh"
+            style={{ padding: 7, borderRadius: 8, border: "none", background: DB_NEU.bg, boxShadow: DB_NEU.out, cursor: "pointer", color: "#64748b" }}>
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+          </button>
+        </div>
+
+        {error && <p style={{ fontSize: 11, color: "#dc2626", padding: "4px 2px" }}>{error}</p>}
+        {loading && !totalCount ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: "24px 0" }}><Loader2 size={16} className="animate-spin" style={{ color: "#94a3b8" }} /></div>
+        ) : (
+          groups.map((g, gi) => (
+            filtered[gi].items.length === 0 ? null : (
+              <div key={g.key} style={{ marginBottom: 10 }}>
+                <p style={{ fontSize: 10, fontWeight: 800, color: "#94a3b8", letterSpacing: "0.08em", textTransform: "uppercase", padding: "4px 6px" }}>
+                  {g.label} ({filtered[gi].items.length})
+                </p>
+                {filtered[gi].items.map(o => {
+                  const cfg = OBJ_TYPE_CFG[o.type || g.type];
+                  const isSel = selected?.schema === o.schema && selected?.name === o.name && selected?.type === (o.type || g.type);
+                  return (
+                    <button key={`${o.schema}.${o.name}`} onClick={() => setSelected({ schema: o.schema, name: o.name, type: o.type || g.type, meta: o })}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 7, width: "100%", textAlign: "left",
+                        padding: "6px 8px", borderRadius: 8, border: "none", cursor: "pointer", marginBottom: 2,
+                        background: isSel ? "rgba(124,58,237,0.12)" : "transparent",
+                        boxShadow: isSel ? "inset 0 0 0 1.5px #7c3aed" : "none",
+                      }}>
+                      <cfg.icon size={12} color={cfg.color} style={{ flexShrink: 0 }} />
+                      <span style={{ fontSize: 12, fontWeight: isSel ? 700 : 600, color: "#334155", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+                        {o.name}
+                      </span>
+                      {o.size_pretty && <span style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, flexShrink: 0 }}>{o.size_pretty}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )
+          ))
+        )}
+        {!loading && totalCount === 0 && !error && (
+          <p style={{ fontSize: 12, color: "#94a3b8", textAlign: "center", padding: "20px 0" }}>No objects found.</p>
+        )}
+      </div>
+
+      {/* Right: detail */}
+      <div style={{ minHeight: 400 }}>
+        {!selected ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 400, background: DB_NEU.bg, borderRadius: 16, boxShadow: DB_NEU.in }}>
+            <Database size={28} color="#c5cad8" />
+            <p style={{ fontSize: 12.5, color: "#94a3b8", marginTop: 10, fontWeight: 500 }}>Select an object on the left to view its structure and data.</p>
+          </div>
+        ) : selected.type === "table" || selected.type === "materialized_view" || selected.type === "view" ? (
+          <DbTableDetail key={`${selected.schema}.${selected.name}`} schema={selected.schema} name={selected.name} meta={selected.meta} />
+        ) : selected.type === "sequence" ? (
+          <div style={{ background: DB_NEU.bg, borderRadius: 16, boxShadow: DB_NEU.in, padding: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <Hash size={16} color="#d97706" />
+              <h4 style={{ fontSize: 14, fontWeight: 700, color: "#1e293b" }}>{selected.schema}.{selected.name}</h4>
+            </div>
+            <p style={{ fontSize: 12, color: "#64748b" }}>Data type: <strong style={{ color: "#334155" }}>{selected.meta?.data_type}</strong></p>
+            <p style={{ fontSize: 11, color: "#94a3b8", marginTop: 10 }}>Use the SQL Console to inspect or modify sequence values (e.g. <code>SELECT last_value FROM {selected.schema}.{selected.name}</code>).</p>
+          </div>
+        ) : (
+          <div style={{ background: DB_NEU.bg, borderRadius: 16, boxShadow: DB_NEU.in, padding: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <Code2 size={16} color="#16a34a" />
+              <h4 style={{ fontSize: 14, fontWeight: 700, color: "#1e293b", fontFamily: "monospace" }}>
+                {selected.schema}.{selected.name}({selected.meta?.arguments})
+              </h4>
+            </div>
+            <p style={{ fontSize: 12, color: "#64748b" }}>Returns: <strong style={{ color: "#334155" }}>{selected.meta?.return_type}</strong></p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DbTableDetail({ schema, name, meta }) {
+  const [innerTab, setInnerTab] = useState("data");
+  const [structure, setStructure] = useState(null);
+  const [structLoading, setStructLoading] = useState(true);
+  const [dataResult, setDataResult] = useState(null);
+  const [dataLoading, setDataLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
+  const [deleting, setDeleting] = useState(null);
+  const [rowError, setRowError] = useState(null);
+
+  useEffect(() => {
+    setStructLoading(true);
+    itApi.getDbStructure(schema, name).then(setStructure).catch(() => setStructure(null)).finally(() => setStructLoading(false));
+  }, [schema, name]);
+
+  const loadData = async (p = page) => {
+    setDataLoading(true); setRowError(null);
+    try {
+      const res = await itApi.getDbData(schema, name, { page: p, page_size: pageSize });
+      setDataResult(res); setPage(p);
+    } catch (e) {
+      setRowError(e?.detail || e?.message || "Failed to load data");
+    } finally {
+      setDataLoading(false);
+    }
+  };
+
+  useEffect(() => { loadData(1); }, [schema, name]); // eslint-disable-line
+
+  const handleDeleteRow = async (row) => {
+    if (!dataResult?.primary_key?.length) return;
+    const pk = {};
+    dataResult.primary_key.forEach(col => { pk[col] = row[dataResult.columns.indexOf(col)]; });
+    const desc = Object.entries(pk).map(([k, v]) => `${k}=${v}`).join(", ");
+    if (!window.confirm(`Delete row from ${schema}.${name} where ${desc}? This cannot be undone.`)) return;
+    setDeleting(desc);
+    try {
+      await itApi.deleteDbRow(schema, name, pk);
+      await loadData(page);
+    } catch (e) {
+      setRowError(e?.detail || e?.message || "Delete failed");
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const totalPages = dataResult ? Math.max(1, Math.ceil(dataResult.total / pageSize)) : 1;
+
+  return (
+    <div style={{ background: DB_NEU.bg, borderRadius: 16, boxShadow: DB_NEU.in, padding: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Table2 size={15} color={meta?.type === "view" ? "#7c3aed" : "#2563eb"} />
+          <h4 style={{ fontSize: 14, fontWeight: 700, color: "#1e293b", fontFamily: "monospace" }}>{schema}.{name}</h4>
+          {meta?.row_estimate != null && <span style={{ fontSize: 10.5, color: "#94a3b8", fontWeight: 600 }}>~{Number(meta.row_estimate).toLocaleString()} rows · {meta.size_pretty}</span>}
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {[["data", "Data"], ["structure", "Structure"]].map(([id, label]) => (
+            <button key={id} onClick={() => setInnerTab(id)}
+              style={{
+                padding: "6px 14px", borderRadius: 8, border: "none", fontSize: 11.5, fontWeight: 700, cursor: "pointer",
+                background: DB_NEU.bg, color: innerTab === id ? "#7c3aed" : "#64748b",
+                boxShadow: innerTab === id ? DB_NEU.in : DB_NEU.out,
+              }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {innerTab === "structure" && (
+        structLoading ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: "30px 0" }}><Loader2 size={16} className="animate-spin" style={{ color: "#94a3b8" }} /></div>
+        ) : !structure ? (
+          <p style={{ fontSize: 12, color: "#94a3b8", textAlign: "center", padding: "20px 0" }}>Failed to load structure.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ borderRadius: 12, overflow: "hidden", boxShadow: DB_NEU.in }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
+                    {["Column", "Type", "Nullable", "Default"].map(h => (
+                      <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontSize: 10.5, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {structure.columns.map((c, i) => (
+                    <tr key={c.column_name} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                      <td style={{ padding: "7px 12px", fontWeight: 700, color: "#1e293b", fontFamily: "monospace" }}>
+                        {c.is_primary_key && <Key size={10} color="#d97706" style={{ display: "inline", marginRight: 5, verticalAlign: -1 }} />}
+                        {c.column_name}
+                      </td>
+                      <td style={{ padding: "7px 12px", color: "#475569", fontFamily: "monospace" }}>
+                        {c.data_type}{c.character_maximum_length ? `(${c.character_maximum_length})` : ""}
+                      </td>
+                      <td style={{ padding: "7px 12px", color: c.is_nullable === "YES" ? "#94a3b8" : "#dc2626", fontWeight: 600 }}>{c.is_nullable === "YES" ? "Yes" : "No"}</td>
+                      <td style={{ padding: "7px 12px", color: "#64748b", fontFamily: "monospace", fontSize: 11 }}>{c.column_default ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {structure.foreign_keys.length > 0 && (
+              <div>
+                <p style={{ fontSize: 10.5, fontWeight: 800, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6 }}>Foreign Keys</p>
+                {structure.foreign_keys.map((fk, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#475569", padding: "4px 2px" }}>
+                    <Link2 size={11} color="#7c3aed" />
+                    <span style={{ fontFamily: "monospace" }}>{fk.column_name}</span> → <span style={{ fontFamily: "monospace" }}>{fk.foreign_schema}.{fk.foreign_table}.{fk.foreign_column}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {structure.indexes.length > 0 && (
+              <div>
+                <p style={{ fontSize: 10.5, fontWeight: 800, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6 }}>Indexes</p>
+                {structure.indexes.map((idx) => (
+                  <div key={idx.indexname} style={{ fontSize: 11, color: "#64748b", fontFamily: "monospace", padding: "4px 2px", overflowX: "auto", whiteSpace: "nowrap" }}>
+                    {idx.indexdef}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      )}
+
+      {innerTab === "data" && (
+        <div>
+          {rowError && (
+            <div style={{ marginBottom: 8, padding: "8px 12px", borderRadius: 8, background: "rgba(220,38,38,0.08)", color: "#dc2626", fontSize: 11.5 }}>{rowError}</div>
+          )}
+          {dataLoading ? (
+            <div style={{ display: "flex", justifyContent: "center", padding: "30px 0" }}><Loader2 size={16} className="animate-spin" style={{ color: "#94a3b8" }} /></div>
+          ) : !dataResult || dataResult.rows.length === 0 ? (
+            <p style={{ fontSize: 12, color: "#94a3b8", textAlign: "center", padding: "20px 0" }}>No rows.</p>
+          ) : (
+            <>
+              <div style={{ borderRadius: 12, overflow: "auto", boxShadow: DB_NEU.in, maxHeight: 420 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+                  <thead>
+                    <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)", position: "sticky", top: 0 }}>
+                      {dataResult.columns.map(c => (
+                        <th key={c} style={{ padding: "7px 10px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{c}</th>
+                      ))}
+                      {dataResult.primary_key.length > 0 && <th style={{ padding: "7px 10px" }} />}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dataResult.rows.map((row, i) => (
+                      <tr key={i} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                        {row.map((cell, j) => (
+                          <td key={j} style={{ padding: "6px 10px", color: "#334155", fontFamily: "monospace", whiteSpace: "nowrap", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }} title={cell == null ? "" : String(cell)}>
+                            {cell === null ? <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>null</span> : String(cell)}
+                          </td>
+                        ))}
+                        {dataResult.primary_key.length > 0 && (
+                          <td style={{ padding: "6px 10px", textAlign: "center" }}>
+                            <button onClick={() => handleDeleteRow(row)} disabled={!!deleting} title="Delete row"
+                              style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 3, opacity: deleting ? 0.4 : 1 }}>
+                              <Trash2 size={12} />
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
+                <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>
+                  {dataResult.total.toLocaleString()} rows · page {page} of {totalPages}
+                </span>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button onClick={() => loadData(page - 1)} disabled={page === 1}
+                    style={{ padding: 5, borderRadius: 7, border: "none", cursor: page === 1 ? "not-allowed" : "pointer", background: DB_NEU.bg, color: page === 1 ? "#cbd5e1" : "#475569", boxShadow: DB_NEU.out }}>
+                    <ChevronLeft size={13} />
+                  </button>
+                  <button onClick={() => loadData(page + 1)} disabled={page >= totalPages}
+                    style={{ padding: 5, borderRadius: 7, border: "none", cursor: page >= totalPages ? "not-allowed" : "pointer", background: DB_NEU.bg, color: page >= totalPages ? "#cbd5e1" : "#475569", boxShadow: DB_NEU.out }}>
+                    <ChevronRight size={13} />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DbSqlConsole() {
+  const [sql, setSql]             = useState("");
+  const [running, setRunning]     = useState(false);
+  const [result, setResult]       = useState(null);
+  const [error, setError]         = useState(null);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
+
+  const run = async (confirm = false) => {
+    if (!sql.trim()) return;
+    setRunning(true); setError(null); setNeedsConfirm(false); setResult(null);
+    try {
+      const res = await itApi.runDbQuery({ sql, confirm });
+      setResult(res);
+    } catch (e) {
+      const detail = e?.detail || e?.message || "Query failed";
+      if (typeof detail === "string" && detail.includes("confirm=true")) {
+        setNeedsConfirm(true);
+        setError(detail);
+      } else {
+        setError(detail);
+      }
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <p style={{ fontSize: 11.5, color: "#94a3b8" }}>
+        Runs directly against <strong style={{ color: "#64748b" }}>ckdo_dashboard</strong>. SELECT / INSERT / UPDATE / DELETE / CREATE / ALTER / DROP are all supported —
+        every statement is recorded in the Audit Log. Destructive statements (DROP, TRUNCATE, or DELETE/UPDATE without a WHERE clause) require confirmation.
+      </p>
+      <textarea
+        value={sql}
+        onChange={e => setSql(e.target.value)}
+        placeholder={"e.g.\nSELECT * FROM employees LIMIT 20;\n\nALTER TABLE employees ADD COLUMN nickname VARCHAR(50);"}
+        rows={7}
+        style={{
+          width: "100%", fontFamily: "monospace", fontSize: 12.5, padding: "12px 14px", borderRadius: 12, border: "none",
+          background: "#fff", color: "#1e293b", boxShadow: DB_NEU.in, outline: "none", resize: "vertical", boxSizing: "border-box",
+        }}
       />
-    </SectionCard>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <button onClick={() => run(false)} disabled={running || !sql.trim()}
+          style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 10, border: "none",
+            fontSize: 12.5, fontWeight: 700, color: "#fff", cursor: running || !sql.trim() ? "not-allowed" : "pointer",
+            background: running || !sql.trim() ? "#94a3b8" : "#7c3aed", boxShadow: DB_NEU.out,
+          }}>
+          {running ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Run
+        </button>
+        {needsConfirm && (
+          <button onClick={() => run(true)} disabled={running}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 10, border: "none", fontSize: 12.5, fontWeight: 700, color: "#fff", cursor: "pointer", background: "#dc2626", boxShadow: DB_NEU.out }}>
+            <AlertTriangle size={13} /> Run Anyway
+          </button>
+        )}
+        {result && !error && (
+          <span style={{ fontSize: 11.5, color: "#16a34a", fontWeight: 600 }}>
+            <CheckCircle size={12} style={{ display: "inline", marginRight: 4, verticalAlign: -1 }} />
+            {result.columns.length > 0 ? `${result.row_count} row${result.row_count !== 1 ? "s" : ""} returned` : `${result.row_count} row${result.row_count !== 1 ? "s" : ""} affected`} · {result.duration_ms}ms
+          </span>
+        )}
+      </div>
+
+      {error && (
+        <div style={{ padding: "10px 14px", borderRadius: 10, background: needsConfirm ? "rgba(217,119,6,0.1)" : "rgba(220,38,38,0.08)", color: needsConfirm ? "#d97706" : "#dc2626", fontSize: 12, fontFamily: "monospace", whiteSpace: "pre-wrap" }}>
+          {error}
+        </div>
+      )}
+
+      {result && result.columns.length > 0 && (
+        <div style={{ borderRadius: 12, overflow: "auto", boxShadow: DB_NEU.in, maxHeight: 420 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+            <thead>
+              <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)", position: "sticky", top: 0 }}>
+                {result.columns.map(c => (
+                  <th key={c} style={{ padding: "7px 10px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{c}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {result.rows.map((row, i) => (
+                <tr key={i} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                  {row.map((cell, j) => (
+                    <td key={j} style={{ padding: "6px 10px", color: "#334155", fontFamily: "monospace", whiteSpace: "nowrap", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" }} title={cell == null ? "" : String(cell)}>
+                      {cell === null ? <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>null</span> : String(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {result.truncated && <p style={{ fontSize: 10.5, color: "#94a3b8", padding: "6px 10px" }}>Showing first 500 rows — refine your query for more.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const STMT_COLOR = {
+  SELECT: "#2563eb", INSERT: "#16a34a", UPDATE: "#d97706", DELETE: "#dc2626",
+  CREATE: "#7c3aed", ALTER: "#7c3aed", DROP: "#dc2626", TRUNCATE: "#dc2626",
+};
+
+function DbAuditLog() {
+  const [logs, setLogs]       = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await itApi.getDbAuditLog(150);
+      setLogs(res ?? []);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, []); // eslint-disable-line
+
+  const fmtTime = (iso) => {
+    if (!iso) return "—";
+    try { return new Date(iso).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "medium" }); }
+    catch { return iso; }
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <p style={{ fontSize: 11.5, color: "#94a3b8" }}>Every statement run through the SQL Console or row deletion, most recent first.</p>
+        <button onClick={load} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 8, border: "none", background: DB_NEU.bg, color: "#64748b", fontSize: 11, fontWeight: 700, cursor: "pointer", boxShadow: DB_NEU.out }}>
+          <RefreshCw size={11} className={loading ? "animate-spin" : ""} /> Refresh
+        </button>
+      </div>
+      <div style={{ borderRadius: 16, overflow: "auto", boxShadow: DB_NEU.in, maxHeight: 560 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+          <thead>
+            <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)", position: "sticky", top: 0 }}>
+              {["Time", "User", "Type", "SQL", "Result", "Rows", "Duration"].map(h => (
+                <th key={h} style={{ padding: "9px 12px", textAlign: "left", fontSize: 10, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={7} style={{ padding: "30px 0", textAlign: "center" }}><Loader2 size={16} className="animate-spin" style={{ color: "#94a3b8" }} /></td></tr>
+            ) : logs.length === 0 ? (
+              <tr><td colSpan={7} style={{ padding: "30px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No queries executed yet.</td></tr>
+            ) : logs.map((l, i) => (
+              <tr key={l.id} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                <td style={{ padding: "7px 12px", color: "#64748b", whiteSpace: "nowrap" }}>{fmtTime(l.executed_at)}</td>
+                <td style={{ padding: "7px 12px", color: "#334155", fontWeight: 600, whiteSpace: "nowrap" }}>{l.executed_by}</td>
+                <td style={{ padding: "7px 12px" }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: STMT_COLOR[l.statement_type] || "#64748b" }}>{l.statement_type}</span>
+                </td>
+                <td style={{ padding: "7px 12px", color: "#475569", fontFamily: "monospace", fontSize: 11, maxWidth: 340, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={l.sql_text}>
+                  {l.sql_text}
+                </td>
+                <td style={{ padding: "7px 12px" }}>
+                  {l.success
+                    ? <span style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "#16a34a", fontWeight: 700 }}><CheckCircle size={11} /> OK</span>
+                    : <span style={{ color: "#dc2626", fontWeight: 700 }} title={l.error_message}>Failed</span>}
+                </td>
+                <td style={{ padding: "7px 12px", color: "#64748b" }}>{l.rows_affected ?? "—"}</td>
+                <td style={{ padding: "7px 12px", color: "#64748b" }}>{l.duration_ms != null ? `${l.duration_ms}ms` : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

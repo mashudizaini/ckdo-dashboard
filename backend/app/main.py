@@ -13,9 +13,10 @@ import app.models.working_calendar  # noqa: F401
 import app.models.hrga_task    # noqa: F401
 import app.models.cv_screening  # noqa: F401
 import app.models.business_plan  # noqa: F401
+import app.models.db_browser_audit  # noqa: F401
 
 # ── Dashboard Routers ──
-from app.routers.dashboard import it, hr, pac, accounting, purchasing, ap_invoice
+from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice
 
 # ── Coretax Router ──
 from app.routers.coretax_router import coretax_router
@@ -122,6 +123,7 @@ app.include_router(health.router, prefix=API_PREFIX, tags=["Health"])
 
 # Dashboard modules
 app.include_router(it.router,         prefix=f"{API_PREFIX}/dashboard/it",         tags=["Dashboard - IT"])
+app.include_router(it_db_browser.router, prefix=f"{API_PREFIX}/dashboard/it/db-browser", tags=["Dashboard - IT DB Browser"])
 app.include_router(hr.router,         prefix=f"{API_PREFIX}/dashboard/hr",         tags=["Dashboard - HR"])
 app.include_router(pac.router,        prefix=f"{API_PREFIX}/dashboard/pac",        tags=["Dashboard - PAC"])
 app.include_router(accounting.router, prefix=f"{API_PREFIX}/dashboard/accounting", tags=["Dashboard - Accounting"])

@@ -32,6 +32,14 @@ export const itApi = {
   getDiskUsage:     () => api.get("/dashboard/it/disk-usage"),
   getPendingJobs:   () => api.get("/dashboard/it/pending-jobs"),
   getWorkflowError: () => api.get("/dashboard/it/workflow-error"),
+
+  // Database Browser (PostgreSQL — ckdo_dashboard)
+  getDbObjects:   ()                     => api.get("/dashboard/it/db-browser/objects"),
+  getDbStructure: (schema, table)        => api.get(`/dashboard/it/db-browser/objects/${schema}/${table}/structure`),
+  getDbData:      (schema, table, params) => api.get(`/dashboard/it/db-browser/objects/${schema}/${table}/data`, { params }),
+  deleteDbRow:    (schema, table, pk)    => api.delete(`/dashboard/it/db-browser/objects/${schema}/${table}/rows`, { data: { pk } }),
+  runDbQuery:     (body)                 => api.post("/dashboard/it/db-browser/query", body),
+  getDbAuditLog:  (limit)                => api.get("/dashboard/it/db-browser/audit-log", { params: { limit } }),
 };
 
 export const hrApi = {
