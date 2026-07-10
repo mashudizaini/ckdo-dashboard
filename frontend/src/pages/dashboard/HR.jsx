@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import * as XLSX from "xlsx";
 import {
   Users, UserCheck, Umbrella, BarChart2, RefreshCw,
   Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck,
@@ -17,6 +18,26 @@ const API        = "/api/v1/dashboard/hr/employees";
 const BUDGET_API = "/api/v1/dashboard/hr/budget";
 
 const MONTHS_ID = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+// ── Employee List Excel export — field list shown in the download picker ──
+const EMPLOYEE_COLS = [
+  { key: "user_id",          label: "NIK" },
+  { key: "full_name",        label: "Name" },
+  { key: "level",            label: "Level" },
+  { key: "department",       label: "Department" },
+  { key: "division",         label: "Division" },
+  { key: "team",             label: "Team" },
+  { key: "job_title",        label: "Position" },
+  { key: "work_placement",   label: "Placement" },
+  { key: "status",           label: "Status" },
+  { key: "sex",              label: "Gender" },
+  { key: "employee_grade",   label: "Grade" },
+  { key: "education_degree", label: "Education" },
+  { key: "marital_status",   label: "Marital" },
+  { key: "date_of_joining",  label: "Join Date" },
+  { key: "end_pkwt",         label: "End PKWT" },
+  { key: "phone_number",     label: "Phone" },
+];
 
 const NEU_TAB = {
   bg: "#e8edf5",
@@ -168,6 +189,9 @@ function EmployeeTable() {
   const [summary,    setSummary]    = useState(null);
   const [sortBy,     setSortBy]     = useState("full_name");
   const [sortDir,    setSortDir]    = useState("asc");
+  const [showExportPicker, setShowExportPicker] = useState(false);
+  const [exportFields, setExportFields] = useState(() => Object.fromEntries(EMPLOYEE_COLS.map(c => [c.key, true])));
+  const [exporting, setExporting] = useState(false);
 
   const PAGE_SIZE = 25;
 
@@ -254,11 +278,47 @@ function EmployeeTable() {
     "Probation": "bg-purple-500/15 text-purple-400 border-purple-500/30",
   };
 
+  const toggleExportField = (key) => setExportFields(p => ({ ...p, [key]: !p[key] }));
+  const setAllExportFields = (val) => setExportFields(Object.fromEntries(EMPLOYEE_COLS.map(c => [c.key, val])));
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({
+        page: 1, page_size: 5000, sort_by: sortBy, sort_dir: sortDir,
+        ...(search       ? { search }                : {}),
+        ...(deptFilter   ? { department: deptFilter } : {}),
+        ...(statusFilter ? { status: statusFilter }   : {}),
+        ...(teamFilter   ? { team: teamFilter }        : {}),
+        ...(genderFilter ? { sex: genderFilter === "Male" ? "M" : "F" } : {}),
+      });
+      const res = await fetch(`${API}?${params}`, { headers });
+      const body = await res.json();
+      const rows = body.employees ?? [];
+      const cols = EMPLOYEE_COLS.filter(c => exportFields[c.key]);
+      const fmtDate = (v) => v ? new Date(v).toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" }) : "";
+      const cellValue = (e, key) => {
+        if (key === "date_of_joining" || key === "end_pkwt") return fmtDate(e[key]);
+        if (key === "sex") return e.sex === "M" ? "Male" : e.sex === "F" ? "Female" : "";
+        return e[key] ?? "";
+      };
+      const aoa = [cols.map(c => c.label), ...rows.map(e => cols.map(c => cellValue(e, c.key)))];
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Employees");
+      XLSX.writeFile(wb, `employee_data_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      setShowExportPicker(false);
+    } catch (_) {
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Summary cards — clickable */}
       {summary && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
           {[
             { id: "total",      label: "Total Employees", val: summary.total,      color: "#2563eb", icon: "👥" },
             { id: "permanent",  label: "Permanent",       val: summary.permanent,  color: "#22c55e", icon: "✓" },
@@ -271,18 +331,18 @@ function EmployeeTable() {
             return (
               <button key={id} onClick={() => handleCardClick(id)}
                 style={{
-                  padding: "14px 12px", borderRadius: 16, border: "none",
+                  padding: "6px 8px", borderRadius: 10, border: "none",
                   background: isActive ? color : "#e8edf5",
                   boxShadow: isActive
-                    ? "inset 3px 3px 6px rgba(0,0,0,0.2)"
-                    : "5px 5px 12px #c5cad8, -5px -5px 12px #ffffff",
+                    ? "inset 2px 2px 4px rgba(0,0,0,0.2)"
+                    : "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff",
                   cursor: "pointer", textAlign: "center",
                   transform: isActive ? "scale(0.97)" : "scale(1)",
                   transition: "all 0.2s ease",
                 }}
               >
-                <div style={{ fontSize: 26, fontWeight: 800, color: isActive ? "#fff" : color }}>{val}</div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: isActive ? "rgba(255,255,255,0.85)" : "#64748b", marginTop: 2 }}>{label}</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: isActive ? "#fff" : color }}>{val}</div>
+                <div style={{ fontSize: 9, fontWeight: 700, color: isActive ? "rgba(255,255,255,0.85)" : "#64748b", marginTop: 1 }}>{label}</div>
               </button>
             );
           })}
@@ -342,6 +402,46 @@ function EmployeeTable() {
         >
           <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Refresh
         </button>
+
+        <div className="relative">
+          <button
+            onClick={() => setShowExportPicker(v => !v)}
+            className="flex items-center gap-1.5 rounded-lg border border-emerald-700/50 bg-emerald-900/20 px-3 py-2 text-sm text-emerald-400 hover:border-emerald-600 hover:bg-emerald-900/30 transition-colors"
+          >
+            <Download size={13} /> Download Excel
+          </button>
+          {showExportPicker && (
+            <>
+              <div onClick={() => setShowExportPicker(false)} className="fixed inset-0 z-20" />
+              <div className="absolute right-0 top-full mt-2 z-30 w-64 rounded-xl border border-gray-700 bg-gray-900 shadow-2xl p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-gray-300">Select fields to export</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => setAllExportFields(true)} className="text-[10px] text-indigo-400 hover:text-indigo-300">All</button>
+                    <button onClick={() => setAllExportFields(false)} className="text-[10px] text-gray-500 hover:text-gray-400">None</button>
+                  </div>
+                </div>
+                <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
+                  {EMPLOYEE_COLS.map(c => (
+                    <label key={c.key} className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer hover:text-white px-1 py-0.5 rounded">
+                      <input type="checkbox" checked={!!exportFields[c.key]} onChange={() => toggleExportField(c.key)}
+                        className="accent-emerald-500" />
+                      {c.label}
+                    </label>
+                  ))}
+                </div>
+                <button
+                  onClick={handleExport}
+                  disabled={exporting || !Object.values(exportFields).some(Boolean)}
+                  className="w-full mt-3 flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+                >
+                  {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                  {exporting ? "Exporting..." : "Download"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Tabel */}
@@ -367,10 +467,10 @@ function EmployeeTable() {
           ? new Date(v).toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })
           : "—";
         return (
-          <div className="overflow-x-auto rounded-lg border border-gray-800">
+          <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 480 }}>
             <table className="w-full text-sm" style={{ minWidth: 1400 }}>
-              <thead>
-                <tr className="bg-gray-800/60">
+              <thead className="sticky top-0 z-10">
+                <tr className="bg-gray-800">
                   {COLS.map(({ label, field, align }) => {
                     const active = sortBy === field;
                     return (

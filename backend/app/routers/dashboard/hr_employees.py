@@ -359,7 +359,7 @@ async def list_employees(
     sort_by:    str           = Query("full_name"),
     sort_dir:   str           = Query("asc"),
     page:       int           = Query(1, ge=1),
-    page_size:  int           = Query(25, ge=1, le=100),
+    page_size:  int           = Query(25, ge=1, le=5000),  # higher cap lets the frontend fetch everything in one call for Excel export
     db:         AsyncSession  = Depends(get_db),
     user:       CurrentUser   = Depends(require_role(Roles.HR)),
 ):
