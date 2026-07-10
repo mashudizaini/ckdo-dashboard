@@ -102,6 +102,18 @@ def _with_leave_join(q):
     )
 
 
+def _load_workbook(contents: bytes):
+    """Load an .xlsx/.xlsm workbook, falling back to read_only mode (a
+    different, more tolerant streaming XML parser) for files with minor
+    OOXML non-compliance that Excel itself accepts but openpyxl's default
+    parser rejects — a real, recurring issue with some HRIS-generated
+    exports (seen with real Talenta exports)."""
+    try:
+        return openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
+    except Exception:
+        return openpyxl.load_workbook(io.BytesIO(contents), data_only=True, read_only=True)
+
+
 def _to_str(val) -> Optional[str]:
     if val is None:
         return None
@@ -191,9 +203,13 @@ async def upload_attendance(
     batch_id = f"att_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
     try:
-        wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
+        wb = _load_workbook(contents)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid Excel file: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid Excel file: {e}. Try opening it in Excel and doing "
+                   f"File > Save As > .xlsx to normalize the file, then re-upload.",
+        )
 
     ws = wb.active
     rows_parsed = [
@@ -313,9 +329,13 @@ async def upload_attendance_talenta(
     batch_id = f"tal_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
     try:
-        wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
+        wb = _load_workbook(contents)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid Excel file: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid Excel file: {e}. Try opening it in Excel and doing "
+                   f"File > Save As > .xlsx to normalize the file, then re-upload.",
+        )
 
     ws = wb.active
     rows_parsed = [
