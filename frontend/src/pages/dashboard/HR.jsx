@@ -85,7 +85,7 @@ export default function HRDashboard() {
 
       {/* ── Employee Data (list + upload) ── */}
       {activeSection === "employees" && (
-        <SectionCard title="Employee Data">
+        <SectionCard>
           <SubTabs
             tabs={[
               { id: "list",     label: "Employee List" },
@@ -106,7 +106,7 @@ export default function HRDashboard() {
 
       {/* ── Leave (data + upload) ── */}
       {activeSection === "leave" && (
-        <SectionCard title="Employee Leave">
+        <SectionCard>
           <SubTabs
             tabs={[{ id: "data", label: "Leave Data" }, { id: "upload", label: "Upload Leave" }]}
             active={leaveSub} onChange={setLeaveSub}
@@ -118,31 +118,31 @@ export default function HRDashboard() {
 
       {/* ── Attendance Rate (summary/detail + upload) ── */}
       {activeSection === "attendance" && (
-        <SectionCard title="Attendance Rate">
+        <SectionCard>
           <AttendanceRateSection />
         </SectionCard>
       )}
 
       {activeSection === "todo" && (
-        <SectionCard title="HRGA To Do List">
+        <SectionCard>
           <HRTodoList />
         </SectionCard>
       )}
 
       {activeSection === "cv" && (
-        <SectionCard title="CV Screening">
+        <SectionCard>
           <HRCvScreening />
         </SectionCard>
       )}
 
       {activeSection === "budget" && (
-        <SectionCard title="Budget Monitoring HRGA">
+        <SectionCard>
           <BudgetMonitoringSection />
         </SectionCard>
       )}
 
       {activeSection === "emagazine" && (
-        <SectionCard title="e-Magazine Management">
+        <SectionCard>
           <EMagazineSection />
         </SectionCard>
       )}
@@ -2850,10 +2850,12 @@ function LeaveDataSection() {
 function SectionCard({ title, action, children }) {
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900">
-      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
-        <h3 className="text-sm font-semibold text-gray-200">{title}</h3>
-        {action}
-      </div>
+      {(title || action) && (
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <h3 className="text-sm font-semibold text-gray-200">{title}</h3>
+          {action}
+        </div>
+      )}
       <div className="p-5">{children}</div>
     </div>
   );
