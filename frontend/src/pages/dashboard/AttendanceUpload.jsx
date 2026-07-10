@@ -1,22 +1,54 @@
 /**
  * AttendanceUpload.jsx
- * Upload file Excel absensi → insert/update ke database.
- * Format: "Attendance HO.xlsx" (header baris 1, data mulai baris 2)
- * Kolom: Name | ID | Department | Date | Week | Time Period |
- *        Check-In | Check-Out | Actual Check-In | Actual Check-Out | Notes
+ * Two upload sources, both feeding the same Attendance Ratio reports:
+ *   - Intercom (kind="intercom") — daily physical check-in/out log
+ *     e.g. "Attendance JUN-2026-Intercom.xlsx"
+ *   - Talenta  (kind="talenta")  — leave & business-trip days
+ *     e.g. "Attendance MAY-JUN-2026 Talenta.xlsx"
  */
 
 import { useState, useRef, useEffect } from "react";
 import {
   Upload, FileSpreadsheet, CheckCircle2, XCircle,
   Loader2, RefreshCw, Clock, ChevronDown, ChevronUp,
-  CalendarCheck, FilePlus, RotateCcw, AlertCircle
+  CalendarCheck, FilePlus, RotateCcw, AlertCircle, Briefcase
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 
 const API = "/api/v1/dashboard/hr/attendance";
 
-export default function AttendanceUpload() {
+const CONFIG = {
+  intercom: {
+    title: "Attendance Intercom",
+    uploadPath: "/upload",
+    logSource: "intercom",
+    example: "Attendance JUN-2026-Intercom.xlsx",
+    guidance: "Daily physical check-in/out log from the Intercom access-control system. Header in row 1, data starts at row 2. Existing records are updated based on Employee ID + date.",
+    icon: CalendarCheck,
+    accent: {
+      text: "text-teal-300", banner: "border-teal-500/20 bg-teal-500/5",
+      dragActive: "border-teal-500 bg-teal-500/10", focus: "focus:border-teal-500",
+      button: "bg-teal-600 hover:bg-teal-500",
+    },
+  },
+  talenta: {
+    title: "Attendance Talenta",
+    uploadPath: "/upload-talenta",
+    logSource: "talenta",
+    example: "Attendance MAY-JUN-2026 Talenta.xlsx",
+    guidance: "Leave and business-trip days from Talenta. Only rows with an Attendance Code or Time Off Code are stored — these explain days an employee wasn't physically checked in (leave is excluded from the attendance rate entirely; Business Trip counts as present).",
+    icon: Briefcase,
+    accent: {
+      text: "text-indigo-300", banner: "border-indigo-500/20 bg-indigo-500/5",
+      dragActive: "border-indigo-500 bg-indigo-500/10", focus: "focus:border-indigo-500",
+      button: "bg-indigo-600 hover:bg-indigo-500",
+    },
+  },
+};
+
+export default function AttendanceUpload({ kind = "intercom" }) {
+  const cfg = CONFIG[kind] ?? CONFIG.intercom;
+
   const [file,        setFile]        = useState(null);
   const [dragging,    setDragging]    = useState(false);
   const [notes,       setNotes]       = useState("");
@@ -34,7 +66,7 @@ export default function AttendanceUpload() {
   const loadLogs = async () => {
     setLoadingLogs(true);
     try {
-      const res = await fetch(`${API}/upload-logs`, { headers });
+      const res = await fetch(`${API}/upload-logs?source=${cfg.logSource}`, { headers });
       if (res.ok) setLogs(await res.json());
     } catch (_) {}
     finally { setLoadingLogs(false); }
@@ -64,7 +96,7 @@ export default function AttendanceUpload() {
     if (notes.trim()) fd.append("notes", notes.trim());
 
     try {
-      const res = await fetch(`${API}/upload`, {
+      const res = await fetch(`${API}${cfg.uploadPath}`, {
         method: "POST",
         headers,
         body: fd,
@@ -84,22 +116,26 @@ export default function AttendanceUpload() {
 
   const fmtDate = (iso) => {
     if (!iso) return "—";
-    try { return new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }); }
+    try { return new Date(iso).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }); }
     catch (_) { return iso; }
   };
 
   const fileSizeKB = file ? (file.size / 1024).toFixed(1) : 0;
+  const Icon = cfg.icon;
 
   return (
     <div className="space-y-5">
 
-      {/* ── Panduan ─────────────────────────────────────────────────────────── */}
-      <div className="flex gap-3 rounded-xl border border-teal-500/20 bg-teal-500/5 px-4 py-3 text-sm text-teal-300">
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      <h3 className={`flex items-center gap-2 text-sm font-semibold ${cfg.accent.text}`}>
+        <Icon size={15} /> {cfg.title}
+      </h3>
+
+      {/* ── Guidance ────────────────────────────────────────────────────────── */}
+      <div className={`flex gap-3 rounded-xl border px-4 py-3 text-sm ${cfg.accent.banner} ${cfg.accent.text}`}>
         <AlertCircle size={15} className="mt-0.5 shrink-0" />
         <span>
-          Upload attendance Excel file (format <strong>Attendance HO.xlsx</strong>).
-          Header in row 1, data starts at row 2. Required columns: <strong>ID</strong> and <strong>Date</strong>.
-          Existing records will be updated based on <strong>ID + date</strong>.
+          {cfg.guidance} Example file: <strong>{cfg.example}</strong>.
         </span>
       </div>
 
@@ -109,9 +145,9 @@ export default function AttendanceUpload() {
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         onClick={() => inputRef.current?.click()}
-        className={`relative flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed py-10 cursor-pointer transition-all select-none
+        className={`relative flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed py-8 cursor-pointer transition-all select-none
           ${dragging
-            ? "border-teal-500 bg-teal-500/10"
+            ? cfg.accent.dragActive
             : file
             ? "border-green-500/50 bg-green-500/5"
             : "border-gray-700 bg-gray-900 hover:border-gray-600 hover:bg-gray-800/50"}`}
@@ -147,28 +183,28 @@ export default function AttendanceUpload() {
         )}
       </div>
 
-      {/* ── Catatan ─────────────────────────────────────────────────────────── */}
+      {/* ── Notes ───────────────────────────────────────────────────────────── */}
       <div>
         <label className="mb-1.5 block text-xs font-medium text-gray-500">
-          Upload notes <span className="text-gray-700">(optional — e.g. "Attendance March 2026")</span>
+          Upload notes <span className="text-gray-700">(optional — e.g. "{cfg.title} June 2026")</span>
         </label>
         <input
           type="text"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           placeholder="Upload description..."
-          className="w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-teal-500 transition-colors"
+          className={`w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none transition-colors ${cfg.accent.focus}`}
         />
       </div>
 
-      {/* ── Tombol Upload ───────────────────────────────────────────────────── */}
+      {/* ── Upload button ───────────────────────────────────────────────────── */}
       <button
         onClick={handleUpload}
         disabled={!file || uploading}
         className={`flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-all
           ${!file || uploading
             ? "cursor-not-allowed bg-gray-700 opacity-50"
-            : "bg-teal-600 hover:bg-teal-500 active:scale-95"}`}
+            : `${cfg.accent.button} active:scale-95`}`}
       >
         {uploading
           ? <><Loader2 size={15} className="animate-spin" /> Uploading...</>
@@ -183,7 +219,7 @@ export default function AttendanceUpload() {
         </div>
       )}
 
-      {/* ── Hasil Upload ─────────────────────────────────────────────────────── */}
+      {/* ── Result ──────────────────────────────────────────────────────────── */}
       {result && (
         <div className="rounded-xl border border-green-500/30 bg-green-500/5 p-5">
           <div className="flex items-center gap-2 mb-4">
@@ -192,13 +228,13 @@ export default function AttendanceUpload() {
           </div>
           <div className="grid grid-cols-3 gap-3">
             {[
-              { icon: CalendarCheck, color: "text-blue-400",  bg: "bg-blue-500/10",  label: "Total Read",    val: result.total_rows },
-              { icon: FilePlus,      color: "text-green-400", bg: "bg-green-500/10", label: "New Records",   val: result.inserted },
-              { icon: RotateCcw,     color: "text-amber-400", bg: "bg-amber-500/10", label: "Updated",       val: result.updated },
-            ].map(({ icon: Icon, color, bg, label, val }) => (
+              { icon: CalendarCheck, color: "text-blue-400",  bg: "bg-blue-500/10",  label: "Total Read",  val: result.total_rows },
+              { icon: FilePlus,      color: "text-green-400", bg: "bg-green-500/10", label: "New Records", val: result.inserted },
+              { icon: RotateCcw,     color: "text-amber-400", bg: "bg-amber-500/10", label: "Updated",     val: result.updated },
+            ].map(({ icon: Ic, color, bg, label, val }) => (
               <div key={label} className="rounded-lg border border-white/5 bg-white/3 p-3 text-center">
                 <div className={`mx-auto mb-1.5 flex h-7 w-7 items-center justify-center rounded-lg ${bg}`}>
-                  <Icon size={14} className={color} />
+                  <Ic size={14} className={color} />
                 </div>
                 <div className={`text-xl font-bold ${color}`}>{val}</div>
                 <div className="text-xs text-gray-500 mt-0.5">{label}</div>
@@ -209,7 +245,7 @@ export default function AttendanceUpload() {
         </div>
       )}
 
-      {/* ── Riwayat Upload ──────────────────────────────────────────────────── */}
+      {/* ── Upload history ──────────────────────────────────────────────────── */}
       <div className="rounded-xl border border-gray-800 bg-gray-900">
         <button
           onClick={() => { setShowLogs((v) => !v); if (!showLogs) loadLogs(); }}

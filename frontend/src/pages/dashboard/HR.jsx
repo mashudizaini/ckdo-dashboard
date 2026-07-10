@@ -1833,7 +1833,10 @@ function AttendanceRateSection() {
       )}
 
       {activeTab === "upload" && (
-        <AttendanceUpload />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <AttendanceUpload kind="intercom" />
+          <AttendanceUpload kind="talenta" />
+        </div>
       )}
     </div>
   );
