@@ -29,9 +29,28 @@ api.interceptors.request.use((config) => {
 // Response interceptor — handle errors globally
 api.interceptors.response.use(
   (response) => response.data,
-  (error) => {
-    if (error.response?.status === 401) {
-      useAuthStore.getState().logout();
+  async (error) => {
+    const original = error.config;
+
+    // A single 401 can just mean the access token quietly expired between
+    // requests — try a silent refresh and retry once before logging out.
+    // Without this, any request made right after expiry (e.g. the first
+    // fetch on a freshly opened tab) forces a full logout, which — since
+    // this realm has Google as the default identity-provider redirector —
+    // skips straight to the Google sign-in screen instead of just
+    // reauthenticating quietly.
+    if (error.response?.status === 401 && original && !original._retried) {
+      original._retried = true;
+      try {
+        const kc = useAuthStore.getState().keycloak;
+        await kc.updateToken(-1); // force refresh regardless of expiry
+        useAuthStore.setState({ token: kc.token });
+        original.headers.Authorization = `Bearer ${kc.token}`;
+        return api(original);
+      } catch (_) {
+        // Refresh token itself is invalid/expired — session is genuinely over.
+        useAuthStore.getState().logout();
+      }
     }
     return Promise.reject(error.response?.data || error);
   }
