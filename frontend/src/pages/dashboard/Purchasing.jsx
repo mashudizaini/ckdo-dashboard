@@ -352,7 +352,7 @@ function PurchaseHistorySection() {
 
   const [f, setF] = useState({
     org_id: "", exchange_rate_type: "Corporate",
-    year_from: CY - 5, year_to: CY,
+    year_from: CY - 1, year_to: CY,
     item_code: "", item_desc: "", vendor_name: "", manufacturer: "",
     country_of_origin: "", category: "", currency_code: "", material_type: "",
     po_number: "", buyer: "",
@@ -401,7 +401,7 @@ function PurchaseHistorySection() {
   };
 
   const handleReset = () => {
-    setF({ org_id: "", exchange_rate_type: "Corporate", year_from: CY - 5, year_to: CY,
+    setF({ org_id: "", exchange_rate_type: "Corporate", year_from: CY - 1, year_to: CY,
            item_code: "", item_desc: "", vendor_name: "", manufacturer: "",
            country_of_origin: "", category: "", currency_code: "", material_type: "",
            po_number: "", buyer: "" });
@@ -680,23 +680,23 @@ function PHDetailTable({ data, loading, error }) {
               <tr><td colSpan={PH_DETAIL_COLS.length} className="px-3 py-10 text-center text-xs text-gray-600">No data found</td></tr>
             ) : paged.map((r, i) => (
               <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
-                <td className={`${TD} font-mono text-blue-400 font-medium`}>{r.po_number}</td>
-                <td className={`${TD} text-gray-400 text-center`}>{r.line_num}</td>
-                <td className={`${TD} font-mono text-gray-300`}>{r.item_code}</td>
-                <td className={`${TD} text-gray-300 max-w-[180px] truncate`} title={r.item_description}>{r.item_description}</td>
-                <td className={`${TD} text-gray-400`}>{r.category}</td>
-                <td className={`${TD} text-gray-400`}>{r.item_type}</td>
-                <td className={`${TD} text-gray-400`}>{r.material_type}</td>
-                <td className={`${TD} text-gray-300 max-w-[160px] truncate`} title={r.supplier_name}>{r.supplier_name}</td>
-                <td className={`${TD} text-gray-400 max-w-[120px] truncate`} title={r.organization_name}>{r.organization_name}</td>
-                <td className={`${TD} text-yellow-400`}>{r.currency_code}</td>
-                <td className={`${TD} text-gray-500`}>{r.uom}</td>
+                <td className={`${TD} font-mono text-blue-400 font-medium`}>{r.po_number || "-"}</td>
+                <td className={`${TD} text-gray-400 text-center`}>{r.line_num ?? "-"}</td>
+                <td className={`${TD} font-mono text-gray-300`}>{r.item_code || "-"}</td>
+                <td className={`${TD} text-gray-300 max-w-[180px] truncate`} title={r.item_description}>{r.item_description || "-"}</td>
+                <td className={`${TD} text-gray-400`}>{r.category || "-"}</td>
+                <td className={`${TD} text-gray-400`}>{r.item_type || "-"}</td>
+                <td className={`${TD} text-gray-400`}>{r.material_type || "-"}</td>
+                <td className={`${TD} text-gray-300 max-w-[160px] truncate`} title={r.supplier_name}>{r.supplier_name || "-"}</td>
+                <td className={`${TD} text-gray-400 max-w-[120px] truncate`} title={r.organization_name}>{r.organization_name || "-"}</td>
+                <td className={`${TD} text-yellow-400`}>{r.currency_code || "-"}</td>
+                <td className={`${TD} text-gray-500`}>{r.uom || "-"}</td>
                 <td className={`${TD} text-right text-gray-300`}>{fmtQty(r.quantity)}</td>
                 <td className={`${TD} text-right text-gray-300`}>{fmtIDR(r.unit_price)}</td>
                 <td className={`${TD} text-right text-gray-300 font-medium`}>{fmtIDR(r.amount_orig)}</td>
                 <td className={`${TD} text-right text-green-400 font-medium`}>{fmtIDR(r.amount_idr)}</td>
                 <td className={`${TD} text-right text-gray-400`}>{fmtQty(r.received_qty)}</td>
-                <td className={`${TD} text-gray-500`}>{r.creation_date}</td>
+                <td className={`${TD} text-gray-500`}>{r.creation_date || "-"}</td>
                 <td className={`${TD} text-gray-400`}>{r.closure_status || "Open"}</td>
               </tr>
             ))}
@@ -1777,11 +1777,11 @@ function ActiveSuppliersSection() {
                     return (
                       <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
                         <td className={`${TD} text-gray-600 text-center w-8`}>{rank}</td>
-                        <td className={`${TD} text-gray-200 font-medium max-w-52 truncate`} title={r.supplier_name}>{r.supplier_name}</td>
-                        <td className={`${TD} text-right text-gray-400`}>{r.po_count}</td>
-                        <td className={`${TD} text-right text-gray-400`}>{r.item_count}</td>
-                        <td className={`${TD} text-right text-gray-400`}>{r.category_count}</td>
-                        <td className={`${TD} text-gray-500`}>{r.last_po_date}</td>
+                        <td className={`${TD} text-gray-200 font-medium max-w-52 truncate`} title={r.supplier_name}>{r.supplier_name || "-"}</td>
+                        <td className={`${TD} text-right text-gray-400`}>{r.po_count ?? "-"}</td>
+                        <td className={`${TD} text-right text-gray-400`}>{r.item_count ?? "-"}</td>
+                        <td className={`${TD} text-right text-gray-400`}>{r.category_count ?? "-"}</td>
+                        <td className={`${TD} text-gray-500`}>{r.last_po_date || "-"}</td>
                         <td className={`${TD} text-right text-emerald-400`}>{fmtIDR(r.direct_idr)}</td>
                         <td className={`${TD} text-right text-blue-400`}>{fmtIDR(r.indirect_idr)}</td>
                         <td className={`${TD} text-right text-gray-200 font-semibold`}>{fmtIDR(r.total_idr)}</td>

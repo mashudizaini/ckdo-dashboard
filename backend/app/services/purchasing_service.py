@@ -422,14 +422,12 @@ class PurchasingService:
                 COUNT(DISTINCT NVL(mcb.segment1,'—'))                             AS category_count,
                 TO_CHAR(MAX(poh.creation_date), 'YYYY-MM-DD')                  AS last_po_date,
                 ROUND(SUM(
-                    CASE WHEN NVL(mcb.segment1,'') IN
-                        ('RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS')
+                    CASE WHEN ({self._MAT_TYPE}) = 'Direct Material'
                     THEN pol.quantity * pol.unit_price * ({self._RATE_CASE})
                     ELSE 0 END
                 ), 0)                                                           AS direct_idr,
                 ROUND(SUM(
-                    CASE WHEN NVL(mcb.segment1,'') NOT IN
-                        ('RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS')
+                    CASE WHEN ({self._MAT_TYPE}) = 'Indirect Material'
                     THEN pol.quantity * pol.unit_price * ({self._RATE_CASE})
                     ELSE 0 END
                 ), 0)                                                           AS indirect_idr,
