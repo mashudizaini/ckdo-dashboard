@@ -100,24 +100,27 @@ function PRStatusBadge({ status }) {
 const OPEN_PR_PAGE_SIZE = 8;
 
 const OPEN_PR_COLS = [
-  { key: "pr_number",         label: "PR Number" },
-  { key: "line_num",          label: "Line",             numeric: true },
-  { key: "item_code",         label: "Item Code" },
-  { key: "item_description",  label: "Item Description" },
-  { key: "category_code",     label: "Category" },
-  { key: "material_type",     label: "Type" },
-  { key: "supplier_name",     label: "Supplier" },
-  { key: "requestor",         label: "Requestor" },
-  { key: "uom",                label: "UoM" },
-  { key: "quantity",          label: "Qty",              numeric: true },
-  { key: "currency_code",     label: "Currency" },
-  { key: "unit_price_orig",   label: "Unit Price",       numeric: true },
-  { key: "unit_price_idr",    label: "Unit Price IDR",   numeric: true },
-  { key: "total_value_orig",  label: "Total Value",      numeric: true },
-  { key: "total_value_idr",   label: "Total Value IDR",  numeric: true },
-  { key: "pr_status",         label: "Status" },
-  { key: "creation_date",     label: "Created" },
-  { key: "aging_days",        label: "Aging",            numeric: true },
+  { key: "pr_number",           label: "PR Number" },
+  { key: "line_num",            label: "Line",               numeric: true },
+  { key: "item_code",           label: "Item Code" },
+  { key: "item_description",    label: "Item Description" },
+  { key: "category_code",       label: "Category" },
+  { key: "material_type",       label: "Type" },
+  { key: "supplier_name",       label: "Supplier" },
+  { key: "payment_terms",       label: "Payment Terms" },
+  { key: "requestor",           label: "Requestor" },
+  { key: "uom",                  label: "UoM" },
+  { key: "quantity",            label: "Qty",                numeric: true },
+  { key: "currency_code",       label: "Currency" },
+  { key: "unit_price_orig",     label: "Unit Price",         numeric: true },
+  { key: "unit_price_idr",      label: "Unit Price IDR",     numeric: true },
+  { key: "last_purchase_price", label: "Last Purchase Price", numeric: true },
+  { key: "total_value_orig",    label: "Total Value",        numeric: true },
+  { key: "total_value_idr",     label: "Total Value IDR",    numeric: true },
+  { key: "pr_status",           label: "Status" },
+  { key: "creation_date",       label: "Created" },
+  { key: "due_date",            label: "Due Date" },
+  { key: "aging_days",          label: "Aging",              numeric: true },
 ];
 
 function OpenPRSection() {
@@ -135,7 +138,6 @@ function OpenPRSection() {
   const [loading,  setLoading]  = useState(false);
   const [searched, setSearched] = useState(false);
   const [rows,     setRows]     = useState([]);
-  const [kpi,      setKpi]      = useState(null);
   const [error,    setError]    = useState("");
   const [page,     setPage]     = useState(1);
   const [sort,     setSort]     = useState({ key: null, dir: "asc" });
@@ -159,7 +161,6 @@ function OpenPRSection() {
       const r = await purchasingApi.getOpenPR(p);
       if (r?.success) {
         setRows(r.data || []);
-        setKpi(r.kpi || null);
         setSearched(true);
       } else {
         setError(r?.error || "Request failed");
@@ -175,7 +176,7 @@ function OpenPRSection() {
     setF({ pr_status: "", material_type: "", pr_number: "", item_code: "",
            item_desc: "", requestor: "", currency_code: "",
            date_from: firstOfYear, date_to: toISO(today), exchange_rate_type: "Corporate" });
-    setRows([]); setKpi(null); setSearched(false); setError(""); setPage(1);
+    setRows([]); setSearched(false); setError(""); setPage(1);
   };
 
   const toggleSort = (key) => {
@@ -198,12 +199,13 @@ function OpenPRSection() {
   const handleDownload = () => {
     const data = sorted.map(r => [
       r.pr_number, r.line_num, r.item_code, r.item_description,
-      r.category_code, r.material_type, r.supplier_name || "—", r.requestor, r.uom, r.quantity,
-      r.currency_code, r.unit_price_orig, r.unit_price_idr,
+      r.category_code, r.material_type, r.supplier_name || "-", r.payment_terms || "-",
+      r.requestor, r.uom, r.quantity,
+      r.currency_code, r.unit_price_orig, r.unit_price_idr, r.last_purchase_price,
       r.total_value_orig, r.total_value_idr,
-      r.pr_status, r.creation_date, r.aging_days,
+      r.pr_status, r.creation_date, r.due_date, r.aging_days,
     ]);
-    const amountCols = [9, 11, 12, 13, 14];
+    const amountCols = [10, 12, 13, 14, 15, 16];
     downloadExcel(`open_pr_${toISO(today)}`, OPEN_PR_COLS.map(c => c.label), data, amountCols);
   };
 
@@ -275,23 +277,6 @@ function OpenPRSection() {
         <ActionBtn icon={loading ? Loader2 : Search} label="Search" color="bg-blue-600 hover:bg-blue-700" onClick={handleSearch} />
       </div>
 
-      {/* KPI Cards */}
-      {searched && kpi && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            { label: "PR Headers",   value: kpi.total_pr_headers, color: "text-blue-400",   bg: "bg-blue-500/10",   border: "border-blue-500/20" },
-            { label: "Total Lines",  value: kpi.total_lines,      color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" },
-            { label: "Overdue (>7d)", value: kpi.overdue_lines,   color: "text-red-400",    bg: "bg-red-500/10",    border: "border-red-500/20" },
-            { label: "Avg Aging",    value: `${kpi.avg_aging}d`,  color: "text-yellow-400", bg: "bg-yellow-500/10", border: "border-yellow-500/20" },
-          ].map(k => (
-            <div key={k.label} className={`rounded-lg border ${k.border} ${k.bg} px-4 py-3`}>
-              <p className="text-xs text-gray-500 mb-1">{k.label}</p>
-              <p className={`text-2xl font-bold ${k.color}`}>{k.value}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Results Table */}
       {searched && (
         <div className="rounded-lg border border-gray-800">
@@ -339,17 +324,24 @@ function OpenPRSection() {
                           : "bg-slate-500/10 text-slate-400 border-slate-500/30"
                       }`}>{r.material_type}</span>
                     </td>
-                    <td className={`${TD} text-gray-400 max-w-40 truncate`} title={r.supplier_name}>{r.supplier_name || "—"}</td>
+                    <td className={`${TD} text-gray-400 max-w-40 truncate`} title={r.supplier_name}>{r.supplier_name || "-"}</td>
+                    <td className={`${TD} text-gray-400`}>{r.payment_terms || "-"}</td>
                     <td className={`${TD} text-gray-400`}>{r.requestor}</td>
                     <td className={`${TD} text-gray-500`}>{r.uom}</td>
                     <td className={`${TD} text-right text-gray-300`}>{fmtQty(r.quantity)}</td>
                     <td className={`${TD} text-gray-500`}>{r.currency_code}</td>
                     <td className={`${TD} text-right text-gray-300`}>{fmtIDR(r.unit_price_orig)}</td>
                     <td className={`${TD} text-right text-gray-400`}>{fmtIDR(r.unit_price_idr)}</td>
+                    <td className={`${TD} text-right text-gray-400`}>
+                      {r.last_purchase_price != null
+                        ? `${r.last_purchase_currency ? r.last_purchase_currency + " " : ""}${fmtIDR(r.last_purchase_price)}`
+                        : "-"}
+                    </td>
                     <td className={`${TD} text-right text-gray-300 font-medium`}>{fmtIDR(r.total_value_orig)}</td>
                     <td className={`${TD} text-right text-gray-400`}>{fmtIDR(r.total_value_idr)}</td>
                     <td className={TD}><PRStatusBadge status={r.pr_status} /></td>
                     <td className={`${TD} text-gray-500`}>{r.creation_date}</td>
+                    <td className={`${TD} text-gray-500`}>{r.due_date || "-"}</td>
                     <td className={TD}><AgingBadge days={r.aging_days} /></td>
                   </tr>
                 ))}

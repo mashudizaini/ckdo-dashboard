@@ -538,8 +538,15 @@ class PurchasingService:
                       * ({self._PR_RATE_CASE}), 2)                         AS total_value_idr,
                 prh.authorization_status                                    AS pr_status,
                 TO_CHAR(prh.creation_date, 'YYYY-MM-DD')                   AS creation_date,
-                TRUNC(SYSDATE) - TRUNC(prh.creation_date)                  AS aging_days,
-                NVL(aps.vendor_name, NVL(prl.suggested_vendor_name, '—'))  AS supplier_name
+                TO_CHAR(prl.need_by_date, 'YYYY-MM-DD')                    AS due_date,
+                TRUNC(SYSDATE) - TRUNC(NVL(appr.approved_date, prh.creation_date))
+                                                                             AS aging_days,
+                NVL(aps.vendor_name,
+                    NVL(lastpo.last_supplier_name,
+                        NVL(prl.suggested_vendor_name, '-')))              AS supplier_name,
+                NVL(trm.name, '-')                                         AS payment_terms,
+                lastpo.last_price                                          AS last_purchase_price,
+                lastpo.last_currency                                       AS last_purchase_currency
             FROM po_requisition_headers_all prh
             JOIN po_requisition_lines_all prl
                 ON prl.requisition_header_id = prh.requisition_header_id
@@ -556,6 +563,34 @@ class PurchasingService:
                 ON  fu.user_id = prh.created_by
             LEFT JOIN ap_suppliers aps
                 ON  aps.vendor_id = prl.vendor_id
+            LEFT JOIN ap_terms_tl trm
+                ON  trm.term_id  = aps.terms_id
+                AND trm.language = USERENV('LANG')
+            LEFT JOIN (
+                SELECT pah.object_id, MAX(pah.action_date) AS approved_date
+                FROM po_action_history pah
+                WHERE pah.action_code      = 'APPROVE'
+                  AND pah.object_type_code = 'REQUISITION'
+                GROUP BY pah.object_id
+            ) appr ON appr.object_id = prh.requisition_header_id
+            LEFT JOIN (
+                SELECT item_desc_key, unit_price AS last_price,
+                       currency_code AS last_currency, vendor_name AS last_supplier_name
+                FROM (
+                    SELECT UPPER(plx.item_description)                     AS item_desc_key,
+                           plx.unit_price, phx.currency_code, apsx.vendor_name,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY UPPER(plx.item_description)
+                               ORDER BY phx.creation_date DESC
+                           )                                               AS rn
+                    FROM po_lines_all plx
+                    JOIN po_headers_all phx  ON phx.po_header_id = plx.po_header_id
+                    JOIN ap_suppliers   apsx ON apsx.vendor_id   = phx.vendor_id
+                    WHERE phx.type_lookup_code      IN ('STANDARD','BLANKET','CONTRACT')
+                      AND phx.authorization_status  NOT IN ('CANCELLED','INCOMPLETE')
+                )
+                WHERE rn = 1
+            ) lastpo ON lastpo.item_desc_key = UPPER(prl.item_description)
             WHERE NVL(prl.cancel_flag, 'N') = 'N'
               AND prh.authorization_status NOT IN ('CANCELLED')
               AND (:p_pr_status IS NULL OR prh.authorization_status = :p_pr_status)
@@ -573,7 +608,7 @@ class PurchasingService:
               AND (:p_date_to IS NULL OR prh.creation_date
                    < TO_DATE(:p_date_to, 'YYYY-MM-DD') + 1)
               AND (:p_mat_type IS NULL OR ({self._MAT_TYPE}) = :p_mat_type)
-            ORDER BY prh.creation_date DESC, prh.segment1, prl.line_num
+            ORDER BY prl.need_by_date ASC NULLS LAST, prh.segment1, prl.line_num
         """
         params = {
             "p_ert":       ert,
