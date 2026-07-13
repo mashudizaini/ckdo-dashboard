@@ -164,11 +164,10 @@ class PurchasingService:
     async def get_categories(self) -> dict:
         sql = """
             SELECT DISTINCT mcb.segment1 AS category
-            FROM mtl_categories_b      mcb
-            JOIN mtl_item_categories   mic  ON mic.category_id = mcb.category_id
-            JOIN mtl_category_sets_b   mcsb ON mcsb.category_set_id = mic.category_set_id
-                                            AND mcsb.category_set_name = 'CKDO Inventory'
-            WHERE mcb.segment1 IS NOT NULL
+            FROM mtl_item_categories_v miv
+            JOIN mtl_categories_b      mcb ON mcb.category_id = miv.category_id
+            WHERE miv.category_set_name = 'CKDO Inventory'
+              AND mcb.segment1 IS NOT NULL
             ORDER BY mcb.segment1
         """
         try:
@@ -202,13 +201,12 @@ class PurchasingService:
         LEFT JOIN mtl_system_items_b msi ON msi.inventory_item_id = pol.item_id
                                        AND msi.organization_id   = poll.ship_to_organization_id
         LEFT JOIN (
-            SELECT mic2.inventory_item_id, mic2.organization_id,
+            SELECT miv2.inventory_item_id, miv2.organization_id,
                    MIN(mcb2.segment1) AS segment1
-            FROM mtl_item_categories mic2
-            JOIN mtl_categories_b    mcb2 ON mcb2.category_id     = mic2.category_id
-            JOIN mtl_category_sets_b mcsb2 ON mcsb2.category_set_id = mic2.category_set_id
-                                          AND mcsb2.category_set_name = 'CKDO Inventory'
-            GROUP BY mic2.inventory_item_id, mic2.organization_id
+            FROM mtl_item_categories_v miv2
+            JOIN mtl_categories_b      mcb2 ON mcb2.category_id = miv2.category_id
+            WHERE miv2.category_set_name = 'CKDO Inventory'
+            GROUP BY miv2.inventory_item_id, miv2.organization_id
         ) mcb ON mcb.inventory_item_id = msi.inventory_item_id
              AND mcb.organization_id   = msi.organization_id
         JOIN ap_suppliers          aps  ON aps.vendor_id         = poh.vendor_id
