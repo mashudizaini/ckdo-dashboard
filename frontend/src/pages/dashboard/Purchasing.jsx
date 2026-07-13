@@ -421,7 +421,7 @@ function PurchaseHistorySection() {
             <X size={12} />{filterErr}
           </div>
         )}
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 gap-3">
           <Field label="Organization">
             <select className={SELECT} value={f.org_id} onChange={e => setF(p => ({ ...p, org_id: e.target.value }))}>
               <option value="">— All —</option>
