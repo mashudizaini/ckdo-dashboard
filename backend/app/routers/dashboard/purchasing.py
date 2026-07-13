@@ -272,6 +272,7 @@ async def get_price_analysis(
     currency_code:      Optional[str]   = Query(None),
     material_type:      Optional[str]   = Query(None),
     exchange_rate_type: Optional[str]   = Query("Corporate"),
+    max_rows:           Optional[int]   = Query(10, ge=1, le=500),
     user: CurrentUser = Depends(require_role(Roles.PURCHASING)),
 ):
     """Price trend per supplier per year for a selected item."""
@@ -281,7 +282,7 @@ async def get_price_analysis(
         "vendor_name": vendor_name, "manufacturer": manufacturer,
         "country_of_origin": country_of_origin, "category": category,
         "currency_code": currency_code, "material_type": material_type,
-        "exchange_rate_type": exchange_rate_type,
+        "exchange_rate_type": exchange_rate_type, "max_rows": max_rows,
     }
     return await PurchasingService().get_price_analysis(filters)
 

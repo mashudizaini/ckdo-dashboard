@@ -524,13 +524,7 @@ class PurchasingService:
                 prl.item_description                                        AS item_description,
                 NVL(mcb.segment1, '—')                                      AS category_code,
                 NVL(mcb.description, prl.item_description)                  AS category_name,
-                CASE
-                    WHEN UPPER(NVL(mcb.segment1,'')) IN (
-                        'RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS',
-                        'API','EXCIPIENT','PRIMARY PACKAGING','SECONDARY PACKAGING'
-                    ) THEN 'Direct Material'
-                    ELSE 'Indirect Material'
-                END                                                         AS material_type,
+                ({self._MAT_TYPE})                                          AS material_type,
                 fu.user_name                                                AS requestor,
                 NVL(prl.unit_meas_lookup_code, '—')                        AS uom,
                 ROUND(prl.quantity, 4)                                      AS quantity,
@@ -552,6 +546,10 @@ class PurchasingService:
                 AND msi.organization_id   = prl.destination_organization_id
             LEFT JOIN mtl_categories_b mcb
                 ON  mcb.category_id = prl.category_id
+            LEFT JOIN fnd_lookup_values_vl lv_mt
+                ON  lv_mt.lookup_code         = msi.item_type
+                AND lv_mt.view_application_id = 700
+                AND lv_mt.lookup_type         = 'CKDO_MTRL_TYPE_DIRECT_INDIRECT'
             LEFT JOIN fnd_user fu
                 ON  fu.user_id = prh.created_by
             LEFT JOIN ap_suppliers aps
@@ -572,20 +570,7 @@ class PurchasingService:
                    >= TO_DATE(:p_date_from, 'YYYY-MM-DD'))
               AND (:p_date_to IS NULL OR prh.creation_date
                    < TO_DATE(:p_date_to, 'YYYY-MM-DD') + 1)
-              AND (
-                  :p_mat_type IS NULL
-                  OR (:p_mat_type = 'Direct Material'
-                      AND UPPER(NVL(mcb.segment1,'')) IN (
-                          'RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS',
-                          'API','EXCIPIENT','PRIMARY PACKAGING','SECONDARY PACKAGING'
-                      ))
-                  OR (:p_mat_type = 'Indirect Material'
-                      AND (mcb.segment1 IS NULL
-                           OR UPPER(mcb.segment1) NOT IN (
-                               'RAW MATERIAL','PACKAGING MATERIAL','FINISHED GOODS',
-                               'API','EXCIPIENT','PRIMARY PACKAGING','SECONDARY PACKAGING'
-                           )))
-              )
+              AND (:p_mat_type IS NULL OR ({self._MAT_TYPE}) = :p_mat_type)
             ORDER BY prh.creation_date DESC, prh.segment1, prl.line_num
         """
         params = {
@@ -671,6 +656,20 @@ class PurchasingService:
         params = self._ph_params(filters)
         try:
             rows = await asyncio.to_thread(self._query, sql, params)
+
+            # Cap to the top N item+supplier combos by total spend (IDR) so the
+            # trend chart stays readable — keeps every year for each combo kept,
+            # rather than truncating the raw row list mid-sequence.
+            max_rows = int(filters.get("max_rows") or 10)
+            if max_rows and len(rows) > 0:
+                group_spend = {}
+                for r in rows:
+                    key = (r["item_code"], r["supplier_name"])
+                    spend = (r.get("avg_price_idr") or 0) * (r.get("total_qty") or 0)
+                    group_spend[key] = group_spend.get(key, 0) + spend
+                top_keys = set(sorted(group_spend, key=lambda k: group_spend[k], reverse=True)[:max_rows])
+                rows = [r for r in rows if (r["item_code"], r["supplier_name"]) in top_keys]
+
             return {"success": True, "count": len(rows), "data": rows, "years": years}
         except Exception as e:
             logger.error("price_analysis_error", error=str(e))

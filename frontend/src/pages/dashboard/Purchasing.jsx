@@ -1853,8 +1853,8 @@ const fmtIDR2 = (v) => v == null ? "—" : new Intl.NumberFormat("id-ID", { maxi
 function PriceAnalysisSection() {
   const [filters, setFilters] = useState({
     item_code: "", item_desc: "", vendor_name: "",
-    year_from: CY - 3, year_to: CY,
-    material_type: "", category: "",
+    year_from: CY - 1, year_to: CY,
+    material_type: "", category: "", max_rows: 10,
   });
   const [data,    setData]    = useState([]);
   const [years,   setYears]   = useState([]);
@@ -1881,6 +1881,7 @@ function PriceAnalysisSection() {
       if (filters.year_to)      p.year_to     = filters.year_to;
       if (filters.material_type) p.material_type = filters.material_type;
       if (filters.category)     p.category    = filters.category;
+      if (filters.max_rows)     p.max_rows    = filters.max_rows;
       const r = await purchasingApi.getPriceAnalysis(p);
       if (r?.success) {
         const newData = r.data || [];
@@ -2034,6 +2035,11 @@ function PriceAnalysisSection() {
               <option value="Direct Material">Direct</option>
               <option value="Indirect Material">Indirect</option>
             </select>
+          </div>
+          <div>
+            <p className={lbl}>Max Data</p>
+            <input className={yearInp} type="number" min={1} max={500} value={filters.max_rows}
+              onChange={e => setFilters(f => ({...f, max_rows: e.target.value}))} />
           </div>
         </div>
         <div className="flex gap-2 mt-3">
