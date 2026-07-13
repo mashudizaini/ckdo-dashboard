@@ -1930,7 +1930,11 @@ function PriceAnalysisSection() {
         years: {},
       };
       map[key].years[r.trx_year] = {
+        min_price_idr: r.min_price_idr,
+        max_price_idr: r.max_price_idr,
         avg_price_idr: r.avg_price_idr,
+        min_price_orig: r.min_price_orig,
+        max_price_orig: r.max_price_orig,
         avg_price_orig: r.avg_price_orig,
         total_qty: r.total_qty,
         po_count: r.po_count,
@@ -1942,10 +1946,11 @@ function PriceAnalysisSection() {
   const handleDownload = () => {
     if (!tableRows.length) return;
     const headers = ["Supplier", "Item Code", "Description", "UOM", "Currency", "Country",
-      ...years.flatMap(y => [`Avg Price IDR ${y}`, `Avg Price Orig ${y}`, `Qty ${y}`, `PO ${y}`])];
+      ...years.flatMap(y => [`Min Price IDR ${y}`, `Max Price IDR ${y}`, `Avg Price IDR ${y}`, `Avg Price Orig ${y}`, `Qty ${y}`, `PO ${y}`])];
     const rows = tableRows.map(r => [
       r.supplier_name, r.item_code, r.item_desc, r.uom, r.currency, r.country,
       ...years.flatMap(y => [
+        r.years[y]?.min_price_idr ?? "", r.years[y]?.max_price_idr ?? "",
         r.years[y]?.avg_price_idr ?? "", r.years[y]?.avg_price_orig ?? "",
         r.years[y]?.total_qty ?? "", r.years[y]?.po_count ?? "",
       ]),
@@ -1957,6 +1962,7 @@ function PriceAnalysisSection() {
   };
 
   const inp = "w-full text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-3 py-2 focus:outline-none focus:border-cyan-500";
+  const yearInp = "w-20 text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-3 py-2 focus:outline-none focus:border-cyan-500";
   const lbl = "text-xs text-gray-400 font-medium mb-1";
 
   return (
@@ -1991,10 +1997,6 @@ function PriceAnalysisSection() {
 
       {/* Filter Panel */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <Filter size={14} className="text-cyan-400" />
-          <span className="text-sm font-semibold text-gray-200">Filter</span>
-        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
           <div className="col-span-2">
             <p className={lbl}>Item Code</p>
@@ -2016,12 +2018,12 @@ function PriceAnalysisSection() {
           </div>
           <div>
             <p className={lbl}>Year From</p>
-            <input className={inp} type="number" value={filters.year_from}
+            <input className={yearInp} type="number" maxLength={4} value={filters.year_from}
               onChange={e => setFilters(f => ({...f, year_from: e.target.value}))} />
           </div>
           <div>
             <p className={lbl}>Year To</p>
-            <input className={inp} type="number" value={filters.year_to}
+            <input className={yearInp} type="number" maxLength={4} value={filters.year_to}
               onChange={e => setFilters(f => ({...f, year_to: e.target.value}))} />
           </div>
           <div>
@@ -2098,9 +2100,48 @@ function PriceAnalysisSection() {
   );
 }
 
+const PRICE_FIXED_COLS = [
+  { key: "supplier_name", label: "Supplier" },
+  { key: "item_code",     label: "Item Code" },
+  { key: "item_desc",     label: "Description" },
+  { key: "uom",           label: "UOM" },
+  { key: "currency",      label: "Curr" },
+  { key: "country",       label: "Country" },
+];
+const PRICE_YEAR_METRICS = [
+  { metric: "min_price_idr", label: "Min IDR" },
+  { metric: "max_price_idr", label: "Max IDR" },
+  { metric: "avg_price_idr", label: "Avg IDR" },
+  { metric: "total_qty",     label: "Qty" },
+];
+
 function PriceDetailTable({ tableRows, years }) {
   const [page, setPage] = useState(1);
-  const paged = tableRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const [sort, setSort] = useState({ key: null, dir: "asc" });
+
+  const toggleSort = (key) => {
+    setPage(1);
+    setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  };
+
+  const sorted = useMemo(() => {
+    if (!sort.key) return tableRows;
+    const mul = sort.dir === "asc" ? 1 : -1;
+    return [...tableRows].sort((a, b) => {
+      if (sort.key.startsWith("year:")) {
+        const [, y, metric] = sort.key.split(":");
+        const av = a.years[y]?.[metric];
+        const bv = b.years[y]?.[metric];
+        return ((av == null ? -Infinity : Number(av)) - (bv == null ? -Infinity : Number(bv))) * mul;
+      }
+      const av = (a[sort.key] ?? "").toString().toLowerCase();
+      const bv = (b[sort.key] ?? "").toString().toLowerCase();
+      return av.localeCompare(bv) * mul;
+    });
+  }, [tableRows, sort]);
+
+  const paged = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const sortArrow = (key) => sort.key === key && (sort.dir === "asc" ? "▲" : "▼");
 
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
@@ -2113,22 +2154,27 @@ function PriceDetailTable({ tableRows, years }) {
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-gray-800 bg-gray-800/60">
-              <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Supplier</th>
-              <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Item Code</th>
-              <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Description</th>
-              <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">UOM</th>
-              <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Curr</th>
-              <th className="px-3 py-2 text-left text-gray-400 whitespace-nowrap">Country</th>
+              {PRICE_FIXED_COLS.map(c => (
+                <th key={c.key} className="px-3 py-2 text-left text-gray-400 whitespace-nowrap cursor-pointer select-none hover:text-gray-200"
+                    onClick={() => toggleSort(c.key)}>
+                  {c.label} {sortArrow(c.key)}
+                </th>
+              ))}
               {years.map(y => (
-                <th key={y} className="px-3 py-2 text-center text-gray-400 whitespace-nowrap" colSpan={2}>{y}</th>
+                <th key={y} className="px-3 py-2 text-center text-gray-400 whitespace-nowrap" colSpan={4}>{y}</th>
               ))}
             </tr>
             <tr className="border-b border-gray-800 bg-gray-800/40">
               <th colSpan={6} />
               {years.map(y => (
                 <>
-                  <th key={`${y}-p`} className="px-3 py-1 text-center text-gray-500 whitespace-nowrap font-normal">Avg IDR</th>
-                  <th key={`${y}-q`} className="px-3 py-1 text-center text-gray-500 whitespace-nowrap font-normal">Qty</th>
+                  {PRICE_YEAR_METRICS.map(m => (
+                    <th key={`${y}-${m.metric}`}
+                        className="px-3 py-1 text-center text-gray-500 whitespace-nowrap font-normal cursor-pointer select-none hover:text-gray-300"
+                        onClick={() => toggleSort(`year:${y}:${m.metric}`)}>
+                      {m.label} {sortArrow(`year:${y}:${m.metric}`)}
+                    </th>
+                  ))}
                 </>
               ))}
             </tr>
@@ -2156,7 +2202,13 @@ function PriceDetailTable({ tableRows, years }) {
                   <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.country}</td>
                   {years.map(y => (
                     <>
-                      <td key={`${y}-p`} className="px-3 py-2 text-right text-gray-200 whitespace-nowrap">
+                      <td key={`${y}-min`} className="px-3 py-2 text-right text-gray-300 whitespace-nowrap">
+                        {fmtIDR2(r.years[y]?.min_price_idr)}
+                      </td>
+                      <td key={`${y}-max`} className="px-3 py-2 text-right text-gray-300 whitespace-nowrap">
+                        {fmtIDR2(r.years[y]?.max_price_idr)}
+                      </td>
+                      <td key={`${y}-avg`} className="px-3 py-2 text-right text-gray-200 whitespace-nowrap">
                         {fmtIDR2(r.years[y]?.avg_price_idr)}
                       </td>
                       <td key={`${y}-q`} className="px-3 py-2 text-right text-gray-400 whitespace-nowrap">

@@ -649,6 +649,10 @@ class PurchasingService:
                 EXTRACT(YEAR FROM poh.creation_date)                        AS trx_year,
                 COUNT(DISTINCT poh.po_header_id)                            AS po_count,
                 ROUND(SUM(pol.quantity), 2)                                 AS total_qty,
+                ROUND(MIN(pol.unit_price), 4)                               AS min_price_orig,
+                ROUND(MAX(pol.unit_price), 4)                               AS max_price_orig,
+                ROUND(MIN(pol.unit_price * ({self._RATE_CASE})), 4)         AS min_price_idr,
+                ROUND(MAX(pol.unit_price * ({self._RATE_CASE})), 4)         AS max_price_idr,
                 ROUND(AVG(pol.unit_price), 4)                               AS avg_price_orig,
                 ROUND(AVG(pol.unit_price * ({self._RATE_CASE})), 4)         AS avg_price_idr
             FROM {self._PH_FROM}
