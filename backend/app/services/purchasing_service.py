@@ -667,7 +667,6 @@ class PurchasingService:
                 poh.currency_code,
                 EXTRACT(YEAR FROM poh.creation_date)
             ORDER BY aps.vendor_name, EXTRACT(YEAR FROM poh.creation_date)
-            FETCH FIRST 10 ROWS ONLY
         """
         params = self._ph_params(filters)
         try:
