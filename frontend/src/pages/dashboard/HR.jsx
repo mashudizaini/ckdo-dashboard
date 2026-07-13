@@ -193,7 +193,7 @@ function EmployeeTable() {
   const [exportFields, setExportFields] = useState(() => Object.fromEntries(EMPLOYEE_COLS.map(c => [c.key, true])));
   const [exporting, setExporting] = useState(false);
 
-  const PAGE_SIZE = 25;
+  const PAGE_SIZE = 8;
 
   const fetchDepts = useCallback(async () => {
     try {
@@ -779,8 +779,8 @@ function EmployeeGraphSection() {
 
   const tickStyle = { fill: "#cbd5e1", fontSize: 10 };
   const tooltipStyle = {
-    contentStyle: { background: "#0f172a", border: "1px solid #374151", borderRadius: 8, fontSize: 11 },
-    labelStyle: { color: "#ffffff", fontWeight: 600 },
+    contentStyle: { backgroundColor: "#0f172a", background: "#0f172a", border: "1px solid #374151", borderRadius: 8, fontSize: 11, color: "#f1f5f9" },
+    labelStyle: { color: "#f8fafc", fontWeight: 600 },
     itemStyle: { color: "#f1f5f9" },
     cursor: { fill: "rgba(255,255,255,0.06)" },
   };
@@ -924,8 +924,8 @@ function TurnoverSection() {
 
   const tickStyle = { fill: "#cbd5e1", fontSize: 10 };
   const tooltipStyle = {
-    contentStyle: { background: "#0f172a", border: "1px solid #374151", borderRadius: 8, fontSize: 11 },
-    labelStyle: { color: "#ffffff", fontWeight: 600 },
+    contentStyle: { backgroundColor: "#0f172a", background: "#0f172a", border: "1px solid #374151", borderRadius: 8, fontSize: 11, color: "#f1f5f9" },
+    labelStyle: { color: "#f8fafc", fontWeight: 600 },
     itemStyle: { color: "#f1f5f9" },
     cursor: { fill: "rgba(255,255,255,0.06)" },
   };
