@@ -97,6 +97,29 @@ function PRStatusBadge({ status }) {
   return <span className={`px-1.5 py-0.5 rounded text-xs font-medium border ${s.cls}`}>{s.label}</span>;
 }
 
+const OPEN_PR_PAGE_SIZE = 8;
+
+const OPEN_PR_COLS = [
+  { key: "pr_number",         label: "PR Number" },
+  { key: "line_num",          label: "Line",             numeric: true },
+  { key: "item_code",         label: "Item Code" },
+  { key: "item_description",  label: "Item Description" },
+  { key: "category_code",     label: "Category" },
+  { key: "material_type",     label: "Type" },
+  { key: "supplier_name",     label: "Supplier" },
+  { key: "requestor",         label: "Requestor" },
+  { key: "uom",                label: "UoM" },
+  { key: "quantity",          label: "Qty",              numeric: true },
+  { key: "currency_code",     label: "Currency" },
+  { key: "unit_price_orig",   label: "Unit Price",       numeric: true },
+  { key: "unit_price_idr",    label: "Unit Price IDR",   numeric: true },
+  { key: "total_value_orig",  label: "Total Value",      numeric: true },
+  { key: "total_value_idr",   label: "Total Value IDR",  numeric: true },
+  { key: "pr_status",         label: "Status" },
+  { key: "creation_date",     label: "Created" },
+  { key: "aging_days",        label: "Aging",            numeric: true },
+];
+
 function OpenPRSection() {
   const today = new Date();
   const pad2  = (n) => String(n).padStart(2, "0");
@@ -115,6 +138,7 @@ function OpenPRSection() {
   const [kpi,      setKpi]      = useState(null);
   const [error,    setError]    = useState("");
   const [page,     setPage]     = useState(1);
+  const [sort,     setSort]     = useState({ key: null, dir: "asc" });
 
   const setFld = (k) => (e) => setF(p => ({ ...p, [k]: e.target.value }));
 
@@ -154,11 +178,25 @@ function OpenPRSection() {
     setRows([]); setKpi(null); setSearched(false); setError(""); setPage(1);
   };
 
+  const toggleSort = (key) => {
+    setPage(1);
+    setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  };
+
+  const sorted = useMemo(() => {
+    if (!sort.key) return rows;
+    const col = OPEN_PR_COLS.find(c => c.key === sort.key);
+    const mul = sort.dir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      if (col?.numeric) return ((Number(a[sort.key]) || 0) - (Number(b[sort.key]) || 0)) * mul;
+      const av = (a[sort.key] ?? "").toString().toLowerCase();
+      const bv = (b[sort.key] ?? "").toString().toLowerCase();
+      return av.localeCompare(bv) * mul;
+    });
+  }, [rows, sort]);
+
   const handleDownload = () => {
-    const cols = ["PR Number","Line","Item Code","Item Description","Category","Type",
-                  "Supplier","Requestor","UoM","Qty","Currency","Unit Price","Unit Price IDR",
-                  "Total Value","Total Value IDR","Status","Created Date","Aging (days)"];
-    const data = rows.map(r => [
+    const data = sorted.map(r => [
       r.pr_number, r.line_num, r.item_code, r.item_description,
       r.category_code, r.material_type, r.supplier_name || "—", r.requestor, r.uom, r.quantity,
       r.currency_code, r.unit_price_orig, r.unit_price_idr,
@@ -166,27 +204,23 @@ function OpenPRSection() {
       r.pr_status, r.creation_date, r.aging_days,
     ]);
     const amountCols = [9, 11, 12, 13, 14];
-    downloadExcel(`open_pr_${toISO(today)}`, cols, data, amountCols);
+    downloadExcel(`open_pr_${toISO(today)}`, OPEN_PR_COLS.map(c => c.label), data, amountCols);
   };
 
-  const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
+  const paged = sorted.slice((page - 1) * OPEN_PR_PAGE_SIZE, page * OPEN_PR_PAGE_SIZE);
+  const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap cursor-pointer select-none hover:text-gray-300";
   const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
 
   return (
-    <div className="space-y-4">
-      {/* Filter Panel */}
-      <SectionCard
-        title="Open PR — Approval Status"
-        subtitle="Purchase Requisition"
-        action={
-          <div className="flex gap-2">
-            <ActionBtn icon={RefreshCw} label="Reset" color="bg-gray-700 hover:bg-gray-600" onClick={handleReset} />
-            <ActionBtn icon={loading ? Loader2 : Search} label="Search" color="bg-blue-600 hover:bg-blue-700" onClick={handleSearch} />
+    <div className="space-y-3">
+      {/* Filter Panel — no title/subtitle */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900 p-4">
+        {error && (
+          <div className="mb-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
+            <X size={12} />{error}
           </div>
-        }
-      >
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+        )}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 gap-3">
           <Field label="PR Status">
             <select className={SELECT} value={f.pr_status} onChange={setFld("pr_status")}>
               <option value="">— All —</option>
@@ -233,12 +267,13 @@ function OpenPRSection() {
             <input className={INPUT} type="date" value={f.date_to} onChange={setFld("date_to")} />
           </Field>
         </div>
-        {error && (
-          <div className="mt-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
-            <X size={12} />{error}
-          </div>
-        )}
-      </SectionCard>
+      </div>
+
+      {/* Reset/Search — below the filter panel */}
+      <div className="flex items-center justify-end gap-2">
+        <ActionBtn icon={RefreshCw} label="Reset" color="bg-gray-700 hover:bg-gray-600" onClick={handleReset} />
+        <ActionBtn icon={loading ? Loader2 : Search} label="Search" color="bg-blue-600 hover:bg-blue-700" onClick={handleSearch} />
+      </div>
 
       {/* KPI Cards */}
       {searched && kpi && (
@@ -273,20 +308,23 @@ function OpenPRSection() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-800/60">
-                  {["PR Number","Line","Item Code","Item Description","Category","Type",
-                    "Supplier","Requestor","UoM","Qty","Currency","Unit Price","Unit Price IDR",
-                    "Total Value","Total Value IDR","Status","Created","Aging"].map(h => (
-                    <th key={h} className={TH}>{h}</th>
+                  {OPEN_PR_COLS.map(c => (
+                    <th key={c.key} className={TH} onClick={() => toggleSort(c.key)}>
+                      <span className="inline-flex items-center gap-1">
+                        {c.label}
+                        {sort.key === c.key && <span className="text-orange-400">{sort.dir === "asc" ? "▲" : "▼"}</span>}
+                      </span>
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={18} className="px-3 py-10 text-center text-xs text-gray-500">
+                  <tr><td colSpan={OPEN_PR_COLS.length} className="px-3 py-10 text-center text-xs text-gray-500">
                     <Loader2 size={14} className="animate-spin inline mr-2" />Loading...
                   </td></tr>
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={18} className="px-3 py-10 text-center text-xs text-gray-600">No data found</td></tr>
+                  <tr><td colSpan={OPEN_PR_COLS.length} className="px-3 py-10 text-center text-xs text-gray-600">No data found</td></tr>
                 ) : paged.map((r, i) => (
                   <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
                     <td className={`${TD} text-blue-400 font-mono font-medium`}>{r.pr_number}</td>
@@ -318,7 +356,7 @@ function OpenPRSection() {
               </tbody>
             </table>
           </div>
-          <Pagination total={rows.length} page={page} onPage={setPage} />
+          <Pagination total={rows.length} page={page} onPage={setPage} pageSize={OPEN_PR_PAGE_SIZE} />
         </div>
       )}
     </div>
