@@ -367,6 +367,7 @@ function OpenPRSection() {
 
 const CY = new Date().getFullYear();
 const PAGE_SIZE = 10;
+const BUYER_ALL = "MARIA|DEWI";
 const VIEWS = [
   { id: "detail",      label: "Detail View" },
   { id: "summary",     label: "Summary" },
@@ -393,7 +394,7 @@ function PurchaseHistorySection() {
     year_from: CY - 1, year_to: CY,
     item_code: "", item_desc: "", vendor_name: "", manufacturer: "",
     country_of_origin: "", category: "", currency_code: "", material_type: "",
-    po_number: "", buyer: "",
+    po_number: "", buyer: BUYER_ALL,
   });
 
   useEffect(() => {
@@ -442,7 +443,7 @@ function PurchaseHistorySection() {
     setF({ org_id: "", exchange_rate_type: "Corporate", year_from: CY - 1, year_to: CY,
            item_code: "", item_desc: "", vendor_name: "", manufacturer: "",
            country_of_origin: "", category: "", currency_code: "", material_type: "",
-           po_number: "", buyer: "" });
+           po_number: "", buyer: BUYER_ALL });
     setSearched(false); setResults({ detail: null, "by-item": null, "by-supplier": null }); setFilterErr(null);
   };
 
@@ -501,7 +502,7 @@ function PurchaseHistorySection() {
           <Field label="Purchase Order Number">{inp("po_number", { placeholder: "e.g. 2510…" })}</Field>
           <Field label="Buyer">
             <select className={SELECT} value={f.buyer} onChange={e => setF(p => ({ ...p, buyer: e.target.value }))}>
-              <option value="">All (Ms Maria &amp; Ms Dewi)</option>
+              <option value={BUYER_ALL}>All (Ms Maria &amp; Ms Dewi)</option>
               <option value="MARIA">Ms Maria</option>
               <option value="DEWI">Ms Dewi</option>
             </select>

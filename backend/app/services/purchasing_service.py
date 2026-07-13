@@ -244,7 +244,7 @@ class PurchasingService:
         AND (:p_currency     IS NULL OR poh.currency_code                = :p_currency)
         AND (:p_mat_type IS NULL OR lv_mt.tag = :p_mat_type)
         AND (:p_po_number    IS NULL OR UPPER(poh.segment1)               LIKE UPPER('%'||:p_po_number||'%'))
-        AND (:p_buyer        IS NULL OR UPPER(buyer_p.full_name)          LIKE UPPER('%'||:p_buyer||'%'))
+        AND (:p_buyer        IS NULL OR REGEXP_LIKE(UPPER(buyer_p.full_name), UPPER(:p_buyer)))
     """
 
     _RATE_CASE = """
