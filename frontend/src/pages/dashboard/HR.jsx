@@ -779,10 +779,10 @@ function EmployeeGraphSection() {
 
   const tickStyle = { fill: "#cbd5e1", fontSize: 10 };
   const tooltipStyle = {
-    contentStyle: { backgroundColor: "#0f172a", background: "#0f172a", border: "1px solid #374151", borderRadius: 8, fontSize: 11, color: "#f1f5f9" },
-    labelStyle: { color: "#f8fafc", fontWeight: 600 },
-    itemStyle: { color: "#f1f5f9" },
-    cursor: { fill: "rgba(255,255,255,0.06)" },
+    contentStyle: { borderRadius: 8, fontSize: 11 },
+    labelStyle: { color: "#1e293b", fontWeight: 600 },
+    itemStyle: { color: "#334155" },
+    cursor: { fill: "rgba(0,0,0,0.04)" },
   };
   if (!RC) return <div className="py-6 text-center text-xs text-gray-300">Loading charts…</div>;
 
@@ -924,10 +924,10 @@ function TurnoverSection() {
 
   const tickStyle = { fill: "#cbd5e1", fontSize: 10 };
   const tooltipStyle = {
-    contentStyle: { backgroundColor: "#0f172a", background: "#0f172a", border: "1px solid #374151", borderRadius: 8, fontSize: 11, color: "#f1f5f9" },
-    labelStyle: { color: "#f8fafc", fontWeight: 600 },
-    itemStyle: { color: "#f1f5f9" },
-    cursor: { fill: "rgba(255,255,255,0.06)" },
+    contentStyle: { borderRadius: 8, fontSize: 11 },
+    labelStyle: { color: "#1e293b", fontWeight: 600 },
+    itemStyle: { color: "#334155" },
+    cursor: { fill: "rgba(0,0,0,0.04)" },
   };
 
   const deptMax   = Math.max(...by_dept.map(d => d.total), 1);
