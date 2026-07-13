@@ -120,13 +120,16 @@ async def ph_detail(
     category:            Optional[str]   = Query(None),
     currency_code:       Optional[str]   = Query(None),
     material_type:       Optional[str]   = Query(None),
+    po_number:           Optional[str]   = Query(None),
+    buyer:               Optional[str]   = Query(None),
     user: CurrentUser = Depends(require_role(Roles.PURCHASING)),
 ):
     filters = dict(org_id=org_id, exchange_rate_type=exchange_rate_type,
                    year_from=year_from, year_to=year_to, item_code=item_code,
                    item_desc=item_desc, vendor_name=vendor_name, manufacturer=manufacturer,
                    country_of_origin=country_of_origin, category=category,
-                   currency_code=currency_code, material_type=material_type)
+                   currency_code=currency_code, material_type=material_type,
+                   po_number=po_number, buyer=buyer)
     return await PurchasingService().get_purchase_history_detail(filters)
 
 
@@ -144,13 +147,16 @@ async def ph_by_item(
     category:            Optional[str]   = Query(None),
     currency_code:       Optional[str]   = Query(None),
     material_type:       Optional[str]   = Query(None),
+    po_number:           Optional[str]   = Query(None),
+    buyer:               Optional[str]   = Query(None),
     user: CurrentUser = Depends(require_role(Roles.PURCHASING)),
 ):
     filters = dict(org_id=org_id, exchange_rate_type=exchange_rate_type,
                    year_from=year_from, year_to=year_to, item_code=item_code,
                    item_desc=item_desc, vendor_name=vendor_name, manufacturer=manufacturer,
                    country_of_origin=country_of_origin, category=category,
-                   currency_code=currency_code, material_type=material_type)
+                   currency_code=currency_code, material_type=material_type,
+                   po_number=po_number, buyer=buyer)
     return await PurchasingService().get_purchase_history_by_item(filters)
 
 
@@ -168,13 +174,16 @@ async def ph_by_supplier(
     category:            Optional[str]   = Query(None),
     currency_code:       Optional[str]   = Query(None),
     material_type:       Optional[str]   = Query(None),
+    po_number:           Optional[str]   = Query(None),
+    buyer:               Optional[str]   = Query(None),
     user: CurrentUser = Depends(require_role(Roles.PURCHASING)),
 ):
     filters = dict(org_id=org_id, exchange_rate_type=exchange_rate_type,
                    year_from=year_from, year_to=year_to, item_code=item_code,
                    item_desc=item_desc, vendor_name=vendor_name, manufacturer=manufacturer,
                    country_of_origin=country_of_origin, category=category,
-                   currency_code=currency_code, material_type=material_type)
+                   currency_code=currency_code, material_type=material_type,
+                   po_number=po_number, buyer=buyer)
     return await PurchasingService().get_purchase_history_by_supplier(filters)
 
 

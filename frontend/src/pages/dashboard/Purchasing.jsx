@@ -355,6 +355,7 @@ function PurchaseHistorySection() {
     year_from: CY - 5, year_to: CY,
     item_code: "", item_desc: "", vendor_name: "", manufacturer: "",
     country_of_origin: "", category: "", currency_code: "", material_type: "",
+    po_number: "", buyer: "",
   });
 
   useEffect(() => {
@@ -377,6 +378,8 @@ function PurchaseHistorySection() {
     category:           f.category           || undefined,
     currency_code:      f.currency_code      || undefined,
     material_type:      f.material_type      || undefined,
+    po_number:          f.po_number          || undefined,
+    buyer:              f.buyer              || undefined,
   }), [f]);
 
   const handleSearch = async () => {
@@ -400,7 +403,8 @@ function PurchaseHistorySection() {
   const handleReset = () => {
     setF({ org_id: "", exchange_rate_type: "Corporate", year_from: CY - 5, year_to: CY,
            item_code: "", item_desc: "", vendor_name: "", manufacturer: "",
-           country_of_origin: "", category: "", currency_code: "", material_type: "" });
+           country_of_origin: "", category: "", currency_code: "", material_type: "",
+           po_number: "", buyer: "" });
     setSearched(false); setResults({ detail: null, "by-item": null, "by-supplier": null }); setFilterErr(null);
   };
 
@@ -425,10 +429,10 @@ function PurchaseHistorySection() {
             </select>
           </Field>
           <Field label="Year From *">
-            <input className={INPUT} type="number" value={f.year_from} onChange={e => setF(p => ({ ...p, year_from: e.target.value }))} />
+            <input className={YEAR_INPUT} type="number" maxLength={4} value={f.year_from} onChange={e => setF(p => ({ ...p, year_from: e.target.value }))} />
           </Field>
           <Field label="Year To *">
-            <input className={INPUT} type="number" value={f.year_to} onChange={e => setF(p => ({ ...p, year_to: e.target.value }))} />
+            <input className={YEAR_INPUT} type="number" maxLength={4} value={f.year_to} onChange={e => setF(p => ({ ...p, year_to: e.target.value }))} />
           </Field>
           <Field label="Exchange Rate Type">
             {inp("exchange_rate_type", { placeholder: "Corporate" })}
@@ -454,6 +458,14 @@ function PurchaseHistorySection() {
             <select className={SELECT} value={f.material_type} onChange={e => setF(p => ({ ...p, material_type: e.target.value }))}>
               <option value="">— All —</option>
               {matTypes.map(t => <option key={t.tag} value={t.tag}>{t.tag}</option>)}
+            </select>
+          </Field>
+          <Field label="Purchase Order Number">{inp("po_number", { placeholder: "e.g. 2510…" })}</Field>
+          <Field label="Buyer">
+            <select className={SELECT} value={f.buyer} onChange={e => setF(p => ({ ...p, buyer: e.target.value }))}>
+              <option value="">All (Ms Maria &amp; Ms Dewi)</option>
+              <option value="MARIA">Ms Maria</option>
+              <option value="DEWI">Ms Dewi</option>
             </select>
           </Field>
         </div>
@@ -520,8 +532,8 @@ function downloadExcel(filename, headers, rows, amountCols) {
 
 /* ─── Shared: Pagination controls ───────────────── */
 
-function Pagination({ total, page, onPage }) {
-  const pages = Math.ceil(total / PAGE_SIZE);
+function Pagination({ total, page, onPage, pageSize = PAGE_SIZE }) {
+  const pages = Math.ceil(total / pageSize);
   if (pages <= 1) return null;
   return (
     <div style={{
@@ -530,7 +542,7 @@ function Pagination({ total, page, onPage }) {
       background: "#e8edf5",
     }}>
       <span style={{ fontSize: 12, color: "#475569", fontWeight: 600 }}>
-        {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total} rows
+        {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total} rows
       </span>
       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
         <button onClick={() => onPage(page - 1)} disabled={page === 1}
@@ -575,24 +587,63 @@ function Pagination({ total, page, onPage }) {
   );
 }
 
+const PH_DETAIL_PAGE_SIZE = 8;
+
+const PH_DETAIL_COLS = [
+  { key: "po_number",         label: "PO Number" },
+  { key: "line_num",          label: "Line",       numeric: true },
+  { key: "item_code",         label: "Item Code" },
+  { key: "item_description",  label: "Item Description" },
+  { key: "category",          label: "Category" },
+  { key: "item_type",         label: "Item Type" },
+  { key: "material_type",     label: "Type" },
+  { key: "supplier_name",     label: "Supplier" },
+  { key: "organization_name", label: "Org" },
+  { key: "currency_code",     label: "Currency" },
+  { key: "uom",                label: "UOM" },
+  { key: "quantity",          label: "Qty",         numeric: true },
+  { key: "unit_price",        label: "Unit Price",  numeric: true },
+  { key: "amount_orig",       label: "Amount",      numeric: true },
+  { key: "amount_idr",        label: "Amount IDR",  numeric: true },
+  { key: "received_qty",      label: "Rcvd Qty",    numeric: true },
+  { key: "creation_date",     label: "PO Date" },
+  { key: "closure_status",    label: "Status" },
+];
+
 function PHDetailTable({ data, loading, error }) {
   const [page, setPage] = useState(1);
-  const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
+  const [sort, setSort] = useState({ key: null, dir: "asc" });
+  const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap cursor-pointer select-none hover:text-gray-300";
   const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
-  const cols = ["PO Number","Line","Item Code","Item Description","Category","Type",
-                "Supplier","Org","Currency","UOM","Qty","Unit Price","Amount","Amount IDR",
-                "Rcvd Qty","PO Date","Status"];
-  const paged = data.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const toggleSort = (key) => {
+    setPage(1);
+    setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  };
+
+  const sorted = useMemo(() => {
+    if (!sort.key) return data;
+    const col = PH_DETAIL_COLS.find(c => c.key === sort.key);
+    const mul = sort.dir === "asc" ? 1 : -1;
+    return [...data].sort((a, b) => {
+      if (col?.numeric) return ((Number(a[sort.key]) || 0) - (Number(b[sort.key]) || 0)) * mul;
+      const av = (a[sort.key] ?? "").toString().toLowerCase();
+      const bv = (b[sort.key] ?? "").toString().toLowerCase();
+      return av.localeCompare(bv) * mul;
+    });
+  }, [data, sort]);
+
+  const paged = sorted.slice((page - 1) * PH_DETAIL_PAGE_SIZE, page * PH_DETAIL_PAGE_SIZE);
 
   const handleDownload = () => {
-    const rows = data.map(r => [
+    const rows = sorted.map(r => [
       r.po_number, r.line_num, r.item_code, r.item_description,
-      r.category, r.material_type, r.supplier_name, r.organization_name,
+      r.category, r.item_type, r.material_type, r.supplier_name, r.organization_name,
       r.currency_code, r.uom, r.quantity, r.unit_price,
       r.amount_orig, r.amount_idr, r.received_qty,
       r.creation_date, r.closure_status,
     ]);
-    downloadExcel("purchase_history_detail", cols, rows, [10, 11, 12, 13, 14]);
+    downloadExcel("purchase_history_detail", PH_DETAIL_COLS.map(c => c.label), rows, [11, 12, 13, 14, 15]);
   };
 
   return (
@@ -608,14 +659,25 @@ function PHDetailTable({ data, loading, error }) {
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead><tr className="bg-gray-800/60">{cols.map(h => <th key={h} className={TH}>{h}</th>)}</tr></thead>
+          <thead>
+            <tr className="bg-gray-800/60">
+              {PH_DETAIL_COLS.map(c => (
+                <th key={c.key} className={TH} onClick={() => toggleSort(c.key)}>
+                  <span className="inline-flex items-center gap-1">
+                    {c.label}
+                    {sort.key === c.key && <span className="text-orange-400">{sort.dir === "asc" ? "▲" : "▼"}</span>}
+                  </span>
+                </th>
+              ))}
+            </tr>
+          </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={cols.length} className="px-3 py-10 text-center text-xs text-gray-500"><Loader2 size={14} className="animate-spin inline mr-2" />Loading data...</td></tr>
+              <tr><td colSpan={PH_DETAIL_COLS.length} className="px-3 py-10 text-center text-xs text-gray-500"><Loader2 size={14} className="animate-spin inline mr-2" />Loading data...</td></tr>
             ) : error ? (
-              <tr><td colSpan={cols.length} className="px-3 py-6 text-center text-xs text-red-400">{error}</td></tr>
+              <tr><td colSpan={PH_DETAIL_COLS.length} className="px-3 py-6 text-center text-xs text-red-400">{error}</td></tr>
             ) : paged.length === 0 ? (
-              <tr><td colSpan={cols.length} className="px-3 py-10 text-center text-xs text-gray-600">No data found</td></tr>
+              <tr><td colSpan={PH_DETAIL_COLS.length} className="px-3 py-10 text-center text-xs text-gray-600">No data found</td></tr>
             ) : paged.map((r, i) => (
               <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
                 <td className={`${TD} font-mono text-blue-400 font-medium`}>{r.po_number}</td>
@@ -623,6 +685,7 @@ function PHDetailTable({ data, loading, error }) {
                 <td className={`${TD} font-mono text-gray-300`}>{r.item_code}</td>
                 <td className={`${TD} text-gray-300 max-w-[180px] truncate`} title={r.item_description}>{r.item_description}</td>
                 <td className={`${TD} text-gray-400`}>{r.category}</td>
+                <td className={`${TD} text-gray-400`}>{r.item_type}</td>
                 <td className={`${TD} text-gray-400`}>{r.material_type}</td>
                 <td className={`${TD} text-gray-300 max-w-[160px] truncate`} title={r.supplier_name}>{r.supplier_name}</td>
                 <td className={`${TD} text-gray-400 max-w-[120px] truncate`} title={r.organization_name}>{r.organization_name}</td>
@@ -640,7 +703,7 @@ function PHDetailTable({ data, loading, error }) {
           </tbody>
         </table>
       </div>
-      <Pagination total={data.length} page={page} onPage={setPage} />
+      <Pagination total={data.length} page={page} onPage={setPage} pageSize={PH_DETAIL_PAGE_SIZE} />
     </div>
   );
 }
@@ -1067,7 +1130,7 @@ function PHGraphView({ data, loading, error, byItemData, byItemYears, bySupData,
     });
 
     const topCats = Object.values(byCat).sort((a, b) => b.value - a.value).slice(0, 10).reverse();
-    const topSups = Object.values(bySup).sort((a, b) => b.value - a.value).slice(0, 10).reverse();
+    const topSups = Object.values(bySup).sort((a, b) => b.value - a.value).slice(0, 10);
     const typeArr = Object.values(byType).sort((a, b) => b.value - a.value);
     const yearArr = Object.values(byYear).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -1104,10 +1167,10 @@ function PHGraphView({ data, loading, error, byItemData, byItemYears, bySupData,
   const TICK  = { fill: "#d1d5db", fontSize: 10 };
   const TICK_DIM = { fill: "#9ca3af", fontSize: 10 };
   const tooltipStyle = {
-    contentStyle: { background: "#0f172a", border: "1px solid #374151", borderRadius: 8, fontSize: 11 },
-    labelStyle:   { color: "#f3f4f6", fontWeight: 600 },
-    itemStyle:    { color: "#e5e7eb" },
-    cursor:       { fill: "rgba(255,255,255,0.04)" },
+    contentStyle: { borderRadius: 8, fontSize: 11 },
+    labelStyle:   { color: "#1e293b", fontWeight: 600 },
+    itemStyle:    { color: "#334155" },
+    cursor:       { fill: "rgba(0,0,0,0.04)" },
   };
 
   return (
@@ -2378,6 +2441,7 @@ function ManufacturerForm({ onClose, onSaved }) {
 
 const INPUT  = "w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 disabled:opacity-40";
 const SELECT = "w-full rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500";
+const YEAR_INPUT = "w-20 rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500 disabled:opacity-40";
 
 function Field({ label, children }) {
   return (

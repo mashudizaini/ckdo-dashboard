@@ -165,7 +165,9 @@ class PurchasingService:
         sql = """
             SELECT DISTINCT mcb.segment1 AS category
             FROM mtl_categories_b      mcb
-            JOIN mtl_item_categories   mic ON mic.category_id = mcb.category_id
+            JOIN mtl_item_categories   mic  ON mic.category_id = mcb.category_id
+            JOIN mtl_category_sets_b   mcsb ON mcsb.category_set_id = mic.category_set_id
+                                            AND mcsb.category_set_name = 'CKDO Inventory'
             WHERE mcb.segment1 IS NOT NULL
             ORDER BY mcb.segment1
         """
@@ -203,11 +205,17 @@ class PurchasingService:
             SELECT mic2.inventory_item_id, mic2.organization_id,
                    MIN(mcb2.segment1) AS segment1
             FROM mtl_item_categories mic2
-            JOIN mtl_categories_b   mcb2 ON mcb2.category_id = mic2.category_id
+            JOIN mtl_categories_b    mcb2 ON mcb2.category_id     = mic2.category_id
+            JOIN mtl_category_sets_b mcsb2 ON mcsb2.category_set_id = mic2.category_set_id
+                                          AND mcsb2.category_set_name = 'CKDO Inventory'
             GROUP BY mic2.inventory_item_id, mic2.organization_id
         ) mcb ON mcb.inventory_item_id = msi.inventory_item_id
              AND mcb.organization_id   = msi.organization_id
         JOIN ap_suppliers          aps  ON aps.vendor_id         = poh.vendor_id
+        LEFT JOIN per_all_people_f buyer_p
+                                        ON buyer_p.person_id     = poh.agent_id
+                                       AND SYSDATE BETWEEN buyer_p.effective_start_date
+                                                        AND buyer_p.effective_end_date
         LEFT JOIN xxckdo_manufacturer_master mfr
                                         ON mfr.item_id           = msi.inventory_item_id
                                        AND mfr.organization_id   = msi.organization_id
@@ -237,6 +245,8 @@ class PurchasingService:
         AND (:p_category     IS NULL OR NVL(mcb.segment1,'—')             = :p_category)
         AND (:p_currency     IS NULL OR poh.currency_code                = :p_currency)
         AND (:p_mat_type IS NULL OR lv_mt.tag = :p_mat_type)
+        AND (:p_po_number    IS NULL OR UPPER(poh.segment1)               LIKE UPPER('%'||:p_po_number||'%'))
+        AND (:p_buyer        IS NULL OR UPPER(buyer_p.full_name)          LIKE UPPER('%'||:p_buyer||'%'))
     """
 
     _RATE_CASE = """
@@ -272,6 +282,8 @@ class PurchasingService:
             "p_category":     f.get("category")            or None,
             "p_currency":     f.get("currency_code")       or None,
             "p_mat_type":     f.get("material_type")       or None,
+            "p_po_number":    f.get("po_number")           or None,
+            "p_buyer":        f.get("buyer")                or None,
         }
 
     async def get_purchase_history_detail(self, filters: dict) -> dict:
@@ -283,6 +295,7 @@ class PurchasingService:
                 NVL(msi.segment1, TO_CHAR(pol.item_id))                  AS item_code,
                 NVL(msi.description, pol.item_description)               AS item_description,
                 NVL(mcb.segment1, '—')                                   AS category,
+                NVL(msi.item_type, '—')                                  AS item_type,
                 ({self._MAT_TYPE})                                       AS material_type,
                 aps.vendor_name                                          AS supplier_name,
                 poh.currency_code,
