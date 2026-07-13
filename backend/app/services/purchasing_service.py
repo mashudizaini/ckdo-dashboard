@@ -31,10 +31,12 @@ class PurchasingService:
     # ── LOV: Organizations ────────────────────────────────────────────────────
 
     async def get_organizations(self) -> dict:
+        """Inventory Organizations only (IO) — excludes Operating Units, Legal
+        Entities, HR Orgs, etc. that HR_ALL_ORGANIZATION_UNITS also returns."""
         sql = """
-            SELECT NAME, ORGANIZATION_ID
-            FROM HR_ALL_ORGANIZATION_UNITS
-            ORDER BY NAME
+            SELECT ood.organization_name AS name, ood.organization_id
+            FROM org_organization_definitions ood
+            ORDER BY ood.organization_name
         """
         try:
             rows = await asyncio.to_thread(self._query, sql)
