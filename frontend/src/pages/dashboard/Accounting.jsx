@@ -1,8 +1,8 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   FileText, DollarSign, FileDown, RefreshCw,
   BarChart2, Package, Download, Search, Loader2, Layers, ClipboardList,
-  AlertTriangle,
+  AlertTriangle, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import CoretaxDownloader from "./CoretaxDownloader";
 import APAutoInvoice from "./APAutoInvoice";
@@ -653,20 +653,41 @@ function InventoryRMPMPanel() {
   const [error,         setError]         = useState(null);
   const [filterType,    setFilterType]    = useState("ALL");
   const [expandedRows,  setExpandedRows]  = useState({});
+  const [sort,          setSort]          = useState({ key: null, dir: "asc" });
+  const [groupPages,    setGroupPages]    = useState({});
 
   const period = monthInputToOPM(monthInput);
+  const INV_PAGE_SIZE = 8;
+  const INV_NUMERIC_KEYS = ["unit_price", "begin_qty", "begin_amount", "end_qty", "end_amount", ...INV_MOVE_COLS.map(c => c.key)];
 
   const loadData = useCallback(async () => {
     if (!period) return;
     setLoading(true); setError(null);
     try {
       const res = await accountingApi.getInventoryRmPm({ period, include_begin: includeBegin });
-      if (res.success) setData(res);
+      if (res.success) { setData(res); setGroupPages({}); }
       else { setError(res.error || "Failed to load"); setData(null); }
     } catch (e) {
       setError(e?.response?.data?.detail || String(e)); setData(null);
     } finally { setLoading(false); }
   }, [period, includeBegin]);
+
+  const toggleSort = (key) => {
+    setGroupPages({});
+    setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  };
+
+  const sortRows = (rows) => {
+    if (!sort.key) return rows;
+    const numeric = INV_NUMERIC_KEYS.includes(sort.key);
+    const mul = sort.dir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      if (numeric) return ((Number(a[sort.key]) || 0) - (Number(b[sort.key]) || 0)) * mul;
+      const av = (a[sort.key] ?? "").toString().toLowerCase();
+      const bv = (b[sort.key] ?? "").toString().toLowerCase();
+      return av.localeCompare(bv) * mul;
+    });
+  };
 
   const allTypes  = data ? [...new Set(data.data.map(r => r.material_type))].sort((a,b) => MAT_TYPE_ORDER.indexOf(a) - MAT_TYPE_ORDER.indexOf(b)) : [];
   const filtered  = data?.data?.filter(r => filterType === "ALL" || r.material_type === filterType) ?? [];
@@ -698,8 +719,6 @@ function InventoryRMPMPanel() {
 
   return (
     <SectionCard
-      title="Inventory RM PM"
-      subtitle={`PT CKD OTTO Pharmaceuticals · Org 121 · Average Cost${period ? ` · ${period}` : ""}`}
       action={data?.data?.length > 0 && <ActionBtn icon={Download} label="Export CSV" color="#10b981" onClick={() => exportInvCSV(data.data, period)} />}
     >
       {/* Filter bar */}
@@ -758,11 +777,21 @@ function InventoryRMPMPanel() {
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1400 }}>
                 <thead>
                   <tr style={{ background: "linear-gradient(135deg,#1e293b,#0f172a)" }}>
-                    {["#","Item Code","Item Name","UOM","Price/UOM",
-                      "Beg Qty","Beg Amount",
-                      ...INV_MOVE_COLS.map(c=>c.label),
-                      "End Qty","End Amount","Detail"].map(h => (
-                      <th key={h} style={{ ...TH, color: "#e2e8f0", background: "transparent", fontSize: 9.5, whiteSpace: "nowrap" }}>{h}</th>
+                    {[
+                      { label: "#", key: null },
+                      { label: "Item Code", key: "item_code" },
+                      { label: "Item Name", key: "item_name" },
+                      { label: "UOM", key: "uom" },
+                      { label: "Price/UOM", key: "unit_price" },
+                      { label: "Beg Qty", key: "begin_qty" },
+                      { label: "Beg Amount", key: "begin_amount" },
+                      ...INV_MOVE_COLS.map(c => ({ label: c.label, key: c.key })),
+                      { label: "End Qty", key: "end_qty" },
+                      { label: "End Amount", key: "end_amount" },
+                      { label: "Detail", key: null },
+                    ].map(h => (
+                      <SortableTH key={h.label} label={h.label} sortKey={h.key} sort={sort} onSort={toggleSort}
+                        style={{ color: "#e2e8f0", background: "transparent", fontSize: 9.5, whiteSpace: "nowrap" }} />
                     ))}
                   </tr>
                 </thead>
@@ -770,6 +799,10 @@ function InventoryRMPMPanel() {
                   {Object.entries(grouped).sort(([a],[b]) => MAT_TYPE_ORDER.indexOf(a)-MAT_TYPE_ORDER.indexOf(b)).map(([matType, rows]) => {
                     const tot  = groupTotal(rows);
                     const tCol = MAT_TYPE_COLOR[matType] || "#64748b";
+                    const sortedGroupRows = sortRows(rows);
+                    const groupPageCount = Math.max(1, Math.ceil(sortedGroupRows.length / INV_PAGE_SIZE));
+                    const groupPage = Math.min(groupPages[matType] || 1, groupPageCount);
+                    const pagedGroupRows = sortedGroupRows.slice((groupPage - 1) * INV_PAGE_SIZE, groupPage * INV_PAGE_SIZE);
                     return [
                       // Category header row
                       <tr key={`hdr-${matType}`} style={{ background: `${tCol}15` }}>
@@ -778,7 +811,7 @@ function InventoryRMPMPanel() {
                         </td>
                       </tr>,
                       // Data rows
-                      ...rows.map((r, i) => {
+                      ...pagedGroupRows.map((r, i) => {
                         const rKey    = r.item_code;
                         const isOpen  = expandedRows[rKey];
                         return [
@@ -786,7 +819,7 @@ function InventoryRMPMPanel() {
                             onMouseEnter={e => e.currentTarget.style.background="rgba(16,185,129,0.05)"}
                             onMouseLeave={e => e.currentTarget.style.background= i%2===0?"#f0f3f9":"#e8edf5"}
                           >
-                            <td style={{ ...TD, color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>{i+1}</td>
+                            <td style={{ ...TD, color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>{(groupPage - 1) * INV_PAGE_SIZE + i + 1}</td>
                             <td style={{ ...TD, fontFamily: "monospace", fontWeight: 700, color: "#1e293b", whiteSpace: "nowrap" }}>{r.item_code}</td>
                             <td style={{ ...TD, fontSize: 11, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.item_name}>{r.item_name}</td>
                             <td style={{ ...TD, fontSize: 11, fontFamily: "monospace" }}>{r.uom}</td>
@@ -824,6 +857,19 @@ function InventoryRMPMPanel() {
                           ),
                         ];
                       }),
+                      // Pagination for this group
+                      sortedGroupRows.length > INV_PAGE_SIZE && (
+                        <tr key={`pg-${matType}`}>
+                          <td colSpan={16} style={{ padding: 0 }}>
+                            <Pagination
+                              total={sortedGroupRows.length}
+                              page={groupPage}
+                              onPage={(p) => setGroupPages(prev => ({ ...prev, [matType]: p }))}
+                              pageSize={INV_PAGE_SIZE}
+                            />
+                          </td>
+                        </tr>
+                      ),
                       // Group subtotal
                       <tr key={`tot-${matType}`} style={{ background: `${tCol}10`, borderTop: `2px solid ${tCol}30` }}>
                         <td colSpan={5} style={{ padding: "8px 12px", fontSize: 11, fontWeight: 800, color: tCol }}>TOTAL {matType}</td>
@@ -910,8 +956,11 @@ function ItemCostComponentPanel() {
   const [data,       setData]       = useState(null);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState(null);
+  const [page,       setPage]       = useState(1);
+  const [sort,       setSort]       = useState({ key: null, dir: "asc" });
 
   const period = monthInputToOPM(monthInput);
+  const ICC_PAGE_SIZE = 8;
 
   const loadData = useCallback(async () => {
     if (!period) return;
@@ -921,6 +970,7 @@ function ItemCostComponentPanel() {
       const res = await accountingApi.getItemCostComponents(period);
       if (res.success) {
         setData(res);
+        setPage(1);
       } else {
         setError(res.error || "Failed to load data");
         setData(null);
@@ -932,6 +982,26 @@ function ItemCostComponentPanel() {
       setLoading(false);
     }
   }, [period]);
+
+  const toggleSort = (key) => {
+    setPage(1);
+    setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  };
+
+  const sortedRows = useMemo(() => {
+    const rows = data?.data || [];
+    if (!sort.key) return rows;
+    const numeric = sort.key === "cmpnt_cost" || sort.key === "total_cost";
+    const mul = sort.dir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      if (numeric) return ((Number(a[sort.key]) || 0) - (Number(b[sort.key]) || 0)) * mul;
+      const av = (a[sort.key] ?? "").toString().toLowerCase();
+      const bv = (b[sort.key] ?? "").toString().toLowerCase();
+      return av.localeCompare(bv) * mul;
+    });
+  }, [data, sort]);
+
+  const pagedRows = sortedRows.slice((page - 1) * ICC_PAGE_SIZE, page * ICC_PAGE_SIZE);
 
   // Build per-item row grouping for alternating bg
   const itemColors = {};
@@ -949,8 +1019,6 @@ function ItemCostComponentPanel() {
 
   return (
     <SectionCard
-      title="Item Cost Component"
-      subtitle={`Oracle OPM · CM_CMPT_DTL · Org 121 · Cost Type 1000 (Actual)${period ? ` · ${period}` : ""}`}
       action={
         data?.data?.length > 0 && (
           <ActionBtn icon={Download} label="Export CSV" color="#10b981" onClick={() => exportICCCSV(data.data, period)} />
@@ -998,7 +1066,9 @@ function ItemCostComponentPanel() {
             <thead>
               <tr style={{ background: "linear-gradient(135deg,#dfe5ed,#d8dee8)" }}>
                 <th style={TH}>#</th>
-                {ICC_HEADERS.map(h => <th key={h.key} style={{ ...TH, minWidth: h.minW }}>{h.label}</th>)}
+                {ICC_HEADERS.map(h => (
+                  <SortableTH key={h.key} label={h.label} sortKey={h.key} sort={sort} onSort={toggleSort} style={{ minWidth: h.minW }} />
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -1015,16 +1085,16 @@ function ItemCostComponentPanel() {
                   </td>
                 </tr>
               ) : (
-                data.data.map((row, i) => {
-                  const isNum = ["cmpnt_cost", "total_cost"].includes;
+                pagedRows.map((row, i) => {
+                  const globalIndex = (page - 1) * ICC_PAGE_SIZE + i;
                   const rowBg = itemColors[row.segment1] ?? "#f0f3f9";
                   return (
-                    <tr key={i}
+                    <tr key={globalIndex}
                       style={{ background: rowBg, transition: "background 0.1s" }}
                       onMouseEnter={e => e.currentTarget.style.background = "rgba(16,185,129,0.07)"}
                       onMouseLeave={e => e.currentTarget.style.background = rowBg}
                     >
-                      <td style={{ ...TD, color: "#94a3b8", fontFamily: "monospace", fontSize: 10 }}>{i + 1}</td>
+                      <td style={{ ...TD, color: "#94a3b8", fontFamily: "monospace", fontSize: 10 }}>{globalIndex + 1}</td>
                       {ICC_HEADERS.map(h => {
                         const v = row[h.key];
                         const numericCol = h.key === "cmpnt_cost" || h.key === "total_cost";
@@ -1041,6 +1111,9 @@ function ItemCostComponentPanel() {
             </tbody>
           </table>
         </div>
+        {data && data.data.length > 0 && (
+          <Pagination total={sortedRows.length} page={page} onPage={setPage} pageSize={ICC_PAGE_SIZE} />
+        )}
       </div>
     </SectionCard>
   );
@@ -1115,6 +1188,11 @@ function MaterialTransactionPanel() {
   const [data,        setData]        = useState(null);
   const [loading,     setLoading]     = useState(false);
   const [error,       setError]       = useState(null);
+  const [page,        setPage]        = useState(1);
+  const [sort,        setSort]        = useState({ key: null, dir: "asc" });
+
+  const MTX_PAGE_SIZE = 8;
+  const MTX_NUMERIC_KEYS = ["quantity", "primary_qty", "unit_cost", "trx_value"];
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -1127,6 +1205,7 @@ function MaterialTransactionPanel() {
       const res = await accountingApi.getMaterialTransactions(params);
       if (res.success) {
         setData(res);
+        setPage(1);
       } else {
         setError(res.error || "Failed to load data");
         setData(null);
@@ -1139,6 +1218,26 @@ function MaterialTransactionPanel() {
     }
   }, [dateFrom, dateTo, orgCode, itemNumber, trxType, limit]);
 
+  const toggleSort = (key) => {
+    setPage(1);
+    setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  };
+
+  const sortedRows = useMemo(() => {
+    const rows = data?.data || [];
+    if (!sort.key) return rows;
+    const numeric = MTX_NUMERIC_KEYS.includes(sort.key);
+    const mul = sort.dir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      if (numeric) return ((Number(a[sort.key]) || 0) - (Number(b[sort.key]) || 0)) * mul;
+      const av = (a[sort.key] ?? "").toString().toLowerCase();
+      const bv = (b[sort.key] ?? "").toString().toLowerCase();
+      return av.localeCompare(bv) * mul;
+    });
+  }, [data, sort]);
+
+  const pagedRows = sortedRows.slice((page - 1) * MTX_PAGE_SIZE, page * MTX_PAGE_SIZE);
+
   const INPUT = {
     padding: "7px 11px", borderRadius: 9, border: "none", fontSize: 12,
     background: NEU.bg, boxShadow: NEU.shadowIn, color: "#1e293b",
@@ -1147,8 +1246,6 @@ function MaterialTransactionPanel() {
 
   return (
     <SectionCard
-      title="Material Transactions"
-      subtitle="Oracle EBS · MTL_MATERIAL_TRANSACTIONS"
       action={
         data?.data?.length > 0 && (
           <ActionBtn icon={Download} label="Export CSV" color="#10b981" onClick={() => exportCSV(data.data)} />
@@ -1210,7 +1307,9 @@ function MaterialTransactionPanel() {
             <thead>
               <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
                 <th style={TH}>#</th>
-                {MTX_HEADERS.map(h => <th key={h.key} style={TH}>{h.label}</th>)}
+                {MTX_HEADERS.map(h => (
+                  <SortableTH key={h.key} label={h.label} sortKey={h.key} sort={sort} onSort={toggleSort} />
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -1227,28 +1326,34 @@ function MaterialTransactionPanel() {
                   </td>
                 </tr>
               ) : (
-                data.data.map((row, i) => (
-                  <tr key={row.transaction_id ?? i}
-                    style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5", transition: "background 0.1s" }}
-                    onMouseEnter={e => e.currentTarget.style.background = "rgba(16,185,129,0.05)"}
-                    onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f0f3f9" : "#e8edf5"}
-                  >
-                    <td style={{ ...TD, color: "#94a3b8", fontFamily: "monospace", fontSize: 10 }}>{i + 1}</td>
-                    {MTX_HEADERS.map(h => {
-                      const v = row[h.key];
-                      const isNum = ["quantity", "primary_qty", "unit_cost", "trx_value"].includes(h.key);
-                      return (
-                        <td key={h.key} style={{ ...TD, fontFamily: h.mono ? "monospace" : undefined, textAlign: isNum ? "right" : "left", whiteSpace: h.key === "item_description" || h.key === "trx_type" ? "normal" : "nowrap" }}>
-                          {isNum ? fmtNum(v) : (v ?? "-")}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))
+                pagedRows.map((row, i) => {
+                  const globalIndex = (page - 1) * MTX_PAGE_SIZE + i;
+                  return (
+                    <tr key={row.transaction_id ?? globalIndex}
+                      style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5", transition: "background 0.1s" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(16,185,129,0.05)"}
+                      onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f0f3f9" : "#e8edf5"}
+                    >
+                      <td style={{ ...TD, color: "#94a3b8", fontFamily: "monospace", fontSize: 10 }}>{globalIndex + 1}</td>
+                      {MTX_HEADERS.map(h => {
+                        const v = row[h.key];
+                        const isNum = MTX_NUMERIC_KEYS.includes(h.key);
+                        return (
+                          <td key={h.key} style={{ ...TD, fontFamily: h.mono ? "monospace" : undefined, textAlign: isNum ? "right" : "left", whiteSpace: h.key === "item_description" || h.key === "trx_type" ? "normal" : "nowrap" }}>
+                            {isNum ? fmtNum(v) : (v ?? "-")}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
+        {data && data.data.length > 0 && (
+          <Pagination total={sortedRows.length} page={page} onPage={setPage} pageSize={MTX_PAGE_SIZE} />
+        )}
       </div>
     </SectionCard>
   );
@@ -1268,17 +1373,63 @@ const TD = {
 function SectionCard({ title, subtitle, action, children }) {
   return (
     <div style={{ borderRadius: 20, background: NEU.bg, boxShadow: NEU.shadowOut }}>
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "16px 20px", borderBottom: "1px solid rgba(0,0,0,0.06)",
-      }}>
-        <div>
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: "#1e293b", margin: 0 }}>{title}</h3>
-          {subtitle && <p style={{ fontSize: 11, color: "#94a3b8", margin: "2px 0 0" }}>{subtitle}</p>}
+      {(title || action) && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "16px 20px", borderBottom: "1px solid rgba(0,0,0,0.06)",
+        }}>
+          <div>
+            {title && <h3 style={{ fontSize: 15, fontWeight: 700, color: "#1e293b", margin: 0 }}>{title}</h3>}
+            {subtitle && <p style={{ fontSize: 11, color: "#94a3b8", margin: "2px 0 0" }}>{subtitle}</p>}
+          </div>
+          {action}
         </div>
-        {action}
-      </div>
+      )}
       <div style={{ padding: 20 }}>{children}</div>
+    </div>
+  );
+}
+
+function SortableTH({ label, sortKey, sort, onSort, style }) {
+  const active = sort.key === sortKey;
+  return (
+    <th
+      style={{ ...TH, ...style, cursor: sortKey ? "pointer" : "default", userSelect: "none" }}
+      onClick={() => sortKey && onSort(sortKey)}
+    >
+      {label} {active && (sort.dir === "asc" ? "▲" : "▼")}
+    </th>
+  );
+}
+
+function Pagination({ total, page, onPage, pageSize = 8 }) {
+  const pages = Math.ceil(total / pageSize);
+  if (pages <= 1) return null;
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "10px 14px", background: NEU.bg,
+    }}>
+      <span style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>
+        {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+      </span>
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <button onClick={() => onPage(Math.max(1, page - 1))} disabled={page === 1}
+          style={{
+            padding: 5, borderRadius: 7, border: "none", cursor: page === 1 ? "not-allowed" : "pointer",
+            background: NEU.bg, color: page === 1 ? "#cbd5e1" : "#475569", boxShadow: NEU.shadowOutSm,
+          }}>
+          <ChevronLeft size={13} />
+        </button>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#1e293b", padding: "0 6px" }}>{page} / {pages}</span>
+        <button onClick={() => onPage(Math.min(pages, page + 1))} disabled={page === pages}
+          style={{
+            padding: 5, borderRadius: 7, border: "none", cursor: page === pages ? "not-allowed" : "pointer",
+            background: NEU.bg, color: page === pages ? "#cbd5e1" : "#475569", boxShadow: NEU.shadowOutSm,
+          }}>
+          <ChevronRight size={13} />
+        </button>
+      </div>
     </div>
   );
 }
