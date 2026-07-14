@@ -2387,15 +2387,18 @@ function WorkingCalendarPanel() {
   );
 }
 
+// Modul ini khusus HR — department dikunci ke HR (dept_code 14), tidak lagi
+// jadi parameter yang bisa diganti user.
+const HR_DEPT_CODE = "14";
+
 function BudgetMonitoringSection() {
   const { token } = useAuthStore();
   const hdrs = { Authorization: `Bearer ${token}` };
   const curYear = new Date().getFullYear();
+  const dept = HR_DEPT_CODE;
 
-  const [dept,          setDept]          = useState("");
-  const [departments,   setDepartments]   = useState([]);
   const [year,          setYear]          = useState(curYear);
-  const [month,         setMonth]         = useState(0);
+  const [month,         setMonth]         = useState(new Date().getMonth() + 1);
   const [years,         setYears]         = useState([curYear, curYear - 1]);
   const [data,          setData]          = useState(null);
   const [loading,       setLoading]       = useState(false);
@@ -2403,20 +2406,7 @@ function BudgetMonitoringSection() {
   const [accountDetail, setAccountDetail] = useState({});
   const [uploadMsg,     setUploadMsg]     = useState(null);
 
-  // Load daftar department dari Oracle saat pertama kali
-  const loadDepartments = useCallback(async () => {
-    try {
-      const res = await fetch(`${BUDGET_API}/departments`, { headers: hdrs });
-      if (res.ok) {
-        const depts = await res.json();
-        setDepartments(depts);
-        if (depts.length && !dept) setDept(depts[0].dept_code);
-      }
-    } catch (_) {}
-  }, []); // eslint-disable-line
-
   const loadYears = useCallback(async () => {
-    if (!dept) return;
     try {
       const res = await fetch(`${BUDGET_API}/years?dept=${encodeURIComponent(dept)}`, { headers: hdrs });
       if (res.ok) {
@@ -2424,10 +2414,9 @@ function BudgetMonitoringSection() {
         if (ys.length) { setYears(ys); setYear(ys[0]); }
       }
     } catch (_) {}
-  }, [dept]); // eslint-disable-line
+  }, []); // eslint-disable-line
 
   const load = useCallback(async () => {
-    if (!dept) return;
     setLoading(true);
     setData(null);
     try {
@@ -2437,11 +2426,10 @@ function BudgetMonitoringSection() {
       if (res.ok) setData(await res.json());
     } catch (_) {}
     setLoading(false);
-  }, [dept, year, month]); // eslint-disable-line
+  }, [year, month]); // eslint-disable-line
 
-  useEffect(() => { loadDepartments(); }, [loadDepartments]);
   useEffect(() => { loadYears(); }, [loadYears]);
-  useEffect(() => { if (dept) load(); }, [load]); // eslint-disable-line
+  useEffect(() => { load(); }, [load]); // eslint-disable-line
 
   const loadDetail = async (code) => {
     const key = `${dept}_${code}_${year}`;
@@ -2469,42 +2457,20 @@ function BudgetMonitoringSection() {
     await loadDetail(code);
   };
 
-  const handleDeptChange = (newDept) => {
-    setDept(newDept);
-    setData(null);
-    setExpandedCode(null);
-    setAccountDetail({});
-  };
-
   const fmtRp = (v) => {
     if (v === undefined || v === null) return "Rp 0";
     return (v < 0 ? "-Rp " : "Rp ") + Math.abs(v).toLocaleString("id-ID");
   };
 
   const summary  = data?.summary;
-  const accounts = data?.accounts || [];
+  // Sembunyikan akun yang budget dan actual-nya sama-sama 0 (tidak ada aktivitas)
+  const accounts = (data?.accounts || []).filter(a => a.budget !== 0 || a.actual !== 0);
 
   return (
     <div className="space-y-4">
 
       {/* ── Controls ── */}
       <div className="flex flex-wrap items-center gap-2">
-
-        {/* Dropdown Department — dari Oracle CKDO_GL_COA_DEPARTMENT */}
-        <select
-          value={dept}
-          onChange={e => handleDeptChange(e.target.value)}
-          className="rounded-lg border border-orange-700/60 bg-gray-900 px-3 py-1.5 text-sm text-orange-200 outline-none focus:border-orange-500 min-w-36"
-        >
-          {departments.length === 0
-            ? <option value="">Loading dept...</option>
-            : departments.map(d => (
-                <option key={d.dept_code} value={d.dept_code}>
-                  {d.dept_code}{d.dept_name ? ` — ${d.dept_name}` : ""}
-                </option>
-              ))
-          }
-        </select>
 
         <select
           value={year}
@@ -2526,7 +2492,6 @@ function BudgetMonitoringSection() {
 
         <button
           onClick={load}
-          disabled={!dept}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-700 bg-gray-900 text-xs text-gray-400 hover:text-gray-200 hover:border-gray-600 disabled:opacity-40 transition-colors"
         >
           <RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Refresh from Oracle
@@ -2536,12 +2501,11 @@ function BudgetMonitoringSection() {
 
         <button
           onClick={() => {
-            if (!dept) return;
             const p = new URLSearchParams({ dept, year });
             if (month) p.set("month", month);
             window.open(`${BUDGET_API}/export?${p}`, "_blank");
           }}
-          disabled={!dept || !data}
+          disabled={!data}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-xs text-white disabled:opacity-40 transition-colors"
         >
           <Download size={12} /> Export Excel
@@ -2560,17 +2524,12 @@ function BudgetMonitoringSection() {
       {loading && <div className="flex justify-center py-16"><Loader2 size={22} className="animate-spin text-gray-600" /></div>}
 
       {/* ── Empty state ── */}
-      {!loading && dept && data && accounts.length === 0 && (
+      {!loading && data && accounts.length === 0 && (
         <div className="py-16 text-center space-y-2">
           <Wallet size={32} className="mx-auto text-gray-700" />
           <p className="text-xs text-gray-600">
-            No budget data for department <strong className="text-gray-400">{dept}</strong> year {year}.
+            No budget data for year {year}.
           </p>
-        </div>
-      )}
-      {!loading && !dept && (
-        <div className="py-16 text-center">
-          <p className="text-xs text-gray-600">Select department to view budget data.</p>
         </div>
       )}
 
