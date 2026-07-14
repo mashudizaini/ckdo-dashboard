@@ -397,7 +397,7 @@ class BudgetService:
             JOIN gl_periods gp
                 ON  gp.period_name          = gjl.period_name
                 AND gp.period_set_name      = gl.period_set_name
-            WHERE gjh.je_category IN ('RECLASS', 'BUDGET')
+            WHERE UPPER(gjh.je_category) IN ('RECLASS', 'BUDGET')
               AND  gcc.segment3 = :dept
               AND EXTRACT(YEAR FROM gp.start_date)  = :year
               AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) = :month)
@@ -430,7 +430,7 @@ class BudgetService:
             JOIN ap_expense_report_headers_v aerh
                 ON  aerh.report_header_id    = aerl.report_header_id
             JOIN gl_code_combinations gcc
-                ON  gcc.code_combination_id  = aerl.dr_code_combination_id
+                ON  gcc.code_combination_id  = aerl.code_combination_id
             WHERE gcc.{DEPT_COL}             = :dept
               AND EXTRACT(YEAR  FROM aerl.expense_date) = :year
               AND (:month   IS NULL OR EXTRACT(MONTH FROM aerl.expense_date) = :month)

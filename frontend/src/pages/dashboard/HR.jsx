@@ -2451,8 +2451,16 @@ function BudgetMonitoringSection() {
         `${BUDGET_API}/account/${encodeURIComponent(code)}?dept=${encodeURIComponent(dept)}&year=${year}`,
         { headers: hdrs }
       );
-      if (res.ok) { const d = await res.json(); setAccountDetail(prev => ({ ...prev, [key]: d })); }
-    } catch (_) {}
+      if (res.ok) {
+        const d = await res.json();
+        setAccountDetail(prev => ({ ...prev, [key]: d }));
+      } else {
+        const body = await res.json().catch(() => null);
+        setAccountDetail(prev => ({ ...prev, [key]: { error: body?.detail || `Failed to load (HTTP ${res.status})` } }));
+      }
+    } catch (e) {
+      setAccountDetail(prev => ({ ...prev, [key]: { error: e?.message || "Network error" } }));
+    }
   };
 
   const handleExpand = async (code) => {
@@ -2623,6 +2631,14 @@ function BudgetMonitoringSection() {
                   <div className="border-t border-gray-800/60 bg-gray-950 px-4 py-3">
                     {!detail ? (
                       <div className="flex justify-center py-6"><Loader2 size={16} className="animate-spin text-gray-600" /></div>
+                    ) : detail.error ? (
+                      <div className="flex items-center justify-between py-4 px-2">
+                        <p className="text-xs text-red-400">{detail.error}</p>
+                        <button
+                          onClick={() => { setAccountDetail(prev => { const n = { ...prev }; delete n[`${dept}_${acc.account_code}_${year}`]; return n; }); loadDetail(acc.account_code); }}
+                          className="text-xs text-gray-400 hover:text-gray-200 underline"
+                        >Retry</button>
+                      </div>
                     ) : detail.monthly.length === 0 ? (
                       <p className="text-xs text-gray-600 text-center py-4">No monthly data for this account.</p>
                     ) : (
