@@ -126,6 +126,11 @@ function APOutstandingPanel() {
   const [loading,        setLoading]        = useState(false);
   const [error,          setError]          = useState(null);
   const [search,         setSearch]         = useState("");
+  const [page,           setPage]           = useState(1);
+  const [sort,           setSort]           = useState({ key: null, dir: "asc" });
+
+  const AP_PAGE_SIZE = 10;
+  const AP_NUMERIC_KEYS = ["original_amount_idr", "remaining_amount_idr", "original_amount_orig", "remaining_amount_orig"];
 
   const loadData = useCallback(async () => {
     setLoading(true); setError(null);
@@ -138,14 +143,19 @@ function APOutstandingPanel() {
         ...(payStatusFilter && payStatusFilter !== "ALL" && { payment_status: payStatusFilter }),
       };
       const res = await accountingApi.getApOutstanding(params);
-      if (res.success) setData(res);
+      if (res.success) { setData(res); setPage(1); }
       else { setError(res.error || "Failed to load"); setData(null); }
     } catch (e) {
       setError(e?.response?.data?.detail || String(e)); setData(null);
     } finally { setLoading(false); }
   }, [asOfDate, supplierName, ouFilter, payStatusFilter, limit]);
 
-  const rows = data?.data?.filter(r => {
+  const toggleSort = (key) => {
+    setPage(1);
+    setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  };
+
+  const filteredRows = data?.data?.filter(r => {
     if (!search) return true;
     const q = search.toLowerCase();
     return (r.supplier_name        || "").toLowerCase().includes(q)
@@ -154,6 +164,21 @@ function APOutstandingPanel() {
         || (r.coa_descpt           || "").toLowerCase().includes(q)
         || (r.operating_unit       || "").toLowerCase().includes(q);
   }) ?? [];
+
+  const rows = useMemo(() => {
+    if (!sort.key) return filteredRows;
+    const numeric = AP_NUMERIC_KEYS.includes(sort.key);
+    const mul = sort.dir === "asc" ? 1 : -1;
+    return [...filteredRows].sort((a, b) => {
+      if (numeric) return ((Number(a[sort.key]) || 0) - (Number(b[sort.key]) || 0)) * mul;
+      const av = (a[sort.key] ?? "").toString().toLowerCase();
+      const bv = (b[sort.key] ?? "").toString().toLowerCase();
+      return av.localeCompare(bv) * mul;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, search, sort]);
+
+  const pagedRows = rows.slice((page - 1) * AP_PAGE_SIZE, page * AP_PAGE_SIZE);
 
   const INPUT = { padding: "7px 11px", borderRadius: 9, border: "none", fontSize: 12, background: NEU.bg, boxShadow: NEU.shadowIn, color: "#1e293b", outline: "none" };
 
@@ -179,11 +204,7 @@ function APOutstandingPanel() {
   const sm = data?.summary;
 
   return (
-    <SectionCard
-      title="AP Outstanding — Accounts Payable"
-      subtitle="Oracle EBS 12.2.8 · AP_INVOICES_ALL + AP_PAYMENT_SCHEDULES_ALL · Excludes Paid"
-      action={data?.data?.length > 0 && <ActionBtn icon={Download} label="Export CSV" color="#3b82f6" onClick={() => exportApCSV(data.data)} />}
-    >
+    <SectionCard>
       {/* Filter bar */}
       <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
         <div>
@@ -217,6 +238,9 @@ function APOutstandingPanel() {
           </select>
         </div>
         <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#3b82f6" onClick={loadData} disabled={loading} />
+        {data?.data?.length > 0 && (
+          <ActionBtn icon={Download} label="Export CSV" color="#3b82f6" onClick={() => exportApCSV(data.data)} />
+        )}
       </div>
 
       {error && (
@@ -245,7 +269,7 @@ function APOutstandingPanel() {
 
           {/* Client-side search */}
           <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-            <input value={search} onChange={e => setSearch(e.target.value)}
+            <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
               placeholder="Filter by supplier / invoice / COA / OU…"
               style={{ ...INPUT, width: 340 }} />
             <span style={{ fontSize: 11, color: "#94a3b8" }}>
@@ -261,24 +285,27 @@ function APOutstandingPanel() {
                   <tr style={{ background: "linear-gradient(135deg,#1e3a5f,#1e40af)" }}>
                     <th style={{ ...TH, color: "#bfdbfe", background: "transparent", fontSize: 9.5 }}>#</th>
                     {AP_HEADERS.map(h => (
-                      <th key={h.key} style={{ ...TH, color: "#bfdbfe", background: "transparent", fontSize: 9.5, minWidth: h.width, whiteSpace: "nowrap" }}>{h.label}</th>
+                      <SortableTH key={h.key} label={h.label} sortKey={h.key} sort={sort} onSort={toggleSort}
+                        style={{ color: "#bfdbfe", background: "transparent", fontSize: 9.5, minWidth: h.width, whiteSpace: "nowrap" }} />
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.length === 0 ? (
+                  {pagedRows.length === 0 ? (
                     <tr>
                       <td colSpan={AP_HEADERS.length + 1} style={{ padding: "40px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
                         No records found
                       </td>
                     </tr>
-                  ) : rows.map((r, i) => (
-                    <tr key={i}
+                  ) : pagedRows.map((r, i) => {
+                    const globalIndex = (page - 1) * AP_PAGE_SIZE + i;
+                    return (
+                    <tr key={globalIndex}
                       style={{ background: rowBg(r, i) }}
                       onMouseEnter={e => e.currentTarget.style.background = "rgba(59,130,246,0.07)"}
                       onMouseLeave={e => e.currentTarget.style.background = rowBg(r, i)}
                     >
-                      <td style={{ ...TD, color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>{i + 1}</td>
+                      <td style={{ ...TD, color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>{globalIndex + 1}</td>
                       <td style={{ ...TD, fontSize: 11, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.operating_unit}>{r.operating_unit}</td>
                       <td style={{ ...TD, fontWeight: 700, color: "#1e293b", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.supplier_name}>{r.supplier_name}</td>
                       <td style={{ ...TD, fontSize: 11 }}>{r.transaction_type}</td>
@@ -296,10 +323,14 @@ function APOutstandingPanel() {
                       <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#64748b" }}>{r.remaining_amount_orig != null ? fmtNum(r.remaining_amount_orig) : "—"}</td>
                       <td style={{ ...TD, fontSize: 11, color: "#64748b", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.description}>{r.description}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
+            {rows.length > 0 && (
+              <Pagination total={rows.length} page={page} onPage={setPage} pageSize={AP_PAGE_SIZE} />
+            )}
           </div>
         </>
       )}
