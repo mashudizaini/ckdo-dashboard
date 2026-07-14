@@ -2643,83 +2643,80 @@ function BudgetMonitoringSection() {
   );
 }
 
-/* Tabel detail per bulan — data dari Oracle GL (budget) + Oracle AP (actual items) */
+/* Kertas kerja per bulan — Budget/Encumbrance/Reclass dari GL, item expense dari
+   Expense Report HRGA. Layout meniru format kertas kerja HRGA:
+   [Bulan] Budget | Actual Expense (list + total) | Available | Reclass | Remain | Note */
 function BudgetMonthTable({ m, fmtRp, accName }) {
-  const remainOk = m.remain >= 0;
+  const remainOk  = m.remain >= 0;
+  const spanRows  = m.items.length + 1; // baris item + 1 baris total
+  const monthName = m.month_name || MONTHS_ID[m.month - 1];
 
   return (
     <div className="rounded-lg border border-gray-800 overflow-hidden text-xs">
-      {/* Month header */}
-      <div className="bg-gray-800 px-3 py-1.5 flex items-center gap-3">
-        <span className="font-bold text-gray-200">{m.month_name || MONTHS_ID[m.month - 1]} Budget</span>
-        <span className="text-blue-600 font-semibold">{fmtRp(m.budget)}</span>
-        <span className="text-gray-600 flex-1">{accName}</span>
+      <div className="bg-gray-800 px-3 py-1.5">
+        <span className="font-bold text-gray-200">{monthName}</span>
+        <span className="text-gray-600 ml-2">{accName}</span>
       </div>
 
-      {/* Table */}
       <table className="w-full">
         <thead>
           <tr className="bg-gray-800/40 text-gray-500 uppercase tracking-wider text-xs">
-            <th className="px-3 py-2 text-left font-semibold" style={{width:"45%"}}>AP Invoice Detail (reference)</th>
-            <th className="px-3 py-2 text-right font-semibold">Amount (Rp)</th>
-            <th className="px-3 py-2 text-right font-semibold">Date</th>
-            <th className="px-3 py-2 text-right font-semibold">No. Invoice</th>
-            <th className="px-3 py-2 text-right font-semibold">Remaining</th>
+            <th className="px-3 py-2 text-right font-semibold" style={{width:"12%"}}>{monthName} Budget</th>
+            <th className="px-3 py-2 text-left font-semibold" style={{width:"28%"}}>Actual Expense</th>
+            <th className="px-3 py-2 text-right font-semibold" style={{width:"12%"}}>Amount</th>
+            <th className="px-3 py-2 text-right font-semibold" style={{width:"12%"}}>Available</th>
+            <th className="px-3 py-2 text-right font-semibold" style={{width:"12%"}}>Reclass</th>
+            <th className="px-3 py-2 text-right font-semibold" style={{width:"12%"}}>Remain</th>
+            <th className="px-3 py-2 text-left font-semibold">Note</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-800/60">
           {m.items.length === 0 ? (
             <tr>
-              <td colSpan={5} className="px-3 py-3 text-gray-700 italic">
-                No AP Invoice data for this period.
-              </td>
+              <td className="px-3 py-2 text-right text-blue-600 font-semibold align-top">{fmtRp(m.budget)}</td>
+              <td colSpan={2} className="px-3 py-3 text-gray-700 italic">No Expense Report data for this period.</td>
+              <td className="px-3 py-2 text-right text-gray-300 align-top">{fmtRp(m.available)}</td>
+              <td className="px-3 py-2 text-right text-gray-300 align-top">{fmtRp(m.reclass)}</td>
+              <td className={`px-3 py-2 text-right font-bold align-top ${remainOk ? "text-green-400" : "text-red-400"}`}>{fmtRp(m.remain)}</td>
+              <td className="px-3 py-2 text-gray-500 align-top">{m.note || "—"}</td>
             </tr>
           ) : (
-            m.items.map((item, idx) => (
-              <tr key={idx} className="hover:bg-gray-800/20 transition-colors">
-                <td className="px-3 py-2 text-gray-300">{item.description}</td>
-                <td className="px-3 py-2 text-right text-gray-300 tabular-nums">
-                  {(item.amount || 0).toLocaleString("id-ID")}
-                </td>
-                <td className="px-3 py-2 text-right text-gray-500">{item.date || "—"}</td>
-                <td className="px-3 py-2 text-right text-gray-600">{item.invoice_num || "—"}</td>
-                {/* Sisa hanya tampil di baris pertama (rowspan) */}
-                {idx === 0 ? (
-                  <td className={`px-3 py-2 text-right tabular-nums align-top font-medium ${remainOk ? "text-green-400" : "text-red-400"}`}
-                    rowSpan={m.items.length}>
-                    <div className="text-gray-500 text-xs">{fmtRp(m.budget)}</div>
-                    <div className="text-gray-600 text-xs">− {fmtRp(m.total_actual)}</div>
-                    <div className={`border-t border-gray-700 mt-1 pt-1 font-bold ${remainOk ? "text-green-400" : "text-red-400"}`}>
-                      {fmtRp(m.remain)}
-                    </div>
+            <>
+              {m.items.map((item, idx) => (
+                <tr key={idx} className="hover:bg-gray-800/20 transition-colors">
+                  {idx === 0 && (
+                    <td className="px-3 py-2 text-right text-blue-600 font-semibold align-top" rowSpan={spanRows}>
+                      {fmtRp(m.budget)}
+                    </td>
+                  )}
+                  <td className="px-3 py-2 text-gray-300">{item.description}</td>
+                  <td className="px-3 py-2 text-right text-gray-300 tabular-nums">
+                    {(item.amount || 0).toLocaleString("id-ID")}
                   </td>
-                ) : null}
-              </tr>
-            ))
-          )}
+                  {idx === 0 && (
+                    <>
+                      <td className="px-3 py-2 text-right text-gray-300 align-top" rowSpan={spanRows}>{fmtRp(m.available)}</td>
+                      <td className="px-3 py-2 text-right text-gray-300 align-top" rowSpan={spanRows}>{fmtRp(m.reclass)}</td>
+                      <td className={`px-3 py-2 text-right font-bold align-top ${remainOk ? "text-green-400" : "text-red-400"}`} rowSpan={spanRows}>
+                        {fmtRp(m.remain)}
+                      </td>
+                      <td className="px-3 py-2 text-gray-500 align-top" rowSpan={spanRows}>{m.note || "—"}</td>
+                    </>
+                  )}
+                </tr>
+              ))}
 
-          {/* Baris total */}
-          <tr className="bg-gray-800/40 font-semibold border-t-2 border-gray-700">
-            <td className="px-3 py-2 text-gray-400 uppercase tracking-wider">Total Actual (GL)</td>
-            <td className="px-3 py-2 text-right text-violet-700 tabular-nums">
-              {m.total_actual.toLocaleString("id-ID")}
-            </td>
-            <td colSpan={2} />
-            <td className={`px-3 py-2 text-right tabular-nums font-bold ${remainOk ? "text-green-400" : "text-red-400"}`}>
-              {fmtRp(m.remain)}
-            </td>
-          </tr>
+              {/* Baris total actual expense */}
+              <tr className="bg-gray-800/40 font-semibold">
+                <td colSpan={2} className="px-3 py-2 text-right text-gray-400 uppercase tracking-wider">Total Actual</td>
+                <td className="px-3 py-2 text-right text-violet-700 tabular-nums">
+                  {m.total_actual.toLocaleString("id-ID")}
+                </td>
+              </tr>
+            </>
+          )}
         </tbody>
       </table>
-
-      {/* Catatan jika detail AP Invoice tidak menjumlah persis ke Total Actual (GL) —
-          artinya ada posting non-AP-Invoice (payroll, jurnal manual, dll) di akun ini */}
-      {m.ap_items_total !== m.total_actual && (
-        <div className="px-3 py-1.5 bg-amber-500/10 border-t border-amber-500/20 text-amber-500 text-xs">
-          AP Invoice detail totals {fmtRp(m.ap_items_total)} — the {fmtRp(m.total_actual - m.ap_items_total)} difference
-          from Total Actual (GL) comes from non-AP-Invoice postings (payroll, manual journal, etc.) not itemized above.
-        </div>
-      )}
     </div>
   );
 }

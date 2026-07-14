@@ -7,11 +7,19 @@ COA Structure CKD Otto:
   segment3 = CKDO_GL_COA_DEPARTMENT  → department (parameter, tidak di-hardcode)
   segment4 = natural account           → kode akun
 
-Dua sumber data:
-  GL_BALANCES (actual_flag='B')        → anggaran per akun per periode
-  AP_INVOICE_DISTRIBUTIONS_ALL         → realisasi AP Invoice per akun per periode
+Sumber data:
+  GL_BALANCES (actual_flag='B')            → budget per akun per periode
+  GL_BALANCES (actual_flag='A')            → actual per akun per periode (ringkasan akun,
+                                              cocok dengan Oracle Funds Available Inquiry)
+  GL_BALANCES (actual_flag='E')            → encumbrance per akun per periode
+  GL_JE_LINES/GL_JE_HEADERS (je_category   → budget reclass (di-net-kan debit−credit,
+    IN ('RECLASS','BUDGET'))                 lihat catatan di _query_reclass_gl)
+  AP_EXPENSE_REPORT_LINES +                → klaim expense report HRGA per bulan
+  AP_EXPENSE_REPORT_HEADERS_V                (detail kertas kerja per akun, bukan AP Invoice)
 
-Rumus: Remain = Budget − Total Actual
+Rumus (ringkasan akun):        Remain = Budget − Actual
+Rumus (kertas kerja per bulan): Remain = Available + Reclass − Total Actual
+                                 dengan Available = Budget − Encumbrance
 """
 import asyncio
 from app.database import get_oracle_connection
@@ -153,14 +161,18 @@ class BudgetService:
 
     async def get_account_detail(self, dept: str, account_code: str, year: int) -> dict:
         """
-        Rincian per bulan untuk 1 akun:
+        Rincian per bulan untuk 1 akun, format kertas kerja HRGA:
         - budget       dari GL_BALANCES (actual_flag='B')
-        - total_actual dari GL_BALANCES (actual_flag='A') — cocok dengan Oracle
-          Funds Available Inquiry, mencakup semua sumber posting (AP, payroll,
-          jurnal manual, dll), bukan hanya AP Invoice.
-        - items         dari AP_INVOICE_DISTRIBUTIONS_ALL — daftar detail AP
-          Invoice sebagai referensi; ini SUBSET dari total_actual dan bisa saja
-          tidak menjumlah persis ke total_actual jika ada posting non-AP-Invoice.
+        - encumbrance  dari GL_BALANCES (actual_flag='E')
+        - available    = budget − encumbrance (belum dikurangi actual bulan ini —
+          sama seperti "Funds Available" di Oracle Funds Available Inquiry)
+        - reclass      dari GL_JE_LINES/GL_JE_HEADERS kategori 'RECLASS'/'BUDGET',
+          di-net-kan (debit − credit) karena proses import reclass sebelumnya
+          menghasilkan baris debit DAN credit untuk akun yang sama (kesalahan
+          prosedur import, bukan reclass ganda)
+        - items + total_actual dari AP_EXPENSE_REPORT_LINES + AP_EXPENSE_REPORT_HEADERS_V
+          (klaim expense report HRGA — meal, petty cash, dll), BUKAN AP Invoice
+        - remain       = available + reclass − total_actual
         """
         budget_rows = await asyncio.to_thread(
             self._query_budget, dept, year, month=None, account_code=account_code
@@ -168,14 +180,20 @@ class BudgetService:
         budget_map = {int(r["month"]): int(r.get("budget_amount") or 0)
                       for r in budget_rows}
 
-        actual_rows = await asyncio.to_thread(
-            self._query_actual_gl, dept, year, month=None, account_code=account_code
+        encumbrance_rows = await asyncio.to_thread(
+            self._query_encumbrance_gl, dept, year, month=None, account_code=account_code
         )
-        actual_map = {int(r["month"]): int(r.get("actual_amount") or 0)
-                      for r in actual_rows}
+        encumbrance_map = {int(r["month"]): int(r.get("encumbrance_amount") or 0)
+                            for r in encumbrance_rows}
+
+        reclass_rows = await asyncio.to_thread(
+            self._query_reclass_gl, dept, year, month=None, account_code=account_code
+        )
+        reclass_map  = {int(r["month"]): int(r.get("reclass_amount") or 0) for r in reclass_rows}
+        reclass_note = {int(r["month"]): (r.get("note") or "") for r in reclass_rows}
 
         items_all = await asyncio.to_thread(
-            self._query_actual_items, dept, year, month=None, account_code=account_code
+            self._query_expense_report_items, dept, year, month=None, account_code=account_code
         )
 
         items_by_month: dict[int, list] = {}
@@ -187,27 +205,34 @@ class BudgetService:
                        "Jul","Agu","Sep","Okt","Nov","Des"]
 
         all_months = sorted(set(
-            list(budget_map.keys()) + list(actual_map.keys()) + list(items_by_month.keys())
+            list(budget_map.keys()) + list(encumbrance_map.keys())
+            + list(reclass_map.keys()) + list(items_by_month.keys())
         ))
         monthly = []
         for m in all_months:
-            budget         = budget_map.get(m, 0)
-            month_items    = items_by_month.get(m, [])
-            total_actual   = actual_map.get(m, 0)
-            ap_items_total = sum(int(i.get("amount") or 0) for i in month_items)
+            budget       = budget_map.get(m, 0)
+            encumbrance  = encumbrance_map.get(m, 0)
+            available    = budget - encumbrance
+            reclass      = reclass_map.get(m, 0)
+            month_items  = items_by_month.get(m, [])
+            total_actual = sum(int(i.get("amount") or 0) for i in month_items)
+            remain       = available + reclass - total_actual
             monthly.append({
-                "month":          m,
-                "month_name":     MONTH_NAMES[m - 1],
-                "budget":         budget,
-                "total_actual":   total_actual,
-                "ap_items_total": ap_items_total,
-                "remain":         budget - total_actual,
+                "month":        m,
+                "month_name":   MONTH_NAMES[m - 1],
+                "budget":       budget,
+                "encumbrance":  encumbrance,
+                "available":    available,
+                "reclass":      reclass,
+                "note":         reclass_note.get(m, ""),
+                "total_actual": total_actual,
+                "remain":       remain,
                 "items": [
                     {
                         "description": i.get("description") or "",
                         "amount":      int(i.get("amount") or 0),
-                        "date":        i.get("invoice_date"),
-                        "invoice_num": i.get("invoice_num"),
+                        "date":        i.get("expense_date"),
+                        "report_num":  i.get("report_num"),
                     }
                     for i in month_items
                 ],
@@ -310,38 +335,107 @@ class BudgetService:
             "month": month, "account": account_code,
         })
 
-    # ── Private: AP Invoice items ─────────────────────────────────────────────
+    # ── Private: Encumbrance dari GL — per bulan, per akun ────────────────────
 
-    def _query_actual_items(self, dept: str, year: int,
-                             month: int = None, account_code: str = None) -> list[dict]:
+    def _query_encumbrance_gl(self, dept: str, year: int,
+                               month: int = None, account_code: str = None) -> list[dict]:
         sql = f"""
             SELECT
-                EXTRACT(YEAR  FROM ai.invoice_date)            AS year,
-                EXTRACT(MONTH FROM ai.invoice_date)            AS month,
+                EXTRACT(YEAR  FROM gp.start_date)              AS year,
+                EXTRACT(MONTH FROM gp.start_date)              AS month,
                 gcc.{ACCOUNT_COL}                              AS account_code,
-                NVL(ail.description, ai.description)
-                    || CASE WHEN NVL(ail.description, ai.description) IS NOT NULL
-                            THEN '' ELSE ' — ' || aps.vendor_name END AS description,
-                aid.amount,
-                TO_CHAR(ai.invoice_date, 'YYYY-MM-DD')         AS invoice_date,
-                ai.invoice_num
-            FROM ap_invoice_distributions_all aid
-            JOIN ap_invoices_all ai
-                ON  ai.invoice_id            = aid.invoice_id
-            JOIN ap_invoice_lines_all ail
-                ON  ail.invoice_id           = aid.invoice_id
-                AND ail.line_number          = aid.invoice_line_number
-            JOIN ap_suppliers aps
-                ON  aps.vendor_id            = ai.vendor_id
+                SUM(NVL(gb.period_net_dr, 0) - NVL(gb.period_net_cr, 0)) AS encumbrance_amount
+            FROM gl_balances gb
+            JOIN gl_ledgers gl
+                ON  gl.ledger_id            = gb.ledger_id
             JOIN gl_code_combinations gcc
-                ON  gcc.code_combination_id  = aid.dist_code_combination_id
-            WHERE ai.cancelled_date          IS NULL
-              AND aid.reversal_flag          IS NULL
-              AND gcc.{DEPT_COL}             = :dept
-              AND EXTRACT(YEAR  FROM ai.invoice_date) = :year
-              AND (:month   IS NULL OR EXTRACT(MONTH FROM ai.invoice_date) = :month)
+                ON  gcc.code_combination_id = gb.code_combination_id
+            JOIN gl_periods gp
+                ON  gp.period_name          = gb.period_name
+                AND gp.period_set_name      = gl.period_set_name
+            WHERE gb.actual_flag            = 'E'
+              AND gb.currency_code          = gl.currency_code
+              AND  gcc.segment3 = :dept
+              AND EXTRACT(YEAR FROM gp.start_date)  = :year
+              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) = :month)
               AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
-            ORDER BY ai.invoice_date, ai.invoice_id, aid.distribution_line_number
+            GROUP BY
+                EXTRACT(YEAR  FROM gp.start_date),
+                EXTRACT(MONTH FROM gp.start_date),
+                gcc.{ACCOUNT_COL}
+            ORDER BY month, account_code
+        """
+        return self._query(sql, {
+            "dept": dept, "year": year,
+            "month": month, "account": account_code,
+        })
+
+    # ── Private: Budget Reclass dari jurnal manual ────────────────────────────
+    # Reclass seharusnya masuk lewat Budget Journal (langsung ke GL_BALANCES
+    # actual_flag='B'), tapi di CKD Otto di-input sebagai jurnal ACTUAL biasa
+    # dengan je_category 'RECLASS' atau 'BUDGET' (kesalahan prosedur import) —
+    # sehingga harus di-query terpisah dan di-net-kan (debit − credit) di sini,
+    # baru ditambahkan manual ke rumus Remain = Available + Reclass − Actual.
+
+    def _query_reclass_gl(self, dept: str, year: int,
+                           month: int = None, account_code: str = None) -> list[dict]:
+        sql = f"""
+            SELECT
+                EXTRACT(YEAR  FROM gp.start_date)              AS year,
+                EXTRACT(MONTH FROM gp.start_date)              AS month,
+                gcc.{ACCOUNT_COL}                              AS account_code,
+                SUM(NVL(gjl.entered_dr, 0) - NVL(gjl.entered_cr, 0)) AS reclass_amount,
+                MAX(NVL(gjl.description, gjh.description))     AS note
+            FROM gl_je_lines gjl
+            JOIN gl_je_headers gjh
+                ON  gjh.je_header_id        = gjl.je_header_id
+                AND gjh.status              = 'P'
+            JOIN gl_ledgers gl
+                ON  gl.ledger_id            = gjh.ledger_id
+            JOIN gl_code_combinations gcc
+                ON  gcc.code_combination_id = gjl.code_combination_id
+            JOIN gl_periods gp
+                ON  gp.period_name          = gjl.period_name
+                AND gp.period_set_name      = gl.period_set_name
+            WHERE gjh.je_category IN ('RECLASS', 'BUDGET')
+              AND  gcc.segment3 = :dept
+              AND EXTRACT(YEAR FROM gp.start_date)  = :year
+              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) = :month)
+              AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
+            GROUP BY
+                EXTRACT(YEAR  FROM gp.start_date),
+                EXTRACT(MONTH FROM gp.start_date),
+                gcc.{ACCOUNT_COL}
+            ORDER BY month, account_code
+        """
+        return self._query(sql, {
+            "dept": dept, "year": year,
+            "month": month, "account": account_code,
+        })
+
+    # ── Private: Expense Report items (klaim HRGA — meal, petty cash, dll) ────
+
+    def _query_expense_report_items(self, dept: str, year: int,
+                                     month: int = None, account_code: str = None) -> list[dict]:
+        sql = f"""
+            SELECT
+                EXTRACT(YEAR  FROM aerl.expense_date)          AS year,
+                EXTRACT(MONTH FROM aerl.expense_date)          AS month,
+                gcc.{ACCOUNT_COL}                              AS account_code,
+                aerl.item_description                          AS description,
+                aerl.amount,
+                TO_CHAR(aerl.expense_date, 'YYYY-MM-DD')       AS expense_date,
+                NVL(aerh.invoice_num, TO_CHAR(aerh.report_header_id)) AS report_num
+            FROM ap_expense_report_lines aerl
+            JOIN ap_expense_report_headers_v aerh
+                ON  aerh.report_header_id    = aerl.report_header_id
+            JOIN gl_code_combinations gcc
+                ON  gcc.code_combination_id  = aerl.dr_code_combination_id
+            WHERE gcc.{DEPT_COL}             = :dept
+              AND EXTRACT(YEAR  FROM aerl.expense_date) = :year
+              AND (:month   IS NULL OR EXTRACT(MONTH FROM aerl.expense_date) = :month)
+              AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
+            ORDER BY aerl.expense_date, aerh.report_header_id, aerl.report_line_id
         """
         return self._query(sql, {
             "dept": dept, "year": year,
