@@ -419,12 +419,12 @@ class BudgetService:
                                      month: int = None, account_code: str = None) -> list[dict]:
         sql = f"""
             SELECT
-                EXTRACT(YEAR  FROM aerl.expense_date)          AS year,
-                EXTRACT(MONTH FROM aerl.expense_date)          AS month,
+                EXTRACT(YEAR  FROM aerl.start_expense_date)          AS year,
+                EXTRACT(MONTH FROM aerl.start_expense_date)          AS month,
                 gcc.{ACCOUNT_COL}                              AS account_code,
                 aerl.item_description                          AS description,
                 aerl.amount,
-                TO_CHAR(aerl.expense_date, 'YYYY-MM-DD')       AS expense_date,
+                TO_CHAR(aerl.start_expense_date, 'YYYY-MM-DD')       AS expense_date,
                 NVL(aerh.invoice_num, TO_CHAR(aerh.report_header_id)) AS report_num
             FROM ap_expense_report_lines aerl
             JOIN ap_expense_report_headers_v aerh
@@ -432,10 +432,10 @@ class BudgetService:
             JOIN gl_code_combinations gcc
                 ON  gcc.code_combination_id  = aerl.code_combination_id
             WHERE gcc.{DEPT_COL}             = :dept
-              AND EXTRACT(YEAR  FROM aerl.expense_date) = :year
-              AND (:month   IS NULL OR EXTRACT(MONTH FROM aerl.expense_date) = :month)
+              AND EXTRACT(YEAR  FROM aerl.start_expense_date) = :year
+              AND (:month   IS NULL OR EXTRACT(MONTH FROM aerl.start_expense_date) = :month)
               AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
-            ORDER BY aerl.expense_date, aerh.report_header_id, aerl.report_line_id
+            ORDER BY aerl.start_expense_date, aerh.report_header_id, aerl.report_line_id
         """
         return self._query(sql, {
             "dept": dept, "year": year,
