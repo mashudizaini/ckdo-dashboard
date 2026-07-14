@@ -154,14 +154,25 @@ class BudgetService:
     async def get_account_detail(self, dept: str, account_code: str, year: int) -> dict:
         """
         Rincian per bulan untuk 1 akun:
-        - budget dari GL_BALANCES
-        - item AP Invoice dari AP_INVOICE_DISTRIBUTIONS_ALL
+        - budget       dari GL_BALANCES (actual_flag='B')
+        - total_actual dari GL_BALANCES (actual_flag='A') — cocok dengan Oracle
+          Funds Available Inquiry, mencakup semua sumber posting (AP, payroll,
+          jurnal manual, dll), bukan hanya AP Invoice.
+        - items         dari AP_INVOICE_DISTRIBUTIONS_ALL — daftar detail AP
+          Invoice sebagai referensi; ini SUBSET dari total_actual dan bisa saja
+          tidak menjumlah persis ke total_actual jika ada posting non-AP-Invoice.
         """
         budget_rows = await asyncio.to_thread(
             self._query_budget, dept, year, month=None, account_code=account_code
         )
         budget_map = {int(r["month"]): int(r.get("budget_amount") or 0)
                       for r in budget_rows}
+
+        actual_rows = await asyncio.to_thread(
+            self._query_actual_gl, dept, year, month=None, account_code=account_code
+        )
+        actual_map = {int(r["month"]): int(r.get("actual_amount") or 0)
+                      for r in actual_rows}
 
         items_all = await asyncio.to_thread(
             self._query_actual_items, dept, year, month=None, account_code=account_code
@@ -175,18 +186,22 @@ class BudgetService:
         MONTH_NAMES = ["Jan","Feb","Mar","Apr","Mei","Jun",
                        "Jul","Agu","Sep","Okt","Nov","Des"]
 
-        all_months = sorted(set(list(budget_map.keys()) + list(items_by_month.keys())))
+        all_months = sorted(set(
+            list(budget_map.keys()) + list(actual_map.keys()) + list(items_by_month.keys())
+        ))
         monthly = []
         for m in all_months:
-            budget       = budget_map.get(m, 0)
-            month_items  = items_by_month.get(m, [])
-            total_actual = sum(int(i.get("amount") or 0) for i in month_items)
+            budget         = budget_map.get(m, 0)
+            month_items    = items_by_month.get(m, [])
+            total_actual   = actual_map.get(m, 0)
+            ap_items_total = sum(int(i.get("amount") or 0) for i in month_items)
             monthly.append({
-                "month":        m,
-                "month_name":   MONTH_NAMES[m - 1],
-                "budget":       budget,
-                "total_actual": total_actual,
-                "remain":       budget - total_actual,
+                "month":          m,
+                "month_name":     MONTH_NAMES[m - 1],
+                "budget":         budget,
+                "total_actual":   total_actual,
+                "ap_items_total": ap_items_total,
+                "remain":         budget - total_actual,
                 "items": [
                     {
                         "description": i.get("description") or "",
@@ -246,28 +261,54 @@ class BudgetService:
             "month": month, "account": account_code,
         })
 
-    # ── Private: Actual summary (per akun) dari AP ────────────────────────────
+    # ── Private: Actual summary (per akun) dari GL_BALANCES ───────────────────
+    # Sama persis dengan Oracle "Funds Available Inquiry" — actual_flag='A'
+    # mencakup SEMUA sumber posting (AP Invoice, payroll, jurnal manual, dll),
+    # bukan hanya AP Invoice seperti versi sebelumnya.
 
     def _query_actual_summary(self, dept: str, year: int,
                                month: int = None) -> dict[str, int]:
+        rows = self._query_actual_gl(dept, year, month=month)
+        totals: dict[str, int] = {}
+        for r in rows:
+            code = str(r["account_code"])
+            totals[code] = totals.get(code, 0) + int(r.get("actual_amount") or 0)
+        return totals
+
+    # ── Private: Actual dari GL — per bulan, per akun ─────────────────────────
+
+    def _query_actual_gl(self, dept: str, year: int,
+                          month: int = None, account_code: str = None) -> list[dict]:
         sql = f"""
             SELECT
-                gcc.{ACCOUNT_COL}  AS account_code,
-                SUM(aid.amount)    AS total_amount
-            FROM ap_invoice_distributions_all aid
-            JOIN ap_invoices_all ai
-                ON  ai.invoice_id           = aid.invoice_id
+                EXTRACT(YEAR  FROM gp.start_date)              AS year,
+                EXTRACT(MONTH FROM gp.start_date)              AS month,
+                gcc.{ACCOUNT_COL}                              AS account_code,
+                SUM(NVL(gb.period_net_dr, 0) - NVL(gb.period_net_cr, 0)) AS actual_amount
+            FROM gl_balances gb
+            JOIN gl_ledgers gl
+                ON  gl.ledger_id            = gb.ledger_id
             JOIN gl_code_combinations gcc
-                ON  gcc.code_combination_id = aid.dist_code_combination_id
-            WHERE ai.cancelled_date         IS NULL
-              AND aid.reversal_flag         IS NULL
-              AND gcc.{DEPT_COL}            = :dept
-              AND EXTRACT(YEAR  FROM ai.invoice_date) = :year
-              AND (:month IS NULL OR EXTRACT(MONTH FROM ai.invoice_date) = :month)
-            GROUP BY gcc.{ACCOUNT_COL}
+                ON  gcc.code_combination_id = gb.code_combination_id
+            JOIN gl_periods gp
+                ON  gp.period_name          = gb.period_name
+                AND gp.period_set_name      = gl.period_set_name
+            WHERE gb.actual_flag            = 'A'
+              AND gb.currency_code          = gl.currency_code
+              AND  gcc.segment3 = :dept
+              AND EXTRACT(YEAR FROM gp.start_date)  = :year
+              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) = :month)
+              AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
+            GROUP BY
+                EXTRACT(YEAR  FROM gp.start_date),
+                EXTRACT(MONTH FROM gp.start_date),
+                gcc.{ACCOUNT_COL}
+            ORDER BY month, account_code
         """
-        rows = self._query(sql, {"dept": dept, "year": year, "month": month})
-        return {str(r["account_code"]): int(r.get("total_amount") or 0) for r in rows}
+        return self._query(sql, {
+            "dept": dept, "year": year,
+            "month": month, "account": account_code,
+        })
 
     # ── Private: AP Invoice items ─────────────────────────────────────────────
 

@@ -162,7 +162,7 @@ async def export_budget(
     ws = wb.active
     ws.title = f"Budget {dept}"
     ws.append(["Department", "Tahun", "Filter Bulan", "Kode Akun", "Nama Akun",
-               "Budget (Rp)", "Realisasi AP (Rp)", "Sisa (Rp)"])
+               "Budget (Rp)", "Realisasi GL (Rp)", "Sisa (Rp)"])
 
     for acc in accounts:
         ws.append([

@@ -1920,11 +1920,15 @@ function AttendanceRateSection() {
 }
 
 // ── Budget Monitoring ─────────────────────────────────────────────────────────
-// Data dari 2 sumber Oracle yang di-upload terpisah:
-//   - "Import Budget"     → Oracle modul Budget   → /upload/budget
-//   - "Import Realisasi"  → Oracle modul AP Invoice → /upload/actual
+// Live query ke Oracle EBS GL_BALANCES (bukan upload):
+//   - Budget  → GL_BALANCES actual_flag='B'
+//   - Actual  → GL_BALANCES actual_flag='A' — sama dengan Oracle "Funds Available
+//               Inquiry", mencakup semua sumber posting (AP Invoice, payroll, dll)
+//   - Item AP Invoice per bulan (drill-down) tetap dari AP_INVOICE_DISTRIBUTIONS_ALL
+//     sebagai referensi detail — ini subset dari Actual (GL), bisa tidak menjumlah
+//     persis jika ada posting non-AP-Invoice.
 //
-// Kalkulasi:  Remain = Available + Reclass − Total Actual
+// Kalkulasi:  Remain = Budget − Total Actual (GL)
 
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const WDAY_LABELS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
@@ -2566,7 +2570,7 @@ function BudgetMonitoringSection() {
       {!loading && summary && accounts.length > 0 && (
         <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
           <BudgetSummaryCard label="Total Budget (GL)"    value={fmtRp(summary.total_budget)} color="text-blue-400"  bg="bg-blue-500/10  border-blue-500/20" />
-          <BudgetSummaryCard label="Total Actual (AP)" value={fmtRp(summary.total_actual)} color="text-violet-400" bg="bg-violet-500/10 border-violet-500/20" />
+          <BudgetSummaryCard label="Total Actual (GL)" value={fmtRp(summary.total_actual)} color="text-violet-400" bg="bg-violet-500/10 border-violet-500/20" />
           <BudgetSummaryCard
             label="Remaining (Budget − Actual)"
             value={fmtRp(summary.total_remain)}
@@ -2583,7 +2587,7 @@ function BudgetMonitoringSection() {
           <div className="bg-gray-800/60 grid grid-cols-12 px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
             <div className="col-span-5">Account</div>
             <div className="col-span-3 text-right">Budget (GL)</div>
-            <div className="col-span-2 text-right">Actual (AP)</div>
+            <div className="col-span-2 text-right">Actual (GL)</div>
             <div className="col-span-2 text-right">Remaining</div>
           </div>
 
@@ -2656,7 +2660,7 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
       <table className="w-full">
         <thead>
           <tr className="bg-gray-800/40 text-gray-500 uppercase tracking-wider text-xs">
-            <th className="px-3 py-2 text-left font-semibold" style={{width:"45%"}}>Actual Expense (AP Invoice)</th>
+            <th className="px-3 py-2 text-left font-semibold" style={{width:"45%"}}>AP Invoice Detail (reference)</th>
             <th className="px-3 py-2 text-right font-semibold">Amount (Rp)</th>
             <th className="px-3 py-2 text-right font-semibold">Date</th>
             <th className="px-3 py-2 text-right font-semibold">No. Invoice</th>
@@ -2696,7 +2700,7 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
 
           {/* Baris total */}
           <tr className="bg-gray-800/40 font-semibold border-t-2 border-gray-700">
-            <td className="px-3 py-2 text-gray-400 uppercase tracking-wider">Total Actual</td>
+            <td className="px-3 py-2 text-gray-400 uppercase tracking-wider">Total Actual (GL)</td>
             <td className="px-3 py-2 text-right text-violet-700 tabular-nums">
               {m.total_actual.toLocaleString("id-ID")}
             </td>
@@ -2707,6 +2711,15 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
           </tr>
         </tbody>
       </table>
+
+      {/* Catatan jika detail AP Invoice tidak menjumlah persis ke Total Actual (GL) —
+          artinya ada posting non-AP-Invoice (payroll, jurnal manual, dll) di akun ini */}
+      {m.ap_items_total !== m.total_actual && (
+        <div className="px-3 py-1.5 bg-amber-500/10 border-t border-amber-500/20 text-amber-500 text-xs">
+          AP Invoice detail totals {fmtRp(m.ap_items_total)} — the {fmtRp(m.total_actual - m.ap_items_total)} difference
+          from Total Actual (GL) comes from non-AP-Invoice postings (payroll, manual journal, etc.) not itemized above.
+        </div>
+      )}
     </div>
   );
 }
