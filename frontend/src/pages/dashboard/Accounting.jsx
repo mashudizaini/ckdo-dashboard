@@ -19,7 +19,7 @@ const TABS = [
   { id: "ap-invoice", icon: FileText,   label: "AP Autoinvoice",    color: "#2563eb" },
   { id: "cogs",       icon: BarChart2,  label: "COGS Report",       color: "#10b981" },
   { id: "profit",     icon: DollarSign, label: "AP Outstanding",    color: "#3b82f6" },
-  { id: "ar",         icon: FileText,   label: "AR Balance",        color: "#f59e0b" },
+  { id: "ar",         icon: FileText,   label: "AR Outstanding",    color: "#f59e0b" },
   { id: "coretax",    icon: FileDown,   label: "Coretax Download",  color: "#8b5cf6" },
 ];
 
@@ -390,6 +390,11 @@ function AROutstandingPanel() {
   const [loading,        setLoading]        = useState(false);
   const [error,          setError]          = useState(null);
   const [search,         setSearch]         = useState("");
+  const [page,           setPage]           = useState(1);
+  const [sort,           setSort]           = useState({ key: null, dir: "asc" });
+
+  const AR_PAGE_SIZE = 10;
+  const AR_NUMERIC_KEYS = ["original_amount", "remaining_amount", "days_overdue"];
 
   const loadData = useCallback(async () => {
     setLoading(true); setError(null);
@@ -403,21 +408,41 @@ function AROutstandingPanel() {
         ...(dateTo        && { date_to:         dateTo        }),
       };
       const res = await accountingApi.getArOutstanding(params);
-      if (res.success) setData(res);
+      if (res.success) { setData(res); setPage(1); }
       else { setError(res.error || "Failed to load"); setData(null); }
     } catch (e) {
       setError(e?.response?.data?.detail || String(e)); setData(null);
     } finally { setLoading(false); }
   }, [customerName, invoiceNumber, dateFrom, dateTo, statusFilter, limit]);
 
+  const toggleSort = (key) => {
+    setPage(1);
+    setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  };
+
   // Client-side search on top of fetched data
-  const rows = data?.data?.filter(r => {
+  const filteredRows = data?.data?.filter(r => {
     if (!search) return true;
     const q = search.toLowerCase();
     return (r.customer_name  || "").toLowerCase().includes(q)
         || (r.invoice_number || "").toLowerCase().includes(q)
         || (r.account_number || "").toLowerCase().includes(q);
   }) ?? [];
+
+  const rows = useMemo(() => {
+    if (!sort.key) return filteredRows;
+    const numeric = AR_NUMERIC_KEYS.includes(sort.key);
+    const mul = sort.dir === "asc" ? 1 : -1;
+    return [...filteredRows].sort((a, b) => {
+      if (numeric) return ((Number(a[sort.key]) || 0) - (Number(b[sort.key]) || 0)) * mul;
+      const av = (a[sort.key] ?? "").toString().toLowerCase();
+      const bv = (b[sort.key] ?? "").toString().toLowerCase();
+      return av.localeCompare(bv) * mul;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, search, sort]);
+
+  const pagedRows = rows.slice((page - 1) * AR_PAGE_SIZE, page * AR_PAGE_SIZE);
 
   const INPUT = { padding: "7px 11px", borderRadius: 9, border: "none", fontSize: 12, background: NEU.bg, boxShadow: NEU.shadowIn, color: "#1e293b", outline: "none" };
 
@@ -448,11 +473,7 @@ function AROutstandingPanel() {
   const sm = data?.summary;
 
   return (
-    <SectionCard
-      title="AR Outstanding — Invoice Receivable"
-      subtitle="Oracle EBS 12.2.8 · AR_PAYMENT_SCHEDULES_ALL · Class: INV + DM"
-      action={data?.data?.length > 0 && <ActionBtn icon={Download} label="Export CSV" color="#f59e0b" onClick={() => exportArCSV(data.data)} />}
-    >
+    <SectionCard>
       {/* Filter bar */}
       <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
         <div>
@@ -490,6 +511,9 @@ function AROutstandingPanel() {
           </select>
         </div>
         <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#f59e0b" onClick={loadData} disabled={loading} />
+        {data?.data?.length > 0 && (
+          <ActionBtn icon={Download} label="Export CSV" color="#f59e0b" onClick={() => exportArCSV(data.data)} />
+        )}
       </div>
 
       {error && (
@@ -517,7 +541,7 @@ function AROutstandingPanel() {
 
           {/* Client-side search */}
           <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-            <input value={search} onChange={e => setSearch(e.target.value)}
+            <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
               placeholder="Filter results by customer / invoice / account…"
               style={{ ...INPUT, width: 320 }} />
             <span style={{ fontSize: 11, color: "#94a3b8" }}>
@@ -533,24 +557,27 @@ function AROutstandingPanel() {
                   <tr style={{ background: "linear-gradient(135deg,#92400e,#78350f)" }}>
                     <th style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5 }}>#</th>
                     {AR_HEADERS.map(h => (
-                      <th key={h.key} style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5, minWidth: h.width, whiteSpace: "nowrap" }}>{h.label}</th>
+                      <SortableTH key={h.key} label={h.label} sortKey={h.key} sort={sort} onSort={toggleSort}
+                        style={{ color: "#fef3c7", background: "transparent", fontSize: 9.5, minWidth: h.width, whiteSpace: "nowrap" }} />
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.length === 0 ? (
+                  {pagedRows.length === 0 ? (
                     <tr>
                       <td colSpan={AR_HEADERS.length + 1} style={{ padding: "40px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
                         No records found
                       </td>
                     </tr>
-                  ) : rows.map((r, i) => (
-                    <tr key={i}
+                  ) : pagedRows.map((r, i) => {
+                    const globalIndex = (page - 1) * AR_PAGE_SIZE + i;
+                    return (
+                    <tr key={globalIndex}
                       style={{ background: rowBg(r) || (i % 2 === 0 ? "#f0f3f9" : "#e8edf5") }}
                       onMouseEnter={e => e.currentTarget.style.background = "rgba(245,158,11,0.08)"}
                       onMouseLeave={e => e.currentTarget.style.background = rowBg(r) || (i % 2 === 0 ? "#f0f3f9" : "#e8edf5")}
                     >
-                      <td style={{ ...TD, color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>{i + 1}</td>
+                      <td style={{ ...TD, color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>{globalIndex + 1}</td>
                       <td style={{ ...TD, fontWeight: 700, color: "#1e293b", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.customer_name}>{r.customer_name}</td>
                       <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.account_number}</td>
                       <td style={{ ...TD, fontFamily: "monospace", fontWeight: 700, color: "#2563eb", whiteSpace: "nowrap" }}>{r.invoice_number}</td>
@@ -567,10 +594,14 @@ function AROutstandingPanel() {
                       <td style={{ ...TD, fontSize: 11, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.operating_unit}>{r.operating_unit}</td>
                       <td style={{ ...TD, fontSize: 11, color: "#64748b", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.comments}>{r.comments}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
+            {rows.length > 0 && (
+              <Pagination total={rows.length} page={page} onPage={setPage} pageSize={AR_PAGE_SIZE} />
+            )}
           </div>
         </>
       )}
