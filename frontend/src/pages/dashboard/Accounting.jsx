@@ -718,9 +718,7 @@ function InventoryRMPMPanel() {
   };
 
   return (
-    <SectionCard
-      action={data?.data?.length > 0 && <ActionBtn icon={Download} label="Export CSV" color="#10b981" onClick={() => exportInvCSV(data.data, period)} />}
-    >
+    <SectionCard>
       {/* Filter bar */}
       <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <div>
@@ -738,6 +736,9 @@ function InventoryRMPMPanel() {
           </label>
         </div>
         <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#10b981" onClick={loadData} disabled={loading || !period} />
+        {data?.data?.length > 0 && (
+          <ActionBtn icon={Download} label="Export CSV" color="#10b981" onClick={() => exportInvCSV(data.data, period)} />
+        )}
       </div>
 
       {error && <div style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 10, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", fontSize: 12, color: "#dc2626" }}>{error}</div>}
@@ -1018,13 +1019,7 @@ function ItemCostComponentPanel() {
   };
 
   return (
-    <SectionCard
-      action={
-        data?.data?.length > 0 && (
-          <ActionBtn icon={Download} label="Export CSV" color="#10b981" onClick={() => exportICCCSV(data.data, period)} />
-        )
-      }
-    >
+    <SectionCard>
       {/* Filter bar */}
       <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 18 }}>
         <div>
@@ -1040,6 +1035,9 @@ function ItemCostComponentPanel() {
           </div>
         </div>
         <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#10b981" onClick={loadData} disabled={loading || !period} />
+        {data?.data?.length > 0 && (
+          <ActionBtn icon={Download} label="Export CSV" color="#10b981" onClick={() => exportICCCSV(data.data, period)} />
+        )}
       </div>
 
       {/* Error */}
@@ -1245,15 +1243,9 @@ function MaterialTransactionPanel() {
   };
 
   return (
-    <SectionCard
-      action={
-        data?.data?.length > 0 && (
-          <ActionBtn icon={Download} label="Export CSV" color="#10b981" onClick={() => exportCSV(data.data)} />
-        )
-      }
-    >
+    <SectionCard>
       {/* Filter Bar */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr auto auto", gap: 10, marginBottom: 18, alignItems: "end" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr auto auto auto", gap: 10, marginBottom: 18, alignItems: "end" }}>
         <div>
           <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Date From</p>
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={INPUT} />
@@ -1281,6 +1273,9 @@ function MaterialTransactionPanel() {
           </select>
         </div>
         <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#10b981" onClick={loadData} disabled={loading} />
+        {data?.data?.length > 0 && (
+          <ActionBtn icon={Download} label="Export CSV" color="#10b981" onClick={() => exportCSV(data.data)} />
+        )}
       </div>
 
       {/* Error */}
