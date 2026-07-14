@@ -105,8 +105,14 @@ class BudgetService:
         """
         Ringkasan budget vs realisasi per akun untuk satu department.
         Budget  : GL_BALANCES (actual_flag='B')
-        Actual  : AP_INVOICE_DISTRIBUTIONS_ALL
+        Actual  : GL_BALANCES (actual_flag='A')
         Remain  : Budget − Actual
+
+        Jika `month` diisi, Budget & Actual dihitung Year-To-Date KUMULATIF dari
+        Januari sampai bulan tsb (bukan hanya bulan itu sendiri) — supaya cocok
+        dengan Oracle Funds Available Inquiry saat Amount Type = "Year To Date
+        Extended". Ini beda dengan get_account_detail() yang menampilkan tiap
+        bulan sebagai baris terpisah (period-only, bukan kumulatif).
         """
         budget_rows = await asyncio.to_thread(self._query_budget, dept, year, month)
         actual_map  = await asyncio.to_thread(self._query_actual_summary, dept, year, month)
@@ -271,9 +277,9 @@ class BudgetService:
                 AND gp.period_set_name      = gl.period_set_name
             WHERE gb.actual_flag            = 'B'
               AND gb.currency_code          = gl.currency_code
-              AND  gcc.segment3 = :dept 
+              AND  gcc.segment3 = :dept
               AND EXTRACT(YEAR FROM gp.start_date)  = :year
-              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) = :month)
+              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) <= :month)
               AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
             GROUP BY
                 EXTRACT(YEAR  FROM gp.start_date),
@@ -322,7 +328,7 @@ class BudgetService:
               AND gb.currency_code          = gl.currency_code
               AND  gcc.segment3 = :dept
               AND EXTRACT(YEAR FROM gp.start_date)  = :year
-              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) = :month)
+              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) <= :month)
               AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
             GROUP BY
                 EXTRACT(YEAR  FROM gp.start_date),
