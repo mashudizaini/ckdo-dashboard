@@ -1396,7 +1396,7 @@ function MaterialTransactionPanel() {
                         const v = row[h.key];
                         const isNum = MTX_NUMERIC_KEYS.includes(h.key);
                         return (
-                          <td key={h.key} style={{ ...TD, fontFamily: h.mono ? "monospace" : undefined, textAlign: isNum ? "right" : "left", whiteSpace: h.key === "item_description" || h.key === "trx_type" ? "normal" : "nowrap" }}>
+                          <td key={h.key} style={{ ...TD, fontFamily: h.mono ? "monospace" : undefined, textAlign: isNum ? "right" : "left" }}>
                             {isNum ? fmtNum(v) : (v ?? "-")}
                           </td>
                         );
@@ -1424,7 +1424,7 @@ const TH = {
   borderBottom: "2px solid rgba(0,0,0,0.06)", whiteSpace: "nowrap",
 };
 const TD = {
-  padding: "8px 12px", fontSize: 12, color: "#334155",
+  padding: "8px 12px", fontSize: 12, color: "#334155", whiteSpace: "nowrap",
 };
 
 function SectionCard({ title, subtitle, action, children }) {
