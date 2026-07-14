@@ -2607,8 +2607,8 @@ function BudgetMonitoringSection() {
                       <div className="text-gray-600">{acc.account_code}</div>
                     </div>
                   </div>
-                  <div className="col-span-3 text-right text-blue-300">{fmtRp(acc.budget)}</div>
-                  <div className="col-span-2 text-right text-violet-300">{fmtRp(acc.actual)}</div>
+                  <div className="col-span-3 text-right text-blue-600 font-semibold">{fmtRp(acc.budget)}</div>
+                  <div className="col-span-2 text-right text-violet-600 font-semibold">{fmtRp(acc.actual)}</div>
                   <div className={`col-span-2 text-right font-semibold ${remainOk ? "text-green-400" : "text-red-400"}`}>
                     {fmtRp(acc.remain)}
                   </div>
@@ -2616,7 +2616,7 @@ function BudgetMonitoringSection() {
 
                 {/* ── Detail: tabel per bulan sesuai format laporan ── */}
                 {isExp && (
-                  <div className="border-t border-gray-800/60 bg-gray-950/50 px-4 py-3">
+                  <div className="border-t border-gray-800/60 bg-gray-950 px-4 py-3">
                     {!detail ? (
                       <div className="flex justify-center py-6"><Loader2 size={16} className="animate-spin text-gray-600" /></div>
                     ) : detail.monthly.length === 0 ? (
@@ -2646,9 +2646,9 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
   return (
     <div className="rounded-lg border border-gray-800 overflow-hidden text-xs">
       {/* Month header */}
-      <div className="bg-gray-800/80 px-3 py-1.5 flex items-center gap-3">
+      <div className="bg-gray-800 px-3 py-1.5 flex items-center gap-3">
         <span className="font-bold text-gray-200">{m.month_name || MONTHS_ID[m.month - 1]} Budget</span>
-        <span className="text-blue-300 font-semibold">{fmtRp(m.budget)}</span>
+        <span className="text-blue-600 font-semibold">{fmtRp(m.budget)}</span>
         <span className="text-gray-600 flex-1">{accName}</span>
       </div>
 
@@ -2697,7 +2697,7 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
           {/* Baris total */}
           <tr className="bg-gray-800/40 font-semibold border-t-2 border-gray-700">
             <td className="px-3 py-2 text-gray-400 uppercase tracking-wider">Total Actual</td>
-            <td className="px-3 py-2 text-right text-violet-300 tabular-nums">
+            <td className="px-3 py-2 text-right text-violet-700 tabular-nums">
               {m.total_actual.toLocaleString("id-ID")}
             </td>
             <td colSpan={2} />
