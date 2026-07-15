@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { hrApi } from "@/api/dashboard";
 import { useAuthStore } from "@/store/authStore";
+import { toggleSort, sortRows } from "@/components/SortableTH";
 
 const NEU = {
   bg: "#e8edf5",
@@ -31,6 +32,15 @@ const CV_SUBTABS = [
 
 const TH = { padding: "10px 12px", textAlign: "left", fontSize: 10.5, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "2px solid rgba(0,0,0,0.06)", whiteSpace: "nowrap" };
 const TD = { padding: "8px 12px", fontSize: 12, color: "#334155", whiteSpace: "nowrap" };
+
+function SortableTHi({ label, field, sortBy, sortDir, onSort, style }) {
+  const active = sortBy === field;
+  return (
+    <th onClick={() => onSort(field)} style={{ ...TH, ...style, cursor: "pointer", userSelect: "none", color: active ? "#2563eb" : TH.color }}>
+      {label} {active && (sortDir === "asc" ? "▲" : "▼")}
+    </th>
+  );
+}
 
 function RecBadge({ rec }) {
   const cfg = REC_CFG[rec] || REC_CFG["Consider"];
@@ -416,6 +426,9 @@ function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
   const [uploadMsg, setUploadMsg] = useState(null);
   const [recFilter, setRecFilter] = useState("");
   const [search, setSearch] = useState("");
+  const [sortBy,  setSortBy]  = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
   const fileRef = useRef(null);
 
   const fetchCandidates = useCallback(async () => {
@@ -594,13 +607,19 @@ function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
-                    {["", "Name", "Email", "Exp", "Education", "Skills", "Score", "Recommendation", ""].map(h => (
-                      <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontSize: 10.5, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "2px solid rgba(0,0,0,0.06)" }}>{h}</th>
-                    ))}
+                    <th style={{ padding: "10px 12px", borderBottom: "2px solid rgba(0,0,0,0.06)" }} />
+                    <SortableTHi label="Name"           field="name"             sortBy={sortBy} sortDir={sortDir} onSort={handleSort} style={{ borderBottom: "2px solid rgba(0,0,0,0.06)" }} />
+                    <SortableTHi label="Email"          field="email"            sortBy={sortBy} sortDir={sortDir} onSort={handleSort} style={{ borderBottom: "2px solid rgba(0,0,0,0.06)" }} />
+                    <SortableTHi label="Exp"            field="experience_years" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} style={{ borderBottom: "2px solid rgba(0,0,0,0.06)" }} />
+                    <SortableTHi label="Education"      field="education"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} style={{ borderBottom: "2px solid rgba(0,0,0,0.06)" }} />
+                    <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10.5, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "2px solid rgba(0,0,0,0.06)" }}>Skills</th>
+                    <SortableTHi label="Score"          field="total_score"      sortBy={sortBy} sortDir={sortDir} onSort={handleSort} style={{ borderBottom: "2px solid rgba(0,0,0,0.06)" }} />
+                    <SortableTHi label="Recommendation" field="recommendation"   sortBy={sortBy} sortDir={sortDir} onSort={handleSort} style={{ borderBottom: "2px solid rgba(0,0,0,0.06)" }} />
+                    <th style={{ padding: "10px 12px", borderBottom: "2px solid rgba(0,0,0,0.06)" }} />
                   </tr>
                 </thead>
                 <tbody>
-                  {candidates.map((c, i) => (
+                  {sortRows(candidates, sortBy, sortDir, ["experience_years", "total_score"]).map((c, i) => (
                     <CandidateRow key={c.id} c={c} i={i} onDelete={handleDeleteCandidate} onHire={handleHire} />
                   ))}
                 </tbody>
@@ -620,6 +639,9 @@ function RequirementTab({ jobs, fetchJobs, activeJobId, setActiveJobId }) {
   const [showJdPanel, setShowJdPanel] = useState(false);
   const [jdPrefill, setJdPrefill] = useState(null);
   const [savingJob, setSavingJob] = useState(false);
+  const [sortBy,  setSortBy]  = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
 
   const handleCreateJob = async (data) => {
     setSavingJob(true);
@@ -676,13 +698,18 @@ function RequirementTab({ jobs, fetchJobs, activeJobId, setActiveJobId }) {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
-                  {["Position", "Required Skills", "Min Exp", "Education", "Certification", "Date Posted", "Created By", ""].map(h => (
-                    <th key={h} style={TH}>{h}</th>
-                  ))}
+                  <SortableTHi label="Position"       field="position_title"         sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Required Skills" field="required_skills"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Min Exp"        field="min_experience"         sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Education"      field="education_keywords"     sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Certification"  field="certification_keywords" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Date Posted"    field="date_posted"            sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Created By"     field="created_by"             sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <th style={TH} />
                 </tr>
               </thead>
               <tbody>
-                {jobs.map((j, i) => (
+                {sortRows(jobs, sortBy, sortDir, ["min_experience"]).map((j, i) => (
                   <tr key={j.id} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
                     <td style={{ ...TD, fontWeight: 700, color: "#1e293b" }}>{j.position_title}</td>
                     <td style={{ ...TD, whiteSpace: "normal", maxWidth: 260 }}>{j.required_skills.join(", ") || "—"}</td>
@@ -717,6 +744,8 @@ function DetailTab({ jobs }) {
   const [loading, setLoading] = useState(false);
   const [jobFilter, setJobFilter] = useState("");
   const [page, setPage] = useState(1);
+  const [sortBy,  setSortBy]  = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
   const PAGE_SIZE = 10;
 
   const fetchDetail = useCallback(async () => {
@@ -733,9 +762,11 @@ function DetailTab({ jobs }) {
 
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
 
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); setPage(1); };
   const fmtDays = (d) => d == null ? "—" : `${d} day${d === 1 ? "" : "s"}`;
   const fmtDate = (d) => d ? d.slice(0, 10) : "—";
-  const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const sortedRows = sortRows(rows, sortBy, sortDir, ["time_to_hire", "time_to_fill", "skills_score", "experience_score", "education_score", "certification_score"]);
+  const paged = sortedRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -755,9 +786,17 @@ function DetailTab({ jobs }) {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
-                  {["Position", "Candidate", "Time to Hire", "Time to Fill", "Education", "Skills Score", "Experience Score", "Education Score", "Certification Score", "File Name", "Processed Date"].map(h => (
-                    <th key={h} style={TH}>{h}</th>
-                  ))}
+                  <SortableTHi label="Position"             field="position_title"     sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Candidate"            field="candidate_name"     sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Time to Hire"         field="time_to_hire"       sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Time to Fill"         field="time_to_fill"       sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Education"            field="education"          sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Skills Score"         field="skills_score"       sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Experience Score"     field="experience_score"   sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Education Score"      field="education_score"    sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Certification Score"  field="certification_score" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="File Name"            field="filename"           sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Processed Date"       field="processed_date"     sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                 </tr>
               </thead>
               <tbody>
@@ -793,6 +832,8 @@ function CandidateDatabaseTab() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [sortBy,  setSortBy]  = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
   const PAGE_SIZE = 10;
 
   const fetchCandidates = useCallback(async () => {
@@ -807,10 +848,15 @@ function CandidateDatabaseTab() {
 
   useEffect(() => { fetchCandidates(); }, [fetchCandidates]);
 
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); setPage(1); };
   const fmtDate = (d) => d ? d.slice(0, 10) : "—";
-  const paged = candidates.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const HEADERS = ["No", "Position", "Name", "Email", "Phone", "Experience (yrs)", "Education",
-    "Total Score", "Recommendation", "Status", "File Name", "Processed Date"];
+  const sortedCandidates = sortRows(candidates, sortBy, sortDir, ["experience_years", "total_score"]);
+  const paged = sortedCandidates.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const HEADERS = [
+    ["Position", "position_title"], ["Name", "name"], ["Email", "email"], ["Phone", "phone"],
+    ["Experience (yrs)", "experience_years"], ["Education", "education"], ["Total Score", "total_score"],
+    ["Recommendation", "recommendation"], ["Status", "is_hired"], ["File Name", "filename"], ["Processed Date", "screened_at"],
+  ];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -830,7 +876,10 @@ function CandidateDatabaseTab() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
-                  {HEADERS.map((h, idx) => <th key={`${h}-${idx}`} style={TH}>{h}</th>)}
+                  <th style={TH}>No</th>
+                  {HEADERS.map(([h, field]) => (
+                    <SortableTHi key={field} label={h} field={field} sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  ))}
                 </tr>
               </thead>
               <tbody>

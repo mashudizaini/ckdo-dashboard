@@ -4,6 +4,7 @@ import {
   List, RefreshCw, Loader2,
 } from "lucide-react";
 import { hrApi } from "@/api/dashboard";
+import { toggleSort, sortRows } from "@/components/SortableTH";
 
 const NEU = {
   bg: "#e8edf5",
@@ -210,6 +211,9 @@ function TaskForm({ initial, onSave, onCancel, saving, employees }) {
 }
 
 function ListView({ tasks, loading, onEdit, onDelete, onToggleComplete }) {
+  const [sortBy,  setSortBy]  = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+
   if (loading) {
     return <div style={{ display: "flex", justifyContent: "center", padding: "40px 0" }}><Loader2 size={20} className="animate-spin" style={{ color: "#94a3b8" }} /></div>;
   }
@@ -217,24 +221,32 @@ function ListView({ tasks, loading, onEdit, onDelete, onToggleComplete }) {
     return <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No activities yet. Click "+ Add New Activity" to get started.</p>;
   }
 
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
+
   const fmtDate = (iso) => {
     if (!iso) return "—";
     try { return new Date(iso + "T00:00:00").toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" }); }
     catch (_) { return iso; }
   };
 
+  const COLS = [["Activity", "title"], ["Category", "category"], ["Assigned To", "assigned_to"], ["Role", "role"], ["Date From", "start_date"], ["Date To", "due_date"], ["Status", "status"]];
+
   return (
     <div style={{ borderRadius: 16, overflow: "hidden", boxShadow: NEU.shadowIn }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
-            {["Activity", "Category", "Assigned To", "Role", "Date From", "Date To", "Status", ""].map(h => (
-              <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontSize: 10.5, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "2px solid rgba(0,0,0,0.06)" }}>{h}</th>
+            {COLS.map(([h, field]) => (
+              <th key={h} onClick={() => handleSort(field)}
+                style={{ padding: "10px 12px", textAlign: "left", fontSize: 10.5, fontWeight: 700, color: sortBy === field ? "#2563eb" : "#374151", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "2px solid rgba(0,0,0,0.06)", cursor: "pointer", userSelect: "none" }}>
+                {h} {sortBy === field && (sortDir === "asc" ? "▲" : "▼")}
+              </th>
             ))}
+            <th style={{ padding: "10px 12px", borderBottom: "2px solid rgba(0,0,0,0.06)" }} />
           </tr>
         </thead>
         <tbody>
-          {tasks.map((t, i) => (
+          {sortRows(tasks, sortBy, sortDir, []).map((t, i) => (
             <tr key={t.id} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
               <td style={{ padding: "8px 12px", fontSize: 12.5, fontWeight: 700, color: "#1e293b" }}>
                 {t.title}

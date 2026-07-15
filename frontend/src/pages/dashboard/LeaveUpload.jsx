@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Upload, Loader2, CheckCircle, X, FileText } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
+import { SortableTH, toggleSort, sortRows } from "@/components/SortableTH";
 
 const API = "/api/v1/dashboard/hr/leave";
 
@@ -11,6 +12,9 @@ export default function LeaveUpload() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [history, setHistory] = useState([]);
+  const [sortBy,  setSortBy]  = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
   const inputRef = useRef(null);
 
   const { token } = useAuthStore();
@@ -146,13 +150,13 @@ export default function LeaveUpload() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-gray-800/60">
-                  {["Upload Time", "File", "Total", "New", "Update", "By", "Notes"].map(h => (
-                    <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                  {[["Upload Time", "uploaded_at"], ["File", "filename"], ["Total", "total_rows"], ["New", "inserted"], ["Update", "updated"], ["By", "uploaded_by"], ["Notes", "notes"]].map(([label, field]) => (
+                    <SortableTH key={label} label={label} field={field} sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
-                {history.map(h => (
+                {sortRows(history, sortBy, sortDir, ["total_rows", "inserted", "updated"]).map(h => (
                   <tr key={h.batch_id} className="hover:bg-gray-800/40">
                     <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{h.uploaded_at?.replace("T", " ").slice(0, 19)}</td>
                     <td className="px-3 py-2 text-gray-300 max-w-[200px] truncate">{h.filename}</td>

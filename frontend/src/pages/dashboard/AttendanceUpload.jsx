@@ -14,6 +14,7 @@ import {
   CalendarCheck, FilePlus, RotateCcw, AlertCircle, Briefcase
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
+import { SortableTH, toggleSort, sortRows } from "@/components/SortableTH";
 
 const API = "/api/v1/dashboard/hr/attendance";
 
@@ -58,6 +59,9 @@ export default function AttendanceUpload({ kind = "intercom" }) {
   const [logs,        setLogs]        = useState([]);
   const [showLogs,    setShowLogs]    = useState(false);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [sortBy,  setSortBy]  = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
   const inputRef = useRef(null);
   const { token } = useAuthStore();
 
@@ -275,13 +279,13 @@ export default function AttendanceUpload({ kind = "intercom" }) {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-gray-800/50">
-                    {["Upload Time", "File", "Total", "New", "Update", "By", "Notes"].map((h) => (
-                      <th key={h} className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                    {[["Upload Time", "uploaded_at"], ["File", "filename"], ["Total", "total_rows"], ["New", "inserted"], ["Update", "updated"], ["By", "uploaded_by"], ["Notes", "notes"]].map(([h, field]) => (
+                      <SortableTH key={h} label={h} field={field} sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800">
-                  {logs.map((l) => (
+                  {sortRows(logs, sortBy, sortDir, ["total_rows", "inserted", "updated"]).map((l) => (
                     <tr key={l.batch_id} className="hover:bg-gray-800/30 transition-colors">
                       <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap">{fmtDate(l.uploaded_at)}</td>
                       <td className="px-3 py-2.5 text-gray-300 max-w-[160px] truncate">{l.filename}</td>

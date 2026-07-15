@@ -13,6 +13,7 @@ import HRTodoList from "./HRTodoList";
 import HRCvScreening from "./HRCvScreening";
 import { useAuthStore } from "@/store/authStore";
 import { hrApi } from "@/api/dashboard";
+import { SortableTH, toggleSort, sortRows } from "@/components/SortableTH";
 
 const API        = "/api/v1/dashboard/hr/employees";
 const BUDGET_API = "/api/v1/dashboard/hr/budget";
@@ -990,8 +991,17 @@ function TurnoverSection() {
 
 // ── Tabel detail Dept + Team ──────────────────────────────────────────────────
 function DeptTeamTable({ data }) {
+  const [sortBy, setSortBy] = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
   if (!data) return null;
   const { departments, grand_total } = data;
+
+  const handleSort = (field) => {
+    const r = toggleSort(sortBy, sortDir, field);
+    setSortBy(r.sortBy); setSortDir(r.sortDir);
+  };
+  const NUMERIC = ["employees", "plan", "actual", "rate"];
+  const thCls = "px-3 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider border border-gray-700";
 
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-800">
@@ -999,16 +1009,16 @@ function DeptTeamTable({ data }) {
         <thead>
           <tr className="bg-gray-800/70">
             <th className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Dept.</th>
-            <th className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Div. / Team</th>
-            <th className="px-3 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Employees</th>
-            <th className="px-3 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Plan</th>
-            <th className="px-3 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">Act</th>
-            <th className="px-3 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider border border-gray-700">%</th>
+            <SortableTH label="Div. / Team" field="team"      sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className={thCls} />
+            <SortableTH label="Employees"   field="employees" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} align="center" className={thCls} />
+            <SortableTH label="Plan"        field="plan"      sortBy={sortBy} sortDir={sortDir} onSort={handleSort} align="center" className={thCls} />
+            <SortableTH label="Act"         field="actual"    sortBy={sortBy} sortDir={sortDir} onSort={handleSort} align="center" className={thCls} />
+            <SortableTH label="%"           field="rate"      sortBy={sortBy} sortDir={sortDir} onSort={handleSort} align="center" className={thCls} />
           </tr>
         </thead>
         <tbody>
           {departments.map((dept) => [
-            ...dept.teams.map((team, ti) => (
+            ...sortRows(dept.teams, sortBy, sortDir, NUMERIC).map((team, ti) => (
               <tr key={`${dept.department}-${team.team}`} className="hover:bg-gray-800/20">
                 {ti === 0 && (
                   <td
@@ -1067,6 +1077,12 @@ function AttendanceTodaySection() {
   const [employees,    setEmployees]    = useState([]);
   const [loadingEmps,  setLoadingEmps]  = useState(false);
   const [selectedDate, setSelectedDate] = useState(""); // "" = today / latest available
+  const [empSortBy,  setEmpSortBy]  = useState(null);
+  const [empSortDir, setEmpSortDir] = useState("asc");
+  const [deptSortBy,  setDeptSortBy]  = useState(null);
+  const [deptSortDir, setDeptSortDir] = useState("asc");
+  const handleEmpSort  = (f) => { const r = toggleSort(empSortBy, empSortDir, f);   setEmpSortBy(r.sortBy);  setEmpSortDir(r.sortDir); };
+  const handleDeptSort = (f) => { const r = toggleSort(deptSortBy, deptSortDir, f); setDeptSortBy(r.sortBy); setDeptSortDir(r.sortDir); };
 
   const fetchData = async (targetDate = selectedDate) => {
     setLoading(true);
@@ -1242,15 +1258,18 @@ function AttendanceTodaySection() {
                         <table className="w-full text-xs">
                           <thead className="sticky top-0 bg-gray-800/90">
                             <tr>
-                              {["No", "Name", "Department", "Check-In", "Check-Out", "Notes"].map((h) => (
-                                <th key={h} className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
-                              ))}
+                              <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">No</th>
+                              <SortableTH label="Name"       field="name"       sortBy={empSortBy} sortDir={empSortDir} onSort={handleEmpSort} />
+                              <SortableTH label="Department" field="department" sortBy={empSortBy} sortDir={empSortDir} onSort={handleEmpSort} />
+                              <SortableTH label="Check-In"   field="checkin"    sortBy={empSortBy} sortDir={empSortDir} onSort={handleEmpSort} />
+                              <SortableTH label="Check-Out"  field="checkout"   sortBy={empSortBy} sortDir={empSortDir} onSort={handleEmpSort} />
+                              <SortableTH label="Notes"      field="notes"      sortBy={empSortBy} sortDir={empSortDir} onSort={handleEmpSort} />
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-800/50">
                             {employees.length === 0 ? (
                               <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-600">No data</td></tr>
-                            ) : employees.map((emp, i) => (
+                            ) : sortRows(employees, empSortBy, empSortDir, []).map((emp, i) => (
                               <tr key={`${emp.id}-${i}`} className="hover:bg-gray-800/40 transition-colors">
                                 <td className="px-3 py-2 text-gray-600 text-center w-8">{i + 1}</td>
                                 <td className="px-3 py-2 font-medium text-gray-200 whitespace-nowrap">{emp.name || "—"}</td>
@@ -1274,15 +1293,17 @@ function AttendanceTodaySection() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-gray-800/60">
-                        {["Department", "Total", "Present", "Absent", "Rate"].map((h) => (
-                          <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
-                        ))}
+                        <SortableTH label="Department" field="department" sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} className="px-3 py-2.5 text-xs" />
+                        <SortableTH label="Total"       field="total"     sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} className="px-3 py-2.5 text-xs" />
+                        <SortableTH label="Present"     field="hadir"     sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} className="px-3 py-2.5 text-xs" />
+                        <SortableTH label="Absent"      field="absen"     sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} className="px-3 py-2.5 text-xs" />
+                        <SortableTH label="Rate"        field="rate"      sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} className="px-3 py-2.5 text-xs" />
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800">
                       {data.data.length === 0 ? (
                         <tr><td colSpan={5} className="py-10 text-center text-xs text-gray-600">No working day data</td></tr>
-                      ) : data.data.map((row) => (
+                      ) : sortRows(data.data, deptSortBy, deptSortDir, ["total", "hadir", "absen", "rate"]).map((row) => (
                         <tr key={row.department} className="hover:bg-gray-800/40 transition-colors">
                           <td className="px-3 py-2.5 font-medium text-gray-200">{row.department}</td>
                           <td className="px-3 py-2.5 text-gray-400 text-center">{row.total}</td>
@@ -1503,6 +1524,9 @@ function EmployeeDetailPanel({ headers, apiBase }) {
   const [results, setResults] = useState([]);
   const [detail,  setDetail]  = useState(null);
   const [loading, setLoading] = useState(false);
+  const [absSortBy,  setAbsSortBy]  = useState(null);
+  const [absSortDir, setAbsSortDir] = useState("asc");
+  const handleAbsSort = (f) => { const r = toggleSort(absSortBy, absSortDir, f); setAbsSortBy(r.sortBy); setAbsSortDir(r.sortDir); };
 
   const doSearch = async (q) => {
     if (q.length < 2) { setResults([]); return; }
@@ -1595,15 +1619,18 @@ function EmployeeDetailPanel({ headers, apiBase }) {
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)", position: "sticky", top: 0 }}>
-                      {["Date", "Note"].map((h) => (
-                        <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>
+                      {[["Date", "date"], ["Note", "reason"]].map(([h, field]) => (
+                        <th key={h} onClick={() => handleAbsSort(field)}
+                          style={{ padding: "8px 12px", textAlign: "left", fontSize: 11, fontWeight: 700, color: absSortBy === field ? "#2563eb" : "#374151", textTransform: "uppercase", letterSpacing: "0.05em", cursor: "pointer", userSelect: "none" }}>
+                          {h} {absSortBy === field && (absSortDir === "asc" ? "▲" : "▼")}
+                        </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {!detail.absences.length ? (
                       <tr><td colSpan={2} style={{ padding: "16px 12px", textAlign: "center", color: "#94a3b8", fontSize: 12 }}>No absence records</td></tr>
-                    ) : detail.absences.map((a, i) => (
+                    ) : sortRows(detail.absences, absSortBy, absSortDir, []).map((a, i) => (
                       <tr key={i} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
                         <td style={{ padding: "6px 12px", fontSize: 12, color: "#475569", fontWeight: 500, whiteSpace: "nowrap" }}>{fmtDate(a.date)}</td>
                         <td style={{ padding: "6px 12px", fontSize: 12, color: "#64748b", fontWeight: 500 }}>{a.reason}</td>
@@ -1648,6 +1675,9 @@ function TargetAchievementPanel({ apiBase, headers }) {
   const [year, setYear]   = useState(curYear);
   const [rows, setRows]   = useState([]);
   const [loading, setLoading] = useState(true);
+  const [sortBy,  setSortBy]  = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
 
   useEffect(() => {
     setLoading(true);
@@ -1682,13 +1712,16 @@ function TargetAchievementPanel({ apiBase, headers }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
             <thead>
               <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
-                {["Month", "Employees", "Effective Working Days", "Target (Man-Days)", "Achievement", "Rate"].map((h) => (
-                  <th key={h} style={{ padding: "8px 10px", textAlign: h === "Month" ? "left" : "center", fontSize: 10, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.04em" }}>{h}</th>
+                {[["Month", "period"], ["Employees", "headcount"], ["Effective Working Days", "working_days"], ["Target (Man-Days)", "target"], ["Achievement", "achievement"], ["Rate", "rate"]].map(([h, field]) => (
+                  <th key={h} onClick={() => handleSort(field)}
+                    style={{ padding: "8px 10px", textAlign: h === "Month" ? "left" : "center", fontSize: 10, fontWeight: 700, color: sortBy === field ? "#2563eb" : "#374151", textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer", userSelect: "none" }}>
+                    {h} {sortBy === field && (sortDir === "asc" ? "▲" : "▼")}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {rows.map((m, i) => (
+              {sortRows(rows, sortBy, sortDir, ["headcount", "working_days", "target", "achievement", "rate"]).map((m, i) => (
                 <tr key={m.period} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
                   <td style={{ padding: "7px 10px", fontWeight: 700, color: "#1e293b" }}>{m.period}</td>
                   <td style={{ padding: "7px 10px", textAlign: "center", color: "#475569" }}>{m.headcount}</td>
@@ -2145,6 +2178,9 @@ function WorkingCalendarPanel() {
   const [form, setForm] = useState({ holiday_date: "", name: "", holiday_type: "national" });
   const [adding, setAdding] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [sortBy,  setSortBy]  = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2320,13 +2356,16 @@ function WorkingCalendarPanel() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
-                  {["Month", "Calendar Days", "Weekends", "National Holidays", "Collective Leave", "Company Holiday", "Working Days"].map(h => (
-                    <th key={h} style={{ padding: "10px 10px", fontSize: 10, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: h === "Month" ? "left" : "center", borderBottom: "2px solid rgba(0,0,0,0.06)" }}>{h}</th>
+                  {[["Month", "month"], ["Calendar Days", "calendar_days"], ["Weekends", "weekends"], ["National Holidays", "national"], ["Collective Leave", "collective"], ["Company Holiday", "company"], ["Working Days", "working_days"]].map(([h, field]) => (
+                    <th key={h} onClick={() => handleSort(field)}
+                      style={{ padding: "10px 10px", fontSize: 10, fontWeight: 700, color: sortBy === field ? "#2563eb" : "#374151", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: h === "Month" ? "left" : "center", borderBottom: "2px solid rgba(0,0,0,0.06)", cursor: "pointer", userSelect: "none" }}>
+                      {h} {sortBy === field && (sortDir === "asc" ? "▲" : "▼")}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {summary.months.map((m, i) => (
+                {sortRows(summary.months, sortBy, sortDir, ["month", "calendar_days", "weekends", "national", "collective", "company", "working_days"]).map((m, i) => (
                   <tr key={m.month} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
                     <td style={{ padding: "8px 10px", fontSize: 12, fontWeight: 700, color: "#1e293b" }}>{MONTH_NAMES[m.month - 1]}</td>
                     <td style={{ padding: "8px 10px", fontSize: 12, fontWeight: 500, color: "#475569", textAlign: "center" }}>{m.calendar_days}</td>
@@ -2625,6 +2664,15 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
   const remainOk  = m.remain >= 0;
   const spanRows  = m.items.length + 1; // baris item + 1 baris total
   const monthName = m.month_name || MONTHS_ID[m.month - 1];
+  const [sortBy,  setSortBy]  = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
+  const sortedItems = sortRows(m.items, sortBy, sortDir, ["amount"]);
+  const thSort = (label, field, extraStyle = {}) => (
+    <th onClick={() => handleSort(field)} className="px-3 py-2 font-semibold" style={{ ...extraStyle, cursor: "pointer", userSelect: "none", color: sortBy === field ? "#818cf8" : undefined }}>
+      {label} {sortBy === field && (sortDir === "asc" ? "▲" : "▼")}
+    </th>
+  );
 
   return (
     <div className="rounded-lg border border-gray-800 overflow-hidden text-xs">
@@ -2637,8 +2685,8 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
         <thead>
           <tr className="bg-gray-800/40 text-gray-500 uppercase tracking-wider text-xs">
             <th className="px-3 py-2 text-right font-semibold" style={{width:"12%"}}>{monthName} Budget</th>
-            <th className="px-3 py-2 text-left font-semibold" style={{width:"28%"}}>Actual Expense</th>
-            <th className="px-3 py-2 text-right font-semibold" style={{width:"12%"}}>Amount</th>
+            {thSort("Actual Expense", "description", { textAlign: "left", width: "28%" })}
+            {thSort("Amount", "amount", { textAlign: "right", width: "12%" })}
             <th className="px-3 py-2 text-right font-semibold" style={{width:"12%"}}>Available</th>
             <th className="px-3 py-2 text-right font-semibold" style={{width:"12%"}}>Reclass</th>
             <th className="px-3 py-2 text-right font-semibold" style={{width:"12%"}}>Remain</th>
@@ -2657,7 +2705,7 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
             </tr>
           ) : (
             <>
-              {m.items.map((item, idx) => (
+              {sortedItems.map((item, idx) => (
                 <tr key={idx} className="hover:bg-gray-800/20 transition-colors">
                   {idx === 0 && (
                     <td className="px-3 py-2 text-right text-blue-600 font-semibold align-top" rowSpan={spanRows}>
@@ -2788,6 +2836,9 @@ function LeaveDataSection() {
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [selectedEmp, setSelectedEmp] = useState(null);
+  const [sortBy,  setSortBy]  = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
   const [filters, setFilters] = useState({
     year: new Date().getFullYear(),
     month: new Date().getMonth() + 1,
@@ -2959,8 +3010,8 @@ function LeaveDataSection() {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-800/60">
-              {["Employee ID","Name","Organization","Position","Date","Leave Code","Leave Type"].map(h => (
-                <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+              {[["Employee ID","employee_id"],["Name","employee_name"],["Organization","organization"],["Position","job_position"],["Date","leave_date"],["Leave Code","leave_code"],["Leave Type","leave_type"]].map(([h, field]) => (
+                <SortableTH key={h} label={h} field={field} sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               ))}
             </tr>
           </thead>
@@ -2971,7 +3022,7 @@ function LeaveDataSection() {
               <tr><td colSpan={7} className="py-10 text-center text-xs text-gray-600">
                 No leave data. Upload Talenta Excel in the Leave Upload tab.
               </td></tr>
-            ) : data.data.map((r, i) => (
+            ) : sortRows(data.data, sortBy, sortDir, []).map((r, i) => (
               <tr key={i} onClick={() => handleRowClick(r)}
                 className="hover:bg-gray-800/40 transition-colors" style={{ cursor: "pointer" }}>
                 <td className="px-3 py-2 text-xs font-mono text-gray-500">{r.employee_id}</td>
@@ -3089,6 +3140,9 @@ function EMagazineSection() {
   const [uploadQrLinks, setUploadQrLinks] = useState([]);
   const [editQr,        setEditQr]        = useState(null); // {filename, links:[{label,url}]}
   const [savingQr,      setSavingQr]      = useState(null);
+  const [sortBy,  setSortBy]  = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -3282,15 +3336,15 @@ function EMagazineSection() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-800/40">
-                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Title</th>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Period</th>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">File Name</th>
-                <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Uploaded</th>
+                <SortableTH label="Title"     field="title"       sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="px-4 py-2.5" />
+                <SortableTH label="Period"    field="date"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="px-4 py-2.5" />
+                <SortableTH label="File Name" field="filename"    sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="px-4 py-2.5" />
+                <SortableTH label="Uploaded"  field="uploaded_at" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="px-4 py-2.5" />
                 <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
-              {list.map((ed, i) => (
+              {sortRows(list, sortBy, sortDir, []).map((ed, i) => (
                 <>
                   <tr key={i} className="hover:bg-gray-800/40 transition-colors">
                     <td className="px-4 py-3 font-medium text-gray-200">{ed.title}</td>
