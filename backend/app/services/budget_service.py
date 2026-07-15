@@ -117,21 +117,32 @@ class BudgetService:
         budget_rows = await asyncio.to_thread(self._query_budget, dept, year, month)
         actual_map  = await asyncio.to_thread(self._query_actual_summary, dept, year, month)
 
+        # _query_budget always groups by (year, month, account) — it returns ONE
+        # ROW PER MONTH per account, even when the WHERE clause lets several
+        # months through (month=None for the whole year, or the YTD-cumulative
+        # range below). Sum per account here first, or every month would show
+        # up as its own duplicate "account" row with only that month's amount.
+        budget_by_account: dict[str, dict] = {}
+        for r in budget_rows:
+            code = str(r["account_code"])
+            name = str(r.get("account_name") or code)
+            amt  = int(r.get("budget_amount") or 0)
+            entry = budget_by_account.setdefault(code, {"account_name": name, "budget": 0})
+            entry["budget"] += amt
+
         total_budget = 0
         total_actual = 0
         accounts     = []
 
-        for r in budget_rows:
-            code   = str(r["account_code"])
-            name   = str(r.get("account_name") or code)
-            budget = int(r.get("budget_amount") or 0)
+        for code, info in budget_by_account.items():
+            budget = info["budget"]
             actual = actual_map.get(code, 0)
             remain = budget - actual
             total_budget += budget
             total_actual += actual
             accounts.append({
                 "account_code": code,
-                "account_name": name,
+                "account_name": info["account_name"],
                 "budget": budget,
                 "actual": actual,
                 "remain": remain,
