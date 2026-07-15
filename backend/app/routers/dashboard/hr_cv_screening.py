@@ -236,6 +236,39 @@ async def list_candidates(
     return [_candidate_to_dict(c) for c in result.scalars().all()]
 
 
+@router.get("/candidates")
+async def list_all_candidates(
+    job_id: Optional[int] = Query(None),
+    recommendation: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    """Candidate Database — every CV ever processed, across all positions
+    (not filtered to a single job like /jobs/{job_id}/candidates)."""
+    jobs_result = await db.execute(select(CvScreeningJob))
+    jobs = {j.id: j.position_title for j in jobs_result.scalars().all()}
+
+    q = select(CvScreeningCandidate)
+    if job_id:
+        q = q.where(CvScreeningCandidate.job_id == job_id)
+    if recommendation:
+        q = q.where(CvScreeningCandidate.recommendation == recommendation)
+    if search:
+        pat = f"%{search}%"
+        q = q.where(CvScreeningCandidate.name.ilike(pat) | CvScreeningCandidate.email.ilike(pat))
+    q = q.order_by(CvScreeningCandidate.screened_at.desc())
+    result = await db.execute(q)
+    candidates = result.scalars().all()
+
+    out = []
+    for c in candidates:
+        d = _candidate_to_dict(c)
+        d["position_title"] = jobs.get(c.job_id, "—")
+        out.append(d)
+    return out
+
+
 @router.delete("/candidates/{candidate_id}")
 async def delete_candidate(
     candidate_id: int,

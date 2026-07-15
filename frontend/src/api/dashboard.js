@@ -74,6 +74,7 @@ export const hrApi = {
   generateCvJd:    (d)      => api.post("/dashboard/hr/cv-screening/jd/generate", d),
   hireCvCandidate: (id, d)  => api.put(`/dashboard/hr/cv-screening/candidates/${id}/hire`, d),
   getCvDetail:     (p)      => api.get("/dashboard/hr/cv-screening/detail", { params: p }),
+  getAllCvCandidates: (p)   => api.get("/dashboard/hr/cv-screening/candidates", { params: p }),
 
   // E-Magazine
   eMagazineList:       ()              => api.get("/dashboard/hr/e-magazine/files"),

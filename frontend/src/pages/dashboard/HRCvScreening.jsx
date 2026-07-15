@@ -24,9 +24,9 @@ const REC_CFG = {
 
 const CV_SUBTABS = [
   { id: "screening",   label: "CV Screening" },
-  { id: "requirement", label: "Database Qualification / Requirement" },
   { id: "detail",      label: "Detail" },
   { id: "candidates",  label: "Candidate Database" },
+  { id: "requirement", label: "Database Qualification" },
 ];
 
 const TH = { padding: "10px 12px", textAlign: "left", fontSize: 10.5, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "2px solid rgba(0,0,0,0.06)", whiteSpace: "nowrap" };
@@ -492,23 +492,21 @@ function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Position selector */}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {/* Qualification parameter — pulled from Database Qualification */}
+      <div>
         {jobs.length === 0 ? (
           <p style={{ fontSize: 12, color: "#94a3b8" }}>
-            No positions configured yet. Go to the "Database Qualification / Requirement" tab to create one.
+            No positions configured yet. Go to the "Database Qualification" tab to create one.
           </p>
-        ) : jobs.map(j => (
-          <button key={j.id} onClick={() => setActiveJobId(j.id)}
-            style={{
-              padding: "8px 16px", borderRadius: 10, border: "none", fontSize: 12, fontWeight: 700,
-              background: NEU.bg, cursor: "pointer",
-              color: activeJobId === j.id ? "#2563eb" : "#64748b",
-              boxShadow: activeJobId === j.id ? NEU.shadowIn : NEU.shadowOutSm,
-            }}>
-            {j.position_title}
-          </button>
-        ))}
+        ) : (
+          <>
+            <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 4 }}>QUALIFICATION</label>
+            <select value={activeJobId || ""} onChange={e => setActiveJobId(Number(e.target.value))}
+              style={{ fontSize: 13, fontWeight: 700, padding: "8px 14px", borderRadius: 10, border: "none", background: NEU.bg, color: "#2563eb", boxShadow: NEU.shadowOutSm, cursor: "pointer", outline: "none", minWidth: 260 }}>
+              {jobs.map(j => <option key={j.id} value={j.id}>{j.position_title}</option>)}
+            </select>
+          </>
+        )}
       </div>
 
       {activeJob && (
@@ -615,7 +613,7 @@ function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
   );
 }
 
-/* ─── Sub-tab: Database Qualification / Requirement (position CRUD) ──────── */
+/* ─── Sub-tab: Database Qualification (master data — position CRUD) ──────── */
 
 function RequirementTab({ jobs, fetchJobs, activeJobId, setActiveJobId }) {
   const [showJobForm, setShowJobForm] = useState(false);
@@ -788,56 +786,44 @@ function DetailTab({ jobs }) {
   );
 }
 
-/* ─── Sub-tab: Candidate Database — reuses the Employee master (hired staff) ── */
-
-function durationParts(start, end) {
-  if (!start) return { y: "—", m: "—", d: "—" };
-  const s = new Date(start);
-  const e = end ? new Date(end) : new Date();
-  let y = e.getFullYear() - s.getFullYear();
-  let m = e.getMonth() - s.getMonth();
-  let d = e.getDate() - s.getDate();
-  if (d < 0) { m -= 1; d += new Date(e.getFullYear(), e.getMonth(), 0).getDate(); }
-  if (m < 0) { y -= 1; m += 12; }
-  return { y, m, d };
-}
+/* ─── Sub-tab: Candidate Database — every CV ever processed, all positions ── */
 
 function CandidateDatabaseTab() {
-  const [employees, setEmployees] = useState([]);
+  const [candidates, setCandidates] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
 
-  const fetchEmployees = useCallback(async () => {
+  const fetchCandidates = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await hrApi.getEmployees({ search, page: 1, page_size: 2000 });
-      setEmployees(res.employees || []);
+      const res = await hrApi.getAllCvCandidates(search ? { search } : {});
+      setCandidates(res || []);
       setPage(1);
     } catch (_) {}
     finally { setLoading(false); }
   }, [search]);
 
-  useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
+  useEffect(() => { fetchCandidates(); }, [fetchCandidates]);
 
-  const paged = employees.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const HEADERS = ["No", "User ID", "Full Name", "Sex", "Level", "Department", "Division", "Team", "Job Title",
-    "Work Placement", "Status", "DOJ", "Duration (Y)", "Duration (M)", "Duration (D)", "Retired (Age 55)",
-    "PKWT Ke-", "Starting PKWT", "End PKWT", "Permanent Date", "Status"];
+  const fmtDate = (d) => d ? d.slice(0, 10) : "—";
+  const paged = candidates.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const HEADERS = ["No", "Position", "Name", "Email", "Phone", "Experience (yrs)", "Education",
+    "Total Score", "Recommendation", "Status", "File Name", "Processed Date"];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ position: "relative", width: 260 }}>
         <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name / NIK / position..."
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name / email..."
           style={{ width: "100%", boxSizing: "border-box", fontSize: 12, padding: "6px 12px 6px 30px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff", outline: "none" }} />
       </div>
 
       {loading ? (
         <div style={{ display: "flex", justifyContent: "center", padding: "40px 0" }}><Loader2 size={20} className="animate-spin" style={{ color: "#94a3b8" }} /></div>
-      ) : employees.length === 0 ? (
-        <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No employee records found.</p>
+      ) : candidates.length === 0 ? (
+        <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No CVs processed yet.</p>
       ) : (
         <div style={{ borderRadius: 16, overflow: "hidden", boxShadow: NEU.shadowIn }}>
           <div style={{ overflowX: "auto" }}>
@@ -848,41 +834,26 @@ function CandidateDatabaseTab() {
                 </tr>
               </thead>
               <tbody>
-                {paged.map((e, i) => {
-                  const dur = durationParts(e.date_of_joining, e.resign_date);
-                  const contractStatus = e.permanent_date ? "Permanent"
-                    : e.end_pkwt && new Date(e.end_pkwt) < new Date() ? "Expired"
-                    : e.end_pkwt ? "Active" : "—";
-                  return (
-                    <tr key={e.id} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
-                      <td style={TD}>{(page - 1) * PAGE_SIZE + i + 1}</td>
-                      <td style={{ ...TD, fontFamily: "monospace" }}>{e.user_id}</td>
-                      <td style={{ ...TD, fontWeight: 700, color: "#1e293b" }}>{e.full_name}</td>
-                      <td style={TD}>{e.sex || "—"}</td>
-                      <td style={TD}>{e.level || "—"}</td>
-                      <td style={TD}>{e.department || "—"}</td>
-                      <td style={TD}>{e.division || "—"}</td>
-                      <td style={TD}>{e.team || "—"}</td>
-                      <td style={TD}>{e.job_title || "—"}</td>
-                      <td style={TD}>{e.work_placement || "—"}</td>
-                      <td style={TD}>{e.status || "—"}</td>
-                      <td style={TD}>{e.date_of_joining || "—"}</td>
-                      <td style={{ ...TD, textAlign: "right" }}>{dur.y}</td>
-                      <td style={{ ...TD, textAlign: "right" }}>{dur.m}</td>
-                      <td style={{ ...TD, textAlign: "right" }}>{dur.d}</td>
-                      <td style={TD}>{e.retire_date || "—"}</td>
-                      <td style={TD}>{e.pkwt_ke || "—"}</td>
-                      <td style={TD}>{e.starting_pkwt || "—"}</td>
-                      <td style={TD}>{e.end_pkwt || "—"}</td>
-                      <td style={TD}>{e.permanent_date || "—"}</td>
-                      <td style={TD}>{contractStatus}</td>
-                    </tr>
-                  );
-                })}
+                {paged.map((c, i) => (
+                  <tr key={c.id} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                    <td style={TD}>{(page - 1) * PAGE_SIZE + i + 1}</td>
+                    <td style={{ ...TD, fontWeight: 700, color: "#1e293b" }}>{c.position_title}</td>
+                    <td style={TD}>{c.name || "—"}</td>
+                    <td style={TD}>{c.email || "—"}</td>
+                    <td style={TD}>{c.phone || "—"}</td>
+                    <td style={{ ...TD, textAlign: "right" }}>{c.experience_years}</td>
+                    <td style={TD}>{c.education || "—"}</td>
+                    <td style={{ ...TD, textAlign: "right", fontWeight: 700 }}>{c.total_score}</td>
+                    <td style={TD}><RecBadge rec={c.recommendation} /></td>
+                    <td style={TD}>{c.is_hired ? "✓ Hired" : "—"}</td>
+                    <td style={{ ...TD, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis" }} title={c.filename}>{c.filename}</td>
+                    <td style={TD}>{fmtDate(c.screened_at)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
-          <Pagination total={employees.length} page={page} onPage={setPage} pageSize={PAGE_SIZE} />
+          <Pagination total={candidates.length} page={page} onPage={setPage} pageSize={PAGE_SIZE} />
         </div>
       )}
     </div>
