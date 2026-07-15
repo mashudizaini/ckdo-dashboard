@@ -1608,6 +1608,17 @@ function MonthlySpendSection() {
 
 /* ─── Section: Active Suppliers ──────────────────── */
 
+const ACTIVE_SUP_COLS = [
+  { key: "supplier_name",   label: "Supplier Name" },
+  { key: "po_count",        label: "PO Count",      numeric: true },
+  { key: "item_count",      label: "Items",         numeric: true },
+  { key: "category_count",  label: "Categories",    numeric: true },
+  { key: "last_po_date",    label: "Last PO" },
+  { key: "direct_idr",      label: "Direct (IDR)",   numeric: true },
+  { key: "indirect_idr",    label: "Indirect (IDR)", numeric: true },
+  { key: "total_idr",       label: "Total (IDR)",    numeric: true },
+];
+
 function ActiveSuppliersSection() {
   const cy = new Date().getFullYear();
   const [f, setF] = useState({
@@ -1620,10 +1631,16 @@ function ActiveSuppliersSection() {
   const [rows,     setRows]     = useState([]);
   const [error,    setError]    = useState("");
   const [page,     setPage]     = useState(1);
+  const [sort,     setSort]     = useState({ key: null, dir: "asc" });
 
   useEffect(() => {
     purchasingApi.getOrganizations().then(r => { if (r.success) setOrgs(r.data ?? []); }).catch(() => {});
   }, []);
+
+  const toggleSort = (key) => {
+    setPage(1);
+    setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  };
 
   const handleSearch = async () => {
     setLoading(true); setError(""); setPage(1);
@@ -1669,15 +1686,27 @@ function ActiveSuppliersSection() {
     }))
   , [rows]);
 
-  const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
+  const sorted = useMemo(() => {
+    if (!sort.key) return rows;
+    const col = ACTIVE_SUP_COLS.find(c => c.key === sort.key);
+    const mul = sort.dir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      if (col?.numeric) return ((Number(a[sort.key]) || 0) - (Number(b[sort.key]) || 0)) * mul;
+      const av = (a[sort.key] ?? "").toString().toLowerCase();
+      const bv = (b[sort.key] ?? "").toString().toLowerCase();
+      return av.localeCompare(bv) * mul;
+    });
+  }, [rows, sort]);
+
+  const paged = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap cursor-pointer select-none hover:text-gray-300";
   const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
   const maxSpend = rows[0] ? (Number(rows[0].total_idr) || 1) : 1;
 
   const handleDownload = () => {
     const cols = ["Supplier Name","PO Count","Item Count","Category Count","Last PO Date",
                   "Direct (IDR)","Indirect (IDR)","Total (IDR)"];
-    const data = rows.map(r => [
+    const data = sorted.map(r => [
       r.supplier_name, r.po_count, r.item_count, r.category_count, r.last_po_date,
       r.direct_idr, r.indirect_idr, r.total_idr,
     ]);
@@ -1761,17 +1790,17 @@ function ActiveSuppliersSection() {
           {/* Top 10 Bar Chart */}
           {chartData.length > 0 && (
             <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-4">
-              <p className="text-xs text-gray-500 mb-3">Top {chartData.length} Suppliers by Spend (IDR)</p>
+              <p className="text-xs mb-3" style={{ color: "#e2e8f0" }}>Top {chartData.length} Suppliers by Spend (IDR)</p>
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 60, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" horizontal={false} />
-                  <XAxis type="number" tickFormatter={fmtIDRShort} tick={{ fill: "#6b7280", fontSize: 10 }} />
-                  <YAxis type="category" dataKey="name" width={140} tick={{ fill: "#9ca3af", fontSize: 10 }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" horizontal={false} />
+                  <XAxis type="number" tickFormatter={fmtIDRShort} tick={{ fill: "#cbd5e1", fontSize: 10 }} />
+                  <YAxis type="category" dataKey="name" width={140} tick={{ fill: "#e2e8f0", fontSize: 10 }} />
                   <Tooltip
                     contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, fontSize: 12, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
                     formatter={(v, name) => [fmtIDR(v), name]}
                   />
-                  <Legend wrapperStyle={{ fontSize: 11, color: "#9ca3af" }} />
+                  <Legend wrapperStyle={{ fontSize: 11, color: "#e2e8f0" }} />
                   <Bar dataKey="direct"   name="Direct Material"   stackId="s" fill="#34d399" radius={[0,0,0,0]} />
                   <Bar dataKey="indirect" name="Indirect Material" stackId="s" fill="#60a5fa" radius={[0,4,4,0]} />
                 </BarChart>
@@ -1794,9 +1823,16 @@ function ActiveSuppliersSection() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-800/60">
-                    {["#","Supplier Name","PO Count","Items","Categories","Last PO","Direct (IDR)","Indirect (IDR)","Total (IDR)","Share"].map(h => (
-                      <th key={h} className={TH}>{h}</th>
+                    <th className={TH.replace(" cursor-pointer select-none hover:text-gray-300", "")}>#</th>
+                    {ACTIVE_SUP_COLS.map(c => (
+                      <th key={c.key} className={TH} onClick={() => toggleSort(c.key)}>
+                        <span className="inline-flex items-center gap-1">
+                          {c.label}
+                          {sort.key === c.key && <span className="text-orange-400">{sort.dir === "asc" ? "▲" : "▼"}</span>}
+                        </span>
+                      </th>
                     ))}
+                    <th className={TH.replace(" cursor-pointer select-none hover:text-gray-300", "")}>Share</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2228,12 +2264,39 @@ function PriceDetailTable({ tableRows, years }) {
 
 /* ─── Section: Manufacturer Master ───────────────── */
 
+const MFR_COLS = [
+  { key: "item_code",         label: "Item Code" },
+  { key: "item_description",  label: "Item Description" },
+  { key: "organization_id",   label: "Org ID",       numeric: true },
+  { key: "manufacturer_name", label: "Manufacturer" },
+  { key: "country_of_origin", label: "Country" },
+  { key: "created_by",        label: "Created By" },
+  { key: "creation_date",     label: "Date" },
+];
+
 function ManufacturerMasterSection() {
   const [data,       setData]       = useState([]);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState(null);
   const [showForm,   setShowForm]   = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [sort,       setSort]       = useState({ key: null, dir: "asc" });
+
+  const toggleSort = (key) => {
+    setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  };
+
+  const sorted = useMemo(() => {
+    if (!sort.key) return data;
+    const col = MFR_COLS.find(c => c.key === sort.key);
+    const mul = sort.dir === "asc" ? 1 : -1;
+    return [...data].sort((a, b) => {
+      if (col?.numeric) return ((Number(a[sort.key]) || 0) - (Number(b[sort.key]) || 0)) * mul;
+      const av = (a[sort.key] ?? "").toString().toLowerCase();
+      const bv = (b[sort.key] ?? "").toString().toLowerCase();
+      return av.localeCompare(bv) * mul;
+    });
+  }, [data, sort]);
 
   const loadList = async () => {
     setLoading(true); setError(null);
@@ -2278,9 +2341,16 @@ function ManufacturerMasterSection() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-800/60">
-                {["Item Code", "Item Description", "Org ID", "Manufacturer", "Country", "Created By", "Date", ""].map((h) => (
-                  <th key={h} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                {MFR_COLS.map((c) => (
+                  <th key={c.key} onClick={() => toggleSort(c.key)}
+                    className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap cursor-pointer select-none hover:text-gray-300">
+                    <span className="inline-flex items-center gap-1">
+                      {c.label}
+                      {sort.key === c.key && <span className="text-orange-400">{sort.dir === "asc" ? "▲" : "▼"}</span>}
+                    </span>
+                  </th>
                 ))}
+                <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap" />
               </tr>
             </thead>
             <tbody>
@@ -2291,7 +2361,7 @@ function ManufacturerMasterSection() {
                   </td>
                 </tr>
               ) : (
-                data.map((row) => (
+                sorted.map((row) => (
                   <tr key={row.manufacturer_id} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
                     <td className="px-3 py-2.5 text-xs font-mono text-blue-400 whitespace-nowrap">{row.item_code}</td>
                     <td className="px-3 py-2.5 text-xs text-gray-300 max-w-[200px] truncate" title={row.item_description}>{row.item_description}</td>
