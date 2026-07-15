@@ -75,7 +75,7 @@ export default function HRDashboard() {
     { id: "leave",      icon: Umbrella,      color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Leave" },
     { id: "attendance", icon: BarChart2,     color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40", label: "Attendance Rate" },
     { id: "todo",       icon: ListChecks,    color: "text-rose-400",   bg: "bg-rose-500/10",   activeBorder: "border-rose-500/40",   label: "To Do List" },
-    { id: "cv",         icon: FileSearch,    color: "text-cyan-400",   bg: "bg-cyan-500/10",   activeBorder: "border-cyan-500/40",   label: "CV Screening" },
+    { id: "cv",         icon: FileSearch,    color: "text-cyan-400",   bg: "bg-cyan-500/10",   activeBorder: "border-cyan-500/40",   label: "E-Recruitment" },
     { id: "budget",     icon: Wallet,        color: "text-orange-400", bg: "bg-orange-500/10", activeBorder: "border-orange-500/40", label: "Budget Monitoring" },
     { id: "emagazine",  icon: BookOpen,      color: "text-teal-400",   bg: "bg-teal-500/10",   activeBorder: "border-teal-500/40",   label: "e-Magazine" },
   ];

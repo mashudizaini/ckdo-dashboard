@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, Float, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, Date, Float, Boolean, ForeignKey
 from app.database import Base
 
 
@@ -17,6 +17,7 @@ class CvScreeningJob(Base):
     weight_experience       = Column(Integer, default=30)
     weight_education        = Column(Integer, default=20)
     weight_certification    = Column(Integer, default=10)
+    date_posted             = Column(Date)    # job posting / requirement approval date — Time to Fill start point
     created_by              = Column(String(100))
     created_at               = Column(DateTime, default=datetime.utcnow)
 
@@ -52,3 +53,6 @@ class CvScreeningCandidate(Base):
     strengths                            = Column(Text) # JSON list
     error                                 = Column(Text)
     screened_at                           = Column(DateTime, default=datetime.utcnow)
+    application_date                      = Column(Date)      # Tanggal melamar/seleksi — Time to Hire start point
+    offer_accept_date                     = Column(Date)      # Tanggal kandidat menerima offer — Time to Hire/Fill end point
+    is_hired                              = Column(Boolean, default=False, index=True)

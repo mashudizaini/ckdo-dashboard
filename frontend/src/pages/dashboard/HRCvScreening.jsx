@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Plus, Upload, Loader2, Trash2, Download, X, ChevronDown, ChevronUp,
-  AlertTriangle, CheckCircle, Search, FileText, Sparkles,
+  AlertTriangle, CheckCircle, Search, FileText, Sparkles, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { hrApi } from "@/api/dashboard";
 import { useAuthStore } from "@/store/authStore";
@@ -22,12 +22,45 @@ const REC_CFG = {
   "Error Processing":    { bg: "#f1f5f9", color: "#64748b" },
 };
 
+const CV_SUBTABS = [
+  { id: "screening",   label: "CV Screening" },
+  { id: "requirement", label: "Database Qualification / Requirement" },
+  { id: "detail",      label: "Detail" },
+  { id: "candidates",  label: "Candidate Database" },
+];
+
+const TH = { padding: "10px 12px", textAlign: "left", fontSize: 10.5, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "2px solid rgba(0,0,0,0.06)", whiteSpace: "nowrap" };
+const TD = { padding: "8px 12px", fontSize: 12, color: "#334155", whiteSpace: "nowrap" };
+
 function RecBadge({ rec }) {
   const cfg = REC_CFG[rec] || REC_CFG["Consider"];
   return (
     <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: cfg.bg, color: cfg.color }}>
       {rec}
     </span>
+  );
+}
+
+function Pagination({ total, page, onPage, pageSize = 10 }) {
+  const pages = Math.ceil(total / pageSize);
+  if (pages <= 1) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 4px" }}>
+      <span style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>
+        {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+      </span>
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <button onClick={() => onPage(Math.max(1, page - 1))} disabled={page === 1}
+          style={{ padding: 5, borderRadius: 7, border: "none", cursor: page === 1 ? "not-allowed" : "pointer", background: NEU.bg, color: page === 1 ? "#cbd5e1" : "#475569", boxShadow: NEU.shadowOutSm }}>
+          <ChevronLeft size={13} />
+        </button>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#1e293b", padding: "0 6px" }}>{page} / {pages}</span>
+        <button onClick={() => onPage(Math.min(pages, page + 1))} disabled={page === pages}
+          style={{ padding: 5, borderRadius: 7, border: "none", cursor: page === pages ? "not-allowed" : "pointer", background: NEU.bg, color: page === pages ? "#cbd5e1" : "#475569", boxShadow: NEU.shadowOutSm }}>
+          <ChevronRight size={13} />
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -38,6 +71,7 @@ function JobForm({ onSave, onCancel, saving, initial }) {
     min_experience: initial?.min_experience || 0,
     education_keywords: (initial?.education_keywords || []).join(", "),
     certification_keywords: (initial?.certification_keywords || []).join(", "),
+    date_posted: initial?.date_posted || new Date().toISOString().slice(0, 10),
   });
   const set = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }));
 
@@ -48,6 +82,7 @@ function JobForm({ onSave, onCancel, saving, initial }) {
       min_experience: Number(form.min_experience) || 0,
       education_keywords: form.education_keywords.split(",").map(s => s.trim()).filter(Boolean),
       certification_keywords: form.certification_keywords.split(",").map(s => s.trim()).filter(Boolean),
+      date_posted: form.date_posted || null,
     });
   };
 
@@ -56,7 +91,7 @@ function JobForm({ onSave, onCancel, saving, initial }) {
 
   return (
     <div style={{ background: NEU.bg, boxShadow: NEU.shadowOut, borderRadius: 16, padding: 18, marginBottom: 16 }}>
-      <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 12 }}>New Position / Job Config</h4>
+      <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 12 }}>New Position / Job Requirement</h4>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
         <div style={{ gridColumn: "1 / -1" }}>
           <label style={labelStyle}>POSITION TITLE *</label>
@@ -71,6 +106,10 @@ function JobForm({ onSave, onCancel, saving, initial }) {
           <input type="number" min={0} value={form.min_experience} onChange={set("min_experience")} style={inputStyle} />
         </div>
         <div>
+          <label style={labelStyle}>DATE POSTED</label>
+          <input type="date" value={form.date_posted} onChange={set("date_posted")} style={inputStyle} />
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
           <label style={labelStyle}>EDUCATION KEYWORDS (comma separated)</label>
           <input value={form.education_keywords} onChange={set("education_keywords")} placeholder="S1 Teknik Informatika, Bachelor Computer Science" style={inputStyle} />
         </div>
@@ -213,8 +252,17 @@ function JdGeneratorPanel({ onUseCriteria, onCancel }) {
   );
 }
 
-function CandidateRow({ c, i, onDelete }) {
+function CandidateRow({ c, i, onDelete, onHire }) {
   const [expanded, setExpanded] = useState(false);
+  const [hireForm, setHireForm] = useState(false);
+  const [appDate, setAppDate] = useState(c.application_date || (c.screened_at ? c.screened_at.slice(0, 10) : ""));
+  const [offerDate, setOfferDate] = useState(c.offer_accept_date || new Date().toISOString().slice(0, 10));
+
+  const submitHire = () => {
+    onHire(c.id, { application_date: appDate, offer_accept_date: offerDate, is_hired: true });
+    setHireForm(false);
+  };
+
   return (
     <>
       <tr style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5", cursor: "pointer" }} onClick={() => setExpanded(!expanded)}>
@@ -225,7 +273,14 @@ function CandidateRow({ c, i, onDelete }) {
         <td style={{ padding: "8px 12px", fontSize: 11.5, color: "#475569" }}>{c.education || "—"}</td>
         <td style={{ padding: "8px 12px", fontSize: 11.5, color: "#475569" }}>{(c.skills_found || []).length} skills</td>
         <td style={{ padding: "8px 12px", fontSize: 14, fontWeight: 800, color: "#1e293b" }}>{c.total_score}</td>
-        <td style={{ padding: "8px 12px" }}><RecBadge rec={c.recommendation} /></td>
+        <td style={{ padding: "8px 12px" }}>
+          <RecBadge rec={c.recommendation} />
+          {c.is_hired && (
+            <span style={{ marginLeft: 6, display: "inline-flex", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: "#dcfce7", color: "#16a34a" }}>
+              ✓ Hired
+            </span>
+          )}
+        </td>
         <td style={{ padding: "8px 12px" }} onClick={e => e.stopPropagation()}>
           <button onClick={() => onDelete(c.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}>
             <Trash2 size={13} />
@@ -313,6 +368,35 @@ function CandidateRow({ c, i, onDelete }) {
                 </div>
               </div>
             )}
+
+            {/* Recruitment pipeline — hire tracking for Time to Hire / Time to Fill */}
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
+              {c.is_hired ? (
+                <p style={{ fontSize: 11.5, color: "#16a34a", fontWeight: 700 }}>
+                  ✓ Hired — Applied {c.application_date || "—"} · Offer accepted {c.offer_accept_date || "—"}
+                </p>
+              ) : hireForm ? (
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>APPLICATION DATE</label>
+                    <input type="date" value={appDate} onChange={e => setAppDate(e.target.value)}
+                      style={{ fontSize: 12, padding: "6px 10px", borderRadius: 8, border: "none", background: NEU.bg, boxShadow: NEU.shadowIn, outline: "none" }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>OFFER ACCEPT DATE</label>
+                    <input type="date" value={offerDate} onChange={e => setOfferDate(e.target.value)}
+                      style={{ fontSize: 12, padding: "6px 10px", borderRadius: 8, border: "none", background: NEU.bg, boxShadow: NEU.shadowIn, outline: "none" }} />
+                  </div>
+                  <button onClick={submitHire} style={{ fontSize: 11.5, fontWeight: 700, padding: "7px 14px", borderRadius: 8, border: "none", background: "#16a34a", color: "#fff", cursor: "pointer", boxShadow: NEU.shadowBtn }}>Save</button>
+                  <button onClick={() => setHireForm(false)} style={{ fontSize: 11.5, fontWeight: 700, padding: "7px 14px", borderRadius: 8, border: "none", background: NEU.bg, color: "#64748b", cursor: "pointer", boxShadow: NEU.shadowBtn }}>Cancel</button>
+                </div>
+              ) : (
+                <button onClick={() => setHireForm(true)}
+                  style={{ fontSize: 11.5, fontWeight: 700, padding: "7px 14px", borderRadius: 8, border: "none", background: NEU.bg, color: "#16a34a", cursor: "pointer", boxShadow: NEU.shadowOutSm }}>
+                  Mark as Hired
+                </button>
+              )}
+            </div>
           </td>
         </tr>
       )}
@@ -320,14 +404,11 @@ function CandidateRow({ c, i, onDelete }) {
   );
 }
 
-export default function HRCvScreening() {
+/* ─── Sub-tab: CV Screening (upload + score against an existing position) ── */
+
+function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
   const { token } = useAuthStore();
-  const [jobs, setJobs] = useState([]);
-  const [activeJobId, setActiveJobId] = useState(null);
-  const [showJobForm, setShowJobForm] = useState(false);
-  const [showJdPanel, setShowJdPanel] = useState(false);
-  const [jdPrefill, setJdPrefill] = useState(null);
-  const [savingJob, setSavingJob] = useState(false);
+  const activeJob = jobs.find(j => j.id === activeJobId);
   const [candidates, setCandidates] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -336,16 +417,6 @@ export default function HRCvScreening() {
   const [recFilter, setRecFilter] = useState("");
   const [search, setSearch] = useState("");
   const fileRef = useRef(null);
-
-  const activeJob = jobs.find(j => j.id === activeJobId);
-
-  const fetchJobs = useCallback(async () => {
-    try {
-      const res = await hrApi.getCvJobs();
-      setJobs(res);
-      if (!activeJobId && res.length > 0) setActiveJobId(res[0].id);
-    } catch (_) {}
-  }, [activeJobId]);
 
   const fetchCandidates = useCallback(async () => {
     if (!activeJobId) { setCandidates([]); setStats(null); return; }
@@ -364,35 +435,7 @@ export default function HRCvScreening() {
     finally { setLoading(false); }
   }, [activeJobId, recFilter, search]);
 
-  useEffect(() => { fetchJobs(); }, []); // eslint-disable-line
   useEffect(() => { fetchCandidates(); }, [fetchCandidates]);
-
-  const handleCreateJob = async (data) => {
-    setSavingJob(true);
-    try {
-      const j = await hrApi.createCvJob(data);
-      setShowJobForm(false);
-      setJdPrefill(null);
-      await fetchJobs();
-      setActiveJobId(j.id);
-    } catch (_) {}
-    finally { setSavingJob(false); }
-  };
-
-  const handleUseJdCriteria = (criteria) => {
-    setJdPrefill(criteria);
-    setShowJdPanel(false);
-    setShowJobForm(true);
-  };
-
-  const handleDeleteJob = async (id) => {
-    if (!confirm("Delete this position and all its screened candidates?")) return;
-    try {
-      await hrApi.deleteCvJob(id);
-      setActiveJobId(null);
-      fetchJobs();
-    } catch (_) {}
-  };
 
   const handleUpload = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -424,6 +467,10 @@ export default function HRCvScreening() {
     try { await hrApi.deleteCvCandidate(id); fetchCandidates(); } catch (_) {}
   };
 
+  const handleHire = async (id, data) => {
+    try { await hrApi.hireCvCandidate(id, data); fetchCandidates(); } catch (_) {}
+  };
+
   const handleExport = async () => {
     if (!activeJobId) return;
     try {
@@ -445,44 +492,24 @@ export default function HRCvScreening() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* Job selector */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {jobs.map(j => (
-            <button key={j.id} onClick={() => setActiveJobId(j.id)}
-              style={{
-                padding: "8px 16px", borderRadius: 10, border: "none", fontSize: 12, fontWeight: 700,
-                background: NEU.bg, cursor: "pointer",
-                color: activeJobId === j.id ? "#2563eb" : "#64748b",
-                boxShadow: activeJobId === j.id ? NEU.shadowIn : NEU.shadowOutSm,
-              }}>
-              {j.position_title}
-            </button>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => { setShowJdPanel(!showJdPanel); setShowJobForm(false); }}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 10, border: "none", background: NEU.bg, color: "#7c3aed", fontSize: 12, fontWeight: 700, cursor: "pointer", boxShadow: showJdPanel ? NEU.shadowIn : NEU.shadowOutSm }}>
-            <Sparkles size={14} /> Generate from JD
-          </button>
-          <button onClick={() => { setShowJobForm(!showJobForm); setJdPrefill(null); setShowJdPanel(false); }}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 10, border: "none", background: "#2563eb", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", boxShadow: NEU.shadowBtn }}>
-            <Plus size={14} /> New Position
-          </button>
-        </div>
-      </div>
-
-      {showJdPanel && <JdGeneratorPanel onUseCriteria={handleUseJdCriteria} onCancel={() => setShowJdPanel(false)} />}
-
-      {showJobForm && <JobForm onSave={handleCreateJob} onCancel={() => { setShowJobForm(false); setJdPrefill(null); }} saving={savingJob} initial={jdPrefill} />}
-
-      {!activeJob && !showJobForm && (
-        <div style={{ background: NEU.bg, boxShadow: NEU.shadowOut, borderRadius: 16, padding: "40px 20px", textAlign: "center" }}>
-          <p style={{ fontSize: 13, color: "#94a3b8", fontWeight: 500 }}>
-            No position configured yet. Click "+ New Position" to define job requirements and start screening CVs.
+      {/* Position selector */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {jobs.length === 0 ? (
+          <p style={{ fontSize: 12, color: "#94a3b8" }}>
+            No positions configured yet. Go to the "Database Qualification / Requirement" tab to create one.
           </p>
-        </div>
-      )}
+        ) : jobs.map(j => (
+          <button key={j.id} onClick={() => setActiveJobId(j.id)}
+            style={{
+              padding: "8px 16px", borderRadius: 10, border: "none", fontSize: 12, fontWeight: 700,
+              background: NEU.bg, cursor: "pointer",
+              color: activeJobId === j.id ? "#2563eb" : "#64748b",
+              boxShadow: activeJobId === j.id ? NEU.shadowIn : NEU.shadowOutSm,
+            }}>
+            {j.position_title}
+          </button>
+        ))}
+      </div>
 
       {activeJob && (
         <>
@@ -507,10 +534,6 @@ export default function HRCvScreening() {
               <button onClick={handleExport} disabled={!candidates.length}
                 style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 10, border: "none", background: NEU.bg, color: "#64748b", fontSize: 12, fontWeight: 700, cursor: candidates.length ? "pointer" : "not-allowed", boxShadow: NEU.shadowOutSm, opacity: candidates.length ? 1 : 0.5 }}>
                 <Download size={13} /> Export
-              </button>
-              <button onClick={() => handleDeleteJob(activeJob.id)}
-                style={{ padding: "8px 10px", borderRadius: 10, border: "none", background: NEU.bg, color: "#dc2626", cursor: "pointer", boxShadow: NEU.shadowOutSm }}>
-                <Trash2 size={13} />
               </button>
             </div>
           </div>
@@ -580,7 +603,7 @@ export default function HRCvScreening() {
                 </thead>
                 <tbody>
                   {candidates.map((c, i) => (
-                    <CandidateRow key={c.id} c={c} i={i} onDelete={handleDeleteCandidate} />
+                    <CandidateRow key={c.id} c={c} i={i} onDelete={handleDeleteCandidate} onHire={handleHire} />
                   ))}
                 </tbody>
               </table>
@@ -588,6 +611,321 @@ export default function HRCvScreening() {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/* ─── Sub-tab: Database Qualification / Requirement (position CRUD) ──────── */
+
+function RequirementTab({ jobs, fetchJobs, activeJobId, setActiveJobId }) {
+  const [showJobForm, setShowJobForm] = useState(false);
+  const [showJdPanel, setShowJdPanel] = useState(false);
+  const [jdPrefill, setJdPrefill] = useState(null);
+  const [savingJob, setSavingJob] = useState(false);
+
+  const handleCreateJob = async (data) => {
+    setSavingJob(true);
+    try {
+      const j = await hrApi.createCvJob(data);
+      setShowJobForm(false);
+      setJdPrefill(null);
+      await fetchJobs();
+      setActiveJobId(j.id);
+    } catch (_) {}
+    finally { setSavingJob(false); }
+  };
+
+  const handleUseJdCriteria = (criteria) => {
+    setJdPrefill(criteria);
+    setShowJdPanel(false);
+    setShowJobForm(true);
+  };
+
+  const handleDeleteJob = async (id) => {
+    if (!confirm("Delete this position and all its screened candidates?")) return;
+    try {
+      await hrApi.deleteCvJob(id);
+      if (activeJobId === id) setActiveJobId(null);
+      fetchJobs();
+    } catch (_) {}
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <button onClick={() => { setShowJdPanel(!showJdPanel); setShowJobForm(false); }}
+          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 10, border: "none", background: NEU.bg, color: "#7c3aed", fontSize: 12, fontWeight: 700, cursor: "pointer", boxShadow: showJdPanel ? NEU.shadowIn : NEU.shadowOutSm }}>
+          <Sparkles size={14} /> Generate from JD
+        </button>
+        <button onClick={() => { setShowJobForm(!showJobForm); setJdPrefill(null); setShowJdPanel(false); }}
+          style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 10, border: "none", background: "#2563eb", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", boxShadow: NEU.shadowBtn }}>
+          <Plus size={14} /> New Position
+        </button>
+      </div>
+
+      {showJdPanel && <JdGeneratorPanel onUseCriteria={handleUseJdCriteria} onCancel={() => setShowJdPanel(false)} />}
+      {showJobForm && <JobForm onSave={handleCreateJob} onCancel={() => { setShowJobForm(false); setJdPrefill(null); }} saving={savingJob} initial={jdPrefill} />}
+
+      {jobs.length === 0 ? (
+        <div style={{ background: NEU.bg, boxShadow: NEU.shadowOut, borderRadius: 16, padding: "40px 20px", textAlign: "center" }}>
+          <p style={{ fontSize: 13, color: "#94a3b8", fontWeight: 500 }}>
+            No position requirements defined yet. Click "+ New Position" to add one.
+          </p>
+        </div>
+      ) : (
+        <div style={{ borderRadius: 16, overflow: "hidden", boxShadow: NEU.shadowIn }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
+                  {["Position", "Required Skills", "Min Exp", "Education", "Certification", "Date Posted", "Created By", ""].map(h => (
+                    <th key={h} style={TH}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {jobs.map((j, i) => (
+                  <tr key={j.id} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                    <td style={{ ...TD, fontWeight: 700, color: "#1e293b" }}>{j.position_title}</td>
+                    <td style={{ ...TD, whiteSpace: "normal", maxWidth: 260 }}>{j.required_skills.join(", ") || "—"}</td>
+                    <td style={TD}>{j.min_experience}y</td>
+                    <td style={{ ...TD, whiteSpace: "normal", maxWidth: 200 }}>{j.education_keywords.join(", ") || "—"}</td>
+                    <td style={{ ...TD, whiteSpace: "normal", maxWidth: 200 }}>{j.certification_keywords.join(", ") || "—"}</td>
+                    <td style={TD}>{j.date_posted || "—"}</td>
+                    <td style={TD}>{j.created_by || "—"}</td>
+                    <td style={TD}>
+                      <button onClick={() => handleDeleteJob(j.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}>
+                        <Trash2 size={13} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Sub-tab: Detail — Time to Hire / Time to Fill per candidate ─────────
+   Time to Hire = Offer Accept Date − Application Date (per candidate)
+   Time to Fill = avg(Offer Accept Date − Job Date Posted) across hired
+                  candidates of that position                             */
+
+function DetailTab({ jobs }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [jobFilter, setJobFilter] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
+
+  const fetchDetail = useCallback(async () => {
+    setLoading(true);
+    try {
+      const p = {};
+      if (jobFilter) p.job_id = jobFilter;
+      const res = await hrApi.getCvDetail(p);
+      setRows(res);
+      setPage(1);
+    } catch (_) {}
+    finally { setLoading(false); }
+  }, [jobFilter]);
+
+  useEffect(() => { fetchDetail(); }, [fetchDetail]);
+
+  const fmtDays = (d) => d == null ? "—" : `${d} day${d === 1 ? "" : "s"}`;
+  const fmtDate = (d) => d ? d.slice(0, 10) : "—";
+  const paged = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <select value={jobFilter} onChange={e => setJobFilter(e.target.value)}
+        style={{ fontSize: 12, fontWeight: 600, padding: "6px 12px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: NEU.shadowOutSm, cursor: "pointer", outline: "none", width: 260 }}>
+        <option value="">All Positions</option>
+        {jobs.map(j => <option key={j.id} value={j.id}>{j.position_title}</option>)}
+      </select>
+
+      {loading ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: "40px 0" }}><Loader2 size={20} className="animate-spin" style={{ color: "#94a3b8" }} /></div>
+      ) : rows.length === 0 ? (
+        <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No screened candidates yet.</p>
+      ) : (
+        <div style={{ borderRadius: 16, overflow: "hidden", boxShadow: NEU.shadowIn }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
+                  {["Position", "Candidate", "Time to Hire", "Time to Fill", "Education", "Skills Score", "Experience Score", "Education Score", "Certification Score", "File Name", "Processed Date"].map(h => (
+                    <th key={h} style={TH}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {paged.map((r, i) => (
+                  <tr key={r.candidate_id} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                    <td style={{ ...TD, fontWeight: 700, color: "#1e293b" }}>{r.position_title}</td>
+                    <td style={TD}>{r.candidate_name}</td>
+                    <td style={TD}>{fmtDays(r.time_to_hire)}</td>
+                    <td style={TD}>{fmtDays(r.time_to_fill)}</td>
+                    <td style={TD}>{r.education || "—"}</td>
+                    <td style={TD}>{r.skills_score}</td>
+                    <td style={TD}>{r.experience_score}</td>
+                    <td style={TD}>{r.education_score}</td>
+                    <td style={TD}>{r.certification_score}</td>
+                    <td style={{ ...TD, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }} title={r.filename}>{r.filename}</td>
+                    <td style={TD}>{fmtDate(r.processed_date)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pagination total={rows.length} page={page} onPage={setPage} pageSize={PAGE_SIZE} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Sub-tab: Candidate Database — reuses the Employee master (hired staff) ── */
+
+function durationParts(start, end) {
+  if (!start) return { y: "—", m: "—", d: "—" };
+  const s = new Date(start);
+  const e = end ? new Date(end) : new Date();
+  let y = e.getFullYear() - s.getFullYear();
+  let m = e.getMonth() - s.getMonth();
+  let d = e.getDate() - s.getDate();
+  if (d < 0) { m -= 1; d += new Date(e.getFullYear(), e.getMonth(), 0).getDate(); }
+  if (m < 0) { y -= 1; m += 12; }
+  return { y, m, d };
+}
+
+function CandidateDatabaseTab() {
+  const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
+
+  const fetchEmployees = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await hrApi.getEmployees({ search, page: 1, page_size: 2000 });
+      setEmployees(res.employees || []);
+      setPage(1);
+    } catch (_) {}
+    finally { setLoading(false); }
+  }, [search]);
+
+  useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
+
+  const paged = employees.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const HEADERS = ["No", "User ID", "Full Name", "Sex", "Level", "Department", "Division", "Team", "Job Title",
+    "Work Placement", "Status", "DOJ", "Duration (Y)", "Duration (M)", "Duration (D)", "Retired (Age 55)",
+    "PKWT Ke-", "Starting PKWT", "End PKWT", "Permanent Date", "Status"];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ position: "relative", width: 260 }}>
+        <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name / NIK / position..."
+          style={{ width: "100%", boxSizing: "border-box", fontSize: 12, padding: "6px 12px 6px 30px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff", outline: "none" }} />
+      </div>
+
+      {loading ? (
+        <div style={{ display: "flex", justifyContent: "center", padding: "40px 0" }}><Loader2 size={20} className="animate-spin" style={{ color: "#94a3b8" }} /></div>
+      ) : employees.length === 0 ? (
+        <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No employee records found.</p>
+      ) : (
+        <div style={{ borderRadius: 16, overflow: "hidden", boxShadow: NEU.shadowIn }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
+                  {HEADERS.map((h, idx) => <th key={`${h}-${idx}`} style={TH}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {paged.map((e, i) => {
+                  const dur = durationParts(e.date_of_joining, e.resign_date);
+                  const contractStatus = e.permanent_date ? "Permanent"
+                    : e.end_pkwt && new Date(e.end_pkwt) < new Date() ? "Expired"
+                    : e.end_pkwt ? "Active" : "—";
+                  return (
+                    <tr key={e.id} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                      <td style={TD}>{(page - 1) * PAGE_SIZE + i + 1}</td>
+                      <td style={{ ...TD, fontFamily: "monospace" }}>{e.user_id}</td>
+                      <td style={{ ...TD, fontWeight: 700, color: "#1e293b" }}>{e.full_name}</td>
+                      <td style={TD}>{e.sex || "—"}</td>
+                      <td style={TD}>{e.level || "—"}</td>
+                      <td style={TD}>{e.department || "—"}</td>
+                      <td style={TD}>{e.division || "—"}</td>
+                      <td style={TD}>{e.team || "—"}</td>
+                      <td style={TD}>{e.job_title || "—"}</td>
+                      <td style={TD}>{e.work_placement || "—"}</td>
+                      <td style={TD}>{e.status || "—"}</td>
+                      <td style={TD}>{e.date_of_joining || "—"}</td>
+                      <td style={{ ...TD, textAlign: "right" }}>{dur.y}</td>
+                      <td style={{ ...TD, textAlign: "right" }}>{dur.m}</td>
+                      <td style={{ ...TD, textAlign: "right" }}>{dur.d}</td>
+                      <td style={TD}>{e.retire_date || "—"}</td>
+                      <td style={TD}>{e.pkwt_ke || "—"}</td>
+                      <td style={TD}>{e.starting_pkwt || "—"}</td>
+                      <td style={TD}>{e.end_pkwt || "—"}</td>
+                      <td style={TD}>{e.permanent_date || "—"}</td>
+                      <td style={TD}>{contractStatus}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <Pagination total={employees.length} page={page} onPage={setPage} pageSize={PAGE_SIZE} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Main export: E-Recruitment shell with 4 sub-tabs ────────────────────── */
+
+export default function HRCvScreening() {
+  const [subTab, setSubTab] = useState("screening");
+  const [jobs, setJobs] = useState([]);
+  const [activeJobId, setActiveJobId] = useState(null);
+
+  const fetchJobs = useCallback(async () => {
+    try {
+      const res = await hrApi.getCvJobs();
+      setJobs(res);
+      if (!activeJobId && res.length > 0) setActiveJobId(res[0].id);
+    } catch (_) {}
+  }, [activeJobId]);
+
+  useEffect(() => { fetchJobs(); }, []); // eslint-disable-line
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", gap: 4, borderBottom: "2px solid rgba(0,0,0,0.06)", flexWrap: "wrap" }}>
+        {CV_SUBTABS.map(t => (
+          <button key={t.id} onClick={() => setSubTab(t.id)}
+            style={{
+              padding: "9px 16px", border: "none", cursor: "pointer", background: "transparent",
+              borderBottom: subTab === t.id ? "2px solid #0891b2" : "2px solid transparent",
+              marginBottom: -2, color: subTab === t.id ? "#0891b2" : "#64748b",
+              fontSize: 12.5, fontWeight: subTab === t.id ? 700 : 500, transition: "all 0.15s",
+            }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {subTab === "screening"   && <ScreeningTab jobs={jobs} activeJobId={activeJobId} setActiveJobId={setActiveJobId} />}
+      {subTab === "requirement" && <RequirementTab jobs={jobs} fetchJobs={fetchJobs} activeJobId={activeJobId} setActiveJobId={setActiveJobId} />}
+      {subTab === "detail"      && <DetailTab jobs={jobs} />}
+      {subTab === "candidates"  && <CandidateDatabaseTab />}
     </div>
   );
 }

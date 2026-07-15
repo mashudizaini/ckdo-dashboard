@@ -39,6 +39,22 @@ class JobCreate(BaseModel):
     weight_experience: int = 30
     weight_education: int = 20
     weight_certification: int = 10
+    date_posted: Optional[str] = None
+
+
+class CandidateHire(BaseModel):
+    application_date: Optional[str] = None
+    offer_accept_date: Optional[str] = None
+    is_hired: bool = True
+
+
+def _parse_date(s: Optional[str]):
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(400, "Date format must be YYYY-MM-DD")
 
 
 def _job_to_dict(j: CvScreeningJob) -> dict:
@@ -53,6 +69,7 @@ def _job_to_dict(j: CvScreeningJob) -> dict:
         "weight_experience": j.weight_experience,
         "weight_education": j.weight_education,
         "weight_certification": j.weight_certification,
+        "date_posted": j.date_posted.isoformat() if j.date_posted else None,
         "created_by": j.created_by,
         "created_at": j.created_at.isoformat() if j.created_at else None,
     }
@@ -92,6 +109,9 @@ def _candidate_to_dict(c: CvScreeningCandidate) -> dict:
         "strengths": json.loads(c.strengths or "[]"),
         "error": c.error,
         "screened_at": c.screened_at.isoformat() if c.screened_at else None,
+        "application_date": c.application_date.isoformat() if c.application_date else None,
+        "offer_accept_date": c.offer_accept_date.isoformat() if c.offer_accept_date else None,
+        "is_hired": c.is_hired,
     }
 
 
@@ -124,6 +144,7 @@ async def create_job(
         weight_experience=body.weight_experience,
         weight_education=body.weight_education,
         weight_certification=body.weight_certification,
+        date_posted=_parse_date(body.date_posted),
         created_by=user.username,
     )
     db.add(j)
@@ -229,6 +250,29 @@ async def delete_candidate(
     return {"message": "Deleted"}
 
 
+@router.put("/candidates/{candidate_id}/hire")
+async def hire_candidate(
+    candidate_id: int,
+    body: CandidateHire,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    """Tandai kandidat sebagai hired + catat Application Date & Offer Accept Date
+    — dipakai untuk menghitung Time to Hire (per kandidat) dan Time to Fill
+    (per posisi, lihat GET /detail)."""
+    result = await db.execute(select(CvScreeningCandidate).where(CvScreeningCandidate.id == candidate_id))
+    c = result.scalars().first()
+    if not c:
+        raise HTTPException(404, "Candidate not found")
+    c.is_hired = body.is_hired
+    if body.application_date is not None:
+        c.application_date = _parse_date(body.application_date)
+    if body.offer_accept_date is not None:
+        c.offer_accept_date = _parse_date(body.offer_accept_date)
+    await db.flush()
+    return _candidate_to_dict(c)
+
+
 @router.get("/jobs/{job_id}/stats")
 async def get_stats(
     job_id: int,
@@ -251,6 +295,72 @@ async def get_stats(
         "errors": by_rec.get("Error Processing", 0),
         "average_score": round(sum(scores) / len(scores), 1) if scores else 0,
     }
+
+
+# ── Detail: Time to Hire / Time to Fill per candidate ────────────────
+
+@router.get("/detail")
+async def get_screening_detail(
+    job_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    """
+    Satu baris per kandidat yang sudah discreening, dengan:
+    - Time to Hire  = Offer Accept Date − Application Date (per kandidat, hanya
+      terisi jika kandidat sudah ditandai hired dengan kedua tanggal tsb)
+    - Time to Fill  = rata-rata (Offer Accept Date − Job.date_posted) dari semua
+      kandidat yang hired untuk posisi tsb — dihitung per posisi, ditampilkan di
+      setiap baris kandidat posisi itu
+    """
+    jobs_result = await db.execute(select(CvScreeningJob))
+    jobs = {j.id: j for j in jobs_result.scalars().all()}
+
+    q = select(CvScreeningCandidate)
+    if job_id:
+        q = q.where(CvScreeningCandidate.job_id == job_id)
+    q = q.order_by(CvScreeningCandidate.screened_at.desc())
+    result = await db.execute(q)
+    candidates = result.scalars().all()
+
+    # Time to Fill per posisi — rata-rata dari kandidat yang hired
+    fill_days_by_job: dict[int, list[int]] = {}
+    for c in candidates:
+        job = jobs.get(c.job_id)
+        if c.is_hired and c.offer_accept_date and job and job.date_posted:
+            fill_days_by_job.setdefault(c.job_id, []).append((c.offer_accept_date - job.date_posted).days)
+    time_to_fill_by_job = {
+        jid: round(sum(days) / len(days), 1)
+        for jid, days in fill_days_by_job.items()
+    }
+
+    rows = []
+    for c in candidates:
+        job = jobs.get(c.job_id)
+        time_to_hire = (
+            (c.offer_accept_date - c.application_date).days
+            if c.offer_accept_date and c.application_date else None
+        )
+        rows.append({
+            "candidate_id":      c.id,
+            "job_id":            c.job_id,
+            "position_title":    job.position_title if job else "—",
+            "candidate_name":    c.name,
+            "is_hired":          c.is_hired,
+            "application_date":  c.application_date.isoformat() if c.application_date else None,
+            "offer_accept_date": c.offer_accept_date.isoformat() if c.offer_accept_date else None,
+            "time_to_hire":      time_to_hire,
+            "time_to_fill":      time_to_fill_by_job.get(c.job_id),
+            "education":         c.education,
+            "skills_score":      c.skills_score,
+            "experience_score":  c.experience_score,
+            "education_score":   c.education_score,
+            "certification_score": c.certification_score,
+            "filename":          c.filename,
+            "processed_date":    c.screened_at.isoformat() if c.screened_at else None,
+        })
+
+    return rows
 
 
 # ── Job Description Generator ──────────────────────────────────────
