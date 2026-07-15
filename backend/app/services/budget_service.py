@@ -8,9 +8,12 @@ COA Structure CKD Otto:
   segment4 = natural account           → kode akun
 
 Sumber data:
-  GL_BALANCES (actual_flag='B')            → budget per akun per periode
-  GL_BALANCES (actual_flag='A')            → actual per akun per periode (ringkasan akun,
-                                              cocok dengan Oracle Funds Available Inquiry)
+  GL_BALANCES (actual_flag='B')            → budget per akun per periode (PTD — Period-To-Date,
+                                              cocok dengan Oracle "Budget Balances" drilldown)
+  GL_BALANCES (actual_flag='A')            → actual per akun per periode, pola sama dengan budget
+
+Ringkasan akun (get_summary): jika parameter month diisi → PTD bulan itu saja;
+jika kosong (All Months) → dijumlah satu tahun penuh.
   GL_BALANCES (actual_flag='E')            → encumbrance per akun per periode
   GL_JE_LINES/GL_JE_HEADERS (je_category   → budget reclass (di-net-kan debit−credit,
     IN ('RECLASS','BUDGET'))                 lihat catatan di _query_reclass_gl)
@@ -108,11 +111,13 @@ class BudgetService:
         Actual  : GL_BALANCES (actual_flag='A')
         Remain  : Budget − Actual
 
-        Jika `month` diisi, Budget & Actual dihitung Year-To-Date KUMULATIF dari
-        Januari sampai bulan tsb (bukan hanya bulan itu sendiri) — supaya cocok
-        dengan Oracle Funds Available Inquiry saat Amount Type = "Year To Date
-        Extended". Ini beda dengan get_account_detail() yang menampilkan tiap
-        bulan sebagai baris terpisah (period-only, bukan kumulatif).
+        Tergantung parameter `month`:
+        - `month` diisi  → PTD (Period-To-Date) untuk bulan itu SAJA, cocok
+          dengan Oracle "Budget Balances" drilldown (Master Balance per periode).
+        - `month` kosong (All Months) → total SATU TAHUN penuh (Jan-Des dijumlah).
+        _query_budget/_query_actual_gl selalu GROUP BY per bulan, jadi baris
+        per-bulan di-sum per akun di sini sebelum dijadikan daftar akun —
+        kalau tidak, tiap bulan akan muncul sebagai "akun" terpisah.
         """
         budget_rows = await asyncio.to_thread(self._query_budget, dept, year, month)
         actual_map  = await asyncio.to_thread(self._query_actual_summary, dept, year, month)
@@ -290,7 +295,7 @@ class BudgetService:
               AND gb.currency_code          = gl.currency_code
               AND  gcc.segment3 = :dept
               AND EXTRACT(YEAR FROM gp.start_date)  = :year
-              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) <= :month)
+              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) = :month)
               AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
             GROUP BY
                 EXTRACT(YEAR  FROM gp.start_date),
@@ -339,7 +344,7 @@ class BudgetService:
               AND gb.currency_code          = gl.currency_code
               AND  gcc.segment3 = :dept
               AND EXTRACT(YEAR FROM gp.start_date)  = :year
-              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) <= :month)
+              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) = :month)
               AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
             GROUP BY
                 EXTRACT(YEAR  FROM gp.start_date),
