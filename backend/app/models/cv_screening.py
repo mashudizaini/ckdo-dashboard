@@ -9,6 +9,7 @@ class CvScreeningJob(Base):
 
     id                      = Column(Integer, primary_key=True, autoincrement=True)
     position_title          = Column(String(300), nullable=False)
+    key_responsibilities    = Column(Text)    # JSON list
     required_skills         = Column(Text)    # JSON list
     min_experience          = Column(Integer, default=0)
     education_keywords      = Column(Text)    # JSON list

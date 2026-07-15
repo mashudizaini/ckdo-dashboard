@@ -77,6 +77,7 @@ function Pagination({ total, page, onPage, pageSize = 10 }) {
 function JobForm({ onSave, onCancel, saving, initial }) {
   const [form, setForm] = useState({
     position_title: initial?.position_title || "",
+    key_responsibilities: (initial?.key_responsibilities || []).join("\n"),
     required_skills: (initial?.required_skills || []).join(", "),
     min_experience: initial?.min_experience || 0,
     education_keywords: (initial?.education_keywords || []).join(", "),
@@ -88,6 +89,7 @@ function JobForm({ onSave, onCancel, saving, initial }) {
   const submit = () => {
     onSave({
       position_title: form.position_title,
+      key_responsibilities: form.key_responsibilities.split("\n").map(s => s.trim()).filter(Boolean),
       required_skills: form.required_skills.split(",").map(s => s.trim()).filter(Boolean),
       min_experience: Number(form.min_experience) || 0,
       education_keywords: form.education_keywords.split(",").map(s => s.trim()).filter(Boolean),
@@ -106,6 +108,12 @@ function JobForm({ onSave, onCancel, saving, initial }) {
         <div style={{ gridColumn: "1 / -1" }}>
           <label style={labelStyle}>POSITION TITLE *</label>
           <input value={form.position_title} onChange={set("position_title")} placeholder="e.g. Oracle EBS Technical Consultant" style={inputStyle} />
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label style={labelStyle}>KEY RESPONSIBILITIES (one per line)</label>
+          <textarea value={form.key_responsibilities} onChange={set("key_responsibilities")} rows={3}
+            placeholder={"Manage day-to-day Oracle EBS Financials support\nCoordinate with vendors on system enhancements"}
+            style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} />
         </div>
         <div style={{ gridColumn: "1 / -1" }}>
           <label style={labelStyle}>REQUIRED SKILLS (comma separated) *</label>
@@ -699,6 +707,7 @@ function RequirementTab({ jobs, fetchJobs, activeJobId, setActiveJobId }) {
               <thead>
                 <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
                   <SortableTHi label="Position"       field="position_title"         sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  <SortableTHi label="Key Responsibility" field="key_responsibilities" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   <SortableTHi label="Required Skills" field="required_skills"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   <SortableTHi label="Min Exp"        field="min_experience"         sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   <SortableTHi label="Education"      field="education_keywords"     sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
@@ -712,6 +721,7 @@ function RequirementTab({ jobs, fetchJobs, activeJobId, setActiveJobId }) {
                 {sortRows(jobs, sortBy, sortDir, ["min_experience"]).map((j, i) => (
                   <tr key={j.id} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
                     <td style={{ ...TD, fontWeight: 700, color: "#1e293b" }}>{j.position_title}</td>
+                    <td style={{ ...TD, whiteSpace: "normal", maxWidth: 260 }}>{j.key_responsibilities?.join("; ") || "—"}</td>
                     <td style={{ ...TD, whiteSpace: "normal", maxWidth: 260 }}>{j.required_skills.join(", ") || "—"}</td>
                     <td style={TD}>{j.min_experience}y</td>
                     <td style={{ ...TD, whiteSpace: "normal", maxWidth: 200 }}>{j.education_keywords.join(", ") || "—"}</td>
@@ -746,7 +756,7 @@ function DetailTab({ jobs }) {
   const [page, setPage] = useState(1);
   const [sortBy,  setSortBy]  = useState(null);
   const [sortDir, setSortDir] = useState("asc");
-  const PAGE_SIZE = 10;
+  const PAGE_SIZE = 8;
 
   const fetchDetail = useCallback(async () => {
     setLoading(true);
@@ -834,7 +844,7 @@ function CandidateDatabaseTab() {
   const [page, setPage] = useState(1);
   const [sortBy,  setSortBy]  = useState(null);
   const [sortDir, setSortDir] = useState("asc");
-  const PAGE_SIZE = 10;
+  const PAGE_SIZE = 8;
 
   const fetchCandidates = useCallback(async () => {
     setLoading(true);

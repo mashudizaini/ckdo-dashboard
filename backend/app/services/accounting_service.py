@@ -24,12 +24,81 @@ class AccountingService:
 
     # ── Inventory RM PM ──────────────────────────────────────────────────────
 
+    # Excel template column order — see sumber/ouput-inventory RMPM.xlsx.
+    # Amount side is coarser than qty side (10 vs 14 cols); WIP Return nets
+    # into WIP Issue amount, Manual addition nets into Purchase amount, and
+    # the 3 sample sub-types net into a single Sample amount column.
+    QTY_COLS = [
+        ("q_purchase",          "Purchase"),
+        ("q_return_vendor",     "Return to vendor"),
+        ("q_sample_qc",         "QTY Sample /Deduct Sample Qty +Issue RM Sample QC"),
+        ("q_sample_stability",  "Sample for Stability Test"),
+        ("q_sample_marketing",  "Sample marketing"),
+        ("q_manual_addition",   "Manual addition project algeria"),
+        ("q_wip_issue",         "WIP Issue"),
+        ("q_wip_return",        "WIP Return"),
+        ("q_repacking",         "Repacking"),
+        ("q_rusak",             "Issue RM Rusak"),
+        ("q_investigation_adj", "stock Investigation adjustment"),
+        ("q_trial_production",  "Trial production"),
+        ("q_mediafill_wo",      "Media fill written off"),
+        ("q_adj_written_off",   "QTY Adjustment Written off from Plant"),
+    ]
+    AMT_COLS = [
+        ("a_purchase",          "Purchase"),
+        ("a_return_supplier",   "Return to supplier"),
+        ("a_sample",            "Sample"),
+        ("a_wip_issue",         "WIP Issue"),
+        ("a_repacking",         "Repacking"),
+        ("a_rusak",             "Issue RM PM Rusak"),
+        ("a_investigation_adj", "stock Investigation adjustment"),
+        ("a_trial_production",  "Amount trial production"),
+        ("a_mediafill",         "Adjustment mediafill"),
+        ("a_written_off",       "Amount written off"),
+    ]
+    # Oracle mtl_transaction_types.transaction_type_name → qty column.
+    # Confirmed against a live 12-month distinct-value pull from org 121
+    # (Subinventory Transfer / Sales Order* / WIP Completion* / RMA Receipt /
+    # Issue FG* / Issue Ruah* are FG/bulk-item or net-zero-at-org-level
+    # transactions and are intentionally left unmapped — they don't appear
+    # on RM/PM items once the item-type filter below is applied).
+    TRX_TYPE_MAP = {
+        "PO Receipt":                       "q_purchase",
+        "Return to Vendor":                 "q_return_vendor",
+        "Issue RM/PM Sample QC":            "q_sample_qc",
+        "Deduct Sample Qty":                "q_sample_qc",
+        "Issue RM/PM Additional Material":  "q_manual_addition",
+        "WIP Issue":                        "q_wip_issue",
+        "WIP Return":                       "q_wip_return",
+        "Residual Mat Prod to RM/PM":       "q_repacking",
+        "Issue RM/PM Rusak":                "q_rusak",
+        "Stock Adjustment RM/PM +":         "q_investigation_adj",
+        "Issue RM/PM Trial Production":     "q_trial_production",
+        "Issue RM/PM Expired":              "q_adj_written_off",
+    }
+    # qty column → amount column it nets into
+    QTY_TO_AMT = {
+        "q_purchase": "a_purchase", "q_manual_addition": "a_purchase",
+        "q_return_vendor": "a_return_supplier",
+        "q_sample_qc": "a_sample", "q_sample_stability": "a_sample", "q_sample_marketing": "a_sample",
+        "q_wip_issue": "a_wip_issue", "q_wip_return": "a_wip_issue",
+        "q_repacking": "a_repacking",
+        "q_rusak": "a_rusak",
+        "q_investigation_adj": "a_investigation_adj",
+        "q_trial_production": "a_trial_production",
+        "q_mediafill_wo": "a_mediafill",
+        "q_adj_written_off": "a_written_off",
+    }
+
     async def get_inventory_rm_pm(self, period: str, include_begin: bool = True) -> dict:
         """
-        Inventory RM PM monthly report matching Template_Dashboard_Inventory-monthly.xlsx.
-        - Movements for the period from MTL_MATERIAL_TRANSACTIONS (org 121)
+        Inventory RM PM monthly report matching sumber/ouput-inventory RMPM.xlsx.
+        - Movements for the period from MTL_MATERIAL_TRANSACTIONS (org 121),
+          restricted to true RM/PM items (excludes FG MAKE/RUAHAN/FG BUY/TOLL IN)
         - Price from CKDO_GET_ITEM_COST
         - Beginning balance: sum of 5-year lookback (skippable for speed)
+        - 14 qty movement columns + 10 netted amount movement columns, see
+          QTY_COLS/AMT_COLS/TRX_TYPE_MAP/QTY_TO_AMT above.
         """
         from calendar import monthrange
 
@@ -73,6 +142,12 @@ class AccountingService:
             WHERE mmt.organization_id = 121
               AND mmt.transaction_date >= TO_DATE(:date_from, 'YYYY-MM-DD')
               AND mmt.transaction_date <  TO_DATE(:date_to,   'YYYY-MM-DD') + 1
+              AND (
+                    UPPER(msib.segment1) LIKE '02A%' OR UPPER(msib.segment1) LIKE '02B%'
+                 OR UPPER(msib.segment1) LIKE '02%'  OR UPPER(msib.segment1) LIKE '01P%'
+                 OR UPPER(msib.segment1) LIKE '01S%' OR UPPER(msib.segment1) LIKE '01%'
+                 OR msib.item_type = 'RM'
+              )
             GROUP BY
                 msib.segment1, msib.description, msib.primary_uom_code,
                 msib.item_type, mtt.transaction_type_name, msib.inventory_item_id
@@ -102,24 +177,8 @@ class AccountingService:
 
         begin_map = {r["item_id"]: float(r["begin_qty"] or 0) for r in beg_rows}
 
-        def categorize(name: str) -> str:
-            n = name.lower()
-            if any(k in n for k in ["receipt", "purchase", "receiving"]) \
-               and "return" not in n: return "purchase"
-            if any(k in n for k in ["return to vendor", "return to receiving",
-                                     "return to supplier"]): return "return_vendor"
-            if "wip" in n and "return" in n:  return "wip_return"
-            if "wip" in n and "issue" in n:   return "wip_issue"
-            if "wip" in n:                    return "wip_issue"
-            if any(k in n for k in ["sample", "qc", "quality"]): return "sample"
-            if any(k in n for k in ["trial", "media fill", "project"]): return "misc"
-            if any(k in n for k in ["disposal", "scrap", "written off"]): return "disposal"
-            if any(k in n for k in ["adjustment", "cycle count",
-                                     "physical inventory"]): return "adjustment"
-            return "other"
-
-        CATS = ["purchase", "return_vendor", "sample", "wip_issue",
-                "wip_return", "misc", "disposal", "adjustment", "other"]
+        QTY_KEYS = [k for k, _ in self.QTY_COLS]
+        AMT_KEYS = [k for k, _ in self.AMT_COLS]
 
         items: dict = {}
         for r in mvt_rows:
@@ -132,20 +191,26 @@ class AccountingService:
                     "material_type": r["material_type"],
                     "unit_price":    float(r["unit_price"] or 0),
                     "movements":     [],
-                    **{c: 0.0 for c in CATS},
+                    **{c: 0.0 for c in QTY_KEYS},
                 }
-            cat = categorize(r["trx_type"])
             qty = float(r["qty"] or 0)
-            items[iid][cat] = round(items[iid][cat] + qty, 6)
             items[iid]["movements"].append({"trx_type": r["trx_type"], "qty": round(qty, 6)})
+            cat = self.TRX_TYPE_MAP.get(r["trx_type"])
+            if cat:
+                items[iid][cat] = round(items[iid][cat] + qty, 6)
 
         result = []
         for iid, d in sorted(items.items(), key=lambda x: x[1]["item_code"]):
             begin_qty  = round(begin_map.get(iid, 0), 6)
-            net_mvt    = sum(d[c] for c in CATS)
+            net_mvt    = sum(d[c] for c in QTY_KEYS)
             end_qty    = round(begin_qty + net_mvt, 6)
             price      = d["unit_price"]
-            result.append({
+
+            amounts = {a: 0.0 for a in AMT_KEYS}
+            for qk, ak in self.QTY_TO_AMT.items():
+                amounts[ak] = round(amounts[ak] + d[qk] * price, 2)
+
+            row = {
                 "item_code":      d["item_code"],
                 "item_name":      d["item_name"],
                 "uom":            d["uom"],
@@ -153,19 +218,13 @@ class AccountingService:
                 "unit_price":     price,
                 "begin_qty":      begin_qty,
                 "begin_amount":   round(begin_qty * price, 2),
-                "purchase":       d["purchase"],
-                "return_vendor":  d["return_vendor"],
-                "sample":         d["sample"],
-                "wip_issue":      d["wip_issue"],
-                "wip_return":     d["wip_return"],
-                "misc":           d["misc"],
-                "disposal":       d["disposal"],
-                "adjustment":     d["adjustment"],
-                "other":          d["other"],
+                **{k: d[k] for k in QTY_KEYS},
                 "end_qty":        end_qty,
-                "end_amount":     round(end_qty * price, 2),
+                **amounts,
+                "end_amount":     round(begin_qty * price + sum(amounts.values()), 2),
                 "movements":      d["movements"],
-            })
+            }
+            result.append(row)
 
         return {
             "success":   True,

@@ -48,6 +48,7 @@ def _build_prompt(cv_text: str, job: dict) -> str:
 **Job Position:** {job['position_title']}
 
 **Job Requirements:**
+- Key Responsibilities: {', '.join(job.get('key_responsibilities', [])) or 'Not specified'}
 - Required Skills: {', '.join(job['required_skills'])}
 - Minimum Experience: {job.get('min_experience', 0)} years
 - Education: {', '.join(job.get('education_keywords', []))}

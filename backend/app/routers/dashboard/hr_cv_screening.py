@@ -31,6 +31,7 @@ ALLOWED_EXT = (".pdf", ".docx", ".doc", ".txt")
 
 class JobCreate(BaseModel):
     position_title: str
+    key_responsibilities: List[str] = []
     required_skills: List[str] = []
     min_experience: int = 0
     education_keywords: List[str] = []
@@ -61,6 +62,7 @@ def _job_to_dict(j: CvScreeningJob) -> dict:
     return {
         "id": j.id,
         "position_title": j.position_title,
+        "key_responsibilities": json.loads(j.key_responsibilities or "[]"),
         "required_skills": json.loads(j.required_skills or "[]"),
         "min_experience": j.min_experience,
         "education_keywords": json.loads(j.education_keywords or "[]"),
@@ -136,6 +138,7 @@ async def create_job(
         raise HTTPException(400, "Position title is required")
     j = CvScreeningJob(
         position_title=body.position_title.strip(),
+        key_responsibilities=json.dumps(body.key_responsibilities),
         required_skills=json.dumps(body.required_skills),
         min_experience=body.min_experience,
         education_keywords=json.dumps(body.education_keywords),

@@ -663,40 +663,59 @@ function COGSReport() {
 
 /* ─── Inventory RM PM Panel ──────────────────────────────────────────────── */
 
-const MAT_TYPE_ORDER = ["API", "EXCIPIENT", "API & EXCIPIENT", "PRIMARY PACKAGING", "SECONDARY PACKAGING", "PACKAGING", "OTHER"];
+const MAT_TYPE_ORDER = ["API", "EXCIPIENT", "API & EXCIPIENT", "PRIMARY PACKAGING", "SECONDARY PACKAGING", "PACKAGING", "RM", "OTHER"];
 const MAT_TYPE_COLOR = {
   "API": "#7c3aed", "EXCIPIENT": "#0891b2", "API & EXCIPIENT": "#7c3aed",
   "PRIMARY PACKAGING": "#059669", "SECONDARY PACKAGING": "#0284c7",
-  "PACKAGING": "#059669", "OTHER": "#64748b",
+  "PACKAGING": "#059669", "RM": "#64748b", "OTHER": "#64748b",
 };
 
-const INV_MOVE_COLS = [
-  { key: "purchase",      label: "Purchase",         sign: +1 },
-  { key: "return_vendor", label: "Rtn Vendor",       sign: -1 },
-  { key: "sample",        label: "Sample/QC",        sign: -1 },
-  { key: "wip_issue",     label: "WIP Issue",        sign: -1 },
-  { key: "wip_return",    label: "WIP Return",       sign: +1 },
-  { key: "misc",          label: "Misc",             sign: -1 },
-  { key: "disposal",      label: "Disposal",         sign: -1 },
-  { key: "adjustment",    label: "Adjustment",       sign:  0 },
-  { key: "other",         label: "Other",            sign:  0 },
+// Matches the 14 qty / 10 amount movement columns in sumber/ouput-inventory RMPM.xlsx
+const QTY_MOVE_COLS = [
+  { key: "q_purchase",          label: "Purchase",             sign: +1 },
+  { key: "q_return_vendor",     label: "Return to vendor",     sign: -1 },
+  { key: "q_sample_qc",         label: "Sample QC/Deduct",     sign: -1 },
+  { key: "q_sample_stability",  label: "Sample Stability",     sign: -1 },
+  { key: "q_sample_marketing",  label: "Sample Marketing",     sign: -1 },
+  { key: "q_manual_addition",   label: "Manual Addition",      sign: +1 },
+  { key: "q_wip_issue",         label: "WIP Issue",            sign: -1 },
+  { key: "q_wip_return",        label: "WIP Return",           sign: +1 },
+  { key: "q_repacking",         label: "Repacking",            sign:  0 },
+  { key: "q_rusak",             label: "Issue Rusak",          sign: -1 },
+  { key: "q_investigation_adj", label: "Investigation Adj",    sign:  0 },
+  { key: "q_trial_production",  label: "Trial Production",     sign: -1 },
+  { key: "q_mediafill_wo",      label: "Media Fill W/O",       sign: -1 },
+  { key: "q_adj_written_off",   label: "Adj Written Off",      sign: -1 },
+];
+const AMT_MOVE_COLS = [
+  { key: "a_purchase",          label: "Purchase" },
+  { key: "a_return_supplier",   label: "Return to Supplier" },
+  { key: "a_sample",            label: "Sample" },
+  { key: "a_wip_issue",         label: "WIP Issue" },
+  { key: "a_repacking",         label: "Repacking" },
+  { key: "a_rusak",             label: "Issue Rusak" },
+  { key: "a_investigation_adj", label: "Investigation Adj" },
+  { key: "a_trial_production",  label: "Trial Production" },
+  { key: "a_mediafill",         label: "Mediafill Adj" },
+  { key: "a_written_off",       label: "Written Off" },
 ];
 
 function exportInvCSV(rows, period) {
   if (!rows?.length) return;
-  const staticHdrs = ["No","Material Type","Item Code","Item Name","UOM","Price/UOM","Begin Qty","Begin Amount"];
-  const moveHdrs   = INV_MOVE_COLS.map(c => c.label);
-  const endHdrs    = ["End Qty","End Amount","Movements Detail"];
-  const allHdrs    = [...staticHdrs, ...moveHdrs, ...endHdrs];
+  const staticHdrs = ["No","Material Type","Item Code","Item Name","UOM","Price/UOM","Begin Qty","Begin Amount","Price/UOM"];
+  const qtyHdrs    = QTY_MOVE_COLS.map(c => c.label);
+  const amtHdrs    = AMT_MOVE_COLS.map(c => c.label);
+  const allHdrs    = [...staticHdrs, ...qtyHdrs, "QTY Ending", ...amtHdrs, "Amount Ending", "Movements Detail"];
   const lines = [
     "﻿" + allHdrs.join(","),
     ...rows.map((r, i) => {
       const detail = r.movements?.map(m => `${m.trx_type}:${m.qty}`).join("|") ?? "";
       return [
         i+1, r.material_type, r.item_code, r.item_name, r.uom,
-        r.unit_price, r.begin_qty, r.begin_amount,
-        ...INV_MOVE_COLS.map(c => r[c.key]),
-        r.end_qty, r.end_amount, detail,
+        r.unit_price, r.begin_qty, r.begin_amount, r.unit_price,
+        ...QTY_MOVE_COLS.map(c => r[c.key]), r.end_qty,
+        ...AMT_MOVE_COLS.map(c => r[c.key]), r.end_amount,
+        detail,
       ].map(v => `"${String(v ?? "").replace(/"/g,'""')}"`).join(",");
     }),
   ];
@@ -707,20 +726,38 @@ function exportInvCSV(rows, period) {
   URL.revokeObjectURL(url);
 }
 
+async function exportInvExcel(period, includeBegin, setBusy) {
+  setBusy(true);
+  try {
+    const res = await accountingApi.exportInventoryRmPm({ period, include_begin: includeBegin });
+    const blob = new Blob([res.data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = `inventory_rm_pm_${period}.xlsx`; a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert(e?.response?.data?.detail || "Export failed");
+  } finally {
+    setBusy(false);
+  }
+}
+
 function InventoryRMPMPanel() {
   const [monthInput,    setMonthInput]    = useState(currentMonthInput());
   const [includeBegin,  setIncludeBegin]  = useState(true);
   const [data,          setData]          = useState(null);
   const [loading,       setLoading]       = useState(false);
+  const [exporting,     setExporting]     = useState(false);
   const [error,         setError]         = useState(null);
-  const [filterType,    setFilterType]    = useState("ALL");
   const [expandedRows,  setExpandedRows]  = useState({});
   const [sort,          setSort]          = useState({ key: null, dir: "asc" });
   const [groupPages,    setGroupPages]    = useState({});
 
   const period = monthInputToOPM(monthInput);
   const INV_PAGE_SIZE = 8;
-  const INV_NUMERIC_KEYS = ["unit_price", "begin_qty", "begin_amount", "end_qty", "end_amount", ...INV_MOVE_COLS.map(c => c.key)];
+  const INV_NUMERIC_KEYS = ["unit_price", "begin_qty", "begin_amount", "end_qty", "end_amount",
+    ...QTY_MOVE_COLS.map(c => c.key), ...AMT_MOVE_COLS.map(c => c.key)];
+  const TOTAL_COLS = 4 + 3 + 1 + QTY_MOVE_COLS.length + 1 + AMT_MOVE_COLS.length + 1 + 1; // # Code Name UOM | Beg Price/Qty/Amt | Price | qty cols+Ending | amt cols+Ending | Detail
 
   const loadData = useCallback(async () => {
     if (!period) return;
@@ -751,22 +788,18 @@ function InventoryRMPMPanel() {
     });
   };
 
-  const allTypes  = data ? [...new Set(data.data.map(r => r.material_type))].sort((a,b) => MAT_TYPE_ORDER.indexOf(a) - MAT_TYPE_ORDER.indexOf(b)) : [];
-  const filtered  = data?.data?.filter(r => filterType === "ALL" || r.material_type === filterType) ?? [];
-
-  // Group by material_type
+  // No filter tabs — always show all (RM/PM-only) material types, grouped.
   const grouped = {};
-  filtered.forEach(r => {
+  (data?.data ?? []).forEach(r => {
     if (!grouped[r.material_type]) grouped[r.material_type] = [];
     grouped[r.material_type].push(r);
   });
 
-  // Totals per group
   const groupTotal = (rows) => ({
     begin_amount: rows.reduce((s, r) => s + (r.begin_amount || 0), 0),
     end_amount:   rows.reduce((s, r) => s + (r.end_amount   || 0), 0),
-    end_qty_sum:  rows.reduce((s, r) => s + (r.end_qty      || 0), 0),
-    ...Object.fromEntries(INV_MOVE_COLS.map(c => [c.key, rows.reduce((s,r) => s + (r[c.key] || 0), 0)])),
+    ...Object.fromEntries(QTY_MOVE_COLS.map(c => [c.key, rows.reduce((s,r) => s + (r[c.key] || 0), 0)])),
+    ...Object.fromEntries(AMT_MOVE_COLS.map(c => [c.key, rows.reduce((s,r) => s + (r[c.key] || 0), 0)])),
   });
 
   const INPUT = { padding: "7px 11px", borderRadius: 9, border: "none", fontSize: 12, background: NEU.bg, boxShadow: NEU.shadowIn, color: "#1e293b", outline: "none" };
@@ -778,6 +811,13 @@ function InventoryRMPMPanel() {
     if (val !== 0) return { color: "#d97706", fontWeight: 700 };
     return { color: "#94a3b8" };
   };
+
+  const HDR_TH = {
+    color: "#e2e8f0", background: "transparent", fontSize: 9, fontWeight: 700,
+    textAlign: "center", whiteSpace: "nowrap", padding: "5px 7px",
+    borderBottom: "1px solid rgba(255,255,255,0.08)", borderLeft: "1px solid rgba(255,255,255,0.05)",
+  };
+  const sortIndicator = (key) => sort.key === key ? (sort.dir === "asc" ? " ▲" : " ▼") : "";
 
   return (
     <SectionCard>
@@ -799,7 +839,11 @@ function InventoryRMPMPanel() {
         </div>
         <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#10b981" onClick={loadData} disabled={loading || !period} />
         {data?.data?.length > 0 && (
-          <ActionBtn icon={Download} label="Export CSV" color="#10b981" onClick={() => exportInvCSV(data.data, period)} />
+          <>
+            <ActionBtn icon={Download} label="Export CSV" color="#64748b" onClick={() => exportInvCSV(data.data, period)} />
+            <ActionBtn icon={exporting ? Loader2 : Download} label={exporting ? "Generating…" : "Export Excel (Template)"} color="#10b981"
+              onClick={() => exportInvExcel(period, includeBegin, setExporting)} disabled={exporting} />
+          </>
         )}
       </div>
 
@@ -807,54 +851,39 @@ function InventoryRMPMPanel() {
 
       {data && (
         <>
-          {/* Summary cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 16 }}>
-            {[
-              { label: "Items",          val: data.count.toLocaleString(),                          color: "#2563eb" },
-              { label: "Begin Amount",   val: "Rp " + fmtNum(data.data.reduce((s,r)=>s+(r.begin_amount||0),0)), color: "#64748b" },
-              { label: "End Amount",     val: "Rp " + fmtNum(data.data.reduce((s,r)=>s+(r.end_amount||0),0)),   color: "#10b981" },
-              { label: "Period",         val: data.period,                                          color: "#7c3aed" },
-            ].map(c => (
-              <div key={c.label} style={{ background: NEU.bg, borderRadius: 12, padding: "10px 14px", boxShadow: NEU.shadowOutSm }}>
-                <p style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{c.label}</p>
-                <p style={{ fontSize: 13, fontWeight: 800, color: c.color, fontFamily: "monospace" }}>{c.val}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Material type filter */}
-          <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-            {["ALL", ...allTypes].map(t => (
-              <button key={t} onClick={() => setFilterType(t)} style={{
-                padding: "4px 12px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 11, fontWeight: filterType === t ? 800 : 500,
-                background: filterType === t ? (MAT_TYPE_COLOR[t] || "#2563eb") : NEU.bg,
-                color: filterType === t ? "#fff" : "#475569",
-                boxShadow: filterType === t ? "2px 2px 6px rgba(0,0,0,0.15)" : NEU.shadowOutSm,
-              }}>{t === "ALL" ? `All (${data.count})` : t}</button>
-            ))}
-          </div>
-
-          {/* Table grouped by material type */}
+          {/* Table grouped by material type — matches sumber/ouput-inventory RMPM.xlsx layout */}
           <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1400 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 2600 }}>
                 <thead>
                   <tr style={{ background: "linear-gradient(135deg,#1e293b,#0f172a)" }}>
-                    {[
-                      { label: "#", key: null },
-                      { label: "Item Code", key: "item_code" },
-                      { label: "Item Name", key: "item_name" },
-                      { label: "UOM", key: "uom" },
-                      { label: "Price/UOM", key: "unit_price" },
-                      { label: "Beg Qty", key: "begin_qty" },
-                      { label: "Beg Amount", key: "begin_amount" },
-                      ...INV_MOVE_COLS.map(c => ({ label: c.label, key: c.key })),
-                      { label: "End Qty", key: "end_qty" },
-                      { label: "End Amount", key: "end_amount" },
-                      { label: "Detail", key: null },
-                    ].map(h => (
-                      <SortableTH key={h.label} label={h.label} sortKey={h.key} sort={sort} onSort={toggleSort}
-                        style={{ color: "#e2e8f0", background: "transparent", fontSize: 9.5, whiteSpace: "nowrap" }} />
+                    <th rowSpan={3} style={HDR_TH}>#</th>
+                    <th rowSpan={3} style={{ ...HDR_TH, cursor: "pointer" }} onClick={() => toggleSort("item_code")}>Item Code{sortIndicator("item_code")}</th>
+                    <th rowSpan={3} style={{ ...HDR_TH, cursor: "pointer" }} onClick={() => toggleSort("item_name")}>Item Name{sortIndicator("item_name")}</th>
+                    <th rowSpan={3} style={HDR_TH}>UOM</th>
+                    <th colSpan={3} style={HDR_TH}>Beginning Balance</th>
+                    <th rowSpan={3} style={HDR_TH}>Price/UOM</th>
+                    <th colSpan={QTY_MOVE_COLS.length + 1} style={HDR_TH}>Qty</th>
+                    <th colSpan={AMT_MOVE_COLS.length + 1} style={HDR_TH}>Amount</th>
+                    <th rowSpan={3} style={HDR_TH}>Detail</th>
+                  </tr>
+                  <tr style={{ background: "linear-gradient(135deg,#1e293b,#0f172a)" }}>
+                    <th rowSpan={2} style={HDR_TH}>Price/UOM</th>
+                    <th rowSpan={2} style={HDR_TH}>Qty Ending</th>
+                    <th rowSpan={2} style={HDR_TH}>Amount Ending</th>
+                    <th style={HDR_TH}>In</th>
+                    <th colSpan={QTY_MOVE_COLS.length - 1} style={HDR_TH}>Out</th>
+                    <th rowSpan={2} style={HDR_TH}>Qty Ending</th>
+                    <th style={HDR_TH}>In</th>
+                    <th colSpan={AMT_MOVE_COLS.length - 1} style={HDR_TH}>Out</th>
+                    <th rowSpan={2} style={HDR_TH}>Amount Ending</th>
+                  </tr>
+                  <tr style={{ background: "linear-gradient(135deg,#1e293b,#0f172a)" }}>
+                    {QTY_MOVE_COLS.map(c => (
+                      <th key={c.key} style={{ ...HDR_TH, cursor: "pointer" }} onClick={() => toggleSort(c.key)}>{c.label}{sortIndicator(c.key)}</th>
+                    ))}
+                    {AMT_MOVE_COLS.map(c => (
+                      <th key={c.key} style={{ ...HDR_TH, cursor: "pointer" }} onClick={() => toggleSort(c.key)}>{c.label}{sortIndicator(c.key)}</th>
                     ))}
                   </tr>
                 </thead>
@@ -869,7 +898,7 @@ function InventoryRMPMPanel() {
                     return [
                       // Category header row
                       <tr key={`hdr-${matType}`} style={{ background: `${tCol}15` }}>
-                        <td colSpan={16} style={{ padding: "7px 12px", fontSize: 11, fontWeight: 800, color: tCol, letterSpacing: "0.05em" }}>
+                        <td colSpan={TOTAL_COLS} style={{ padding: "7px 12px", fontSize: 11, fontWeight: 800, color: tCol, letterSpacing: "0.05em" }}>
                           ▸ {matType} — {rows.length} items
                         </td>
                       </tr>,
@@ -889,12 +918,18 @@ function InventoryRMPMPanel() {
                             <td style={{ ...TD, textAlign: "right", fontFamily: "monospace" }}>{fmtNum(r.unit_price)}</td>
                             <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#64748b" }}>{fmtNum(r.begin_qty)}</td>
                             <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#64748b" }}>{fmtNum(r.begin_amount)}</td>
-                            {INV_MOVE_COLS.map(c => (
+                            <td style={{ ...TD, textAlign: "right", fontFamily: "monospace" }}>{fmtNum(r.unit_price)}</td>
+                            {QTY_MOVE_COLS.map(c => (
                               <td key={c.key} style={{ ...TD, textAlign: "right", fontFamily: "monospace", ...colStyle(c.sign, r[c.key]) }}>
                                 {r[c.key] !== 0 ? fmtNum(r[c.key]) : <span style={{ color: "#d1d5db" }}>—</span>}
                               </td>
                             ))}
                             <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#10b981" }}>{fmtNum(r.end_qty)}</td>
+                            {AMT_MOVE_COLS.map(c => (
+                              <td key={c.key} style={{ ...TD, textAlign: "right", fontFamily: "monospace" }}>
+                                {r[c.key] !== 0 ? fmtNum(r[c.key]) : <span style={{ color: "#d1d5db" }}>—</span>}
+                              </td>
+                            ))}
                             <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#10b981" }}>{fmtNum(r.end_amount)}</td>
                             <td style={{ ...TD }}>
                               {r.movements?.length > 0 && (
@@ -907,7 +942,7 @@ function InventoryRMPMPanel() {
                           </tr>,
                           isOpen && (
                             <tr key={`${rKey}-detail`} style={{ background: "#f8fafc" }}>
-                              <td colSpan={16} style={{ padding: "6px 40px 10px" }}>
+                              <td colSpan={TOTAL_COLS} style={{ padding: "6px 40px 10px" }}>
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                                   {r.movements?.map((m, mi) => (
                                     <span key={mi} style={{ fontSize: 10.5, padding: "3px 10px", borderRadius: 20, background: m.qty > 0 ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)", color: m.qty > 0 ? "#16a34a" : "#dc2626", fontFamily: "monospace", fontWeight: 600, border: `1px solid ${m.qty > 0 ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)"}` }}>
@@ -923,7 +958,7 @@ function InventoryRMPMPanel() {
                       // Pagination for this group
                       sortedGroupRows.length > INV_PAGE_SIZE && (
                         <tr key={`pg-${matType}`}>
-                          <td colSpan={16} style={{ padding: 0 }}>
+                          <td colSpan={TOTAL_COLS} style={{ padding: 0 }}>
                             <Pagination
                               total={sortedGroupRows.length}
                               page={groupPage}
@@ -935,15 +970,22 @@ function InventoryRMPMPanel() {
                       ),
                       // Group subtotal
                       <tr key={`tot-${matType}`} style={{ background: `${tCol}10`, borderTop: `2px solid ${tCol}30` }}>
-                        <td colSpan={5} style={{ padding: "8px 12px", fontSize: 11, fontWeight: 800, color: tCol }}>TOTAL {matType}</td>
+                        <td colSpan={4} style={{ padding: "8px 12px", fontSize: 11, fontWeight: 800, color: tCol }}>TOTAL {matType}</td>
+                        <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#64748b" }}>—</td>
                         <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#64748b" }}>—</td>
                         <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#64748b" }}>{fmtNum(tot.begin_amount)}</td>
-                        {INV_MOVE_COLS.map(c => (
+                        <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#64748b" }}>—</td>
+                        {QTY_MOVE_COLS.map(c => (
                           <td key={c.key} style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: tCol }}>
                             {tot[c.key] !== 0 ? fmtNum(tot[c.key]) : <span style={{ color: "#d1d5db" }}>—</span>}
                           </td>
                         ))}
                         <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: tCol }}>—</td>
+                        {AMT_MOVE_COLS.map(c => (
+                          <td key={c.key} style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: tCol }}>
+                            {tot[c.key] !== 0 ? fmtNum(tot[c.key]) : <span style={{ color: "#d1d5db" }}>—</span>}
+                          </td>
+                        ))}
                         <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: tCol }}>{fmtNum(tot.end_amount)}</td>
                         <td />
                       </tr>,

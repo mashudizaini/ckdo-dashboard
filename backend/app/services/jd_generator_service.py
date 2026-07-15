@@ -55,6 +55,7 @@ Analyze this job description and create an IMPROVED, STRUCTURED version that is:
     }},
     "screening_criteria": {{
       "position_title": "Job title for screening system",
+      "key_responsibilities": ["Responsibility 1", "Responsibility 2", "Responsibility 3"],
       "required_skills": ["Skill1", "Skill2", "Skill3"],
       "min_experience": 3,
       "education_keywords": ["Bachelor", "Computer Science"],
@@ -125,6 +126,7 @@ def generate_jd_template_based(original_jd: str) -> dict:
             },
             "screening_criteria": {
                 "position_title": position_title,
+                "key_responsibilities": responsibilities,
                 "required_skills": technical_skills,
                 "min_experience": experience_years,
                 "education_keywords": [education_requirement],
