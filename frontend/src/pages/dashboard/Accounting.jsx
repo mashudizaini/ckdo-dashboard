@@ -729,22 +729,23 @@ function exportInvCSV(rows, period) {
 async function exportInvExcel(period, includeBegin, setBusy) {
   setBusy(true);
   try {
-    const res = await accountingApi.exportInventoryRmPm({ period, include_begin: includeBegin });
-    const blob = new Blob([res.data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    // client.js's axios interceptor already unwraps response.data for every
+    // call in this app, so `blobData` here IS the Blob itself — not {data: Blob}.
+    const blobData = await accountingApi.exportInventoryRmPm({ period, include_begin: includeBegin });
+    const blob = new Blob([blobData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement("a");
     a.href = url; a.download = `inventory_rm_pm_${period}.xlsx`; a.click();
     URL.revokeObjectURL(url);
   } catch (e) {
-    // responseType:"blob" means an error body also arrives as a Blob, not
-    // parsed JSON — read it as text and parse manually to surface the real
-    // backend message instead of a generic "Export failed".
+    // Same interceptor rejects with error.response.data directly (not the
+    // full error object) — with responseType:"blob" that's a Blob containing
+    // the JSON error text, not a parsed object, so `e` itself is the Blob.
     let msg = "Export failed";
-    const data = e?.response?.data;
-    if (data instanceof Blob) {
-      try { msg = JSON.parse(await data.text())?.detail || msg; } catch (_) {}
-    } else if (data?.detail) {
-      msg = data.detail;
+    if (e instanceof Blob) {
+      try { msg = JSON.parse(await e.text())?.detail || msg; } catch (_) {}
+    } else if (e?.detail) {
+      msg = e.detail;
     } else if (e?.message) {
       msg = e.message;
     }
