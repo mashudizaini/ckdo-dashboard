@@ -95,7 +95,10 @@ async def export_inventory_rm_pm(
     """
     result = await AccountingService().get_inventory_rm_pm(period, include_begin)
     if not result.get("success"):
-        return result
+        # Must fail with a real error status, not HTTP 200 — this endpoint's
+        # contract is "always a file"; a 200 with a JSON body here would get
+        # silently downloaded by the frontend as a corrupt .xlsx.
+        raise HTTPException(400, result.get("error") or "Failed to load Inventory RM PM data")
 
     try:
         return _build_inventory_rm_pm_xlsx(result, period)
