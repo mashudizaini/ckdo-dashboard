@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   FileText, DollarSign, FileDown, RefreshCw,
   BarChart2, Package, Download, Search, Loader2, Layers, ClipboardList,
@@ -736,7 +736,19 @@ async function exportInvExcel(period, includeBegin, setBusy) {
     a.href = url; a.download = `inventory_rm_pm_${period}.xlsx`; a.click();
     URL.revokeObjectURL(url);
   } catch (e) {
-    alert(e?.response?.data?.detail || "Export failed");
+    // responseType:"blob" means an error body also arrives as a Blob, not
+    // parsed JSON — read it as text and parse manually to surface the real
+    // backend message instead of a generic "Export failed".
+    let msg = "Export failed";
+    const data = e?.response?.data;
+    if (data instanceof Blob) {
+      try { msg = JSON.parse(await data.text())?.detail || msg; } catch (_) {}
+    } else if (data?.detail) {
+      msg = data.detail;
+    } else if (e?.message) {
+      msg = e.message;
+    }
+    alert(msg);
   } finally {
     setBusy(false);
   }
@@ -752,16 +764,6 @@ function InventoryRMPMPanel() {
   const [expandedRows,  setExpandedRows]  = useState({});
   const [sort,          setSort]          = useState({ key: null, dir: "asc" });
   const [groupPages,    setGroupPages]    = useState({});
-  const [tableScrollW,  setTableScrollW]  = useState(0);
-  const topScrollRef  = useRef(null);
-  const bodyScrollRef = useRef(null);
-
-  useEffect(() => {
-    if (bodyScrollRef.current) setTableScrollW(bodyScrollRef.current.scrollWidth);
-  }, [data, sort, groupPages]);
-
-  const onTopScroll  = () => { if (bodyScrollRef.current && topScrollRef.current) bodyScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft; };
-  const onBodyScroll = () => { if (bodyScrollRef.current && topScrollRef.current) topScrollRef.current.scrollLeft = bodyScrollRef.current.scrollLeft; };
 
   const period = monthInputToOPM(monthInput);
   const INV_PAGE_SIZE = 8;
@@ -861,17 +863,13 @@ function InventoryRMPMPanel() {
 
       {data && (
         <>
-          {/* Table grouped by material type — matches sumber/ouput-inventory RMPM.xlsx layout */}
+          {/* Table grouped by material type — matches sumber/ouput-inventory RMPM.xlsx layout.
+              Bounded-height frame with its own scrollbars + sticky header, like an
+              Excel freeze-panes view: header stays put while scrolling through rows. */}
           <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
-            {/* Top scrollbar — kept in sync with the table's own horizontal scroll,
-                so scrolling right doesn't require scrolling all the way down first */}
-            <div ref={topScrollRef} onScroll={onTopScroll}
-              style={{ overflowX: "auto", overflowY: "hidden", height: 14, background: "#1e293b" }}>
-              <div style={{ width: tableScrollW, height: 1 }} />
-            </div>
-            <div ref={bodyScrollRef} onScroll={onBodyScroll} style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 2600 }}>
-                <thead>
+            <div style={{ maxHeight: "70vh", overflow: "auto" }}>
+              <table className="inv-rmpm-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 2600 }}>
+                <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
                   <tr style={{ background: "linear-gradient(135deg,#1e293b,#0f172a)" }}>
                     <th rowSpan={3} style={HDR_TH}>#</th>
                     <th rowSpan={3} style={{ ...HDR_TH, cursor: "pointer" }} onClick={() => toggleSort("item_code")}>Item Code{sortIndicator("item_code")}</th>

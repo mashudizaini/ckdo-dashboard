@@ -12,7 +12,7 @@ from calendar import monthrange
 
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.dependencies import require_role, CurrentUser, Roles
@@ -97,6 +97,13 @@ async def export_inventory_rm_pm(
     if not result.get("success"):
         return result
 
+    try:
+        return _build_inventory_rm_pm_xlsx(result, period)
+    except Exception as e:
+        raise HTTPException(500, f"Excel generation failed: {e}")
+
+
+def _build_inventory_rm_pm_xlsx(result: dict, period: str) -> StreamingResponse:
     QTY_COLS = AccountingService.QTY_COLS
     AMT_COLS = AccountingService.AMT_COLS
     rows = result["data"]
@@ -155,7 +162,12 @@ async def export_inventory_rm_pm(
         ws.cell(row=HR2, column=c).fill = fillHdr
     vmerge_header(COL_PRICE, "Price/UOM")
 
-    merge(HR1, COL_QTY_START, HR1, COL_QTY_END, "Qty", (bold, center))
+    # NOTE: the "Qty"/"Amount" group merges stop one column short of
+    # COL_QTY_END/COL_AMT_END — those Ending columns get their own vertical
+    # merge via vmerge_header() below, and merged ranges in Excel must not
+    # overlap (unlike HTML colSpan/rowSpan, which can visually cover the
+    # same column from different cells across rows without conflict).
+    merge(HR1, COL_QTY_START, HR1, COL_QTY_END - 1, "Qty", (bold, center))
     merge(HR2, COL_QTY_START, HR2, COL_QTY_START, "In", (bold, center))
     merge(HR2, COL_QTY_START + 1, HR2, COL_QTY_END - 1, "Out", (bold, center))
     vmerge_header(COL_QTY_END, "QTY Ending")
@@ -163,7 +175,7 @@ async def export_inventory_rm_pm(
         c = ws.cell(row=HR3, column=COL_QTY_START + i, value=lbl)
         c.font, c.alignment = bold, center
 
-    merge(HR1, COL_AMT_START, HR1, COL_AMT_END, "Amount", (bold, center))
+    merge(HR1, COL_AMT_START, HR1, COL_AMT_END - 1, "Amount", (bold, center))
     merge(HR2, COL_AMT_START, HR2, COL_AMT_START, "In", (bold, center))
     merge(HR2, COL_AMT_START + 1, HR2, COL_AMT_END - 1, "Out", (bold, center))
     vmerge_header(COL_AMT_END, "Amount Ending")

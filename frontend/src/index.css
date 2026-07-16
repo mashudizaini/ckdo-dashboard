@@ -137,6 +137,29 @@ table {
   border-spacing: 0 !important;
 }
 
+/* ── Inventory RM PM (Accounting > COGS Report) — dark 3-tier header ──
+   The bare `thead th`/`thead tr` rules above force every header in the app
+   to the light theme via !important. Inline styles can't win against that
+   (!important always beats inline), so this table needs its own scoped
+   !important rule with higher specificity to keep its dark header dark
+   and its grid lines actually visible. */
+.inv-rmpm-table { border-collapse: collapse !important; }
+.inv-rmpm-table thead tr {
+  background: linear-gradient(135deg,#1e293b,#0f172a) !important;
+}
+.inv-rmpm-table thead th {
+  color: #e2e8f0 !important;
+  background: transparent !important;
+  border-bottom: 1px solid rgba(226,232,240,0.45) !important;
+  border-left: 1px solid rgba(226,232,240,0.25) !important;
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  letter-spacing: normal !important;
+  text-transform: none !important;
+  padding: 5px 7px !important;
+  white-space: nowrap !important;
+}
+
 thead tr {
   background: linear-gradient(135deg, #dfe5ed, #d8dee8) !important;
 }
