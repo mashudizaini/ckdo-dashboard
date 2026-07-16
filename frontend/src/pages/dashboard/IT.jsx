@@ -961,7 +961,7 @@ function TablespaceSection() {
             <div key={r.tablespace_name + "-actions"} style={{ display: "flex", gap: 5 }}>
               <button
                 onClick={() => setModalTs(r)}
-                title="Tambah Datafile baru"
+                title="Add new datafile"
                 style={{
                   display: "inline-flex", alignItems: "center", gap: 4,
                   padding: "4px 9px", borderRadius: 8, border: "none",
@@ -975,11 +975,11 @@ function TablespaceSection() {
                 onMouseUp={e => e.currentTarget.style.boxShadow = "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff"}
                 onMouseLeave={e => e.currentTarget.style.boxShadow = "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff"}
               >
-                <PlusCircle size={11} /> Tambah File
+                <PlusCircle size={11} /> Add File
               </button>
               <button
                 onClick={() => setResizeModalTs(r)}
-                title="Extend ukuran datafile yang sudah ada"
+                title="Extend the size of an existing datafile"
                 style={{
                   display: "inline-flex", alignItems: "center", gap: 4,
                   padding: "4px 9px", borderRadius: 8, border: "none",
@@ -1079,7 +1079,7 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
         onSuccess?.(res.message);
         onClose();
       } else {
-        setSaveError(res?.error ?? "Gagal menambahkan datafile");
+        setSaveError(res?.error ?? "Failed to add datafile");
         setStep("form");
       }
     } catch (e) {
@@ -1097,14 +1097,14 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)" }}>
-      <div style={{ width: "100%", maxWidth: 520, borderRadius: 20, ...neu, boxShadow: shadow }}>
+      <div style={{ width: "100%", maxWidth: 520, maxHeight: "90vh", borderRadius: 20, ...neu, boxShadow: shadow, display: "flex", flexDirection: "column" }}>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4" style={divider}>
+        <div className="flex items-center justify-between px-5 py-4" style={{ ...divider, flexShrink: 0 }}>
           <div className="flex items-center gap-2">
             <Database size={15} color="#2563eb" />
             <h3 style={{ fontSize: 14, fontWeight: 700, color: "#1e293b" }}>
-              {step === "form" ? "Tambah Datafile" : "Konfirmasi DDL"} — {tablespace.tablespace_name}
+              {step === "form" ? "Add Datafile" : "Confirm DDL"} — {tablespace.tablespace_name}
             </h3>
           </div>
           <button onClick={onClose} style={{ color: "#94a3b8" }}
@@ -1116,12 +1116,12 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
 
         {step === "form" ? (
           <>
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-4" style={{ overflowY: "auto", minHeight: 0 }}>
 
               {/* Existing files reference */}
               <div>
                 <p style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                  Datafile yang sudah ada:
+                  Existing datafiles:
                 </p>
                 <div style={{
                   borderRadius: 10, padding: "10px 12px",
@@ -1130,9 +1130,9 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
                   maxHeight: 100, overflowY: "auto",
                 }}>
                   {loadingFiles ? (
-                    <p style={{ fontSize: 11, color: "#94a3b8" }}>Memuat...</p>
+                    <p style={{ fontSize: 11, color: "#94a3b8" }}>Loading...</p>
                   ) : files.length === 0 ? (
-                    <p style={{ fontSize: 11, color: "#94a3b8" }}>Tidak ada datafile ditemukan</p>
+                    <p style={{ fontSize: 11, color: "#94a3b8" }}>No datafiles found</p>
                   ) : (
                     files.map((f, i) => (
                       <div key={i} style={{ fontSize: 11, color: "#475569", marginBottom: i < files.length - 1 ? 4 : 0, fontFamily: "monospace" }}>
@@ -1147,7 +1147,7 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
               </div>
 
               {/* File path */}
-              <Field label="Lokasi File Baru">
+              <Field label="New File Location">
                 <input
                   className={INPUT}
                   value={filePath}
@@ -1158,7 +1158,7 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
               </Field>
 
               {/* Size */}
-              <Field label="Ukuran">
+              <Field label="Size">
                 <div style={{ display: "flex", gap: 8 }}>
                   <input
                     className={INPUT}
@@ -1221,11 +1221,11 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
               )}
             </div>
 
-            <div className="flex justify-end gap-2 px-5 py-4" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-              <ActionBtn icon={X} label="Batal" color="bg-gray-700 hover:bg-gray-600" onClick={onClose} />
+            <div className="flex justify-end gap-2 px-5 py-4" style={{ borderTop: "1px solid rgba(0,0,0,0.06)", flexShrink: 0 }}>
+              <ActionBtn icon={X} label="Cancel" color="bg-gray-700 hover:bg-gray-600" onClick={onClose} />
               <ActionBtn
                 icon={PlusCircle}
-                label="Lanjut ke Konfirmasi"
+                label="Continue to Confirmation"
                 color={canSubmit ? "bg-blue-600 hover:bg-blue-700" : "bg-gray-500 cursor-not-allowed"}
                 onClick={() => canSubmit && setStep("confirm")}
               />
@@ -1233,15 +1233,15 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
           </>
         ) : (
           <>
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-4" style={{ overflowY: "auto", minHeight: 0 }}>
 
               {/* Warning */}
               <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
                 <AlertCircle size={16} color="#d97706" style={{ flexShrink: 0, marginTop: 1 }} />
                 <div>
-                  <p style={{ fontSize: 12, fontWeight: 700, color: "#92400e", marginBottom: 2 }}>Perhatian</p>
+                  <p style={{ fontSize: 12, fontWeight: 700, color: "#92400e", marginBottom: 2 }}>Warning</p>
                   <p style={{ fontSize: 11.5, color: "#78350f", lineHeight: 1.5 }}>
-                    DDL di bawah akan dieksekusi langsung ke database Oracle. Operasi ini tidak dapat dibatalkan setelah dijalankan.
+                    The DDL below will be executed directly against the Oracle database. This operation cannot be undone once run.
                   </p>
                 </div>
               </div>
@@ -1249,7 +1249,7 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
               {/* DDL box */}
               <div>
                 <p style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                  DDL yang akan dijalankan:
+                  DDL to be executed:
                 </p>
                 <div style={{
                   borderRadius: 10, padding: "12px 14px",
@@ -1265,10 +1265,10 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
               {/* Details */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 {[
-                  ["Tablespace",  tablespace.tablespace_name],
-                  ["Ukuran",      `${sizeNum} ${sizeUnit}`],
-                  ["Autoextend",  autoextend ? "ON (NEXT 100M, MAXSIZE UNLIMITED)" : "OFF"],
-                  ["Penggunaan",  `${tablespace.usage_percent}% (${tablespace.used_gb} / ${tablespace.total_gb} GB)`],
+                  ["Tablespace", tablespace.tablespace_name],
+                  ["Size",       `${sizeNum} ${sizeUnit}`],
+                  ["Autoextend", autoextend ? "ON (NEXT 100M, MAXSIZE UNLIMITED)" : "OFF"],
+                  ["Usage",      `${tablespace.usage_percent}% (${tablespace.used_gb} / ${tablespace.total_gb} GB)`],
                 ].map(([k, v]) => (
                   <div key={k} style={{
                     borderRadius: 8, padding: "8px 12px",
@@ -1288,11 +1288,11 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
               )}
             </div>
 
-            <div className="flex justify-between px-5 py-4" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-              <ActionBtn icon={X} label="Kembali" color="bg-gray-700 hover:bg-gray-600" onClick={() => setStep("form")} />
+            <div className="flex justify-between px-5 py-4" style={{ borderTop: "1px solid rgba(0,0,0,0.06)", flexShrink: 0 }}>
+              <ActionBtn icon={X} label="Back" color="bg-gray-700 hover:bg-gray-600" onClick={() => setStep("form")} />
               <ActionBtn
                 icon={saving ? Loader2 : CheckCircle}
-                label={saving ? "Menjalankan DDL..." : "Ya, Jalankan DDL"}
+                label={saving ? "Running DDL..." : "Yes, Run DDL"}
                 color="bg-green-600 hover:bg-green-700"
                 onClick={handleConfirm}
               />
@@ -1357,7 +1357,7 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
         onSuccess?.(res.message);
         onClose();
       } else {
-        setSaveError(res?.error ?? "Gagal resize datafile");
+        setSaveError(res?.error ?? "Failed to resize datafile");
         setStep("form");
       }
     } catch (e) {
@@ -1375,14 +1375,14 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)" }}>
-      <div style={{ width: "100%", maxWidth: 540, borderRadius: 20, ...neu, boxShadow: shadow }}>
+      <div style={{ width: "100%", maxWidth: 540, maxHeight: "90vh", borderRadius: 20, ...neu, boxShadow: shadow, display: "flex", flexDirection: "column" }}>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4" style={divider}>
+        <div className="flex items-center justify-between px-5 py-4" style={{ ...divider, flexShrink: 0 }}>
           <div className="flex items-center gap-2">
             <Maximize2 size={15} color="#7c3aed" />
             <h3 style={{ fontSize: 14, fontWeight: 700, color: "#1e293b" }}>
-              {step === "form" ? "Resize Datafile" : "Konfirmasi DDL"} — {tablespace.tablespace_name}
+              {step === "form" ? "Resize Datafile" : "Confirm DDL"} — {tablespace.tablespace_name}
             </h3>
           </div>
           <button onClick={onClose} style={{ color: "#94a3b8" }}
@@ -1394,17 +1394,17 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
 
         {step === "form" ? (
           <>
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-4" style={{ overflowY: "auto", minHeight: 0 }}>
 
-              {/* Pilih datafile */}
+              {/* Select datafile */}
               <div>
                 <p style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                  Pilih Datafile:
+                  Select Datafile:
                 </p>
                 {loadingFiles ? (
-                  <p style={{ fontSize: 11, color: "#94a3b8", padding: "10px 0" }}>Memuat datafile...</p>
+                  <p style={{ fontSize: 11, color: "#94a3b8", padding: "10px 0" }}>Loading datafiles...</p>
                 ) : files.length === 0 ? (
-                  <p style={{ fontSize: 11, color: "#ef4444", padding: "10px 0" }}>Tidak ada datafile ditemukan di tablespace ini.</p>
+                  <p style={{ fontSize: 11, color: "#ef4444", padding: "10px 0" }}>No datafiles found in this tablespace.</p>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     {files.map((f, i) => {
@@ -1436,7 +1436,7 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
                                 {f.file_name}
                               </p>
                               <p style={{ fontSize: 10.5, color: "#64748b", marginTop: 2 }}>
-                                Ukuran: <strong>{fmtSize(parseFloat(f.size_mb))}</strong>
+                                Size: <strong>{fmtSize(parseFloat(f.size_mb))}</strong>
                                 <span style={{ marginLeft: 10, color: "#94a3b8" }}>AUTOEXTEND: {f.autoextensible}</span>
                                 <span style={{ marginLeft: 10, color: "#94a3b8" }}>Status: {f.status}</span>
                               </p>
@@ -1449,8 +1449,8 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
                 )}
               </div>
 
-              {/* Tambah ukuran */}
-              <Field label="Tambah Ukuran">
+              {/* Add size */}
+              <Field label="Add Size">
                 <div style={{ display: "flex", gap: 8 }}>
                   <input
                     className={INPUT}
@@ -1483,9 +1483,9 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
                   display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10,
                 }}>
                   {[
-                    { label: "Ukuran Sekarang", value: fmtSize(currMb),     color: "#64748b"  },
-                    { label: `+ Tambahan`,       value: fmtSize(addMb),      color: "#7c3aed"  },
-                    { label: "Ukuran Baru",      value: fmtSize(newTotalMb), color: "#16a34a"  },
+                    { label: "Current Size", value: fmtSize(currMb),     color: "#64748b"  },
+                    { label: `+ Added`,       value: fmtSize(addMb),      color: "#7c3aed"  },
+                    { label: "New Size",      value: fmtSize(newTotalMb), color: "#16a34a"  },
                   ].map(({ label, value, color }) => (
                     <div key={label} style={{ textAlign: "center" }}>
                       <p style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 3 }}>{label}</p>
@@ -1521,11 +1521,11 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
               )}
             </div>
 
-            <div className="flex justify-end gap-2 px-5 py-4" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-              <ActionBtn icon={X} label="Batal" color="bg-gray-700 hover:bg-gray-600" onClick={onClose} />
+            <div className="flex justify-end gap-2 px-5 py-4" style={{ borderTop: "1px solid rgba(0,0,0,0.06)", flexShrink: 0 }}>
+              <ActionBtn icon={X} label="Cancel" color="bg-gray-700 hover:bg-gray-600" onClick={onClose} />
               <ActionBtn
                 icon={Maximize2}
-                label="Lanjut ke Konfirmasi"
+                label="Continue to Confirmation"
                 color={canSubmit ? "bg-purple-600 hover:bg-purple-700" : "bg-gray-500 cursor-not-allowed"}
                 onClick={() => canSubmit && setStep("confirm")}
               />
@@ -1533,15 +1533,15 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
           </>
         ) : (
           <>
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-4" style={{ overflowY: "auto", minHeight: 0 }}>
 
               {/* Warning */}
               <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
                 <AlertCircle size={16} color="#d97706" style={{ flexShrink: 0, marginTop: 1 }} />
                 <div>
-                  <p style={{ fontSize: 12, fontWeight: 700, color: "#92400e", marginBottom: 2 }}>Perhatian</p>
+                  <p style={{ fontSize: 12, fontWeight: 700, color: "#92400e", marginBottom: 2 }}>Warning</p>
                   <p style={{ fontSize: 11.5, color: "#78350f", lineHeight: 1.5 }}>
-                    DDL di bawah akan mengubah ukuran datafile secara langsung di database Oracle. Ukuran tidak dapat dikurangi setelah di-resize.
+                    The DDL below will resize the datafile directly on the Oracle database. Size cannot be reduced once resized.
                   </p>
                 </div>
               </div>
@@ -1549,7 +1549,7 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
               {/* DDL box */}
               <div>
                 <p style={{ fontSize: 11, fontWeight: 700, color: "#64748b", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                  DDL yang akan dijalankan:
+                  DDL to be executed:
                 </p>
                 <div style={{
                   borderRadius: 10, padding: "12px 14px",
@@ -1565,12 +1565,12 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
               {/* Details grid */}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 {[
-                  ["Tablespace",      tablespace.tablespace_name],
-                  ["Datafile",        selected?.file_name?.split("/").pop() ?? "-"],
-                  ["Ukuran Sekarang", fmtSize(currMb)],
-                  ["Ukuran Baru",     fmtSize(newTotalMb)],
-                  ["Tambahan",        `+${fmtSize(addMb)} (+${Math.round(addMb).toLocaleString()} MB)`],
-                  ["Penggunaan TS",   `${tablespace.usage_percent}%`],
+                  ["Tablespace",   tablespace.tablespace_name],
+                  ["Datafile",     selected?.file_name?.split("/").pop() ?? "-"],
+                  ["Current Size", fmtSize(currMb)],
+                  ["New Size",     fmtSize(newTotalMb)],
+                  ["Added",        `+${fmtSize(addMb)} (+${Math.round(addMb).toLocaleString()} MB)`],
+                  ["TS Usage",     `${tablespace.usage_percent}%`],
                 ].map(([k, v]) => (
                   <div key={k} style={{
                     borderRadius: 8, padding: "8px 12px",
@@ -1590,11 +1590,11 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
               )}
             </div>
 
-            <div className="flex justify-between px-5 py-4" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-              <ActionBtn icon={X} label="Kembali" color="bg-gray-700 hover:bg-gray-600" onClick={() => setStep("form")} />
+            <div className="flex justify-between px-5 py-4" style={{ borderTop: "1px solid rgba(0,0,0,0.06)", flexShrink: 0 }}>
+              <ActionBtn icon={X} label="Back" color="bg-gray-700 hover:bg-gray-600" onClick={() => setStep("form")} />
               <ActionBtn
                 icon={saving ? Loader2 : CheckCircle}
-                label={saving ? "Menjalankan DDL..." : "Ya, Jalankan DDL"}
+                label={saving ? "Running DDL..." : "Yes, Run DDL"}
                 color="bg-green-600 hover:bg-green-700"
                 onClick={handleConfirm}
               />
