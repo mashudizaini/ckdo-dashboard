@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import {
   FileText, DollarSign, FileDown, RefreshCw,
   BarChart2, Package, Download, Search, Loader2, Layers, ClipboardList,
@@ -752,6 +752,16 @@ function InventoryRMPMPanel() {
   const [expandedRows,  setExpandedRows]  = useState({});
   const [sort,          setSort]          = useState({ key: null, dir: "asc" });
   const [groupPages,    setGroupPages]    = useState({});
+  const [tableScrollW,  setTableScrollW]  = useState(0);
+  const topScrollRef  = useRef(null);
+  const bodyScrollRef = useRef(null);
+
+  useEffect(() => {
+    if (bodyScrollRef.current) setTableScrollW(bodyScrollRef.current.scrollWidth);
+  }, [data, sort, groupPages]);
+
+  const onTopScroll  = () => { if (bodyScrollRef.current && topScrollRef.current) bodyScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft; };
+  const onBodyScroll = () => { if (bodyScrollRef.current && topScrollRef.current) topScrollRef.current.scrollLeft = bodyScrollRef.current.scrollLeft; };
 
   const period = monthInputToOPM(monthInput);
   const INV_PAGE_SIZE = 8;
@@ -815,7 +825,7 @@ function InventoryRMPMPanel() {
   const HDR_TH = {
     color: "#e2e8f0", background: "transparent", fontSize: 9, fontWeight: 700,
     textAlign: "center", whiteSpace: "nowrap", padding: "5px 7px",
-    borderBottom: "1px solid rgba(255,255,255,0.08)", borderLeft: "1px solid rgba(255,255,255,0.05)",
+    borderBottom: "1px solid rgba(226,232,240,0.45)", borderLeft: "1px solid rgba(226,232,240,0.25)",
   };
   const sortIndicator = (key) => sort.key === key ? (sort.dir === "asc" ? " ▲" : " ▼") : "";
 
@@ -853,7 +863,13 @@ function InventoryRMPMPanel() {
         <>
           {/* Table grouped by material type — matches sumber/ouput-inventory RMPM.xlsx layout */}
           <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
-            <div style={{ overflowX: "auto" }}>
+            {/* Top scrollbar — kept in sync with the table's own horizontal scroll,
+                so scrolling right doesn't require scrolling all the way down first */}
+            <div ref={topScrollRef} onScroll={onTopScroll}
+              style={{ overflowX: "auto", overflowY: "hidden", height: 14, background: "#1e293b" }}>
+              <div style={{ width: tableScrollW, height: 1 }} />
+            </div>
+            <div ref={bodyScrollRef} onScroll={onBodyScroll} style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 2600 }}>
                 <thead>
                   <tr style={{ background: "linear-gradient(135deg,#1e293b,#0f172a)" }}>
