@@ -247,7 +247,7 @@ def _build_inventory_rm_pm_xlsx(result: dict, period: str) -> StreamingResponse:
     ws.column_dimensions["E"].width = 8
     for c in range(6, LAST_COL + 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(c)].width = 13
-    ws.freeze_panes = ws.cell(row=HR3 + 1, column=COL_CODE + 1)
+    ws.freeze_panes = f"{openpyxl.utils.get_column_letter(COL_CODE + 1)}{HR3 + 1}"
 
     buf = io.BytesIO()
     wb.save(buf)
