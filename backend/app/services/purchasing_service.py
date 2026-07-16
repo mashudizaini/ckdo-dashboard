@@ -521,6 +521,7 @@ class PurchasingService:
         sql = f"""
             SELECT
                 prh.segment1                                                AS pr_number,
+                po_link.po_number                                          AS po_number,
                 prl.line_num                                                AS line_num,
                 NVL(msi.segment1, '—')                                     AS item_code,
                 prl.item_description                                        AS item_description,
@@ -539,8 +540,9 @@ class PurchasingService:
                 prh.authorization_status                                    AS pr_status,
                 TO_CHAR(prh.creation_date, 'YYYY-MM-DD')                   AS creation_date,
                 TO_CHAR(prl.need_by_date, 'YYYY-MM-DD')                    AS due_date,
-                TRUNC(SYSDATE) - TRUNC(NVL(appr.approved_date, prh.creation_date))
-                                                                             AS aging_days,
+                CASE WHEN po_link.po_number IS NOT NULL THEN NULL
+                     ELSE TRUNC(SYSDATE) - TRUNC(NVL(appr.approved_date, prh.creation_date))
+                END                                                          AS aging_days,
                 NVL(aps.vendor_name,
                     NVL(lastpo.last_supplier_name,
                         NVL(prl.suggested_vendor_name, '-')))              AS supplier_name,
@@ -573,6 +575,26 @@ class PurchasingService:
                   AND pah.object_type_code = 'REQUISITION'
                 GROUP BY pah.object_id
             ) appr ON appr.object_id = prh.requisition_header_id
+            LEFT JOIN (
+                -- Requisition line -> PO, via the real distribution linkage
+                -- (not the fuzzy item-description match "lastpo" below uses).
+                -- Picks the most recently created PO if a line was split
+                -- across more than one.
+                SELECT requisition_line_id, po_number
+                FROM (
+                    SELECT prd.requisition_line_id,
+                           poh2.segment1 AS po_number,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY prd.requisition_line_id
+                               ORDER BY poh2.creation_date DESC
+                           ) AS rn
+                    FROM po_req_distributions_all prd
+                    JOIN po_distributions_all pd   ON pd.req_distribution_id = prd.distribution_id
+                    JOIN po_headers_all        poh2 ON poh2.po_header_id     = pd.po_header_id
+                    WHERE poh2.authorization_status NOT IN ('CANCELLED')
+                )
+                WHERE rn = 1
+            ) po_link ON po_link.requisition_line_id = prl.requisition_line_id
             LEFT JOIN (
                 SELECT item_desc_key, unit_price AS last_price,
                        currency_code AS last_currency, vendor_name AS last_supplier_name

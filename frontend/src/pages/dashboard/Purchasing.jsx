@@ -101,6 +101,7 @@ const OPEN_PR_PAGE_SIZE = 8;
 
 const OPEN_PR_COLS = [
   { key: "pr_number",           label: "PR Number" },
+  { key: "po_number",           label: "PO Number" },
   { key: "line_num",            label: "Line",               numeric: true },
   { key: "item_code",           label: "Item Code" },
   { key: "item_description",    label: "Item Description" },
@@ -198,14 +199,14 @@ function OpenPRSection() {
 
   const handleDownload = () => {
     const data = sorted.map(r => [
-      r.pr_number, r.line_num, r.item_code, r.item_description,
+      r.pr_number, r.po_number || "-", r.line_num, r.item_code, r.item_description,
       r.category_code, r.material_type, r.supplier_name || "-", r.payment_terms || "-",
       r.requestor, r.uom, r.quantity,
       r.currency_code, r.unit_price_orig, r.unit_price_idr, r.last_purchase_price,
       r.total_value_orig, r.total_value_idr,
       r.pr_status, r.creation_date, r.due_date, r.aging_days,
     ]);
-    const amountCols = [10, 12, 13, 14, 15, 16];
+    const amountCols = [11, 13, 14, 15, 16, 17];
     downloadExcel(`open_pr_${toISO(today)}`, OPEN_PR_COLS.map(c => c.label), data, amountCols);
   };
 
@@ -313,6 +314,7 @@ function OpenPRSection() {
                 ) : paged.map((r, i) => (
                   <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
                     <td className={`${TD} text-blue-400 font-mono font-medium`}>{r.pr_number}</td>
+                    <td className={`${TD} text-purple-400 font-mono font-medium`}>{r.po_number || "-"}</td>
                     <td className={`${TD} text-gray-400 text-center`}>{r.line_num}</td>
                     <td className={`${TD} text-gray-300 font-mono`}>{r.item_code}</td>
                     <td className={`${TD} text-gray-300 max-w-48 truncate`} title={r.item_description}>{r.item_description}</td>
