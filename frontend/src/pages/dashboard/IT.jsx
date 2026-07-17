@@ -18,10 +18,10 @@ import { itApi } from "@/api/dashboard";
 /* ─── Tab definitions ─────────────────────────────── */
 
 const TABS = [
-  { id: "server-monitoring", icon: Server,        color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Server Monitoring" },
-  { id: "tablespace-usage",  icon: Activity,      color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Tablespace Usage"  },
-  { id: "disk-usage",        icon: HardDrive,     color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Disk Usage"        },
-  { id: "db-browser",        icon: Database,      color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Database Browser"  },
+  { id: "server-monitoring", icon: Server,        color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Oracle Server Monitoring" },
+  { id: "tablespace-usage",  icon: Activity,      color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Oracle Tablespace Monitoring"  },
+  { id: "disk-usage",        icon: HardDrive,     color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Oracle Storage Monitoring"        },
+  { id: "db-browser",        icon: Database,      color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Dashboard DB Browser"  },
   { id: "workflow-error",    icon: AlertTriangle, color: "text-red-400",    bg: "bg-red-500/10",    activeBorder: "border-red-500/40",    label: "Workflow Error"    },
 ];
 
