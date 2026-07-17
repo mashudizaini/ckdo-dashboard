@@ -18,7 +18,7 @@ import { purchasingApi } from "@/api/dashboard";
 const TABS = [
   { id: "open-pr",             icon: FileText,  color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Open PR"             },
   { id: "purchase-history",    icon: History,   color: "text-orange-400", bg: "bg-orange-500/10", activeBorder: "border-orange-500/40", label: "Purchase History"    },
-  { id: "price-analysis",      icon: BarChart2, color: "text-cyan-400",   bg: "bg-cyan-500/10",   activeBorder: "border-cyan-500/40",   label: "Price Analysis"      },
+  { id: "price-analysis",      icon: BarChart2, color: "text-cyan-400",   bg: "bg-cyan-500/10",   activeBorder: "border-cyan-500/40",   label: "PO Price Analysis"      },
   { id: "monthly-spend",       icon: Banknote,  color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Monthly Spend"       },
   { id: "active-suppliers",    icon: Truck,     color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Active Suppliers"    },
   { id: "manufacturer-master", icon: BookOpen,  color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Manufacturer Master" },
@@ -1876,7 +1876,7 @@ function ActiveSuppliersSection() {
   );
 }
 
-/* ─── Section: Price Analysis ────────────────────── */
+/* ─── Section: PO Price Analysis ────────────────────── */
 
 const LINE_COLORS = ["#06b6d4","#f59e0b","#10b981","#f43f5e","#8b5cf6","#3b82f6","#ec4899","#84cc16"];
 const fmtIDR2 = (v) => v == null ? "—" : new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 }).format(v);
