@@ -891,9 +891,11 @@ function OrganizationChartSection() {
   const [zoom, setZoom]         = useState(1);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [employeeNames, setEmployeeNames]       = useState([]);
+  const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError("");
     try {
       const res = await hrApi.getOrgChart();
       setRoot(res.data.root || null);
@@ -908,8 +910,10 @@ function OrganizationChartSection() {
         walk(res.data.root, 0);
         setExpanded(ids);
       }
-    } catch (_) {}
-    finally { setLoading(false); }
+    } catch (err) {
+      setRoot(null);
+      setError(err?.response?.data?.detail || "Failed to load organization chart. Please try refreshing.");
+    } finally { setLoading(false); }
   }, []);
 
   const loadNames = useCallback(() => {
@@ -975,7 +979,17 @@ function OrganizationChartSection() {
   }, [root]);
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 size={22} className="animate-spin" style={{ color: "#94a3b8" }} /></div>;
-  if (!root) return <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No employee data yet. Upload Excel in the Upload Excel tab.</p>;
+  if (error) {
+    return (
+      <div style={{ padding: "40px 0", textAlign: "center" }}>
+        <p style={{ fontSize: 12, color: "#dc2626", fontWeight: 600 }}>{error}</p>
+        <button onClick={load} style={{ marginTop: 10, fontSize: 11.5, fontWeight: 700, color: "#2563eb", background: "none", border: "none", cursor: "pointer" }}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+  if (!root) return <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No employee data yet. Upload Excel in Employee Data → Upload Excel.</p>;
 
   return (
     <div className="space-y-4">
