@@ -614,7 +614,7 @@ function EmployeeDetailModal({ employee, onClose }) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-3xl max-h-[85vh] overflow-y-auto rounded-2xl"
+        className="w-full max-w-5xl max-h-[85vh] overflow-y-auto rounded-2xl"
         style={{ background: "#e8edf5", boxShadow: "8px 8px 20px #c5cad8, -8px -8px 20px #ffffff" }}
       >
         <div
@@ -641,11 +641,15 @@ function EmployeeDetailModal({ employee, onClose }) {
               <h4 style={{ fontSize: 11, fontWeight: 800, color: "#2563eb", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
                 {section}
               </h4>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px 16px" }}>
                 {fields.map(([key, label]) => (
                   <div
                     key={key}
-                    style={{ padding: "8px 12px", borderRadius: 10, background: "#e8edf5", boxShadow: "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff" }}
+                    style={{
+                      padding: "8px 12px", borderRadius: 10, background: "#e8edf5",
+                      boxShadow: "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff",
+                      gridColumn: key === "address" ? "1 / -1" : undefined,
+                    }}
                   >
                     <div style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                       {label}
