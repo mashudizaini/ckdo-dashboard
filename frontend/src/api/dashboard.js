@@ -140,7 +140,7 @@ export const purchasingApi = {
   getCurrencies:     () => api.get("/dashboard/purchasing/lov/currencies"),
   getMaterialTypes:  () => api.get("/dashboard/purchasing/lov/material-types"),
 
-  // Price Analysis
+  // PO Price Analysis
   getPriceAnalysis: (p) => api.get("/dashboard/purchasing/price-analysis", { params: p }),
   getMetalsLatest:  ()  => api.get("/dashboard/purchasing/metals/latest"),
 

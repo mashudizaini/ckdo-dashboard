@@ -10,6 +10,7 @@ sqlalchemy==2.0.27
 alembic==1.13.1
 asyncpg==0.29.0
 psycopg2-binary==2.9.9
+sqlparse==0.5.1
 
 # Oracle
 oracledb==2.1.2

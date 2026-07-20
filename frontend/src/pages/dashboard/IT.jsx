@@ -21,7 +21,7 @@ const TABS = [
   { id: "server-monitoring", icon: Server,        color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Oracle Server Monitoring" },
   { id: "tablespace-usage",  icon: Activity,      color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Oracle Tablespace Monitoring"  },
   { id: "disk-usage",        icon: HardDrive,     color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Oracle Storage Monitoring"        },
-  { id: "db-browser",        icon: Database,      color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Dashboard DB Browser"  },
+  { id: "db-browser",        icon: Database,      color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Postgre DB Browser"  },
   { id: "workflow-error",    icon: AlertTriangle, color: "text-red-400",    bg: "bg-red-500/10",    activeBorder: "border-red-500/40",    label: "Workflow Error"    },
 ];
 
@@ -1851,6 +1851,7 @@ function DbObjectsBrowser() {
   const [loading, setLoading]   = useState(true);
   const [error,   setError]     = useState(null);
   const [search,  setSearch]    = useState("");
+  const [schemaFilter, setSchemaFilter] = useState("");
   const [selected, setSelected] = useState(null); // { schema, name, type }
 
   const load = async () => {
@@ -1874,7 +1875,14 @@ function DbObjectsBrowser() {
     { key: "functions", label: "Functions", type: "function", items: objects.functions },
   ];
   const q = search.trim().toLowerCase();
-  const filtered = groups.map(g => ({ ...g, items: q ? g.items.filter(o => o.name.toLowerCase().includes(q)) : g.items }));
+  const allSchemas = [...new Set(groups.flatMap(g => g.items.map(o => o.schema)))].sort();
+  const filtered = groups.map(g => ({
+    ...g,
+    items: g.items.filter(o =>
+      (!q || o.name.toLowerCase().includes(q)) &&
+      (!schemaFilter || o.schema === schemaFilter)
+    ),
+  }));
   const totalCount = groups.reduce((s, g) => s + g.items.length, 0);
 
   return (
@@ -1892,6 +1900,14 @@ function DbObjectsBrowser() {
             <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
           </button>
         </div>
+
+        {allSchemas.length > 1 && (
+          <select value={schemaFilter} onChange={e => setSchemaFilter(e.target.value)}
+            style={{ width: "100%", fontSize: 11.5, fontWeight: 600, padding: "6px 8px", borderRadius: 8, border: "none", background: "#fff", color: "#334155", boxShadow: DB_NEU.in, outline: "none", marginBottom: 10, cursor: "pointer" }}>
+            <option value="">All schemas ({allSchemas.length})</option>
+            {allSchemas.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        )}
 
         {error && <p style={{ fontSize: 11, color: "#dc2626", padding: "4px 2px" }}>{error}</p>}
         {loading && !totalCount ? (
@@ -1915,6 +1931,11 @@ function DbObjectsBrowser() {
                         boxShadow: isSel ? "inset 0 0 0 1.5px #7c3aed" : "none",
                       }}>
                       <cfg.icon size={12} color={cfg.color} style={{ flexShrink: 0 }} />
+                      {allSchemas.length > 1 && (
+                        <span style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", background: "rgba(148,163,184,0.15)", padding: "1px 5px", borderRadius: 5, flexShrink: 0 }}>
+                          {o.schema}
+                        </span>
+                      )}
                       <span style={{ fontSize: 12, fontWeight: isSel ? 700 : 600, color: "#334155", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
                         {o.name}
                       </span>

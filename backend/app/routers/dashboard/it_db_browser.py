@@ -34,6 +34,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
 
+import sqlparse
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select, text
@@ -323,29 +324,47 @@ async def run_query(
     if not body.sql.strip():
         raise HTTPException(status_code=400, detail="SQL statement is empty")
 
-    stype, requires_confirm = _classify_and_check(body.sql)
-    if requires_confirm and not body.confirm:
+    # asyncpg refuses more than one command in a single prepared-statement
+    # execute() call ("cannot insert multiple commands into a prepared
+    # statement") — unlike psycopg2, it has no implicit multi-statement
+    # support. sqlparse.split() safely splits on ';' while respecting string
+    # literals and $$-quoted function bodies (a naive str.split(";") would
+    # mangle those), so each statement can be run as its own execute() call
+    # instead. They still share one DB transaction (see _log_audit's comment
+    # below), so a failure partway through rolls back everything already run.
+    statements = [s.strip() for s in sqlparse.split(body.sql) if s.strip()]
+    if not statements:
+        raise HTTPException(status_code=400, detail="SQL statement is empty")
+
+    classified = [_classify_and_check(s) for s in statements]
+    if any(req for _, req in classified) and not body.confirm:
+        dangerous_types = ", ".join(sorted({t for t, req in classified if req}))
         raise HTTPException(
             status_code=400,
-            detail=f"This {stype} statement looks destructive (DROP/TRUNCATE, or DELETE/UPDATE with no WHERE clause). "
-                   f"Re-submit with confirm=true to proceed.",
+            detail=f"This includes a {dangerous_types} statement that looks destructive (DROP/TRUNCATE, or "
+                   f"DELETE/UPDATE with no WHERE clause). Re-submit with confirm=true to proceed.",
         )
+    # Single statement keeps the exact type it always had; multiple statements
+    # get a "+"-joined summary (e.g. "SELECT+ALTER") for the audit log.
+    stype = classified[0][0] if len(statements) == 1 else "+".join(dict.fromkeys(t for t, _ in classified))
 
     start = time.monotonic()
     try:
-        result = await db.execute(text(body.sql))
+        payload = {"columns": [], "rows": [], "row_count": 0, "truncated": False}
+        for stmt in statements:
+            result = await db.execute(text(stmt))
+            if result.returns_rows:
+                columns = list(result.keys())
+                rows = result.fetchmany(500)
+                payload = {
+                    "columns": columns,
+                    "rows": [[_jsonify(v) for v in r] for r in rows],
+                    "row_count": len(rows),
+                    "truncated": len(rows) == 500,
+                }
+            else:
+                payload = {"columns": [], "rows": [], "row_count": result.rowcount, "truncated": False}
         duration_ms = int((time.monotonic() - start) * 1000)
-        if result.returns_rows:
-            columns = list(result.keys())
-            rows = result.fetchmany(500)
-            payload = {
-                "columns": columns,
-                "rows": [[_jsonify(v) for v in r] for r in rows],
-                "row_count": len(rows),
-                "truncated": len(rows) == 500,
-            }
-        else:
-            payload = {"columns": [], "rows": [], "row_count": result.rowcount, "truncated": False}
         await _log_audit(db, user, body.sql, stype, True, None, payload["row_count"], duration_ms)
         return {"success": True, "duration_ms": duration_ms, **payload}
     except Exception as e:

@@ -1,0 +1,43 @@
+# docker-compose.prod.yml
+# Override untuk Production Server (172.21.2.28 / dashboard.ckd-otto.com)
+# Digunakan bersama docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+
+services:
+  keycloak:
+    command: start --import-realm
+    environment:
+      KC_HOSTNAME_STRICT: "false"
+      # Production `start` mode assumes it terminates HTTPS itself and
+      # refuses to boot without its own cert ("Key material not provided").
+      # TLS here is meant to be terminated at nginx, not Keycloak, so tell
+      # it explicitly that HTTP-only is intentional.
+      KC_HTTP_ENABLED: "true"
+      # ...and independently, production mode also defaults to forcing
+      # https:// in the issuer/redirect URLs it generates, which would
+      # break login as long as nginx itself has no cert yet.
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      # KC_PROXY=edge unconditionally assumes TLS is already terminated in
+      # front of Keycloak and sets Secure-flagged cookies accordingly — that
+      # breaks login ("Cookie not found") as long as nginx is still plain
+      # HTTP (no cert yet). xforwarded instead trusts nginx's real
+      # X-Forwarded-Proto header, so it works correctly both now (http) and
+      # once SSL is added (https) without needing to change this again.
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_RELATIVE_PATH: /auth
+
+  backend:
+    environment:
+      - ENVIRONMENT=production
+    volumes:
+      - ./e-magazine/magazines:/app/magazine-uploads
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  nginx:
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./e-magazine:/usr/share/nginx/html/e-magazine:ro
+    ports:
+      - "80:80"
+      - "443:443"
