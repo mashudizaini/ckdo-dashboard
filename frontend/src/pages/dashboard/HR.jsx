@@ -194,7 +194,7 @@ function EmployeeTable() {
   }, []); // eslint-disable-line
 
   const fetchEmployeeNames = useCallback(async () => {
-    try { setEmployeeNames((await hrApi.getEmployeeNames()).data || []); } catch (_) {}
+    try { setEmployeeNames((await hrApi.getEmployeeNames()) || []); } catch (_) {}
   }, []); // eslint-disable-line
 
   const fetchTeams = useCallback(async (dept) => {
@@ -641,7 +641,7 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSupervis
       setSupervisorQuery("");
       onSupervisorSaved?.(employee.user_id, newId);
     } catch (err) {
-      setSaveError(err?.response?.data?.detail || "Failed to update supervisor");
+      setSaveError(err?.detail || "Failed to update supervisor");
     } finally {
       setSaving(false);
     }
@@ -898,26 +898,26 @@ function OrganizationChartSection() {
     setError("");
     try {
       const res = await hrApi.getOrgChart();
-      setRoot(res.data.root || null);
-      setTotal(res.data.total || 0);
-      if (res.data.root) {
+      setRoot(res.root || null);
+      setTotal(res.total || 0);
+      if (res.root) {
         const ids = new Set();
         const walk = (node, depth) => {
           if (!node) return;
           ids.add(node.user_id);
           if (depth < 2) node.children?.forEach((c) => walk(c, depth + 1));
         };
-        walk(res.data.root, 0);
+        walk(res.root, 0);
         setExpanded(ids);
       }
     } catch (err) {
       setRoot(null);
-      setError(err?.response?.data?.detail || "Failed to load organization chart. Please try refreshing.");
+      setError(err?.detail || "Failed to load organization chart. Please try refreshing.");
     } finally { setLoading(false); }
   }, []);
 
   const loadNames = useCallback(() => {
-    hrApi.getEmployeeNames().then((r) => setEmployeeNames(r.data || [])).catch(() => {});
+    hrApi.getEmployeeNames().then((r) => setEmployeeNames(r || [])).catch(() => {});
   }, []);
 
   useEffect(() => { load(); loadNames(); }, [load, loadNames]);
@@ -963,7 +963,7 @@ function OrganizationChartSection() {
   const openDetail = async (userId) => {
     try {
       const res = await hrApi.getEmployee(userId);
-      setSelectedEmployee(res.data);
+      setSelectedEmployee(res);
     } catch (_) {}
   };
 
