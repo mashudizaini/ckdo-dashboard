@@ -32,6 +32,7 @@ class Employee(Base):
     education_school= Column(String(200))
     education_major = Column(String(200))
     employee_grade  = Column(String(20))
+    supervisor_id   = Column(String(20), index=True)  # NIK atasan langsung — dipakai untuk Organization Chart
     working_experience_years = Column(String(20))
     previous_company= Column(String(200))
     address         = Column(Text)

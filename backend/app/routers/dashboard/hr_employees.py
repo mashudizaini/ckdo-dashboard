@@ -9,6 +9,7 @@ from typing import Optional
 
 import openpyxl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
+from pydantic import BaseModel
 from sqlalchemy import func, select, delete, extract, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -179,6 +180,75 @@ def _extract_rows(contents: bytes, filename: str) -> list:
     return list(ws.iter_rows(min_row=2, values_only=True))
 
 
+# ── Organization Chart — derive "reports to" from level/department/division/team ──
+# Talenta's export has no "Direct Supervisor" column, so instead of leaving every
+# employee's supervisor blank after each REPLACE upload, infer it from the existing
+# level/department/division/team fields: within each (department, division, team)
+# group the most senior `level` becomes that group's lead, everyone else in the group
+# reports to the lead, and each group's lead reports to the lead of its parent group
+# (team → division → department → President Director). HR can still correct any one
+# employee's supervisor afterward via PATCH /{user_id}/supervisor.
+_LEVEL_RANK = {
+    "Director": 0, "General Manager": 1, "Senior Manager": 2, "Manager": 3,
+    "Assistant Manager": 4, "Supervisor": 5, "Senior Staff": 6,
+    "Officer": 7, "Staff": 7, "Operator / Clerk": 8,
+}
+
+
+def _assign_supervisors(rows: list) -> None:
+    """Mutates each row dict in `rows`, setting row['supervisor_id']. No-op if no
+    'President Director' row is found (nothing recognizable to anchor the chart to)."""
+    def rank(row):
+        return _LEVEL_RANK.get(row.get("level"), 9)
+
+    root = next((r for r in rows if (r.get("job_title") or "").strip().lower() == "president director"), None)
+    if root is None:
+        return
+    root["supervisor_id"] = None
+
+    # Plant's Director sits in a separate "Director" pseudo-department alongside the
+    # President Director rather than in a (department="Plant", division="", team="")
+    # bucket of its own, so it's keyed onto department "Plant" by hand.
+    plant_director = next((r for r in rows if (r.get("job_title") or "").strip().lower() == "plant director"), None)
+    dept_head_override = {}
+    if plant_director:
+        plant_director["supervisor_id"] = root["user_id"]
+        dept_head_override["Plant"] = plant_director
+
+    others = [r for r in rows if r is not root and r is not plant_director]
+
+    def group_key(r):
+        return (r.get("department") or "", r.get("division") or "", r.get("team") or "")
+
+    groups: dict = {}
+    for r in others:
+        groups.setdefault(group_key(r), []).append(r)
+
+    def leader_of(key):
+        members = groups.get(key)
+        return min(members, key=rank) if members else None
+
+    for key, members in groups.items():
+        dept, div, team = key
+        leader = leader_of(key)
+        for r in members:
+            if r is not leader:
+                r["supervisor_id"] = leader["user_id"]
+
+        if team:
+            parent_key = (dept, div, "")
+        elif div:
+            parent_key = (dept, "", "")
+        else:
+            parent_key = None  # this bucket already IS the department-head bucket
+
+        if parent_key is None:
+            leader["supervisor_id"] = root["user_id"]
+        else:
+            parent_leader = leader_of(parent_key) or dept_head_override.get(dept)
+            leader["supervisor_id"] = (parent_leader or root)["user_id"]
+
+
 # ── Upload endpoint ────────────────────────────────────────────────────────────
 
 @router.post("/upload")
@@ -223,6 +293,8 @@ async def upload_employees(
     if not rows_parsed:
         raise HTTPException(status_code=422, detail="No employee data found in file. "
                             "Make sure the sheet is named 'Employee Data' with headers in the first row.")
+
+    _assign_supervisors(rows_parsed)
 
     try:
         # REPLACE — delete all previous data, replace with the new file's data
@@ -348,6 +420,51 @@ async def get_employee_summary(
     }
 
 
+def _emp_dict(e: Employee) -> dict:
+    return {
+        "id":               e.id,
+        "user_id":          e.user_id,
+        "full_name":        e.full_name,
+        "sex":              e.sex,
+        "level":            e.level,
+        "department":       e.department,
+        "division":         e.division,
+        "team":             e.team,
+        "job_title":        e.job_title,
+        "work_placement":   e.work_placement,
+        "status":           e.status,
+        "employee_grade":   e.employee_grade,
+        "supervisor_id":    e.supervisor_id,
+        "education_degree": e.education_degree,
+        "education_school": e.education_school,
+        "education_major":  e.education_major,
+        "marital_status":   e.marital_status,
+        "religion":         e.religion,
+        "blood_type":       e.blood_type,
+        "phone_number":     e.phone_number,
+        "emergency_phone":  e.emergency_phone,
+        "company_email":    e.company_email,
+        "personal_email":   e.personal_email,
+        "date_of_joining":  str(e.date_of_joining)  if e.date_of_joining  else None,
+        "date_of_birth":    str(e.date_of_birth)    if e.date_of_birth    else None,
+        "place_of_birth":   e.place_of_birth,
+        "retire_date":      str(e.retire_date)       if e.retire_date      else None,
+        "end_pkwt":         str(e.end_pkwt)          if e.end_pkwt         else None,
+        "starting_pkwt":    str(e.starting_pkwt)     if e.starting_pkwt    else None,
+        "pkwt_ke":          e.pkwt_ke,
+        "permanent_date":   str(e.permanent_date)    if e.permanent_date   else None,
+        "resign_date":      str(e.resign_date)        if e.resign_date      else None,
+        "no_bpjs_health":   e.no_bpjs_health,
+        "no_bpjs_employee": e.no_bpjs_employee,
+        "working_experience_years": e.working_experience_years,
+        "previous_company": e.previous_company,
+        "address":          e.address,
+        "npwp_number":      e.npwp_number,
+        "bank_account_bca": e.bank_account_bca,
+        "bank_account_name": e.bank_account_name,
+    }
+
+
 @router.get("")
 async def list_employees(
     search:     str           = Query(""),
@@ -410,49 +527,6 @@ async def list_employees(
     q        = q.offset((page - 1) * page_size).limit(page_size)
     result   = await db.execute(q)
     employees = result.scalars().all()
-
-    def _emp_dict(e: Employee) -> dict:
-        return {
-            "id":               e.id,
-            "user_id":          e.user_id,
-            "full_name":        e.full_name,
-            "sex":              e.sex,
-            "level":            e.level,
-            "department":       e.department,
-            "division":         e.division,
-            "team":             e.team,
-            "job_title":        e.job_title,
-            "work_placement":   e.work_placement,
-            "status":           e.status,
-            "employee_grade":   e.employee_grade,
-            "education_degree": e.education_degree,
-            "education_school": e.education_school,
-            "education_major":  e.education_major,
-            "marital_status":   e.marital_status,
-            "religion":         e.religion,
-            "blood_type":       e.blood_type,
-            "phone_number":     e.phone_number,
-            "emergency_phone":  e.emergency_phone,
-            "company_email":    e.company_email,
-            "personal_email":   e.personal_email,
-            "date_of_joining":  str(e.date_of_joining)  if e.date_of_joining  else None,
-            "date_of_birth":    str(e.date_of_birth)    if e.date_of_birth    else None,
-            "place_of_birth":   e.place_of_birth,
-            "retire_date":      str(e.retire_date)       if e.retire_date      else None,
-            "end_pkwt":         str(e.end_pkwt)          if e.end_pkwt         else None,
-            "starting_pkwt":    str(e.starting_pkwt)     if e.starting_pkwt    else None,
-            "pkwt_ke":          e.pkwt_ke,
-            "permanent_date":   str(e.permanent_date)    if e.permanent_date   else None,
-            "resign_date":      str(e.resign_date)        if e.resign_date      else None,
-            "no_bpjs_health":   e.no_bpjs_health,
-            "no_bpjs_employee": e.no_bpjs_employee,
-            "working_experience_years": e.working_experience_years,
-            "previous_company": e.previous_company,
-            "address":          e.address,
-            "npwp_number":      e.npwp_number,
-            "bank_account_bca": e.bank_account_bca,
-            "bank_account_name": e.bank_account_name,
-        }
 
     return {
         "total":      total,
@@ -803,3 +877,120 @@ async def get_employee_names(
         .order_by(Employee.full_name)
     )
     return [{"user_id": r[0], "full_name": r[1], "department": r[2]} for r in result.fetchall()]
+
+
+class SupervisorUpdate(BaseModel):
+    supervisor_id: Optional[str] = None
+
+
+@router.patch("/{user_id}/supervisor")
+async def set_employee_supervisor(
+    user_id: str,
+    body: SupervisorUpdate,
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Manual override for one employee's direct supervisor (used by the Organization
+    Chart tab). Gets overwritten the next time the master data is re-uploaded, since
+    upload REPLACEs the whole table and re-derives supervisor_id from scratch."""
+    target = await db.scalar(select(Employee).where(Employee.user_id == user_id))
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Employee {user_id} not found")
+
+    new_sup_id = body.supervisor_id or None
+    if new_sup_id:
+        if new_sup_id == user_id:
+            raise HTTPException(status_code=400, detail="An employee cannot be their own supervisor")
+        supervisor = await db.scalar(select(Employee).where(Employee.user_id == new_sup_id))
+        if not supervisor:
+            raise HTTPException(status_code=404, detail=f"Supervisor {new_sup_id} not found")
+
+        # Walk the chain upward from the proposed supervisor — if it reaches
+        # user_id again, this assignment would create a reporting-line loop.
+        cursor = supervisor.supervisor_id
+        seen = {user_id}
+        hops = 0
+        while cursor and hops < 200:
+            if cursor in seen:
+                raise HTTPException(status_code=400, detail="This assignment would create a reporting-line loop")
+            seen.add(cursor)
+            cursor = await db.scalar(select(Employee.supervisor_id).where(Employee.user_id == cursor))
+            hops += 1
+
+    target.supervisor_id = new_sup_id
+    await db.flush()
+    return {"user_id": user_id, "supervisor_id": new_sup_id}
+
+
+@router.get("/org-chart")
+async def get_org_chart(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Full company hierarchy, nested by supervisor_id, for the Organization Chart tab.
+    Always returns a single root node — employees with no resolvable supervisor chain
+    (shouldn't normally happen) are bucketed under a synthetic 'Unassigned' node
+    instead of becoming extra floating roots."""
+    result = await db.execute(
+        select(
+            Employee.user_id, Employee.full_name, Employee.job_title, Employee.level,
+            Employee.department, Employee.division, Employee.team, Employee.sex,
+            Employee.supervisor_id,
+        ).where(Employee.resign_date.is_(None)).order_by(Employee.full_name)
+    )
+    rows = [dict(r._mapping) for r in result.fetchall()]
+    if not rows:
+        return {"total": 0, "root": None}
+
+    by_id = {r["user_id"]: {**r, "children": []} for r in rows}
+    roots = []
+    for r in rows:
+        node = by_id[r["user_id"]]
+        sup_id = r["supervisor_id"]
+        if sup_id and sup_id in by_id and sup_id != r["user_id"]:
+            by_id[sup_id]["children"].append(node)
+        else:
+            roots.append(node)
+
+    def subtree_size(node):
+        return 1 + sum(subtree_size(c) for c in node["children"])
+
+    def finalize(node):
+        node["children"].sort(key=lambda c: (-subtree_size(c), c["full_name"] or ""))
+        node["direct_count"] = len(node["children"])
+        for c in node["children"]:
+            finalize(c)
+
+    main_root = next((n for n in roots if (n["job_title"] or "").strip().lower() == "president director"), None)
+    if main_root is None:
+        roots.sort(key=lambda n: -len(n["children"]))
+        main_root = roots[0] if roots else None
+
+    orphans = [n for n in roots if n is not main_root]
+    if main_root and orphans:
+        main_root["children"].append({
+            "user_id": "__unassigned__", "full_name": "Unassigned", "job_title": "No supervisor set",
+            "level": None, "department": None, "division": None, "team": None, "sex": None,
+            "supervisor_id": main_root["user_id"], "children": orphans,
+        })
+
+    if main_root:
+        finalize(main_root)
+
+    return {"total": len(rows), "root": main_root}
+
+
+# NOTE: declared last — a path-param route shadows any static route registered
+# after it (FastAPI matches in declaration order), so this must stay below
+# /departments, /teams, /names, /org-chart, and /{user_id}/supervisor.
+@router.get("/{user_id}")
+async def get_employee(
+    user_id: str,
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Single employee's full record — used by the Organization Chart tab when a node is clicked."""
+    emp = await db.scalar(select(Employee).where(Employee.user_id == user_id))
+    if not emp:
+        raise HTTPException(status_code=404, detail=f"Employee {user_id} not found")
+    return _emp_dict(emp)

@@ -202,6 +202,54 @@ tbody td {
   font-weight: 500 !important;
 }
 
+/* ── HR Organization Chart — pure-CSS connector tree ──
+   React inline styles can't target ::before/::after, so the connector lines
+   (the horizontal/vertical bars joining a node to its children) live here. */
+.org-tree, .org-tree ul {
+  padding-top: 28px;
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+.org-tree ul { padding-top: 36px; }
+.org-tree li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  list-style: none;
+  position: relative;
+  padding: 36px 14px 0 14px;
+}
+.org-tree > li { padding-top: 0; }
+.org-tree li::before,
+.org-tree li::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 50%;
+  width: 50%;
+  height: 36px;
+  border-top: 2px solid #93a3bd;
+}
+.org-tree li::after { right: auto; left: 50%; border-left: 2px solid #93a3bd; }
+.org-tree li:only-child::before,
+.org-tree li:only-child::after { display: none; }
+.org-tree li:only-child { padding-top: 0; }
+.org-tree li:first-child::before { border: none; }
+.org-tree li:last-child::after { border: none; }
+.org-tree li:last-child::before { border-right: 2px solid #93a3bd; border-radius: 0 6px 0 0; }
+.org-tree li:first-child::after { border-radius: 6px 0 0 0; }
+.org-tree li:only-child::before, .org-tree li:only-child::after { border: none; }
+.org-tree > li::before, .org-tree > li::after { display: none; }
+.org-tree ul::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  border-left: 2px solid #93a3bd;
+  width: 0;
+  height: 36px;
+}
 /* ── Input/select — neumorphic inset ── */
 input, select, textarea {
   background-color: var(--bg-card) !important;
