@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import {
-  Users, UserCheck, Umbrella, BarChart2, RefreshCw,
+  Users, UserCheck, BarChart2, RefreshCw,
   Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck,
   Wallet, Download, ChevronDown, ChevronUp, ListChecks, FileSearch, BookOpen, Trash2,
   QrCode, Plus, ArrowUpDown,
@@ -69,11 +69,9 @@ export default function HRDashboard() {
   const [activeSection, setActiveSection] = useState("employees");
   const [empSub, setEmpSub] = useState("list");
   const [attSub, setAttSub] = useState("summary");
-  const [leaveSub, setLeaveSub] = useState("data");
 
   const kpiCards = [
     { id: "employees",  icon: Users,         color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Employee Data" },
-    { id: "leave",      icon: Umbrella,      color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Leave" },
     { id: "attendance", icon: BarChart2,     color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40", label: "Attendance Rate" },
     { id: "todo",       icon: ListChecks,    color: "text-rose-400",   bg: "bg-rose-500/10",   activeBorder: "border-rose-500/40",   label: "To Do List" },
     { id: "cv",         icon: FileSearch,    color: "text-cyan-400",   bg: "bg-cyan-500/10",   activeBorder: "border-cyan-500/40",   label: "E-Recruitment" },
@@ -126,19 +124,7 @@ export default function HRDashboard() {
         </SectionCard>
       )}
 
-      {/* ── Leave (data + upload) ── */}
-      {activeSection === "leave" && (
-        <SectionCard>
-          <SubTabs
-            tabs={[{ id: "data", label: "Leave Data" }, { id: "upload", label: "Upload Leave" }]}
-            active={leaveSub} onChange={setLeaveSub}
-          />
-          {leaveSub === "data" && <LeaveDataSection />}
-          {leaveSub === "upload" && <LeaveUpload />}
-        </SectionCard>
-      )}
-
-      {/* ── Attendance Rate (summary/detail + upload) ── */}
+      {/* ── Attendance Rate (summary/detail + leave + upload) ── */}
       {activeSection === "attendance" && (
         <SectionCard>
           <AttendanceRateSection />
@@ -193,6 +179,7 @@ function EmployeeTable() {
   const [showExportPicker, setShowExportPicker] = useState(false);
   const [exportFields, setExportFields] = useState(() => Object.fromEntries(EMPLOYEE_COLS.map(c => [c.key, true])));
   const [exporting, setExporting] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
 
   const PAGE_SIZE = 8;
 
@@ -502,7 +489,7 @@ function EmployeeTable() {
                     {search || deptFilter || statusFilter || genderFilter ? "No employees matching filter" : "No employee data yet. Upload Excel in Employee Upload tab."}
                   </td></tr>
                 ) : data.employees.map((e) => (
-                  <tr key={e.user_id} className="hover:bg-gray-800/40 transition-colors">
+                  <tr key={e.user_id} onClick={() => setSelectedEmployee(e)} className="hover:bg-gray-800/40 transition-colors cursor-pointer">
                     <td className="px-3 py-2.5 font-mono text-xs text-gray-500 whitespace-nowrap">{e.user_id}</td>
                     <td className="px-3 py-2.5 font-medium text-gray-200 whitespace-nowrap">{e.full_name}</td>
                     <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap text-xs">{e.level || "—"}</td>
@@ -571,6 +558,108 @@ function EmployeeTable() {
           </div>
         </div>
       )}
+
+      {selectedEmployee && (
+        <EmployeeDetailModal employee={selectedEmployee} onClose={() => setSelectedEmployee(null)} />
+      )}
+    </div>
+  );
+}
+
+// ── Employee List row click → full-detail popup, split into 2 columns ─────────
+const EMPLOYEE_DETAIL_FIELDS = [
+  { section: "Identity", fields: [
+    ["user_id", "NIK"], ["full_name", "Full Name"], ["sex", "Gender"], ["place_of_birth", "Place of Birth"],
+    ["date_of_birth", "Date of Birth"], ["religion", "Religion"], ["blood_type", "Blood Type"], ["marital_status", "Marital Status"],
+  ] },
+  { section: "Employment", fields: [
+    ["level", "Level"], ["department", "Department"], ["division", "Division"], ["team", "Team"],
+    ["job_title", "Position"], ["work_placement", "Placement"], ["status", "Status"], ["employee_grade", "Grade"],
+    ["date_of_joining", "Join Date"], ["pkwt_ke", "PKWT Ke"], ["starting_pkwt", "Starting PKWT"], ["end_pkwt", "End PKWT"],
+    ["permanent_date", "Permanent Date"], ["resign_date", "Resign Date"], ["retire_date", "Retire Date"],
+  ] },
+  { section: "Education & Experience", fields: [
+    ["education_degree", "Education Degree"], ["education_school", "School"], ["education_major", "Major"],
+    ["working_experience_years", "Work Experience (yrs)"], ["previous_company", "Previous Company"],
+  ] },
+  { section: "Contact", fields: [
+    ["phone_number", "Phone"], ["emergency_phone", "Emergency Phone"], ["company_email", "Company Email"],
+    ["personal_email", "Personal Email"], ["address", "Address"],
+  ] },
+  { section: "Administrative", fields: [
+    ["no_bpjs_health", "BPJS Kesehatan"], ["no_bpjs_employee", "BPJS Ketenagakerjaan"], ["npwp_number", "NPWP"],
+    ["bank_account_bca", "Bank Account (BCA)"], ["bank_account_name", "Bank Account Name"],
+  ] },
+];
+
+const EMPLOYEE_DETAIL_DATE_KEYS = new Set([
+  "date_of_joining", "date_of_birth", "retire_date", "end_pkwt", "starting_pkwt", "permanent_date", "resign_date",
+]);
+
+function fmtEmployeeDetailValue(key, val) {
+  if (val === null || val === undefined || val === "") return "—";
+  if (EMPLOYEE_DETAIL_DATE_KEYS.has(key)) {
+    return new Date(val).toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" });
+  }
+  if (key === "sex") return val === "M" ? "Male" : val === "F" ? "Female" : val;
+  return val;
+}
+
+function EmployeeDetailModal({ employee, onClose }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(15,23,42,0.6)" }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-3xl max-h-[85vh] overflow-y-auto rounded-2xl"
+        style={{ background: "#e8edf5", boxShadow: "8px 8px 20px #c5cad8, -8px -8px 20px #ffffff" }}
+      >
+        <div
+          className="sticky top-0 z-10 flex items-center justify-between px-6 py-4"
+          style={{ background: "linear-gradient(135deg, #2563eb, #3b82f6)", borderRadius: "16px 16px 0 0" }}
+        >
+          <div>
+            <h3 style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>{employee.full_name || "—"}</h3>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.85)", fontWeight: 600, marginTop: 2 }}>
+              {employee.user_id} · {employee.job_title || "—"}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            style={{ padding: 6, borderRadius: 8, border: "none", background: "rgba(255,255,255,0.2)", color: "#fff", cursor: "pointer" }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {EMPLOYEE_DETAIL_FIELDS.map(({ section, fields }) => (
+            <div key={section}>
+              <h4 style={{ fontSize: 11, fontWeight: 800, color: "#2563eb", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+                {section}
+              </h4>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px" }}>
+                {fields.map(([key, label]) => (
+                  <div
+                    key={key}
+                    style={{ padding: "8px 12px", borderRadius: 10, background: "#e8edf5", boxShadow: "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff" }}
+                  >
+                    <div style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      {label}
+                    </div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: "#1e293b", marginTop: 2, wordBreak: "break-word" }}>
+                      {fmtEmployeeDetailValue(key, employee[key])}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1809,7 +1898,7 @@ function AttendanceRateSection() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        {[["summary", "Summary"], ["today", "Attendance Today"], ["detail", "Detail"], ["calendar", "Working Calendar"], ["upload", "Upload"]].map(([id, label]) => (
+        {[["summary", "Summary"], ["today", "Attendance Today"], ["detail", "Detail"], ["calendar", "Working Calendar"], ["leaveData", "Leave Data"], ["leaveUpload", "Upload Leave"], ["upload", "Upload"]].map(([id, label]) => (
           <button key={id} onClick={() => setActiveTab(id)}
             style={{
               padding: "8px 20px", borderRadius: 10, border: "none", fontSize: 12, fontWeight: 700,
@@ -1940,6 +2029,15 @@ function AttendanceRateSection() {
       {/* ── Upload ── */}
       {activeTab === "calendar" && (
         <WorkingCalendarPanel />
+      )}
+
+      {/* ── Leave (moved from the former standalone Leave tab) ── */}
+      {activeTab === "leaveData" && (
+        <LeaveDataSection />
+      )}
+
+      {activeTab === "leaveUpload" && (
+        <LeaveUpload />
       )}
 
       {activeTab === "upload" && (
