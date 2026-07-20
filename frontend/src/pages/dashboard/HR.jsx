@@ -798,58 +798,59 @@ function OrgNode({ node, expanded, toggle, matchIds, onOpenDetail }) {
   const isPlaceholder = node.user_id === "__unassigned__";
   const color = isPlaceholder ? "#94a3b8" : orgDeptColor(node.department);
 
+  const groupLabel = node.team || node.division || node.department || "";
+
   return (
     <li>
       <div
         onClick={() => !isPlaceholder && onOpenDetail(node.user_id)}
         style={{
-          width: 172, borderRadius: 12, padding: "10px 12px",
+          width: 168, borderRadius: 6, overflow: "hidden",
           cursor: isPlaceholder ? "default" : "pointer",
-          background: "#e8edf5",
-          boxShadow: isMatch
-            ? `0 0 0 2px ${color}, 4px 4px 10px #c5cad8, -4px -4px 10px #ffffff`
-            : "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff",
+          background: "#fff",
+          border: `1.5px solid ${isMatch ? color : "#c4cddb"}`,
+          boxShadow: isMatch ? `0 0 0 2px ${color}55` : "2px 3px 6px rgba(30,41,59,0.12)",
           position: "relative",
         }}
       >
         {isPlaceholder ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 30, height: 30, borderRadius: "50%", flexShrink: 0, background: "#cbd5e1", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
-              <UserCheck size={13} />
+          <div style={{ padding: "8px 10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <UserCheck size={12} color="#64748b" />
+              <span style={{ fontSize: 11.5, fontWeight: 800, color: "#64748b" }}>Unassigned</span>
             </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 800, color: "#64748b" }}>Unassigned</div>
-              <div style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600 }}>{node.children.length} employee{node.children.length !== 1 ? "s" : ""}</div>
-            </div>
+            <div style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, marginTop: 2 }}>{node.children.length} employee{node.children.length !== 1 ? "s" : ""}</div>
           </div>
         ) : (
           <>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {groupLabel && (
               <div style={{
-                width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
-                background: `linear-gradient(135deg, ${color}, ${color}cc)`,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                color: "#fff", fontSize: 11, fontWeight: 800,
-              }}>
-                {orgInitials(node.full_name)}
+                background: color, color: "#fff", fontSize: 9.5, fontWeight: 800,
+                padding: "4px 10px", textAlign: "center", textTransform: "uppercase", letterSpacing: "0.02em",
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              }} title={groupLabel}>
+                {groupLabel}
               </div>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 11.5, fontWeight: 800, color: "#1e293b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={node.full_name}>
-                  {node.full_name || "—"}
-                </div>
-                <div style={{ fontSize: 9.5, color: "#64748b", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={node.job_title || ""}>
-                  {node.job_title || node.level || "—"}
-                </div>
+            )}
+            <div style={{ padding: "7px 10px 9px", textAlign: "center" }}>
+              <div style={{
+                fontSize: 10, fontWeight: 700, color: "#475569", textDecoration: "underline",
+                textDecorationColor: color, textUnderlineOffset: 2,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              }} title={node.job_title || node.level || ""}>
+                {node.job_title || node.level || "—"}
               </div>
-            </div>
-            <div style={{ marginTop: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
-              <span style={{
-                fontSize: 8.5, fontWeight: 700, color, background: color + "1a", padding: "1px 6px", borderRadius: 5,
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 110,
-              }}>
-                {node.team || node.division || node.department || "—"}
-              </span>
-              {hasChildren && <span style={{ fontSize: 8.5, fontWeight: 700, color: "#94a3b8", flexShrink: 0 }}>{node.direct_count}</span>}
+              <div style={{
+                fontSize: 12, fontWeight: 700, color: "#1e293b", marginTop: 3,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+              }} title={node.full_name}>
+                {node.full_name || "—"}
+              </div>
+              {hasChildren && (
+                <div style={{ fontSize: 8.5, fontWeight: 700, color: "#94a3b8", marginTop: 2 }}>
+                  {node.direct_count} direct report{node.direct_count !== 1 ? "s" : ""}
+                </div>
+              )}
             </div>
           </>
         )}
@@ -860,7 +861,7 @@ function OrgNode({ node, expanded, toggle, matchIds, onOpenDetail }) {
             title={isOpen ? "Collapse" : "Expand"}
             style={{
               position: "absolute", bottom: -10, left: "50%", transform: "translateX(-50%)",
-              width: 20, height: 20, borderRadius: "50%", border: "2px solid #e8edf5",
+              width: 20, height: 20, borderRadius: "50%", border: "2px solid #fff",
               background: color, color: "#fff", cursor: "pointer", display: "flex",
               alignItems: "center", justifyContent: "center", boxShadow: "2px 2px 5px rgba(0,0,0,0.2)",
               zIndex: 2, padding: 0,
