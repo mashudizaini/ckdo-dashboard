@@ -34,11 +34,19 @@ class Settings(BaseSettings):
     talenta_api_key: str = ""
     talenta_api_url: str = "https://api.talenta.co"
 
-    # Anthropic
+    # Anthropic — still used by CV Screening / JD Generator / AP Invoice OCR /
+    # Meeting Notes. The AI Chatbot itself has moved to the local Ollama server.
     anthropic_api_key: str = ""
 
-    # Voyage AI (embeddings for RAG chatbot)
-    voyage_api_key: str = ""
+    # Ollama — local AI server (VM "ai-engine", 172.21.2.27), used by the AI Chatbot
+    # (chat completion + RAG embeddings, replacing Anthropic + Voyage AI)
+    ollama_api_url: str = "http://172.21.2.27:11434"
+    ollama_chat_model: str = "qwen2.5:14b-instruct"
+    ollama_tool_model: str = "qwen2.5:7b-instruct"  # Oracle EBS tool-calling chat — smaller/faster is fine for tool selection
+
+    # EIS (Postgres, ETL'd from Oracle EBS) — read-only user, used by the Oracle
+    # EBS tool-calling chat. Only reachable where EIS is deployed (currently dev).
+    eis_database_url: str = "postgresql://chat_readonly:CkdoChat_R0!2026@172.21.2.209:5433/eis_dashboard"
 
     class Config:
         env_file = ".env"

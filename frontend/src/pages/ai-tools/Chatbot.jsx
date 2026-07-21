@@ -135,7 +135,7 @@ function KnowledgeBasePanel({ onClose }) {
         <div className="p-5 space-y-5">
           {!ragConfigured ? (
             <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-4 py-3 text-sm text-amber-400">
-              RAG is not active yet: <code>VOYAGE_API_KEY</code> is not set in the backend environment.
+              RAG is not active yet: <code>OLLAMA_API_URL</code> is not set in the backend environment.
             </div>
           ) : (
             <>
@@ -308,7 +308,7 @@ export default function Chatbot() {
             <MessageSquare className="text-blue-400" size={26} />
             AI Chatbot
           </h1>
-          <p className="text-gray-500 text-sm mt-1">AI Assistant powered by Claude — Ask anything about company data</p>
+          <p className="text-gray-500 text-sm mt-1">AI Assistant — Ask anything about company data</p>
         </div>
         {canManageKB && (
           <button onClick={() => setShowKB(true)}

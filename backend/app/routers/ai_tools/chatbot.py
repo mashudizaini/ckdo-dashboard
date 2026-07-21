@@ -5,11 +5,12 @@ Route prefix : /api/v1/ai/chatbot
 Required role: any authenticated user (chat) / any staff role (knowledge base)
 
 Endpoints:
-  POST   /chat                — Send message, get AI response (streaming, RAG-grounded)
+  POST   /chat                — Policy chat: send message, get AI response (streaming, RAG-grounded)
+  POST   /oracle-chat         — Oracle EBS data chat: tool-calling over Postgres EIS (streaming)
   GET    /documents           — List ingested knowledge base documents
   POST   /documents           — Ingest a new document (paste text or upload file)
   DELETE /documents           — Delete a document by source+title
-  GET    /status               — Whether RAG (Voyage AI) is configured
+  GET    /status               — Whether RAG (local Ollama embeddings) is configured
 """
 import asyncio
 import os
@@ -19,6 +20,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from app.dependencies import get_current_user, require_role, CurrentUser, Roles
 from app.services.ai_service import AIService
+from app.services.oracle_chat_service import OracleChatService
 from app.services import rag_service
 
 router = APIRouter()
@@ -38,7 +40,7 @@ async def chat(
     user: CurrentUser = Depends(get_current_user),
 ):
     """
-    AI Chatbot dengan Claude API — streaming response, otomatis grounded ke
+    AI Chatbot — streaming response (local Ollama), otomatis grounded ke
     dokumen perusahaan jika relevan. Dokumen yang bisa diakses dibatasi sesuai
     departemen user (IT/Admin bebas akses semua departemen).
     """
@@ -48,6 +50,24 @@ async def chat(
     service = AIService()
     return StreamingResponse(
         service.stream_chat(request.message, request.conversation_history, user, department_filter),
+        media_type="text/event-stream",
+    )
+
+
+@router.post("/oracle-chat")
+async def oracle_chat(
+    request: ChatRequest,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Oracle EBS Data Chat — streaming response (local Ollama, tool-calling).
+    The model picks a predefined, parameterized query (sales/production/
+    budget/financial) instead of writing SQL itself; the query runs against
+    Postgres EIS through a read-only DB role. See oracle_chat_service.py.
+    """
+    service = OracleChatService()
+    return StreamingResponse(
+        service.stream_chat(request.message, request.conversation_history, user),
         media_type="text/event-stream",
     )
 
@@ -62,7 +82,7 @@ async def list_documents(
     user: CurrentUser = Depends(require_role(Roles.IT, Roles.HR, Roles.ACCOUNTING, Roles.PAC, Roles.PURCHASING, Roles.ADMIN)),
 ):
     if not rag_service.is_configured():
-        raise HTTPException(400, "VOYAGE_API_KEY belum diset — knowledge base belum aktif")
+        raise HTTPException(400, "OLLAMA_API_URL belum diset — knowledge base belum aktif")
     return rag_service.list_documents()
 
 
@@ -78,7 +98,7 @@ async def ingest_document(
     if department not in rag_service.DEPARTMENTS:
         raise HTTPException(400, f"Department harus salah satu dari: {', '.join(rag_service.DEPARTMENTS)}")
     if not rag_service.is_configured():
-        raise HTTPException(400, "VOYAGE_API_KEY belum diset di environment. Tambahkan dulu lalu restart backend.")
+        raise HTTPException(400, "OLLAMA_API_URL belum diset di environment. Tambahkan dulu lalu restart backend.")
 
     content    = text.strip()
     from_file  = False
@@ -146,7 +166,7 @@ async def ingest_document(
             timeout=40.0,
         )
     except asyncio.TimeoutError:
-        raise HTTPException(504, "Timeout: Voyage AI tidak merespons dalam 40 detik. Periksa koneksi server ke api.voyageai.com")
+        raise HTTPException(504, "Timeout: server AI lokal tidak merespons dalam 40 detik. Periksa koneksi ke ai-engine (172.21.2.27).")
     except Exception as e:
         raise HTTPException(500, f"Gagal ingest dokumen: {str(e)}")
 

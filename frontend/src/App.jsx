@@ -15,6 +15,7 @@ import PurchasingDashboard from "@/pages/dashboard/Purchasing";
 
 // AI Tools Pages
 import Chatbot from "@/pages/ai-tools/Chatbot";
+import ChatOracleData from "@/pages/ai-tools/ChatOracleData";
 import MeetingNotes from "@/pages/ai-tools/MeetingNotes";
 
 export default function App() {
@@ -103,6 +104,7 @@ export default function App() {
       {/* AI Tools */}
       <Route path="/ai" element={<Layout />}>
         <Route path="chatbot" element={<Chatbot />} />
+        <Route path="oracle-data" element={<ChatOracleData />} />
         <Route path="meeting-notes" element={<MeetingNotes />} />
       </Route>
 

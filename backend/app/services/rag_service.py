@@ -6,9 +6,9 @@ ckdo_dashboard Postgres database (extension `vector` via pgvector image).
 Documents are tagged with a `department` (HR / Accounting / PAC / Purchasing / IT / General).
 Retrieval is scoped to the asking user's department(s); IT/Admin see everything.
 
-Flow: embed user question (Voyage) -> find similar chunks (pgvector cosine
-similarity, filtered by allowed departments) -> build context -> Claude
-answers grounded in company docs.
+Flow: embed user question (local Ollama, nomic-embed-text) -> find similar
+chunks (pgvector cosine similarity, filtered by allowed departments) -> build
+context -> chat model answers grounded in company docs.
 """
 import re
 import psycopg2
@@ -53,7 +53,7 @@ def ensure_schema():
                 content     TEXT NOT NULL,
                 department  TEXT NOT NULL DEFAULT 'General',
                 metadata    JSONB DEFAULT '{}',
-                embedding   VECTOR(1024),
+                embedding   VECTOR(768),
                 created_by  TEXT,
                 created_at  TIMESTAMPTZ DEFAULT now()
             )
@@ -219,7 +219,10 @@ def build_context(search_results: list[dict]) -> str:
 
 
 def is_configured() -> bool:
-    return bool(settings.voyage_api_key)
+    """RAG runs on the local Ollama server, which has a sensible default URL —
+    it's 'configured' unconditionally now (there's no API key to check).
+    If Ollama itself is unreachable, retrieve_context() fails closed anyway."""
+    return bool(settings.ollama_api_url)
 
 
 def departments_for_roles(roles: list[str], is_unrestricted: bool) -> list[str] | None:
@@ -247,7 +250,7 @@ def retrieve_context(question: str, department_filter: list[str] = None, top_k: 
     Embed question + search similar chunks (scoped to department_filter). Returns
     {context, sources} or {context: None, sources: []} if RAG isn't configured,
     no relevant docs found, or nothing matches the user's allowed departments.
-    Safe to call even if Voyage/pgvector aren't set up — fails closed (no context).
+    Safe to call even if Ollama/pgvector aren't reachable — fails closed (no context).
     """
     if not is_configured():
         return {"context": None, "sources": []}

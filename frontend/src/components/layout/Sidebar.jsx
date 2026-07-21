@@ -3,7 +3,7 @@ import { useAuthStore } from "@/store/authStore";
 import { useThemeStore } from "@/store/themeStore";
 import {
   Monitor, Users, Factory, Calculator,
-  ShoppingCart, FileText, LogOut, LayoutGrid
+  ShoppingCart, FileText, LogOut, LayoutGrid, Database
 } from "lucide-react";
 import RobotIcon from "@/components/icons/RobotIcon";
 import logo from "@/assets/LOGO-ONLY.png";
@@ -17,8 +17,9 @@ const NAV_ITEMS = [
 ];
 
 const AI_ITEMS = [
-  { label: "AI Chatbot",    path: "/ai/chatbot",       icon: RobotIcon, roles: [] },
-  { label: "Meeting Notes", path: "/ai/meeting-notes", icon: FileText,  roles: [] },
+  { label: "AI Chatbot",     path: "/ai/chatbot",       icon: RobotIcon, roles: [] },
+  { label: "Oracle Data Chat", path: "/ai/oracle-data",  icon: Database,  roles: [] },
+  { label: "Meeting Notes",  path: "/ai/meeting-notes", icon: FileText,  roles: [] },
 ];
 
 /* ── One nav card — shared between the Dashboard and AI Tools groups ── */

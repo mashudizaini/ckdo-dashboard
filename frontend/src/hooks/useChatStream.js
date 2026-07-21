@@ -7,8 +7,10 @@ import { useAuthStore } from "@/store/authStore";
  * logic lives in exactly one place.
  *
  * storageKey: optional localStorage key to persist messages across sessions.
+ * endpoint: which chat backend to stream from — defaults to the Policy Chat;
+ * pass "/api/v1/ai/chatbot/oracle-chat" for the Oracle EBS Data Chat.
  */
-export function useChatStream(initialGreeting, storageKey = null) {
+export function useChatStream(initialGreeting, storageKey = null, endpoint = "/api/v1/ai/chatbot/chat") {
   const { token } = useAuthStore();
 
   const [messages, setMessages] = useState(() => {
@@ -42,10 +44,11 @@ export function useChatStream(initialGreeting, storageKey = null) {
     const text = (textOverride ?? input).trim();
     if (!text || streaming) return;
 
-    // Anthropic requires the first message in a conversation to have role
-    // "user" — the seeded greeting is assistant-role with no prior user turn,
-    // so strip everything before the first user message (drops the greeting
-    // on turn 1, otherwise a no-op) to avoid a 400 that kills the SSE stream.
+    // Chat APIs generally expect the first message in a conversation to have
+    // role "user" — the seeded greeting is assistant-role with no prior user
+    // turn, so strip everything before the first user message (drops the
+    // greeting on turn 1, otherwise a no-op) to avoid a malformed request
+    // that kills the SSE stream.
     const firstUserIdx = messages.findIndex((m) => m.role === "user");
     const history = (firstUserIdx === -1 ? [] : messages.slice(firstUserIdx))
       .filter((m) => !m.error)
@@ -59,7 +62,7 @@ export function useChatStream(initialGreeting, storageKey = null) {
     abortRef.current = controller;
 
     try {
-      const res = await fetch("/api/v1/ai/chatbot/chat", {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ message: text, conversation_history: history }),

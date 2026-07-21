@@ -1,13 +1,17 @@
 """
-AI Service — Claude API wrapper with RAG (Retrieval Augmented Generation)
+AI Service — local Ollama wrapper with RAG (Retrieval Augmented Generation)
 
-If Voyage AI is configured and relevant company documents are found,
-answers are grounded in those documents (with cited sources). Otherwise
-falls back to a plain Claude chat — the chatbot always works either way.
+If relevant company documents are found via RAG, answers are grounded in
+those documents (with cited sources). Otherwise falls back to a plain
+chat — the chatbot always works either way.
+
+Chat completion and RAG retrieval both run on the local "ai-engine" Ollama
+server (172.21.2.27) instead of paid APIs — see
+sumber/AI_Chat_Implementation_Guide.md (chat: qwen2.5, embeddings: nomic-embed-text).
 """
 import asyncio
 import json
-import anthropic
+import httpx
 from app.config import get_settings
 from app.services import rag_service
 import structlog
@@ -16,15 +20,17 @@ logger = structlog.get_logger()
 settings = get_settings()
 
 RAG_TIMEOUT_SECONDS = 6.0
+OLLAMA_CHAT_TIMEOUT_SECONDS = 120.0
 
 
 class AIService:
     def __init__(self):
-        self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        self.base_url = settings.ollama_api_url.rstrip("/")
+        self.model = settings.ollama_chat_model
 
     async def stream_chat(self, message: str, history: list[dict], user, department_filter: list[str] = None):
         """
-        Stream chat response from Claude API as SSE, grounded in company docs when available.
+        Stream chat response from the local Ollama server as SSE, grounded in company docs when available.
         department_filter: list of departments the user may see (None = unrestricted, e.g. IT/Admin).
         """
         try:
@@ -95,7 +101,9 @@ class AIService:
         else:
             system = base_system
 
-        messages = history + [{"role": "user", "content": message}]
+        # Ollama takes the system prompt as a regular message in the list
+        # (unlike Anthropic, which has a separate top-level `system` param).
+        messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": message}]
 
         # The SSE response has already committed a 200 OK by the time this
         # generator runs (StreamingResponse sends headers before iterating
@@ -105,16 +113,26 @@ class AIService:
         # indication of what went wrong. Catch it and emit a proper SSE
         # error event so the frontend can show a real message instead.
         try:
-            with self.client.messages.stream(
-                model="claude-sonnet-4-6",
-                max_tokens=2048,
-                system=system,
-                messages=messages,
-            ) as stream:
-                for text in stream.text_stream:
-                    yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+            async with httpx.AsyncClient(timeout=OLLAMA_CHAT_TIMEOUT_SECONDS) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/api/chat",
+                    json={"model": self.model, "messages": messages, "stream": True},
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
+                        chunk = json.loads(line)
+                        if chunk.get("error"):
+                            raise RuntimeError(chunk["error"])
+                        text = chunk.get("message", {}).get("content", "")
+                        if text:
+                            yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+                        if chunk.get("done"):
+                            break
         except Exception as e:
-            logger.error("claude_stream_error", error=str(e))
+            logger.error("ollama_stream_error", error=str(e))
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
             yield "data: [DONE]\n\n"
             return

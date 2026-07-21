@@ -1,42 +1,40 @@
 """
-Embeddings Service — Voyage AI
-Ported from sumber/chatbotai/embeddings.py.
+Embeddings Service — local Ollama (nomic-embed-text)
 
 Generates embeddings for RAG (Retrieval Augmented Generation) chatbot.
-Kalau provider embedding diganti nanti, cukup ubah file ini saja —
+Runs on the local "ai-engine" Ollama server (172.21.2.27) instead of the
+paid Voyage AI API — see sumber/AI_Chat_Implementation_Guide.md.
+Kalau provider embedding diganti lagi nanti, cukup ubah file ini saja —
 rag_service.py dan ai_service.py tidak perlu berubah.
 """
 import re
-import voyageai
+import httpx
 from app.config import get_settings
 
 settings = get_settings()
 
-EMBED_MODEL = "voyage-3"  # dimensi 1024, harus sama dengan kolom VECTOR(1024) di DB
+EMBED_MODEL = "nomic-embed-text"  # dimensi 768, harus sama dengan kolom VECTOR(768) di DB
+EMBED_TIMEOUT_SECONDS = 30.0
 
-_client = None
-
-
-def _get_client():
-    global _client
-    if _client is None:
-        try:
-            _client = voyageai.Client(api_key=settings.voyage_api_key, timeout=5)
-        except TypeError:
-            _client = voyageai.Client(api_key=settings.voyage_api_key)
-    return _client
+# nomic-embed-text is an asymmetric embedding model — the doc it stores and the
+# query that searches for it need different task prefixes for retrieval to
+# actually work well (per Nomic's model card), mirroring Voyage's old
+# input_type param.
+_TASK_PREFIX = {"document": "search_document: ", "query": "search_query: "}
 
 
 def embed_text(text: str, input_type: str = "document") -> list[float]:
     """input_type: 'document' saat menyimpan data, 'query' saat user bertanya."""
-    result = _get_client().embed([text], model=EMBED_MODEL, input_type=input_type)
-    return result.embeddings[0]
+    return embed_texts_batch([text], input_type=input_type)[0]
 
 
 def embed_texts_batch(texts: list[str], input_type: str = "document") -> list[list[float]]:
     """Embed banyak teks sekaligus, lebih efisien untuk ingest dokumen."""
-    result = _get_client().embed(texts, model=EMBED_MODEL, input_type=input_type)
-    return result.embeddings
+    prefix = _TASK_PREFIX.get(input_type, "")
+    with httpx.Client(base_url=settings.ollama_api_url.rstrip("/"), timeout=EMBED_TIMEOUT_SECONDS) as client:
+        resp = client.post("/api/embed", json={"model": EMBED_MODEL, "input": [f"{prefix}{t}" for t in texts]})
+        resp.raise_for_status()
+        return resp.json()["embeddings"]
 
 
 def chunk_text(text: str, chunk_size: int = 700, overlap: int = 120) -> list[str]:
