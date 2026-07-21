@@ -10,7 +10,7 @@ Flow: embed user question (local Ollama, nomic-embed-text) -> find similar
 chunks (pgvector cosine similarity, filtered by allowed departments) -> build
 context -> chat model answers grounded in company docs.
 """
-import re
+from urllib.parse import urlsplit, unquote
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 from pgvector.psycopg2 import register_vector
@@ -23,13 +23,26 @@ settings = get_settings()
 DEPARTMENTS = ["General", "HR", "Accounting", "PAC", "Purchasing", "IT"]
 
 
+def _pg_connect_kwargs() -> dict:
+    """Parse DATABASE_URL into psycopg2 connect() kwargs. Handles any
+    'postgresql[+driver]://' scheme (e.g. plain, +asyncpg, +psycopg2) since
+    different environments' .env files have used different variants —
+    a scheme-literal regex silently broke on '+asyncpg' and made RAG's
+    schema/table never get created there."""
+    parts = urlsplit(settings.database_url)
+    if not parts.hostname or not parts.path.lstrip("/"):
+        raise RuntimeError(f"Cannot parse DATABASE_URL (scheme={parts.scheme!r})")
+    return {
+        "host": parts.hostname,
+        "port": parts.port or 5432,
+        "dbname": parts.path.lstrip("/"),
+        "user": unquote(parts.username or ""),
+        "password": unquote(parts.password or ""),
+    }
+
+
 def _get_pg():
-    url = settings.database_url
-    m = re.match(r"postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)", url)
-    if not m:
-        raise RuntimeError(f"Cannot parse DATABASE_URL: {url}")
-    conn = psycopg2.connect(host=m.group(3), port=int(m.group(4)), dbname=m.group(5),
-                             user=m.group(1), password=m.group(2))
+    conn = psycopg2.connect(**_pg_connect_kwargs())
     try:
         register_vector(conn)
     except Exception:
@@ -40,9 +53,7 @@ def _get_pg():
 def ensure_schema():
     """Create `vector` extension + company_documents table/columns if missing. Safe to call repeatedly."""
     try:
-        m = re.match(r"postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)", settings.database_url)
-        conn = psycopg2.connect(host=m.group(3), port=int(m.group(4)), dbname=m.group(5),
-                                 user=m.group(1), password=m.group(2))
+        conn = psycopg2.connect(**_pg_connect_kwargs())
         cur = conn.cursor()
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
         cur.execute("""
