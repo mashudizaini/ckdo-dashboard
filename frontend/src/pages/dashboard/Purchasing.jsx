@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, Fragment } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   FileText, History, Banknote, Truck, BookOpen, BarChart2,
@@ -12,6 +12,7 @@ import {
   Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
 import { purchasingApi } from "@/api/dashboard";
+import { SortableTH, toggleSort, sortRows } from "@/components/SortableTH";
 
 /* ─── Tab definitions ─────────────────────────────── */
 
@@ -364,6 +365,7 @@ const PAGE_SIZE = 10;
 const BUYER_ALL = "MARIA|DEWI";
 const VIEWS = [
   { id: "detail",      label: "Detail View" },
+  { id: "detail-qty",  label: "Detail View (Qty)" },
   { id: "summary",     label: "Summary" },
   { id: "graph",       label: "Graph" },
   { id: "by-item",     label: "By Item (Pivot)" },
@@ -531,6 +533,7 @@ function PurchaseHistorySection() {
       {searched && (
         <div className="space-y-3">
           {view === "detail"      && <PHDetailTable      data={results.detail?.data ?? []}           loading={loadingMap.detail}           error={results.detail?.error} />}
+          {view === "detail-qty"  && <PHDetailByQtyTable data={results["by-item"]?.data ?? []}       loading={loadingMap["by-item"]}       error={results["by-item"]?.error}       years={results["by-item"]?.years ?? []} />}
           {view === "summary"     && <PHSummaryView      data={results.detail?.data ?? []}           loading={loadingMap.detail}           error={results.detail?.error} />}
           {view === "graph"       && <PHGraphView        data={results.detail?.data ?? []}           loading={loadingMap.detail}           error={results.detail?.error}
                                                          byItemData={results["by-item"]?.data ?? []}  byItemYears={results["by-item"]?.years ?? []}
@@ -743,15 +746,37 @@ function PHDetailTable({ data, loading, error }) {
 
 function PHByItemTable({ data, years, loading, error }) {
   const [page, setPage] = useState(1);
-  const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
+  const [sortBy, setSortBy] = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
   const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
-  const fixedCols = ["Org ID","Organization","Item Code","Item Desc","Category","Type","Currency","UOM"];
+  const fixedCols = [
+    { field: "organization_id",   label: "Org ID",       align: "left" },
+    { field: "organization_name", label: "Organization", align: "left" },
+    { field: "item_code",         label: "Item Code",    align: "left" },
+    { field: "item_description",  label: "Item Desc",    align: "left" },
+    { field: "category",          label: "Category",     align: "left" },
+    { field: "material_type",     label: "Type",         align: "left" },
+    { field: "currency_code",     label: "Currency",     align: "left" },
+    { field: "uom",               label: "UOM",          align: "left" },
+  ];
   const totalCols = fixedCols.length + years.length * 2 + 2;
-  const paged = data.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const numericFields = useMemo(() => [
+    "organization_id", ...years.flatMap(y => [`value_idr_${y}`, `qty_${y}`]), "total_value_idr", "total_qty",
+  ], [years]);
+
+  const onSort = (field) => {
+    setPage(1);
+    const next = toggleSort(sortBy, sortDir, field);
+    setSortBy(next.sortBy); setSortDir(next.sortDir);
+  };
+
+  const sorted = useMemo(() => sortRows(data, sortBy, sortDir, numericFields), [data, sortBy, sortDir, numericFields]);
+  const paged = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const handleDownload = () => {
-    const headers = [...fixedCols, ...years.flatMap(y => [`Value IDR ${y}`, `Qty ${y}`]), "Total Value IDR", "Total Qty"];
-    const rows = data.map(r => [
+    const headers = [...fixedCols.map(c => c.label), ...years.flatMap(y => [`Value IDR ${y}`, `Qty ${y}`]), "Total Value IDR", "Total Qty"];
+    const rows = sorted.map(r => [
       r.organization_id, r.organization_name, r.item_code, r.item_description,
       r.category, r.material_type, r.currency_code, r.uom,
       ...years.flatMap(y => [r[`value_idr_${y}`] ?? 0, r[`qty_${y}`] ?? 0]),
@@ -775,22 +800,23 @@ function PHByItemTable({ data, years, loading, error }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-800/60">
-              {fixedCols.map(h => <th key={h} className={TH}>{h}</th>)}
-              {years.map(y => (
-                <th key={y} className={TH} colSpan={2}>{y}</th>
+              {fixedCols.map(c => (
+                <SortableTH key={c.field} label={c.label} field={c.field} sortBy={sortBy} sortDir={sortDir} onSort={onSort} align={c.align} rowSpan={2} />
               ))}
-              <th className={TH} colSpan={2}>TOTAL</th>
+              {years.map(y => (
+                <th key={y} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap" colSpan={2}>{y}</th>
+              ))}
+              <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap" colSpan={2}>TOTAL</th>
             </tr>
             <tr className="bg-gray-800/40">
-              {fixedCols.map(h => <th key={h} className="px-3 py-1" />)}
               {years.map(y => (
-                <>
-                  <th key={`vi${y}`} className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Value IDR</th>
-                  <th key={`q${y}`}  className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Qty</th>
-                </>
+                <Fragment key={y}>
+                  <SortableTH label="Value IDR" field={`value_idr_${y}`} sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" className="!py-1 !text-[11px] !normal-case" />
+                  <SortableTH label="Qty"       field={`qty_${y}`}       sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" className="!py-1 !text-[11px] !normal-case" />
+                </Fragment>
               ))}
-              <th className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Value IDR</th>
-              <th className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Qty</th>
+              <SortableTH label="Value IDR" field="total_value_idr" sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" className="!py-1 !text-[11px] !normal-case" />
+              <SortableTH label="Qty"       field="total_qty"       sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" className="!py-1 !text-[11px] !normal-case" />
             </tr>
           </thead>
           <tbody>
@@ -811,10 +837,10 @@ function PHByItemTable({ data, years, loading, error }) {
                 <td className={`${TD} text-yellow-400`}>{r.currency_code}</td>
                 <td className={`${TD} text-gray-500`}>{r.uom}</td>
                 {years.map(y => (
-                  <>
-                    <td key={`vi${y}`} className={`${TD} text-right text-gray-300`}>{fmtIDR(r[`value_idr_${y}`])}</td>
-                    <td key={`q${y}`}  className={`${TD} text-right text-gray-400`}>{fmtQty(r[`qty_${y}`])}</td>
-                  </>
+                  <Fragment key={y}>
+                    <td className={`${TD} text-right text-gray-300`}>{fmtIDR(r[`value_idr_${y}`])}</td>
+                    <td className={`${TD} text-right text-gray-400`}>{fmtQty(r[`qty_${y}`])}</td>
+                  </Fragment>
                 ))}
                 <td className={`${TD} text-right text-green-400 font-medium`}>{fmtIDR(r.total_value_idr)}</td>
                 <td className={`${TD} text-right text-gray-300 font-medium`}>{fmtQty(r.total_qty)}</td>
@@ -830,15 +856,35 @@ function PHByItemTable({ data, years, loading, error }) {
 
 function PHBySupplierTable({ data, years, loading, error }) {
   const [page, setPage] = useState(1);
-  const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap";
+  const [sortBy, setSortBy] = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
   const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
-  const fixedCols = ["Supplier","Currency","Items","POs"];
+  const fixedCols = [
+    { field: "supplier_name", label: "Supplier", align: "left" },
+    { field: "currency_code", label: "Currency", align: "left" },
+    { field: "item_count",    label: "Items",     align: "center" },
+    { field: "po_count",      label: "POs",       align: "center" },
+  ];
   const totalCols = fixedCols.length + years.length * 3 + 3;
-  const paged = data.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const numericFields = useMemo(() => [
+    "item_count", "po_count",
+    ...years.flatMap(y => [`value_orig_${y}`, `value_idr_${y}`, `qty_${y}`]),
+    "total_value_orig", "total_value_idr", "total_qty",
+  ], [years]);
+
+  const onSort = (field) => {
+    setPage(1);
+    const next = toggleSort(sortBy, sortDir, field);
+    setSortBy(next.sortBy); setSortDir(next.sortDir);
+  };
+
+  const sorted = useMemo(() => sortRows(data, sortBy, sortDir, numericFields), [data, sortBy, sortDir, numericFields]);
+  const paged = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const handleDownload = () => {
-    const headers = [...fixedCols, ...years.flatMap(y => [`Value Orig ${y}`, `Value IDR ${y}`, `Qty ${y}`]), "Total Orig", "Total IDR", "Total Qty"];
-    const rows = data.map(r => [
+    const headers = [...fixedCols.map(c => c.label), ...years.flatMap(y => [`Value Orig ${y}`, `Value IDR ${y}`, `Qty ${y}`]), "Total Orig", "Total IDR", "Total Qty"];
+    const rows = sorted.map(r => [
       r.supplier_name, r.currency_code, r.item_count, r.po_count,
       ...years.flatMap(y => [r[`value_orig_${y}`] ?? 0, r[`value_idr_${y}`] ?? 0, r[`qty_${y}`] ?? 0]),
       r.total_value_orig, r.total_value_idr, r.total_qty,
@@ -861,22 +907,25 @@ function PHBySupplierTable({ data, years, loading, error }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-800/60">
-              {fixedCols.map(h => <th key={h} className={TH}>{h}</th>)}
-              {years.map(y => <th key={y} className={TH} colSpan={3}>{y}</th>)}
-              <th className={TH} colSpan={3}>TOTAL</th>
+              {fixedCols.map(c => (
+                <SortableTH key={c.field} label={c.label} field={c.field} sortBy={sortBy} sortDir={sortDir} onSort={onSort} align={c.align} rowSpan={2} />
+              ))}
+              {years.map(y => (
+                <th key={y} className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap" colSpan={3}>{y}</th>
+              ))}
+              <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap" colSpan={3}>TOTAL</th>
             </tr>
             <tr className="bg-gray-800/40">
-              {fixedCols.map(h => <th key={h} className="px-3 py-1" />)}
               {years.map(y => (
-                <>
-                  <th key={`vo${y}`} className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Orig</th>
-                  <th key={`vi${y}`} className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">IDR</th>
-                  <th key={`q${y}`}  className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Qty</th>
-                </>
+                <Fragment key={y}>
+                  <SortableTH label="Orig" field={`value_orig_${y}`} sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" className="!py-1 !text-[11px] !normal-case" />
+                  <SortableTH label="IDR"  field={`value_idr_${y}`}  sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" className="!py-1 !text-[11px] !normal-case" />
+                  <SortableTH label="Qty"  field={`qty_${y}`}        sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" className="!py-1 !text-[11px] !normal-case" />
+                </Fragment>
               ))}
-              <th className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Orig</th>
-              <th className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">IDR</th>
-              <th className="px-3 py-1 text-xs text-gray-600 text-right whitespace-nowrap">Qty</th>
+              <SortableTH label="Orig" field="total_value_orig" sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" className="!py-1 !text-[11px] !normal-case" />
+              <SortableTH label="IDR"  field="total_value_idr"  sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" className="!py-1 !text-[11px] !normal-case" />
+              <SortableTH label="Qty"  field="total_qty"        sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" className="!py-1 !text-[11px] !normal-case" />
             </tr>
           </thead>
           <tbody>
@@ -893,11 +942,11 @@ function PHBySupplierTable({ data, years, loading, error }) {
                 <td className={`${TD} text-gray-400 text-center`}>{r.item_count}</td>
                 <td className={`${TD} text-gray-400 text-center`}>{r.po_count}</td>
                 {years.map(y => (
-                  <>
-                    <td key={`vo${y}`} className={`${TD} text-right text-gray-300`}>{fmtIDR(r[`value_orig_${y}`])}</td>
-                    <td key={`vi${y}`} className={`${TD} text-right text-green-400`}>{fmtIDR(r[`value_idr_${y}`])}</td>
-                    <td key={`q${y}`}  className={`${TD} text-right text-gray-400`}>{fmtQty(r[`qty_${y}`])}</td>
-                  </>
+                  <Fragment key={y}>
+                    <td className={`${TD} text-right text-gray-300`}>{fmtIDR(r[`value_orig_${y}`])}</td>
+                    <td className={`${TD} text-right text-green-400`}>{fmtIDR(r[`value_idr_${y}`])}</td>
+                    <td className={`${TD} text-right text-gray-400`}>{fmtQty(r[`qty_${y}`])}</td>
+                  </Fragment>
                 ))}
                 <td className={`${TD} text-right text-gray-300 font-medium`}>{fmtIDR(r.total_value_orig)}</td>
                 <td className={`${TD} text-right text-green-400 font-medium`}>{fmtIDR(r.total_value_idr)}</td>
@@ -908,6 +957,129 @@ function PHBySupplierTable({ data, years, loading, error }) {
         </table>
       </div>
       <Pagination total={data.length} page={page} onPage={setPage} />
+    </div>
+  );
+}
+
+/* ─── Purchase History: Detail View by Qty (currency-merged) ───
+   "By Item (Pivot)" groups by item + currency, so one item bought in both
+   USD and IDR shows as two rows. This view merges those currency variants
+   into a single row per item so the total quantity purchased in the
+   selected period is visible at a glance — derived client-side from the
+   already-fetched by-item pivot data, no extra API call needed. */
+function aggregatePHByQty(byItemData, years) {
+  const map = new Map();
+  for (const r of byItemData) {
+    const key = `${r.organization_id}||${r.item_code}`;
+    let agg = map.get(key);
+    if (!agg) {
+      agg = {
+        organization_id: r.organization_id, organization_name: r.organization_name,
+        item_code: r.item_code, item_description: r.item_description,
+        category: r.category, material_type: r.material_type, uom: r.uom,
+        currencies: new Set(), total_qty: 0,
+      };
+      for (const y of years) agg[`qty_${y}`] = 0;
+      map.set(key, agg);
+    }
+    if (r.currency_code) agg.currencies.add(r.currency_code);
+    agg.total_qty += Number(r.total_qty) || 0;
+    for (const y of years) agg[`qty_${y}`] += Number(r[`qty_${y}`]) || 0;
+  }
+  return [...map.values()].map(a => ({ ...a, currency_code: [...a.currencies].sort().join(", ") || "-" }));
+}
+
+function PHDetailByQtyTable({ data, years, loading, error }) {
+  const [page, setPage] = useState(1);
+  const [sortBy, setSortBy] = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
+  const fixedCols = [
+    { field: "organization_id",   label: "Org ID",       align: "left" },
+    { field: "organization_name", label: "Organization", align: "left" },
+    { field: "item_code",         label: "Item Code",    align: "left" },
+    { field: "item_description",  label: "Item Desc",    align: "left" },
+    { field: "category",          label: "Category",     align: "left" },
+    { field: "material_type",     label: "Type",         align: "left" },
+    { field: "currency_code",     label: "Currencies",   align: "left" },
+    { field: "uom",               label: "UOM",          align: "left" },
+  ];
+  const totalCols = fixedCols.length + years.length + 1;
+
+  const aggregated = useMemo(() => aggregatePHByQty(data, years), [data, years]);
+  const numericFields = useMemo(() => ["organization_id", ...years.map(y => `qty_${y}`), "total_qty"], [years]);
+
+  const onSort = (field) => {
+    setPage(1);
+    const next = toggleSort(sortBy, sortDir, field);
+    setSortBy(next.sortBy); setSortDir(next.sortDir);
+  };
+
+  const sorted = useMemo(() => sortRows(aggregated, sortBy, sortDir, numericFields), [aggregated, sortBy, sortDir, numericFields]);
+  const paged = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const handleDownload = () => {
+    const headers = [...fixedCols.map(c => c.label), ...years.map(y => `Qty ${y}`), "Total Qty"];
+    const rows = sorted.map(r => [
+      r.organization_id, r.organization_name, r.item_code, r.item_description,
+      r.category, r.material_type, r.currency_code, r.uom,
+      ...years.map(y => r[`qty_${y}`] ?? 0),
+      r.total_qty,
+    ]);
+    const amtCols = [];
+    for (let i = fixedCols.length; i < headers.length; i++) amtCols.push(i);
+    downloadExcel("purchase_history_detail_by_qty", headers, rows, amtCols);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-gray-500">{aggregated.length} items — quantity merged across currencies</span>
+        <button onClick={handleDownload} disabled={aggregated.length === 0}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600/20 hover:bg-green-600/30 text-green-400 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+          <Download size={12} /> Download Excel
+        </button>
+      </div>
+      <div className="overflow-x-auto rounded-lg border border-gray-800">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-800/60">
+              {fixedCols.map(c => (
+                <SortableTH key={c.field} label={c.label} field={c.field} sortBy={sortBy} sortDir={sortDir} onSort={onSort} align={c.align} />
+              ))}
+              {years.map(y => (
+                <SortableTH key={y} label={`Qty ${y}`} field={`qty_${y}`} sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" />
+              ))}
+              <SortableTH label="Total Qty" field="total_qty" sortBy={sortBy} sortDir={sortDir} onSort={onSort} align="right" />
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={totalCols} className="px-3 py-10 text-center text-xs text-gray-500"><Loader2 size={14} className="animate-spin inline mr-2" />Loading data...</td></tr>
+            ) : error ? (
+              <tr><td colSpan={totalCols} className="px-3 py-6 text-center text-xs text-red-400">{error}</td></tr>
+            ) : aggregated.length === 0 ? (
+              <tr><td colSpan={totalCols} className="px-3 py-10 text-center text-xs text-gray-600">No data found</td></tr>
+            ) : paged.map((r, i) => (
+              <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
+                <td className={`${TD} text-gray-400 font-mono`}>{r.organization_id}</td>
+                <td className={`${TD} text-gray-300 max-w-[120px] truncate`} title={r.organization_name}>{r.organization_name}</td>
+                <td className={`${TD} font-mono text-blue-400`}>{r.item_code}</td>
+                <td className={`${TD} text-gray-300 max-w-[180px] truncate`} title={r.item_description}>{r.item_description}</td>
+                <td className={`${TD} text-gray-400`}>{r.category}</td>
+                <td className={`${TD} text-gray-400`}>{r.material_type}</td>
+                <td className={`${TD} text-yellow-400`} title={r.currency_code}>{r.currency_code}</td>
+                <td className={`${TD} text-gray-500`}>{r.uom}</td>
+                {years.map(y => (
+                  <td key={y} className={`${TD} text-right text-gray-300`}>{fmtQty(r[`qty_${y}`])}</td>
+                ))}
+                <td className={`${TD} text-right text-green-400 font-medium`}>{fmtQty(r.total_qty)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pagination total={aggregated.length} page={page} onPage={setPage} />
     </div>
   );
 }

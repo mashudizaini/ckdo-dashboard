@@ -5,13 +5,14 @@ import { ChevronUp, ChevronDown, ArrowUpDown } from "lucide-react";
  * HR.jsx's EmployeeTable. Click toggles asc/desc; an ArrowUpDown icon shows
  * on hover for unsorted columns, a filled chevron for the active column.
  */
-export function SortableTH({ label, field, sortBy, sortDir, onSort, align = "left", className = "" }) {
+export function SortableTH({ label, field, sortBy, sortDir, onSort, align = "left", className = "", ...rest }) {
   const active = sortBy === field;
   return (
     <th
       onClick={() => onSort(field)}
       className={`px-3 py-2.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer select-none group ${className}`}
       style={{ color: active ? "#a5b4fc" : "#6b7280", textAlign: align }}
+      {...rest}
     >
       <span className={`inline-flex items-center gap-1 ${align === "center" ? "justify-center" : ""}`}>
         {label}
