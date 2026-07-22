@@ -3,7 +3,7 @@ import {
   Banknote, ExternalLink, RefreshCw, Filter, X,
   Download, Loader2, TrendingUp, TrendingDown, Minus,
   BookOpen, Plus, Trash2, Save, Printer, ChevronDown, ChevronRight,
-  CheckCircle, Clock, Edit3, FileText, Globe, Upload, AlertCircle, Calendar, BookOpenCheck, Sparkles,
+  CheckCircle, Clock, Edit3, FileText, Globe, Upload, AlertCircle, Calendar, BookOpenCheck, Sparkles, Settings,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line,
