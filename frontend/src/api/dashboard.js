@@ -86,6 +86,70 @@ export const hrApi = {
   eMagazineUpdateQR:   (filename, qrs) => api.patch(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/qr-links`, qrs),
 };
 
+// EIS Dashboard — ported from the standalone eis-dashboard-v2 app.
+const EIS = "/dashboard/eis";
+export const eisApi = {
+  // Summary
+  getKpiCards:          (year, period) => api.get(`${EIS}/summary/kpi-cards`, { params: { year, period } }),
+  getPortfolio:         (params)       => api.get(`${EIS}/summary/portfolio`, { params }),
+  getClosingEstimation: (year, period) => api.get(`${EIS}/summary/closing-estimation`, { params: { year, period } }),
+  getNwc:               (year, period) => api.get(`${EIS}/summary/nwc`, { params: { year, period } }),
+
+  // Performance
+  getSalesAchievement: (year, segment)      => api.get(`${EIS}/performance/sales-achievement`, { params: { year, segment } }),
+  getMonthlySales:     (year, segment)      => api.get(`${EIS}/performance/monthly-sales`, { params: { year, segment } }),
+  getSalesGrowth:      (year, segment)      => api.get(`${EIS}/performance/growth`, { params: { year, segment } }),
+  getEbitProduct:      (year, period)       => api.get(`${EIS}/performance/ebit-product`, { params: { year, period } }),
+  getAreaSales:        (year, period)       => api.get(`${EIS}/performance/area-sales`, { params: { year, period } }),
+  getMarketing:        (year)               => api.get(`${EIS}/performance/marketing`, { params: { year } }),
+  getForecast:         (year, period, segment) => api.get(`${EIS}/performance/forecast`, { params: { year, period, segment } }),
+
+  // Production
+  getBatchProduction: (year)         => api.get(`${EIS}/production/batch`, { params: { year } }),
+  getYieldProduction: (year)         => api.get(`${EIS}/production/yield`, { params: { year } }),
+  getDio:             (year)         => api.get(`${EIS}/production/dio`, { params: { year } }),
+  getCogsRatio:       (year, period) => api.get(`${EIS}/production/cogs-ratio`, { params: { year, period } }),
+  getOvertime:        (year)         => api.get(`${EIS}/production/overtime`, { params: { year } }),
+  getReleaseTime:     (year)         => api.get(`${EIS}/production/release-time`, { params: { year } }),
+
+  // Expansion
+  getPipeline:        (year)         => api.get(`${EIS}/expansion/pipeline`, { params: { year } }),
+  getPipelineSummary: (year, period) => api.get(`${EIS}/expansion/pipeline-summary`, { params: { year, period } }),
+
+  // Administration
+  getHeadcount: (year) => api.get(`${EIS}/admin/headcount`, { params: { year } }),
+  getTurnover:  (year) => api.get(`${EIS}/admin/turnover`, { params: { year } }),
+  getProfit:    (year) => api.get(`${EIS}/admin/profit`, { params: { year } }),
+  getCashflow:  (year) => api.get(`${EIS}/admin/cashflow`, { params: { year } }),
+  getRatios:    (year) => api.get(`${EIS}/admin/ratios`, { params: { year } }),
+  getBudget:    (year) => api.get(`${EIS}/admin/budget`, { params: { year } }),
+
+  // Business Plan
+  getBpList: (year, planType) => api.get(`${EIS}/bp/list`, { params: { year, plan_type: planType } }),
+  saveBp:    (data)           => api.post(`${EIS}/bp/save`, data),
+  deleteBp:  (id)             => api.delete(`${EIS}/bp/${id}`),
+  getBpTypes: ()              => api.get(`${EIS}/bp/types`),
+
+  // ETL
+  getEtlStatus:   ()               => api.get(`${EIS}/etl/status`),
+  triggerEtl:     (jobName, params) => api.post(`${EIS}/etl/trigger/${jobName}`, params),
+  stopEtl:        (jobName)        => api.post(`${EIS}/etl/stop/${jobName}`),
+  getEtlSchedule: ()               => api.get(`${EIS}/etl/schedule`),
+  getEtlJobData:  (jobName, year, month) => api.get(`${EIS}/etl/job-data/${jobName}`, { params: { year, month: month || undefined } }),
+
+  // Daily Sales
+  getDailySales:    ()         => api.get(`${EIS}/daily-sales/data`),
+  uploadDailySales: (formData) => api.post(`${EIS}/daily-sales/upload`, formData, { headers: { "Content-Type": "multipart/form-data" } }),
+
+  // Data Upload
+  getOvertimeData:   (year)         => api.get(`${EIS}/data-upload/overtime`, { params: { year } }),
+  uploadOvertimeData:(year, formData) => api.post(`${EIS}/data-upload/overtime/upload`, formData, { params: { year }, headers: { "Content-Type": "multipart/form-data" } }),
+  getCogsUploadData: (year, period) => api.get(`${EIS}/data-upload/cogs`, { params: { year, period } }),
+  uploadCogsData:    (year, formData) => api.post(`${EIS}/data-upload/cogs/upload`, formData, { params: { year }, headers: { "Content-Type": "multipart/form-data" } }),
+  getSalesBP:        (year)         => api.get(`${EIS}/data-upload/sales-bp`, { params: { year } }),
+  uploadSalesBP:     (year, formData) => api.post(`${EIS}/data-upload/sales-bp/upload`, formData, { params: { year }, headers: { "Content-Type": "multipart/form-data" } }),
+};
+
 export const pacApi = {
   getSummary:      ()  => api.get("/dashboard/pac/summary"),
   getBudgetUsage:  (p) => api.get("/dashboard/pac/budget-usage", { params: p }),
@@ -96,6 +160,12 @@ export const pacApi = {
   getBusinessPlan:     (id)   => api.get(`/dashboard/pac/business-plans/${id}`),
   upsertBusinessPlan:  (body) => api.post("/dashboard/pac/business-plans", body),
   deleteBusinessPlan:  (id)   => api.delete(`/dashboard/pac/business-plans/${id}`),
+
+  // Setup Modules (Schedule / Guideline / Outlook)
+  listSetupModules:     (p)    => api.get("/dashboard/pac/setup-modules", { params: p }),
+  getSetupModule:       (id)   => api.get(`/dashboard/pac/setup-modules/${id}`),
+  upsertSetupModule:    (body) => api.post("/dashboard/pac/setup-modules", body),
+  deleteSetupModule:    (id)   => api.delete(`/dashboard/pac/setup-modules/${id}`),
 
   // Exchange Rates
   getExchangeRates:    (refresh = false) => api.get("/dashboard/pac/exchange-rates", { params: { refresh } }),

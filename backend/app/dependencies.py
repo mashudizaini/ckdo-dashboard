@@ -136,3 +136,4 @@ class Roles:
     PAC = "pac_staff"
     ACCOUNTING = "accounting_staff"
     PURCHASING = "purchasing_staff"
+    MANAGEMENT = "management"

@@ -7,7 +7,7 @@ celery_app = Celery(
     "ckdo_dashboard",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.tasks.oracle_sync", "app.tasks.report_gen"],
+    include=["app.tasks.oracle_sync", "app.tasks.report_gen", "app.tasks.eis_etl_tasks"],
 )
 
 celery_app.conf.update(

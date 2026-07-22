@@ -3,7 +3,7 @@ import {
   Banknote, ExternalLink, RefreshCw, Filter, X,
   Download, Loader2, TrendingUp, TrendingDown, Minus,
   BookOpen, Plus, Trash2, Save, Printer, ChevronDown, ChevronRight,
-  CheckCircle, Clock, Edit3, FileText, Globe, Upload, AlertCircle,
+  CheckCircle, Clock, Edit3, FileText, Globe, Upload, AlertCircle, Settings, Calendar, BookOpenCheck,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line,
@@ -15,10 +15,11 @@ import { pacApi } from "@/api/dashboard";
 
 /* ─── Tabs ────────────────────────────────────────── */
 const TABS = [
-  { id: "bizplan",  icon: BookOpen, color: "text-violet-400", bg: "bg-violet-500/10", activeBorder: "border-violet-500/40", label: "Business Plan"       },
-  { id: "budget",   icon: Banknote, color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Budget Usage Report" },
-  { id: "mt940",    icon: Banknote, color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "BCA MT940 Upload"    },
-  { id: "exchange", icon: Globe,    color: "text-amber-400",  bg: "bg-amber-500/10",  activeBorder: "border-amber-500/40",  label: "Exchange Rate"       },
+  { id: "setup",    icon: Settings,   color: "text-sky-400",    bg: "bg-sky-500/10",    activeBorder: "border-sky-500/40",    label: "Setup"              },
+  { id: "bizplan",  icon: BookOpen,   color: "text-violet-400", bg: "bg-violet-500/10", activeBorder: "border-violet-500/40", label: "Business Plan"       },
+  { id: "budget",   icon: Banknote,   color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Budget Usage Report" },
+  { id: "mt940",    icon: Banknote,   color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "BCA MT940 Upload"    },
+  { id: "exchange", icon: Globe,      color: "text-amber-400",  bg: "bg-amber-500/10",  activeBorder: "border-amber-500/40",  label: "Exchange Rate"       },
 ];
 
 const CY = new Date().getFullYear();
@@ -45,12 +46,12 @@ const MONTH_NAMES = ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","O
 
 /* ─── Main ───────────────────────────────────────── */
 export default function PACDashboard() {
-  const [activeTab, setActiveTab] = useState("bizplan");
+  const [activeTab, setActiveTab] = useState("setup");
 
   return (
     <div className="p-6 space-y-4">
       {/* Tab Buttons */}
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-5 gap-2">
         {TABS.map((tab) => {
           const active = activeTab === tab.id;
           return (
@@ -71,6 +72,7 @@ export default function PACDashboard() {
         })}
       </div>
 
+      {activeTab === "setup"    && <SetupSection />}
       {activeTab === "bizplan"  && <BusinessPlanSection />}
       {activeTab === "budget"   && <BudgetUsageSection />}
       {activeTab === "mt940"    && <MT940Section />}
@@ -155,6 +157,9 @@ const BTN_SM = (color = "violet") =>
   (color === "violet" ? "text-violet-300 border-violet-500/30 bg-violet-500/10 hover:bg-violet-500/20"
    : color === "red"  ? "text-red-400 border-red-500/30 bg-red-500/10 hover:bg-red-500/20"
    : color === "green" ? "text-green-400 border-green-500/30 bg-green-500/10 hover:bg-green-500/20"
+   : color === "sky"   ? "text-sky-300 border-sky-500/30 bg-sky-500/10 hover:bg-sky-500/20"
+   : color === "teal"  ? "text-teal-300 border-teal-500/30 bg-teal-500/10 hover:bg-teal-500/20"
+   : color === "indigo"? "text-indigo-300 border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20"
    : "text-gray-400 border-gray-600 bg-gray-800 hover:bg-gray-700");
 
 /* ══ Managerial Objective Panel ══════════════════════════════════════════════ */
@@ -1627,6 +1632,420 @@ function ExchangeRateSection() {
             Lihat di BI <ExternalLink size={10} />
           </a>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+/* ══════════════════════════════════════════════════
+   SETUP MODULES
+   ══════════════════════════════════════════════════ */
+const SETUP_SUBTABS = [
+  { id: "schedule",  label: "Schedule",   icon: Calendar,      color: "text-sky-400",   bg: "bg-sky-500/10",    activeBorder: "border-sky-500/40" },
+  { id: "guideline", label: "Guideline",  icon: BookOpenCheck, color: "text-teal-400",  bg: "bg-teal-500/10",   activeBorder: "border-teal-500/40" },
+  { id: "outlook",   label: "Outlook",    icon: Globe,         color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40" },
+];
+
+function SetupSection() {
+  const [subTab, setSubTab] = useState("schedule");
+  const [year, setYear] = useState(new Date().getFullYear());
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex gap-1 p-1 rounded-lg bg-gray-800/60 border border-gray-700">
+          {SETUP_SUBTABS.map(t => (
+            <button key={t.id} onClick={() => setSubTab(t.id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                subTab === t.id ? `${t.bg} ${t.activeBorder} ${t.color}` : "text-gray-500 hover:text-gray-300"
+              }`}>
+              <t.icon size={11} />{t.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-gray-500">Plan Year</label>
+          <select value={year} onChange={e => setYear(Number(e.target.value))}
+            className="bg-gray-800 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-sky-500/60">
+            {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+      </div>
+      {subTab === "schedule"  && <section className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden"><div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40"><h3 className="text-sm font-semibold text-gray-200">Business Plan Schedule</h3><p className="text-xs text-gray-500 mt-0.5">{year} Business Plan · Timeline</p></div><div className="p-4"><SchedulePanel year={year} /></div></section>}
+      {subTab === "guideline" && <section className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden"><div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40"><h3 className="text-sm font-semibold text-gray-200">Business Plan Guideline</h3><p className="text-xs text-gray-500 mt-0.5">{year} Business Plan · Guidelines</p></div><div className="p-4"><GuidelinePanel year={year} /></div></section>}
+      {subTab === "outlook"   && <section className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden"><div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40"><h3 className="text-sm font-semibold text-gray-200">Business Plan Outlook</h3><p className="text-xs text-gray-500 mt-0.5">{year} Business Plan · Outlook</p></div><div className="p-4"><OutlookPanel year={year} /></div></section>}
+    </div>
+  );
+}
+
+const DEFAULT_SCHEDULE = {
+  subtitle: "Timeline of {year} Business Plan",
+  activities: [
+    { no: 1, activity: "Notification of {year} business plan timeline", date: "Sep 22", day: "Friday", sales: "x", development: "x", plant: "x", admin: "x", director: "ok", remarks: "Timeline" },
+    { no: 2, activity: "Distribution of all relevant templates", date: "Sep 29", day: "Friday", sales: "x", development: "x", plant: "x", admin: "x", director: "ok", remarks: "CS" },
+    { no: 3, activity: "{year} economic outlook & guideline", date: "Sep 29", day: "Friday", sales: "x", development: "x", plant: "x", admin: "x", director: "x", remarks: "Outlook Report" },
+    { no: 4, activity: "Review & discuss financial template with Company", date: "Sep 30", day: "Sunday", sales: "F", development: "F", plant: "F", admin: "F", director: "x", remarks: "Finance Team" },
+    { no: 5, activity: "Prepare sales plan & strategic direction", date: "Oct 1", day: "Tuesday", sales: "x", development: "x", plant: "x", admin: "x", director: "x", remarks: "Business Plan" },
+    { no: 6, activity: "Business development plan : CMO, export and others", date: "Oct 25-29", day: "Tue-Thu", sales: "x", development: "x", plant: "x", admin: "x", director: "x", remarks: "81, 82" },
+    { no: 7, activity: "Sales plan {year} : by department, product & area", date: "Oct 25", day: "Wednesday", sales: "x", development: "$1, 52", plant: "x", admin: "x", director: "x", remarks: "Sales Plan" },
+    { no: 8, activity: "Starting sales plan with Stakeholders / HO review", date: "Oct 28", day: "Monday", sales: "x", development: "x", plant: "x", admin: "x", director: "Petey", remarks: "Petey" },
+    { no: 9, activity: "Purchase plan", date: "Nov 1", day: "Friday", sales: "x", development: "x", plant: "x", admin: "x", director: "x", remarks: "Purchase" },
+    { no: 10, activity: "Reduction / manufacturing plan", date: "Nov 12", day: "Tuesday", sales: "x", development: "x", plant: "x", admin: "Now 14", director: "x", remarks: "Plant" },
+    { no: 11, activity: "Data evaluation : production, personnel, purchase, inventory, opex budget plan", date: "Nov 23-24", day: "Thu-Fri", sales: "x", development: "x", plant: "x", admin: "x", director: "Now 23", remarks: "Budget Meeting" },
+    { no: 12, activity: "Forecasting : profit and loss simulation", date: "Nov 24", day: "Thursday", sales: "x", development: "x", plant: "x", admin: "Now 24", director: "x", remarks: "Finance" },
+    { no: 13, activity: "Final Budget decision", date: "Dec 6", day: "Wednesday", sales: "x", development: "x", plant: "x", admin: "x", director: "Dec 6", remarks: "Final" },
+    { no: 14, activity: "{year} Cashflow forecasting", date: "Dec 6", day: "Wednesday", sales: "x", development: "x", plant: "x", admin: "x", director: "x", remarks: "Cashflow" },
+    { no: 15, activity: "{year} Business plan report", date: "Dec 12", day: "Wednesday", sales: "x", development: "x", plant: "x", admin: "x", director: "x", remarks: "Report" },
+    { no: 16, activity: "Reporting business plan {year} to President Director", date: "Dec 12", day: "Wednesday", sales: "x", development: "x", plant: "x", admin: "x", director: "x", remarks: "President Director" },
+  ],
+};
+
+function SchedulePanel({ year }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await pacApi.listSetupModules({ setup_module: "schedule", plan_year: year });
+      if (res.success && res.data.length > 0) {
+        setData(res.data[0]);
+      } else {
+        const content = JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
+        content.activities = content.activities.map(a => Object.assign({}, a, { activity: a.activity.replace("{year}", year), remarks: String(a.remarks) }));
+        setData({ setup_module: "schedule", plan_year: year, content, status: "draft" });
+      }
+    } catch {
+      const content = JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
+      content.activities = content.activities.map(a => Object.assign({}, a, { activity: a.activity.replace("{year}", year), remarks: String(a.remarks) }));
+      setData({ setup_module: "schedule", plan_year: year, content, status: "draft" });
+    } finally { setLoading(false); }
+  }, [year]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const updateActivity = (idx, field, val) => {
+    setData(prev => ({
+      ...prev,
+      content: {
+        ...prev.content,
+        activities: prev.content.activities.map((a, i) => i === idx ? Object.assign({}, a, { [field]: val }) : a),
+      },
+    }));
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const payload = Object.assign({}, data, { setup_module: "schedule", plan_year: year });
+      const res = await pacApi.upsertSetupModule(payload);
+      if (res.success) { setData(res.data); setSaved(true); setTimeout(() => setSaved(false), 2000); }
+    } finally { setSaving(false); }
+  };
+
+  if (loading) return <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>;
+  if (!data) return null;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-gray-500">Year: <span className="text-sky-400 font-bold">{year}</span></span>
+          <span className="text-xs text-gray-500">Module: <span className="text-gray-300">Schedule</span></span>
+          {data.id && <span className={`text-xs px-2 py-0.5 rounded-full border ${data.status === 'final' ? 'text-green-400 border-green-500/30 bg-green-500/10' : 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10'}`}>{data.status === 'final' ? '✓ Final' : 'Draft'}</span>}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setData(prev => Object.assign({}, prev, { status: prev.status === 'final' ? 'draft' : 'final' }))}
+            className={BTN_SM(data.status === 'final' ? 'gray' : 'green')}>
+            <CheckCircle size={11} /> {data.status === 'final' ? 'Mark Draft' : 'Mark Final'}
+          </button>
+          <button onClick={save} disabled={saving} className={BTN_SM("sky")}>
+            {saving ? <Loader2 size={11} className="animate-spin" /> : saved ? <CheckCircle size={11} /> : <Save size={11} />}
+            {saved ? "Saved!" : "Save"}
+          </button>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-xs">
+          <thead>
+            <tr className="bg-gray-800/80">
+              {["No","Activity","Date","Day","Sales & Marketing","Strategic Development","Plant","Admin","P. Director","Remarks"].map(h => (
+                <th key={h} className="px-2 py-2.5 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {(data.content.activities || []).map((act, i) => (
+              <tr key={i} className="border-b border-gray-800 hover:bg-gray-800/30">
+                <td className="px-2 py-1.5 border border-gray-700 text-center font-bold text-gray-400 w-8">{act.no}</td>
+                <td className="px-2 py-1.5 border border-gray-700">
+                  <textarea rows={1} className={`${TA} py-1 text-[11px]`} value={act.activity} onChange={e => updateActivity(i, "activity", e.target.value)} />
+                </td>
+                <td className="px-2 py-1.5 border border-gray-700 text-center w-20">
+                  <input className={`${INP} text-center py-1 text-[11px]`} value={act.date} onChange={e => updateActivity(i, "date", e.target.value)} />
+                </td>
+                <td className="px-2 py-1.5 border border-gray-700 text-center w-24">
+                  <input className={`${INP} text-center py-1 text-[11px]`} value={act.day} onChange={e => updateActivity(i, "day", e.target.value)} />
+                </td>
+                <td className="px-2 py-1.5 border border-gray-700 text-center w-16"><input className={`${INP} text-center py-1 text-[11px]`} value={act.sales} onChange={e => updateActivity(i, "sales", e.target.value)} /></td>
+                <td className="px-2 py-1.5 border border-gray-700 text-center w-28"><input className={`${INP} text-center py-1 text-[11px]`} value={act.development} onChange={e => updateActivity(i, "development", e.target.value)} /></td>
+                <td className="px-2 py-1.5 border border-gray-700 text-center w-16"><input className={`${INP} text-center py-1 text-[11px]`} value={act.plant} onChange={e => updateActivity(i, "plant", e.target.value)} /></td>
+                <td className="px-2 py-1.5 border border-gray-700 text-center w-24"><input className={`${INP} text-center py-1 text-[11px]`} value={act.admin} onChange={e => updateActivity(i, "admin", e.target.value)} /></td>
+                <td className="px-2 py-1.5 border border-gray-700 text-center w-20"><input className={`${INP} text-center py-1 text-[11px]`} value={act.director} onChange={e => updateActivity(i, "director", e.target.value)} /></td>
+                <td className="px-2 py-1.5 border border-gray-700 w-28"><input className={`${INP} py-1 text-[11px]`} value={act.remarks} onChange={e => updateActivity(i, "remarks", e.target.value)} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+const DEFAULT_GUIDELINE = {
+  sections: [
+    {
+      title: "1. Working Days",
+      items: [
+        { label: "Jan", value: 22 }, { label: "Feb", value: 20 }, { label: "Mar", value: 23 },
+        { label: "Apr", value: 21 }, { label: "May", value: 22 }, { label: "Jun", value: 20 },
+        { label: "Jul", value: 23 }, { label: "Aug", value: 21 }, { label: "Sep", value: 21 },
+        { label: "Oct", value: 23 }, { label: "Nov", value: 19 }, { label: "Dec", value: 20 },
+      ],
+    },
+    {
+      title: "2. Economic Indicator for Budgeting",
+      items: [
+        { label: "Exchange Rate (IDR/USD)", value: "15,100 - 15,200" },
+        { label: "Minimum Salary (UMR)", value: "Rp 5,000,000" },
+        { label: "Inflation", value: "2.5% - 3.0%" },
+      ],
+    },
+    {
+      title: "3. Meeting & Business Trip",
+      items: [
+        { label: "Domestic — Director", value: "Rp 800,000 / day" },
+        { label: "Domestic — General Manager", value: "Rp 700,000 / day" },
+        { label: "Domestic — Senior Manager", value: "Rp 600,000 / day" },
+        { label: "Domestic — Manager", value: "Rp 500,000 / day" },
+        { label: "Domestic — Staff", value: "Rp 400,000 / day" },
+        { label: "International — Director", value: "$300 / day" },
+        { label: "International — Manager", value: "$200 / day" },
+        { label: "International — Staff", value: "$150 / day" },
+      ],
+    },
+  ],
+};
+
+function GuidelinePanel({ year }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await pacApi.listSetupModules({ setup_module: "guideline", plan_year: year });
+      if (res.success && res.data.length > 0) setData(res.data[0]);
+      else setData({ setup_module: "guideline", plan_year: year, content: JSON.parse(JSON.stringify(DEFAULT_GUIDELINE)), status: "draft" });
+    } catch {
+      setData({ setup_module: "guideline", plan_year: year, content: JSON.parse(JSON.stringify(DEFAULT_GUIDELINE)), status: "draft" });
+    } finally { setLoading(false); }
+  }, [year]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const updateItem = (secIdx, itemIdx, field, val) => {
+    setData(prev => {
+      if (!prev) return prev;
+      return Object.assign({}, prev, {
+        content: Object.assign({}, prev.content, {
+          sections: prev.content.sections.map((s, si) =>
+            si === secIdx ? Object.assign({}, s, { items: s.items.map((it, ii) => ii === itemIdx ? Object.assign({}, it, { [field]: val }) : it) }) : s
+          ),
+        }),
+      });
+    });
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const payload = Object.assign({}, data, { setup_module: "guideline", plan_year: year });
+      const res = await pacApi.upsertSetupModule(payload);
+      if (res.success) { setData(res.data); setSaved(true); setTimeout(() => setSaved(false), 2000); }
+    } finally { setSaving(false); }
+  };
+
+  if (loading) return <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>;
+  if (!data) return null;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-gray-500">Year: <span className="text-teal-400 font-bold">{year}</span></span>
+          <span className="text-xs text-gray-500">Module: <span className="text-gray-300">Guideline</span></span>
+          {data.id && <span className={`text-xs px-2 py-0.5 rounded-full border ${data.status === 'final' ? 'text-green-400 border-green-500/30 bg-green-500/10' : 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10'}`}>{data.status === 'final' ? '✓ Final' : 'Draft'}</span>}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setData(prev => prev ? Object.assign({}, prev, { status: prev.status === 'final' ? 'draft' : 'final' }) : prev)}
+            className={BTN_SM(data.status === 'final' ? 'gray' : 'green')}>
+            <CheckCircle size={11} /> {data.status === 'final' ? 'Mark Draft' : 'Mark Final'}
+          </button>
+          <button onClick={save} disabled={saving} className={BTN_SM("teal")}>
+            {saving ? <Loader2 size={11} className="animate-spin" /> : saved ? <CheckCircle size={11} /> : <Save size={11} />}
+            {saved ? "Saved!" : "Save"}
+          </button>
+        </div>
+      </div>
+      <div className="space-y-4">
+        {(data.content.sections || []).map((section, si) => (
+          <div key={si} className="rounded-lg border border-gray-700/50 bg-gray-800/30 overflow-hidden">
+            <div className="px-4 py-2.5 bg-gray-800/50 border-b border-gray-700">
+              <span className="text-xs font-semibold text-teal-400">{section.title}</span>
+            </div>
+            <div className="p-3">
+              <table className="w-full">
+                <tbody>
+                  {section.items.map((item, ii) => (
+                    <tr key={ii} className="border-b border-gray-800 last:border-0">
+                      <td className="py-2 pr-4 text-xs text-gray-400 w-48 whitespace-nowrap">{item.label}</td>
+                      <td className="py-2">
+                        <input className={`${INP} w-full`} value={item.value} onChange={e => updateItem(si, ii, "value", e.target.value)} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const DEFAULT_OUTLOOK = {
+  global_economic: {
+    title: "I. Global Economic Outlook",
+    items: [
+      { label: "Global GDP Forecast", value: "Decrease from 3.0% in 2023 to 2.7% in 2024" },
+      { label: "Key Factor 1", value: "Sharp slowdown in China — persistent Yuan weakness" },
+      { label: "Key Factor 2", value: "Declining inflation — reflecting drop in energy prices" },
+      { label: "Key Factor 3", value: "Russian invasion of Ukraine — ongoing recovery with OECD support" },
+      { label: "Fed Interest Rate", value: "5.5% (Sep 2023) -> Expected 5.7% Q4 2023 -> 5.5% in 2024" },
+      { label: "Global Inflation", value: "Projected to decline from 3.8% to 2.6% in 2024" },
+    ],
+  },
+  indonesia_economic: {
+    title: "II. Indonesia Economic Outlook",
+    items: [
+      { label: "GDP Forecast", value: "5.1% in 2023 -> 5.2% in 2024" },
+      { label: "Annual Budget", value: "Income Rp 2.8 T + Financing Rp 0.5 T = Expense Rp 3.3 T" },
+      { label: "Target", value: "Accelerate inclusive and sustainable economic transformation" },
+      { label: "Inflation", value: "2.7% - 2.8%" },
+      { label: "Interest Rate", value: "6.0% - 6.9%" },
+      { label: "Exchange Rate", value: "IDR 15,000 - 15,100 / USD" },
+      { label: "Geopolitics", value: "Presidential election Feb 2024 — potential unstable economic condition" },
+      { label: "IKN Capital", value: "Move to Kalimantan (IKN) from 2024-2045" },
+    ],
+  },
+  pharmaceutical: {
+    title: "III. Pharmaceutical Industry",
+    items: [
+      { label: "Global Market Size", value: "Expected $ 1.1 Trillion in 2023 to $ 1.2 Trillion in 2024" },
+      { label: "Indonesia Growth Rate", value: "Expected 12% in 2024" },
+      { label: "TKDN Objective", value: "Reduce importation of raw material by 24% in 2024" },
+      { label: "Oncology", value: "API for oncology still depend on import API" },
+      { label: "CKD OTTO Strategy", value: "Increasing TKDN score with local material purchase; Cooperate with foreign oncology medical worker" },
+    ],
+  },
+};
+
+function OutlookPanel({ year }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await pacApi.listSetupModules({ setup_module: "outlook", plan_year: year });
+      if (res.success && res.data.length > 0) setData(res.data[0]);
+      else setData({ setup_module: "outlook", plan_year: year, content: JSON.parse(JSON.stringify(DEFAULT_OUTLOOK)), status: "draft" });
+    } catch {
+      setData({ setup_module: "outlook", plan_year: year, content: JSON.parse(JSON.stringify(DEFAULT_OUTLOOK)), status: "draft" });
+    } finally { setLoading(false); }
+  }, [year]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const updateItem = (secKey, itemIdx, field, val) => {
+    setData(prev => {
+      if (!prev) return prev;
+      return Object.assign({}, prev, {
+        content: Object.assign({}, prev.content, {
+          [secKey]: Object.assign({}, prev.content[secKey], {
+            items: prev.content[secKey].items.map((it, i) => i === itemIdx ? Object.assign({}, it, { [field]: val }) : it),
+          }),
+        }),
+      });
+    });
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const payload = Object.assign({}, data, { setup_module: "outlook", plan_year: year });
+      const res = await pacApi.upsertSetupModule(payload);
+      if (res.success) { setData(res.data); setSaved(true); setTimeout(() => setSaved(false), 2000); }
+    } finally { setSaving(false); }
+  };
+
+  if (loading) return <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>;
+  if (!data) return null;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-gray-500">Year: <span className="text-indigo-400 font-bold">{year}</span></span>
+          <span className="text-xs text-gray-500">Module: <span className="text-gray-300">Outlook</span></span>
+          {data.id && <span className={`text-xs px-2 py-0.5 rounded-full border ${data.status === 'final' ? 'text-green-400 border-green-500/30 bg-green-500/10' : 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10'}`}>{data.status === 'final' ? '✓ Final' : 'Draft'}</span>}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setData(prev => prev ? Object.assign({}, prev, { status: prev.status === 'final' ? 'draft' : 'final' }) : prev)}
+            className={BTN_SM(data.status === 'final' ? 'gray' : 'green')}>
+            <CheckCircle size={11} /> {data.status === 'final' ? 'Mark Draft' : 'Mark Final'}
+          </button>
+          <button onClick={save} disabled={saving} className={BTN_SM("indigo")}>
+            {saving ? <Loader2 size={11} className="animate-spin" /> : saved ? <CheckCircle size={11} /> : <Save size={11} />}
+            {saved ? "Saved!" : "Save"}
+          </button>
+        </div>
+      </div>
+      <div className="space-y-4">
+        {["global_economic", "indonesia_economic", "pharmaceutical"].map(secKey => (
+          <div key={secKey} className="rounded-lg border border-gray-700/50 bg-gray-800/30 overflow-hidden">
+            <div className="px-4 py-2.5 bg-gray-800/50 border-b border-gray-700">
+              <span className="text-xs font-semibold text-indigo-400">{data.content[secKey].title}</span>
+            </div>
+            <div className="p-3">
+              {data.content[secKey].items.map((item, ii) => (
+                <div key={ii} className="flex items-start gap-3 mb-3 last:mb-0">
+                  <span className="text-xs text-gray-500 w-32 shrink-0 pt-1.5">{item.label}</span>
+                  <textarea rows={2} className={`${TA} text-[11px]`} value={item.value} onChange={e => updateItem(secKey, ii, "value", e.target.value)} />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -3,7 +3,7 @@ import { useAuthStore } from "@/store/authStore";
 import { useThemeStore } from "@/store/themeStore";
 import {
   Monitor, Users, Factory, Calculator,
-  ShoppingCart, FileText, LogOut, LayoutGrid, Database
+  ShoppingCart, FileText, LogOut, LayoutGrid, Database, TrendingUp
 } from "lucide-react";
 import RobotIcon from "@/components/icons/RobotIcon";
 import logo from "@/assets/LOGO-ONLY.png";
@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { label: "PAC",         path: "/dashboard/pac",        icon: Factory,      roles: ["pac_staff"] },
   { label: "Accounting",  path: "/dashboard/accounting", icon: Calculator,   roles: ["accounting_staff"] },
   { label: "Purchasing",  path: "/dashboard/purchasing", icon: ShoppingCart, roles: ["purchasing_staff"] },
+  { label: "EIS",         path: "/dashboard/eis",        icon: TrendingUp,   roles: ["management"] },
 ];
 
 const AI_ITEMS = [

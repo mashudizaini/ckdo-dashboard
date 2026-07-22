@@ -44,9 +44,16 @@ class Settings(BaseSettings):
     ollama_chat_model: str = "qwen2.5:14b-instruct"
     ollama_tool_model: str = "qwen2.5:7b-instruct"  # Oracle EBS tool-calling chat — smaller/faster is fine for tool selection
 
-    # EIS (Postgres, ETL'd from Oracle EBS) — read-only user, used by the Oracle
-    # EBS tool-calling chat. Only reachable where EIS is deployed (currently dev).
+    # EIS (Postgres, ETL'd from Oracle EBS). Only reachable where EIS is
+    # deployed (currently dev, 172.21.2.209:5433).
+    # Read-only — used by the Oracle EBS tool-calling chat (defense in depth:
+    # even a compromised prompt/argument can't write, since the DB role can't).
     eis_database_url: str = "postgresql://chat_readonly:CkdoChat_R0!2026@172.21.2.209:5433/eis_dashboard"
+    # Full read-write — used by the integrated EIS Dashboard tab and its ETL
+    # (same credentials the standalone eis-dashboard-v2 app used). Plain
+    # scheme like `database_url` above — the +asyncpg driver is added at the
+    # point of use (see eis_database.py), same convention as app/database.py.
+    eis_database_url_rw: str = "postgresql://eis_user:eis_secret@172.21.2.209:5433/eis_dashboard"
 
     class Config:
         env_file = ".env"

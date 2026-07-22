@@ -339,6 +339,7 @@ class PurchasingService:
                     NVL(msi.description, pol.item_description)               AS item_description,
                     NVL(mcb.segment1, '—')                                   AS category,
                     ({self._MAT_TYPE})                                       AS material_type,
+                    COALESCE(mfr.country_of_origin,'UNKNOWN')                AS country_of_origin,
                     poh.currency_code,
                     NVL(msi.primary_uom_code, pol.unit_meas_lookup_code)     AS uom,
                     EXTRACT(YEAR FROM poh.creation_date)                     AS trx_year,
@@ -349,12 +350,12 @@ class PurchasingService:
             )
             SELECT
                 organization_id, organization_name,
-                item_code, item_description, category, material_type, currency_code, uom,
+                item_code, item_description, category, material_type, country_of_origin, currency_code, uom,
                 {pivot},
                 SUM(line_amount_idr) AS total_value_idr,
                 SUM(line_qty)        AS total_qty
             FROM base_data
-            GROUP BY organization_id, organization_name, item_code, item_description, category, material_type, currency_code, uom
+            GROUP BY organization_id, organization_name, item_code, item_description, category, material_type, country_of_origin, currency_code, uom
             ORDER BY item_code
         """
         try:

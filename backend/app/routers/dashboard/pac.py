@@ -21,6 +21,7 @@ from app.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.pac_service import PACService
 from app.services.business_plan_service import BusinessPlanService
+from app.services.business_plan_setup_service import BusinessPlanSetupService
 from app.services import exchange_rate_service
 
 router = APIRouter()
@@ -101,6 +102,57 @@ async def delete_business_plan(
     user: CurrentUser = Depends(require_role(Roles.PAC)),
 ):
     return await BusinessPlanService().delete_plan(db, plan_id)
+
+
+# ── Business Plan Setup (Schedule / Guideline / Outlook) ───────────────────────
+
+class SetupPayload(BaseModel):
+    id:           Optional[int]  = None
+    setup_module: str            = "schedule"   # schedule | guideline | outlook
+    plan_year:    int
+    content:      dict           = {}
+    status:       Optional[str]  = "draft"
+
+
+@router.get("/setup-modules")
+async def list_setup_modules(
+    setup_module: Optional[str] = Query(None),
+    plan_year:    Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """List setup modules (schedule, guideline, outlook) filtered by year/module."""
+    return await BusinessPlanSetupService().list_setup(db, setup_module, plan_year)
+
+
+@router.get("/setup-modules/{setup_id}")
+async def get_setup_module(
+    setup_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Get single setup module document."""
+    return await BusinessPlanSetupService().get_setup(db, setup_id)
+
+
+@router.post("/setup-modules")
+async def upsert_setup_module(
+    body: SetupPayload,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Create / update setup module document."""
+    return await BusinessPlanSetupService().upsert_setup(db, body.model_dump(), user.username)
+
+
+@router.delete("/setup-modules/{setup_id}")
+async def delete_setup_module(
+    setup_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Delete setup module document."""
+    return await BusinessPlanSetupService().delete_setup(db, setup_id)
 
 
 # ── Exchange Rates ─────────────────────────────────────────────────────────────

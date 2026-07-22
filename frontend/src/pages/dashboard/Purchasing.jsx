@@ -633,6 +633,7 @@ const PH_DETAIL_COLS = [
   { key: "category",          label: "Category" },
   { key: "item_type",         label: "Item Type" },
   { key: "material_type",     label: "Type" },
+  { key: "country_of_origin", label: "Country of Origin" },
   { key: "supplier_name",     label: "Supplier" },
   { key: "organization_name", label: "Org" },
   { key: "currency_code",     label: "Currency" },
@@ -674,12 +675,12 @@ function PHDetailTable({ data, loading, error }) {
   const handleDownload = () => {
     const rows = sorted.map(r => [
       r.po_number, r.line_num, r.item_code, r.item_description,
-      r.category, r.item_type, r.material_type, r.supplier_name, r.organization_name,
+      r.category, r.item_type, r.material_type, r.country_of_origin, r.supplier_name, r.organization_name,
       r.currency_code, r.uom, r.quantity, r.unit_price,
       r.amount_orig, r.amount_idr, r.received_qty,
       r.creation_date, r.closure_status,
     ]);
-    downloadExcel("purchase_history_detail", PH_DETAIL_COLS.map(c => c.label), rows, [11, 12, 13, 14, 15]);
+    downloadExcel("purchase_history_detail", PH_DETAIL_COLS.map(c => c.label), rows, [12, 13, 14, 15, 16]);
   };
 
   return (
@@ -723,6 +724,7 @@ function PHDetailTable({ data, loading, error }) {
                 <td className={`${TD} text-gray-400`}>{r.category || "-"}</td>
                 <td className={`${TD} text-gray-400`}>{r.item_type || "-"}</td>
                 <td className={`${TD} text-gray-400`}>{r.material_type || "-"}</td>
+                <td className={`${TD} text-gray-400`}>{r.country_of_origin || "-"}</td>
                 <td className={`${TD} text-gray-300 max-w-[160px] truncate`} title={r.supplier_name}>{r.supplier_name || "-"}</td>
                 <td className={`${TD} text-gray-400 max-w-[120px] truncate`} title={r.organization_name}>{r.organization_name || "-"}</td>
                 <td className={`${TD} text-yellow-400`}>{r.currency_code || "-"}</td>
@@ -756,6 +758,7 @@ function PHByItemTable({ data, years, loading, error }) {
     { field: "item_description",  label: "Item Desc",    align: "left" },
     { field: "category",          label: "Category",     align: "left" },
     { field: "material_type",     label: "Type",         align: "left" },
+    { field: "country_of_origin", label: "Country of Origin", align: "left" },
     { field: "currency_code",     label: "Currency",     align: "left" },
     { field: "uom",               label: "UOM",          align: "left" },
   ];
@@ -778,7 +781,7 @@ function PHByItemTable({ data, years, loading, error }) {
     const headers = [...fixedCols.map(c => c.label), ...years.flatMap(y => [`Value IDR ${y}`, `Qty ${y}`]), "Total Value IDR", "Total Qty"];
     const rows = sorted.map(r => [
       r.organization_id, r.organization_name, r.item_code, r.item_description,
-      r.category, r.material_type, r.currency_code, r.uom,
+      r.category, r.material_type, r.country_of_origin, r.currency_code, r.uom,
       ...years.flatMap(y => [r[`value_idr_${y}`] ?? 0, r[`qty_${y}`] ?? 0]),
       r.total_value_idr, r.total_qty,
     ]);
@@ -834,6 +837,7 @@ function PHByItemTable({ data, years, loading, error }) {
                 <td className={`${TD} text-gray-300 max-w-[160px] truncate`} title={r.item_description}>{r.item_description}</td>
                 <td className={`${TD} text-gray-400`}>{r.category}</td>
                 <td className={`${TD} text-gray-400`}>{r.material_type}</td>
+                <td className={`${TD} text-gray-400`}>{r.country_of_origin}</td>
                 <td className={`${TD} text-yellow-400`}>{r.currency_code}</td>
                 <td className={`${TD} text-gray-500`}>{r.uom}</td>
                 {years.map(y => (
@@ -977,16 +981,15 @@ function aggregatePHByQty(byItemData, years) {
         organization_id: r.organization_id, organization_name: r.organization_name,
         item_code: r.item_code, item_description: r.item_description,
         category: r.category, material_type: r.material_type, uom: r.uom,
-        currencies: new Set(), total_qty: 0,
+        total_qty: 0,
       };
       for (const y of years) agg[`qty_${y}`] = 0;
       map.set(key, agg);
     }
-    if (r.currency_code) agg.currencies.add(r.currency_code);
     agg.total_qty += Number(r.total_qty) || 0;
     for (const y of years) agg[`qty_${y}`] += Number(r[`qty_${y}`]) || 0;
   }
-  return [...map.values()].map(a => ({ ...a, currency_code: [...a.currencies].sort().join(", ") || "-" }));
+  return [...map.values()];
 }
 
 function PHDetailByQtyTable({ data, years, loading, error }) {
@@ -1001,7 +1004,6 @@ function PHDetailByQtyTable({ data, years, loading, error }) {
     { field: "item_description",  label: "Item Desc",    align: "left" },
     { field: "category",          label: "Category",     align: "left" },
     { field: "material_type",     label: "Type",         align: "left" },
-    { field: "currency_code",     label: "Currencies",   align: "left" },
     { field: "uom",               label: "UOM",          align: "left" },
   ];
   const totalCols = fixedCols.length + years.length + 1;
@@ -1022,7 +1024,7 @@ function PHDetailByQtyTable({ data, years, loading, error }) {
     const headers = [...fixedCols.map(c => c.label), ...years.map(y => `Qty ${y}`), "Total Qty"];
     const rows = sorted.map(r => [
       r.organization_id, r.organization_name, r.item_code, r.item_description,
-      r.category, r.material_type, r.currency_code, r.uom,
+      r.category, r.material_type, r.uom,
       ...years.map(y => r[`qty_${y}`] ?? 0),
       r.total_qty,
     ]);
@@ -1068,7 +1070,6 @@ function PHDetailByQtyTable({ data, years, loading, error }) {
                 <td className={`${TD} text-gray-300 max-w-[180px] truncate`} title={r.item_description}>{r.item_description}</td>
                 <td className={`${TD} text-gray-400`}>{r.category}</td>
                 <td className={`${TD} text-gray-400`}>{r.material_type}</td>
-                <td className={`${TD} text-yellow-400`} title={r.currency_code}>{r.currency_code}</td>
                 <td className={`${TD} text-gray-500`}>{r.uom}</td>
                 {years.map(y => (
                   <td key={y} className={`${TD} text-right text-gray-300`}>{fmtQty(r[`qty_${y}`])}</td>
@@ -2110,7 +2111,7 @@ function PriceAnalysisSection() {
     years.forEach(y => { yearMap[y] = { year: String(y) }; });
     data.forEach(r => {
       if (yearMap[r.trx_year]) {
-        yearMap[r.trx_year][r.supplier_name] = r.avg_price_idr;
+        yearMap[r.trx_year][r.supplier_name] = r.avg_price_orig;
       }
     });
     return Object.values(yearMap);
@@ -2150,12 +2151,12 @@ function PriceAnalysisSection() {
   const handleDownload = () => {
     if (!tableRows.length) return;
     const headers = ["Supplier", "Item Code", "Description", "UOM", "Currency", "Country",
-      ...years.flatMap(y => [`Min Price IDR ${y}`, `Max Price IDR ${y}`, `Avg Price IDR ${y}`, `Avg Price Orig ${y}`, `Qty ${y}`, `PO ${y}`])];
+      ...years.flatMap(y => [`Min Price ${y}`, `Max Price ${y}`, `Avg Price ${y}`, `Qty ${y}`, `PO ${y}`])];
     const rows = tableRows.map(r => [
       r.supplier_name, r.item_code, r.item_desc, r.uom, r.currency, r.country,
       ...years.flatMap(y => [
-        r.years[y]?.min_price_idr ?? "", r.years[y]?.max_price_idr ?? "",
-        r.years[y]?.avg_price_idr ?? "", r.years[y]?.avg_price_orig ?? "",
+        r.years[y]?.min_price_orig ?? "", r.years[y]?.max_price_orig ?? "",
+        r.years[y]?.avg_price_orig ?? "",
         r.years[y]?.total_qty ?? "", r.years[y]?.po_count ?? "",
       ]),
     ]);
@@ -2264,8 +2265,11 @@ function PriceAnalysisSection() {
       {/* Chart */}
       {searched && chartData.length > 0 && (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-          <p className="text-sm font-semibold text-gray-200 mb-4">
-            Average Purchase Price Trend (IDR/UOM) — by Supplier
+          <p className="text-sm font-semibold text-gray-200">
+            Average Purchase Price Trend (Original Currency/UOM) — by Supplier
+          </p>
+          <p className="text-xs text-gray-500 mb-4">
+            Prices shown as-invoiced per supplier — not converted to IDR, so values aren't directly comparable across suppliers using different currencies (see "Curr" column below).
           </p>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 4, right: 20, left: 10, bottom: 4 }}>
@@ -2318,10 +2322,10 @@ const PRICE_FIXED_COLS = [
   { key: "country",       label: "Country" },
 ];
 const PRICE_YEAR_METRICS = [
-  { metric: "min_price_idr", label: "Min IDR" },
-  { metric: "max_price_idr", label: "Max IDR" },
-  { metric: "avg_price_idr", label: "Avg IDR" },
-  { metric: "total_qty",     label: "Qty" },
+  { metric: "min_price_orig", label: "Min" },
+  { metric: "max_price_orig", label: "Max" },
+  { metric: "avg_price_orig", label: "Avg" },
+  { metric: "total_qty",      label: "Qty" },
 ];
 
 function PriceDetailTable({ tableRows, years }) {
@@ -2392,8 +2396,8 @@ function PriceDetailTable({ tableRows, years }) {
             {paged.map((r, i) => {
               const lastY = years[years.length - 1];
               const prevY = years[years.length - 2];
-              const lastP = r.years[lastY]?.avg_price_idr;
-              const prevP = r.years[prevY]?.avg_price_idr;
+              const lastP = r.years[lastY]?.avg_price_orig;
+              const prevP = r.years[prevY]?.avg_price_orig;
               const trend = lastP && prevP ? (lastP > prevP ? "up" : lastP < prevP ? "down" : "flat") : null;
               return (
                 <tr key={i} className="border-b border-gray-800 hover:bg-gray-800/40">
@@ -2412,13 +2416,13 @@ function PriceDetailTable({ tableRows, years }) {
                   {years.map(y => (
                     <>
                       <td key={`${y}-min`} className="px-3 py-2 text-right text-gray-300 whitespace-nowrap">
-                        {fmtIDR2(r.years[y]?.min_price_idr)}
+                        {fmtIDR2(r.years[y]?.min_price_orig)}
                       </td>
                       <td key={`${y}-max`} className="px-3 py-2 text-right text-gray-300 whitespace-nowrap">
-                        {fmtIDR2(r.years[y]?.max_price_idr)}
+                        {fmtIDR2(r.years[y]?.max_price_orig)}
                       </td>
                       <td key={`${y}-avg`} className="px-3 py-2 text-right text-gray-200 whitespace-nowrap">
-                        {fmtIDR2(r.years[y]?.avg_price_idr)}
+                        {fmtIDR2(r.years[y]?.avg_price_orig)}
                       </td>
                       <td key={`${y}-q`} className="px-3 py-2 text-right text-gray-400 whitespace-nowrap">
                         {r.years[y]?.total_qty != null ? fmtIDR2(r.years[y].total_qty) : "—"}

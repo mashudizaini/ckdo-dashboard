@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
@@ -6,6 +6,7 @@ import structlog
 
 from app.config import get_settings
 from app.database import async_engine, Base, init_oracle_client
+from app.dependencies import require_role, Roles
 import app.models.employee    # noqa: F401 — register models ke Base.metadata
 import app.models.attendance   # noqa: F401 — register models ke Base.metadata
 import app.models.leave        # noqa: F401
@@ -13,10 +14,15 @@ import app.models.working_calendar  # noqa: F401
 import app.models.hrga_task    # noqa: F401
 import app.models.cv_screening  # noqa: F401
 import app.models.business_plan  # noqa: F401
+import app.models.business_plan_setup  # noqa: F401
 import app.models.db_browser_audit  # noqa: F401
 
 # ── Dashboard Routers ──
 from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice
+from app.routers.dashboard import (
+    eis_summary, eis_performance, eis_production, eis_expansion, eis_administration,
+    eis_business_plan, eis_daily_sales, eis_data_upload, eis_etl_admin,
+)
 
 # ── Coretax Router ──
 from app.routers.coretax_router import coretax_router
@@ -129,6 +135,22 @@ app.include_router(pac.router,        prefix=f"{API_PREFIX}/dashboard/pac",     
 app.include_router(accounting.router, prefix=f"{API_PREFIX}/dashboard/accounting", tags=["Dashboard - Accounting"])
 app.include_router(ap_invoice.router,  prefix=f"{API_PREFIX}/dashboard/accounting/ap-invoice", tags=["Dashboard - AP Invoice"])
 app.include_router(purchasing.router, prefix=f"{API_PREFIX}/dashboard/purchasing", tags=["Dashboard - Purchasing"])
+
+# EIS Dashboard — ported from the standalone eis-dashboard-v2 app.
+# Viewing/editing gated to management (+ admin, always implicitly allowed by
+# require_role); ETL Admin is gated separately to it_staff on its own routes
+# since triggering/monitoring ETL jobs is an IT/ops concern, not a management
+# viewing one.
+_eis_mgmt = [Depends(require_role(Roles.MANAGEMENT))]
+app.include_router(eis_summary.router,        prefix=f"{API_PREFIX}/dashboard/eis/summary",     tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
+app.include_router(eis_performance.router,    prefix=f"{API_PREFIX}/dashboard/eis/performance", tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
+app.include_router(eis_production.router,     prefix=f"{API_PREFIX}/dashboard/eis/production",  tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
+app.include_router(eis_expansion.router,      prefix=f"{API_PREFIX}/dashboard/eis/expansion",   tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
+app.include_router(eis_administration.router, prefix=f"{API_PREFIX}/dashboard/eis/admin",       tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
+app.include_router(eis_business_plan.router,  prefix=f"{API_PREFIX}/dashboard/eis/bp",          tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
+app.include_router(eis_daily_sales.router,    prefix=f"{API_PREFIX}/dashboard/eis/daily-sales", tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
+app.include_router(eis_data_upload.router,    prefix=f"{API_PREFIX}/dashboard/eis/data-upload", tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
+app.include_router(eis_etl_admin.router,      prefix=f"{API_PREFIX}/dashboard/eis/etl",         tags=["Dashboard - EIS"])
 
 # AI Tools
 app.include_router(chatbot.router,       prefix=f"{API_PREFIX}/ai/chatbot",       tags=["AI - Chatbot"])

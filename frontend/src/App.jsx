@@ -12,6 +12,7 @@ import HRDashboard from "@/pages/dashboard/HR";
 import PACDashboard from "@/pages/dashboard/PAC";
 import AccountingDashboard from "@/pages/dashboard/Accounting";
 import PurchasingDashboard from "@/pages/dashboard/Purchasing";
+import EISDashboard from "@/pages/dashboard/EIS";
 
 // AI Tools Pages
 import Chatbot from "@/pages/ai-tools/Chatbot";
@@ -96,6 +97,14 @@ export default function App() {
           element={
             <ProtectedRoute roles={["purchasing_staff", "admin"]}>
               <PurchasingDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="eis/*"
+          element={
+            <ProtectedRoute roles={["management", "admin"]}>
+              <EISDashboard />
             </ProtectedRoute>
           }
         />
