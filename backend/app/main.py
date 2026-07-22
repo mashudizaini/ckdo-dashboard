@@ -15,6 +15,7 @@ import app.models.hrga_task    # noqa: F401
 import app.models.cv_screening  # noqa: F401
 import app.models.business_plan  # noqa: F401
 import app.models.business_plan_setup  # noqa: F401
+import app.models.sales_plan  # noqa: F401
 import app.models.db_browser_audit  # noqa: F401
 
 # ── Dashboard Routers ──

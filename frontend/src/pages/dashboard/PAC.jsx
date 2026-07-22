@@ -88,6 +88,7 @@ const BP_SUBTABS = [
   { id: "strategy",   label: "Strategy & Action Plan", icon: FileText },
   { id: "history",    label: "Document List",          icon: Clock    },
   { id: "setup",      label: "Setup",                   icon: Settings },
+  { id: "simulation", label: "Simulation",              icon: BarChart },
 ];
 
 const ROMAN = ["i","ii","iii","iv","v","vi","vii","viii","ix","x"];
@@ -693,6 +694,7 @@ function BusinessPlanSection() {
       {subTab === "strategy"   && <SectionCard title="Strategy & Action Plan" subtitle={`Per department · ${year} Business Plan`}><SPPanel year={year} /></SectionCard>}
       {subTab === "history"    && <SectionCard title="Document List" subtitle={`All Business Plan documents for ${year}`}><BPHistoryPanel year={year} /></SectionCard>}
       {subTab === "setup"      && <SetupSection year={year} />}
+      {subTab === "simulation" && <SimulationSection year={year} />}
     </div>
   );
 }
@@ -2111,6 +2113,365 @@ function OutlookPanel({ year }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Section: Simulation ──────────────────────────── */
+const SIM_SUBTABS = [
+  { id: "data_collection", label: "Data Collection", icon: FileText },
+  { id: "sales_plan",      label: "Sales Plan",      icon: BarChart },
+];
+
+function SimulationSection({ year }) {
+  const [subTab, setSubTab] = useState("data_collection");
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex gap-1 p-1 rounded-lg bg-gray-800/60 border border-gray-700">
+          {SIM_SUBTABS.map(t => (
+            <button key={t.id} onClick={() => setSubTab(t.id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                subTab === t.id ? "bg-violet-500/20 border border-violet-500/40 text-violet-300"
+                                : "text-gray-500 hover:text-gray-300"
+              }`}>
+              <t.icon size={11} />{t.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-gray-500">Plan Year: <span className="text-violet-400 font-bold">{year}</span></label>
+        </div>
+      </div>
+      {subTab === "data_collection" && <DataCollectionPanel year={year} />}
+      {subTab === "sales_plan"      && <SalesPlanPanel year={year} />}
+    </div>
+  );
+}
+
+/* ══ Data Collection Panel ══════════════════════════════════════════════════════ */
+
+function DataCollectionPanel({ year }) {
+  const [loading, setLoading] = useState(false);
+
+  if (loading) return <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>;
+
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40">
+        <h3 className="text-sm font-semibold text-gray-200">Data Collection</h3>
+        <p className="text-xs text-gray-500 mt-0.5">Collect and manage input data for simulation · {year}</p>
+      </div>
+      <div className="p-5">
+        <div className="flex flex-col items-center justify-center py-12 text-gray-500 gap-3">
+          <FileText size={40} className="opacity-30" />
+          <p className="text-sm">Data collection module will be used to gather simulation input data.</p>
+          <p className="text-xs text-gray-600">This feature will be available soon.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══ Sales Plan Panel ══════════════════════════════════════════════════════════ */
+
+const DEFAULT_SALES_PLAN_CONTENT = {
+  headers: ["No", "Product / Description", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total"],
+  rows: [
+    ["1", "Product A", 100, 120, 110, 130, 140, 150, 160, 170, 180, 190, 200, 210, 1960],
+    ["2", "Product B", 200, 210, 220, 230, 240, 250, 260, 270, 280, 290, 300, 310, 3060],
+    ["3", "Product C", 150, 160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 260, 2460],
+  ],
+};
+
+function SalesPlanPanel({ year }) {
+  const [plans, setPlans] = useState([]);
+  const [selectedPlan, setSelectedPlan] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+
+  const [form, setForm] = useState({
+    id: null,
+    plan_year: year,
+    department: "",
+    team_code: "",
+    team_name: "",
+    plan_type: "value",
+    content: DEFAULT_SALES_PLAN_CONTENT,
+    status: "draft",
+  });
+
+  const loadPlans = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await pacApi.listSalesPlans({ plan_year: year });
+      if (res.success) setPlans(res.data || []);
+    } catch {
+      setPlans([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [year]);
+
+  useEffect(() => { loadPlans(); }, [loadPlans]);
+
+  const resetForm = () => {
+    setForm({
+      id: null,
+      plan_year: year,
+      department: "",
+      team_code: "",
+      team_name: "",
+      plan_type: "value",
+      content: JSON.parse(JSON.stringify(DEFAULT_SALES_PLAN_CONTENT)),
+      status: "draft",
+    });
+    setShowForm(false);
+  };
+
+  const openCreate = () => {
+    resetForm();
+    setShowForm(true);
+  };
+
+  const openEdit = (plan) => {
+    setForm({
+      id: plan.id,
+      plan_year: plan.plan_year,
+      department: plan.department,
+      team_code: plan.team_code,
+      team_name: plan.team_name,
+      plan_type: plan.plan_type,
+      content: plan.content || DEFAULT_SALES_PLAN_CONTENT,
+      status: plan.status,
+    });
+    setShowForm(true);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await pacApi.upsertSalesPlan({ ...form });
+      if (res.success) {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+        await loadPlans();
+        setShowForm(false);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateCell = (rowIdx, colIdx, val) => {
+    setForm(prev => {
+      const newRows = [...(prev.content.rows || [])];
+      newRows[rowIdx] = [...newRows[rowIdx]];
+      if (colIdx === 0 || colIdx === 1) {
+        newRows[rowIdx][colIdx] = val;
+      } else {
+        newRows[rowIdx][colIdx] = Number(val) || 0;
+      }
+      const total = newRows[rowIdx].slice(2, 14).reduce((a, b) => a + (Number(b) || 0), 0);
+      newRows[rowIdx][14] = total;
+      return { ...prev, content: { ...prev.content, rows: newRows } };
+    });
+  };
+
+  const addRow = () => {
+    setForm(prev => {
+      const newRows = [...(prev.content.rows || [])];
+      const no = newRows.length + 1;
+      newRows.push([String(no), "New Product", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+      return { ...prev, content: { ...prev.content, rows: newRows } };
+    });
+  };
+
+  const removeRow = (rowIdx) => {
+    setForm(prev => {
+      const newRows = (prev.content.rows || []).filter((_, i) => i !== rowIdx);
+      return { ...prev, content: { ...prev.content, rows: newRows } };
+    });
+  };
+
+  const exportExcel = async (planType) => {
+    const targetId = selectedPlan?.id;
+    if (!targetId) {
+      alert("Pilih sales plan terlebih dahulu sebelum export.");
+      return;
+    }
+    setExporting(true);
+    try {
+      const res = await pacApi.exportSalesPlanExcel(targetId, planType);
+      if (res.success) {
+        alert(`Export berhasil: ${res.filename}`);
+      } else {
+        alert(res.error || "Export failed");
+      }
+    } catch (e) {
+      alert("Export error: " + e.message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const grandTotal = (colIdx) => {
+    return (form.content.rows || []).reduce((sum, row) => sum + (Number(row[colIdx]) || 0), 0);
+  };
+
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-200">Sales Plan</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Input perencanaan penjualan · {year}</p>
+        </div>
+        <div className="flex gap-2">
+          {!showForm ? (
+            <>
+              <button onClick={openCreate} className={BTN_SM("violet")}><Plus size={11} /> New Plan</button>
+              <button onClick={() => exportExcel("value")} disabled={exporting || !selectedPlan} className={BTN_SM("sky")}>
+                {exporting ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                Export S1 (Value)
+              </button>
+              <button onClick={() => exportExcel("unit")} disabled={exporting || !selectedPlan} className={BTN_SM("teal")}>
+                {exporting ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                Export S2 (Unit)
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={save} disabled={saving} className={BTN_SM("green")}>
+                {saving ? <Loader2 size={11} className="animate-spin" /> : saved ? <CheckCircle size={11} /> : <Save size={11} />}
+                {saved ? "Saved!" : "Save"}
+              </button>
+              <button onClick={resetForm} className={BTN_SM("gray")}><X size={11} /> Cancel</button>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="p-5">
+        {!showForm ? (
+          <>
+            <div className="mb-4">
+              <label className="text-xs text-gray-500 mb-1 block">Pilih Sales Plan:</label>
+              <select value={selectedPlan?.id || ""} onChange={e => {
+                const plan = plans.find(p => String(p.id) === e.target.value);
+                setSelectedPlan(plan || null);
+                if (plan) openEdit(plan);
+              }} className={`${SELECT} w-full max-w-md`}>
+                <option value="">-- Pilih Sales Plan --</option>
+                {plans.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.plan_year} - {p.department || "(no dept)"} / {p.team_code || "(no team)"} [{p.plan_type}]
+                  </option>
+                ))}
+              </select>
+            </div>
+            {selectedPlan && (
+              <div className="overflow-x-auto border border-gray-700 rounded-lg">
+                <table className="w-full border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-gray-800/80">
+                      {["No", "Product / Description", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total"].map(h => (
+                        <th key={h} className="px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(selectedPlan.content.rows || []).map((row, i) => (
+                      <tr key={i} className="border-b border-gray-800 hover:bg-gray-800/30">
+                        <td className="px-2 py-1.5 border border-gray-700 text-center w-8">{row[0]}</td>
+                        <td className="px-2 py-1.5 border border-gray-700">{row[1]}</td>
+                        {row.slice(2, 14).map((val, ci) => (
+                          <td key={ci} className="px-2 py-1.5 border border-gray-700 text-right font-mono">{Number(val).toLocaleString()}</td>
+                        ))}
+                        <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-violet-400">{Number(row[14]).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Field label="Plan Year">
+                <input type="number" className={`${INP}`} value={form.plan_year} onChange={e => setForm({ ...form, plan_year: Number(e.target.value) })} />
+              </Field>
+              <Field label="Department">
+                <input className={`${INP}`} value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} placeholder="e.g. SALES" />
+              </Field>
+              <Field label="Team Code">
+                <input className={`${INP}`} value={form.team_code} onChange={e => setForm({ ...form, team_code: e.target.value })} placeholder="e.g. 01" />
+              </Field>
+              <Field label="Team Name">
+                <input className={`${INP}`} value={form.team_name} onChange={e => setForm({ ...form, team_name: e.target.value })} placeholder="e.g. Domestic Sales" />
+              </Field>
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="text-xs text-gray-500">Plan Type:</label>
+              <select value={form.plan_type} onChange={e => setForm({ ...form, plan_type: e.target.value })} className={`${SELECT}`}>
+                <option value="value">Value (S1)</option>
+                <option value="unit">Unit (S2)</option>
+              </select>
+              <label className="text-xs text-gray-500">Status:</label>
+              <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className={`${SELECT}`}>
+                <option value="draft">Draft</option>
+                <option value="final">Final</option>
+              </select>
+            </div>
+            <div className="overflow-x-auto border border-gray-700 rounded-lg">
+              <table className="w-full border-collapse text-xs">
+                <thead>
+                  <tr className="bg-gray-800/80">
+                    {["No", "Product / Description", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total"].map((h, ci) => (
+                      <th key={h} className={`px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${ci >= 2 ? 'text-center w-16' : ''}`}>{h}</th>
+                    ))}
+                    <th className="px-2 py-2 text-center border border-gray-700 w-10"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(form.content.rows || []).map((row, ri) => (
+                    <tr key={ri} className="border-b border-gray-800 hover:bg-gray-800/30">
+                      <td className="px-2 py-1.5 border border-gray-700 text-center w-8 font-bold text-gray-400">{row[0]}</td>
+                      <td className="px-2 py-1.5 border border-gray-700">
+                        <input className={`${INP} !text-xs`} value={row[1]} onChange={e => updateCell(ri, 1, e.target.value)} />
+                      </td>
+                      {row.slice(2, 14).map((val, ci) => (
+                        <td key={ci} className="px-2 py-1.5 border border-gray-700">
+                          <input type="number" className={`${INP} !text-center !text-xs font-mono`} value={val} onChange={e => updateCell(ri, ci + 2, e.target.value)} />
+                        </td>
+                      ))}
+                      <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-violet-400">{Number(row[14]).toLocaleString()}</td>
+                      <td className="px-2 py-1.5 border border-gray-700 text-center">
+                        <button onClick={() => removeRow(ri)} className={BTN_SM("red")}><Trash2 size={9} /></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-800/60">
+                    <td colSpan={2} className="px-2 py-1.5 border border-gray-700 text-xs font-bold text-gray-300">GRAND TOTAL</td>
+                    {[2,3,4,5,6,7,8,9,10,11,12,13].map(ci => (
+                      <td key={ci} className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-gray-200">{grandTotal(ci).toLocaleString()}</td>
+                    ))}
+                    <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-violet-400">{grandTotal(14).toLocaleString()}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <button onClick={addRow} className={BTN_SM("violet")}><Plus size={11} /> Add Product</button>
+          </div>
+        )}
       </div>
     </div>
   );

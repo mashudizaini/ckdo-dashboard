@@ -168,6 +168,13 @@ export const pacApi = {
   deleteSetupModule:    (id)   => api.delete(`/dashboard/pac/setup-modules/${id}`),
   generateOutlook:      (body) => api.post("/dashboard/pac/setup-modules/generate-outlook", body),
 
+  // Sales Plan (Simulation)
+  listSalesPlans:       (p)    => api.get("/dashboard/pac/sales-plans", { params: p }),
+  getSalesPlan:         (id)   => api.get(`/dashboard/pac/sales-plans/${id}`),
+  upsertSalesPlan:      (body) => api.post("/dashboard/pac/sales-plans", body),
+  deleteSalesPlan:      (id)   => api.delete(`/dashboard/pac/sales-plans/${id}`),
+  exportSalesPlanExcel: (id, type) => api.post(`/dashboard/pac/sales-plans/${id}/export`, null, { params: { plan_type: type }, responseType: "blob" }),
+
   // Exchange Rates
   getExchangeRates:    (refresh = false) => api.get("/dashboard/pac/exchange-rates", { params: { refresh } }),
   pushExchangeRatesToEBS: (body) => api.post("/dashboard/pac/exchange-rates/push-to-ebs", body),

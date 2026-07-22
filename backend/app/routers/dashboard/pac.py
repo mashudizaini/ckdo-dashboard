@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.pac_service import PACService
 from app.services.business_plan_service import BusinessPlanService
 from app.services.business_plan_setup_service import BusinessPlanSetupService
+from app.services.sales_plan_service import SalesPlanService
 from app.services.ai_service import AIService
 from app.services import exchange_rate_service
 
@@ -220,6 +221,73 @@ Make it realistic for {body.year} with specific numbers and trends. Keep values 
         return {"success": True, "data": {"setup_module": "outlook", "plan_year": body.year, "content": content, "status": "draft"}}
     except Exception as e:
         return {"success": False, "error": f"Failed to generate outlook: {str(e)}", "data": None}
+
+
+# ── Sales Plan ────────────────────────────────────────────────────────────────
+
+class SalesPlanPayload(BaseModel):
+    id:          Optional[int]  = None
+    plan_year:   int
+    department:  str            = ""
+    team_code:   str            = ""
+    team_name:   str            = ""
+    plan_type:   str            = "value"   # value | unit
+    content:     dict           = {}
+    status:      Optional[str]  = "draft"
+
+
+@router.get("/sales-plans")
+async def list_sales_plans(
+    plan_year:  Optional[int] = Query(None),
+    department: Optional[str] = Query(None),
+    team_code:  Optional[str] = Query(None),
+    plan_type:  Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """List sales plans filtered by year/department/team/type."""
+    return await SalesPlanService().list_sales_plans(db, plan_year, department, team_code, plan_type)
+
+
+@router.get("/sales-plans/{plan_id}")
+async def get_sales_plan(
+    plan_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Get single sales plan."""
+    return await SalesPlanService().get_sales_plan(db, plan_id)
+
+
+@router.post("/sales-plans")
+async def upsert_sales_plan(
+    body: SalesPlanPayload,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Create / update sales plan."""
+    return await SalesPlanService().upsert_sales_plan(db, body.model_dump(), user.username)
+
+
+@router.delete("/sales-plans/{plan_id}")
+async def delete_sales_plan(
+    plan_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Delete sales plan."""
+    return await SalesPlanService().delete_sales_plan(db, plan_id)
+
+
+@router.post("/sales-plans/{plan_id}/export")
+async def export_sales_plan_excel(
+    plan_id: int,
+    plan_type: str = Query(..., description="value atau unit"),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Export Sales Plan ke Excel (S1 Value atau S2 Unit)."""
+    return await SalesPlanService().export_excel(db, plan_id, plan_type, user.username)
 
 
 # ── Exchange Rates ─────────────────────────────────────────────────────────────
