@@ -166,6 +166,7 @@ export const pacApi = {
   getSetupModule:       (id)   => api.get(`/dashboard/pac/setup-modules/${id}`),
   upsertSetupModule:    (body) => api.post("/dashboard/pac/setup-modules", body),
   deleteSetupModule:    (id)   => api.delete(`/dashboard/pac/setup-modules/${id}`),
+  generateOutlook:      (body) => api.post("/dashboard/pac/setup-modules/generate-outlook", body),
 
   // Exchange Rates
   getExchangeRates:    (refresh = false) => api.get("/dashboard/pac/exchange-rates", { params: { refresh } }),

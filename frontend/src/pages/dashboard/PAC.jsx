@@ -3,7 +3,7 @@ import {
   Banknote, ExternalLink, RefreshCw, Filter, X,
   Download, Loader2, TrendingUp, TrendingDown, Minus,
   BookOpen, Plus, Trash2, Save, Printer, ChevronDown, ChevronRight,
-  CheckCircle, Clock, Edit3, FileText, Globe, Upload, AlertCircle, Settings, Calendar, BookOpenCheck,
+  CheckCircle, Clock, Edit3, FileText, Globe, Upload, AlertCircle, Calendar, BookOpenCheck, Sparkles,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line,
@@ -15,7 +15,6 @@ import { pacApi } from "@/api/dashboard";
 
 /* ─── Tabs ────────────────────────────────────────── */
 const TABS = [
-  { id: "setup",    icon: Settings,   color: "text-sky-400",    bg: "bg-sky-500/10",    activeBorder: "border-sky-500/40",    label: "Setup"              },
   { id: "bizplan",  icon: BookOpen,   color: "text-violet-400", bg: "bg-violet-500/10", activeBorder: "border-violet-500/40", label: "Business Plan"       },
   { id: "budget",   icon: Banknote,   color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Budget Usage Report" },
   { id: "mt940",    icon: Banknote,   color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "BCA MT940 Upload"    },
@@ -46,12 +45,12 @@ const MONTH_NAMES = ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","O
 
 /* ─── Main ───────────────────────────────────────── */
 export default function PACDashboard() {
-  const [activeTab, setActiveTab] = useState("setup");
+  const [activeTab, setActiveTab] = useState("bizplan");
 
   return (
     <div className="p-6 space-y-4">
       {/* Tab Buttons */}
-      <div className="grid grid-cols-5 gap-2">
+      <div className="grid grid-cols-4 gap-2">
         {TABS.map((tab) => {
           const active = activeTab === tab.id;
           return (
@@ -72,7 +71,6 @@ export default function PACDashboard() {
         })}
       </div>
 
-      {activeTab === "setup"    && <SetupSection />}
       {activeTab === "bizplan"  && <BusinessPlanSection />}
       {activeTab === "budget"   && <BudgetUsageSection />}
       {activeTab === "mt940"    && <MT940Section />}
@@ -89,6 +87,7 @@ const BP_SUBTABS = [
   { id: "managerial", label: "Managerial Objective", icon: BookOpen },
   { id: "strategy",   label: "Strategy & Action Plan", icon: FileText },
   { id: "history",    label: "Document List",          icon: Clock    },
+  { id: "setup",      label: "Setup",                   icon: Settings },
 ];
 
 const ROMAN = ["i","ii","iii","iv","v","vi","vii","viii","ix","x"];
@@ -693,6 +692,7 @@ function BusinessPlanSection() {
       {subTab === "managerial" && <SectionCard title="Managerial Objective" subtitle={`PT CKD OTTO Pharmaceuticals · ${year} Business Plan`}><MOPanel year={year} /></SectionCard>}
       {subTab === "strategy"   && <SectionCard title="Strategy & Action Plan" subtitle={`Per department · ${year} Business Plan`}><SPPanel year={year} /></SectionCard>}
       {subTab === "history"    && <SectionCard title="Document List" subtitle={`All Business Plan documents for ${year}`}><BPHistoryPanel year={year} /></SectionCard>}
+      {subTab === "setup"      && <SetupSection year={year} />}
     </div>
   );
 }
@@ -1647,9 +1647,8 @@ const SETUP_SUBTABS = [
   { id: "outlook",   label: "Outlook",    icon: Globe,         color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40" },
 ];
 
-function SetupSection() {
+function SetupSection({ year }) {
   const [subTab, setSubTab] = useState("schedule");
-  const [year, setYear] = useState(new Date().getFullYear());
 
   return (
     <div className="space-y-4">
@@ -1665,19 +1664,17 @@ function SetupSection() {
           ))}
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-500">Plan Year</label>
-          <select value={year} onChange={e => setYear(Number(e.target.value))}
-            className="bg-gray-800 border border-gray-700 rounded-md px-2 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-sky-500/60">
-            {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
+          <label className="text-xs text-gray-500">Plan Year: <span className="text-sky-400 font-bold">{year}</span></label>
         </div>
       </div>
-      {subTab === "schedule"  && <section className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden"><div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40"><h3 className="text-sm font-semibold text-gray-200">Business Plan Schedule</h3><p className="text-xs text-gray-500 mt-0.5">{year} Business Plan · Timeline</p></div><div className="p-4"><SchedulePanel year={year} /></div></section>}
-      {subTab === "guideline" && <section className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden"><div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40"><h3 className="text-sm font-semibold text-gray-200">Business Plan Guideline</h3><p className="text-xs text-gray-500 mt-0.5">{year} Business Plan · Guidelines</p></div><div className="p-4"><GuidelinePanel year={year} /></div></section>}
-      {subTab === "outlook"   && <section className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden"><div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40"><h3 className="text-sm font-semibold text-gray-200">Business Plan Outlook</h3><p className="text-xs text-gray-500 mt-0.5">{year} Business Plan · Outlook</p></div><div className="p-4"><OutlookPanel year={year} /></div></section>}
+      {subTab === "schedule"  && <SchedulePanel year={year} />}
+      {subTab === "guideline" && <GuidelinePanel year={year} />}
+      {subTab === "outlook"   && <OutlookPanel year={year} />}
     </div>
   );
 }
+
+/* ══ Schedule Panel ═══════════════════════════════════════════════════════════ */
 
 const DEFAULT_SCHEDULE = {
   subtitle: "Timeline of {year} Business Plan",
@@ -1700,6 +1697,19 @@ const DEFAULT_SCHEDULE = {
     { no: 16, activity: "Reporting business plan {year} to President Director", date: "Dec 12", day: "Wednesday", sales: "x", development: "x", plant: "x", admin: "x", director: "x", remarks: "President Director" },
   ],
 };
+
+const SCHEDULE_COLUMNS = [
+  { key: "no", label: "No", width: "w-10", align: "center" },
+  { key: "activity", label: "Activity Description", width: "flex-1 min-w-[280px]", align: "left" },
+  { key: "date", label: "Submission Date", width: "w-28", align: "center" },
+  { key: "day", label: "Day", width: "w-20", align: "center" },
+  { key: "sales", label: "Sales & Mkt", width: "w-16", align: "center" },
+  { key: "development", label: "Strategic Dev", width: "w-20", align: "center" },
+  { key: "plant", label: "Plant", width: "w-16", align: "center" },
+  { key: "admin", label: "Admin", width: "w-16", align: "center" },
+  { key: "director", label: "P. Director", width: "w-20", align: "center" },
+  { key: "remarks", label: "Remarks", width: "w-28", align: "center" },
+];
 
 function SchedulePanel({ year }) {
   const [data, setData] = useState(null);
@@ -1750,12 +1760,11 @@ function SchedulePanel({ year }) {
   if (!data) return null;
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-500">Year: <span className="text-sky-400 font-bold">{year}</span></span>
-          <span className="text-xs text-gray-500">Module: <span className="text-gray-300">Schedule</span></span>
-          {data.id && <span className={`text-xs px-2 py-0.5 rounded-full border ${data.status === 'final' ? 'text-green-400 border-green-500/30 bg-green-500/10' : 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10'}`}>{data.status === 'final' ? '✓ Final' : 'Draft'}</span>}
+    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-200">Business Plan Schedule</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Timeline & Schedule · {year}</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => setData(prev => Object.assign({}, prev, { status: prev.status === 'final' ? 'draft' : 'final' }))}
@@ -1772,30 +1781,42 @@ function SchedulePanel({ year }) {
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="bg-gray-800/80">
-              {["No","Activity","Date","Day","Sales & Marketing","Strategic Development","Plant","Admin","P. Director","Remarks"].map(h => (
-                <th key={h} className="px-2 py-2.5 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
+              {SCHEDULE_COLUMNS.map(col => (
+                <th key={col.key} className={`${col.width} px-3 py-2.5 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${col.align === 'center' ? 'text-center' : ''}`}>{col.label}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {(data.content.activities || []).map((act, i) => (
-              <tr key={i} className="border-b border-gray-800 hover:bg-gray-800/30">
-                <td className="px-2 py-1.5 border border-gray-700 text-center font-bold text-gray-400 w-8">{act.no}</td>
-                <td className="px-2 py-1.5 border border-gray-700">
-                  <textarea rows={1} className={`${TA} py-1 text-[11px]`} value={act.activity} onChange={e => updateActivity(i, "activity", e.target.value)} />
+              <tr key={i} className={`border-b border-gray-800 transition-colors ${i % 2 === 0 ? 'bg-gray-900' : 'bg-gray-900/40'} hover:bg-gray-800/50`}>
+                <td className="px-3 py-2 border border-gray-700 text-center font-bold text-gray-400">{act.no}</td>
+                <td className="px-3 py-2 border border-gray-700">
+                  <textarea rows={1} className={`${TA} !py-1.5 !text-xs w-full`} value={act.activity} onChange={e => updateActivity(i, "activity", e.target.value)} />
                 </td>
-                <td className="px-2 py-1.5 border border-gray-700 text-center w-20">
-                  <input className={`${INP} text-center py-1 text-[11px]`} value={act.date} onChange={e => updateActivity(i, "date", e.target.value)} />
+                <td className="px-3 py-2 border border-gray-700 text-center">
+                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.date} onChange={e => updateActivity(i, "date", e.target.value)} />
                 </td>
-                <td className="px-2 py-1.5 border border-gray-700 text-center w-24">
-                  <input className={`${INP} text-center py-1 text-[11px]`} value={act.day} onChange={e => updateActivity(i, "day", e.target.value)} />
+                <td className="px-3 py-2 border border-gray-700 text-center">
+                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.day} onChange={e => updateActivity(i, "day", e.target.value)} />
                 </td>
-                <td className="px-2 py-1.5 border border-gray-700 text-center w-16"><input className={`${INP} text-center py-1 text-[11px]`} value={act.sales} onChange={e => updateActivity(i, "sales", e.target.value)} /></td>
-                <td className="px-2 py-1.5 border border-gray-700 text-center w-28"><input className={`${INP} text-center py-1 text-[11px]`} value={act.development} onChange={e => updateActivity(i, "development", e.target.value)} /></td>
-                <td className="px-2 py-1.5 border border-gray-700 text-center w-16"><input className={`${INP} text-center py-1 text-[11px]`} value={act.plant} onChange={e => updateActivity(i, "plant", e.target.value)} /></td>
-                <td className="px-2 py-1.5 border border-gray-700 text-center w-24"><input className={`${INP} text-center py-1 text-[11px]`} value={act.admin} onChange={e => updateActivity(i, "admin", e.target.value)} /></td>
-                <td className="px-2 py-1.5 border border-gray-700 text-center w-20"><input className={`${INP} text-center py-1 text-[11px]`} value={act.director} onChange={e => updateActivity(i, "director", e.target.value)} /></td>
-                <td className="px-2 py-1.5 border border-gray-700 w-28"><input className={`${INP} py-1 text-[11px]`} value={act.remarks} onChange={e => updateActivity(i, "remarks", e.target.value)} /></td>
+                <td className="px-3 py-2 border border-gray-700 text-center">
+                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.sales} onChange={e => updateActivity(i, "sales", e.target.value)} />
+                </td>
+                <td className="px-3 py-2 border border-gray-700 text-center">
+                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.development} onChange={e => updateActivity(i, "development", e.target.value)} />
+                </td>
+                <td className="px-3 py-2 border border-gray-700 text-center">
+                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.plant} onChange={e => updateActivity(i, "plant", e.target.value)} />
+                </td>
+                <td className="px-3 py-2 border border-gray-700 text-center">
+                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.admin} onChange={e => updateActivity(i, "admin", e.target.value)} />
+                </td>
+                <td className="px-3 py-2 border border-gray-700 text-center">
+                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.director} onChange={e => updateActivity(i, "director", e.target.value)} />
+                </td>
+                <td className="px-3 py-2 border border-gray-700 text-center">
+                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.remarks} onChange={e => updateActivity(i, "remarks", e.target.value)} />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -1805,10 +1826,13 @@ function SchedulePanel({ year }) {
   );
 }
 
+/* ══ Guideline Panel ══════════════════════════════════════════════════════════ */
+
 const DEFAULT_GUIDELINE = {
   sections: [
     {
       title: "1. Working Days",
+      icon: "📅",
       items: [
         { label: "Jan", value: 22 }, { label: "Feb", value: 20 }, { label: "Mar", value: 23 },
         { label: "Apr", value: 21 }, { label: "May", value: 22 }, { label: "Jun", value: 20 },
@@ -1818,6 +1842,7 @@ const DEFAULT_GUIDELINE = {
     },
     {
       title: "2. Economic Indicator for Budgeting",
+      icon: "📊",
       items: [
         { label: "Exchange Rate (IDR/USD)", value: "15,100 - 15,200" },
         { label: "Minimum Salary (UMR)", value: "Rp 5,000,000" },
@@ -1826,6 +1851,7 @@ const DEFAULT_GUIDELINE = {
     },
     {
       title: "3. Meeting & Business Trip",
+      icon: "✈️",
       items: [
         { label: "Domestic — Director", value: "Rp 800,000 / day" },
         { label: "Domestic — General Manager", value: "Rp 700,000 / day" },
@@ -1885,12 +1911,11 @@ function GuidelinePanel({ year }) {
   if (!data) return null;
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-500">Year: <span className="text-teal-400 font-bold">{year}</span></span>
-          <span className="text-xs text-gray-500">Module: <span className="text-gray-300">Guideline</span></span>
-          {data.id && <span className={`text-xs px-2 py-0.5 rounded-full border ${data.status === 'final' ? 'text-green-400 border-green-500/30 bg-green-500/10' : 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10'}`}>{data.status === 'final' ? '✓ Final' : 'Draft'}</span>}
+    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-200">Business Plan Guideline</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Guidelines & Parameters · {year}</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => setData(prev => prev ? Object.assign({}, prev, { status: prev.status === 'final' ? 'draft' : 'final' }) : prev)}
@@ -1903,32 +1928,37 @@ function GuidelinePanel({ year }) {
           </button>
         </div>
       </div>
-      <div className="space-y-4">
-        {(data.content.sections || []).map((section, si) => (
-          <div key={si} className="rounded-lg border border-gray-700/50 bg-gray-800/30 overflow-hidden">
-            <div className="px-4 py-2.5 bg-gray-800/50 border-b border-gray-700">
-              <span className="text-xs font-semibold text-teal-400">{section.title}</span>
+      <div className="p-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {(data.content.sections || []).map((section, si) => (
+            <div key={si} className="rounded-xl border border-gray-700/60 bg-gray-800/40 overflow-hidden">
+              <div className="px-4 py-3 bg-gray-800/60 border-b border-gray-700 flex items-center gap-2">
+                <span className="text-lg">{section.icon}</span>
+                <span className="text-xs font-bold text-teal-400 uppercase tracking-wider">{section.title}</span>
+              </div>
+              <div className="p-3">
+                <table className="w-full">
+                  <tbody>
+                    {section.items.map((item, ii) => (
+                      <tr key={ii} className="border-b border-gray-800 last:border-0">
+                        <td className="py-2.5 pr-3 text-xs text-gray-400 font-medium w-32 whitespace-nowrap">{item.label}</td>
+                        <td className="py-2.5">
+                          <input className={`${INP} w-full !text-xs`} value={item.value} onChange={e => updateItem(si, ii, "value", e.target.value)} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-            <div className="p-3">
-              <table className="w-full">
-                <tbody>
-                  {section.items.map((item, ii) => (
-                    <tr key={ii} className="border-b border-gray-800 last:border-0">
-                      <td className="py-2 pr-4 text-xs text-gray-400 w-48 whitespace-nowrap">{item.label}</td>
-                      <td className="py-2">
-                        <input className={`${INP} w-full`} value={item.value} onChange={e => updateItem(si, ii, "value", e.target.value)} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </div>
   );
 }
+
+/* ══ Outlook Panel ═══════════════════════════════════════════════════════════ */
 
 const DEFAULT_OUTLOOK = {
   global_economic: {
@@ -1972,6 +2002,7 @@ function OutlookPanel({ year }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1999,6 +2030,24 @@ function OutlookPanel({ year }) {
     });
   };
 
+  const generateWithAI = async () => {
+    setGenerating(true);
+    try {
+      const res = await pacApi.generateOutlook({ year });
+      if (res.success && res.data) {
+        setData(res.data);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 3000);
+      } else {
+        alert(res.error || "Failed to generate outlook");
+      }
+    } catch (e) {
+      alert("Failed to generate outlook: " + e.message);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const save = async () => {
     setSaving(true);
     try {
@@ -2011,15 +2060,25 @@ function OutlookPanel({ year }) {
   if (loading) return <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>;
   if (!data) return null;
 
+  const sectionColors = {
+    global_economic: { border: "border-blue-500/30", bg: "bg-blue-500/5", header: "bg-blue-500/10", title: "text-blue-400", icon: "🌍" },
+    indonesia_economic: { border: "border-amber-500/30", bg: "bg-amber-500/5", header: "bg-amber-500/10", title: "text-amber-400", icon: "🏛️" },
+    pharmaceutical: { border: "border-emerald-500/30", bg: "bg-emerald-500/5", header: "bg-emerald-500/10", title: "text-emerald-400", icon: "💊" },
+  };
+
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-gray-500">Year: <span className="text-indigo-400 font-bold">{year}</span></span>
-          <span className="text-xs text-gray-500">Module: <span className="text-gray-300">Outlook</span></span>
-          {data.id && <span className={`text-xs px-2 py-0.5 rounded-full border ${data.status === 'final' ? 'text-green-400 border-green-500/30 bg-green-500/10' : 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10'}`}>{data.status === 'final' ? '✓ Final' : 'Draft'}</span>}
+    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-200">Business Plan Outlook</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Economic & Industry Outlook · {year}</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={generateWithAI} disabled={generating}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 transition-all disabled:opacity-50">
+            {generating ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+            {generating ? "Generating…" : "AI Generate"}
+          </button>
           <button onClick={() => setData(prev => prev ? Object.assign({}, prev, { status: prev.status === 'final' ? 'draft' : 'final' }) : prev)}
             className={BTN_SM(data.status === 'final' ? 'gray' : 'green')}>
             <CheckCircle size={11} /> {data.status === 'final' ? 'Mark Draft' : 'Mark Final'}
@@ -2030,23 +2089,31 @@ function OutlookPanel({ year }) {
           </button>
         </div>
       </div>
-      <div className="space-y-4">
-        {["global_economic", "indonesia_economic", "pharmaceutical"].map(secKey => (
-          <div key={secKey} className="rounded-lg border border-gray-700/50 bg-gray-800/30 overflow-hidden">
-            <div className="px-4 py-2.5 bg-gray-800/50 border-b border-gray-700">
-              <span className="text-xs font-semibold text-indigo-400">{data.content[secKey].title}</span>
-            </div>
-            <div className="p-3">
-              {data.content[secKey].items.map((item, ii) => (
-                <div key={ii} className="flex items-start gap-3 mb-3 last:mb-0">
-                  <span className="text-xs text-gray-500 w-32 shrink-0 pt-1.5">{item.label}</span>
-                  <textarea rows={2} className={`${TA} text-[11px]`} value={item.value} onChange={e => updateItem(secKey, ii, "value", e.target.value)} />
+      <div className="p-5 space-y-4">
+        {["global_economic", "indonesia_economic", "pharmaceutical"].map(secKey => {
+          const colors = sectionColors[secKey];
+          return (
+            <div key={secKey} className={`rounded-xl border ${colors.border} ${colors.bg} overflow-hidden`}>
+              <div className={`px-4 py-2.5 border-b border-gray-700 ${colors.header} flex items-center gap-2`}>
+                <span className="text-sm">{colors.icon}</span>
+                <span className={`text-xs font-bold uppercase tracking-wider ${colors.title}`}>{data.content[secKey].title}</span>
+              </div>
+              <div className="p-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {data.content[secKey].items.map((item, ii) => (
+                    <div key={ii} className="flex items-start gap-3">
+                      <span className="text-xs text-gray-500 w-32 shrink-0 pt-1 font-medium">{item.label}</span>
+                      <textarea rows={2} className={`${TA} !text-xs flex-1`} value={item.value} onChange={e => updateItem(secKey, ii, "value", e.target.value)} />
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
 }
+
+/* ─── Section: Budget Usage Report ──────────────── */

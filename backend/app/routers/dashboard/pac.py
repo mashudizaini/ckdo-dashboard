@@ -13,6 +13,7 @@ Endpoints:
   DELETE /business-plans/{id}     — Delete document
 """
 import asyncio
+import json
 from fastapi import APIRouter, Depends, Query
 from typing import Optional
 from pydantic import BaseModel
@@ -22,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.pac_service import PACService
 from app.services.business_plan_service import BusinessPlanService
 from app.services.business_plan_setup_service import BusinessPlanSetupService
+from app.services.ai_service import AIService
 from app.services import exchange_rate_service
 
 router = APIRouter()
@@ -153,6 +155,71 @@ async def delete_setup_module(
 ):
     """Delete setup module document."""
     return await BusinessPlanSetupService().delete_setup(db, setup_id)
+
+
+class GenerateOutlookRequest(BaseModel):
+    year: int
+    context: Optional[str] = None
+
+
+@router.post("/setup-modules/generate-outlook")
+async def generate_outlook(
+    body: GenerateOutlookRequest,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """
+    Generate Business Plan Outlook content using AI based on the selected year.
+    Returns structured outlook data that can be saved via upsert.
+    """
+    ai = AIService()
+    prompt = f"""Generate a comprehensive Business Plan Outlook for PT CKD OTTO Pharmaceuticals for year {body.year}.
+{f'Additional context: {body.context}' if body.context else ''}
+
+Return ONLY valid JSON with this exact structure:
+{{
+  "global_economic": {{
+    "title": "I. Global Economic Outlook",
+    "items": [
+      {{"label": "Global GDP Forecast", "value": "..."}},
+      {{"label": "Key Factor 1", "value": "..."}},
+      {{"label": "Key Factor 2", "value": "..."}},
+      {{"label": "Fed Interest Rate", "value": "..."}},
+      {{"label": "Global Inflation", "value": "..."}}
+    ]
+  }},
+  "indonesia_economic": {{
+    "title": "II. Indonesia Economic Outlook",
+    "items": [
+      {{"label": "GDP Forecast", "value": "..."}},
+      {{"label": "Inflation", "value": "..."}},
+      {{"label": "Interest Rate", "value": "..."}},
+      {{"label": "Exchange Rate", "value": "..."}},
+      {{"label": "Government Focus", "value": "..."}}
+    ]
+  }},
+  "pharmaceutical": {{
+    "title": "III. Pharmaceutical Industry",
+    "items": [
+      {{"label": "Global Market", "value": "..."}},
+      {{"label": "Indonesia Market", "value": "..."}},
+      {{"label": "Oncology", "value": "..."}},
+      {{"label": "CKD OTTO Strategy", "value": "..."}}
+    ]
+  }}
+}}
+
+Make it realistic for {body.year} with specific numbers and trends. Keep values concise but informative."""
+
+    try:
+        response = await ai.generate_chat_completion([
+            {"role": "system", "content": "You are a business analyst. Return only valid JSON, no markdown, no explanations."},
+            {"role": "user", "content": prompt}
+        ])
+        content = json.loads(response)
+        return {"success": True, "data": {"setup_module": "outlook", "plan_year": body.year, "content": content, "status": "draft"}}
+    except Exception as e:
+        return {"success": False, "error": f"Failed to generate outlook: {str(e)}", "data": None}
 
 
 # ── Exchange Rates ─────────────────────────────────────────────────────────────
