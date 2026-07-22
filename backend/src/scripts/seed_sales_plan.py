@@ -13,7 +13,7 @@ from openpyxl import load_workbook
 from app.database import async_engine, Base, get_db
 from app.models.sales_plan import SalesPlan
 
-XLSX_PATH = "../../sumber/(S1) Sales plan_Value_Local_FY 2026_Scenario 2.xlsx"
+XLSX_PATH = "sumber/(S1) Sales plan_Value_Local_FY 2026_Scenario 2.xlsx"
 
 
 def read_sheet(ws):
@@ -51,7 +51,7 @@ async def seed():
     sheets_to_read = [
         ("Sales plan_V_Total", "Total", ""),
         ("Sales plan_V_National_Public", "National", "Public"),
-        ("Sales plan_V_National_Private", "National", "Private"),
+        ("Sales plan_V_National_Private ", "National", "Private"),
         ("Sales plan_V_West_Public", "West", "Public"),
         ("Sales plan_V_West_Private", "West", "Private"),
         ("Sales plan_V_East_Public", "East", "Public"),

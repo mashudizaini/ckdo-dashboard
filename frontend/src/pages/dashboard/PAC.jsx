@@ -2179,11 +2179,11 @@ function DataCollectionPanel({ year }) {
 
 const DEFAULT_SALES_PLAN_CONTENT = {
   headers: ["No", "Product / Description", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total"],
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total Value", "Total Unit", "Price (Rp)"],
   rows: [
-    ["1", "Product A", 100, 120, 110, 130, 140, 150, 160, 170, 180, 190, 200, 210, 1960],
-    ["2", "Product B", 200, 210, 220, 230, 240, 250, 260, 270, 280, 290, 300, 310, 3060],
-    ["3", "Product C", 150, 160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 260, 2460],
+    ["1", "Product A", 100, 120, 110, 130, 140, 150, 160, 170, 180, 190, 200, 210, 1960, 12, 50000],
+    ["2", "Product B", 200, 210, 220, 230, 240, 250, 260, 270, 280, 290, 300, 310, 3060, 15, 75000],
+    ["3", "Product C", 150, 160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 260, 2460, 10, 60000],
   ],
 };
 
@@ -2374,29 +2374,40 @@ function SalesPlanPanel({ year }) {
                 ))}
               </select>
             </div>
-            {selectedPlan && (
-              <div className="overflow-x-auto border border-gray-700 rounded-lg">
-                <table className="w-full border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-gray-800/80">
-                      {["No", "Product / Description", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total"].map(h => (
-                        <th key={h} className="px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(selectedPlan.content.rows || []).map((row, i) => (
-                      <tr key={i} className="border-b border-gray-800 hover:bg-gray-800/30">
-                        <td className="px-2 py-1.5 border border-gray-700 text-center w-8">{row[0]}</td>
-                        <td className="px-2 py-1.5 border border-gray-700">{row[1]}</td>
-                        {row.slice(2, 14).map((val, ci) => (
-                          <td key={ci} className="px-2 py-1.5 border border-gray-700 text-right font-mono">{Number(val).toLocaleString()}</td>
+            {selectedPlan && selectedPlan.content && (
+              <div className="space-y-3">
+                {(selectedPlan.content.meta || selectedPlan.content).area && (
+                  <div className="flex items-center gap-3 text-xs text-gray-400">
+                    <span className="px-2 py-1 rounded bg-violet-500/10 border border-violet-500/30 text-violet-300 font-medium">{selectedPlan.content.meta?.area || 'Total'}</span>
+                    {selectedPlan.content.meta?.type && <span className="px-2 py-1 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-medium">{selectedPlan.content.meta.type}</span>}
+                    <span className="text-gray-500">{selectedPlan.department} / {selectedPlan.team_code} - {selectedPlan.team_name}</span>
+                  </div>
+                )}
+                <div className="overflow-x-auto border border-gray-700 rounded-lg">
+                  <table className="w-full border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-gray-800/80">
+                        {(selectedPlan.content.headers || DEFAULT_SALES_PLAN_CONTENT.headers).map((h, ci) => (
+                          <th key={ci} className={`px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${ci >= 2 && ci <= 13 ? 'text-center w-16' : ci === 14 || ci === 15 ? 'text-right w-20' : ''}`}>{h}</th>
                         ))}
-                        <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-violet-400">{Number(row[14]).toLocaleString()}</td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {(selectedPlan.content.rows || []).map((row, i) => (
+                        <tr key={i} className="border-b border-gray-800 hover:bg-gray-800/30">
+                          <td className="px-2 py-1.5 border border-gray-700 text-center w-8">{row[0]}</td>
+                          <td className="px-2 py-1.5 border border-gray-700">{row[1]}</td>
+                          {row.slice(2, 14).map((val, ci) => (
+                            <td key={ci} className="px-2 py-1.5 border border-gray-700 text-right font-mono">{Number(val || 0).toLocaleString()}</td>
+                          ))}
+                          <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-violet-400">{Number(row[14] || 0).toLocaleString()}</td>
+                          <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-sky-400">{Number(row[15] || 0).toLocaleString()}</td>
+                          <td className="px-2 py-1.5 border border-gray-700 text-right font-mono text-xs text-gray-400">{row[16] ? Number(row[16]).toLocaleString() : '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </>
@@ -2432,8 +2443,8 @@ function SalesPlanPanel({ year }) {
               <table className="w-full border-collapse text-xs">
                 <thead>
                   <tr className="bg-gray-800/80">
-                    {["No", "Product / Description", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total"].map((h, ci) => (
-                      <th key={h} className={`px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${ci >= 2 ? 'text-center w-16' : ''}`}>{h}</th>
+                    {(form.content.headers || DEFAULT_SALES_PLAN_CONTENT.headers).map((h, ci) => (
+                      <th key={ci} className={`px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${ci >= 2 && ci <= 13 ? 'text-center w-16' : ci === 14 || ci === 15 ? 'text-right w-20' : ''}`}>{h}</th>
                     ))}
                     <th className="px-2 py-2 text-center border border-gray-700 w-10"></th>
                   </tr>
@@ -2450,7 +2461,9 @@ function SalesPlanPanel({ year }) {
                           <input type="number" className={`${INP} !text-center !text-xs font-mono`} value={val} onChange={e => updateCell(ri, ci + 2, e.target.value)} />
                         </td>
                       ))}
-                      <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-violet-400">{Number(row[14]).toLocaleString()}</td>
+                      <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-violet-400">{Number(row[14] || 0).toLocaleString()}</td>
+                      <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-sky-400">{Number(row[15] || 0).toLocaleString()}</td>
+                      <td className="px-2 py-1.5 border border-gray-700 text-right font-mono text-xs text-gray-400">{row[16] ? Number(row[16]).toLocaleString() : '-'}</td>
                       <td className="px-2 py-1.5 border border-gray-700 text-center">
                         <button onClick={() => removeRow(ri)} className={BTN_SM("red")}><Trash2 size={9} /></button>
                       </td>
@@ -2464,6 +2477,7 @@ function SalesPlanPanel({ year }) {
                       <td key={ci} className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-gray-200">{grandTotal(ci).toLocaleString()}</td>
                     ))}
                     <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-violet-400">{grandTotal(14).toLocaleString()}</td>
+                    <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-sky-400">{grandTotal(15).toLocaleString()}</td>
                     <td></td>
                   </tr>
                 </tfoot>
