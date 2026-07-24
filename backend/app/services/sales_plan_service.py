@@ -80,6 +80,121 @@ class SalesPlanService:
         await db.refresh(row)
         return {"success": True, "data": self._to_dict(row)}
 
+    async def import_excel(self, db: AsyncSession, file_bytes: bytes, plan_year: int, username: str) -> dict:
+        """Parse an uploaded Excel matching the "(S1) Sales plan_Value.xlsx"
+        template — meta at A6/C6 (Type), A8/C8 (Area), A10/C10 (Department),
+        A12/C12+D12 (Team Code/Name); two-row header at 14-15 (No, Product,
+        Jan-Dec, Total Value, Total Unit, Price); data from row 16. Same
+        layout the existing seed script (seed_sales_plan.py) already reads."""
+        import io
+        from openpyxl import load_workbook
+
+        try:
+            wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
+        except Exception as e:
+            return {"success": False, "error": f"Could not read Excel file: {e}"}
+
+        ws = wb.worksheets[0]
+        meta = {
+            "type":       ws.cell(row=6,  column=3).value or "",
+            "area":       ws.cell(row=8,  column=3).value or "",
+            "department": ws.cell(row=10, column=3).value or "",
+            "team_code":  ws.cell(row=12, column=3).value or "",
+            "team_name":  str(ws.cell(row=12, column=4).value or "").lstrip("/ ").strip(),
+        }
+
+        def _num(v):
+            # Blank template cells sometimes hold a stray placeholder like
+            # "\" instead of being truly empty — anything non-numeric just
+            # means "no value yet", not a parse error.
+            try:
+                return int(v or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        headers = ["No", "Product", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total Value", "Total Unit", "Price (Rp)"]
+        rows = []
+        for r in range(16, ws.max_row + 1):
+            no = ws.cell(row=r, column=1).value
+            product = ws.cell(row=r, column=2).value
+            if no is None or product is None:
+                continue
+            months = [_num(ws.cell(row=r, column=c).value) for c in range(4, 16)]  # D-O
+            total_value = _num(ws.cell(row=r, column=16).value)
+            total_unit  = _num(ws.cell(row=r, column=17).value)
+            price       = ws.cell(row=r, column=18).value
+            price       = price if isinstance(price, (int, float)) else ""
+            rows.append([no, str(product), *months, total_value, total_unit, price])
+
+        if not rows:
+            return {"success": False, "error": "No data rows found starting at row 16 — file doesn't match the expected template"}
+
+        content = {"headers": headers, "rows": rows, "meta": meta}
+        payload = {
+            "plan_year":  plan_year,
+            "department": meta["department"],
+            "team_code":  str(meta["team_code"]),
+            "team_name":  meta["team_name"],
+            "plan_type":  "value",
+            "content":    content,
+            "status":     "draft",
+        }
+        result = await self.upsert_sales_plan(db, payload, username)
+        if result["success"]:
+            result["rows_imported"] = len(rows)
+        return result
+
+    async def get_gross_sales_report_data(self, db: AsyncSession, plan_year: int) -> dict:
+        """Flatten every Sales Plan (Value) product row for the given year
+        into report lines for the Gross Sales Report export — Market comes
+        from each plan's [ Type ] meta, Customer from [ Area ], matching how
+        output_grossales2026.xlsx's Market/Customer columns are populated.
+        The S1 template's Jan-Dec cells hold monthly Sales VALUE (Rp), not
+        quantity — confirmed against a real dev record where row[14] (Total
+        Value) and row[15] (Total Unit) exactly match output_grossales2026's
+        Sales Amount Total / Sales Quantity Total for the same product, and
+        row[Jan]/price divides out to the reference file's Sales Quantity
+        Jan exactly. So Amount is the real entered data; Quantity is derived
+        (Amount / Price) — the reverse of a plain qty*price sheet."""
+        q = select(SalesPlan).where(
+            SalesPlan.plan_year == plan_year,
+            SalesPlan.plan_type == "value",
+        ).order_by(SalesPlan.department, SalesPlan.team_code)
+        result = await db.execute(q)
+        plans = result.scalars().all()
+
+        lines = []
+        for plan in plans:
+            content = plan.content or {}
+            meta = content.get("meta", {})
+            market = meta.get("type", "") or ""
+            customer = meta.get("area", "") or ""
+            if not market:
+                # A blank [ Type ] marks a pre-aggregated rollup plan (e.g.
+                # area="Total") rather than a real market/customer segment —
+                # its monthly cells hold a second-order sum across other
+                # plans, so mixing it into the line-item report would
+                # double-count every product.
+                continue
+            for row in content.get("rows", []):
+                if len(row) < 17:
+                    continue
+                product = row[1]
+                amounts = [v if isinstance(v, (int, float)) else 0 for v in row[2:14]]
+                price = row[16] if isinstance(row[16], (int, float)) else 0
+                lines.append({
+                    "market": market,
+                    "customer": customer,
+                    "product": str(product or ""),
+                    "amounts": amounts,
+                    "price": price,
+                })
+
+        if not lines:
+            return {"success": False, "error": f"Tidak ada Sales Plan Data (Value) untuk tahun {plan_year}."}
+        return {"success": True, "data": lines, "plan_year": plan_year}
+
     async def delete_sales_plan(self, db: AsyncSession, plan_id: int) -> dict:
         row = await db.get(SalesPlan, plan_id)
         if not row:

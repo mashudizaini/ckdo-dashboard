@@ -1,4 +1,5 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   FileText, DollarSign, FileDown, RefreshCw,
   BarChart2, Package, Download, Search, Loader2, Layers, ClipboardList,
@@ -24,48 +25,20 @@ const TABS = [
 ];
 
 export default function AccountingDashboard() {
-  const [active, setActive] = useState("ap-invoice");
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Derive active tab from URL — navigation now lives in the sidebar tree menu.
+  const active = TABS.find((t) => location.pathname.endsWith(t.id))?.id ?? "ap-invoice";
+
+  useEffect(() => {
+    if (location.pathname === "/dashboard/accounting" || location.pathname === "/dashboard/accounting/") {
+      navigate("/dashboard/accounting/ap-invoice", { replace: true });
+    }
+  }, []); // eslint-disable-line
 
   return (
     <div className="p-6 space-y-4">
-      {/* Navigation Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10 }}>
-        {TABS.map((tab) => {
-          const isActive = active === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActive(tab.id)}
-              style={{
-                display: "flex", alignItems: "center", gap: 12,
-                padding: "14px 16px", borderRadius: 16, border: "none",
-                background: NEU.bg, cursor: "pointer",
-                boxShadow: isActive ? NEU.shadowIn : NEU.shadowOut,
-                transform: isActive ? "scale(0.98)" : "scale(1)",
-                transition: "all 0.2s ease",
-              }}
-            >
-              <div style={{
-                width: 36, height: 36, borderRadius: 10,
-                background: isActive ? tab.color : NEU.bg,
-                boxShadow: isActive ? "none" : NEU.shadowOutSm,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                transition: "all 0.2s ease",
-              }}>
-                <tab.icon size={16} style={{ color: isActive ? "#fff" : tab.color }} />
-              </div>
-              <span style={{
-                fontSize: 13, fontWeight: 700, letterSpacing: "0.01em",
-                color: isActive ? tab.color : "#475569",
-                transition: "color 0.2s ease",
-              }}>
-                {tab.label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
       {/* Content */}
       {active === "ap-invoice" && <APAutoInvoice />}
       {active === "cogs"       && <COGSReport />}

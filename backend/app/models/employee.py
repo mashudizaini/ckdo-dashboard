@@ -17,6 +17,7 @@ class Employee(Base):
     job_title       = Column(String(200))
     work_placement  = Column(String(100))
     status          = Column(String(50))       # Permanent / Contract
+    employment_status = Column(String(20), index=True)  # Active / Resign — which sheet (EMP Active / EMP Resign) the row came from
     date_of_joining = Column(Date)
     retire_date     = Column(Date)
     pkwt_ke         = Column(String(30))
@@ -24,6 +25,7 @@ class Employee(Base):
     end_pkwt        = Column(Date)
     permanent_date  = Column(Date)
     resign_date     = Column(Date)
+    resign_reason   = Column(Text)
     place_of_birth  = Column(String(100))
     date_of_birth   = Column(Date)
     no_bpjs_health  = Column(String(50))

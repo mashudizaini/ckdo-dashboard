@@ -46,6 +46,9 @@ export const hrApi = {
   getSummary: () => api.get("/dashboard/hr/summary"),
   getEmployees: (params) => api.get("/dashboard/hr/employees", { params }),
   getEmployee:  (userId) => api.get(`/dashboard/hr/employees/${userId}`),
+  createEmployee: (data)         => api.post("/dashboard/hr/employees", data),
+  updateEmployee: (userId, data) => api.put(`/dashboard/hr/employees/${userId}`, data),
+  resignEmployee: (userId, data) => api.post(`/dashboard/hr/employees/${userId}/resign`, data),
   getAttendance: (params) => api.get("/dashboard/hr/attendance", { params }),
   uploadLeave:     (form) => api.post("/dashboard/hr/leave/upload", form, { headers: { "Content-Type": undefined } }),
   getLeaveHistory: ()     => api.get("/dashboard/hr/leave/history"),
@@ -84,6 +87,17 @@ export const hrApi = {
   eMagazineUpload:     (form)          => api.post("/dashboard/hr/e-magazine/upload", form, { headers: { "Content-Type": "multipart/form-data" } }),
   eMagazineDelete:     (filename)      => api.delete(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}`),
   eMagazineUpdateQR:   (filename, qrs) => api.patch(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/qr-links`, qrs),
+
+  // Organization Structure (manual add/edit/delete org chart)
+  getOrgStructureTree:    ()          => api.get("/dashboard/hr/org-structure/tree"),
+  getOrgStructureList:    (p)         => api.get("/dashboard/hr/org-structure/list", { params: p }),
+  getOrgStructureLov:     ()          => api.get("/dashboard/hr/org-structure/lov"),
+  getOrgStructureDepts:   ()          => api.get("/dashboard/hr/org-structure/departments"),
+  createOrgStructureNode: (d)         => api.post("/dashboard/hr/org-structure", d),
+  updateOrgStructureNode: (id, d)     => api.put(`/dashboard/hr/org-structure/${id}`, d),
+  deleteOrgStructureNode: (id)        => api.delete(`/dashboard/hr/org-structure/${id}`),
+  importOrgStructure:     (form)      => api.post("/dashboard/hr/org-structure/import", form, { headers: { "Content-Type": "multipart/form-data" } }),
+  getOrgStructureUploadLogs: ()       => api.get("/dashboard/hr/org-structure/upload-logs"),
 };
 
 // EIS Dashboard — ported from the standalone eis-dashboard-v2 app.
@@ -174,6 +188,68 @@ export const pacApi = {
   upsertSalesPlan:      (body) => api.post("/dashboard/pac/sales-plans", body),
   deleteSalesPlan:      (id)   => api.delete(`/dashboard/pac/sales-plans/${id}`),
   exportSalesPlanExcel: (id, type) => api.post(`/dashboard/pac/sales-plans/${id}/export`, null, { params: { plan_type: type }, responseType: "blob" }),
+  uploadSalesPlanExcel: (file, planYear) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/dashboard/pac/sales-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
+  },
+  exportGrossSalesReport: (planYear) => api.get("/dashboard/pac/sales-plans/gross-sales-report", { params: { plan_year: planYear }, responseType: "blob" }),
+  exportSalesSummary: (planYear) => api.get("/dashboard/pac/sales-plans/sales-summary", { params: { plan_year: planYear }, responseType: "blob" }),
+
+  // Purchase Plan Material (Simulation)
+  listPurchasePlans:  (p)    => api.get("/dashboard/pac/purchase-plans", { params: p }),
+  getPurchasePlan:    (id)   => api.get(`/dashboard/pac/purchase-plans/${id}`),
+  upsertPurchasePlan: (body) => api.post("/dashboard/pac/purchase-plans", body),
+  deletePurchasePlan: (id)   => api.delete(`/dashboard/pac/purchase-plans/${id}`),
+  uploadPurchasePlanExcel: (file, planYear) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/dashboard/pac/purchase-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
+  },
+
+  // Personnel Plan (Simulation)
+  listPersonnelPlans:  (p)    => api.get("/dashboard/pac/personnel-plans", { params: p }),
+  getPersonnelPlan:    (id)   => api.get(`/dashboard/pac/personnel-plans/${id}`),
+  upsertPersonnelPlan: (body) => api.post("/dashboard/pac/personnel-plans", body),
+  deletePersonnelPlan: (id)   => api.delete(`/dashboard/pac/personnel-plans/${id}`),
+  uploadPersonnelPlanExcel: (file, planYear) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/dashboard/pac/personnel-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
+  },
+
+  // Manufacture Plan (Simulation)
+  listManufacturePlans:  (p)    => api.get("/dashboard/pac/manufacture-plans", { params: p }),
+  getManufacturePlan:    (id)   => api.get(`/dashboard/pac/manufacture-plans/${id}`),
+  upsertManufacturePlan: (body) => api.post("/dashboard/pac/manufacture-plans", body),
+  deleteManufacturePlan: (id)   => api.delete(`/dashboard/pac/manufacture-plans/${id}`),
+  uploadManufacturePlanExcel: (file, planYear) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/dashboard/pac/manufacture-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
+  },
+
+  // Investment Plan (Simulation)
+  listInvestmentPlans:  (p)    => api.get("/dashboard/pac/investment-plans", { params: p }),
+  getInvestmentPlan:    (id)   => api.get(`/dashboard/pac/investment-plans/${id}`),
+  upsertInvestmentPlan: (body) => api.post("/dashboard/pac/investment-plans", body),
+  deleteInvestmentPlan: (id)   => api.delete(`/dashboard/pac/investment-plans/${id}`),
+  uploadInvestmentPlanExcel: (file, planYear) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/dashboard/pac/investment-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
+  },
+
+  // OPEX Plan (Simulation)
+  listOpexPlans:  (p)    => api.get("/dashboard/pac/opex-plans", { params: p }),
+  getOpexPlan:    (id)   => api.get(`/dashboard/pac/opex-plans/${id}`),
+  upsertOpexPlan: (body) => api.post("/dashboard/pac/opex-plans", body),
+  deleteOpexPlan: (id)   => api.delete(`/dashboard/pac/opex-plans/${id}`),
+  uploadOpexPlanExcel: (file, planYear) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/dashboard/pac/opex-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
+  },
 
   // Exchange Rates
   getExchangeRates:    (refresh = false) => api.get("/dashboard/pac/exchange-rates", { params: { refresh } }),

@@ -102,8 +102,7 @@ export default function EmployeeUpload() {
       <div className="flex gap-3 rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3 text-sm text-blue-300">
         <AlertCircle size={15} className="mt-0.5 shrink-0" />
         <span>
-          Upload the standard Talenta employee export (sheet <strong>"Employee Data"</strong>, .xls/.xlsx/.xlsm).
-          This <strong>replaces all existing employee data</strong> with the contents of the uploaded file.
+          Upload the Employee Database template 
         </span>
       </div>
 

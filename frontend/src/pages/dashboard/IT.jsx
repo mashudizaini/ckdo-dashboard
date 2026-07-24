@@ -43,32 +43,7 @@ export default function ITDashboard() {
 
   return (
     <div className="p-6 space-y-4">
-      {/* Tab Buttons */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
-        {TABS.map((tab) => {
-          const active = activeId === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => navigate(`/dashboard/it/${tab.id}`)}
-              className={`flex items-center gap-3 rounded-lg border px-4 py-3 transition-all ${
-                active
-                  ? `${tab.bg} ${tab.activeBorder} ring-1 ring-inset ${tab.activeBorder}`
-                  : "bg-gray-900 border-gray-800 hover:border-gray-700 hover:bg-gray-800/60"
-              }`}
-            >
-              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${tab.bg} border ${tab.activeBorder}`}>
-                <tab.icon size={15} className={tab.color} />
-              </div>
-              <span className={`text-sm font-medium truncate ${active ? "text-white" : "text-gray-400"}`}>
-                {tab.label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Section Panels */}
+      {/* Section Panels — navigation now lives in the left sidebar tree menu */}
       {activeId === "server-monitoring" && <ServerMonitoringSection />}
       {activeId === "tablespace-usage"  && <TablespaceSection />}
       {activeId === "disk-usage"        && <DiskUsageSection />}

@@ -41,31 +41,7 @@ export default function PurchasingDashboard() {
 
   return (
     <div className="p-6 space-y-4">
-      {/* Tab Buttons */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
-        {TABS.map((tab) => {
-          const active = activeId === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => navigate(`/dashboard/purchasing/${tab.id}`)}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 transition-all ${
-                active
-                  ? `${tab.bg} ${tab.activeBorder} ring-1 ring-inset ${tab.activeBorder}`
-                  : "bg-gray-900 border-gray-800 hover:border-gray-700 hover:bg-gray-800/60"
-              }`}
-            >
-              <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${tab.bg} border ${tab.activeBorder}`}>
-                <tab.icon size={14} className={tab.color} />
-              </div>
-              <span className={`text-sm font-semibold leading-tight truncate ${active ? "text-white" : "text-gray-400"}`}>
-                {tab.label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
+      {/* Section Panels — navigation now lives in the left sidebar tree menu */}
       {activeId === "open-pr"             && <OpenPRSection />}
       {activeId === "purchase-history"    && <PurchaseHistorySection />}
       {activeId === "price-analysis"      && <PriceAnalysisSection />}
@@ -143,6 +119,11 @@ function OpenPRSection() {
   const [error,    setError]    = useState("");
   const [page,     setPage]     = useState(1);
   const [sort,     setSort]     = useState({ key: null, dir: "asc" });
+  const [matTypes, setMatTypes] = useState([]);
+
+  useEffect(() => {
+    purchasingApi.getMaterialTypes().then(r => { if (r.success) setMatTypes(r.data ?? []); }).catch(() => {});
+  }, []);
 
   const setFld = (k) => (e) => setF(p => ({ ...p, [k]: e.target.value }));
 
@@ -237,8 +218,7 @@ function OpenPRSection() {
           <Field label="Material Type">
             <select className={SELECT} value={f.material_type} onChange={setFld("material_type")}>
               <option value="">— All —</option>
-              <option value="Direct Material">Direct Material</option>
-              <option value="Indirect Material">Indirect Material</option>
+              {matTypes.map(t => <option key={t.tag} value={t.tag}>{t.tag}</option>)}
             </select>
           </Field>
           <Field label="Currency">
@@ -322,7 +302,7 @@ function OpenPRSection() {
                     <td className={`${TD} text-gray-400`}>{r.category_code}</td>
                     <td className={`${TD} text-gray-400`}>
                       <span className={`px-1.5 py-0.5 rounded text-xs border ${
-                        r.material_type === "Direct Material"
+                        r.material_type?.toUpperCase() === "DIRECT MATERIAL"
                           ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
                           : "bg-slate-500/10 text-slate-400 border-slate-500/30"
                       }`}>{r.material_type}</span>
@@ -1209,7 +1189,7 @@ function PHSummaryView({ data, loading, error }) {
             <tbody>
               {summary.typeArr.map((t, i) => (
                 <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30">
-                  <td className={`${TD} font-medium ${t.label === "Direct Material" ? "text-emerald-400" : "text-blue-400"}`}>{t.label}</td>
+                  <td className={`${TD} font-medium ${t.label?.toUpperCase() === "DIRECT MATERIAL" ? "text-emerald-400" : "text-blue-400"}`}>{t.label}</td>
                   <td className={`${TD} text-right text-green-400 font-medium`}>{fmtIDR(t.idr)}</td>
                   <td className={`${TD} text-right text-gray-400`}>{pct(t.idr)}</td>
                   <td className={`${TD} text-right text-gray-300`}>{fmtIDR(t.orig)}</td>
@@ -1415,11 +1395,12 @@ function PHGraphView({ data, loading, error, byItemData, byItemYears, bySupData,
           <p className="text-xs font-semibold text-gray-200">Spend Share by Type</p>
           {chartData.typeArr.map((t, i) => {
             const pct = chartData.totalIDR > 0 ? (t.value / chartData.totalIDR) * 100 : 0;
-            const color = t.name === "Direct Material" ? "bg-emerald-400" : "bg-blue-400";
+            const isDirect = t.name?.toUpperCase() === "DIRECT MATERIAL";
+            const color = isDirect ? "bg-emerald-400" : "bg-blue-400";
             return (
               <div key={i} className="space-y-1">
                 <div className="flex justify-between text-xs">
-                  <span className={t.name === "Direct Material" ? "text-emerald-300 font-medium" : "text-blue-300 font-medium"}>{t.name}</span>
+                  <span className={isDirect ? "text-emerald-300 font-medium" : "text-blue-300 font-medium"}>{t.name}</span>
                   <span className="text-gray-200">{pct.toFixed(1)}% · {fmtIDRShort(t.value)}</span>
                 </div>
                 <div className="h-2 rounded-full bg-gray-800">
@@ -1514,9 +1495,11 @@ function MonthlySpendSection() {
   const [error,    setError]    = useState("");
   const [chartMode, setChartMode] = useState("stacked");   // "stacked" | "yoy"
   const [page,     setPage]     = useState(1);
+  const [matTypes, setMatTypes] = useState([]);
 
   useEffect(() => {
     purchasingApi.getOrganizations().then(r => { if (r.success) setOrgs(r.data ?? []); }).catch(() => {});
+    purchasingApi.getMaterialTypes().then(r => { if (r.success) setMatTypes(r.data ?? []); }).catch(() => {});
   }, []);
 
   const handleSearch = async () => {
@@ -1551,8 +1534,8 @@ function MonthlySpendSection() {
       const key = r.ym_label;
       if (!map[key]) map[key] = { label: key, yr: r.yr, mo: r.mo, direct: 0, indirect: 0, total: 0, po_count: 0 };
       const v = Number(r.spend_idr) || 0;
-      if (r.material_type === "Direct Material")   map[key].direct   += v;
-      else                                          map[key].indirect += v;
+      if (r.material_type?.toUpperCase() === "DIRECT MATERIAL")   map[key].direct   += v;
+      else                                                         map[key].indirect += v;
       map[key].total    += v;
       map[key].po_count += Number(r.po_count) || 0;
     });
@@ -1632,8 +1615,7 @@ function MonthlySpendSection() {
           <Field label="Material Type">
             <select className={SELECT} value={f.material_type} onChange={e => setF(p => ({ ...p, material_type: e.target.value }))}>
               <option value="">— All —</option>
-              <option value="Direct Material">Direct Material</option>
-              <option value="Indirect Material">Indirect Material</option>
+              {matTypes.map(t => <option key={t.tag} value={t.tag}>{t.tag}</option>)}
             </select>
           </Field>
           <Field label="Exchange Rate">
@@ -1807,9 +1789,11 @@ function ActiveSuppliersSection() {
   const [error,    setError]    = useState("");
   const [page,     setPage]     = useState(1);
   const [sort,     setSort]     = useState({ key: null, dir: "asc" });
+  const [matTypes, setMatTypes] = useState([]);
 
   useEffect(() => {
     purchasingApi.getOrganizations().then(r => { if (r.success) setOrgs(r.data ?? []); }).catch(() => {});
+    purchasingApi.getMaterialTypes().then(r => { if (r.success) setMatTypes(r.data ?? []); }).catch(() => {});
   }, []);
 
   const toggleSort = (key) => {
@@ -1920,8 +1904,7 @@ function ActiveSuppliersSection() {
           <Field label="Material Type">
             <select className={SELECT} value={f.material_type} onChange={e => setF(p => ({ ...p, material_type: e.target.value }))}>
               <option value="">— All —</option>
-              <option value="Direct Material">Direct Material</option>
-              <option value="Indirect Material">Indirect Material</option>
+              {matTypes.map(t => <option key={t.tag} value={t.tag}>{t.tag}</option>)}
             </select>
           </Field>
           <Field label="Exchange Rate">
@@ -2066,12 +2049,14 @@ function PriceAnalysisSection() {
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState("");
   const [searched, setSearched] = useState(false);
+  const [matTypes, setMatTypes] = useState([]);
 
   // Fetch metals prices on mount
   useEffect(() => {
     purchasingApi.getMetalsLatest()
       .then(r => setMetals(r?.data || null))
       .catch(() => {});
+    purchasingApi.getMaterialTypes().then(r => { if (r.success) setMatTypes(r.data ?? []); }).catch(() => {});
   }, []);
 
   const handleSearch = async () => {
@@ -2236,8 +2221,7 @@ function PriceAnalysisSection() {
             <select className={inp} value={filters.material_type}
               onChange={e => setFilters(f => ({...f, material_type: e.target.value}))}>
               <option value="">All</option>
-              <option value="Direct Material">Direct</option>
-              <option value="Indirect Material">Indirect</option>
+              {matTypes.map(t => <option key={t.tag} value={t.tag}>{t.tag}</option>)}
             </select>
           </div>
           <div>

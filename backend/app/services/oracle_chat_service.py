@@ -24,6 +24,24 @@ settings = get_settings()
 TOOL_SELECTION_TIMEOUT_SECONDS = 60.0
 FINAL_ANSWER_TIMEOUT_SECONDS = 120.0
 
+# The local model doesn't reliably follow a general "match the question's
+# language" rule buried in the system prompt (verified: an Indonesian question
+# still came back in English). Detecting the language ourselves and injecting
+# an explicit, single-purpose instruction as the LAST message before the final
+# generation call — closest to where the model actually writes its reply — is
+# far more reliable for smaller local models than a rule stated once up front.
+_INDONESIAN_HINTS = {
+    "yang", "dan", "untuk", "dari", "dengan", "bagaimana", "apa", "apakah", "berapa",
+    "ini", "itu", "adalah", "tidak", "saya", "kita", "kami", "bulan", "tahun", "periode",
+    "bandingkan", "ringkasan", "kinerja", "penjualan", "produksi", "keuangan", "dibanding",
+    "terhadap", "pada", "atau", "juga", "sudah", "belum", "bisa", "tolong", "mohon",
+}
+
+
+def _detect_language(text: str) -> str:
+    words = {w.strip(".,?!:;()").lower() for w in text.split()}
+    return "id" if words & _INDONESIAN_HINTS else "en"
+
 SYSTEM_PROMPT = (
     "Kamu adalah asisten data perusahaan PT CKD OTTO Pharmaceuticals bernama CKDO Data Assistant. "
     "Kamu menjawab pertanyaan tentang data penjualan, produksi, budget, dan keuangan perusahaan "
@@ -34,9 +52,13 @@ SYSTEM_PROMPT = (
     "tersedia di sistem — jangan menolak dengan alasan 'periode di masa depan' atau semacamnya.\n"
     "- Jika user tidak menyebutkan periode, tanyakan periode mana yang dimaksud (format YYYY-MM) "
     "alih-alih menebak.\n"
-    "- Setelah mendapat hasil data, jawab dalam Bahasa Indonesia yang natural — jangan hanya "
-    "membalas mentahan JSON, susun jadi kalimat/insight yang mudah dibaca. Gunakan **bold** untuk "
-    "angka kunci dan tabel markdown kalau membandingkan banyak baris.\n"
+    "- Jawab dalam bahasa yang SAMA dengan bahasa pertanyaan user: jika user bertanya dalam Bahasa "
+    "Inggris, jawab dalam Bahasa Inggris; jika user bertanya dalam Bahasa Indonesia, jawab dalam "
+    "Bahasa Indonesia. Ikuti bahasa pertanyaan TERBARU dari user, bukan bahasa pesan sebelumnya di "
+    "percakapan ini.\n"
+    "- Setelah mendapat hasil data, jawab dengan kalimat natural — jangan hanya membalas mentahan "
+    "JSON, susun jadi kalimat/insight yang mudah dibaca. Gunakan **bold** untuk angka kunci dan "
+    "tabel markdown kalau membandingkan banyak baris.\n"
     "- Jika data yang diminta tidak ditemukan (list kosong), katakan terus terang tidak ada data "
     "untuk periode/filter tersebut — jangan mengarang.\n"
 )
@@ -87,6 +109,18 @@ class OracleChatService:
                     "role": "tool",
                     "content": json.dumps({"error": error} if error else {"data": data}, default=str),
                 })
+
+        # Explicit, single-purpose language directive — appended last so it's
+        # the freshest instruction the model sees before writing its reply.
+        lang = _detect_language(message)
+        messages.append({
+            "role": "system",
+            "content": (
+                "PENTING: Tulis balasan berikut dalam Bahasa Indonesia. Jangan gunakan Bahasa Inggris."
+                if lang == "id" else
+                "IMPORTANT: Write the following reply in English. Do not use Indonesian."
+            ),
+        })
 
         # Final answer — streamed either way (with tool results in context, or
         # the model's own direct reply if it chose not to call a tool at all,

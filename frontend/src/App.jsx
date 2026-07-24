@@ -69,7 +69,7 @@ export default function App() {
           }
         />
         <Route
-          path="hr"
+          path="hr/*"
           element={
             <ProtectedRoute roles={["hr_staff", "admin"]}>
               <HRDashboard />
@@ -77,7 +77,7 @@ export default function App() {
           }
         />
         <Route
-          path="pac"
+          path="pac/*"
           element={
             <ProtectedRoute roles={["pac_staff", "admin"]}>
               <PACDashboard />
@@ -85,7 +85,7 @@ export default function App() {
           }
         />
         <Route
-          path="accounting"
+          path="accounting/*"
           element={
             <ProtectedRoute roles={["accounting_staff", "admin"]}>
               <AccountingDashboard />

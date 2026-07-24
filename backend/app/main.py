@@ -16,7 +16,13 @@ import app.models.cv_screening  # noqa: F401
 import app.models.business_plan  # noqa: F401
 import app.models.business_plan_setup  # noqa: F401
 import app.models.sales_plan  # noqa: F401
+import app.models.purchase_plan  # noqa: F401
+import app.models.personnel_plan  # noqa: F401
+import app.models.manufacture_plan  # noqa: F401
+import app.models.investment_plan  # noqa: F401
+import app.models.opex_plan  # noqa: F401
 import app.models.db_browser_audit  # noqa: F401
+import app.models.org_structure  # noqa: F401
 
 # ── Dashboard Routers ──
 from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice

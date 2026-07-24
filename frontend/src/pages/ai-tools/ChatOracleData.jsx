@@ -30,7 +30,7 @@ function ToolBadge({ source }) {
 
 export default function ChatOracleData() {
   const { messages, input, setInput, streaming, sendMessage } = useChatStream(
-    "Halo! Saya CKDO Data Assistant. Tanya apa saja tentang data penjualan, produksi, budget, atau keuangan perusahaan (sumber: Oracle EBS).",
+    "Hello! I'm the CKDO Data Assistant. Ask me anything about the company's sales, production, budget, or financial data (source: Oracle EBS).",
     null,
     "/api/v1/ai/chatbot/oracle-chat",
   );

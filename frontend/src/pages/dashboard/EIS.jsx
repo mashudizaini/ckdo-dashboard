@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, Fragment } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   BarChart2, TrendingUp, TrendingDown, Landmark, Wallet, Users, PieChart as PieIcon,
   Loader2, RefreshCw, Upload, FileSpreadsheet, Save, Plus, Trash2, Play, Square,
@@ -1449,11 +1450,21 @@ const EIS_TABS = [
 ];
 
 export default function EISDashboard() {
-  const [tab, setTab] = useState("summary");
+  const navigate = useNavigate();
+  const location = useLocation();
   const [year, setYear] = useState(CY);
   const [period, setPeriod] = useState(new Date().getMonth() || 12);
   const [segment, setSegment] = useState("all");
   const YEARS = Array.from({ length: 5 }, (_, i) => CY - i);
+
+  // Derive active tab from URL — navigation now lives in the sidebar tree menu.
+  const tab = EIS_TABS.find((t) => location.pathname.endsWith(t.id))?.id ?? "summary";
+
+  useEffect(() => {
+    if (location.pathname === "/dashboard/eis" || location.pathname === "/dashboard/eis/") {
+      navigate("/dashboard/eis/summary", { replace: true });
+    }
+  }, []); // eslint-disable-line
 
   return (
     <div className="p-6 space-y-4">
@@ -1477,17 +1488,6 @@ export default function EISDashboard() {
             </select>
           )}
         </div>
-      </div>
-
-      <div className="flex gap-2 flex-wrap">
-        {EIS_TABS.map((t) => (
-          <button key={t.id} onClick={() => setTab(t.id)}
-            className={`px-4 py-2 rounded-lg text-xs font-medium border transition-all ${
-              tab === t.id ? "bg-cyan-500/10 border-cyan-500/40 text-cyan-400" : "bg-gray-900 border-gray-800 text-gray-500 hover:border-gray-700"
-            }`}>
-            {t.label}
-          </button>
-        ))}
       </div>
 
       {tab === "summary" && <EisSummaryTab year={year} period={period} />}

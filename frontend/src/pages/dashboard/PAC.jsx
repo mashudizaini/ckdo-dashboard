@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   Banknote, ExternalLink, RefreshCw, Filter, X,
   Download, Loader2, TrendingUp, TrendingDown, Minus,
   BookOpen, Plus, Trash2, Save, Printer, ChevronDown, ChevronRight,
-  CheckCircle, Clock, Edit3, FileText, Globe, Upload, AlertCircle, Calendar, BookOpenCheck, Sparkles, Settings,
+  CheckCircle, Clock, Edit3, FileText, Globe, Upload, AlertCircle, Calendar, BookOpenCheck, Sparkles, Settings, Users, Factory, Wallet,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line,
@@ -45,32 +46,20 @@ const MONTH_NAMES = ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","O
 
 /* ─── Main ───────────────────────────────────────── */
 export default function PACDashboard() {
-  const [activeTab, setActiveTab] = useState("bizplan");
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Derive active tab from URL — navigation now lives in the sidebar tree menu.
+  const activeTab = TABS.find((t) => location.pathname.endsWith(t.id))?.id ?? "bizplan";
+
+  useEffect(() => {
+    if (location.pathname === "/dashboard/pac" || location.pathname === "/dashboard/pac/") {
+      navigate("/dashboard/pac/bizplan", { replace: true });
+    }
+  }, []); // eslint-disable-line
 
   return (
     <div className="p-6 space-y-4">
-      {/* Tab Buttons */}
-      <div className="grid grid-cols-4 gap-2">
-        {TABS.map((tab) => {
-          const active = activeTab === tab.id;
-          return (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-3 rounded-lg border px-4 py-3 transition-all ${
-                active
-                  ? `${tab.bg} ${tab.activeBorder} ring-1 ring-inset ${tab.activeBorder}`
-                  : "bg-gray-900 border-gray-800 hover:border-gray-700 hover:bg-gray-800/60"
-              }`}>
-              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${tab.bg} border ${tab.activeBorder}`}>
-                <tab.icon size={15} className={tab.color} />
-              </div>
-              <span className={`text-sm font-medium truncate ${active ? "text-white" : "text-gray-400"}`}>
-                {tab.label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
       {activeTab === "bizplan"  && <BusinessPlanSection />}
       {activeTab === "budget"   && <BudgetUsageSection />}
       {activeTab === "mt940"    && <MT940Section />}
@@ -88,7 +77,7 @@ const BP_SUBTABS = [
   { id: "strategy",   label: "Strategy & Action Plan", icon: FileText },
   { id: "history",    label: "Document List",          icon: Clock    },
   { id: "setup",      label: "Setup",                   icon: Settings },
-  { id: "simulation", label: "Simulation",              icon: BarChart },
+  { id: "simulation", label: "Simulation Data",         icon: BarChart },
 ];
 
 const ROMAN = ["i","ii","iii","iv","v","vi","vii","viii","ix","x"];
@@ -152,6 +141,7 @@ function defaultSP(year) {
 /* ── Shared textarea style ─────────────────────────────────────────────────── */
 const TA = "w-full bg-gray-800/60 border border-gray-700 rounded-md px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500/60 resize-none leading-relaxed";
 const INP = "bg-gray-800/60 border border-gray-700 rounded-md px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-500/60";
+const SELECT = "bg-gray-800/60 border border-gray-700 rounded-md px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-violet-500/60";
 const BTN_SM = (color = "violet") =>
   `flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all border ` +
   (color === "violet" ? "text-violet-300 border-violet-500/30 bg-violet-500/10 hover:bg-violet-500/20"
@@ -2120,8 +2110,12 @@ function OutlookPanel({ year }) {
 
 /* ─── Section: Simulation ──────────────────────────── */
 const SIM_SUBTABS = [
-  { id: "data_collection", label: "Data Collection", icon: FileText },
-  { id: "sales_plan",      label: "Sales Plan",      icon: BarChart },
+  { id: "data_collection",  label: "Purchase Plan",     icon: FileText },
+  { id: "sales_plan",       label: "Sales Plan",        icon: BarChart },
+  { id: "personnel_plan",   label: "Personal Plan",     icon: Users },
+  { id: "manufacture_plan", label: "Manufacture Plan",  icon: Factory },
+  { id: "investment_plan",  label: "Investment Plan",   icon: Banknote },
+  { id: "opex_plan",        label: "OPEX Plan",         icon: Wallet },
 ];
 
 function SimulationSection({ year }) {
@@ -2145,31 +2139,1691 @@ function SimulationSection({ year }) {
           <label className="text-xs text-gray-500">Plan Year: <span className="text-violet-400 font-bold">{year}</span></label>
         </div>
       </div>
-      {subTab === "data_collection" && <DataCollectionPanel year={year} />}
+      {subTab === "data_collection" && <PurchasePlanPanel year={year} />}
       {subTab === "sales_plan"      && <SalesPlanPanel year={year} />}
+      {subTab === "personnel_plan"  && <PersonnelPlanPanel year={year} />}
+      {subTab === "manufacture_plan" && <ManufacturePlanPanel year={year} />}
+      {subTab === "investment_plan"  && <InvestmentPlanPanel year={year} />}
+      {subTab === "opex_plan"        && <OpexPlanPanel year={year} />}
     </div>
   );
 }
 
-/* ══ Data Collection Panel ══════════════════════════════════════════════════════ */
+/* ══ Purchase Plan (Material) Panel ═══════════════════════════════════════════ */
+/* Field set + Excel format reference: sumber/(P1-M) Purchase plan_Material.xlsx
+   Each item has an "Order" row (planned monthly order qty + price) and a
+   paired "Received" row (planned monthly received qty), matching the sheet. */
 
-function DataCollectionPanel({ year }) {
+const PP_CATEGORIES = ["Summary", "Local", "CMO", "Export"];
+const PP_MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+const DEFAULT_PP_ITEM = () => ({
+  no: 1, type: "", item_code_no: "", item_code_name: "New Item", uom: "",
+  moq: null, stock: null, qty_needed: null, final_qty_to_order: null,
+  order: Array(12).fill(0), order_total: 0, unit_price_orig: 0, unit_price_idr: 0, total_price: 0,
+  received: Array(12).fill(0), received_total: 0,
+});
+
+const DEFAULT_PP_CONTENT = () => ({
+  meta: { type: "", department: "", team_code: "", team_name: "", exchange_rate: 0 },
+  items: [DEFAULT_PP_ITEM()],
+});
+
+function PurchasePlanPanel({ year }) {
+  const [plans, setPlans] = useState([]);
+  const [selectedPlan, setSelectedPlan] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const fileInputRef = useRef(null);
 
-  if (loading) return <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>;
+  const [form, setForm] = useState({
+    id: null,
+    plan_year: year,
+    plan_category: "Local",
+    department: "",
+    team_code: "",
+    team_name: "",
+    content: DEFAULT_PP_CONTENT(),
+    status: "draft",
+  });
+
+  const loadPlans = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await pacApi.listPurchasePlans({ plan_year: year });
+      if (res.success) setPlans(res.data || []);
+    } catch {
+      setPlans([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [year]);
+
+  useEffect(() => { loadPlans(); }, [loadPlans]);
+
+  useEffect(() => {
+    if (!showForm && plans.length > 0 && !plans.some(p => p.id === selectedPlan?.id)) {
+      setSelectedPlan(plans[0]);
+    }
+  }, [plans, showForm, selectedPlan]);
+
+  const resetForm = () => {
+    setForm({
+      id: null,
+      plan_year: year,
+      plan_category: "Local",
+      department: "",
+      team_code: "",
+      team_name: "",
+      content: DEFAULT_PP_CONTENT(),
+      status: "draft",
+    });
+    setShowForm(false);
+  };
+
+  const openCreate = () => {
+    resetForm();
+    setShowForm(true);
+  };
+
+  const openEdit = (plan) => {
+    setForm({
+      id: plan.id,
+      plan_year: plan.plan_year,
+      plan_category: plan.plan_category,
+      department: plan.department,
+      team_code: plan.team_code,
+      team_name: plan.team_name,
+      content: plan.content || DEFAULT_PP_CONTENT(),
+      status: plan.status,
+    });
+    setShowForm(true);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await pacApi.upsertPurchasePlan({ ...form });
+      if (res.success) {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+        await loadPlans();
+        setShowForm(false);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateItem = (idx, patch) => {
+    setForm(prev => {
+      const items = [...prev.content.items];
+      items[idx] = { ...items[idx], ...patch };
+      return { ...prev, content: { ...prev.content, items } };
+    });
+  };
+
+  const updateItemMonth = (idx, field, monthIdx, val) => {
+    setForm(prev => {
+      const items = [...prev.content.items];
+      const arr = [...items[idx][field]];
+      arr[monthIdx] = Number(val) || 0;
+      const total = arr.reduce((a, b) => a + (Number(b) || 0), 0);
+      items[idx] = { ...items[idx], [field]: arr, [`${field}_total`]: total };
+      return { ...prev, content: { ...prev.content, items } };
+    });
+  };
+
+  const addItem = () => {
+    setForm(prev => {
+      const items = [...prev.content.items];
+      items.push({ ...DEFAULT_PP_ITEM(), no: items.length + 1 });
+      return { ...prev, content: { ...prev.content, items } };
+    });
+  };
+
+  const removeItem = (idx) => {
+    setForm(prev => ({
+      ...prev,
+      content: { ...prev.content, items: prev.content.items.filter((_, i) => i !== idx) },
+    }));
+  };
+
+  const handleUploadFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const res = await pacApi.uploadPurchasePlanExcel(file, year);
+      if (res.success) {
+        const summary = res.imported.map(x => `${x.category} (${x.items} items)`).join(", ");
+        alert(`Import berhasil: ${summary}`);
+        await loadPlans();
+      } else {
+        alert(res.error || "Import failed");
+      }
+    } catch (e) {
+      alert("Import error: " + (e?.detail || e?.message || e));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const fmtNum = (v) => Number(v || 0).toLocaleString();
 
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
-      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40">
-        <h3 className="text-sm font-semibold text-gray-200">Data Collection</h3>
-        <p className="text-xs text-gray-500 mt-0.5">Collect and manage input data for simulation · {year}</p>
+      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-200">Purchase Plan Data</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Input Purchase Plan material · {year}</p>
+        </div>
+        <div className="flex gap-2">
+          {!showForm ? (
+            <>
+              <button onClick={openCreate} className={BTN_SM("violet")}><Plus size={11} /> New Plan</button>
+              <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleUploadFile} />
+              <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM("teal")}>
+                {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                Upload Excel
+              </button>
+              {selectedPlan && (
+                <button onClick={() => openEdit(selectedPlan)} className={BTN_SM("indigo")}><Edit3 size={11} /> Edit</button>
+              )}
+            </>
+          ) : (
+            <>
+              <button onClick={save} disabled={saving} className={BTN_SM("green")}>
+                {saving ? <Loader2 size={11} className="animate-spin" /> : saved ? <CheckCircle size={11} /> : <Save size={11} />}
+                {saved ? "Saved!" : "Save"}
+              </button>
+              <button onClick={resetForm} className={BTN_SM("gray")}><X size={11} /> Cancel</button>
+            </>
+          )}
+        </div>
       </div>
       <div className="p-5">
-        <div className="flex flex-col items-center justify-center py-12 text-gray-500 gap-3">
-          <FileText size={40} className="opacity-30" />
-          <p className="text-sm">Data collection module will be used to gather simulation input data.</p>
-          <p className="text-xs text-gray-600">This feature will be available soon.</p>
+        {loading ? (
+          <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>
+        ) : !showForm ? (
+          <>
+            <div className="mb-4">
+              <label className="text-xs text-gray-500 mb-1 block">Pilih Purchase Plan:</label>
+              <select value={selectedPlan?.id || ""} onChange={e => {
+                const plan = plans.find(p => String(p.id) === e.target.value);
+                setSelectedPlan(plan || null);
+              }} className={`${SELECT} w-full max-w-md`}>
+                <option value="">-- Pilih Purchase Plan --</option>
+                {plans.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.plan_year} - {p.department || "(no dept)"} / {p.team_name || "(no team)"} [{p.plan_category}]
+                  </option>
+                ))}
+              </select>
+            </div>
+            {selectedPlan && selectedPlan.content && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3 text-xs text-gray-400">
+                  <span className="px-2 py-1 rounded bg-violet-500/10 border border-violet-500/30 text-violet-300 font-medium">{selectedPlan.plan_category}</span>
+                  {selectedPlan.content.meta?.type && <span className="px-2 py-1 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-medium">{selectedPlan.content.meta.type}</span>}
+                  <span className="text-gray-500">{selectedPlan.department} / {selectedPlan.team_code} - {selectedPlan.team_name}</span>
+                  {!!selectedPlan.content.meta?.exchange_rate && <span className="text-gray-500">Kurs: {fmtNum(selectedPlan.content.meta.exchange_rate)}</span>}
+                </div>
+                <PurchasePlanTable items={selectedPlan.content.items || []} editable={false} />
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+              <Field label="Plan Year">
+                <input type="number" className={`${INP}`} value={form.plan_year} onChange={e => setForm({ ...form, plan_year: Number(e.target.value) })} />
+              </Field>
+              <Field label="Category">
+                <select className={`${SELECT}`} value={form.plan_category} onChange={e => setForm({ ...form, plan_category: e.target.value })}>
+                  {PP_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </Field>
+              <Field label="Department">
+                <input className={`${INP}`} value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} placeholder="e.g. Plant" />
+              </Field>
+              <Field label="Team Code">
+                <input className={`${INP}`} value={form.team_code} onChange={e => setForm({ ...form, team_code: e.target.value })} placeholder="e.g. 35" />
+              </Field>
+              <Field label="Team Name">
+                <input className={`${INP}`} value={form.team_name} onChange={e => setForm({ ...form, team_name: e.target.value })} placeholder="e.g. Production Planning & Warehouse" />
+              </Field>
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="text-xs text-gray-500">Type:</label>
+              <input className={`${INP} max-w-xs`} value={form.content.meta?.type || ""}
+                onChange={e => setForm({ ...form, content: { ...form.content, meta: { ...form.content.meta, type: e.target.value } } })}
+                placeholder="e.g. API, Excipient & Packaging - Local" />
+              <label className="text-xs text-gray-500">Kurs USD/IDR:</label>
+              <input type="number" className={`${INP} max-w-[120px]`} value={form.content.meta?.exchange_rate || 0}
+                onChange={e => setForm({ ...form, content: { ...form.content, meta: { ...form.content.meta, exchange_rate: Number(e.target.value) || 0 } } })} />
+              <label className="text-xs text-gray-500">Status:</label>
+              <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className={`${SELECT}`}>
+                <option value="draft">Draft</option>
+                <option value="final">Final</option>
+              </select>
+            </div>
+            <PurchasePlanTable
+              items={form.content.items || []}
+              editable={true}
+              onUpdateItem={updateItem}
+              onUpdateMonth={updateItemMonth}
+              onRemove={removeItem}
+            />
+            <button onClick={addItem} className={BTN_SM("violet")}><Plus size={11} /> Add Item</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PurchasePlanTable({ items, editable, onUpdateItem, onUpdateMonth, onRemove }) {
+  const TH = "px-2 py-1.5 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap text-center";
+  const TD = "px-2 py-1 border border-gray-700 text-right font-mono text-xs";
+  const fmtNum = (v) => Number(v || 0).toLocaleString();
+
+  return (
+    <div className="overflow-x-auto border border-gray-700 rounded-lg">
+      <table className="w-full border-collapse text-xs" style={{ minWidth: 1600 }}>
+        <thead>
+          <tr className="bg-gray-800/80">
+            <th className={`${TH} w-16`}>No</th>
+            <th className={TH}>Type</th>
+            <th className={TH}>Item Code</th>
+            <th className={TH}>Item Name</th>
+            <th className={TH}>UOM</th>
+            <th className={TH}>MOQ</th>
+            <th className={TH}>Stock</th>
+            <th className={TH}>Qty Needed</th>
+            <th className={TH}>Final Qty</th>
+            <th className={`${TH} w-14`}></th>
+            {PP_MONTHS.map(m => <th key={m} className={`${TH} w-14`}>{m}</th>)}
+            <th className={TH}>Total</th>
+            <th className={TH}>Unit Price (Orig)</th>
+            <th className={TH}>Unit Price (IDR)</th>
+            <th className={TH}>Total Price (Rp)</th>
+            {editable && <th className={`${TH} w-10`}></th>}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item, idx) => ([
+              <tr key={`${idx}-order`} className="border-b border-gray-800 hover:bg-gray-800/30">
+                <td className={`${TD} text-center`} rowSpan={2}>{item.no}</td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input className={`${INP} !text-xs`} value={item.type} onChange={e => onUpdateItem(idx, { type: e.target.value })} />
+                            : <span className="text-gray-300">{item.type}</span>}
+                </td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input className={`${INP} !text-xs`} value={item.item_code_no} onChange={e => onUpdateItem(idx, { item_code_no: e.target.value })} />
+                            : <span className="text-gray-300">{item.item_code_no}</span>}
+                </td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input className={`${INP} !text-xs`} value={item.item_code_name} onChange={e => onUpdateItem(idx, { item_code_name: e.target.value })} />
+                            : <span className="text-gray-300">{item.item_code_name}</span>}
+                </td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input className={`${INP} !text-xs`} value={item.uom} onChange={e => onUpdateItem(idx, { uom: e.target.value })} />
+                            : <span className="text-gray-300">{item.uom}</span>}
+                </td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input type="number" className={`${INP} !text-xs`} value={item.moq ?? ""} onChange={e => onUpdateItem(idx, { moq: e.target.value === "" ? null : Number(e.target.value) })} />
+                            : <span className="text-gray-400">{item.moq ?? "—"}</span>}
+                </td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input type="number" className={`${INP} !text-xs`} value={item.stock ?? ""} onChange={e => onUpdateItem(idx, { stock: e.target.value === "" ? null : Number(e.target.value) })} />
+                            : <span className="text-gray-400">{item.stock ?? "—"}</span>}
+                </td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input type="number" className={`${INP} !text-xs`} value={item.qty_needed ?? ""} onChange={e => onUpdateItem(idx, { qty_needed: e.target.value === "" ? null : Number(e.target.value) })} />
+                            : <span className="text-gray-400">{item.qty_needed ?? "—"}</span>}
+                </td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input type="number" className={`${INP} !text-xs`} value={item.final_qty_to_order ?? ""} onChange={e => onUpdateItem(idx, { final_qty_to_order: e.target.value === "" ? null : Number(e.target.value) })} />
+                            : <span className="text-gray-400">{item.final_qty_to_order ?? "—"}</span>}
+                </td>
+                <td className="px-2 py-1 border border-gray-700 text-center text-violet-400 font-semibold">Order</td>
+                {PP_MONTHS.map((m, mi) => (
+                  <td key={m} className={TD}>
+                    {editable
+                      ? <input type="number" className={`${INP} !text-center !text-xs font-mono`} value={item.order[mi]} onChange={e => onUpdateMonth(idx, "order", mi, e.target.value)} />
+                      : fmtNum(item.order[mi])}
+                  </td>
+                ))}
+                <td className={`${TD} font-bold text-violet-400`} rowSpan={1}>{fmtNum(item.order_total)}</td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input type="number" className={`${INP} !text-xs`} value={item.unit_price_orig} onChange={e => onUpdateItem(idx, { unit_price_orig: Number(e.target.value) || 0 })} />
+                            : <span className="text-gray-300 font-mono">{fmtNum(item.unit_price_orig)}</span>}
+                </td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input type="number" className={`${INP} !text-xs`} value={item.unit_price_idr} onChange={e => onUpdateItem(idx, { unit_price_idr: Number(e.target.value) || 0 })} />
+                            : <span className="text-gray-300 font-mono">{fmtNum(item.unit_price_idr)}</span>}
+                </td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input type="number" className={`${INP} !text-xs`} value={item.total_price} onChange={e => onUpdateItem(idx, { total_price: Number(e.target.value) || 0 })} />
+                            : <span className="text-sky-400 font-mono font-bold">{fmtNum(item.total_price)}</span>}
+                </td>
+                {editable && (
+                  <td className="px-2 py-1 border border-gray-700 text-center" rowSpan={2}>
+                    <button onClick={() => onRemove(idx)} className={BTN_SM("red")}><Trash2 size={9} /></button>
+                  </td>
+                )}
+              </tr>,
+              <tr key={`${idx}-received`} className="border-b border-gray-800 hover:bg-gray-800/30">
+                <td className="px-2 py-1 border border-gray-700 text-center text-sky-400 font-semibold">Received</td>
+                {PP_MONTHS.map((m, mi) => (
+                  <td key={m} className={TD}>
+                    {editable
+                      ? <input type="number" className={`${INP} !text-center !text-xs font-mono`} value={item.received[mi]} onChange={e => onUpdateMonth(idx, "received", mi, e.target.value)} />
+                      : fmtNum(item.received[mi])}
+                  </td>
+                ))}
+                <td className={`${TD} font-bold text-sky-400`}>{fmtNum(item.received_total)}</td>
+              </tr>
+          ]))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ══ Personnel Plan Panel ("Personal Plan Data") ══════════════════════════════ */
+/* Field set + Excel format reference: sumber/Personal plan template.xlsx —
+   headcount by level (prev/curr year Permanent/Temporary/Total + Increasing)
+   plus two recruitment schedules (Permanent, Temporary) by level x month. */
+
+const DEFAULT_PERSONNEL_HC_ROW = () => ({
+  level: "New Level",
+  prev_permanent: 0, prev_temporary: 0, prev_total: 0,
+  curr_permanent: 0, curr_temporary: 0, curr_total: 0,
+  inc_permanent: 0, inc_temporary: 0, inc_total: 0,
+  notes: "",
+});
+const DEFAULT_PERSONNEL_REC_ROW = () => ({ level: "New Level", months: Array(12).fill(0), total: 0 });
+
+const DEFAULT_PERSONNEL_CONTENT = (year) => ({
+  meta: { type: "", department: "" },
+  headcount: { year_prev: year - 1, year_curr: year, rows: [DEFAULT_PERSONNEL_HC_ROW()], total: null },
+  recruitment_permanent: { year, rows: [DEFAULT_PERSONNEL_REC_ROW()], total: null },
+  recruitment_temporary: { year, rows: [DEFAULT_PERSONNEL_REC_ROW()], total: null },
+});
+
+function PersonnelPlanPanel({ year }) {
+  const [plans, setPlans] = useState([]);
+  const [selectedPlan, setSelectedPlan] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const [form, setForm] = useState({
+    id: null,
+    plan_year: year,
+    department: "",
+    content: DEFAULT_PERSONNEL_CONTENT(year),
+    status: "draft",
+  });
+
+  const loadPlans = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await pacApi.listPersonnelPlans({ plan_year: year });
+      if (res.success) setPlans(res.data || []);
+    } catch {
+      setPlans([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [year]);
+
+  useEffect(() => { loadPlans(); }, [loadPlans]);
+
+  useEffect(() => {
+    if (!showForm && plans.length > 0 && !plans.some(p => p.id === selectedPlan?.id)) {
+      setSelectedPlan(plans[0]);
+    }
+  }, [plans, showForm, selectedPlan]);
+
+  const resetForm = () => {
+    setForm({ id: null, plan_year: year, department: "", content: DEFAULT_PERSONNEL_CONTENT(year), status: "draft" });
+    setShowForm(false);
+  };
+
+  const openCreate = () => { resetForm(); setShowForm(true); };
+
+  const openEdit = (plan) => {
+    setForm({
+      id: plan.id,
+      plan_year: plan.plan_year,
+      department: plan.department,
+      content: plan.content || DEFAULT_PERSONNEL_CONTENT(year),
+      status: plan.status,
+    });
+    setShowForm(true);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await pacApi.upsertPersonnelPlan({ ...form });
+      if (res.success) {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+        await loadPlans();
+        setShowForm(false);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateHcRow = (idx, patch) => {
+    setForm(prev => {
+      const rows = [...prev.content.headcount.rows];
+      rows[idx] = { ...rows[idx], ...patch };
+      return { ...prev, content: { ...prev.content, headcount: { ...prev.content.headcount, rows } } };
+    });
+  };
+  const addHcRow = () => setForm(prev => ({
+    ...prev, content: { ...prev.content, headcount: { ...prev.content.headcount, rows: [...prev.content.headcount.rows, DEFAULT_PERSONNEL_HC_ROW()] } },
+  }));
+  const removeHcRow = (idx) => setForm(prev => ({
+    ...prev, content: { ...prev.content, headcount: { ...prev.content.headcount, rows: prev.content.headcount.rows.filter((_, i) => i !== idx) } },
+  }));
+
+  const updateRecRow = (block, idx, patch) => {
+    setForm(prev => {
+      const rows = [...prev.content[block].rows];
+      rows[idx] = { ...rows[idx], ...patch };
+      return { ...prev, content: { ...prev.content, [block]: { ...prev.content[block], rows } } };
+    });
+  };
+  const updateRecMonth = (block, idx, monthIdx, val) => {
+    setForm(prev => {
+      const rows = [...prev.content[block].rows];
+      const months = [...rows[idx].months];
+      months[monthIdx] = Number(val) || 0;
+      rows[idx] = { ...rows[idx], months, total: months.reduce((a, b) => a + (Number(b) || 0), 0) };
+      return { ...prev, content: { ...prev.content, [block]: { ...prev.content[block], rows } } };
+    });
+  };
+  const addRecRow = (block) => setForm(prev => ({
+    ...prev, content: { ...prev.content, [block]: { ...prev.content[block], rows: [...prev.content[block].rows, DEFAULT_PERSONNEL_REC_ROW()] } },
+  }));
+  const removeRecRow = (block, idx) => setForm(prev => ({
+    ...prev, content: { ...prev.content, [block]: { ...prev.content[block], rows: prev.content[block].rows.filter((_, i) => i !== idx) } },
+  }));
+
+  const handleUploadFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const res = await pacApi.uploadPersonnelPlanExcel(file, year);
+      if (res.success) {
+        const s = res.rows_imported;
+        alert(`Import berhasil: Headcount ${s.headcount} baris, Recruitment Permanent ${s.recruitment_permanent} baris, Recruitment Temporary ${s.recruitment_temporary} baris (${res.data?.department}).`);
+        await loadPlans();
+      } else {
+        alert(res.error || "Import failed");
+      }
+    } catch (e) {
+      alert("Import error: " + (e?.detail || e?.message || e));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const fmtNum = (v) => Number(v || 0).toLocaleString();
+
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-200">Personal Plan Data</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Input perencanaan personil (headcount & recruitment) · {year}</p>
         </div>
+        <div className="flex gap-2">
+          {!showForm ? (
+            <>
+              <button onClick={openCreate} className={BTN_SM("violet")}><Plus size={11} /> New Plan</button>
+              <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleUploadFile} />
+              <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM("teal")}>
+                {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                Upload Excel
+              </button>
+              {selectedPlan && (
+                <button onClick={() => openEdit(selectedPlan)} className={BTN_SM("indigo")}><Edit3 size={11} /> Edit</button>
+              )}
+            </>
+          ) : (
+            <>
+              <button onClick={save} disabled={saving} className={BTN_SM("green")}>
+                {saving ? <Loader2 size={11} className="animate-spin" /> : saved ? <CheckCircle size={11} /> : <Save size={11} />}
+                {saved ? "Saved!" : "Save"}
+              </button>
+              <button onClick={resetForm} className={BTN_SM("gray")}><X size={11} /> Cancel</button>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="p-5 space-y-5">
+        {loading ? (
+          <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>
+        ) : !showForm ? (
+          <>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Pilih Personal Plan:</label>
+              <select value={selectedPlan?.id || ""} onChange={e => {
+                const plan = plans.find(p => String(p.id) === e.target.value);
+                setSelectedPlan(plan || null);
+              }} className={`${SELECT} w-full max-w-md`}>
+                <option value="">-- Pilih Personal Plan --</option>
+                {plans.map(p => (
+                  <option key={p.id} value={p.id}>{p.plan_year} - {p.department || "(no dept)"}</option>
+                ))}
+              </select>
+            </div>
+            {selectedPlan && selectedPlan.content && (
+              <>
+                <div className="flex items-center gap-3 text-xs text-gray-400">
+                  {selectedPlan.content.meta?.type && <span className="px-2 py-1 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-medium">{selectedPlan.content.meta.type}</span>}
+                  <span className="text-gray-500">{selectedPlan.department}</span>
+                </div>
+                <PersonnelHeadcountTable data={selectedPlan.content.headcount} editable={false} fmtNum={fmtNum} />
+                <PersonnelRecruitmentTable title="Recruitment Schedule - Permanent" data={selectedPlan.content.recruitment_permanent} editable={false} fmtNum={fmtNum} />
+                <PersonnelRecruitmentTable title="Recruitment Schedule - Temporary" data={selectedPlan.content.recruitment_temporary} editable={false} fmtNum={fmtNum} />
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Field label="Plan Year">
+                <input type="number" className={`${INP}`} value={form.plan_year} onChange={e => setForm({ ...form, plan_year: Number(e.target.value) })} />
+              </Field>
+              <Field label="Department">
+                <input className={`${INP}`} value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} placeholder="e.g. Plant" />
+              </Field>
+              <Field label="Type">
+                <input className={`${INP}`} value={form.content.meta?.type || ""}
+                  onChange={e => setForm({ ...form, content: { ...form.content, meta: { ...form.content.meta, type: e.target.value } } })}
+                  placeholder="e.g. Personnel Plan - Department" />
+              </Field>
+              <Field label="Status">
+                <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className={`${SELECT}`}>
+                  <option value="draft">Draft</option>
+                  <option value="final">Final</option>
+                </select>
+              </Field>
+            </div>
+
+            <div>
+              <h4 className="text-xs font-semibold text-gray-300 mb-2">Headcount by Level</h4>
+              <PersonnelHeadcountTable data={form.content.headcount} editable={true} fmtNum={fmtNum}
+                onUpdateRow={updateHcRow} onRemove={removeHcRow} />
+              <button onClick={addHcRow} className={`${BTN_SM("violet")} mt-2`}><Plus size={11} /> Add Level</button>
+            </div>
+
+            <div>
+              <h4 className="text-xs font-semibold text-gray-300 mb-2">Recruitment Schedule - Permanent</h4>
+              <PersonnelRecruitmentTable data={form.content.recruitment_permanent} editable={true} fmtNum={fmtNum}
+                onUpdateRow={(idx, patch) => updateRecRow("recruitment_permanent", idx, patch)}
+                onUpdateMonth={(idx, mi, val) => updateRecMonth("recruitment_permanent", idx, mi, val)}
+                onRemove={(idx) => removeRecRow("recruitment_permanent", idx)} />
+              <button onClick={() => addRecRow("recruitment_permanent")} className={`${BTN_SM("violet")} mt-2`}><Plus size={11} /> Add Level</button>
+            </div>
+
+            <div>
+              <h4 className="text-xs font-semibold text-gray-300 mb-2">Recruitment Schedule - Temporary</h4>
+              <PersonnelRecruitmentTable data={form.content.recruitment_temporary} editable={true} fmtNum={fmtNum}
+                onUpdateRow={(idx, patch) => updateRecRow("recruitment_temporary", idx, patch)}
+                onUpdateMonth={(idx, mi, val) => updateRecMonth("recruitment_temporary", idx, mi, val)}
+                onRemove={(idx) => removeRecRow("recruitment_temporary", idx)} />
+              <button onClick={() => addRecRow("recruitment_temporary")} className={`${BTN_SM("violet")} mt-2`}><Plus size={11} /> Add Level</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PersonnelHeadcountTable({ data, editable, fmtNum, onUpdateRow, onRemove }) {
+  if (!data) return null;
+  const TH = "px-2 py-1.5 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap";
+  const TD = "px-2 py-1 border border-gray-700 text-right font-mono text-xs";
+  return (
+    <div className="overflow-x-auto border border-gray-700 rounded-lg">
+      <table className="w-full border-collapse text-xs" style={{ minWidth: 1100 }}>
+        <thead>
+          <tr className="bg-gray-800/80">
+            <th className={`${TH} text-left`} rowSpan={2}>Level</th>
+            <th className={TH} colSpan={3}>Dec {data.year_prev} (E)</th>
+            <th className={TH} colSpan={3}>Dec {data.year_curr} (P)</th>
+            <th className={TH} colSpan={3}>Increasing</th>
+            <th className={TH} rowSpan={2}>Notes</th>
+            {editable && <th className={TH} rowSpan={2}></th>}
+          </tr>
+          <tr className="bg-gray-800/80">
+            {["Permanent","Temporary","Total","Permanent","Temporary","Total","Permanent","Temporary","Total"].map((h, i) => (
+              <th key={i} className={`${TH} w-16`}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.rows.map((row, idx) => (
+            <tr key={idx} className="border-b border-gray-800 hover:bg-gray-800/30">
+              <td className="px-2 py-1 border border-gray-700">
+                {editable ? <input className={`${INP} !text-xs`} value={row.level} onChange={e => onUpdateRow(idx, { level: e.target.value })} />
+                          : <span className="text-gray-300">{row.level}</span>}
+              </td>
+              {["prev_permanent","prev_temporary","prev_total","curr_permanent","curr_temporary","curr_total","inc_permanent","inc_temporary","inc_total"].map(key => (
+                <td key={key} className={TD}>
+                  {editable
+                    ? <input type="number" className={`${INP} !text-center !text-xs font-mono`} value={row[key]} onChange={e => onUpdateRow(idx, { [key]: Number(e.target.value) || 0 })} />
+                    : fmtNum(row[key])}
+                </td>
+              ))}
+              <td className="px-2 py-1 border border-gray-700">
+                {editable ? <input className={`${INP} !text-xs`} value={row.notes} onChange={e => onUpdateRow(idx, { notes: e.target.value })} />
+                          : <span className="text-gray-500">{row.notes}</span>}
+              </td>
+              {editable && (
+                <td className="px-2 py-1 border border-gray-700 text-center">
+                  <button onClick={() => onRemove(idx)} className={BTN_SM("red")}><Trash2 size={9} /></button>
+                </td>
+              )}
+            </tr>
+          ))}
+          {data.total && (
+            <tr className="bg-gray-800/60 font-bold">
+              <td className="px-2 py-1 border border-gray-700 text-gray-200">TOTAL</td>
+              {["prev_permanent","prev_temporary","prev_total","curr_permanent","curr_temporary","curr_total","inc_permanent","inc_temporary","inc_total"].map(key => (
+                <td key={key} className={`${TD} text-indigo-300`}>{fmtNum(data.total[key])}</td>
+              ))}
+              <td className="px-2 py-1 border border-gray-700"></td>
+              {editable && <td className="px-2 py-1 border border-gray-700"></td>}
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PersonnelRecruitmentTable({ title, data, editable, fmtNum, onUpdateRow, onUpdateMonth, onRemove }) {
+  if (!data) return null;
+  const TH = "px-2 py-1.5 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap";
+  const TD = "px-2 py-1 border border-gray-700 text-right font-mono text-xs";
+  return (
+    <div className="space-y-1.5">
+      {title && <p className="text-xs font-semibold text-gray-400">{title} · {data.year}</p>}
+      <div className="overflow-x-auto border border-gray-700 rounded-lg">
+        <table className="w-full border-collapse text-xs" style={{ minWidth: 1000 }}>
+          <thead>
+            <tr className="bg-gray-800/80">
+              <th className={`${TH} text-left`}>Level</th>
+              {PP_MONTHS.map(m => <th key={m} className={`${TH} w-12`}>{m}</th>)}
+              <th className={TH}>Total</th>
+              {editable && <th className={TH}></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((row, idx) => (
+              <tr key={idx} className="border-b border-gray-800 hover:bg-gray-800/30">
+                <td className="px-2 py-1 border border-gray-700">
+                  {editable ? <input className={`${INP} !text-xs`} value={row.level} onChange={e => onUpdateRow(idx, { level: e.target.value })} />
+                            : <span className="text-gray-300">{row.level}</span>}
+                </td>
+                {row.months.map((v, mi) => (
+                  <td key={mi} className={TD}>
+                    {editable
+                      ? <input type="number" className={`${INP} !text-center !text-xs font-mono`} value={v} onChange={e => onUpdateMonth(idx, mi, e.target.value)} />
+                      : fmtNum(v)}
+                  </td>
+                ))}
+                <td className={`${TD} font-bold text-violet-400`}>{fmtNum(row.total)}</td>
+                {editable && (
+                  <td className="px-2 py-1 border border-gray-700 text-center">
+                    <button onClick={() => onRemove(idx)} className={BTN_SM("red")}><Trash2 size={9} /></button>
+                  </td>
+                )}
+              </tr>
+            ))}
+            {data.total && (
+              <tr className="bg-gray-800/60 font-bold">
+                <td className="px-2 py-1 border border-gray-700 text-gray-200">TOTAL</td>
+                {data.total.months.map((v, mi) => (
+                  <td key={mi} className={`${TD} text-indigo-300`}>{fmtNum(v)}</td>
+                ))}
+                <td className={`${TD} text-indigo-300`}>{fmtNum(data.total.total)}</td>
+                {editable && <td className="px-2 py-1 border border-gray-700"></td>}
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ══ Manufacture Plan Panel ════════════════════════════════════════════════════ */
+/* Field set + Excel format reference: sumber/manufacture plan template.xlsx —
+   flat product/customer list with monthly batch qty + totals, mirrors
+   SalesPlanPanel's shape (headers + rows array). */
+
+const MFG_HEADERS = ["No", "Customer", "Item Code", "Name", "Batch Size (Vial)", "Yield (%)",
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  "Total Batch", "Total Qty (Before Yield)", "Total Qty (After Yield)", "Sales Quantity", "Coverage"];
+
+const DEFAULT_MFG_CONTENT = () => ({
+  meta: { type: "", department: "", team_code: "", team_name: "", year: null },
+  headers: MFG_HEADERS,
+  rows: [[1, "", "", "New Product", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]],
+});
+
+function ManufacturePlanPanel({ year }) {
+  const [plans, setPlans] = useState([]);
+  const [selectedPlan, setSelectedPlan] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const [form, setForm] = useState({
+    id: null,
+    plan_year: year,
+    department: "",
+    team_code: "",
+    team_name: "",
+    content: DEFAULT_MFG_CONTENT(),
+    status: "draft",
+  });
+
+  const loadPlans = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await pacApi.listManufacturePlans({ plan_year: year });
+      if (res.success) setPlans(res.data || []);
+    } catch {
+      setPlans([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [year]);
+
+  useEffect(() => { loadPlans(); }, [loadPlans]);
+
+  useEffect(() => {
+    if (!showForm && plans.length > 0 && !plans.some(p => p.id === selectedPlan?.id)) {
+      setSelectedPlan(plans[0]);
+    }
+  }, [plans, showForm, selectedPlan]);
+
+  const resetForm = () => {
+    setForm({ id: null, plan_year: year, department: "", team_code: "", team_name: "", content: DEFAULT_MFG_CONTENT(), status: "draft" });
+    setShowForm(false);
+  };
+
+  const openCreate = () => { resetForm(); setShowForm(true); };
+
+  const openEdit = (plan) => {
+    setForm({
+      id: plan.id,
+      plan_year: plan.plan_year,
+      department: plan.department,
+      team_code: plan.team_code,
+      team_name: plan.team_name,
+      content: plan.content || DEFAULT_MFG_CONTENT(),
+      status: plan.status,
+    });
+    setShowForm(true);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await pacApi.upsertManufacturePlan({ ...form });
+      if (res.success) {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+        await loadPlans();
+        setShowForm(false);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateCell = (rowIdx, colIdx, val) => {
+    setForm(prev => {
+      const newRows = [...(prev.content.rows || [])];
+      newRows[rowIdx] = [...newRows[rowIdx]];
+      if (colIdx <= 3) {
+        newRows[rowIdx][colIdx] = val;
+      } else {
+        newRows[rowIdx][colIdx] = Number(val) || 0;
+        if (colIdx >= 6 && colIdx <= 17) {
+          // Jan-Dec — keep Total Batch (col 18) in sync with the months.
+          newRows[rowIdx][18] = newRows[rowIdx].slice(6, 18).reduce((a, b) => a + (Number(b) || 0), 0);
+        }
+      }
+      return { ...prev, content: { ...prev.content, rows: newRows } };
+    });
+  };
+
+  const addRow = () => {
+    setForm(prev => {
+      const newRows = [...(prev.content.rows || [])];
+      const no = newRows.length + 1;
+      newRows.push([no, "", "", "New Product", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+      return { ...prev, content: { ...prev.content, rows: newRows } };
+    });
+  };
+
+  const removeRow = (rowIdx) => {
+    setForm(prev => ({ ...prev, content: { ...prev.content, rows: (prev.content.rows || []).filter((_, i) => i !== rowIdx) } }));
+  };
+
+  const handleUploadFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const res = await pacApi.uploadManufacturePlanExcel(file, year);
+      if (res.success) {
+        alert(`Import berhasil: ${res.rows_imported} baris produk (${res.data?.department} / ${res.data?.team_name}).`);
+        await loadPlans();
+      } else {
+        alert(res.error || "Import failed");
+      }
+    } catch (e) {
+      alert("Import error: " + (e?.detail || e?.message || e));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const grandTotal = (colIdx) => (form.content.rows || []).reduce((sum, row) => sum + (Number(row[colIdx]) || 0), 0);
+  const fmtNum = (v) => v === "" || v == null ? "—" : Number(v).toLocaleString();
+
+  const NUMERIC_COLS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-200">Manufacture Plan Data</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Input perencanaan produksi · {year}</p>
+        </div>
+        <div className="flex gap-2">
+          {!showForm ? (
+            <>
+              <button onClick={openCreate} className={BTN_SM("violet")}><Plus size={11} /> New Plan</button>
+              <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleUploadFile} />
+              <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM("teal")}>
+                {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                Upload Excel
+              </button>
+              {selectedPlan && (
+                <button onClick={() => openEdit(selectedPlan)} className={BTN_SM("indigo")}><Edit3 size={11} /> Edit</button>
+              )}
+            </>
+          ) : (
+            <>
+              <button onClick={save} disabled={saving} className={BTN_SM("green")}>
+                {saving ? <Loader2 size={11} className="animate-spin" /> : saved ? <CheckCircle size={11} /> : <Save size={11} />}
+                {saved ? "Saved!" : "Save"}
+              </button>
+              <button onClick={resetForm} className={BTN_SM("gray")}><X size={11} /> Cancel</button>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="p-5">
+        {loading ? (
+          <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>
+        ) : !showForm ? (
+          <>
+            <div className="mb-4">
+              <label className="text-xs text-gray-500 mb-1 block">Pilih Manufacture Plan:</label>
+              <select value={selectedPlan?.id || ""} onChange={e => {
+                const plan = plans.find(p => String(p.id) === e.target.value);
+                setSelectedPlan(plan || null);
+              }} className={`${SELECT} w-full max-w-md`}>
+                <option value="">-- Pilih Manufacture Plan --</option>
+                {plans.map(p => (
+                  <option key={p.id} value={p.id}>{p.plan_year} - {p.department || "(no dept)"} / {p.team_name || "(no team)"}</option>
+                ))}
+              </select>
+            </div>
+            {selectedPlan && selectedPlan.content && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3 text-xs text-gray-400">
+                  {selectedPlan.content.meta?.type && <span className="px-2 py-1 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-medium">{selectedPlan.content.meta.type}</span>}
+                  <span className="text-gray-500">{selectedPlan.department} / {selectedPlan.team_code} - {selectedPlan.team_name}</span>
+                </div>
+                <div className="overflow-x-auto border border-gray-700 rounded-lg">
+                  <table className="w-full border-collapse text-xs" style={{ minWidth: 1900 }}>
+                    <thead>
+                      <tr className="bg-gray-800/80">
+                        {(selectedPlan.content.headers || MFG_HEADERS).map((h, ci) => (
+                          <th key={ci} className="px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(selectedPlan.content.rows || []).map((row, i) => (
+                        <tr key={i} className="border-b border-gray-800 hover:bg-gray-800/30">
+                          {row.map((val, ci) => (
+                            <td key={ci} className={`px-2 py-1.5 border border-gray-700 ${NUMERIC_COLS.includes(ci) ? "text-right font-mono" : "text-left"}`}>
+                              {NUMERIC_COLS.includes(ci) ? fmtNum(val) : val}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Field label="Plan Year">
+                <input type="number" className={`${INP}`} value={form.plan_year} onChange={e => setForm({ ...form, plan_year: Number(e.target.value) })} />
+              </Field>
+              <Field label="Department">
+                <input className={`${INP}`} value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} placeholder="e.g. Plant" />
+              </Field>
+              <Field label="Team Code">
+                <input className={`${INP}`} value={form.team_code} onChange={e => setForm({ ...form, team_code: e.target.value })} placeholder="e.g. 35" />
+              </Field>
+              <Field label="Team Name">
+                <input className={`${INP}`} value={form.team_name} onChange={e => setForm({ ...form, team_name: e.target.value })} placeholder="e.g. Production Planning & Warehouse" />
+              </Field>
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="text-xs text-gray-500">Type:</label>
+              <input className={`${INP} max-w-xs`} value={form.content.meta?.type || ""}
+                onChange={e => setForm({ ...form, content: { ...form.content, meta: { ...form.content.meta, type: e.target.value } } })}
+                placeholder="e.g. Commercial Production - Export" />
+              <label className="text-xs text-gray-500">Status:</label>
+              <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className={`${SELECT}`}>
+                <option value="draft">Draft</option>
+                <option value="final">Final</option>
+              </select>
+            </div>
+            <div className="overflow-x-auto border border-gray-700 rounded-lg">
+              <table className="w-full border-collapse text-xs" style={{ minWidth: 2000 }}>
+                <thead>
+                  <tr className="bg-gray-800/80">
+                    {(form.content.headers || MFG_HEADERS).map((h, ci) => (
+                      <th key={ci} className="px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
+                    ))}
+                    <th className="px-2 py-2 text-center border border-gray-700 w-10"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(form.content.rows || []).map((row, ri) => (
+                    <tr key={ri} className="border-b border-gray-800 hover:bg-gray-800/30">
+                      <td className="px-2 py-1.5 border border-gray-700 text-center font-bold text-gray-400 w-10">{row[0]}</td>
+                      {[1, 2, 3].map(ci => (
+                        <td key={ci} className="px-2 py-1.5 border border-gray-700">
+                          <input className={`${INP} !text-xs`} value={row[ci]} onChange={e => updateCell(ri, ci, e.target.value)} />
+                        </td>
+                      ))}
+                      {row.slice(4).map((val, i) => {
+                        const ci = i + 4;
+                        return (
+                          <td key={ci} className="px-2 py-1.5 border border-gray-700">
+                            <input type="number" className={`${INP} !text-center !text-xs font-mono`} value={val} onChange={e => updateCell(ri, ci, e.target.value)} />
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 py-1.5 border border-gray-700 text-center">
+                        <button onClick={() => removeRow(ri)} className={BTN_SM("red")}><Trash2 size={9} /></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-800/60">
+                    <td colSpan={6} className="px-2 py-1.5 border border-gray-700 text-xs font-bold text-gray-300">GRAND TOTAL</td>
+                    {[6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22].map(ci => (
+                      <td key={ci} className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-gray-200">{grandTotal(ci).toLocaleString()}</td>
+                    ))}
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <button onClick={addRow} className={BTN_SM("violet")}><Plus size={11} /> Add Product</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ══ Investment Plan Panel ═════════════════════════════════════════════════════ */
+/* Field set + Excel format reference: sumber/investment plan template.xlsx —
+   flat capex category/item list with monthly spend + total, mirrors
+   ManufacturePlanPanel's shape (headers + rows array). */
+
+const INV_HEADERS = ["No", "Clarification", "Priority", "Item", "Purpose", "Picture", "QTY", "Lifetime (Year)",
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  "Total", "Notes (Replacement/Additional)"];
+
+const DEFAULT_INV_CONTENT = () => ({
+  meta: { type: "", department: "", team_code: "", team_name: "", year: null },
+  headers: INV_HEADERS,
+  rows: [[1, "New Category", "", "", "", "", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ""]],
+});
+
+function InvestmentPlanPanel({ year }) {
+  const [plans, setPlans] = useState([]);
+  const [selectedPlan, setSelectedPlan] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const [form, setForm] = useState({
+    id: null,
+    plan_year: year,
+    department: "",
+    team_code: "",
+    team_name: "",
+    content: DEFAULT_INV_CONTENT(),
+    status: "draft",
+  });
+
+  const loadPlans = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await pacApi.listInvestmentPlans({ plan_year: year });
+      if (res.success) setPlans(res.data || []);
+    } catch {
+      setPlans([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [year]);
+
+  useEffect(() => { loadPlans(); }, [loadPlans]);
+
+  useEffect(() => {
+    if (!showForm && plans.length > 0 && !plans.some(p => p.id === selectedPlan?.id)) {
+      setSelectedPlan(plans[0]);
+    }
+  }, [plans, showForm, selectedPlan]);
+
+  const resetForm = () => {
+    setForm({ id: null, plan_year: year, department: "", team_code: "", team_name: "", content: DEFAULT_INV_CONTENT(), status: "draft" });
+    setShowForm(false);
+  };
+
+  const openCreate = () => { resetForm(); setShowForm(true); };
+
+  const openEdit = (plan) => {
+    setForm({
+      id: plan.id,
+      plan_year: plan.plan_year,
+      department: plan.department,
+      team_code: plan.team_code,
+      team_name: plan.team_name,
+      content: plan.content || DEFAULT_INV_CONTENT(),
+      status: plan.status,
+    });
+    setShowForm(true);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await pacApi.upsertInvestmentPlan({ ...form });
+      if (res.success) {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+        await loadPlans();
+        setShowForm(false);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateCell = (rowIdx, colIdx, val) => {
+    setForm(prev => {
+      const newRows = [...(prev.content.rows || [])];
+      newRows[rowIdx] = [...newRows[rowIdx]];
+      if ([1, 2, 3, 4, 5, 21].includes(colIdx)) {
+        newRows[rowIdx][colIdx] = val;
+      } else {
+        newRows[rowIdx][colIdx] = Number(val) || 0;
+        if (colIdx >= 8 && colIdx <= 19) {
+          // Jan-Dec — keep Total (col 20) in sync with the months.
+          newRows[rowIdx][20] = newRows[rowIdx].slice(8, 20).reduce((a, b) => a + (Number(b) || 0), 0);
+        }
+      }
+      return { ...prev, content: { ...prev.content, rows: newRows } };
+    });
+  };
+
+  const addRow = () => {
+    setForm(prev => {
+      const newRows = [...(prev.content.rows || [])];
+      const no = newRows.length + 1;
+      newRows.push([no, "New Category", "", "", "", "", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ""]);
+      return { ...prev, content: { ...prev.content, rows: newRows } };
+    });
+  };
+
+  const removeRow = (rowIdx) => {
+    setForm(prev => ({ ...prev, content: { ...prev.content, rows: (prev.content.rows || []).filter((_, i) => i !== rowIdx) } }));
+  };
+
+  const handleUploadFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const res = await pacApi.uploadInvestmentPlanExcel(file, year);
+      if (res.success) {
+        alert(`Import berhasil: ${res.rows_imported} baris kategori (${res.data?.department} / ${res.data?.team_name || res.data?.team_code}).`);
+        await loadPlans();
+      } else {
+        alert(res.error || "Import failed");
+      }
+    } catch (e) {
+      alert("Import error: " + (e?.detail || e?.message || e));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const grandTotal = (colIdx) => (form.content.rows || []).reduce((sum, row) => sum + (Number(row[colIdx]) || 0), 0);
+  const fmtNum = (v) => v === "" || v == null ? "—" : Number(v).toLocaleString();
+
+  const NUMERIC_COLS = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-200">Investment Plan Data</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Input perencanaan investasi (capex) · {year}</p>
+        </div>
+        <div className="flex gap-2">
+          {!showForm ? (
+            <>
+              <button onClick={openCreate} className={BTN_SM("violet")}><Plus size={11} /> New Plan</button>
+              <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleUploadFile} />
+              <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM("teal")}>
+                {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                Upload Excel
+              </button>
+              {selectedPlan && (
+                <button onClick={() => openEdit(selectedPlan)} className={BTN_SM("indigo")}><Edit3 size={11} /> Edit</button>
+              )}
+            </>
+          ) : (
+            <>
+              <button onClick={save} disabled={saving} className={BTN_SM("green")}>
+                {saving ? <Loader2 size={11} className="animate-spin" /> : saved ? <CheckCircle size={11} /> : <Save size={11} />}
+                {saved ? "Saved!" : "Save"}
+              </button>
+              <button onClick={resetForm} className={BTN_SM("gray")}><X size={11} /> Cancel</button>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="p-5">
+        {loading ? (
+          <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>
+        ) : !showForm ? (
+          <>
+            <div className="mb-4">
+              <label className="text-xs text-gray-500 mb-1 block">Pilih Investment Plan:</label>
+              <select value={selectedPlan?.id || ""} onChange={e => {
+                const plan = plans.find(p => String(p.id) === e.target.value);
+                setSelectedPlan(plan || null);
+              }} className={`${SELECT} w-full max-w-md`}>
+                <option value="">-- Pilih Investment Plan --</option>
+                {plans.map(p => (
+                  <option key={p.id} value={p.id}>{p.plan_year} - {p.department || "(no dept)"} / {p.team_code || "(no team)"}</option>
+                ))}
+              </select>
+            </div>
+            {selectedPlan && selectedPlan.content && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3 text-xs text-gray-400">
+                  {selectedPlan.content.meta?.type && <span className="px-2 py-1 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-medium">{selectedPlan.content.meta.type}</span>}
+                  <span className="text-gray-500">{selectedPlan.department} / {selectedPlan.team_code}</span>
+                </div>
+                <div className="overflow-x-auto border border-gray-700 rounded-lg">
+                  <table className="w-full border-collapse text-xs" style={{ minWidth: 1900 }}>
+                    <thead>
+                      <tr className="bg-gray-800/80">
+                        {(selectedPlan.content.headers || INV_HEADERS).map((h, ci) => (
+                          <th key={ci} className="px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(selectedPlan.content.rows || []).map((row, i) => (
+                        <tr key={i} className="border-b border-gray-800 hover:bg-gray-800/30">
+                          {row.map((val, ci) => (
+                            <td key={ci} className={`px-2 py-1.5 border border-gray-700 ${NUMERIC_COLS.includes(ci) ? "text-right font-mono" : "text-left"}`}>
+                              {NUMERIC_COLS.includes(ci) ? fmtNum(val) : val}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Field label="Plan Year">
+                <input type="number" className={`${INP}`} value={form.plan_year} onChange={e => setForm({ ...form, plan_year: Number(e.target.value) })} />
+              </Field>
+              <Field label="Department">
+                <input className={`${INP}`} value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} placeholder="e.g. Plant" />
+              </Field>
+              <Field label="Team Code / Name">
+                <input className={`${INP}`} value={form.team_code} onChange={e => setForm({ ...form, team_code: e.target.value })} placeholder="e.g. All" />
+              </Field>
+              <Field label="Type">
+                <input className={`${INP}`} value={form.content.meta?.type || ""}
+                  onChange={e => setForm({ ...form, content: { ...form.content, meta: { ...form.content.meta, type: e.target.value } } })}
+                  placeholder="e.g. Investment - Department" />
+              </Field>
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="text-xs text-gray-500">Status:</label>
+              <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className={`${SELECT}`}>
+                <option value="draft">Draft</option>
+                <option value="final">Final</option>
+              </select>
+            </div>
+            <div className="overflow-x-auto border border-gray-700 rounded-lg">
+              <table className="w-full border-collapse text-xs" style={{ minWidth: 2000 }}>
+                <thead>
+                  <tr className="bg-gray-800/80">
+                    {(form.content.headers || INV_HEADERS).map((h, ci) => (
+                      <th key={ci} className="px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
+                    ))}
+                    <th className="px-2 py-2 text-center border border-gray-700 w-10"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(form.content.rows || []).map((row, ri) => (
+                    <tr key={ri} className="border-b border-gray-800 hover:bg-gray-800/30">
+                      <td className="px-2 py-1.5 border border-gray-700 text-center font-bold text-gray-400 w-10">{row[0]}</td>
+                      {[1, 2, 3, 4, 5].map(ci => (
+                        <td key={ci} className="px-2 py-1.5 border border-gray-700">
+                          <input className={`${INP} !text-xs`} value={row[ci]} onChange={e => updateCell(ri, ci, e.target.value)} />
+                        </td>
+                      ))}
+                      {row.slice(6, 21).map((val, i) => {
+                        const ci = i + 6;
+                        return (
+                          <td key={ci} className="px-2 py-1.5 border border-gray-700">
+                            <input type="number" className={`${INP} !text-center !text-xs font-mono`} value={val} onChange={e => updateCell(ri, ci, e.target.value)} />
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 py-1.5 border border-gray-700">
+                        <input className={`${INP} !text-xs`} value={row[21]} onChange={e => updateCell(ri, 21, e.target.value)} />
+                      </td>
+                      <td className="px-2 py-1.5 border border-gray-700 text-center">
+                        <button onClick={() => removeRow(ri)} className={BTN_SM("red")}><Trash2 size={9} /></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-800/60">
+                    <td colSpan={8} className="px-2 py-1.5 border border-gray-700 text-xs font-bold text-gray-300">GRAND TOTAL</td>
+                    {[8,9,10,11,12,13,14,15,16,17,18,19,20].map(ci => (
+                      <td key={ci} className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-gray-200">{grandTotal(ci).toLocaleString()}</td>
+                    ))}
+                    <td></td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <button onClick={addRow} className={BTN_SM("violet")}><Plus size={11} /> Add Category</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ══ OPEX Plan Panel ═══════════════════════════════════════════════════════════ */
+
+const OPEX_HEADERS = [
+  "No", "Managerial Account No", "Managerial Account Name", "Chart of Account No", "Chart of Account Name",
+  "Controll/Uncontrolled", "Sales & Mkt", "Strategy Development", "Plant", "Admin",
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total",
+];
+
+const DEFAULT_OPEX_CONTENT = () => ({
+  meta: { type: "", department: "", team_code: "", team_name: "" },
+  headers: OPEX_HEADERS,
+  rows: [[1, "", "New Account", "", "", "", "", "", "", "", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]],
+});
+
+function OpexPlanPanel({ year }) {
+  const [plans, setPlans] = useState([]);
+  const [selectedPlan, setSelectedPlan] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const [form, setForm] = useState({
+    id: null,
+    plan_year: year,
+    department: "",
+    team_code: "",
+    team_name: "",
+    content: DEFAULT_OPEX_CONTENT(),
+    status: "draft",
+  });
+
+  const loadPlans = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await pacApi.listOpexPlans({ plan_year: year });
+      if (res.success) setPlans(res.data || []);
+    } catch {
+      setPlans([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [year]);
+
+  useEffect(() => { loadPlans(); }, [loadPlans]);
+
+  useEffect(() => {
+    if (!showForm && plans.length > 0 && !plans.some(p => p.id === selectedPlan?.id)) {
+      setSelectedPlan(plans[0]);
+    }
+  }, [plans, showForm, selectedPlan]);
+
+  const resetForm = () => {
+    setForm({ id: null, plan_year: year, department: "", team_code: "", team_name: "", content: DEFAULT_OPEX_CONTENT(), status: "draft" });
+    setShowForm(false);
+  };
+
+  const openCreate = () => { resetForm(); setShowForm(true); };
+
+  const openEdit = (plan) => {
+    setForm({
+      id: plan.id,
+      plan_year: plan.plan_year,
+      department: plan.department,
+      team_code: plan.team_code,
+      team_name: plan.team_name,
+      content: plan.content || DEFAULT_OPEX_CONTENT(),
+      status: plan.status,
+    });
+    setShowForm(true);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await pacApi.upsertOpexPlan({ ...form });
+      if (res.success) {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+        await loadPlans();
+        setShowForm(false);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateCell = (rowIdx, colIdx, val) => {
+    setForm(prev => {
+      const newRows = [...(prev.content.rows || [])];
+      newRows[rowIdx] = [...newRows[rowIdx]];
+      if (colIdx >= 1 && colIdx <= 9) {
+        newRows[rowIdx][colIdx] = val;
+      } else {
+        newRows[rowIdx][colIdx] = Number(val) || 0;
+        if (colIdx >= 10 && colIdx <= 21) {
+          // Jan-Dec — keep Total (col 22) in sync with the months.
+          newRows[rowIdx][22] = newRows[rowIdx].slice(10, 22).reduce((a, b) => a + (Number(b) || 0), 0);
+        }
+      }
+      return { ...prev, content: { ...prev.content, rows: newRows } };
+    });
+  };
+
+  const addRow = () => {
+    setForm(prev => {
+      const newRows = [...(prev.content.rows || [])];
+      const no = newRows.length + 1;
+      newRows.push([no, "", "New Account", "", "", "", "", "", "", "", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+      return { ...prev, content: { ...prev.content, rows: newRows } };
+    });
+  };
+
+  const removeRow = (rowIdx) => {
+    setForm(prev => ({ ...prev, content: { ...prev.content, rows: (prev.content.rows || []).filter((_, i) => i !== rowIdx) } }));
+  };
+
+  const handleUploadFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const res = await pacApi.uploadOpexPlanExcel(file, year);
+      if (res.success) {
+        const summary = (res.imported || []).map(x => `${x.sheet} (${x.rows} baris)`).join(", ");
+        alert(`Import berhasil: ${res.imported?.length || 0} sheet — ${summary}.`);
+        await loadPlans();
+      } else {
+        alert(res.error || "Import failed");
+      }
+    } catch (e) {
+      alert("Import error: " + (e?.detail || e?.message || e));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const grandTotal = (colIdx) => (form.content.rows || []).reduce((sum, row) => sum + (Number(row[colIdx]) || 0), 0);
+  const fmtNum = (v) => v === "" || v == null ? "—" : Number(v).toLocaleString();
+
+  const NUMERIC_COLS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-200">OPEX Plan Data</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Input perencanaan biaya operasional (OPEX) · {year}</p>
+        </div>
+        <div className="flex gap-2">
+          {!showForm ? (
+            <>
+              <button onClick={openCreate} className={BTN_SM("violet")}><Plus size={11} /> New Plan</button>
+              <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleUploadFile} />
+              <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM("teal")}>
+                {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                Upload Excel
+              </button>
+              {selectedPlan && (
+                <button onClick={() => openEdit(selectedPlan)} className={BTN_SM("indigo")}><Edit3 size={11} /> Edit</button>
+              )}
+            </>
+          ) : (
+            <>
+              <button onClick={save} disabled={saving} className={BTN_SM("green")}>
+                {saving ? <Loader2 size={11} className="animate-spin" /> : saved ? <CheckCircle size={11} /> : <Save size={11} />}
+                {saved ? "Saved!" : "Save"}
+              </button>
+              <button onClick={resetForm} className={BTN_SM("gray")}><X size={11} /> Cancel</button>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="p-5">
+        {loading ? (
+          <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>
+        ) : !showForm ? (
+          <>
+            <div className="mb-4">
+              <label className="text-xs text-gray-500 mb-1 block">Pilih OPEX Plan:</label>
+              <select value={selectedPlan?.id || ""} onChange={e => {
+                const plan = plans.find(p => String(p.id) === e.target.value);
+                setSelectedPlan(plan || null);
+              }} className={`${SELECT} w-full max-w-md`}>
+                <option value="">-- Pilih OPEX Plan --</option>
+                {plans.map(p => (
+                  <option key={p.id} value={p.id}>{p.plan_year} - {p.department || "(no dept)"} / {p.team_name || p.team_code || "(no team)"}</option>
+                ))}
+              </select>
+            </div>
+            {selectedPlan && selectedPlan.content && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3 text-xs text-gray-400">
+                  {selectedPlan.content.meta?.type && <span className="px-2 py-1 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-medium">{selectedPlan.content.meta.type}</span>}
+                  <span className="text-gray-500">{selectedPlan.department} / {selectedPlan.team_name || selectedPlan.team_code}</span>
+                </div>
+                <div className="overflow-x-auto border border-gray-700 rounded-lg">
+                  <table className="w-full border-collapse text-xs" style={{ minWidth: 2400 }}>
+                    <thead>
+                      <tr className="bg-gray-800/80">
+                        {(selectedPlan.content.headers || OPEX_HEADERS).map((h, ci) => (
+                          <th key={ci} className="px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(selectedPlan.content.rows || []).map((row, i) => (
+                        <tr key={i} className="border-b border-gray-800 hover:bg-gray-800/30">
+                          {row.map((val, ci) => (
+                            <td key={ci} className={`px-2 py-1.5 border border-gray-700 ${NUMERIC_COLS.includes(ci) ? "text-right font-mono" : "text-left"}`}>
+                              {NUMERIC_COLS.includes(ci) ? fmtNum(val) : val}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Field label="Plan Year">
+                <input type="number" className={`${INP}`} value={form.plan_year} onChange={e => setForm({ ...form, plan_year: Number(e.target.value) })} />
+              </Field>
+              <Field label="Department">
+                <input className={`${INP}`} value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} placeholder="e.g. Plant" />
+              </Field>
+              <Field label="Team Code / Name">
+                <input className={`${INP}`} value={form.team_code} onChange={e => setForm({ ...form, team_code: e.target.value })} placeholder="e.g. All Plant Team" />
+              </Field>
+              <Field label="Type">
+                <input className={`${INP}`} value={form.content.meta?.type || ""}
+                  onChange={e => setForm({ ...form, content: { ...form.content, meta: { ...form.content.meta, type: e.target.value } } })}
+                  placeholder="e.g. Opex - Department" />
+              </Field>
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="text-xs text-gray-500">Status:</label>
+              <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className={`${SELECT}`}>
+                <option value="draft">Draft</option>
+                <option value="final">Final</option>
+              </select>
+            </div>
+            <div className="overflow-x-auto border border-gray-700 rounded-lg">
+              <table className="w-full border-collapse text-xs" style={{ minWidth: 2500 }}>
+                <thead>
+                  <tr className="bg-gray-800/80">
+                    {(form.content.headers || OPEX_HEADERS).map((h, ci) => (
+                      <th key={ci} className="px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
+                    ))}
+                    <th className="px-2 py-2 text-center border border-gray-700 w-10"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(form.content.rows || []).map((row, ri) => (
+                    <tr key={ri} className="border-b border-gray-800 hover:bg-gray-800/30">
+                      <td className="px-2 py-1.5 border border-gray-700 text-center font-bold text-gray-400 w-10">{row[0]}</td>
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(ci => (
+                        <td key={ci} className="px-2 py-1.5 border border-gray-700">
+                          <input className={`${INP} !text-xs`} value={row[ci]} onChange={e => updateCell(ri, ci, e.target.value)} />
+                        </td>
+                      ))}
+                      {row.slice(10, 23).map((val, i) => {
+                        const ci = i + 10;
+                        return (
+                          <td key={ci} className="px-2 py-1.5 border border-gray-700">
+                            <input type="number" className={`${INP} !text-center !text-xs font-mono`} value={val} onChange={e => updateCell(ri, ci, e.target.value)} />
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 py-1.5 border border-gray-700 text-center">
+                        <button onClick={() => removeRow(ri)} className={BTN_SM("red")}><Trash2 size={9} /></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-800/60">
+                    <td colSpan={10} className="px-2 py-1.5 border border-gray-700 text-xs font-bold text-gray-300">GRAND TOTAL</td>
+                    {[10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22].map(ci => (
+                      <td key={ci} className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-gray-200">{grandTotal(ci).toLocaleString()}</td>
+                    ))}
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <button onClick={addRow} className={BTN_SM("violet")}><Plus size={11} /> Add Account</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2194,7 +3848,11 @@ function SalesPlanPanel({ year }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportingGross, setExportingGross] = useState(false);
+  const [exportingSummary, setExportingSummary] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const fileInputRef = useRef(null);
 
   const [form, setForm] = useState({
     id: null,
@@ -2220,6 +3878,14 @@ function SalesPlanPanel({ year }) {
   }, [year]);
 
   useEffect(() => { loadPlans(); }, [loadPlans]);
+
+  // Auto-select the first plan so the panel shows data immediately instead
+  // of a blank dropdown-only view when the sub-tab is first opened.
+  useEffect(() => {
+    if (!showForm && plans.length > 0 && !plans.some(p => p.id === selectedPlan?.id)) {
+      setSelectedPlan(plans[0]);
+    }
+  }, [plans, showForm, selectedPlan]);
 
   const resetForm = () => {
     setForm({
@@ -2325,17 +3991,97 @@ function SalesPlanPanel({ year }) {
     return (form.content.rows || []).reduce((sum, row) => sum + (Number(row[colIdx]) || 0), 0);
   };
 
+  const handleUploadFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file next time
+    if (!file) return;
+    setUploading(true);
+    try {
+      const res = await pacApi.uploadSalesPlanExcel(file, year);
+      if (res.success) {
+        alert(`Import berhasil: ${res.rows_imported} baris produk (${res.data?.department} / ${res.data?.team_name}).`);
+        await loadPlans();
+      } else {
+        alert(res.error || "Import failed");
+      }
+    } catch (e) {
+      alert("Import error: " + (e?.detail || e?.message || e));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // client.js's axios interceptor already unwraps response.data for every
+  // call in this app, so `blobData` here IS the Blob itself — not {data: Blob}.
+  const handleExportGrossSalesReport = async () => {
+    setExportingGross(true);
+    try {
+      const blobData = await pacApi.exportGrossSalesReport(year);
+      const blob = new Blob([blobData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `Gross_Sales_Report_${year}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      // Same interceptor rejects with error.response.data directly — with
+      // responseType:"blob" that's a Blob containing the JSON error text.
+      let msg = "Export failed";
+      if (e instanceof Blob) {
+        try { msg = JSON.parse(await e.text())?.detail || msg; } catch (_) {}
+      } else if (e?.detail) {
+        msg = e.detail;
+      } else if (e?.message) {
+        msg = e.message;
+      }
+      alert("Gross Sales Report error: " + msg);
+    } finally {
+      setExportingGross(false);
+    }
+  };
+
+  const handleExportSalesSummary = async () => {
+    setExportingSummary(true);
+    try {
+      const blobData = await pacApi.exportSalesSummary(year);
+      const blob = new Blob([blobData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `Sales_Summary_${year}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      let msg = "Export failed";
+      if (e instanceof Blob) {
+        try { msg = JSON.parse(await e.text())?.detail || msg; } catch (_) {}
+      } else if (e?.detail) {
+        msg = e.detail;
+      } else if (e?.message) {
+        msg = e.message;
+      }
+      alert("Sales Summary error: " + msg);
+    } finally {
+      setExportingSummary(false);
+    }
+  };
+
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-gray-200">Sales Plan</h3>
+          <h3 className="text-sm font-semibold text-gray-200">Sales Plan Data</h3>
           <p className="text-xs text-gray-500 mt-0.5">Input perencanaan penjualan · {year}</p>
         </div>
         <div className="flex gap-2">
           {!showForm ? (
             <>
               <button onClick={openCreate} className={BTN_SM("violet")}><Plus size={11} /> New Plan</button>
+              <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleUploadFile} />
+              <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM("teal")}>
+                {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                Upload Excel
+              </button>
+              {selectedPlan && (
+                <button onClick={() => openEdit(selectedPlan)} className={BTN_SM("indigo")}><Edit3 size={11} /> Edit</button>
+              )}
               <button onClick={() => exportExcel("value")} disabled={exporting || !selectedPlan} className={BTN_SM("sky")}>
                 {exporting ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
                 Export S1 (Value)
@@ -2359,20 +4105,29 @@ function SalesPlanPanel({ year }) {
       <div className="p-5">
         {!showForm ? (
           <>
-            <div className="mb-4">
-              <label className="text-xs text-gray-500 mb-1 block">Pilih Sales Plan:</label>
-              <select value={selectedPlan?.id || ""} onChange={e => {
-                const plan = plans.find(p => String(p.id) === e.target.value);
-                setSelectedPlan(plan || null);
-                if (plan) openEdit(plan);
-              }} className={`${SELECT} w-full max-w-md`}>
-                <option value="">-- Pilih Sales Plan --</option>
-                {plans.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.plan_year} - {p.department || "(no dept)"} / {p.team_code || "(no team)"} [{p.plan_type}]
-                  </option>
-                ))}
-              </select>
+            <div className="mb-4 flex items-end gap-3">
+              <div className="flex-1">
+                <label className="text-xs text-gray-500 mb-1 block">Pilih Sales Plan:</label>
+                <select value={selectedPlan?.id || ""} onChange={e => {
+                  const plan = plans.find(p => String(p.id) === e.target.value);
+                  setSelectedPlan(plan || null);
+                }} className={`${SELECT} w-full max-w-md`}>
+                  <option value="">-- Pilih Sales Plan --</option>
+                  {plans.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.plan_year} - {p.department || "(no dept)"} / {p.team_code || "(no team)"} [{p.plan_type}]
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button onClick={handleExportGrossSalesReport} disabled={exportingGross} className={BTN_SM("green")}>
+                {exportingGross ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                Gross Sales Report
+              </button>
+              <button onClick={handleExportSalesSummary} disabled={exportingSummary} className={BTN_SM("indigo")}>
+                {exportingSummary ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                Sales Summary
+              </button>
             </div>
             {selectedPlan && selectedPlan.content && (
               <div className="space-y-3">

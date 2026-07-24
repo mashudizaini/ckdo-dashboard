@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
-import * as XLSX from "xlsx";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { toPng } from "html-to-image";
 import {
-  Users, UserCheck, BarChart2, RefreshCw,
+  UserCheck, RefreshCw,
   Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck,
   Wallet, Download, ChevronDown, ChevronUp, ListChecks, FileSearch, BookOpen, Trash2,
   QrCode, Plus, ArrowUpDown, Pencil, ZoomIn, ZoomOut, Maximize2, Minimize2, Network,
@@ -31,14 +32,27 @@ const EMPLOYEE_COLS = [
   { key: "job_title",        label: "Position" },
   { key: "work_placement",   label: "Placement" },
   { key: "status",           label: "Status" },
+  { key: "employment_status", label: "Employment Status" },
   { key: "sex",              label: "Gender" },
   { key: "employee_grade",   label: "Grade" },
   { key: "education_degree", label: "Education" },
   { key: "marital_status",   label: "Marital" },
   { key: "date_of_joining",  label: "Join Date" },
+  { key: "resign_date",      label: "Resign Date" },
   { key: "end_pkwt",         label: "End PKWT" },
   { key: "phone_number",     label: "Phone" },
 ];
+
+const STATUS_BADGE = {
+  "Permanent": "bg-green-500/15 text-green-400 border-green-500/30",
+  "Contract":  "bg-amber-500/15 text-amber-400 border-amber-500/30",
+  "Probation": "bg-purple-500/15 text-purple-400 border-purple-500/30",
+};
+
+const EMPLOYMENT_STATUS_BADGE = {
+  "Active": "bg-green-500/15 text-green-400 border-green-500/30",
+  "Resign": "bg-red-500/15 text-red-400 border-red-500/30",
+};
 
 const NEU_TAB = {
   bg: "#e8edf5",
@@ -65,51 +79,31 @@ function SubTabs({ tabs, active, onChange }) {
   );
 }
 
-export default function HRDashboard() {
-  const [activeSection, setActiveSection] = useState("employees");
-  const [empSub, setEmpSub] = useState("list");
-  const [attSub, setAttSub] = useState("summary");
+const HR_TABS = ["employees", "attendance", "todo", "cv", "budget", "emagazine"];
 
-  const kpiCards = [
-    { id: "employees",  icon: Users,         color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Employee Data" },
-    { id: "attendance", icon: BarChart2,     color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40", label: "Attendance Rate" },
-    { id: "todo",       icon: ListChecks,    color: "text-rose-400",   bg: "bg-rose-500/10",   activeBorder: "border-rose-500/40",   label: "To Do List" },
-    { id: "cv",         icon: FileSearch,    color: "text-cyan-400",   bg: "bg-cyan-500/10",   activeBorder: "border-cyan-500/40",   label: "E-Recruitment" },
-    { id: "budget",     icon: Wallet,        color: "text-orange-400", bg: "bg-orange-500/10", activeBorder: "border-orange-500/40", label: "Budget Monitoring" },
-    { id: "emagazine",  icon: BookOpen,      color: "text-teal-400",   bg: "bg-teal-500/10",   activeBorder: "border-teal-500/40",   label: "e-Magazine" },
-  ];
+export default function HRDashboard() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [empSub, setEmpSub] = useState("summary");
+
+  // Derive active section from URL — navigation now lives in the sidebar tree menu.
+  const activeSection = HR_TABS.find((id) => location.pathname.endsWith(id)) ?? "employees";
+
+  useEffect(() => {
+    if (location.pathname === "/dashboard/hr" || location.pathname === "/dashboard/hr/") {
+      navigate("/dashboard/hr/employees", { replace: true });
+    }
+  }, []); // eslint-disable-line
 
   return (
     <div className="p-6 space-y-4">
-      {/* Tab Buttons — 6 tabs */}
-      <div className="grid grid-cols-2 xl:grid-cols-7 gap-2">
-        {kpiCards.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => setActiveSection(activeSection === c.id ? null : c.id)}
-            className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 transition-all ${
-              activeSection === c.id
-                ? `${c.bg} ${c.activeBorder} ring-1 ring-inset ${c.activeBorder}`
-                : "bg-gray-900 border-gray-800 hover:border-gray-700 hover:bg-gray-800/60"
-            }`}
-          >
-            <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${c.bg} border ${c.activeBorder}`}>
-              <c.icon size={14} className={c.color} />
-            </div>
-            <span className={`text-sm font-semibold leading-tight ${activeSection === c.id ? "text-white" : "text-gray-400"}`}>
-              {c.label}
-            </span>
-          </button>
-        ))}
-      </div>
-
       {/* ── Employee Data (list + upload) ── */}
       {activeSection === "employees" && (
         <SectionCard>
           <SubTabs
             tabs={[
-              { id: "list",     label: "Employee List" },
               { id: "summary",  label: "Employee Summary" },
+              { id: "list",     label: "Employee List" },
               { id: "graph",    label: "Employee Graph" },
               { id: "orgchart", label: "Organization Chart" },
               { id: "turnover", label: "Turnover Report" },
@@ -171,10 +165,13 @@ function EmployeeTable() {
   const [search,     setSearch]     = useState("");
   const [deptFilter, setDeptFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [genderFilter, setGenderFilter] = useState("");
+  const [employmentStatusFilter, setEmploymentStatusFilter] = useState("");
+  const [joinMonthFilter, setJoinMonthFilter] = useState(() => String(new Date().getMonth() + 1));
+  const [joinYearFilter, setJoinYearFilter] = useState(() => String(new Date().getFullYear()));
   const [teamFilter, setTeamFilter] = useState("");
   const [departments, setDepartments]   = useState([]);
   const [teams,       setTeams]         = useState([]);
+  const [joinYears,   setJoinYears]     = useState([]);
   const [summary,    setSummary]    = useState(null);
   const [sortBy,     setSortBy]     = useState("full_name");
   const [sortDir,    setSortDir]    = useState("asc");
@@ -182,6 +179,8 @@ function EmployeeTable() {
   const [exportFields, setExportFields] = useState(() => Object.fromEntries(EMPLOYEE_COLS.map(c => [c.key, true])));
   const [exporting, setExporting] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [addingEmployee, setAddingEmployee] = useState(false);
+  const [resigningEmployee, setResigningEmployee] = useState(null);
   const [employeeNames, setEmployeeNames] = useState([]);
 
   const PAGE_SIZE = 8;
@@ -207,8 +206,19 @@ function EmployeeTable() {
 
   const fetchSummary = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/summary`, { headers });
+      const params = new URLSearchParams({
+        ...(joinMonthFilter ? { join_month: joinMonthFilter } : {}),
+        ...(joinYearFilter  ? { join_year: joinYearFilter }   : {}),
+      });
+      const res = await fetch(`${API}/summary?${params}`, { headers });
       if (res.ok) setSummary(await res.json());
+    } catch (_) {}
+  }, [joinMonthFilter, joinYearFilter]); // eslint-disable-line
+
+  const fetchJoinYears = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/join-years`, { headers });
+      if (res.ok) setJoinYears(await res.json());
     } catch (_) {}
   }, []); // eslint-disable-line
 
@@ -223,16 +233,19 @@ function EmployeeTable() {
         ...(search       ? { search }               : {}),
         ...(deptFilter   ? { department: deptFilter } : {}),
         ...(statusFilter ? { status: statusFilter }  : {}),
+        ...(employmentStatusFilter ? { employment_status: employmentStatusFilter } : {}),
+        ...(joinMonthFilter ? { join_month: joinMonthFilter } : {}),
+        ...(joinYearFilter  ? { join_year: joinYearFilter }   : {}),
         ...(teamFilter   ? { team: teamFilter }      : {}),
-        ...(genderFilter ? { sex: genderFilter === "Male" ? "M" : "F" } : {}),
       });
       const res = await fetch(`${API}?${params}`, { headers });
       if (res.ok) setData(await res.json());
     } catch (_) {}
     finally { setLoading(false); }
-  }, [page, search, deptFilter, statusFilter, teamFilter, genderFilter, sortBy, sortDir]); // eslint-disable-line
+  }, [page, search, deptFilter, statusFilter, employmentStatusFilter, joinMonthFilter, joinYearFilter, teamFilter, sortBy, sortDir]); // eslint-disable-line
 
-  useEffect(() => { fetchDepts(); fetchSummary(); fetchTeams(""); fetchEmployeeNames(); }, []); // eslint-disable-line
+  useEffect(() => { fetchDepts(); fetchTeams(""); fetchEmployeeNames(); fetchJoinYears(); }, []); // eslint-disable-line
+  useEffect(() => { fetchSummary(); }, [fetchSummary]);
   useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
 
   const [activeCard, setActiveCard] = useState("");
@@ -254,23 +267,17 @@ function EmployeeTable() {
 
   const handleCardClick = (id) => {
     if (activeCard === id) {
-      setActiveCard(""); setStatusFilter(""); setGenderFilter(""); setPage(1);
+      setActiveCard(""); setStatusFilter(""); setEmploymentStatusFilter(""); setPage(1);
     } else {
       setActiveCard(id);
-      if (id === "permanent")  { setStatusFilter("Permanent"); setGenderFilter(""); }
-      else if (id === "contract")  { setStatusFilter("Contract");  setGenderFilter(""); }
-      else if (id === "probation") { setStatusFilter("Probation"); setGenderFilter(""); }
-      else if (id === "male")   { setStatusFilter(""); setGenderFilter("Male"); }
-      else if (id === "female") { setStatusFilter(""); setGenderFilter("Female"); }
-      else { setStatusFilter(""); setGenderFilter(""); }
+      setStatusFilter(""); setEmploymentStatusFilter("");
+      if (id === "active")         setEmploymentStatusFilter("Active");
+      else if (id === "resign")    setEmploymentStatusFilter("Resign");
+      else if (id === "permanent") setStatusFilter("Permanent");
+      else if (id === "contract")  setStatusFilter("Contract");
+      else if (id === "probation") setStatusFilter("Probation");
       setPage(1);
     }
-  };
-
-  const STATUS_BADGE = {
-    "Permanent": "bg-green-500/15 text-green-400 border-green-500/30",
-    "Contract":  "bg-amber-500/15 text-amber-400 border-amber-500/30",
-    "Probation": "bg-purple-500/15 text-purple-400 border-purple-500/30",
   };
 
   const toggleExportField = (key) => setExportFields(p => ({ ...p, [key]: !p[key] }));
@@ -279,29 +286,26 @@ function EmployeeTable() {
   const handleExport = async () => {
     setExporting(true);
     try {
+      const cols = EMPLOYEE_COLS.filter(c => exportFields[c.key]);
       const params = new URLSearchParams({
-        page: 1, page_size: 5000, sort_by: sortBy, sort_dir: sortDir,
+        sort_by: sortBy, sort_dir: sortDir, fields: cols.map(c => c.key).join(","),
         ...(search       ? { search }                : {}),
         ...(deptFilter   ? { department: deptFilter } : {}),
         ...(statusFilter ? { status: statusFilter }   : {}),
+        ...(employmentStatusFilter ? { employment_status: employmentStatusFilter } : {}),
+        ...(joinMonthFilter ? { join_month: joinMonthFilter } : {}),
+        ...(joinYearFilter  ? { join_year: joinYearFilter }   : {}),
         ...(teamFilter   ? { team: teamFilter }        : {}),
-        ...(genderFilter ? { sex: genderFilter === "Male" ? "M" : "F" } : {}),
       });
-      const res = await fetch(`${API}?${params}`, { headers });
-      const body = await res.json();
-      const rows = body.employees ?? [];
-      const cols = EMPLOYEE_COLS.filter(c => exportFields[c.key]);
-      const fmtDate = (v) => v ? new Date(v).toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" }) : "";
-      const cellValue = (e, key) => {
-        if (key === "date_of_joining" || key === "end_pkwt") return fmtDate(e[key]);
-        if (key === "sex") return e.sex === "M" ? "Male" : e.sex === "F" ? "Female" : "";
-        return e[key] ?? "";
-      };
-      const aoa = [cols.map(c => c.label), ...rows.map(e => cols.map(c => cellValue(e, c.key)))];
-      const ws = XLSX.utils.aoa_to_sheet(aoa);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Employees");
-      XLSX.writeFile(wb, `employee_data_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      const res = await fetch(`${API}/export?${params}`, { headers });
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `employee_data_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
       setShowExportPicker(false);
     } catch (_) {
     } finally {
@@ -316,11 +320,11 @@ function EmployeeTable() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
           {[
             { id: "total",      label: "Total Employees", val: summary.total,      color: "#2563eb", icon: "👥" },
+            { id: "active",     label: "Active",          val: summary.active,     color: "#16a34a", icon: "🟢" },
+            { id: "resign",     label: "Resign",          val: summary.resign,     color: "#dc2626", icon: "🔴" },
             { id: "permanent",  label: "Permanent",       val: summary.permanent,  color: "#22c55e", icon: "✓" },
             { id: "contract",   label: "Contract",        val: summary.contract,   color: "#f59e0b", icon: "📋" },
             { id: "probation",  label: "Probation",       val: summary.probation,  color: "#a855f7", icon: "⏳" },
-            { id: "male",       label: "Male",            val: summary.male,       color: "#3b82f6", icon: "♂" },
-            { id: "female",     label: "Female",          val: summary.female,     color: "#ec4899", icon: "♀" },
           ].map(({ id, label, val, color, icon }) => {
             const isActive = activeCard === id;
             return (
@@ -345,9 +349,10 @@ function EmployeeTable() {
       )}
 
       {/* Filter bar */}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         <div className="relative flex-1 min-w-[180px]">
-          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+          <label className="mb-1 block text-[10px] font-medium text-gray-500">Search</label>
+          <Search size={13} className="absolute left-2.5 top-[29px] text-gray-500" />
           <input
             type="text"
             placeholder="Search name / NIK / position..."
@@ -356,40 +361,97 @@ function EmployeeTable() {
             className="w-full rounded-lg border border-gray-700 bg-gray-900 pl-8 pr-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500 transition-colors"
           />
           {search && (
-            <button onClick={() => handleSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400">
+            <button onClick={() => handleSearch("")} className="absolute right-2 top-[30px] text-gray-600 hover:text-gray-400">
               <X size={13} />
             </button>
           )}
         </div>
 
-        <select
-          value={deptFilter}
-          onChange={(e) => handleDept(e.target.value)}
-          className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
-        >
-          <option value="">All Departments</option>
-          {departments.map((d) => <option key={d} value={d}>{d}</option>)}
-        </select>
+        <div>
+          <label className="mb-1 block text-[10px] font-medium text-gray-500">Department</label>
+          <select
+            value={deptFilter}
+            onChange={(e) => handleDept(e.target.value)}
+            className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+          >
+            <option value="">All</option>
+            {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
 
-        <select
-          value={statusFilter}
-          onChange={(e) => handleStatus(e.target.value)}
-          className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
-        >
-          <option value="">All Statuses</option>
-          <option value="Permanent">Permanent</option>
-          <option value="Contract">Contract</option>
-          <option value="Probation">Probation</option>
-        </select>
+        <div>
+          <label className="mb-1 block text-[10px] font-medium text-gray-500">Status</label>
+          <select
+            value={statusFilter}
+            onChange={(e) => handleStatus(e.target.value)}
+            className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+          >
+            <option value="">All</option>
+            <option value="Permanent">Permanent</option>
+            <option value="Contract">Contract</option>
+            <option value="Probation">Probation</option>
+          </select>
+        </div>
 
-        <select
-          value={teamFilter}
-          onChange={(e) => handleTeam(e.target.value)}
-          className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+        <div>
+          <label className="mb-1 block text-[10px] font-medium text-gray-500">Employment State</label>
+          <select
+            value={employmentStatusFilter}
+            onChange={(e) => { setEmploymentStatusFilter(e.target.value); setActiveCard(""); setPage(1); }}
+            className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+          >
+            <option value="">All</option>
+            <option value="Active">ACTIVE</option>
+            <option value="Resign">INACTIVE</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-[10px] font-medium text-gray-500" title="Shows employees who joined on or before the selected Month/Year">
+            Joined up to (Month)
+          </label>
+          <select
+            value={joinMonthFilter}
+            onChange={(e) => { setJoinMonthFilter(e.target.value); setPage(1); }}
+            className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+          >
+            <option value="">All</option>
+            {MONTHS_ID.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-[10px] font-medium text-gray-500" title="Shows employees who joined on or before the selected Month/Year">
+            Joined up to (Year)
+          </label>
+          <select
+            value={joinYearFilter}
+            onChange={(e) => { setJoinYearFilter(e.target.value); setPage(1); }}
+            className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+          >
+            <option value="">All</option>
+            {joinYears.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-[10px] font-medium text-gray-500">Team</label>
+          <select
+            value={teamFilter}
+            onChange={(e) => handleTeam(e.target.value)}
+            className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+          >
+            <option value="">All</option>
+            {teams.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+
+        <button
+          onClick={() => setAddingEmployee(true)}
+          className="flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-2 text-sm font-semibold text-white transition-colors"
         >
-          <option value="">All Teams</option>
-          {teams.map((t) => <option key={t} value={t}>{t}</option>)}
-        </select>
+          <Plus size={14} /> Add Employee
+        </button>
 
         <button
           onClick={() => fetchEmployees()}
@@ -439,43 +501,82 @@ function EmployeeTable() {
         </div>
       </div>
 
-      {/* Tabel */}
+      {/* Tabel — every field on the Employee record gets its own column */}
       {(() => {
-        const COLS = [
-          { label: "NIK",             field: "user_id",          align: "left" },
-          { label: "Name",            field: "full_name",         align: "left" },
-          { label: "Level",           field: "level",             align: "left" },
-          { label: "Department",      field: "department",        align: "left" },
-          { label: "Division / Team", field: "division",          align: "left" },
-          { label: "Position",        field: "job_title",         align: "left" },
-          { label: "Placement",       field: "work_placement",    align: "left" },
-          { label: "Status",          field: "status",            align: "left" },
-          { label: "Gender",          field: "sex",               align: "center" },
-          { label: "Grade",           field: "employee_grade",    align: "center" },
-          { label: "Education",       field: "education_degree",  align: "left" },
-          { label: "Marital",         field: "marital_status",    align: "left" },
-          { label: "Join Date",       field: "date_of_joining",   align: "left" },
-          { label: "End PKWT",        field: "end_pkwt",          align: "left" },
-          { label: "Phone",           field: "phone_number",      align: "left" },
-        ];
         const fmtDate = (v) => v
           ? new Date(v).toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })
           : "—";
+        const badge = (val, map) => val
+          ? <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${map[val] || "bg-gray-700 text-gray-400 border-gray-600"}`}>{val}</span>
+          : "—";
+        const truncated = (val) => (
+          <span className="block max-w-[220px] truncate" title={val || ""}>{val || "—"}</span>
+        );
+
+        const COLS = [
+          { label: "NIK",              field: "user_id",          mono: true, bold: true },
+          { label: "Name",             field: "full_name",        bold: true },
+          { label: "Gender",           field: "sex",               align: "center",
+            render: (e) => e.sex === "M" ? <span className="text-blue-400 font-semibold">M</span> : e.sex === "F" ? <span className="text-pink-400 font-semibold">F</span> : "—" },
+          { label: "Place of Birth",   field: "place_of_birth" },
+          { label: "Date of Birth",    field: "date_of_birth",     render: (e) => fmtDate(e.date_of_birth) },
+          { label: "Religion",         field: "religion" },
+          { label: "Blood Type",       field: "blood_type",        align: "center" },
+          { label: "Marital",          field: "marital_status" },
+          { label: "Level",            field: "level" },
+          { label: "Department",       field: "department" },
+          { label: "Division",         field: "division" },
+          { label: "Team",             field: "team" },
+          { label: "Position",         field: "job_title",         render: (e) => truncated(e.job_title) },
+          { label: "Supervisor",       field: "supervisor_id",
+            render: (e) => e.supervisor_id ? (employeeNames.find(n => n.user_id === e.supervisor_id)?.full_name || e.supervisor_id) : "—" },
+          { label: "Placement",        field: "work_placement" },
+          { label: "Status",           field: "status",            render: (e) => badge(e.status, STATUS_BADGE) },
+          { label: "Employment",       field: "employment_status", render: (e) => badge(e.employment_status, EMPLOYMENT_STATUS_BADGE) },
+          { label: "Grade",            field: "employee_grade",    align: "center", mono: true },
+          { label: "Join Date",        field: "date_of_joining",   render: (e) => fmtDate(e.date_of_joining) },
+          { label: "PKWT Ke",          field: "pkwt_ke" },
+          { label: "Starting PKWT",    field: "starting_pkwt",     render: (e) => fmtDate(e.starting_pkwt) },
+          { label: "End PKWT",         field: "end_pkwt",
+            render: (e) => e.end_pkwt
+              ? <span className={new Date(e.end_pkwt) < new Date() ? "text-red-400" : "text-amber-400"}>{fmtDate(e.end_pkwt)}</span>
+              : <span className="text-gray-700">—</span> },
+          { label: "Permanent Date",   field: "permanent_date",    render: (e) => fmtDate(e.permanent_date) },
+          { label: "Resign Date",      field: "resign_date",       render: (e) => e.employment_status === "Active" ? "—" : fmtDate(e.resign_date) },
+          { label: "Resign Reason",    field: "resign_reason",     render: (e) => truncated(e.resign_reason) },
+          { label: "Retire Date",      field: "retire_date",       render: (e) => fmtDate(e.retire_date) },
+          { label: "Education",        field: "education_degree" },
+          { label: "School",           field: "education_school" },
+          { label: "Major",            field: "education_major" },
+          { label: "Work Experience",  field: "working_experience_years", align: "center" },
+          { label: "Previous Company", field: "previous_company",  render: (e) => truncated(e.previous_company) },
+          { label: "Phone",            field: "phone_number",      mono: true },
+          { label: "Emergency Phone",  field: "emergency_phone",   mono: true },
+          { label: "Company Email",    field: "company_email" },
+          { label: "Personal Email",   field: "personal_email" },
+          { label: "Address",          field: "address",           render: (e) => truncated(e.address) },
+          { label: "BPJS Health",      field: "no_bpjs_health",    mono: true },
+          { label: "BPJS Employee",    field: "no_bpjs_employee",  mono: true },
+          { label: "NPWP",             field: "npwp_number",       mono: true },
+          { label: "Bank Account (BCA)", field: "bank_account_bca", mono: true },
+          { label: "Bank Account Name", field: "bank_account_name" },
+        ];
+
         return (
           <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 480 }}>
-            <table className="w-full text-sm" style={{ minWidth: 1400 }}>
+            <table className="w-full text-sm" style={{ minWidth: 4200 }}>
               <thead className="sticky top-0 z-10">
                 <tr className="bg-gray-800">
-                  {COLS.map(({ label, field, align }) => {
+                  {COLS.map(({ label, field }) => {
                     const active = sortBy === field;
                     return (
                       <th
                         key={field}
                         onClick={() => handleSort(field)}
                         className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer select-none group"
-                        style={{ color: active ? "#a5b4fc" : "#6b7280", textAlign: align }}
+                        style={{ color: active ? "#a5b4fc" : "#6b7280", textAlign: "center" }}
                       >
-                        <span className={`inline-flex items-center gap-1 ${align === "center" ? "justify-center" : ""}`}>
+                        <span className="inline-flex items-center gap-1 justify-center">
                           {label}
                           <span className={`transition-opacity ${active ? "opacity-100" : "opacity-0 group-hover:opacity-50"}`}>
                             {active
@@ -486,42 +587,39 @@ function EmployeeTable() {
                       </th>
                     );
                   })}
+                  <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap text-center" style={{ color: "#6b7280" }}>
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
                 {loading ? (
-                  <tr><td colSpan={COLS.length} className="py-12 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></td></tr>
+                  <tr><td colSpan={COLS.length + 1} className="py-12 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></td></tr>
                 ) : data.employees.length === 0 ? (
-                  <tr><td colSpan={COLS.length} className="py-12 text-center text-xs text-gray-600">
-                    {search || deptFilter || statusFilter || genderFilter ? "No employees matching filter" : "No employee data yet. Upload Excel in Employee Upload tab."}
+                  <tr><td colSpan={COLS.length + 1} className="py-12 text-center text-xs text-gray-600">
+                    {search || deptFilter || statusFilter || employmentStatusFilter || joinMonthFilter || joinYearFilter || teamFilter ? "No employees matching filter" : "No employee data yet. Upload Excel in Employee Upload tab."}
                   </td></tr>
                 ) : data.employees.map((e) => (
                   <tr key={e.user_id} onClick={() => setSelectedEmployee(e)} className="hover:bg-gray-800/40 transition-colors cursor-pointer">
-                    <td className="px-3 py-2.5 font-mono text-xs text-gray-500 whitespace-nowrap">{e.user_id}</td>
-                    <td className="px-3 py-2.5 font-medium text-gray-200 whitespace-nowrap">{e.full_name}</td>
-                    <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap text-xs">{e.level || "—"}</td>
-                    <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap">{e.department || "—"}</td>
-                    <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{[e.division, e.team].filter(Boolean).join(" / ") || "—"}</td>
-                    <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap max-w-[200px] truncate" title={e.job_title}>{e.job_title || "—"}</td>
-                    <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{e.work_placement || "—"}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap">
-                      {e.status
-                        ? <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[e.status] || "bg-gray-700 text-gray-400 border-gray-600"}`}>{e.status}</span>
-                        : "—"}
+                    {COLS.map(({ field, align, mono, bold, render }) => (
+                      <td
+                        key={field}
+                        className={`px-3 py-2.5 whitespace-nowrap text-xs ${mono ? "font-mono" : ""} ${bold ? "font-medium text-gray-200" : "text-gray-500"}`}
+                        style={{ textAlign: align || "left" }}
+                      >
+                        {render ? render(e) : (e[field] || "—")}
+                      </td>
+                    ))}
+                    <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                      {e.employment_status !== "Resign" && (
+                        <button
+                          onClick={(ev) => { ev.stopPropagation(); setResigningEmployee(e); }}
+                          className="rounded-md border border-red-800/50 bg-red-950/40 px-2.5 py-1 text-xs font-semibold text-red-400 hover:bg-red-900/50 hover:border-red-700 transition-colors"
+                        >
+                          Resign
+                        </button>
+                      )}
                     </td>
-                    <td className="px-3 py-2.5 text-center text-xs text-gray-500">
-                      {e.sex === "M" ? <span className="text-blue-400 font-semibold">M</span> : e.sex === "F" ? <span className="text-pink-400 font-semibold">F</span> : "—"}
-                    </td>
-                    <td className="px-3 py-2.5 text-center text-xs text-gray-400 font-mono">{e.employee_grade || "—"}</td>
-                    <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap text-xs">{e.education_degree || "—"}</td>
-                    <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap text-xs">{e.marital_status || "—"}</td>
-                    <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap text-xs">{fmtDate(e.date_of_joining)}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap text-xs">
-                      {e.end_pkwt
-                        ? <span className={`${new Date(e.end_pkwt) < new Date() ? "text-red-400" : "text-amber-400"}`}>{fmtDate(e.end_pkwt)}</span>
-                        : <span className="text-gray-700">—</span>}
-                    </td>
-                    <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap text-xs font-mono">{e.phone_number || "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -566,12 +664,26 @@ function EmployeeTable() {
         </div>
       )}
 
-      {selectedEmployee && (
+      {(selectedEmployee || addingEmployee) && (
         <EmployeeDetailModal
-          employee={selectedEmployee}
-          onClose={() => setSelectedEmployee(null)}
+          employee={addingEmployee ? null : selectedEmployee}
+          onClose={() => { setSelectedEmployee(null); setAddingEmployee(false); }}
           employeeNames={employeeNames}
-          onSupervisorSaved={() => fetchEmployeeNames()}
+          onSaved={() => {
+            setSelectedEmployee(null); setAddingEmployee(false);
+            fetchEmployees(); fetchEmployeeNames(); fetchSummary(); fetchDepts(); fetchTeams(deptFilter);
+          }}
+        />
+      )}
+
+      {resigningEmployee && (
+        <ResignEmployeeModal
+          employee={resigningEmployee}
+          onClose={() => setResigningEmployee(null)}
+          onSaved={() => {
+            setResigningEmployee(null);
+            fetchEmployees(); fetchEmployeeNames(); fetchSummary();
+          }}
         />
       )}
     </div>
@@ -586,9 +698,10 @@ const EMPLOYEE_DETAIL_FIELDS = [
   ] },
   { section: "Employment", fields: [
     ["level", "Level"], ["department", "Department"], ["division", "Division"], ["team", "Team"],
-    ["job_title", "Position"], ["supervisor_id", "Direct Supervisor"], ["work_placement", "Placement"], ["status", "Status"], ["employee_grade", "Grade"],
+    ["job_title", "Position"], ["supervisor_id", "Direct Supervisor"], ["work_placement", "Placement"], ["status", "Status"],
+    ["employment_status", "Employment Status"], ["employee_grade", "Grade"],
     ["date_of_joining", "Join Date"], ["pkwt_ke", "PKWT Ke"], ["starting_pkwt", "Starting PKWT"], ["end_pkwt", "End PKWT"],
-    ["permanent_date", "Permanent Date"], ["resign_date", "Resign Date"], ["retire_date", "Retire Date"],
+    ["permanent_date", "Permanent Date"], ["resign_date", "Resign Date"], ["resign_reason", "Resign Reason"], ["retire_date", "Retire Date"],
   ] },
   { section: "Education & Experience", fields: [
     ["education_degree", "Education Degree"], ["education_school", "School"], ["education_major", "Major"],
@@ -608,40 +721,50 @@ const EMPLOYEE_DETAIL_DATE_KEYS = new Set([
   "date_of_joining", "date_of_birth", "retire_date", "end_pkwt", "starting_pkwt", "permanent_date", "resign_date",
 ]);
 
-function fmtEmployeeDetailValue(key, val) {
-  if (val === null || val === undefined || val === "") return "—";
-  if (EMPLOYEE_DETAIL_DATE_KEYS.has(key)) {
-    return new Date(val).toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" });
-  }
-  if (key === "sex") return val === "M" ? "Male" : val === "F" ? "Female" : val;
-  return val;
-}
+const EMPLOYEE_SELECT_OPTIONS = {
+  sex: [["M", "Male"], ["F", "Female"]],
+  status: [["Permanent", "Permanent"], ["Contract", "Contract"], ["Probation", "Probation"]],
+  employment_status: [["Active", "Active"], ["Resign", "Resign"]],
+};
 
-function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSupervisorSaved }) {
-  const [supervisorId, setSupervisorId] = useState(employee.supervisor_id || null);
+const EMPTY_EMPLOYEE_FORM = Object.fromEntries(
+  EMPLOYEE_DETAIL_FIELDS.flatMap(({ fields }) => fields.map(([key]) => [key, ""]))
+);
+
+// Editable employee form — used both for editing an existing employee (row
+// click in Employee List) and adding a brand new one (Add Employee button).
+function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved }) {
+  const isNew = !employee;
+  const [form, setForm] = useState(() => ({
+    ...EMPTY_EMPLOYEE_FORM,
+    ...(employee || {}),
+  }));
   const [editingSupervisor, setEditingSupervisor] = useState(false);
   const [supervisorQuery, setSupervisorQuery] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
 
-  const supervisorName = employeeNames.find(n => n.user_id === supervisorId)?.full_name;
+  const setField = (key, val) => setForm((f) => ({ ...f, [key]: val }));
+
+  const supervisorName = employeeNames.find(n => n.user_id === form.supervisor_id)?.full_name;
 
   const matches = employeeNames
-    .filter(n => n.user_id !== employee.user_id)
+    .filter(n => n.user_id !== form.user_id)
     .filter(n => !supervisorQuery.trim() || n.full_name?.toLowerCase().includes(supervisorQuery.trim().toLowerCase()))
     .slice(0, 8);
 
-  const saveSupervisor = async (newId) => {
+  const handleSave = async () => {
+    if (!form.full_name?.trim()) { setSaveError("Full name is required"); return; }
+    if (isNew && !form.user_id?.trim()) { setSaveError("NIK is required"); return; }
+
     setSaving(true);
     setSaveError("");
     try {
-      await hrApi.setSupervisor(employee.user_id, newId);
-      setSupervisorId(newId);
-      setEditingSupervisor(false);
-      setSupervisorQuery("");
-      onSupervisorSaved?.(employee.user_id, newId);
+      if (isNew) await hrApi.createEmployee(form);
+      else await hrApi.updateEmployee(employee.user_id, form);
+      onSaved?.();
     } catch (err) {
-      setSaveError(err?.detail || "Failed to update supervisor");
+      setSaveError(err?.detail || "Failed to save");
     } finally {
       setSaving(false);
     }
@@ -663,10 +786,12 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSupervis
           style={{ background: "linear-gradient(135deg, #2563eb, #3b82f6)", borderRadius: "16px 16px 0 0" }}
         >
           <div>
-            <h3 style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>{employee.full_name || "—"}</h3>
-            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.85)", fontWeight: 600, marginTop: 2 }}>
-              {employee.user_id} · {employee.job_title || "—"}
-            </p>
+            <h3 style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>{isNew ? "Add Employee" : (form.full_name || "—")}</h3>
+            {!isNew && (
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.85)", fontWeight: 600, marginTop: 2 }}>
+                {employee.user_id} · {form.job_title || "—"}
+              </p>
+            )}
           </div>
           <button
             onClick={onClose}
@@ -685,6 +810,13 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSupervis
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px 16px" }}>
                 {fields.map(([key, label]) => {
                   const isSupervisor = key === "supervisor_id";
+                  const isDate = EMPLOYEE_DETAIL_DATE_KEYS.has(key);
+                  const selectOptions = EMPLOYEE_SELECT_OPTIONS[key];
+                  const isUserId = key === "user_id";
+                  const inputStyle = {
+                    width: "100%", fontSize: 12.5, fontWeight: 600, padding: "5px 6px", marginTop: 2,
+                    borderRadius: 6, border: "none", background: "#fff", color: "#1e293b", outline: "none",
+                  };
                   return (
                     <div
                       key={key}
@@ -695,66 +827,84 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSupervis
                       }}
                     >
                       <div style={{ fontSize: 9, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                        {label}
+                        {label}{isUserId && isNew && " *"}
                       </div>
 
-                      {!isSupervisor ? (
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: "#1e293b", marginTop: 2, wordBreak: "break-word" }}>
-                          {fmtEmployeeDetailValue(key, employee[key])}
-                        </div>
-                      ) : !editingSupervisor ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
-                          <span style={{ fontSize: 12.5, fontWeight: 600, color: "#1e293b", wordBreak: "break-word" }}>
-                            {supervisorId ? (supervisorName || supervisorId) : "— (Top of chart)"}
-                          </span>
-                          <button
-                            onClick={() => setEditingSupervisor(true)}
-                            title="Change supervisor"
-                            style={{ padding: 3, borderRadius: 6, border: "none", background: "rgba(37,99,235,0.12)", color: "#2563eb", cursor: "pointer", flexShrink: 0 }}
-                          >
-                            <Pencil size={10} />
-                          </button>
-                        </div>
-                      ) : (
-                        <div style={{ marginTop: 4 }}>
-                          <input
-                            autoFocus
-                            value={supervisorQuery}
-                            onChange={(e) => setSupervisorQuery(e.target.value)}
-                            placeholder="Search employee name..."
-                            style={{ width: "100%", fontSize: 12, fontWeight: 600, padding: "6px 8px", borderRadius: 8, border: "none", background: "#fff", color: "#334155", outline: "none" }}
-                          />
-                          <div style={{ maxHeight: 150, overflowY: "auto", marginTop: 4, borderRadius: 8, background: "#fff" }}>
-                            <div
-                              onClick={() => saveSupervisor(null)}
-                              style={{ padding: "6px 10px", fontSize: 11.5, fontWeight: 600, color: "#dc2626", cursor: "pointer" }}
-                            >
-                              — No supervisor (top of chart)
-                            </div>
-                            {matches.map((n) => (
-                              <div
-                                key={n.user_id}
-                                onClick={() => saveSupervisor(n.user_id)}
-                                style={{ padding: "6px 10px", fontSize: 11.5, fontWeight: 600, color: "#1e293b", cursor: "pointer" }}
-                              >
-                                {n.full_name} <span style={{ color: "#94a3b8", fontWeight: 500 }}>· {n.department || "—"}</span>
-                              </div>
-                            ))}
-                            {matches.length === 0 && (
-                              <div style={{ padding: "6px 10px", fontSize: 11, color: "#94a3b8" }}>No matches</div>
-                            )}
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                      {isSupervisor ? (
+                        !editingSupervisor ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+                            <span style={{ fontSize: 12.5, fontWeight: 600, color: "#1e293b", wordBreak: "break-word" }}>
+                              {form.supervisor_id ? (supervisorName || form.supervisor_id) : "— (Top of chart)"}
+                            </span>
                             <button
-                              onClick={() => { setEditingSupervisor(false); setSupervisorQuery(""); setSaveError(""); }}
-                              style={{ fontSize: 10.5, fontWeight: 700, color: "#64748b", background: "none", border: "none", cursor: "pointer" }}
+                              onClick={() => setEditingSupervisor(true)}
+                              title="Change supervisor"
+                              style={{ padding: 3, borderRadius: 6, border: "none", background: "rgba(37,99,235,0.12)", color: "#2563eb", cursor: "pointer", flexShrink: 0 }}
+                            >
+                              <Pencil size={10} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ marginTop: 4 }}>
+                            <input
+                              autoFocus
+                              value={supervisorQuery}
+                              onChange={(e) => setSupervisorQuery(e.target.value)}
+                              placeholder="Search employee name..."
+                              style={{ width: "100%", fontSize: 12, fontWeight: 600, padding: "6px 8px", borderRadius: 8, border: "none", background: "#fff", color: "#334155", outline: "none" }}
+                            />
+                            <div style={{ maxHeight: 150, overflowY: "auto", marginTop: 4, borderRadius: 8, background: "#fff" }}>
+                              <div
+                                onClick={() => { setField("supervisor_id", null); setEditingSupervisor(false); setSupervisorQuery(""); }}
+                                style={{ padding: "6px 10px", fontSize: 11.5, fontWeight: 600, color: "#dc2626", cursor: "pointer" }}
+                              >
+                                — No supervisor (top of chart)
+                              </div>
+                              {matches.map((n) => (
+                                <div
+                                  key={n.user_id}
+                                  onClick={() => { setField("supervisor_id", n.user_id); setEditingSupervisor(false); setSupervisorQuery(""); }}
+                                  style={{ padding: "6px 10px", fontSize: 11.5, fontWeight: 600, color: "#1e293b", cursor: "pointer" }}
+                                >
+                                  {n.full_name} <span style={{ color: "#94a3b8", fontWeight: 500 }}>· {n.department || "—"}</span>
+                                </div>
+                              ))}
+                              {matches.length === 0 && (
+                                <div style={{ padding: "6px 10px", fontSize: 11, color: "#94a3b8" }}>No matches</div>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => { setEditingSupervisor(false); setSupervisorQuery(""); }}
+                              style={{ fontSize: 10.5, fontWeight: 700, color: "#64748b", background: "none", border: "none", cursor: "pointer", marginTop: 4 }}
                             >
                               Cancel
                             </button>
-                            {saving && <Loader2 size={12} className="animate-spin" style={{ color: "#2563eb" }} />}
-                            {saveError && <span style={{ fontSize: 10, color: "#dc2626", fontWeight: 600 }}>{saveError}</span>}
                           </div>
-                        </div>
+                        )
+                      ) : selectOptions ? (
+                        <select
+                          value={form[key] || ""}
+                          onChange={(e) => setField(key, e.target.value)}
+                          style={{ ...inputStyle, cursor: "pointer" }}
+                        >
+                          <option value="">—</option>
+                          {selectOptions.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                        </select>
+                      ) : isDate ? (
+                        <input
+                          type="date"
+                          value={form[key] || ""}
+                          onChange={(e) => setField(key, e.target.value)}
+                          style={inputStyle}
+                        />
+                      ) : (
+                        <input
+                          type="text"
+                          value={form[key] || ""}
+                          disabled={isUserId && !isNew}
+                          onChange={(e) => setField(key, e.target.value)}
+                          style={{ ...inputStyle, ...(isUserId && !isNew ? { opacity: 0.6, cursor: "not-allowed" } : {}) }}
+                        />
                       )}
                     </div>
                   );
@@ -762,6 +912,109 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSupervis
               </div>
             </div>
           ))}
+
+          <div className="flex items-center justify-end gap-3 pt-2">
+            {saveError && <span style={{ fontSize: 11.5, color: "#dc2626", fontWeight: 600 }}>{saveError}</span>}
+            <button
+              onClick={onClose}
+              style={{ fontSize: 12, fontWeight: 700, color: "#64748b", background: "none", border: "none", cursor: "pointer" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700, color: "#fff",
+                padding: "9px 20px", borderRadius: 10, border: "none", cursor: saving ? "wait" : "pointer",
+                background: "#2563eb", boxShadow: "3px 3px 8px rgba(37,99,235,0.3)",
+              }}
+            >
+              {saving && <Loader2 size={14} className="animate-spin" />}
+              {isNew ? "Add Employee" : "Save"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Mark an employee as resigned — resign date + reason ────────────────────────
+function ResignEmployeeModal({ employee, onClose, onSaved }) {
+  const [resignDate, setResignDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSave = async () => {
+    if (!resignDate) { setError("Resign date is required"); return; }
+    setSaving(true); setError("");
+    try {
+      await hrApi.resignEmployee(employee.user_id, { resign_date: resignDate, reason: reason.trim() || null });
+      onSaved?.();
+    } catch (err) {
+      setError(err?.detail || "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,0.6)" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-2xl" style={{ background: "#e8edf5", boxShadow: "8px 8px 20px #c5cad8, -8px -8px 20px #ffffff" }}>
+        <div className="flex items-center justify-between px-6 py-4" style={{ background: "linear-gradient(135deg, #dc2626, #ef4444)", borderRadius: "16px 16px 0 0" }}>
+          <div>
+            <h3 style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>Mark as Resigned</h3>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.85)", fontWeight: 600, marginTop: 2 }}>
+              {employee.full_name} · {employee.user_id}
+            </p>
+          </div>
+          <button onClick={onClose} style={{ padding: 6, borderRadius: 8, border: "none", background: "rgba(255,255,255,0.2)", color: "#fff", cursor: "pointer" }}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="text-xs font-semibold text-gray-500">Resign Date *</label>
+            <input
+              type="date"
+              value={resignDate}
+              onChange={(e) => setResignDate(e.target.value)}
+              className="w-full mt-1 rounded-lg border-none bg-white px-3 py-2 text-sm text-gray-800 outline-none"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-gray-500">Reason</label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={4}
+              placeholder="Optional — reason for resignation..."
+              className="w-full mt-1 rounded-lg border-none bg-white px-3 py-2 text-sm text-gray-800 outline-none resize-none"
+            />
+          </div>
+
+          {error && <p style={{ fontSize: 11.5, color: "#dc2626", fontWeight: 600 }}>{error}</p>}
+
+          <div className="flex items-center justify-end gap-3 pt-1">
+            <button onClick={onClose} style={{ fontSize: 12, fontWeight: 700, color: "#64748b", background: "none", border: "none", cursor: "pointer" }}>
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700, color: "#fff",
+                padding: "9px 18px", borderRadius: 10, border: "none", cursor: saving ? "wait" : "pointer",
+                background: "#dc2626", boxShadow: "3px 3px 8px rgba(220,38,38,0.3)",
+              }}
+            >
+              {saving && <Loader2 size={14} className="animate-spin" />}
+              Confirm Resign
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -770,11 +1023,16 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSupervis
 
 // ── Organization Chart (Employee Data) ─────────────────────────────────────────
 const ORG_DEPT_COLORS = {
-  "Director":              "#ef4444",
-  "Sales & Marketing":     "#3b82f6",
-  "Strategy Development":  "#a855f7",
-  "Plant":                 "#f59e0b",
-  "Administration":        "#10b981",
+  "Board of Commissioners": "#0f172a",
+  "Board of Directors":     "#ef4444",
+  "Sales & Marketing":      "#3b82f6",
+  "Strategy Development":   "#a855f7",
+  "Plant":                  "#f59e0b",
+  "Administration":         "#10b981",
+};
+const ORG_DEPT_ORDER = {
+  "Board of Commissioners": 0, "Board of Directors": 1, "Sales & Marketing": 2,
+  "Strategy Development": 3, "Plant": 4, "Administration": 5,
 };
 const ORG_DEFAULT_COLOR = "#64748b";
 const orgDeptColor = (dept) => ORG_DEPT_COLORS[dept] || ORG_DEFAULT_COLOR;
@@ -787,23 +1045,25 @@ function orgInitials(name) {
 
 function orgCollectIds(node, set) {
   if (!node) return;
-  set.add(node.user_id);
+  set.add(node.id);
   node.children?.forEach((c) => orgCollectIds(c, set));
 }
 
-function OrgNode({ node, expanded, toggle, matchIds, onOpenDetail }) {
+function OrgNode({ node, expanded, toggle, matchIds, onNodeClick, visibleIds }) {
+  if (visibleIds && !visibleIds.has(node.id)) return null;
+
   const hasChildren = !!node.children?.length;
-  const isOpen = expanded.has(node.user_id);
-  const isMatch = matchIds.has(node.user_id);
-  const isPlaceholder = node.user_id === "__unassigned__";
+  const isOpen = expanded.has(node.id);
+  const isMatch = matchIds.has(node.id);
+  const isPlaceholder = node.id === null;
   const color = isPlaceholder ? "#94a3b8" : orgDeptColor(node.department);
 
-  const groupLabel = node.team || node.division || node.department || "";
+  const groupLabel = node.sub_team || node.division || node.department || "";
 
   return (
     <li>
       <div
-        onClick={() => !isPlaceholder && onOpenDetail(node.user_id)}
+        onClick={() => !isPlaceholder && onNodeClick(node)}
         style={{
           width: 168, borderRadius: 6, overflow: "hidden",
           cursor: isPlaceholder ? "default" : "pointer",
@@ -817,9 +1077,9 @@ function OrgNode({ node, expanded, toggle, matchIds, onOpenDetail }) {
           <div style={{ padding: "8px 10px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <UserCheck size={12} color="#64748b" />
-              <span style={{ fontSize: 11.5, fontWeight: 800, color: "#64748b" }}>Unassigned</span>
+              <span style={{ fontSize: 11.5, fontWeight: 800, color: "#64748b" }}>{node.full_name}</span>
             </div>
-            <div style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, marginTop: 2 }}>{node.children.length} employee{node.children.length !== 1 ? "s" : ""}</div>
+            <div style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, marginTop: 2 }}>{node.children.length} branch{node.children.length !== 1 ? "es" : ""}</div>
           </div>
         ) : (
           <>
@@ -837,8 +1097,8 @@ function OrgNode({ node, expanded, toggle, matchIds, onOpenDetail }) {
                 fontSize: 10, fontWeight: 700, color: "#475569", textDecoration: "underline",
                 textDecorationColor: color, textUnderlineOffset: 2,
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              }} title={node.job_title || node.level || ""}>
-                {node.job_title || node.level || "—"}
+              }} title={node.position || ""}>
+                {node.position || "—"}
               </div>
               <div style={{
                 fontSize: 12, fontWeight: 700, color: "#1e293b", marginTop: 3,
@@ -848,7 +1108,7 @@ function OrgNode({ node, expanded, toggle, matchIds, onOpenDetail }) {
               </div>
               {hasChildren && (
                 <div style={{ fontSize: 8.5, fontWeight: 700, color: "#94a3b8", marginTop: 2 }}>
-                  {node.direct_count} direct report{node.direct_count !== 1 ? "s" : ""}
+                  {node.children.length} direct report{node.children.length !== 1 ? "s" : ""}
                 </div>
               )}
             </div>
@@ -857,7 +1117,7 @@ function OrgNode({ node, expanded, toggle, matchIds, onOpenDetail }) {
 
         {hasChildren && (
           <button
-            onClick={(e) => { e.stopPropagation(); toggle(node.user_id); }}
+            onClick={(e) => { e.stopPropagation(); toggle(node.id); }}
             title={isOpen ? "Collapse" : "Expand"}
             style={{
               position: "absolute", bottom: -10, left: "50%", transform: "translateX(-50%)",
@@ -875,7 +1135,7 @@ function OrgNode({ node, expanded, toggle, matchIds, onOpenDetail }) {
       {hasChildren && isOpen && (
         <ul>
           {node.children.map((c) => (
-            <OrgNode key={c.user_id} node={c} expanded={expanded} toggle={toggle} matchIds={matchIds} onOpenDetail={onOpenDetail} />
+            <OrgNode key={c.id} node={c} expanded={expanded} toggle={toggle} matchIds={matchIds} onNodeClick={onNodeClick} visibleIds={visibleIds} />
           ))}
         </ul>
       )}
@@ -883,29 +1143,166 @@ function OrgNode({ node, expanded, toggle, matchIds, onOpenDetail }) {
   );
 }
 
-function OrganizationChartSection() {
+// ── Add/Edit/Delete a single org structure position — shared by the chart's
+// click-to-edit and the Manage Structure table's Add/Edit actions ──────────
+function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
+  const isNew = !node?.id;
+  const [form, setForm] = useState({
+    full_name:     node?.full_name || "",
+    position:      node?.position || "",
+    department:    node?.department || "",
+    division:      node?.division || "",
+    sub_team:      node?.sub_team || "",
+    join_date:     node?.join_date || "",
+    supervisor_id: node?.supervisor_id ?? null,
+  });
+  const [saving, setSaving]     = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError]       = useState("");
+  const [lov, setLov]           = useState([]);
+  const [supQuery, setSupQuery] = useState("");
+  const [supOpen, setSupOpen]   = useState(false);
+
+  useEffect(() => {
+    hrApi.getOrgStructureLov().then((r) => setLov(r || [])).catch(() => {});
+  }, []);
+
+  const supervisorName = lov.find((n) => n.id === form.supervisor_id)?.full_name;
+  const matches = lov
+    .filter((n) => n.id !== node?.id)
+    .filter((n) => !supQuery.trim() || n.full_name?.toLowerCase().includes(supQuery.trim().toLowerCase()))
+    .slice(0, 8);
+
+  const handleSave = async () => {
+    if (!form.full_name.trim()) { setError("Name is required"); return; }
+    setSaving(true); setError("");
+    try {
+      if (isNew) await hrApi.createOrgStructureNode(form);
+      else await hrApi.updateOrgStructureNode(node.id, form);
+      onSaved?.();
+    } catch (err) {
+      setError(err?.detail || "Failed to save");
+    } finally { setSaving(false); }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm(`Delete "${node.full_name}"? Their direct reports will be reassigned to their supervisor's supervisor.`)) return;
+    setDeleting(true); setError("");
+    try {
+      await hrApi.deleteOrgStructureNode(node.id);
+      onDeleted?.();
+    } catch (err) {
+      setError(err?.detail || "Failed to delete");
+    } finally { setDeleting(false); }
+  };
+
+  const field = (key, label, extra) => (
+    <div key={key} style={extra?.full ? { gridColumn: "1 / -1" } : undefined}>
+      <label style={{ fontSize: 10, fontWeight: 700, color: "#64748b" }}>{label}</label>
+      <input
+        value={form[key]}
+        onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+        style={{ width: "100%", fontSize: 12.5, fontWeight: 600, padding: "8px 10px", borderRadius: 8, border: "none", background: "#fff", color: "#1e293b", outline: "none", marginTop: 2 }}
+      />
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,0.6)" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl" style={{ background: "#e8edf5", boxShadow: "8px 8px 20px #c5cad8, -8px -8px 20px #ffffff" }}>
+        <div className="flex items-center justify-between px-6 py-4" style={{ background: "linear-gradient(135deg, #2563eb, #3b82f6)", borderRadius: "16px 16px 0 0" }}>
+          <h3 style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>{isNew ? "Add Position" : "Edit Position"}</h3>
+          <button onClick={onClose} style={{ padding: 6, borderRadius: 8, border: "none", background: "rgba(255,255,255,0.2)", color: "#fff", cursor: "pointer" }}><X size={16} /></button>
+        </div>
+
+        <div className="p-6 space-y-3">
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 12px" }}>
+            {field("full_name", "Full Name *", { full: true })}
+            {field("position", "Position")}
+            {field("department", "Department")}
+            {field("division", "Division")}
+            {field("sub_team", "Sub-team / Region")}
+            <div>
+              <label style={{ fontSize: 10, fontWeight: 700, color: "#64748b" }}>Join Date</label>
+              <input type="date" value={form.join_date || ""} onChange={(e) => setForm({ ...form, join_date: e.target.value })}
+                style={{ width: "100%", fontSize: 12.5, fontWeight: 600, padding: "8px 10px", borderRadius: 8, border: "none", background: "#fff", color: "#1e293b", outline: "none", marginTop: 2 }} />
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 10, fontWeight: 700, color: "#64748b" }}>Direct Supervisor</label>
+            <input
+              value={supOpen ? supQuery : (supervisorName || "")}
+              onFocus={() => { setSupOpen(true); setSupQuery(""); }}
+              onChange={(e) => setSupQuery(e.target.value)}
+              placeholder="Search name... (leave empty = top of chart)"
+              style={{ width: "100%", fontSize: 12.5, fontWeight: 600, padding: "8px 10px", borderRadius: 8, border: "none", background: "#fff", color: "#1e293b", outline: "none", marginTop: 2 }}
+            />
+            {supOpen && (
+              <div style={{ maxHeight: 150, overflowY: "auto", marginTop: 4, borderRadius: 8, background: "#fff" }}>
+                <div onClick={() => { setForm({ ...form, supervisor_id: null }); setSupOpen(false); }}
+                  style={{ padding: "6px 10px", fontSize: 11.5, fontWeight: 600, color: "#dc2626", cursor: "pointer" }}>
+                  — No supervisor (top of chart)
+                </div>
+                {matches.map((n) => (
+                  <div key={n.id} onClick={() => { setForm({ ...form, supervisor_id: n.id }); setSupOpen(false); }}
+                    style={{ padding: "6px 10px", fontSize: 11.5, fontWeight: 600, color: "#1e293b", cursor: "pointer" }}>
+                    {n.full_name} <span style={{ color: "#94a3b8", fontWeight: 500 }}>· {n.department || "—"}</span>
+                  </div>
+                ))}
+                {matches.length === 0 && <div style={{ padding: "6px 10px", fontSize: 11, color: "#94a3b8" }}>No matches</div>}
+                <div onClick={() => setSupOpen(false)} style={{ padding: "6px 10px", fontSize: 11, fontWeight: 700, color: "#64748b", cursor: "pointer", textAlign: "center" }}>Close</div>
+              </div>
+            )}
+          </div>
+
+          {error && <p style={{ fontSize: 11.5, color: "#dc2626", fontWeight: 600 }}>{error}</p>}
+
+          <div className="flex items-center justify-between pt-2">
+            {!isNew ? (
+              <button onClick={handleDelete} disabled={deleting || saving}
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: "#dc2626", background: "none", border: "none", cursor: "pointer" }}>
+                {deleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Delete
+              </button>
+            ) : <span />}
+            <div className="flex items-center gap-3">
+              <button onClick={onClose} style={{ fontSize: 11.5, fontWeight: 700, color: "#64748b", background: "none", border: "none", cursor: "pointer" }}>Cancel</button>
+              <button onClick={handleSave} disabled={saving || deleting}
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "#fff", padding: "8px 16px", borderRadius: 8, border: "none", cursor: "pointer", background: "#2563eb" }}>
+                {saving && <Loader2 size={13} className="animate-spin" />} {isNew ? "Add" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OrgChartView() {
   const [root, setRoot]         = useState(null);
   const [total, setTotal]       = useState(0);
   const [loading, setLoading]   = useState(true);
   const [expanded, setExpanded] = useState(() => new Set());
   const [search, setSearch]     = useState("");
   const [zoom, setZoom]         = useState(1);
-  const [selectedEmployee, setSelectedEmployee] = useState(null);
-  const [employeeNames, setEmployeeNames]       = useState([]);
-  const [error, setError] = useState("");
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [error, setError]       = useState("");
+  const [exportingImage, setExportingImage] = useState(false);
+  const chartRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await hrApi.getOrgChart();
+      const res = await hrApi.getOrgStructureTree();
       setRoot(res.root || null);
       setTotal(res.total || 0);
       if (res.root) {
         const ids = new Set();
         const walk = (node, depth) => {
           if (!node) return;
-          ids.add(node.user_id);
+          ids.add(node.id);
           if (depth < 2) node.children?.forEach((c) => walk(c, depth + 1));
         };
         walk(res.root, 0);
@@ -917,11 +1314,7 @@ function OrganizationChartSection() {
     } finally { setLoading(false); }
   }, []);
 
-  const loadNames = useCallback(() => {
-    hrApi.getEmployeeNames().then((r) => setEmployeeNames(r || [])).catch(() => {});
-  }, []);
-
-  useEffect(() => { load(); loadNames(); }, [load, loadNames]);
+  useEffect(() => { load(); }, [load]);
 
   const toggle = (id) => setExpanded((prev) => {
     const next = new Set(prev);
@@ -935,49 +1328,83 @@ function OrganizationChartSection() {
     if (!q || !root) return found;
     const walk = (node) => {
       if (!node) return;
-      if ((node.full_name || "").toLowerCase().includes(q)) found.add(node.user_id);
+      if ((node.full_name || "").toLowerCase().includes(q)) found.add(node.id);
       node.children?.forEach(walk);
     };
     walk(root);
     return found;
   }, [q, root]);
 
-  useEffect(() => {
-    if (!q || !root || matchIds.size === 0) return;
+  // While searching: only the matched person(s), their full supervisor chain
+  // (ancestors), and their full subordinate chain (descendants) stay visible —
+  // everything else is hidden rather than just highlighted. null = show everything.
+  const visibleIds = useMemo(() => {
+    if (!q || !root) return null;
+    if (matchIds.size === 0) return new Set();
+
     const parentOf = {};
-    const build = (node, parent) => {
+    const byId = {};
+    const index = (node, parent) => {
       if (!node) return;
-      if (parent) parentOf[node.user_id] = parent.user_id;
-      node.children?.forEach((c) => build(c, node));
+      byId[node.id] = node;
+      if (parent) parentOf[node.id] = parent.id;
+      node.children?.forEach((c) => index(c, node));
     };
-    build(root, null);
+    index(root, null);
+
+    const visible = new Set();
+    matchIds.forEach((id) => {
+      let cur = id;
+      while (cur != null) { visible.add(cur); cur = parentOf[cur]; }
+    });
+    const addDescendants = (node) => {
+      if (!node) return;
+      node.children?.forEach((c) => { visible.add(c.id); addDescendants(c); });
+    };
+    matchIds.forEach((id) => addDescendants(byId[id]));
+
+    return visible;
+  }, [q, root, matchIds]);
+
+  useEffect(() => {
+    if (!visibleIds || visibleIds.size === 0) return;
     setExpanded((prev) => {
       const next = new Set(prev);
-      matchIds.forEach((id) => {
-        let cur = id;
-        while (cur) { next.add(cur); cur = parentOf[cur]; }
-      });
+      visibleIds.forEach((id) => next.add(id));
       return next;
     });
-  }, [matchIds]); // eslint-disable-line
-
-  const openDetail = async (userId) => {
-    try {
-      const res = await hrApi.getEmployee(userId);
-      setSelectedEmployee(res);
-    } catch (_) {}
-  };
+  }, [visibleIds]); // eslint-disable-line
 
   const deptsPresent = useMemo(() => {
     const set = new Set();
     const walk = (node) => {
-      if (!node || node.user_id === "__unassigned__") return;
+      if (!node || node.id === null) return;
       if (node.department) set.add(node.department);
       node.children?.forEach(walk);
     };
     walk(root);
-    return [...set];
+    return [...set].sort((a, b) => (ORG_DEPT_ORDER[a] ?? 99) - (ORG_DEPT_ORDER[b] ?? 99));
   }, [root]);
+
+  const handleDownloadImage = async () => {
+    if (!chartRef.current) return;
+    setExportingImage(true);
+    const prevZoom = zoom;
+    setZoom(1);
+    await new Promise((r) => setTimeout(r, 60)); // let the zoom=1 re-render paint before capture
+    try {
+      const dataUrl = await toPng(chartRef.current, { backgroundColor: "#dfe5ed", pixelRatio: 2 });
+      const link = document.createElement("a");
+      link.download = `organization-structure_${new Date().toISOString().slice(0, 10)}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (_) {
+      alert("Failed to export image");
+    } finally {
+      setZoom(prevZoom);
+      setExportingImage(false);
+    }
+  };
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 size={22} className="animate-spin" style={{ color: "#94a3b8" }} /></div>;
   if (error) {
@@ -990,7 +1417,7 @@ function OrganizationChartSection() {
       </div>
     );
   }
-  if (!root) return <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No employee data yet. Upload Excel in Employee Data → Upload Excel.</p>;
+  if (!root) return <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No organization structure data yet. Add a position or import Excel in the Manage Structure tab.</p>;
 
   return (
     <div className="space-y-4">
@@ -1003,7 +1430,7 @@ function OrganizationChartSection() {
           <Network size={13} style={{ display: "inline", marginRight: 6, verticalAlign: -2 }} />
           Organization Chart
         </h2>
-        <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.85)", fontWeight: 600, marginTop: 2 }}>{total} employees</p>
+        <p style={{ fontSize: 10.5, color: "rgba(255,255,255,0.85)", fontWeight: 600, marginTop: 2 }}>{total} positions</p>
       </div>
 
       {/* Toolbar */}
@@ -1016,7 +1443,7 @@ function OrganizationChartSection() {
           <Search size={12} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
           <input
             value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search employee name..."
+            placeholder="Search name..."
             style={{ width: "100%", fontSize: 12, fontWeight: 600, padding: "7px 10px 7px 28px", borderRadius: 8, border: "none", background: "#fff", color: "#334155", outline: "none" }}
           />
         </div>
@@ -1027,11 +1454,18 @@ function OrganizationChartSection() {
         )}
         <div style={{ flex: 1 }} />
 
+        <button onClick={handleDownloadImage} disabled={exportingImage} title="Download as image"
+          className="flex items-center gap-1.5"
+          style={{ padding: "7px 12px", borderRadius: 8, border: "none", cursor: exportingImage ? "wait" : "pointer", background: "#2563eb", color: "#fff", fontSize: 11.5, fontWeight: 700, boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff" }}>
+          {exportingImage ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+          {exportingImage ? "Exporting..." : "Download Image"}
+        </button>
+
         {[
           { icon: ZoomOut,   title: "Zoom out",     onClick: () => setZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(2))) },
           { icon: ZoomIn,    title: "Zoom in",      onClick: () => setZoom((z) => Math.min(1.5, +(z + 0.1).toFixed(2))) },
           { icon: Maximize2, title: "Expand all",   onClick: () => { const ids = new Set(); orgCollectIds(root, ids); setExpanded(ids); } },
-          { icon: Minimize2, title: "Collapse all", onClick: () => setExpanded(new Set([root.user_id])) },
+          { icon: Minimize2, title: "Collapse all", onClick: () => setExpanded(new Set([root.id])) },
           { icon: RefreshCw, title: "Refresh",      onClick: load },
         ].map(({ icon: Icon, title, onClick }) => (
           <button key={title} onClick={onClick} title={title}
@@ -1056,21 +1490,211 @@ function OrganizationChartSection() {
 
       {/* Tree */}
       <div style={{ overflow: "auto", borderRadius: 14, background: "#dfe5ed", padding: "30px 20px 50px", maxHeight: "70vh" }}>
-        <div style={{ transform: `scale(${zoom})`, transformOrigin: "top center", display: "inline-block", minWidth: "100%" }}>
-          <ul className="org-tree">
-            <OrgNode node={root} expanded={expanded} toggle={toggle} matchIds={matchIds} onOpenDetail={openDetail} />
-          </ul>
-        </div>
+        {visibleIds && visibleIds.size === 0 ? (
+          <p style={{ padding: "40px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
+            No one found matching "{search}".
+          </p>
+        ) : (
+          <div ref={chartRef} style={{ transform: `scale(${zoom})`, transformOrigin: "top center", display: "inline-block", minWidth: "100%", background: "#dfe5ed" }}>
+            <ul className="org-tree">
+              <OrgNode node={root} expanded={expanded} toggle={toggle} matchIds={matchIds} onNodeClick={setSelectedNode} visibleIds={visibleIds} />
+            </ul>
+          </div>
+        )}
       </div>
 
-      {selectedEmployee && (
-        <EmployeeDetailModal
-          employee={selectedEmployee}
-          onClose={() => setSelectedEmployee(null)}
-          employeeNames={employeeNames}
-          onSupervisorSaved={() => { loadNames(); load(); }}
+      {selectedNode && (
+        <OrgNodeFormModal
+          node={selectedNode}
+          onClose={() => setSelectedNode(null)}
+          onSaved={() => { setSelectedNode(null); load(); }}
+          onDeleted={() => { setSelectedNode(null); load(); }}
         />
       )}
+    </div>
+  );
+}
+
+function OrgManageView() {
+  const [nodes, setNodes]       = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [search, setSearch]     = useState("");
+  const [deptFilter, setDeptFilter] = useState("");
+  const [departments, setDepartments] = useState([]);
+  const [modalNode, setModalNode] = useState(null); // null=closed, {}=new, {...}=edit
+  const [sortBy, setSortBy]   = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
+
+  const [file, setFile]           = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState(null);
+  const [uploadError, setUploadError]   = useState(null);
+  const inputRef = useRef(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = {};
+      if (search) params.search = search;
+      if (deptFilter) params.department = deptFilter;
+      const res = await hrApi.getOrgStructureList(params);
+      setNodes(res || []);
+    } catch (_) {}
+    finally { setLoading(false); }
+  }, [search, deptFilter]);
+
+  const loadDepts = useCallback(async () => {
+    try { setDepartments((await hrApi.getOrgStructureDepts()) || []); } catch (_) {}
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadDepts(); }, [loadDepts]);
+
+  const handleDelete = async (n) => {
+    if (!confirm(`Delete "${n.full_name}"? Their direct reports will be reassigned to their supervisor's supervisor.`)) return;
+    try {
+      await hrApi.deleteOrgStructureNode(n.id);
+      load(); loadDepts();
+    } catch (err) { alert(err?.detail || "Failed to delete"); }
+  };
+
+  const handleUpload = async () => {
+    if (!file) return;
+    setUploading(true); setUploadError(null); setUploadResult(null);
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const res = await hrApi.importOrgStructure(fd);
+      setUploadResult(res);
+      setFile(null);
+      if (inputRef.current) inputRef.current.value = "";
+      load(); loadDepts();
+    } catch (err) {
+      setUploadError(err?.detail || "Upload failed");
+    } finally { setUploading(false); }
+  };
+
+  const sorted = sortRows(nodes, sortBy, sortDir, []);
+
+  return (
+    <div className="space-y-4">
+      {/* Import */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900 p-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-200">Import from Excel</h3>
+            <p className="text-xs text-gray-500 mt-1">
+              Upload the "Daftar Karyawan" template (Departemen, Divisi/Tim, Wilayah/Sub-Tim, Nama, Posisi, Tanggal Bergabung, Atasan Langsung).
+              This <strong className="text-gray-400">replaces the entire structure</strong>.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <input ref={inputRef} type="file" accept=".xlsx,.xlsm" className="hidden" onChange={(e) => setFile(e.target.files[0])} />
+            <button onClick={() => inputRef.current?.click()} className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs text-gray-300 hover:border-gray-600 transition-colors">
+              <FileSearch size={13} /> {file ? file.name : "Choose File"}
+            </button>
+            <button onClick={handleUpload} disabled={!file || uploading}
+              className="flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 px-3 py-2 text-xs font-semibold text-white transition-colors">
+              {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {uploading ? "Uploading..." : "Import"}
+            </button>
+          </div>
+        </div>
+        {uploadError && <p className="text-xs text-red-400 mt-2">{uploadError}</p>}
+        {uploadResult && <p className="text-xs text-emerald-400 mt-2">{uploadResult.message}</p>}
+      </div>
+
+      {/* Filter bar + Add button */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+          <input
+            value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name / position..."
+            className="w-full rounded-lg border border-gray-700 bg-gray-900 pl-8 pr-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500 transition-colors"
+          />
+        </div>
+        <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}
+          className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer">
+          <option value="">ALL</option>
+          {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <button onClick={() => setModalNode({})} className="flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-2 text-sm font-semibold text-white transition-colors">
+          <Plus size={14} /> Add Position
+        </button>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 520 }}>
+        <table className="w-full text-sm" style={{ minWidth: 900 }}>
+          <thead className="sticky top-0 z-10 bg-gray-800">
+            <tr>
+              <SortableTH label="Name" field="full_name" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortableTH label="Position" field="position" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <SortableTH label="Department" field="department" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Division / Sub-team</th>
+              <SortableTH label="Join Date" field="join_date" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Supervisor</th>
+              <th className="px-3 py-2.5 w-12"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800">
+            {loading ? (
+              <tr><td colSpan={7} className="py-12 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></td></tr>
+            ) : sorted.length === 0 ? (
+              <tr><td colSpan={7} className="py-12 text-center text-xs text-gray-600">No structure data yet. Add a position or import Excel.</td></tr>
+            ) : sorted.map((n) => (
+              <tr key={n.id} onClick={() => setModalNode(n)} className="hover:bg-gray-800/40 cursor-pointer transition-colors">
+                <td className="px-3 py-2.5 font-medium text-gray-200 whitespace-nowrap">{n.full_name}</td>
+                <td className="px-3 py-2.5 text-gray-400 text-xs whitespace-nowrap">{n.position || "—"}</td>
+                <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap">{n.department || "—"}</td>
+                <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{[n.division, n.sub_team].filter(Boolean).join(" / ") || "—"}</td>
+                <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{n.join_date || "—"}</td>
+                <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{n.supervisor_name || "—"}</td>
+                <td className="px-3 py-2.5">
+                  <button onClick={(e) => { e.stopPropagation(); handleDelete(n); }} className="p-1 text-gray-600 hover:text-red-400">
+                    <Trash2 size={13} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {modalNode && (
+        <OrgNodeFormModal
+          node={modalNode.id ? modalNode : null}
+          onClose={() => setModalNode(null)}
+          onSaved={() => { setModalNode(null); load(); loadDepts(); }}
+          onDeleted={() => { setModalNode(null); load(); loadDepts(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function OrganizationChartSection() {
+  const [view, setView] = useState("chart"); // "chart" | "manage"
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        {[
+          { id: "chart", label: "Chart", icon: Network },
+          { id: "manage", label: "Manage Structure", icon: ListChecks },
+        ].map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setView(id)}
+            className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+              view === id ? "bg-indigo-600 text-white" : "bg-gray-900 border border-gray-700 text-gray-400 hover:border-gray-600"
+            }`}
+          >
+            <Icon size={14} /> {label}
+          </button>
+        ))}
+      </div>
+      {view === "chart" ? <OrgChartView /> : <OrgManageView />}
     </div>
   );
 }
@@ -1133,123 +1757,522 @@ function SummaryHBarList({ items, max }) {
 }
 
 // ── Employee Summary — data (KPI + breakdown), tanpa chart ─────────────────────
+const SUMMARY_COLS = [
+  { label: "NIK",               field: "user_id",          mono: true },
+  { label: "Name",              field: "full_name",        bold: true },
+  { label: "Sex",               field: "sex",               align: "center",
+    render: (e) => e.sex === "M" ? <span className="text-blue-400 font-semibold">M</span> : e.sex === "F" ? <span className="text-pink-400 font-semibold">F</span> : "—" },
+  { label: "Department",        field: "department" },
+  { label: "Position",          field: "job_title" },
+  { label: "Education",         field: "education_degree" },
+  { label: "Marital Status",    field: "marital_status" },
+  { label: "Employment Status", field: "employment_status", render: (e) => e.employment_status
+      ? <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${EMPLOYMENT_STATUS_BADGE[e.employment_status] || "bg-gray-700 text-gray-400 border-gray-600"}`}>{e.employment_status}</span>
+      : "—" },
+  { label: "Join Date",         field: "date_of_joining",
+    render: (e) => e.date_of_joining ? new Date(e.date_of_joining).toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" }) : "—" },
+];
+
 function EmployeeSummarySection() {
-  const curYear = new Date().getFullYear();
-  const [fMonth, setFMonth] = useState("");
-  const [fYear,  setFYear]  = useState("");
-  const { data, loading, errMsg } = useMonthlySummary(fMonth, fYear);
+  const { token } = useAuthStore();
+  const headers = { Authorization: `Bearer ${token}` };
 
-  const filterBar = (
-    <div className="flex flex-wrap items-end gap-2">
-      <div>
-        <label className="text-xs text-gray-500 block mb-1">Month</label>
-        <select value={fMonth} onChange={e => setFMonth(e.target.value)}
-          className="text-xs rounded-lg border border-gray-700 bg-gray-900 text-gray-200 px-2 py-1.5">
-          <option value="">All</option>
-          {MONTHS_ID.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
-        </select>
-      </div>
-      <div>
-        <label className="text-xs text-gray-500 block mb-1">Year</label>
-        <select value={fYear} onChange={e => setFYear(e.target.value)}
-          className="text-xs rounded-lg border border-gray-700 bg-gray-900 text-gray-200 px-2 py-1.5">
-          <option value="">Current</option>
-          {[curYear, curYear - 1, curYear - 2, curYear - 3].map(y => <option key={y} value={y}>{y}</option>)}
-        </select>
-      </div>
-      {(fMonth || fYear) && (
-        <button onClick={() => { setFMonth(""); setFYear(""); }}
-          className="text-xs font-semibold text-red-400 hover:text-red-300 px-3 py-1.5">
-          Reset
-        </button>
-      )}
+  const [data, setData] = useState({ employees: [], total: 0, pages: 1 });
+  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [deptFilter, setDeptFilter] = useState("");
+  const [divisionFilter, setDivisionFilter] = useState("");
+  const [educationFilter, setEducationFilter] = useState("");
+  const [levelFilter, setLevelFilter] = useState("");
+  const [teamFilter, setTeamFilter] = useState("");
+  const [employmentStatusFilter, setEmploymentStatusFilter] = useState("");
+  const [maritalFilter, setMaritalFilter] = useState("");
+  const [sexFilter, setSexFilter] = useState("");
+  const [asOfMonth, setAsOfMonth] = useState(() => String(new Date().getMonth() + 1));
+  const [asOfYear, setAsOfYear] = useState(() => String(new Date().getFullYear()));
+  const [departments, setDepartments] = useState([]);
+  const [educations, setEducations] = useState([]);
+  const [levels, setLevels] = useState([]);
+  const [teams, setTeams] = useState([]);
+  const [maritalStatuses, setMaritalStatuses] = useState([]);
+  const [joinYears, setJoinYears] = useState([]);
+  const [sortBy, setSortBy] = useState("full_name");
+  const [sortDir, setSortDir] = useState("asc");
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [employeeNames, setEmployeeNames] = useState([]);
+  const [exporting, setExporting] = useState(false);
+  const [viewMode, setViewMode] = useState("list"); // "list" | "year" | "month"
+
+  const PAGE_SIZE = 8;
+
+  const fetchLov = useCallback(async () => {
+    try {
+      const [d, e, l, m, y] = await Promise.all([
+        fetch(`${API}/departments`, { headers }).then((r) => r.ok ? r.json() : []),
+        fetch(`${API}/educations`, { headers }).then((r) => r.ok ? r.json() : []),
+        fetch(`${API}/levels`, { headers }).then((r) => r.ok ? r.json() : []),
+        fetch(`${API}/marital-statuses`, { headers }).then((r) => r.ok ? r.json() : []),
+        fetch(`${API}/join-years`, { headers }).then((r) => r.ok ? r.json() : []),
+      ]);
+      setDepartments(d); setEducations(e); setLevels(l); setMaritalStatuses(m); setJoinYears(y);
+    } catch (_) {}
+  }, []); // eslint-disable-line
+
+  const fetchTeams = useCallback(async (dept) => {
+    try {
+      const url = dept ? `${API}/teams?department=${encodeURIComponent(dept)}` : `${API}/teams`;
+      const res = await fetch(url, { headers });
+      if (res.ok) setTeams(await res.json());
+    } catch (_) {}
+  }, []); // eslint-disable-line
+
+  const handleDeptFilter = (v) => { setDeptFilter(v); setDivisionFilter(""); setTeamFilter(""); fetchTeams(v); setPage(1); };
+
+  const fetchEmployeeNames = useCallback(async () => {
+    try { setEmployeeNames((await hrApi.getEmployeeNames()) || []); } catch (_) {}
+  }, []); // eslint-disable-line
+
+  const summaryParams = useCallback(() => ({
+    ...(deptFilter ? { department: deptFilter } : {}),
+    ...(divisionFilter ? { division: divisionFilter } : {}),
+    ...(educationFilter ? { education: educationFilter } : {}),
+    ...(levelFilter ? { level: levelFilter } : {}),
+    ...(teamFilter ? { team: teamFilter } : {}),
+    ...(employmentStatusFilter ? { employment_status: employmentStatusFilter } : {}),
+    ...(maritalFilter ? { marital_status: maritalFilter } : {}),
+    ...(sexFilter ? { sex: sexFilter } : {}),
+    ...(asOfMonth ? { snapshot_month: asOfMonth } : {}),
+    ...(asOfYear  ? { snapshot_year: asOfYear }   : {}),
+  }), [deptFilter, divisionFilter, educationFilter, levelFilter, teamFilter, employmentStatusFilter, maritalFilter, sexFilter, asOfMonth, asOfYear]);
+
+  const fetchEmployees = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page, page_size: PAGE_SIZE, sort_by: sortBy, sort_dir: sortDir,
+        ...summaryParams(),
+      });
+      const res = await fetch(`${API}?${params}`, { headers });
+      if (res.ok) setData(await res.json());
+    } catch (_) {}
+    finally { setLoading(false); }
+  }, [page, summaryParams, sortBy, sortDir]); // eslint-disable-line
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const fields = SUMMARY_COLS.map(c => c.field).join(",");
+      const params = new URLSearchParams({ sort_by: sortBy, sort_dir: sortDir, fields, ...summaryParams() });
+      const res = await fetch(`${API}/export?${params}`, { headers });
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `employee_summary_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (_) {
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  useEffect(() => { fetchLov(); fetchEmployeeNames(); }, [fetchLov, fetchEmployeeNames]);
+  useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
+
+  // Drill-down from Summary per Month — clicking a dept/division/team cell
+  // jumps to the List filtered to exactly those employees ("active as of"
+  // that month, same windowing the summary cell was computed with).
+  const drillDown = (department, division, team, month, year) => {
+    setDeptFilter(department);
+    fetchTeams(department);
+    setDivisionFilter(division || "");
+    setTeamFilter(team || "");
+    setEducationFilter(""); setLevelFilter(""); setEmploymentStatusFilter("");
+    setMaritalFilter(""); setSexFilter("");
+    setAsOfMonth(String(month));
+    setAsOfYear(String(year));
+    setPage(1);
+    setViewMode("list");
+  };
+
+  const handleSort = (field) => {
+    if (sortBy === field) setSortDir((d) => d === "asc" ? "desc" : "asc");
+    else { setSortBy(field); setSortDir("asc"); }
+    setPage(1);
+  };
+
+  const filterSelect = (label, value, onChange, options) => (
+    <div className="w-32">
+      <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">{label}</label>
+      <select
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setPage(1); }}
+        className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+      >
+        <option value="">All</option>
+        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
     </div>
   );
-
-  if (loading) return <div className="space-y-3 mt-2">{filterBar}<div className="py-16 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-300" /></div></div>;
-  if (errMsg || !data) return (
-    <div className="space-y-3 mt-2">
-      {filterBar}
-      <div className="py-10 text-center space-y-2">
-        <p className="text-xs text-red-400 font-semibold">Failed to load summary data</p>
-        {errMsg && <pre className="text-xs text-gray-300 max-w-xl mx-auto whitespace-pre-wrap text-left bg-gray-900 rounded p-3">{errMsg}</pre>}
-      </div>
-    </div>
-  );
-
-  const {
-    monthly_joins = [],
-    by_dept = [], by_level = [], by_education = [],
-    by_marital = [], by_status = [], by_grade = [], by_gender = [],
-    period = {},
-  } = data;
-
-  const totalEmployees = period.total_employees ?? 0;
-  const isFiltered = !!(fMonth || fYear);
-  const avgJoin12 = Math.round(monthly_joins.slice(-12).reduce((s, m) => s + m.joins, 0) / 12);
-
-  const joinsLabel = isFiltered ? `New Joins — ${period.label}` : "Avg. Joins/Month";
-  const joinsValue = isFiltered ? (period.joins_in_month ?? 0) : avgJoin12;
-  const joinsSub   = isFiltered ? (fMonth ? "this month" : "this year") : "last 12 months";
-
-  const deptMax   = Math.max(...by_dept.map(d => d.total), 1);
-  const levelMax  = Math.max(...by_level.map(d => d.total), 1);
-  const eduMax    = Math.max(...by_education.map(d => d.total), 1);
-  const gradeMax  = Math.max(...by_grade.map(d => d.total), 1);
-  const statusMax  = Math.max(...by_status.map(d => d.total), 1);
-  const maritalMax = Math.max(...by_marital.map(d => d.total), 1);
 
   return (
     <div className="space-y-4 mt-2">
-      {filterBar}
+      <SubTabs
+        tabs={[
+          { id: "year",  label: "Summary per Year" },
+          { id: "month", label: "Summary per Month" },
+          { id: "list",  label: "List" },
+        ]}
+        active={viewMode}
+        onChange={setViewMode}
+      />
 
-      {isFiltered && (
-        <p className="text-xs text-indigo-300">
-          Showing active-employee roster as of <strong>{period.label}</strong> (snapshot date {period.snapshot_date}). Attribute values (department, status, etc.) reflect each employee's current record.
-        </p>
-      )}
+      {viewMode === "year"  && <EmployeeYearSummaryTable />}
+      {viewMode === "month" && <EmployeeMonthSummaryTable onDrillDown={drillDown} />}
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: "Total Employees",    val: totalEmployees, sub: period.label || "Current", color: "#818cf8" },
-          { label: joinsLabel,           val: joinsValue,      sub: joinsSub,  color: "#34d399" },
-          { label: "Male",               val: by_gender.find(g => g.name === "Male")?.total ?? 0,  sub: "M", color: "#60a5fa" },
-          { label: "Female",             val: by_gender.find(g => g.name === "Female")?.total ?? 0,  sub: "F", color: "#fb7185" },
-        ].map(({ label, val, sub, color }) => (
-          <div key={label} className="rounded-xl border border-gray-800 bg-gray-900 p-4">
-            <div className="text-2xl font-bold" style={{ color }}>{val}</div>
-            <div className="text-xs font-semibold text-gray-100 mt-0.5">{label}</div>
-            <div className="text-xs text-gray-400 mt-0.5">{sub}</div>
+      {viewMode === "list" && (<>
+      {/* Total + Download */}
+      <div className="flex items-center justify-between">
+        <div className="rounded-lg border border-gray-800 bg-gray-900 px-3 py-1.5 inline-block">
+          <span className="text-base font-bold text-indigo-400">{data.total}</span>
+          <span className="text-[10px] font-semibold text-gray-400 ml-1.5">Employees Shown</span>
+        </div>
+        <button
+          onClick={handleExport}
+          disabled={exporting}
+          className="flex items-center gap-1.5 rounded-lg border border-green-700/50 bg-green-500/10 px-3 py-1.5 text-xs font-medium text-green-400 hover:bg-green-500/20 transition-colors disabled:opacity-50"
+        >
+          {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+          Download Excel
+        </button>
+      </div>
+
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-end gap-2">
+        {filterSelect("Department", deptFilter, handleDeptFilter, departments)}
+        {filterSelect("Team", teamFilter, (v) => { setTeamFilter(v); setPage(1); }, teams)}
+        {filterSelect("Education", educationFilter, setEducationFilter, educations)}
+        {filterSelect("Level", levelFilter, setLevelFilter, levels)}
+        <div className="w-32">
+          <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">Employee Status</label>
+          <select
+            value={employmentStatusFilter}
+            onChange={(e) => { setEmploymentStatusFilter(e.target.value); setPage(1); }}
+            className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+          >
+            <option value="">All</option>
+            <option value="Active">ACTIVE</option>
+            <option value="Resign">INACTIVE</option>
+          </select>
+        </div>
+        {filterSelect("Marital Status", maritalFilter, setMaritalFilter, maritalStatuses)}
+        <div className="w-32">
+          <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">Sex</label>
+          <select
+            value={sexFilter}
+            onChange={(e) => { setSexFilter(e.target.value); setPage(1); }}
+            className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+          >
+            <option value="">All</option>
+            <option value="M">Male</option>
+            <option value="F">Female</option>
+          </select>
+        </div>
+        <div className="w-32" title="Shows employees active as of the end of the selected Month/Year (joined on/before, not yet resigned)">
+          <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">As of (Mo)</label>
+          <select
+            value={asOfMonth}
+            onChange={(e) => { setAsOfMonth(e.target.value); setPage(1); }}
+            className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+          >
+            <option value="">All</option>
+            {MONTHS_ID.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+          </select>
+        </div>
+        <div className="w-32" title="Shows employees active as of the end of the selected Month/Year (joined on/before, not yet resigned)">
+          <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">As of (Yr)</label>
+          <select
+            value={asOfYear}
+            onChange={(e) => { setAsOfYear(e.target.value); setPage(1); }}
+            className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+          >
+            <option value="">All</option>
+            {joinYears.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* Table — capped to fit ~8 rows so the scrollbar shows within the viewport */}
+      <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 360 }}>
+        <table className="w-full text-sm" style={{ minWidth: 1160 }}>
+          <thead className="sticky top-0 z-10">
+            <tr className="bg-gray-800">
+              {SUMMARY_COLS.map(({ label, field }) => {
+                const active = sortBy === field;
+                return (
+                  <th
+                    key={field}
+                    onClick={() => handleSort(field)}
+                    className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer select-none group"
+                    style={{ color: active ? "#a5b4fc" : "#6b7280", textAlign: "center" }}
+                  >
+                    <span className="inline-flex items-center gap-1 justify-center">
+                      {label}
+                      <span className={`transition-opacity ${active ? "opacity-100" : "opacity-0 group-hover:opacity-50"}`}>
+                        {active
+                          ? (sortDir === "asc" ? <ChevronUp size={11} className="text-indigo-400" /> : <ChevronDown size={11} className="text-indigo-400" />)
+                          : <ArrowUpDown size={10} />}
+                      </span>
+                    </span>
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800">
+            {loading ? (
+              <tr><td colSpan={SUMMARY_COLS.length} className="py-12 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></td></tr>
+            ) : data.employees.length === 0 ? (
+              <tr><td colSpan={SUMMARY_COLS.length} className="py-12 text-center text-xs text-gray-600">No employees matching filter</td></tr>
+            ) : data.employees.map((e) => (
+              <tr key={e.user_id} onClick={() => setSelectedEmployee(e)} className="hover:bg-gray-800/40 transition-colors cursor-pointer">
+                {SUMMARY_COLS.map(({ field, mono, bold, align, render }) => (
+                  <td
+                    key={field}
+                    className={`px-3 py-2.5 whitespace-nowrap text-xs ${mono ? "font-mono" : ""} ${bold ? "font-medium text-gray-200" : "text-gray-500"}`}
+                    style={{ textAlign: align || "left" }}
+                  >
+                    {render ? render(e) : (e[field] || "—")}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      {data.pages > 1 && (
+        <div className="flex items-center justify-between" style={{ padding: "10px 0", fontSize: 12 }}>
+          <span style={{ color: "#94a3b8", fontWeight: 600 }}>
+            {data.total} employees · page {page} of {data.pages}
+          </span>
+          <div className="flex gap-1">
+            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
+              className="rounded-lg border border-gray-700 bg-gray-900 p-1.5 text-gray-400 disabled:opacity-40">
+              <ChevronLeft size={13} />
+            </button>
+            <button onClick={() => setPage((p) => Math.min(data.pages, p + 1))} disabled={page === data.pages}
+              className="rounded-lg border border-gray-700 bg-gray-900 p-1.5 text-gray-400 disabled:opacity-40">
+              <ChevronRight size={13} />
+            </button>
           </div>
-        ))}
+        </div>
+      )}
+      </>)}
+
+      {selectedEmployee && (
+        <EmployeeDetailModal
+          employee={selectedEmployee}
+          onClose={() => setSelectedEmployee(null)}
+          employeeNames={employeeNames}
+          onSaved={() => {
+            setSelectedEmployee(null);
+            fetchEmployees(); fetchEmployeeNames(); fetchLov();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Employee Summary: Summary per Year — headcount by dept, Beginning/Ending
+// per year (format reference: SUMMARY sheet, "Yearly" block) ──────────────
+function EmployeeYearSummaryTable() {
+  const { token } = useAuthStore();
+  const headers = { Authorization: `Bearer ${token}` };
+  const [d, setD] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`${API}/summary/by-year`, { headers })
+      .then((r) => r.ok ? r.json() : null)
+      .then(setD)
+      .finally(() => setLoading(false));
+  }, []); // eslint-disable-line
+
+  if (loading) return <div className="py-16 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></div>;
+  if (!d) return <div className="py-16 text-center text-xs text-gray-600">Failed to load</div>;
+
+  const TH = "px-2.5 py-2 text-xs font-semibold uppercase tracking-wider text-gray-500 whitespace-nowrap text-center border-b border-gray-800";
+  const TD = "px-2.5 py-2 text-xs text-right whitespace-nowrap";
+
+  return (
+    <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 480 }}>
+      <table className="text-sm" style={{ minWidth: 200 + d.years.length * 140 }}>
+        <thead className="sticky top-0 z-10 bg-gray-800">
+          <tr>
+            <th className={`${TH} text-left sticky left-0 bg-gray-800 z-20`} rowSpan={2}>Department</th>
+            {d.years.map((y) => <th key={y} className={TH} colSpan={2}>{y}</th>)}
+          </tr>
+          <tr>
+            {d.years.map((y) => ([
+              <th key={`${y}-b`} className={TH}>Beginning</th>,
+              <th key={`${y}-e`} className={TH}>Ending</th>,
+            ]))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-800">
+          {d.rows.map((row) => (
+            <tr key={row.department} className="hover:bg-gray-800/30">
+              <td className="px-2.5 py-2 text-xs text-gray-300 whitespace-nowrap sticky left-0 bg-gray-900">{row.department}</td>
+              {d.years.map((y) => ([
+                <td key={`${y}-b`} className={`${TD} text-gray-500`}>{row.by_year[y]?.beginning ?? "—"}</td>,
+                <td key={`${y}-e`} className={`${TD} text-gray-300`}>{row.by_year[y]?.ending ?? "—"}</td>,
+              ]))}
+            </tr>
+          ))}
+          <tr className="bg-gray-800/60 font-bold">
+            <td className="px-2.5 py-2 text-xs text-gray-200 whitespace-nowrap sticky left-0 bg-gray-800/60">TOTAL</td>
+            {d.years.map((y) => ([
+              <td key={`${y}-b`} className={`${TD} text-gray-300`}>{d.total[y]?.beginning ?? "—"}</td>,
+              <td key={`${y}-e`} className={`${TD} text-indigo-300`}>{d.total[y]?.ending ?? "—"}</td>,
+            ]))}
+          </tr>
+          <tr>
+            <td className="px-2.5 py-2 text-xs text-gray-500 whitespace-nowrap sticky left-0 bg-gray-900">Growth (YoY)</td>
+            {d.years.map((y) => {
+              const g = d.growth[y];
+              return (
+                <td key={y} colSpan={2} className={`${TD} ${g == null ? "text-gray-600" : g > 0 ? "text-green-400" : g < 0 ? "text-red-400" : "text-gray-500"}`}>
+                  {g == null ? "—" : g > 0 ? `+${g}` : g}
+                </td>
+              );
+            })}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Employee Summary: Summary per Month — headcount by dept, end-of-month
+// snapshot (format reference: SUMMARY sheet, "Monthly" block) ─────────────
+function EmployeeMonthSummaryTable({ onDrillDown }) {
+  const { token } = useAuthStore();
+  const headers = { Authorization: `Bearer ${token}` };
+  const [year, setYear] = useState(() => new Date().getFullYear());
+  const [d, setD] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [collapsedDepts, setCollapsedDepts] = useState(() => new Set());
+  const [collapsedDivisions, setCollapsedDivisions] = useState(() => new Set());
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`${API}/summary/by-month?year=${year}`, { headers })
+      .then((r) => r.ok ? r.json() : null)
+      .then(setD)
+      .finally(() => setLoading(false));
+  }, [year]); // eslint-disable-line
+
+  const toggleSet = (setFn) => (key) => setFn((prev) => {
+    const next = new Set(prev);
+    next.has(key) ? next.delete(key) : next.add(key);
+    return next;
+  });
+  const toggleDept = toggleSet(setCollapsedDepts);
+  const toggleDivision = toggleSet(setCollapsedDivisions);
+  const divKey = (dept, division) => `${dept}::${division}`;
+
+  const visibleRows = d ? d.rows.filter((row) => {
+    if (collapsedDepts.has(row.department)) return row.division == null && row.team == null; // dept row itself always shows
+    if (row.division && row.team && collapsedDivisions.has(divKey(row.department, row.division))) return false;
+    return true;
+  }) : [];
+
+  const curYear = new Date().getFullYear();
+  const yearOptions = Array.from({ length: 6 }, (_, i) => curYear - i);
+
+  const TH = "px-3 py-2 text-xs font-semibold uppercase tracking-wider text-gray-500 whitespace-nowrap text-center border-b border-gray-800";
+  const TD = "px-3 py-2 text-xs text-right whitespace-nowrap";
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-end justify-between">
+        <div className="w-32">
+          <label className="mb-1 block text-[10px] font-medium text-gray-500">Year</label>
+          <select
+            value={year}
+            onChange={(e) => setYear(Number(e.target.value))}
+            className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+          >
+            {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <p className="text-[10px] text-gray-600">Click a value to view that exact list of employees</p>
       </div>
 
-      {/* Breakdown lists row 1 */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <SummaryChartCard title="By Department">
-          <SummaryHBarList items={by_dept} max={deptMax} />
-        </SummaryChartCard>
-        <SummaryChartCard title="By Job Level">
-          <SummaryHBarList items={by_level} max={levelMax} />
-        </SummaryChartCard>
-        <SummaryChartCard title="By Education">
-          <SummaryHBarList items={by_education} max={eduMax} />
-        </SummaryChartCard>
-      </div>
-
-      {/* Breakdown lists row 2 */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <SummaryChartCard title="By Grade">
-          <SummaryHBarList items={by_grade} max={gradeMax} />
-        </SummaryChartCard>
-        <SummaryChartCard title="Employee Status">
-          <SummaryHBarList items={by_status} max={statusMax} />
-        </SummaryChartCard>
-        <SummaryChartCard title="Marital Status">
-          <SummaryHBarList items={by_marital} max={maritalMax} />
-        </SummaryChartCard>
-      </div>
+      {loading ? (
+        <div className="py-16 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></div>
+      ) : !d ? (
+        <div className="py-16 text-center text-xs text-gray-600">Failed to load</div>
+      ) : (
+        <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 480 }}>
+          <table className="w-full text-sm" style={{ minWidth: 900 }}>
+            <thead className="sticky top-0 z-10 bg-gray-800">
+              <tr>
+                <th className={`${TH} text-left sticky left-0 bg-gray-800 z-20`}>Department / Division / Team</th>
+                {d.months.map((m) => <th key={m} className={TH}>{MONTHS_ID[m - 1]}</th>)}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800">
+              {visibleRows.map((row) => {
+                const level = row.team ? 2 : row.division ? 1 : 0;
+                const hasChildren = level === 0
+                  ? d.rows.some((r) => r.department === row.department && (r.division || r.team))
+                  : level === 1
+                    ? d.rows.some((r) => r.department === row.department && r.division === row.division && r.team)
+                    : false;
+                const toggleKey = level === 0 ? row.department : divKey(row.department, row.division);
+                const isOpen = hasChildren && !(level === 0 ? collapsedDepts : collapsedDivisions).has(toggleKey);
+                const label = row.team || row.division || row.department;
+                const pad = level === 0 ? "" : level === 1 ? "pl-6" : "pl-9";
+                const rowClass = level === 0 ? "bg-gray-800/30 font-semibold" : level === 1 ? "bg-gray-900/40 font-medium hover:bg-gray-800/30" : "hover:bg-gray-800/30";
+                return (
+                <tr key={`${row.department}-${row.division || ""}-${row.team || ""}`} className={rowClass}>
+                  <td
+                    onClick={hasChildren ? () => (level === 0 ? toggleDept(toggleKey) : toggleDivision(toggleKey)) : undefined}
+                    className={`px-3 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${level === 2 ? "text-gray-400 bg-gray-900" : level === 1 ? "text-gray-300 bg-gray-900/40" : "text-gray-200 bg-gray-800/30"} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
+                  >
+                    {hasChildren && (isOpen ? <ChevronDown size={11} className="inline mr-1 -mt-0.5" /> : <ChevronRight size={11} className="inline mr-1 -mt-0.5" />)}
+                    {label}
+                  </td>
+                  {d.months.map((m) => (
+                    <td
+                      key={m}
+                      onClick={() => onDrillDown && onDrillDown(row.department, row.division, row.team, m, year)}
+                      className={`${TD} ${level === 0 ? "text-gray-200" : "text-gray-400"} ${onDrillDown ? "cursor-pointer hover:bg-indigo-500/20 hover:text-indigo-300" : ""}`}
+                      title={onDrillDown ? `View the ${row.by_month[m] ?? 0} employee(s) behind this number` : undefined}
+                    >
+                      {row.by_month[m] ?? "—"}
+                    </td>
+                  ))}
+                </tr>
+                );
+              })}
+              <tr className="bg-gray-800/60 font-bold">
+                <td className="px-3 py-2 text-xs text-gray-200 whitespace-nowrap sticky left-0 bg-gray-800/60">GRAND TOTAL</td>
+                {d.months.map((m) => (
+                  <td key={m} className={`${TD} text-indigo-300`}>{d.total[m] ?? "—"}</td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -1382,17 +2405,43 @@ function EmployeeGraphSection() {
 // ── Turnover Report ───────────────────────────────────────────────────────────
 function TurnoverSection() {
   const { token } = useAuthStore();
+  const headers = { Authorization: `Bearer ${token}` };
+  const curYear = new Date().getFullYear();
+
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [errMsg, setErrMsg]   = useState("");
-  // Semua hook harus dipanggil unconditionally di setiap render — RC dideklarasikan
-  // di sini (sebelum early-return loading/error), bukan setelahnya.
   const [RC, setRC] = useState(null);
 
+  const [yearFilter, setYearFilter] = useState(curYear);
+  const [monthFilter, setMonthFilter] = useState("");
+  const [deptFilter, setDeptFilter] = useState("");
+  const [teamFilter, setTeamFilter] = useState("");
+  const [departments, setDepartments] = useState([]);
+  const [teams, setTeams] = useState([]);
+
+  const fetchTeams = useCallback(async (dept) => {
+    try {
+      const url = dept ? `${API}/teams?department=${encodeURIComponent(dept)}` : `${API}/teams`;
+      const res = await fetch(url, { headers });
+      if (res.ok) setTeams(await res.json());
+    } catch (_) {}
+  }, []); // eslint-disable-line
+
   useEffect(() => {
-    fetch("/api/v1/dashboard/hr/employees/turnover-summary", {
-      headers: { Authorization: `Bearer ${token}` },
-    })
+    fetch(`${API}/departments`, { headers }).then((r) => r.ok ? r.json() : []).then(setDepartments).catch(() => {});
+    fetchTeams("");
+  }, []); // eslint-disable-line
+
+  useEffect(() => {
+    setLoading(true);
+    const params = new URLSearchParams({
+      year: yearFilter,
+      ...(monthFilter ? { month: monthFilter } : {}),
+      ...(deptFilter ? { department: deptFilter } : {}),
+      ...(teamFilter ? { team: teamFilter } : {}),
+    });
+    fetch(`/api/v1/dashboard/hr/employees/turnover-summary?${params}`, { headers })
       .then(async (r) => {
         const body = await r.json();
         if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
@@ -1401,27 +2450,67 @@ function TurnoverSection() {
       .then((d) => setData(d))
       .catch((e) => setErrMsg(e.message || "Network error"))
       .finally(() => setLoading(false));
-  }, []); // eslint-disable-line
+  }, [yearFilter, monthFilter, deptFilter, teamFilter]); // eslint-disable-line
 
   useEffect(() => {
     import("recharts").then((mod) => setRC(mod)).catch(() => {});
   }, []);
 
-  if (loading) return <div className="py-20 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-300" /></div>;
+  const filterBar = (
+    <div className="flex flex-wrap items-end gap-2">
+      <div className="w-28">
+        <label className="mb-1 block text-[10px] font-medium text-gray-500">Year</label>
+        <select value={yearFilter} onChange={(e) => setYearFilter(Number(e.target.value))}
+          className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer">
+          {[curYear, curYear - 1, curYear - 2, curYear - 3, curYear - 4].map((y) => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+      <div className="w-28">
+        <label className="mb-1 block text-[10px] font-medium text-gray-500">Month</label>
+        <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)}
+          className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer">
+          <option value="">All</option>
+          {MONTHS_ID.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+        </select>
+      </div>
+      <div className="w-32">
+        <label className="mb-1 block text-[10px] font-medium text-gray-500">Department</label>
+        <select value={deptFilter} onChange={(e) => { setDeptFilter(e.target.value); setTeamFilter(""); fetchTeams(e.target.value); }}
+          className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer">
+          <option value="">All</option>
+          {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
+      </div>
+      <div className="w-32">
+        <label className="mb-1 block text-[10px] font-medium text-gray-500">Team</label>
+        <select value={teamFilter} onChange={(e) => setTeamFilter(e.target.value)}
+          className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer">
+          <option value="">All</option>
+          {teams.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </div>
+    </div>
+  );
+
+  if (loading) return <div className="space-y-3 mt-2">{filterBar}<div className="py-16 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-300" /></div></div>;
   if (errMsg || !data) return (
-    <div className="py-10 text-center space-y-2">
-      <p className="text-xs text-red-400 font-semibold">Failed to load turnover report</p>
-      {errMsg && <pre className="text-xs text-gray-300 max-w-xl mx-auto whitespace-pre-wrap text-left bg-gray-900 rounded p-3">{errMsg}</pre>}
+    <div className="space-y-3 mt-2">
+      {filterBar}
+      <div className="py-10 text-center space-y-2">
+        <p className="text-xs text-red-400 font-semibold">Failed to load turnover report</p>
+        {errMsg && <pre className="text-xs text-gray-300 max-w-xl mx-auto whitespace-pre-wrap text-left bg-gray-900 rounded p-3">{errMsg}</pre>}
+      </div>
     </div>
   );
 
   const {
-    resign_trend = [], annual_turnover_rate = 0, total_resigns_12m = 0,
+    resign_trend = [], annual_turnover_rate = 0, total_resigns_period = 0,
     avg_tenure_years = 0, current_headcount = 0,
-    by_dept = [], by_level = [], by_status = [],
+    by_dept = [], by_level = [], by_status = [], year = curYear, month = null,
   } = data;
 
   const CHART_H = 200;
+  const periodLabel = month ? `${MONTHS_ID[month - 1]} ${year}` : `${year}`;
 
   const tickStyle = { fill: "#cbd5e1", fontSize: 10 };
   const tooltipStyle = {
@@ -1437,13 +2526,15 @@ function TurnoverSection() {
 
   return (
     <div className="space-y-4 mt-2">
+      {filterBar}
+
       {/* KPI Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: "Turnover Rate (12 Mo)",  val: `${annual_turnover_rate}%`, sub: "annualized",              color: "#fb7185" },
-          { label: "Total Resigned (12 Mo)", val: total_resigns_12m,          sub: "employees left",          color: "#fbbf24" },
-          { label: "Avg. Tenure",            val: `${avg_tenure_years} yrs`,  sub: "of resigned employees",   color: "#818cf8" },
-          { label: "Current Headcount",      val: current_headcount,          sub: "active employees",        color: "#34d399" },
+          { label: `Turnover Rate (${year})`,      val: `${annual_turnover_rate}%`, sub: "annualized",              color: "#fb7185" },
+          { label: `Total Resigned (${periodLabel})`, val: total_resigns_period,     sub: "employees left",          color: "#fbbf24" },
+          { label: "Avg. Tenure",                  val: `${avg_tenure_years} yrs`,  sub: "of resigned employees",   color: "#818cf8" },
+          { label: "Current Headcount",            val: current_headcount,          sub: "active employees",        color: "#34d399" },
         ].map(({ label, val, sub, color }) => (
           <div key={label} className="rounded-xl border border-gray-800 bg-gray-900 p-4">
             <div className="text-2xl font-bold" style={{ color }}>{val}</div>
@@ -1456,10 +2547,10 @@ function TurnoverSection() {
       {/* Chart: resign trend + turnover rate */}
       {RC ? (
         <>
-          <SummaryChartCard title="Resign & Turnover Rate Trend (24 Months)">
+          <SummaryChartCard title={`Resign & Turnover Rate Trend (Jan–Dec ${year})`}>
             <RC.ResponsiveContainer width="100%" height={CHART_H}>
               <RC.ComposedChart data={resign_trend} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
-                <RC.XAxis dataKey="label" tick={tickStyle} interval={3} />
+                <RC.XAxis dataKey="label" tick={tickStyle} />
                 <RC.YAxis yAxisId="left" tick={tickStyle} allowDecimals={false} />
                 <RC.YAxis yAxisId="right" orientation="right" tick={tickStyle} unit="%" />
                 <RC.Tooltip {...tooltipStyle} formatter={(v, name) => name === "turnover_rate" ? [`${v}%`, "Turnover Rate"] : [v, "Resigned"]} />
@@ -1471,13 +2562,13 @@ function TurnoverSection() {
 
           {/* Breakdown lists row */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <SummaryChartCard title="Resigned by Department (12 Mo)">
+            <SummaryChartCard title={`Resigned by Department (${periodLabel})`}>
               <SummaryHBarList items={by_dept} max={deptMax} />
             </SummaryChartCard>
-            <SummaryChartCard title="Resigned by Job Level (12 Mo)">
+            <SummaryChartCard title={`Resigned by Job Level (${periodLabel})`}>
               <SummaryHBarList items={by_level} max={levelMax} />
             </SummaryChartCard>
-            <SummaryChartCard title="Resigned by Employee Status (12 Mo)">
+            <SummaryChartCard title={`Resigned by Employee Status (${periodLabel})`}>
               <SummaryHBarList items={by_status} max={statusMax} />
             </SummaryChartCard>
           </div>
@@ -2666,7 +3757,7 @@ function PrintableWorkingCalendar({ year, holidays, summary }) {
         <div style={{ textAlign: "center" }}>
           <p style={{ margin: 0 }}>Prepared by,</p>
           <div style={{ height: 40 }} />
-          <p style={{ margin: 0, borderTop: `1px solid ${PRINT_BORDER}`, paddingTop: 2, fontWeight: 700 }}>HR</p>
+          <p style={{ margin: 0, borderTop: `1px solid ${PRINT_BORDER}`, paddingTop: 2, fontWeight: 700 }}>HRGA</p>
         </div>
         <div style={{ textAlign: "center" }}>
           <p style={{ margin: 0 }}>Approved by,</p>

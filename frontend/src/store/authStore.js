@@ -15,6 +15,10 @@ const kc = new Keycloak({
 
 let kcInitialized = false;
 
+// Auto-logout setelah 10 menit tanpa aktivitas (mouse/keyboard/touch/scroll).
+const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+const ACTIVITY_EVENTS = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"];
+
 export const useAuthStore = create((set, get) => ({
   keycloak: kc,
   isAuthenticated: false,
@@ -75,6 +79,18 @@ export const useAuthStore = create((set, get) => ({
             }
           });
         }, 30000);
+
+        // Auto-logout setelah 10 menit tanpa aktivitas — refresh loop di atas
+        // sengaja tidak dijadikan sinyal aktivitas, supaya idle beneran (tab
+        // dibiarkan terbuka tanpa disentuh) tetap ter-logout meski token
+        // masih terus di-refresh di background.
+        let idleTimer;
+        const resetIdleTimer = () => {
+          clearTimeout(idleTimer);
+          idleTimer = setTimeout(() => get().logout(), IDLE_TIMEOUT_MS);
+        };
+        ACTIVITY_EVENTS.forEach((evt) => window.addEventListener(evt, resetIdleTimer, { passive: true }));
+        resetIdleTimer();
       }
     } catch (error) {
       console.error("Keycloak init failed:", error);
