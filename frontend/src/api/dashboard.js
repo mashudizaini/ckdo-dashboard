@@ -266,6 +266,25 @@ export const accountingApi = {
   getMaterialTransactions: (p) => api.get("/dashboard/accounting/material-transactions", { params: p }),
 };
 
+export const financialStatementApi = {
+  getPeriods:  () => api.get("/dashboard/accounting/financial-statement/periods"),
+  getBalanceSheet:       (periods) => api.get("/dashboard/accounting/financial-statement/balance-sheet", { params: { periods: periods.join(",") } }),
+  getBalanceSheetDetail: (periods) => api.get("/dashboard/accounting/financial-statement/balance-sheet-detail", { params: { periods: periods.join(",") } }),
+  getProfitLoss:         (columns) => api.get("/dashboard/accounting/financial-statement/profit-loss", { params: { columns: JSON.stringify(columns) } }),
+  getProfitLossMonthly:  ({ periodThis, ytdThis, periodLast, ytdLast }) =>
+    api.get("/dashboard/accounting/financial-statement/profit-loss-monthly", {
+      params: { period_this: periodThis, ytd_this: ytdThis.join(","), period_last: periodLast, ytd_last: ytdLast.join(",") },
+    }),
+  exportBalanceSheet:       (periods, asOfLabel) => api.get("/dashboard/accounting/financial-statement/balance-sheet/export", { params: { periods: periods.join(","), as_of_label: asOfLabel || "" }, responseType: "blob" }),
+  exportBalanceSheetDetail: (periods, asOfLabel) => api.get("/dashboard/accounting/financial-statement/balance-sheet-detail/export", { params: { periods: periods.join(","), as_of_label: asOfLabel || "" }, responseType: "blob" }),
+  exportProfitLoss:         (columns, dateLabel) => api.get("/dashboard/accounting/financial-statement/profit-loss/export", { params: { columns: JSON.stringify(columns), date_label: dateLabel || "" }, responseType: "blob" }),
+  exportProfitLossMonthly:  ({ periodThis, ytdThis, periodLast, ytdLast, dateLabel }) =>
+    api.get("/dashboard/accounting/financial-statement/profit-loss-monthly/export", {
+      params: { period_this: periodThis, ytd_this: ytdThis.join(","), period_last: periodLast, ytd_last: ytdLast.join(","), date_label: dateLabel || "" },
+      responseType: "blob",
+    }),
+};
+
 export const apInvoiceApi = {
   upload:          (formData) => api.post("/dashboard/accounting/ap-invoice/upload", formData, { headers: { "Content-Type": "multipart/form-data" }, timeout: 120000 }),
   list:            ()         => api.get("/dashboard/accounting/ap-invoice/invoices"),

@@ -39,7 +39,7 @@ const NAV_ITEMS = [
     { label: "COGS Report", path: "/dashboard/accounting/cogs" },
     { label: "AP Outstanding", path: "/dashboard/accounting/profit" },
     { label: "AR Outstanding", path: "/dashboard/accounting/ar" },
-    { label: "Coretax Download", path: "/dashboard/accounting/coretax" },
+    { label: "Financial Statement", path: "/dashboard/accounting/financial-statement" },
   ] },
   { label: "Purchasing", path: "/dashboard/purchasing", icon: ShoppingCart, roles: ["purchasing_staff"], children: [
     { label: "Open PR", path: "/dashboard/purchasing/open-pr" },

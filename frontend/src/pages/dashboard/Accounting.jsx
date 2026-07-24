@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
-  FileText, DollarSign, FileDown, RefreshCw,
+  FileText, DollarSign, FileBarChart2, RefreshCw,
   BarChart2, Package, Download, Search, Loader2, Layers, ClipboardList,
   AlertTriangle, ChevronLeft, ChevronRight,
 } from "lucide-react";
-import CoretaxDownloader from "./CoretaxDownloader";
+import FinancialStatement from "./FinancialStatement";
 import APAutoInvoice from "./APAutoInvoice";
 import { accountingApi } from "@/api/dashboard";
 
@@ -21,7 +21,7 @@ const TABS = [
   { id: "cogs",       icon: BarChart2,  label: "COGS Report",       color: "#10b981" },
   { id: "profit",     icon: DollarSign, label: "AP Outstanding",    color: "#3b82f6" },
   { id: "ar",         icon: FileText,   label: "AR Outstanding",    color: "#f59e0b" },
-  { id: "coretax",    icon: FileDown,   label: "Coretax Download",  color: "#8b5cf6" },
+  { id: "financial-statement", icon: FileBarChart2, label: "Financial Statement", color: "#8b5cf6" },
 ];
 
 export default function AccountingDashboard() {
@@ -47,7 +47,7 @@ export default function AccountingDashboard() {
 
       {active === "ar" && <AROutstandingPanel />}
 
-      {active === "coretax" && <CoretaxDownloader />}
+      {active === "financial-statement" && <FinancialStatement />}
     </div>
   );
 }

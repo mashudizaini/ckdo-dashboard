@@ -25,7 +25,7 @@ import app.models.db_browser_audit  # noqa: F401
 import app.models.org_structure  # noqa: F401
 
 # ── Dashboard Routers ──
-from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice
+from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement
 from app.routers.dashboard import (
     eis_summary, eis_performance, eis_production, eis_expansion, eis_administration,
     eis_business_plan, eis_daily_sales, eis_data_upload, eis_etl_admin,
@@ -141,6 +141,7 @@ app.include_router(hr.router,         prefix=f"{API_PREFIX}/dashboard/hr",      
 app.include_router(pac.router,        prefix=f"{API_PREFIX}/dashboard/pac",        tags=["Dashboard - PAC"])
 app.include_router(accounting.router, prefix=f"{API_PREFIX}/dashboard/accounting", tags=["Dashboard - Accounting"])
 app.include_router(ap_invoice.router,  prefix=f"{API_PREFIX}/dashboard/accounting/ap-invoice", tags=["Dashboard - AP Invoice"])
+app.include_router(financial_statement.router, prefix=f"{API_PREFIX}/dashboard/accounting/financial-statement", tags=["Dashboard - Financial Statement"])
 app.include_router(purchasing.router, prefix=f"{API_PREFIX}/dashboard/purchasing", tags=["Dashboard - Purchasing"])
 
 # EIS Dashboard — ported from the standalone eis-dashboard-v2 app.
