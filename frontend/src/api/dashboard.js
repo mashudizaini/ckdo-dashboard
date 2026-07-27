@@ -228,6 +228,7 @@ export const pacApi = {
     form.append("file", file);
     return api.post("/dashboard/pac/manufacture-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
   },
+  exportManufacturePlanDetailReport: (planYear) => api.get("/dashboard/pac/manufacture-plans/detail-report", { params: { plan_year: planYear }, responseType: "blob" }),
 
   // Investment Plan (Simulation)
   listInvestmentPlans:  (p)    => api.get("/dashboard/pac/investment-plans", { params: p }),
@@ -286,7 +287,7 @@ export const financialStatementApi = {
 };
 
 export const apInvoiceApi = {
-  upload:          (formData) => api.post("/dashboard/accounting/ap-invoice/upload", formData, { headers: { "Content-Type": "multipart/form-data" }, timeout: 120000 }),
+  upload:          (formData, provider = "onprem") => api.post("/dashboard/accounting/ap-invoice/upload", formData, { params: { provider }, headers: { "Content-Type": "multipart/form-data" }, timeout: 180000 }),
   list:            ()         => api.get("/dashboard/accounting/ap-invoice/invoices"),
   get:             (id)       => api.get(`/dashboard/accounting/ap-invoice/invoices/${id}`),
   update:          (id, data) => api.put(`/dashboard/accounting/ap-invoice/invoices/${id}`, data),

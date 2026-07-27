@@ -1,6 +1,12 @@
 """
 CV Screening Service
-Parse CV (PDF/DOCX/TXT) → analyze with Claude AI → structured score + recommendation.
+Parse CV (PDF/DOCX/TXT) → analyze with AI → structured score + recommendation.
+
+Two providers, selected per-request (see screen_cv's `provider` param):
+  - "onprem"    (standard, default) — local Ollama (qwen2.5:14b-instruct) on
+                the "ai-engine" VM (172.21.2.27), no per-call API cost.
+  - "anthropic" (premium, opt-in)   — Claude, higher quality on tricky CVs
+                but costs real API credits.
 
 Ported from sumber/cv_screening (AI-Enhanced screener) into the FastAPI stack.
 """
@@ -12,10 +18,12 @@ from typing import Optional
 import fitz  # PyMuPDF
 import docx
 import anthropic
+import httpx
 
 from app.config import get_settings
 
 settings = get_settings()
+OLLAMA_TIMEOUT_SECONDS = 120.0
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads", "cv_screening")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -108,7 +116,7 @@ Scoring weights to apply: skills={job.get('weight_skills', 40)}, experience={job
 - Return ONLY valid JSON, no extra text"""
 
 
-def analyze_cv_with_ai(cv_text: str, job: dict) -> dict:
+def analyze_cv_with_anthropic(cv_text: str, job: dict) -> dict:
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     prompt = _build_prompt(cv_text, job)
 
@@ -124,14 +132,41 @@ def analyze_cv_with_ai(cv_text: str, job: dict) -> dict:
     return json.loads(raw)
 
 
-def screen_cv(file_path: str, filename: str, job: dict) -> dict:
-    """Extract + analyze a single CV. Returns a dict matching CvScreeningCandidate fields."""
+def analyze_cv_with_ollama(cv_text: str, job: dict) -> dict:
+    """Standard (default, free) provider — local Ollama on the ai-engine VM."""
+    prompt = _build_prompt(cv_text, job)
+    url = f"{settings.ollama_api_url.rstrip('/')}/api/chat"
+
+    with httpx.Client(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
+        resp = client.post(url, json={
+            "model": settings.ollama_chat_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "format": "json",
+        })
+        resp.raise_for_status()
+        raw = resp.json()["message"]["content"].strip()
+
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+    return json.loads(raw)
+
+
+# Backward-compatible alias — existing callers that don't care about provider
+# selection get the standard (on-premise) analyzer.
+analyze_cv_with_ai = analyze_cv_with_ollama
+
+
+def screen_cv(file_path: str, filename: str, job: dict, provider: str = "onprem") -> dict:
+    """Extract + analyze a single CV. Returns a dict matching CvScreeningCandidate
+    fields. `provider`: "onprem" (standard, default, local Ollama) or
+    "anthropic" (premium, opt-in, costs API credits)."""
     try:
         cv_text = extract_cv_text(file_path)
         if not cv_text or len(cv_text) < 30:
             raise ValueError("Could not extract readable text from file")
 
-        ai = analyze_cv_with_ai(cv_text, job)
+        ai = analyze_cv_with_anthropic(cv_text, job) if provider == "anthropic" else analyze_cv_with_ollama(cv_text, job)
 
         scoring = ai.get("scoring", {})
         rec = ai.get("recommendation", {})

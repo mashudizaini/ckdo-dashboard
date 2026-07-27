@@ -500,6 +500,135 @@ def _build_gross_sales_report_xlsx(lines: list, plan_year: int) -> StreamingResp
     )
 
 
+_MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _build_manufacture_plan_detail_xlsx(rows: list, plan_year: int) -> StreamingResponse:
+    """rows: raw ManufacturePlan.content.rows lists, shape matches
+    manufacture_plan_service.HEADERS:
+      [No, Customer, ItemCode, Name, BatchSize, Yield%, Jan..Dec(12),
+       TotalBatch, QtyBeforeYield, QtyAfterYield, SalesQty, Coverage]
+
+    Total Batch / Qty Before Yield / Qty After Yield / Coverage are
+    RECOMPUTED here from the raw inputs (monthly batches, batch size,
+    yield%, sales qty) rather than trusting the stored derived columns —
+    the manufacture plan editor only keeps "Total Batch" in sync when a
+    monthly cell changes (see PAC.jsx's updateCell), not the downstream
+    yield/coverage columns, so a report built off stale stored values
+    could silently disagree with its own inputs. Formulas:
+      Total Batch            = SUM(Jan..Dec)
+      Total Qty Before Yield = Total Batch * Batch Size
+      Total Qty After Yield  = Total Qty Before Yield * Yield%
+      Coverage                = Total Qty After Yield / Sales Quantity
+    — same chain as sumber/'BOM, Manufacturing plan.xlsx' ('Detail
+    Manufacturing plan_All': W = S*T*V, Coverage = After-Yield / Sales Plan).
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"Detail_Manufacturing_{plan_year}"
+
+    bold = Font(bold=True)
+    title_font = Font(bold=True, size=13)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    fill_hdr = PatternFill("solid", fgColor="D9E1F2")
+    fill_total = PatternFill("solid", fgColor="F2F2F2")
+
+    headers = (
+        ["No", "Business Type", "Item Code", "Product Name"]
+        + _MONTH_LABELS
+        + ["Total Batch", "Batch Size (Vial)", "Total Qty Before Yield", "Yield (%)",
+           "Total Production After Yield (Vial)", "Sales Quantity (Vial)", "Coverage"]
+    )
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
+    ws.cell(row=1, column=1, value="PT CKD OTTO Pharmaceuticals").font = title_font
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(headers))
+    ws.cell(row=2, column=1, value=f"Manufacturing Plan Detail — {plan_year}").font = Font(italic=True, size=10)
+
+    HR = 4
+    for c, label in enumerate(headers, 1):
+        cell = ws.cell(row=HR, column=c, value=label)
+        cell.font, cell.alignment, cell.fill = bold, center, fill_hdr
+
+    # sort by Business Type then Item Code, mirroring the reference file's
+    # grouping (products clustered by Local/Export/CMO)
+    def sort_key(r):
+        return (str(r[1] if len(r) > 1 else ""), str(r[2] if len(r) > 2 else ""))
+
+    sorted_rows = sorted(rows, key=sort_key)
+
+    r = HR + 1
+    totals = {"batch": 0, "before": 0.0, "after": 0.0, "sales": 0.0}
+    for i, row in enumerate(sorted_rows, 1):
+        customer   = row[1] if len(row) > 1 else ""
+        item_code  = row[2] if len(row) > 2 else ""
+        name       = row[3] if len(row) > 3 else ""
+        batch_size = float(row[4] or 0) if len(row) > 4 else 0.0
+        yield_pct  = float(row[5] or 0) if len(row) > 5 else 0.0
+        months     = [float(row[6 + m] or 0) if len(row) > 6 + m else 0.0 for m in range(12)]
+        sales_qty  = float(row[21] or 0) if len(row) > 21 else 0.0
+
+        total_batch = sum(months)
+        qty_before  = total_batch * batch_size
+        qty_after   = qty_before * yield_pct
+        coverage    = (qty_after / sales_qty) if sales_qty else None
+
+        ws.cell(row=r, column=1, value=i)
+        ws.cell(row=r, column=2, value=customer)
+        ws.cell(row=r, column=3, value=item_code)
+        ws.cell(row=r, column=4, value=name)
+        for m in range(12):
+            ws.cell(row=r, column=5 + m, value=months[m] or None)
+        ws.cell(row=r, column=17, value=total_batch)
+        ws.cell(row=r, column=18, value=batch_size)
+        ws.cell(row=r, column=19, value=qty_before)
+        c_yield = ws.cell(row=r, column=20, value=yield_pct)
+        c_yield.number_format = "0.0%"
+        ws.cell(row=r, column=21, value=qty_after)
+        ws.cell(row=r, column=22, value=sales_qty)
+        c_cov = ws.cell(row=r, column=23, value=coverage)
+        if coverage is not None:
+            c_cov.number_format = "0.00"
+
+        totals["batch"]  += total_batch
+        totals["before"] += qty_before
+        totals["after"]  += qty_after
+        totals["sales"]  += sales_qty
+        r += 1
+
+    last_row = r - 1
+    ws.cell(row=r, column=4, value="TOTAL").font = bold
+    ws.cell(row=r, column=17, value=totals["batch"]).font = bold
+    ws.cell(row=r, column=19, value=totals["before"]).font = bold
+    ws.cell(row=r, column=21, value=totals["after"]).font = bold
+    ws.cell(row=r, column=22, value=totals["sales"]).font = bold
+    total_cov = (totals["after"] / totals["sales"]) if totals["sales"] else None
+    if total_cov is not None:
+        c = ws.cell(row=r, column=23, value=total_cov)
+        c.font, c.number_format = bold, "0.00"
+    for c in range(1, len(headers) + 1):
+        ws.cell(row=r, column=c).fill = fill_total
+
+    ws.freeze_panes = ws.cell(row=HR + 1, column=5)
+    ws.column_dimensions["D"].width = 26
+    for col_letter in ["B", "C"]:
+        ws.column_dimensions[col_letter].width = 14
+    for m in range(12):
+        ws.column_dimensions[get_column_letter(5 + m)].width = 6
+    for col_letter in ["Q", "R", "S", "T", "U", "V", "W"]:
+        ws.column_dimensions[col_letter].width = 16
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"Manufacturing_Plan_Detail_{plan_year}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
+
+
 def _classify_business_unit(market: str) -> str:
     """Business-unit bucket rule mirrored from V5.Sales Estimation2026.xlsx's
     Summary sheet: Local = Public/Private, CMO/Export are their own units,
@@ -812,6 +941,32 @@ async def list_manufacture_plans(
 ):
     """List manufacture plans filtered by year/department/team."""
     return await ManufacturePlanService().list_manufacture_plans(db, plan_year, department, team_code)
+
+
+@router.get("/manufacture-plans/detail-report")
+async def export_manufacture_plan_detail_report(
+    plan_year: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Export the Manufacturing Plan detail report — same column layout and
+    calculations as sumber/'BOM, Manufacturing plan.xlsx' sheet
+    'Detail Manufacturing plan_All', built from every Manufacture Plan
+    record for the given year (2026 scope only — no 2027 H1 columns, since
+    this app has no 2027 planning data source to build them from).
+    Registered before /manufacture-plans/{plan_id} for the same reason as
+    /sales-plans/gross-sales-report — otherwise Starlette's path matching
+    would swallow this route as plan_id="detail-report"."""
+    result = await ManufacturePlanService().list_manufacture_plans(db, plan_year=plan_year)
+    if not result.get("success"):
+        raise HTTPException(400, result.get("error") or "Failed to load Manufacture Plan data")
+    rows = [row for plan in result["data"] for row in (plan.get("content") or {}).get("rows", [])]
+    if not rows:
+        raise HTTPException(404, f"Tidak ada data Manufacture Plan untuk tahun {plan_year}")
+    try:
+        return _build_manufacture_plan_detail_xlsx(rows, plan_year)
+    except Exception as e:
+        raise HTTPException(500, f"Excel generation failed: {e}")
 
 
 @router.get("/manufacture-plans/{plan_id}")

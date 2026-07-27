@@ -3,6 +3,13 @@ Job Description Generator
 Takes a raw job description and produces a structured, HR-friendly version
 plus ready-to-use CV screening criteria.
 
+Three methods, selected per-request (see the router's JdGenerateRequest.method):
+  - "onprem"    (standard, default) — local Ollama (qwen2.5:14b-instruct) on
+                the "ai-engine" VM (172.21.2.27), no per-call API cost.
+  - "anthropic" (premium, opt-in)   — Claude, higher quality on messy/unusual
+                JDs but costs real API credits.
+  - "template"  (offline fallback)  — regex/keyword extraction, no AI at all.
+
 Ported from sumber/cv_screening (jd_generator_template.py + AI method in
 app_cv_screening_bp.py) into the FastAPI stack.
 """
@@ -10,13 +17,15 @@ import json
 import re
 
 import anthropic
+import httpx
 
 from app.config import get_settings
 
 settings = get_settings()
+OLLAMA_TIMEOUT_SECONDS = 120.0
 
 
-# ── AI-Powered (Claude) ──────────────────────────────────────────────
+# ── AI-Powered (Claude / Ollama) ──────────────────────────────────────
 
 def _build_prompt(original_jd: str) -> str:
     return f"""You are an expert HR consultant specializing in writing clear, comprehensive job descriptions.
@@ -75,7 +84,7 @@ Analyze this job description and create an IMPROVED, STRUCTURED version that is:
 - Return ONLY valid JSON, no extra text"""
 
 
-def generate_jd_with_ai(original_jd: str) -> dict:
+def generate_jd_with_anthropic(original_jd: str) -> dict:
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     prompt = _build_prompt(original_jd)
 
@@ -92,6 +101,34 @@ def generate_jd_with_ai(original_jd: str) -> dict:
     result["improvements_made"] = result.get("improvements_made", [])
     result["hr_notes"] = result.get("hr_notes", "")
     return result
+
+
+def generate_jd_with_ollama(original_jd: str) -> dict:
+    """Standard (default, free) method — local Ollama on the ai-engine VM."""
+    prompt = _build_prompt(original_jd)
+    url = f"{settings.ollama_api_url.rstrip('/')}/api/chat"
+
+    with httpx.Client(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
+        resp = client.post(url, json={
+            "model": settings.ollama_chat_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "format": "json",
+        })
+        resp.raise_for_status()
+        raw = resp.json()["message"]["content"].strip()
+
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+    result = json.loads(raw)
+    result["improvements_made"] = result.get("improvements_made", [])
+    result["hr_notes"] = result.get("hr_notes", "")
+    return result
+
+
+# Backward-compatible alias — existing callers that don't care about method
+# selection get the standard (on-premise) generator.
+generate_jd_with_ai = generate_jd_with_ollama
 
 
 # ── Template-Based (free, no API required) ───────────────────────────

@@ -14,6 +14,7 @@ import json
 import httpx
 from app.config import get_settings
 from app.services import rag_service
+from app.services import gemini_service
 import structlog
 
 logger = structlog.get_logger()
@@ -22,20 +23,39 @@ settings = get_settings()
 RAG_TIMEOUT_SECONDS = 6.0
 OLLAMA_CHAT_TIMEOUT_SECONDS = 120.0
 
+GENERAL_CHAT_SYSTEM_PROMPT = (
+    "Kamu adalah asisten AI internal PT CKD OTTO Pharmaceuticals bernama CKDO Assistant, "
+    "untuk pertanyaan umum sehari-hari (di luar kebijakan perusahaan spesifik dan data ERP Oracle "
+    "— untuk itu ada mode chat terpisah).\n\n"
+    "## Gaya Jawaban\n"
+    "- Langsung ke inti — jangan awali dengan basa-basi seperti \"Tentu!\", \"Baik saya akan...\".\n"
+    "- Gunakan **bold** untuk istilah kunci, tabel untuk perbandingan multi-kolom, list untuk "
+    "langkah-langkah. Pakai format hanya jika benar-benar membantu kejelasan.\n"
+    "- Pertanyaan singkat -> jawab singkat.\n"
+    "- Balas dalam bahasa yang SAMA dengan bahasa pertanyaan user: Bahasa Indonesia -> jawab dalam "
+    "Bahasa Indonesia; Bahasa Inggris -> jawab dalam Bahasa Inggris.\n"
+)
+
 
 class AIService:
     def __init__(self):
         self.base_url = settings.ollama_api_url.rstrip("/")
         self.model = settings.ollama_chat_model
 
-    async def stream_chat(self, message: str, history: list[dict], user, department_filter: list[str] = None):
+    async def stream_chat(self, message: str, history: list[dict], user, department_filter: list[str] = None, provider: str = "onprem", gemini_api_key: str = None):
         """
         Stream chat response from the local Ollama server as SSE, grounded in company docs when available.
         department_filter: list of departments the user may see (None = unrestricted, e.g. IT/Admin).
         """
+        # The local qwen2.5:14b model reliably uses up to ~16 sources in
+        # context but degrades (or outright hallucinates a wrong number
+        # pulled from an unrelated chunk) past ~18 — validated empirically.
+        # Gemini handles the full top_k=30 fine. DB search stays broad either
+        # way (top_k=30 default) for recall; only the prompt content differs.
+        context_k = 16 if provider == "onprem" else 30
         try:
             retrieval = await asyncio.wait_for(
-                asyncio.to_thread(rag_service.retrieve_context, message, department_filter),
+                asyncio.to_thread(rag_service.retrieve_context, message, department_filter, 30, 0.15, context_k),
                 timeout=RAG_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError:
@@ -101,10 +121,6 @@ class AIService:
         else:
             system = base_system
 
-        # Ollama takes the system prompt as a regular message in the list
-        # (unlike Anthropic, which has a separate top-level `system` param).
-        messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": message}]
-
         # The SSE response has already committed a 200 OK by the time this
         # generator runs (StreamingResponse sends headers before iterating
         # the body), so an unhandled exception here doesn't become a clean
@@ -112,31 +128,90 @@ class AIService:
         # browser reports it to fetch() as an opaque "network error" with no
         # indication of what went wrong. Catch it and emit a proper SSE
         # error event so the frontend can show a real message instead.
-        try:
-            async with httpx.AsyncClient(timeout=OLLAMA_CHAT_TIMEOUT_SECONDS) as client:
-                async with client.stream(
-                    "POST",
-                    f"{self.base_url}/api/chat",
-                    json={"model": self.model, "messages": messages, "stream": True},
-                ) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
-                        if not line.strip():
-                            continue
-                        chunk = json.loads(line)
-                        if chunk.get("error"):
-                            raise RuntimeError(chunk["error"])
-                        text = chunk.get("message", {}).get("content", "")
-                        if text:
-                            yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
-                        if chunk.get("done"):
-                            break
-        except Exception as e:
-            logger.error("ollama_stream_error", error=str(e))
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-            yield "data: [DONE]\n\n"
-            return
+        if provider == "gemini":
+            contents = gemini_service.to_contents(history, message)
+            try:
+                async for text in gemini_service.stream_generate(system, contents, gemini_api_key):
+                    yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+            except Exception as e:
+                logger.error("gemini_stream_error", error=str(e))
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+        else:
+            # Ollama takes the system prompt as a regular message in the list
+            # (unlike Anthropic/Gemini, which have a separate top-level `system` param).
+            messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": message}]
+            try:
+                async with httpx.AsyncClient(timeout=OLLAMA_CHAT_TIMEOUT_SECONDS) as client:
+                    async with client.stream(
+                        "POST",
+                        f"{self.base_url}/api/chat",
+                        json={"model": self.model, "messages": messages, "stream": True},
+                    ) as response:
+                        response.raise_for_status()
+                        async for line in response.aiter_lines():
+                            if not line.strip():
+                                continue
+                            chunk = json.loads(line)
+                            if chunk.get("error"):
+                                raise RuntimeError(chunk["error"])
+                            text = chunk.get("message", {}).get("content", "")
+                            if text:
+                                yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+                            if chunk.get("done"):
+                                break
+            except Exception as e:
+                logger.error("ollama_stream_error", error=str(e))
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
 
         if sources:
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    async def stream_general_chat(self, message: str, history: list[dict], user, provider: str = "onprem", gemini_api_key: str = None):
+        """
+        General-purpose chat — no RAG retrieval, no tools. Simplest of the
+        3 chat modes; for questions that aren't about company policy docs
+        or Oracle ERP data.
+        """
+        if provider == "gemini":
+            contents = gemini_service.to_contents(history, message)
+            try:
+                async for text in gemini_service.stream_generate(GENERAL_CHAT_SYSTEM_PROMPT, contents, gemini_api_key):
+                    yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+            except Exception as e:
+                logger.error("gemini_general_chat_error", error=str(e))
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+        else:
+            messages = [{"role": "system", "content": GENERAL_CHAT_SYSTEM_PROMPT}] + history + [{"role": "user", "content": message}]
+            try:
+                async with httpx.AsyncClient(timeout=OLLAMA_CHAT_TIMEOUT_SECONDS) as client:
+                    async with client.stream(
+                        "POST",
+                        f"{self.base_url}/api/chat",
+                        json={"model": self.model, "messages": messages, "stream": True},
+                    ) as response:
+                        response.raise_for_status()
+                        async for line in response.aiter_lines():
+                            if not line.strip():
+                                continue
+                            chunk = json.loads(line)
+                            if chunk.get("error"):
+                                raise RuntimeError(chunk["error"])
+                            text = chunk.get("message", {}).get("content", "")
+                            if text:
+                                yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+                            if chunk.get("done"):
+                                break
+            except Exception as e:
+                logger.error("ollama_general_chat_error", error=str(e))
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
         yield "data: [DONE]\n\n"

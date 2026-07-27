@@ -3400,7 +3400,7 @@ function AttendanceRateSection() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        {[["summary", "Summary"], ["today", "Attendance Today"], ["detail", "Detail"], ["calendar", "Working Calendar"], ["leaveData", "Leave Data"], ["leaveUpload", "Upload Leave"], ["upload", "Upload"]].map(([id, label]) => (
+        {[["summary", "Summary"], ["today", "Attendance Today"], ["detail", "Detail"], ["leaveData", "Attendance Leave"], ["calendar", "Working Calendar"], ["upload", "Upload"]].map(([id, label]) => (
           <button key={id} onClick={() => setActiveTab(id)}
             style={{
               padding: "8px 20px", borderRadius: 10, border: "none", fontSize: 12, fontWeight: 700,
@@ -3538,14 +3538,12 @@ function AttendanceRateSection() {
         <LeaveDataSection />
       )}
 
-      {activeTab === "leaveUpload" && (
-        <LeaveUpload />
-      )}
-
+      {/* All uploads (attendance + leave) consolidated in one place */}
       {activeTab === "upload" && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <AttendanceUpload kind="intercom" />
           <AttendanceUpload kind="talenta" />
+          <LeaveUpload />
         </div>
       )}
     </div>

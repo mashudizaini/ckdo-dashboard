@@ -7,8 +7,18 @@
 import { create } from "zustand";
 import Keycloak from "keycloak-js";
 
+// VITE_KEYCLOAK_URL is a fixed build-time string (currently "http://...").
+// The app is reachable over both http:// and https:// (nginx serves both,
+// no forced redirect), but Keycloak's token/auth XHR calls must match the
+// PAGE's own scheme — an https:// page calling out to a hardcoded http://
+// endpoint gets blocked outright as mixed content (no user-facing error
+// beyond a silent "Keycloak init failed" and a bounce back to the login
+// page). Swap in whichever scheme the page actually loaded with, so login
+// works consistently under either.
+const keycloakUrl = (import.meta.env.VITE_KEYCLOAK_URL || "").replace(/^https?:/, window.location.protocol);
+
 const kc = new Keycloak({
-  url: import.meta.env.VITE_KEYCLOAK_URL,
+  url: keycloakUrl,
   realm: import.meta.env.VITE_KEYCLOAK_REALM,
   clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID,
 });

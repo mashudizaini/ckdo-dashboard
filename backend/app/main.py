@@ -23,6 +23,8 @@ import app.models.investment_plan  # noqa: F401
 import app.models.opex_plan  # noqa: F401
 import app.models.db_browser_audit  # noqa: F401
 import app.models.org_structure  # noqa: F401
+import app.models.user_api_key  # noqa: F401
+import app.models.meeting_recording  # noqa: F401
 
 # ── Dashboard Routers ──
 from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement
@@ -35,7 +37,7 @@ from app.routers.dashboard import (
 from app.routers.coretax_router import coretax_router
 
 # ── AI Tools Routers ──
-from app.routers.ai_tools import chatbot, meeting_notes
+from app.routers.ai_tools import chatbot, meeting_notes, user_settings, document_converter
 
 # ── Util Routers ──
 from app.routers import health
@@ -163,6 +165,8 @@ app.include_router(eis_etl_admin.router,      prefix=f"{API_PREFIX}/dashboard/ei
 # AI Tools
 app.include_router(chatbot.router,       prefix=f"{API_PREFIX}/ai/chatbot",       tags=["AI - Chatbot"])
 app.include_router(meeting_notes.router, prefix=f"{API_PREFIX}/ai/meeting-notes", tags=["AI - Meeting Notes"])
+app.include_router(user_settings.router, prefix=f"{API_PREFIX}/ai/settings",       tags=["AI - User Settings"])
+app.include_router(document_converter.router, prefix=f"{API_PREFIX}/ai/document-converter", tags=["AI - Document Converter"])
 
 # Coretax Bulk Downloader (prefix already set in router: /api/coretax)
 app.include_router(coretax_router)

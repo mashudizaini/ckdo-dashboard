@@ -4,7 +4,7 @@ import { useAuthStore } from "@/store/authStore";
 import { useThemeStore } from "@/store/themeStore";
 import {
   Monitor, Users, Factory, Calculator,
-  ShoppingCart, FileText, LogOut, LayoutGrid, Database, TrendingUp,
+  ShoppingCart, FileText, LogOut, LayoutGrid, TrendingUp, FileStack,
   ChevronDown, ChevronRight,
 } from "lucide-react";
 import RobotIcon from "@/components/icons/RobotIcon";
@@ -68,9 +68,9 @@ const EIS_ITEMS = [
 ];
 
 const AI_ITEMS = [
-  { label: "AI Chatbot",     path: "/ai/chatbot",       icon: RobotIcon, roles: [] },
-  { label: "Oracle Data Chat", path: "/ai/oracle-data",  icon: Database,  roles: [] },
-  { label: "Meeting Notes",  path: "/ai/meeting-notes", icon: FileText,  roles: [] },
+  { label: "AI Chatbot",         path: "/ai/chatbot",             icon: RobotIcon,  roles: [] },
+  { label: "Document Converter", path: "/ai/document-converter",  icon: FileStack,  roles: [] },
+  { label: "Meeting Notes",      path: "/ai/meeting-notes",       icon: FileText,   roles: [] },
 ];
 
 /* ── Leaf nav card — no children (AI Tools items, or a module with none) ── */

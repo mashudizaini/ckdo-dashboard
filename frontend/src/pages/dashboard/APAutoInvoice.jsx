@@ -79,6 +79,7 @@ export default function APAutoInvoice() {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [ocrProvider, setOcrProvider] = useState("onprem"); // "onprem" (standard, default) | "anthropic" (premium)
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [actionLoading, setActionLoading] = useState("");
@@ -107,7 +108,7 @@ export default function APAutoInvoice() {
     try {
       const form = new FormData();
       form.append("file", file);
-      const res = await apInvoiceApi.upload(form);
+      const res = await apInvoiceApi.upload(form, ocrProvider);
       setMessage({ type: "success", text: `PDF extracted successfully! Invoice: ${res.preview?.invoice_num}` });
       await refresh();
       setSelectedId(res.stg_id);
@@ -223,7 +224,13 @@ export default function APAutoInvoice() {
             Upload supplier PDF → Extract → Review/Edit → Validate → Import to Oracle EBS
           </p>
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <select value={ocrProvider} onChange={e => setOcrProvider(e.target.value)} disabled={uploading}
+            title="AI provider used to extract data from the PDF"
+            style={{ fontSize: 11.5, fontWeight: 600, padding: "8px 12px", borderRadius: 10, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: NEU.shadowOutSm, cursor: "pointer", outline: "none", colorScheme: "light" }}>
+            <option value="onprem">Standard (On-Premise AI)</option>
+            <option value="anthropic">Premium (Anthropic Claude)</option>
+          </select>
           <NeuBtn icon={RefreshCw} label="Refresh" color="#e8edf5" textColor="#475569" onClick={refresh} loading={loading} />
           <label style={{ cursor: "pointer" }}>
             <input ref={fileRef} type="file" accept=".pdf" onChange={handleUpload} style={{ display: "none" }} />

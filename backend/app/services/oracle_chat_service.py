@@ -16,6 +16,7 @@ import json
 import httpx
 from app.config import get_settings
 from app.services import eis_tools
+from app.services import gemini_service
 import structlog
 
 logger = structlog.get_logger()
@@ -69,7 +70,12 @@ class OracleChatService:
         self.base_url = settings.ollama_api_url.rstrip("/")
         self.model = settings.ollama_tool_model
 
-    async def stream_chat(self, message: str, history: list[dict], user):
+    async def stream_chat(self, message: str, history: list[dict], user, provider: str = "onprem", gemini_api_key: str = None):
+        if provider == "gemini":
+            async for chunk in self._stream_chat_gemini(message, history, user, gemini_api_key):
+                yield chunk
+            return
+
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": message}]
 
         try:
@@ -146,6 +152,56 @@ class OracleChatService:
                             break
         except Exception as e:
             logger.error("oracle_final_answer_error", error=str(e))
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        if sources:
+            yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    async def _stream_chat_gemini(self, message: str, history: list[dict], user, gemini_api_key: str = None):
+        contents = gemini_service.to_contents(history, message)
+
+        try:
+            step1 = await gemini_service.generate_with_tools(SYSTEM_PROMPT, contents, eis_tools.EIS_TOOLS, gemini_api_key)
+        except Exception as e:
+            logger.error("oracle_gemini_tool_selection_error", error=str(e))
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        sources = []
+        if step1["function_calls"]:
+            # Must echo back the exact parts (including thoughtSignature) —
+            # Gemini 3.x rejects the follow-up call otherwise.
+            contents.append({"role": "model", "parts": step1["model_parts"]})
+            for call in step1["function_calls"]:
+                tool_name = call["name"]
+                arguments = call["args"]
+                try:
+                    data = eis_tools.execute_tool(tool_name, arguments)
+                    error = None
+                except Exception as e:
+                    data = []
+                    error = str(e)
+                    logger.warning("oracle_gemini_tool_execution_error", tool=tool_name, arguments=arguments, error=error)
+
+                sources.append({"tool": tool_name, "arguments": arguments, "row_count": len(data), "error": error})
+                contents.append(gemini_service.function_response_part(tool_name, call.get("id"), data, error))
+
+        lang = _detect_language(message)
+        final_system = SYSTEM_PROMPT + "\n\n" + (
+            "PENTING: Tulis balasan berikut dalam Bahasa Indonesia. Jangan gunakan Bahasa Inggris."
+            if lang == "id" else
+            "IMPORTANT: Write the following reply in English. Do not use Indonesian."
+        )
+
+        try:
+            async for text in gemini_service.stream_generate(final_system, contents, gemini_api_key):
+                yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+        except Exception as e:
+            logger.error("oracle_gemini_final_answer_error", error=str(e))
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
             yield "data: [DONE]\n\n"
             return

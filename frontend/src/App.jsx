@@ -16,8 +16,9 @@ import EISDashboard from "@/pages/dashboard/EIS";
 
 // AI Tools Pages
 import Chatbot from "@/pages/ai-tools/Chatbot";
-import ChatOracleData from "@/pages/ai-tools/ChatOracleData";
+import DocumentConverter from "@/pages/ai-tools/DocumentConverter";
 import MeetingNotes from "@/pages/ai-tools/MeetingNotes";
+import MeetingTranscriptView from "@/pages/ai-tools/MeetingTranscriptView";
 
 export default function App() {
   const { init, isLoading, isAuthenticated } = useAuthStore();
@@ -110,10 +111,14 @@ export default function App() {
         />
       </Route>
 
+      {/* Bare new-tab view (no sidebar chrome) — opened via window.open() after transcribing */}
+      <Route path="/ai/meeting-notes/view/:id" element={<MeetingTranscriptView />} />
+
       {/* AI Tools */}
       <Route path="/ai" element={<Layout />}>
         <Route path="chatbot" element={<Chatbot />} />
-        <Route path="oracle-data" element={<ChatOracleData />} />
+        <Route path="document-converter" element={<DocumentConverter />} />
+        <Route path="oracle-data" element={<Navigate to="/ai/chatbot" replace />} />
         <Route path="meeting-notes" element={<MeetingNotes />} />
       </Route>
 

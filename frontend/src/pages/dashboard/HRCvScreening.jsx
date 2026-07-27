@@ -151,7 +151,7 @@ function JobForm({ onSave, onCancel, saving, initial }) {
 
 function JdGeneratorPanel({ onUseCriteria, onCancel }) {
   const [jdText, setJdText] = useState("");
-  const [method, setMethod] = useState("template");
+  const [method, setMethod] = useState("onprem");
   const [uploading, setUploading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(null);
@@ -214,9 +214,10 @@ function JdGeneratorPanel({ onUseCriteria, onCancel }) {
           </span>
         </label>
         <select value={method} onChange={e => setMethod(e.target.value)}
-          style={{ fontSize: 11.5, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: NEU.shadowOutSm, cursor: "pointer", outline: "none" }}>
-          <option value="template">Template (free)</option>
-          <option value="ai">AI-Powered (Claude)</option>
+          style={{ fontSize: 11.5, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: NEU.shadowOutSm, cursor: "pointer", outline: "none", colorScheme: "light" }}>
+          <option value="onprem">Standard (On-Premise AI)</option>
+          <option value="anthropic">Premium (Anthropic Claude)</option>
+          <option value="template">Template (no AI, instant)</option>
         </select>
       </div>
 
@@ -432,6 +433,7 @@ function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState(null);
+  const [provider, setProvider] = useState("onprem"); // "onprem" (standard, default) | "anthropic" (premium)
   const [recFilter, setRecFilter] = useState("");
   const [search, setSearch] = useState("");
   const [sortBy,  setSortBy]  = useState(null);
@@ -466,7 +468,7 @@ function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
     try {
       const fd = new FormData();
       files.forEach(f => fd.append("files", f));
-      const res = await fetch(`/api/v1/dashboard/hr/cv-screening/jobs/${activeJobId}/upload`, {
+      const res = await fetch(`/api/v1/dashboard/hr/cv-screening/jobs/${activeJobId}/upload?provider=${provider}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: fd,
@@ -542,6 +544,12 @@ function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
               </p>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
+              <select value={provider} onChange={e => setProvider(e.target.value)} disabled={uploading}
+                title="AI provider used to analyze each CV"
+                style={{ fontSize: 11.5, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: NEU.shadowOutSm, cursor: "pointer", outline: "none", colorScheme: "light" }}>
+                <option value="onprem">Standard (On-Premise AI)</option>
+                <option value="anthropic">Premium (Anthropic Claude)</option>
+              </select>
               <label>
                 <input ref={fileRef} type="file" accept=".pdf,.docx,.doc,.txt" multiple onChange={handleUpload} style={{ display: "none" }} />
                 <span onClick={() => fileRef.current?.click()}

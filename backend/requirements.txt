@@ -18,6 +18,7 @@ oracledb==2.1.2
 # Auth / Keycloak
 python-keycloak==3.9.1
 python-jose[cryptography]==3.3.0
+cryptography==43.0.3
 httpx==0.27.0
 
 # Cache / Queue
@@ -35,8 +36,12 @@ PyMuPDF==1.24.4
 #openai-whisper==20231117
 faster-whisper==1.0.3
 
-# RAG Chatbot — embeddings (local Ollama, nomic-embed-text) + pgvector
+# RAG Chatbot — embeddings (local Ollama, bge-m3) + pgvector
 pgvector==0.3.6
+
+# Document Converter — PDF/DOCX/image -> RAG-friendly markdown (OCR + table
+# structure recognition via RapidOCR/onnxruntime, CPU-only, no torch needed)
+docling==2.115.0
 
 # Data Processing
 pandas==2.2.0

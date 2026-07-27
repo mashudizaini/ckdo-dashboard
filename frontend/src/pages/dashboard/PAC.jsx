@@ -2942,6 +2942,7 @@ function ManufacturePlanPanel({ year }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [exportingReport, setExportingReport] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -3060,6 +3061,25 @@ function ManufacturePlanPanel({ year }) {
     }
   };
 
+  const handleExportDetailReport = async () => {
+    setExportingReport(true);
+    try {
+      const blobData = await pacApi.exportManufacturePlanDetailReport(year);
+      const blob = new Blob([blobData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `Manufacturing_Plan_Detail_${year}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      let msg = "Export failed";
+      if (e instanceof Blob) { try { msg = JSON.parse(await e.text())?.detail || msg; } catch (_) {} }
+      else if (e?.detail) msg = e.detail; else if (e?.message) msg = e.message;
+      alert("Export Detail Report error: " + msg);
+    } finally {
+      setExportingReport(false);
+    }
+  };
+
   const grandTotal = (colIdx) => (form.content.rows || []).reduce((sum, row) => sum + (Number(row[colIdx]) || 0), 0);
   const fmtNum = (v) => v === "" || v == null ? "—" : Number(v).toLocaleString();
 
@@ -3080,6 +3100,10 @@ function ManufacturePlanPanel({ year }) {
               <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM("teal")}>
                 {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
                 Upload Excel
+              </button>
+              <button onClick={handleExportDetailReport} disabled={exportingReport} className={BTN_SM("green")} title="Export Detail Manufacturing Plan report (format & calculation matching the reference BOM/Manufacturing Plan file)">
+                {exportingReport ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                Export Detail Report
               </button>
               {selectedPlan && (
                 <button onClick={() => openEdit(selectedPlan)} className={BTN_SM("indigo")}><Edit3 size={11} /> Edit</button>

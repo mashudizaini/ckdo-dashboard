@@ -11,6 +11,8 @@ import os
 from datetime import datetime
 from typing import Optional, List
 
+import anthropic
+import httpx
 import openpyxl
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
@@ -175,9 +177,13 @@ async def delete_job(
 async def upload_and_screen(
     job_id: int,
     files: List[UploadFile] = File(...),
+    provider: str = Query("onprem", description='"onprem" (standard, default) or "anthropic" (premium)'),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.HR)),
 ):
+    if provider not in ("onprem", "anthropic"):
+        raise HTTPException(400, 'Invalid provider — use "onprem" or "anthropic"')
+
     result = await db.execute(select(CvScreeningJob).where(CvScreeningJob.id == job_id))
     job_row = result.scalars().first()
     if not job_row:
@@ -201,7 +207,7 @@ async def upload_and_screen(
             out.write(content)
 
         try:
-            data = svc.screen_cv(file_path, f.filename, job)
+            data = svc.screen_cv(file_path, f.filename, job, provider=provider)
         finally:
             if os.path.exists(file_path):
                 os.remove(file_path)
@@ -403,7 +409,7 @@ async def get_screening_detail(
 
 class JdGenerateRequest(BaseModel):
     jd_text: str
-    method: str = "template"  # "ai" or "template"
+    method: str = "onprem"  # "onprem" (standard, default) | "anthropic" (premium) | "template" (offline, no AI)
 
 
 @router.post("/jd/upload")
@@ -438,12 +444,20 @@ async def generate_jd(
     if not body.jd_text.strip():
         raise HTTPException(400, "No job description text provided")
 
-    if body.method == "ai":
-        result = jd_svc.generate_jd_with_ai(body.jd_text)
-    elif body.method == "template":
-        result = jd_svc.generate_jd_template_based(body.jd_text)
-    else:
-        raise HTTPException(400, f'Invalid method: {body.method}. Use "ai" or "template"')
+    if body.method not in ("onprem", "anthropic", "template"):
+        raise HTTPException(400, f'Invalid method: {body.method}. Use "onprem", "anthropic", or "template"')
+
+    try:
+        if body.method == "onprem":
+            result = jd_svc.generate_jd_with_ollama(body.jd_text)
+        elif body.method == "anthropic":
+            result = jd_svc.generate_jd_with_anthropic(body.jd_text)
+        else:
+            result = jd_svc.generate_jd_template_based(body.jd_text)
+    except anthropic.APIStatusError as e:
+        raise HTTPException(502, f"Anthropic API error: {e.message}")
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"On-premise AI engine unreachable: {e}")
 
     return {"result": result, "method": body.method}
 

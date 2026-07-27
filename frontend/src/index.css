@@ -192,6 +192,43 @@ tbody td {
   border-bottom: 1px solid rgba(0,0,0,0.04) !important;
 }
 
+/* ── Financial Statement (Accounting > Financial Statement) — bold no-fill
+   group/section headers vs. indented line items vs. bold light-blue TOTAL
+   rows. The bare tbody/thead rules above force nth-child zebra striping,
+   uniform padding and font-weight on every table in the app via !important
+   — same problem .inv-rmpm-table solves above, same fix: a scoped class
+   with higher-specificity !important rules keyed off each row's
+   data-type/data-level attribute rather than its position. */
+.fs-table { border-collapse: collapse !important; }
+.fs-table thead tr { background: #1F4E78 !important; }
+.fs-table thead th {
+  color: #ffffff !important;
+  background: transparent !important;
+  text-transform: none !important;
+  letter-spacing: normal !important;
+  text-align: center !important;
+}
+.fs-table tbody tr[data-type] { background-color: transparent !important; }
+.fs-table tbody tr[data-type="header"] td {
+  font-weight: 700 !important;
+  color: #1e293b !important;
+  background: #ffffff !important;
+  border-bottom: none !important;
+}
+.fs-table tbody tr[data-type="line"] td {
+  font-weight: 400 !important;
+  color: #1F4E78 !important;
+  background: #ffffff !important;
+}
+.fs-table tbody tr[data-type="total"] td {
+  font-weight: 700 !important;
+  color: #1e293b !important;
+  background: #D9E1F2 !important;
+}
+.fs-table tbody td[data-lvl="0"] { padding-left: 14px !important; }
+.fs-table tbody td[data-lvl="1"] { padding-left: 34px !important; }
+.fs-table tbody td[data-lvl="2"] { padding-left: 54px !important; }
+
 /* ── Recharts tooltip ── */
 .recharts-tooltip-wrapper .recharts-default-tooltip {
   background-color: var(--bg-card) !important;

@@ -34,15 +34,45 @@ class Settings(BaseSettings):
     talenta_api_key: str = ""
     talenta_api_url: str = "https://api.talenta.co"
 
-    # Anthropic — still used by CV Screening / JD Generator / AP Invoice OCR /
-    # Meeting Notes. The AI Chatbot itself has moved to the local Ollama server.
+    # Anthropic — kept as the opt-in "Premium" provider for CV Screening / JD
+    # Generator / AP Invoice OCR / Meeting Notes MOM generation. Each of these
+    # defaults to the on-premise Ollama engine below ("Standard") and only
+    # calls Anthropic when the caller explicitly asks for provider="anthropic".
     anthropic_api_key: str = ""
 
-    # Ollama — local AI server (VM "ai-engine", 172.21.2.27), used by the AI Chatbot
-    # (chat completion + RAG embeddings, replacing Anthropic + Voyage AI)
+    # Ollama — local AI server (VM "ai-engine", 172.21.2.27). Chat completion
+    # + RAG embeddings for the AI Chatbot, and the default ("Standard") text
+    # provider for CV Screening / JD Generator.
     ollama_api_url: str = "http://172.21.2.27:11434"
     ollama_chat_model: str = "qwen2.5:14b-instruct"
     ollama_tool_model: str = "qwen2.5:7b-instruct"  # Oracle EBS tool-calling chat — smaller/faster is fine for tool selection
+    # Vision-capable model for AP Invoice OCR's default ("Standard") provider
+    # — qwen2.5:14b-instruct is text-only, so document/image extraction needs
+    # a separate VL model (validated: 100% accurate field extraction on a
+    # test invoice in ~6s).
+    ollama_vision_model: str = "qwen2.5vl:7b"
+
+    # Whisper transcription — GPU service on the same "ai-engine" VM
+    # (172.21.2.27:9500, faster-whisper large-v3, systemd unit whisper-server.service).
+    # Replaces running faster-whisper in-process on the backend's CPU for
+    # Meeting Notes — ~17x realtime on this box's RTX 5060 Ti vs. potentially
+    # slower-than-realtime on CPU, which matters for 1-2 hour meeting audio.
+    whisper_api_url: str = "http://172.21.2.27:9500"
+
+    # Gemini API (Google AI Studio) — third chat provider, opt-in alongside
+    # "onprem" (Ollama) for the AI Chatbot's 3 modes (Company Policy / Oracle
+    # ERP / General). Company already has paid Gemini access via Google
+    # Workspace. Use the "-latest" alias, not a pinned version — dated model
+    # IDs get deprecated for new API keys/projects (e.g. gemini-2.5-flash
+    # returns 404 "no longer available to new users").
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-flash-latest"
+
+    # Field-level encryption for secrets stored at rest in Postgres —
+    # currently only per-user Gemini API keys (see crypto.py). Distinct from
+    # any auth secret; generate once per environment with
+    # `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+    field_encryption_key: str = ""
 
     # EIS (Postgres, ETL'd from Oracle EBS). Only reachable where EIS is
     # deployed (currently dev, 172.21.2.209:5433).

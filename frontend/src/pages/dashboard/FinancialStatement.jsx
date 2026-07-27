@@ -9,7 +9,12 @@ const NEU = {
   shadowIn:    "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
 };
 
-const SELECT = { padding: "7px 11px", borderRadius: 9, border: "none", fontSize: 12, background: NEU.bg, boxShadow: NEU.shadowIn, color: "#1e293b", outline: "none" };
+// colorScheme:"light" forces native form controls (the <select>'s own
+// dropdown/<option> list) to render with light-mode system colors even
+// when the OS/browser is in dark mode — without it, the dropdown panel
+// can pick up a dark system background while inheriting our light text
+// color, making the open list unreadable.
+const SELECT = { padding: "7px 11px", borderRadius: 9, border: "none", fontSize: 12, background: NEU.bg, boxShadow: NEU.shadowIn, color: "#1e293b", outline: "none", colorScheme: "light" };
 const BTN = { padding: "8px 14px", borderRadius: 9, border: "none", background: NEU.bg, boxShadow: NEU.shadowOutSm, color: "#334155", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 };
 
 // client.js's axios interceptor already unwraps response.data for every
@@ -104,21 +109,19 @@ function periodLabel(p) {
  *   { type: "total",  label, values, level }        — e.g. TOTAL CURRENT ASSETS
  */
 
-const HEADER_FILL = "#1F4E78";
-const TOTAL_FILL  = "#D9E1F2";
-const LINE_COLOR  = "#1F4E78";
-const INDENT_PX   = 20;
-
+// The .fs-table / [data-type] / [data-lvl] rules in index.css do the real
+// styling — the global tbody/thead CSS in this app forces zebra striping,
+// uniform padding and font-weight on every plain <table> via !important,
+// which silently defeats inline styles. A scoped class + data attributes
+// is this codebase's established fix for that (see .inv-rmpm-table).
 function FsTable({ columns, rows, checkDiff }) {
   return (
     <div style={{ overflowX: "auto", borderRadius: 12, boxShadow: NEU.shadowOutSm }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 480 + columns.length * 130 }}>
+      <table className="fs-table" style={{ width: "100%", fontSize: 12.5, minWidth: 480 + columns.length * 130 }}>
         <thead>
           <tr>
-            <th style={{ textAlign: "center", padding: "10px 14px", fontWeight: 700, color: "#ffffff", background: HEADER_FILL }}>ACCOUNT</th>
-            {columns.map((c, i) => (
-              <th key={i} style={{ textAlign: "center", padding: "10px 14px", fontWeight: 700, color: "#ffffff", background: HEADER_FILL, whiteSpace: "nowrap" }}>{c}</th>
-            ))}
+            <th>ACCOUNT</th>
+            {columns.map((c, i) => <th key={i} style={{ whiteSpace: "nowrap" }}>{c}</th>)}
           </tr>
         </thead>
         <tbody>
@@ -135,31 +138,21 @@ function FsTable({ columns, rows, checkDiff }) {
 }
 
 function FsRow({ row }) {
-  const level = row.level || 0;
+  const level = Math.min(row.level || 0, 2);
   if (row.type === "header") {
     return (
-      <tr>
-        <td style={{ padding: `6px 14px 6px ${14 + level * INDENT_PX}px`, fontWeight: 700, color: "#1e293b" }}>{row.label}</td>
+      <tr data-type="header">
+        <td data-lvl={level}>{row.label}</td>
         {(row.values || []).map((_, ci) => <td key={ci} />)}
       </tr>
     );
   }
-  if (row.type === "total") {
-    return (
-      <tr style={{ background: TOTAL_FILL }}>
-        <td style={{ padding: `7px 14px 7px ${14 + level * INDENT_PX}px`, fontWeight: 700, color: "#1e293b" }}>{row.label}</td>
-        {row.values.map((v, ci) => (
-          <td key={ci} style={{ padding: "7px 14px", textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#1e293b" }}>{fmtNum(v)}</td>
-        ))}
-      </tr>
-    );
-  }
-  // "line"
+  const values = row.values || [];
   return (
-    <tr style={{ borderBottom: "1px solid rgba(0,0,0,0.04)" }}>
-      <td style={{ padding: `6px 14px 6px ${14 + level * INDENT_PX}px`, color: LINE_COLOR }}>{row.label}</td>
-      {row.values.map((v, ci) => (
-        <td key={ci} style={{ padding: "6px 14px", textAlign: "right", fontFamily: "monospace", color: LINE_COLOR }}>{fmtNum(v)}</td>
+    <tr data-type={row.type}>
+      <td data-lvl={level}>{row.label}</td>
+      {values.map((v, ci) => (
+        <td key={ci} style={{ textAlign: "right", fontFamily: "monospace" }}>{fmtNum(v)}</td>
       ))}
     </tr>
   );
@@ -530,7 +523,7 @@ export default function FinancialStatement() {
   }, []);
 
   return (
-    <div>
+    <div style={{ colorScheme: "light" }}>
       <div style={{ marginBottom: 4 }}>
         <h2 style={{ fontSize: 16, fontWeight: 700, color: "#1e293b" }}>Financial Statement</h2>
         <p style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>

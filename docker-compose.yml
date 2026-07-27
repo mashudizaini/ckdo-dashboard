@@ -16,6 +16,14 @@ services:
       KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-dashboard-dev.ckd-otto.com}
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_RELATIVE_PATH: "/auth"
+      # nginx proxies both http (80) and https (443) to Keycloak's plain
+      # http backend — without this, Keycloak can't tell which scheme the
+      # browser actually used and defaults to treating everything as http,
+      # generating http:// URLs even for requests that came in over https
+      # (breaks the https login flow with mixed-content errors downstream).
+      # xforwarded = trust nginx's X-Forwarded-Proto/-For/Host headers
+      # (already set in nginx.dev.conf's /auth/ location).
+      KC_PROXY_HEADERS: "xforwarded"
     volumes:
       - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json
     ports:
@@ -112,6 +120,7 @@ services:
     volumes:
       - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
       - ./e-magazine:/usr/share/nginx/html/e-magazine:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
     ports:
       - "80:80"
       - "443:443"

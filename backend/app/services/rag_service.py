@@ -17,7 +17,9 @@ from pgvector.psycopg2 import register_vector
 
 from app.config import get_settings
 from app.services import embeddings_service as emb
+import structlog
 
+logger = structlog.get_logger()
 settings = get_settings()
 
 DEPARTMENTS = ["General", "HR", "Accounting", "PAC", "Purchasing", "IT"]
@@ -56,21 +58,45 @@ def ensure_schema():
         conn = psycopg2.connect(**_pg_connect_kwargs())
         cur = conn.cursor()
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
-        cur.execute("""
+        cur.execute(f"""
             CREATE TABLE IF NOT EXISTS company_documents (
                 id          BIGSERIAL PRIMARY KEY,
                 source      TEXT NOT NULL,
                 title       TEXT,
                 content     TEXT NOT NULL,
                 department  TEXT NOT NULL DEFAULT 'General',
-                metadata    JSONB DEFAULT '{}',
-                embedding   VECTOR(768),
+                metadata    JSONB DEFAULT '{{}}',
+                embedding   VECTOR({emb.EMBED_DIM}),
                 created_by  TEXT,
                 created_at  TIMESTAMPTZ DEFAULT now()
             )
         """)
         # Migrate existing table: add department column if it predates this change
         cur.execute("ALTER TABLE company_documents ADD COLUMN IF NOT EXISTS department TEXT NOT NULL DEFAULT 'General'")
+
+        # Migrate existing table if its embedding column's dimension doesn't
+        # match the currently configured model (e.g. after switching
+        # EMBED_MODEL to one with a different output size, like the
+        # nomic-embed-text[768] -> bge-m3[1024] migration this shipped with).
+        # pgvector requires one fixed dimension per column, so old vectors
+        # must be cleared before the column can be widened/narrowed — the
+        # actual re-embedding is a separate, explicit one-off step (see
+        # reembed_all_documents), not run automatically here.
+        cur.execute("""
+            SELECT atttypmod FROM pg_attribute
+            WHERE attrelid = 'company_documents'::regclass AND attname = 'embedding'
+        """)
+        row = cur.fetchone()
+        current_dim = row[0] if row else None
+        if current_dim is not None and current_dim != emb.EMBED_DIM:
+            logger.warning(
+                "rag_embedding_dimension_mismatch_migrating",
+                current_dim=current_dim, target_dim=emb.EMBED_DIM,
+            )
+            cur.execute("DROP INDEX IF EXISTS idx_company_documents_embedding")
+            cur.execute("UPDATE company_documents SET embedding = NULL")
+            cur.execute(f"ALTER TABLE company_documents ALTER COLUMN embedding TYPE VECTOR({emb.EMBED_DIM})")
+
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_company_documents_embedding
                 ON company_documents USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)
@@ -81,6 +107,37 @@ def ensure_schema():
         conn.close()
     except Exception:
         pass  # e.g. pgvector extension not available yet on first boot — chat falls back gracefully
+
+
+def reembed_all_documents(batch_size: int = 20) -> dict:
+    """
+    One-off migration helper — re-computes embeddings for every existing
+    row using the currently configured EMBED_MODEL (e.g. after
+    ensure_schema() cleared them due to a dimension change). Safe to call
+    multiple times: only touches rows where embedding IS NULL, so an
+    interrupted run can just be re-invoked to pick up where it left off.
+    Returns {"total": int, "updated": int}.
+    """
+    conn = _get_pg()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT id, content FROM company_documents WHERE embedding IS NULL ORDER BY id")
+            rows = cur.fetchall()
+
+        updated = 0
+        for i in range(0, len(rows), batch_size):
+            batch = rows[i:i + batch_size]
+            vectors = emb.embed_texts_batch([r["content"] for r in batch], input_type="document")
+            with conn.cursor() as cur:
+                for row, vec in zip(batch, vectors):
+                    cur.execute("UPDATE company_documents SET embedding = %s WHERE id = %s", (vec, row["id"]))
+            conn.commit()
+            updated += len(batch)
+            logger.info("rag_reembed_progress", updated=updated, total=len(rows))
+
+        return {"total": len(rows), "updated": updated}
+    finally:
+        conn.close()
 
 
 # ── Document management (ingest) ──────────────────────────────────
@@ -107,9 +164,14 @@ def insert_document(source: str, title: str, content: str, embedding: list, crea
 
 def ingest_text(source: str, title: str, text: str, created_by: str,
                 department: str = "General", from_file: bool = False,
-                file_name: str = None) -> list[int]:
-    """Chunk + embed + store one document. Returns list of inserted chunk ids."""
-    chunks = emb.chunk_text(text.strip())
+                file_name: str = None, chunk_size: int = 700, overlap: int = 120,
+                line_aware: bool = False) -> list[int]:
+    """Chunk + embed + store one document. Returns list of inserted chunk ids.
+    chunk_size/overlap/line_aware: callers ingesting OCR'd scanned PDFs should
+    pass a larger chunk_size and line_aware=True — see chunk_text()'s
+    line_aware docstring for why OCR output needs different boundary handling
+    than real prose."""
+    chunks = emb.chunk_text(text.strip(), chunk_size=chunk_size, overlap=overlap, line_aware=line_aware)
     if not chunks:
         return []
     vectors = emb.embed_texts_batch(chunks, input_type="document")
@@ -120,6 +182,22 @@ def ingest_text(source: str, title: str, text: str, created_by: str,
         doc_id = insert_document(source, title, chunk, vec, created_by, department, meta)
         ids.append(doc_id)
     return ids
+
+
+def get_document_content(source: str, title: str) -> str | None:
+    """Concatenate all chunks of a document (in original chunk order) back into
+    one text blob — used by the Document Converter's 'reopen for editing' flow
+    so an already-ingested document can be loaded back into the editor."""
+    conn = _get_pg()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT content FROM company_documents WHERE source = %s AND title = %s ORDER BY id", (source, title))
+            rows = cur.fetchall()
+            if not rows:
+                return None
+            return "\n\n".join(r[0] for r in rows)
+    finally:
+        conn.close()
 
 
 def list_documents() -> list[dict]:
@@ -256,19 +334,33 @@ def departments_for_roles(roles: list[str], is_unrestricted: bool) -> list[str] 
     return list(depts)
 
 
-def retrieve_context(question: str, department_filter: list[str] = None, top_k: int = 10, min_similarity: float = 0.25) -> dict:
+def retrieve_context(question: str, department_filter: list[str] = None, top_k: int = 30,
+                      min_similarity: float = 0.15, context_k: int = None) -> dict:
     """
     Embed question + search similar chunks (scoped to department_filter). Returns
     {context, sources} or {context: None, sources: []} if RAG isn't configured,
     no relevant docs found, or nothing matches the user's allowed departments.
     Safe to call even if Ollama/pgvector aren't reachable — fails closed (no context).
+
+    top_k vs. context_k: top_k controls how many candidates are FETCHED from the
+    DB (broad, for recall — a correct chunk can legitimately rank in the teens
+    or twenties against a large multi-document KB). context_k controls how many
+    of those actually get formatted into the prompt (defaults to top_k, i.e. no
+    truncation). These need to differ per chat model: validated empirically that
+    the on-premise qwen2.5:14b model answers correctly with 16 sources in context
+    but starts failing (or outright hallucinating a wrong number from an unrelated
+    chunk) at 18+ — classic "lost in the middle" context overload for a smaller
+    model — while Gemini handles the full top_k=30 correctly. Callers should pass
+    a smaller context_k for local-model providers.
     """
     if not is_configured():
         return {"context": None, "sources": []}
+    if context_k is None:
+        context_k = top_k
     try:
         query_embedding = emb.embed_text(question, input_type="query")
         results = search_similar(query_embedding, top_k=top_k, department_filter=department_filter)
-        results = [r for r in results if r["similarity"] >= min_similarity]
+        results = [r for r in results if r["similarity"] >= min_similarity][:context_k]
         if not results:
             return {"context": None, "sources": []}
         return {

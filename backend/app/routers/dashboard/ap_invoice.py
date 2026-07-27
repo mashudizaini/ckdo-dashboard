@@ -7,7 +7,9 @@ import os
 import shutil
 import json
 import psycopg2
-from fastapi import APIRouter, UploadFile, File, HTTPException
+import anthropic
+import httpx
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 from app.config import get_settings
 from app.database import get_oracle_connection
 from app.services import ap_invoice_service as svc
@@ -72,16 +74,27 @@ def ensure_staging_table():
 
 
 @router.post("/upload")
-async def upload_pdf(file: UploadFile = File(...)):
+async def upload_pdf(
+    file: UploadFile = File(...),
+    provider: str = Query("onprem", description='"onprem" (standard, default) or "anthropic" (premium)'),
+):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "File harus berformat PDF")
+    if provider not in ("onprem", "anthropic"):
+        raise HTTPException(400, 'Invalid provider — use "onprem" or "anthropic"')
 
     file_path = os.path.join(svc.UPLOAD_DIR, file.filename)
     with open(file_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
     try:
-        invoice_data = svc.extract_pdf(file_path, file.filename)
+        invoice_data = svc.extract_pdf(file_path, file.filename, provider=provider)
+    except anthropic.APIStatusError as e:
+        os.remove(file_path)
+        raise HTTPException(502, f"Anthropic API error: {e.message}")
+    except httpx.HTTPError as e:
+        os.remove(file_path)
+        raise HTTPException(502, f"On-premise AI engine unreachable: {e}")
     except Exception as e:
         os.remove(file_path)
         raise HTTPException(422, f"Gagal extract PDF: {str(e)}")

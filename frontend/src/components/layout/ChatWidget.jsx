@@ -1,8 +1,40 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useLocation } from "react-router-dom";
-import { X, Send, User, Loader2, Trash2 } from "lucide-react";
+import { X, Send, User, Loader2, Trash2, KeyRound } from "lucide-react";
 import { useChatStream } from "@/hooks/useChatStream";
 import RobotIcon from "@/components/icons/RobotIcon";
+import { CHAT_MODES, CHAT_MODE_ORDER } from "@/config/chatModes";
+import GeminiApiKeyModal from "@/components/ai/GeminiApiKeyModal";
+
+/* Inline-style color themes per mode — this widget uses inline styles
+   throughout (not Tailwind classes), so it needs its own hex palette rather
+   than the Tailwind gradient classes the full /ai/chatbot page uses. */
+const MODE_STYLE = {
+  policy:  { grad: "linear-gradient(135deg, #2563eb 0%, #1e40af 100%)", bubble: "linear-gradient(135deg,#2563eb,#1e40af)", botBg: "#eff6ff", botIcon: "#1d4ed8" },
+  oracle:  { grad: "linear-gradient(135deg, #059669 0%, #065f46 100%)", bubble: "linear-gradient(135deg,#059669,#065f46)", botBg: "#ecfdf5", botIcon: "#047857" },
+  general: { grad: "linear-gradient(135deg, #4f46e5 0%, #7c3aed 60%, #9333ea 100%)", bubble: "linear-gradient(135deg,#4f46e5,#7c3aed)", botBg: "#ede9fe", botIcon: "#6d28d9" },
+};
+
+function renderWidgetSource(modeKey, s, j) {
+  if (modeKey === "oracle") {
+    const argsText = Object.entries(s.arguments || {}).map(([k, v]) => `${k}=${v}`).join(", ");
+    return (
+      <span key={j} title={s.error || `${s.row_count} row${s.row_count !== 1 ? "s" : ""} returned`}
+        style={{ fontSize: 9, borderRadius: 8, padding: "1px 6px", background: s.error ? "#fee2e2" : "#ecfdf5", color: s.error ? "#dc2626" : "#047857" }}>
+        🛠️ {s.tool}{argsText ? `(${argsText})` : ""}
+      </span>
+    );
+  }
+  if (modeKey === "policy") {
+    return (
+      <span key={j} title={`${s.department} · similarity ${s.similarity}`}
+        style={{ fontSize: 9, borderRadius: 8, padding: "1px 6px", background: "#ede9fe", color: "#6d28d9" }}>
+        📄 {s.title}
+      </span>
+    );
+  }
+  return null;
+}
 
 const NEU = {
   bg: "#e8edf5",
@@ -110,18 +142,26 @@ function MdBlock({ text, isUser }) {
 const FAB_W     = 168;
 const FAB_H     = 48;
 const POPUP_W   = 380;
-const POPUP_H   = 500;
-const GREETING  = "Hello! How can I help you with company data?";
-const STORAGE_KEY = "ckdo_chat_widget";
+const POPUP_H   = 540;
 
 export default function ChatWidget() {
   const location = useLocation();
   const [open, setOpen]               = useState(false);
   const [pos, setPos]                 = useState({ right: 20, bottom: 20 });
   const [confirmClear, setConfirmClear] = useState(false);
+  const [activeTab, setActiveTab]     = useState("policy");
+  const [provider, setProvider]       = useState("onprem");
+  const [showApiKey, setShowApiKey]   = useState(false);
 
-  const { messages, input, setInput, streaming, sendMessage, clearHistory } =
-    useChatStream(GREETING, STORAGE_KEY);
+  // Same localStorage keys/endpoints as the full /ai/chatbot page (see
+  // config/chatModes.js) — so a conversation started in the widget
+  // continues seamlessly if the user later opens the full page, and vice versa.
+  const policyChat  = useChatStream(CHAT_MODES.policy.greeting,  CHAT_MODES.policy.storageKey,  CHAT_MODES.policy.endpoint,  provider);
+  const oracleChat  = useChatStream(CHAT_MODES.oracle.greeting,  CHAT_MODES.oracle.storageKey,  CHAT_MODES.oracle.endpoint,  provider);
+  const generalChat = useChatStream(CHAT_MODES.general.greeting, CHAT_MODES.general.storageKey, CHAT_MODES.general.endpoint, provider);
+  const chats = { policy: policyChat, oracle: oracleChat, general: generalChat };
+  const { messages, input, setInput, streaming, sendMessage, clearHistory } = chats[activeTab];
+  const style = MODE_STYLE[activeTab];
 
   const bottomRef = useRef(null);
   const drag      = useRef({ active: false, moved: false, sx: 0, sy: 0, sr: 0, sb: 0 });
@@ -160,7 +200,7 @@ export default function ChatWidget() {
 
   useEffect(() => {
     if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, open]);
+  }, [messages, open, activeTab]);
 
   if (location.pathname === "/ai/chatbot") return null;
 
@@ -223,7 +263,7 @@ export default function ChatWidget() {
           {/* Header */}
           <div style={{
             display: "flex", alignItems: "center", gap: 10, padding: "12px 14px",
-            background: "linear-gradient(135deg, #4f46e5 0%, #7c3aed 60%, #9333ea 100%)",
+            background: style.grad, transition: "background 0.2s",
             flexShrink: 0,
           }}>
             <div style={{
@@ -235,7 +275,7 @@ export default function ChatWidget() {
               <RobotIcon size={22} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ fontSize: 12, fontWeight: 700, color: "#fff", margin: 0 }}>CKDO Intelligence</p>
+              <p style={{ fontSize: 12, fontWeight: 700, color: "#fff", margin: 0 }}>{CHAT_MODES[activeTab].label}</p>
               <p style={{ fontSize: 10, color: "rgba(255,255,255,0.75)", margin: 0 }}>
                 {streaming ? "Typing…" : "Online · AI Assistant"}
               </p>
@@ -265,6 +305,60 @@ export default function ChatWidget() {
             </button>
           </div>
 
+          {/* Mode tabs + provider */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "8px 10px",
+            borderBottom: "1px solid rgba(0,0,0,0.06)", background: "#fff", flexShrink: 0,
+          }}>
+            {CHAT_MODE_ORDER.map((key) => {
+              const m = CHAT_MODES[key];
+              const Icon = m.icon;
+              const active = activeTab === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => { setActiveTab(key); setConfirmClear(false); }}
+                  title={m.label}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 600,
+                    padding: "4px 8px", borderRadius: 8, border: "none", cursor: "pointer",
+                    background: active ? MODE_STYLE[key].grad : "#f1f5f9",
+                    color: active ? "#fff" : "#64748b",
+                    transition: "background 0.15s, color 0.15s",
+                  }}
+                >
+                  <Icon size={11} /> {m.shortLabel}
+                </button>
+              );
+            })}
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+              title="AI provider"
+              style={{
+                marginLeft: "auto", fontSize: 10, fontWeight: 600, padding: "4px 6px",
+                borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff",
+                color: "#475569", cursor: "pointer",
+              }}
+            >
+              <option value="onprem">Standard</option>
+              <option value="gemini">Gemini</option>
+            </select>
+            <button
+              onClick={() => setShowApiKey(true)}
+              title="API Key Gemini pribadi"
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 22, height: 22, borderRadius: 6, border: "1px solid #e2e8f0",
+                background: "#fff", color: "#64748b", cursor: "pointer", flexShrink: 0,
+              }}
+            >
+              <KeyRound size={11} />
+            </button>
+          </div>
+
+          {showApiKey && <GeminiApiKeyModal onClose={() => setShowApiKey(false)} />}
+
           {/* Messages */}
           <div style={{
             flex: 1, overflowY: "auto", padding: "12px 12px 4px",
@@ -277,11 +371,11 @@ export default function ChatWidget() {
                 <div style={{
                   width: 26, height: 26, borderRadius: "50%", flexShrink: 0, marginTop: 2,
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  background: msg.role === "user" ? "linear-gradient(135deg,#4f46e5,#7c3aed)" : "#ede9fe",
+                  background: msg.role === "user" ? style.bubble : style.botBg,
                 }}>
                   {msg.role === "user"
                     ? <User size={12} color="#fff" />
-                    : <RobotIcon size={15} color="#6d28d9" />}
+                    : <RobotIcon size={15} color={style.botIcon} />}
                 </div>
                 {/* Bubble */}
                 <div style={{
@@ -291,8 +385,8 @@ export default function ChatWidget() {
                   background: msg.error
                     ? "#fee2e2"
                     : msg.role === "user"
-                    ? "linear-gradient(135deg,#4f46e5,#7c3aed)"
-                    : "#f5f3ff",
+                    ? style.bubble
+                    : style.botBg,
                   color: msg.error ? "#dc2626" : msg.role === "user" ? "#fff" : "#1e1b4b",
                 }}>
                   {streaming && i === messages.length - 1 && !msg.text
@@ -301,12 +395,7 @@ export default function ChatWidget() {
                   }
                   {msg.sources?.length > 0 && (
                     <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(0,0,0,0.08)", display: "flex", flexWrap: "wrap", gap: 4 }}>
-                      {msg.sources.map((s, j) => (
-                        <span key={j} title={`${s.department} · similarity ${s.similarity}`}
-                          style={{ fontSize: 9, borderRadius: 8, padding: "1px 6px", background: "#ede9fe", color: "#6d28d9" }}>
-                          📄 {s.title}
-                        </span>
-                      ))}
+                      {msg.sources.map((s, j) => renderWidgetSource(activeTab, s, j))}
                     </div>
                   )}
                 </div>
@@ -338,11 +427,11 @@ export default function ChatWidget() {
               disabled={streaming || !input.trim()}
               style={{
                 width: 34, height: 34, borderRadius: "50%", border: "none",
-                background: "linear-gradient(135deg,#4f46e5,#7c3aed)",
+                background: style.bubble,
                 color: "#fff", cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 opacity: (streaming || !input.trim()) ? 0.45 : 1, flexShrink: 0,
-                transition: "opacity 0.15s",
+                transition: "opacity 0.15s, background 0.2s",
               }}
             >
               {streaming ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}

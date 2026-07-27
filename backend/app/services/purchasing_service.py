@@ -616,6 +616,21 @@ class PurchasingService:
             ) lastpo ON lastpo.item_desc_key = UPPER(prl.item_description)
             WHERE NVL(prl.cancel_flag, 'N') = 'N'
               AND prh.authorization_status NOT IN ('CANCELLED')
+              -- Excludes requisition lines superseded by a Split PO/Split
+              -- Requisition Line action. When a buyer splits a line during
+              -- AutoCreate, Oracle sets MODIFIED_BY_AGENT_FLAG='Y' on the
+              -- ORIGINAL line but leaves its full original QUANTITY intact
+              -- (no reduction, no cancel_flag) — the new split-child lines
+              -- carry the real remaining demand instead. Without this
+              -- filter, the original line's full quantity kept showing as
+              -- still-open (with no PO and full aging) even though it had
+              -- already been fully replaced by its split children —
+              -- verified directly against PO_REQUISITION_LINES_ALL for a
+              -- real split PR (25100080): original line qty 8000,
+              -- MODIFIED_BY_AGENT_FLAG='Y', vs. its 3 split children
+              -- (qty 2892.1 + 2886 + 2221.9 = 8000 exactly) each with
+              -- MODIFIED_BY_AGENT_FLAG NULL.
+              AND NVL(prl.modified_by_agent_flag, 'N') = 'N'
               AND (:p_pr_status IS NULL OR prh.authorization_status = :p_pr_status)
               AND (:p_pr_number IS NULL OR UPPER(prh.segment1)
                    LIKE UPPER('%' || :p_pr_number || '%'))
