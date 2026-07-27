@@ -23,3 +23,7 @@ oracle_client/oci.so*
 
 # Real employee data samples — contains PII, never commit
 sumber/
+
+# Runtime-generated, not source
+backend/downloads/
+nginx/ssl/

@@ -184,7 +184,7 @@ export default function MeetingNotes() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.detail || "Transcription failed");
       setTranscript(data);
-      if (data.id) window.open(`/ai/meeting-notes/view/${data.id}`, "_blank");
+      fetchHistory();
     } catch (e) {
       setTranscribeError(e.message || String(e));
     } finally {

@@ -13,7 +13,7 @@
     "@tanstack/react-table": "^8.17.3",
     "axios": "^1.6.8",
     "clsx": "^2.1.1",
-    "html-to-image": "^1.11.11",
+    "html-to-image": "^1.11.13",
     "keycloak-js": "^24.0.5",
     "lucide-react": "^0.383.0",
     "react": "^18.3.1",
