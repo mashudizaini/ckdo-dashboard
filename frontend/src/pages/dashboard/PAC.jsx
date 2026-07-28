@@ -1756,46 +1756,101 @@ function SetupSection({ year }) {
 
 /* ══ Schedule Panel ═══════════════════════════════════════════════════════════ */
 
-const DEFAULT_SCHEDULE = {
-  subtitle: "Timeline of {year} Business Plan",
-  activities: [
-    { no: 1, activity: "Notification of {year} business plan timeline", date: "Sep 22", day: "Friday", sales: "x", development: "x", plant: "x", admin: "x", director: "ok", remarks: "Timeline" },
-    { no: 2, activity: "Distribution of all relevant templates", date: "Sep 29", day: "Friday", sales: "x", development: "x", plant: "x", admin: "x", director: "ok", remarks: "CS" },
-    { no: 3, activity: "{year} economic outlook & guideline", date: "Sep 29", day: "Friday", sales: "x", development: "x", plant: "x", admin: "x", director: "x", remarks: "Outlook Report" },
-    { no: 4, activity: "Review & discuss financial template with Company", date: "Sep 30", day: "Sunday", sales: "F", development: "F", plant: "F", admin: "F", director: "x", remarks: "Finance Team" },
-    { no: 5, activity: "Prepare sales plan & strategic direction", date: "Oct 1", day: "Tuesday", sales: "x", development: "x", plant: "x", admin: "x", director: "x", remarks: "Business Plan" },
-    { no: 6, activity: "Business development plan : CMO, export and others", date: "Oct 25-29", day: "Tue-Thu", sales: "x", development: "x", plant: "x", admin: "x", director: "x", remarks: "81, 82" },
-    { no: 7, activity: "Sales plan {year} : by department, product & area", date: "Oct 25", day: "Wednesday", sales: "x", development: "$1, 52", plant: "x", admin: "x", director: "x", remarks: "Sales Plan" },
-    { no: 8, activity: "Starting sales plan with Stakeholders / HO review", date: "Oct 28", day: "Monday", sales: "x", development: "x", plant: "x", admin: "x", director: "Petey", remarks: "Petey" },
-    { no: 9, activity: "Purchase plan", date: "Nov 1", day: "Friday", sales: "x", development: "x", plant: "x", admin: "x", director: "x", remarks: "Purchase" },
-    { no: 10, activity: "Reduction / manufacturing plan", date: "Nov 12", day: "Tuesday", sales: "x", development: "x", plant: "x", admin: "Now 14", director: "x", remarks: "Plant" },
-    { no: 11, activity: "Data evaluation : production, personnel, purchase, inventory, opex budget plan", date: "Nov 23-24", day: "Thu-Fri", sales: "x", development: "x", plant: "x", admin: "x", director: "Now 23", remarks: "Budget Meeting" },
-    { no: 12, activity: "Forecasting : profit and loss simulation", date: "Nov 24", day: "Thursday", sales: "x", development: "x", plant: "x", admin: "Now 24", director: "x", remarks: "Finance" },
-    { no: 13, activity: "Final Budget decision", date: "Dec 6", day: "Wednesday", sales: "x", development: "x", plant: "x", admin: "x", director: "Dec 6", remarks: "Final" },
-    { no: 14, activity: "{year} Cashflow forecasting", date: "Dec 6", day: "Wednesday", sales: "x", development: "x", plant: "x", admin: "x", director: "x", remarks: "Cashflow" },
-    { no: 15, activity: "{year} Business plan report", date: "Dec 12", day: "Wednesday", sales: "x", development: "x", plant: "x", admin: "x", director: "x", remarks: "Report" },
-    { no: 16, activity: "Reporting business plan {year} to President Director", date: "Dec 12", day: "Wednesday", sales: "x", development: "x", plant: "x", admin: "x", director: "x", remarks: "President Director" },
-  ],
-};
+// Department PIC keys, in display order (matches Business plan schedule.xlsx's PIC column group).
+const SCHEDULE_DEPTS = [
+  { key: "sales",       label: "Sales & Mkt" },
+  { key: "development", label: "Strategic Dev" },
+  { key: "plant",        label: "Plant" },
+  { key: "admin",        label: "Admin" },
+  { key: "director",     label: "P. Director" },
+];
+
+// Raw seed rows transcribed from Business plan schedule.xlsx (month-day only —
+// years are attached at load time relative to the selected plan year: the
+// prior-year reference date falls in {year-2}, this year's submission
+// window falls in {year-1}, matching the source file's own labeling).
+const SCHEDULE_SEED_ROWS = [
+  ["Notification of {year} business plan timeline",                                                     "09-20", "09-19", "09-19", "Friday",             "X X X O X", "Timeline"],
+  ["Distribution of all relevant templates",                                                             "09-20", "09-19", "09-19", "Friday",             "X X X X X", "-"],
+  ["{year} economic outlook & guideline",                                                                "10-03", "09-30", "09-30", "Tuesday",            "X X X O X", "-"],
+  ["{year} managerial objective decision of the Company from President Director",                        "10-08", "10-10", "10-10", "Friday",             "X X X X O", "C1"],
+  ["{year} action plan from Department related to managerial objective",                                 "10-18", "10-15", "10-15", "Wednesday",          "O O O O O", "C2, A1"],
+  ["Registration schedule (including export)",                                                           "10-11", "10-17", "10-17", "Friday",             "X O X X X", "R1"],
+  ["Business development plan : CMO, export, and others / PERT / by new area, customer & product",       "10-29", "10-24", "10-24", "Friday",             "X O X X X", "B1"],
+  ["Sales plan {year} : by department, product & area (local, export and CMO)",                          "10-29", "10-24", "10-24", "Friday",             "O O X X X", "S1, S2, S3"],
+  ["Sales plan review",                                                                                   "10-31", "10-29", "10-29", "Wednesday",          "X X X O O", "-"],
+  ["Sharing sales plan {year} with Shareholders / initial consensus",                                    "10-31", "10-29", "10-29", "Wednesday",          "X X X O O", "-"],
+  ["Production / manufacturing plan",                                                                     "11-06", "11-03", "11-03", "Monday",             "X X O X X", "M1"],
+  ["Personnel plan",                                                                                      "11-08", "11-05", "11-05", "Wednesday",          "O O O O X", "H1"],
+  ["Purchase plan",                                                                                       "11-08", "11-05", "11-05", "Wednesday",          "O O X X X", "P1, P2"],
+  ["Investment plan",                                                                                     "11-13", "11-10", "11-10", "Monday",             "X X O O X", "I1"],
+  ["Opex budget plan",                                                                                    "11-13", "11-10", "11-10", "Monday",             "O O O O X", "O1, O2"],
+  ["Data review : production, personnel, purchase, investment & opex budget plan",                       "11-15", "11-12", "11-12", "Wednesday",          "X X X O X", "-"],
+  ["Standard COGS / manufacture costs",                                                                  "11-20", "11-17", "11-17", "Monday",             "X X O X X", "CS1, CS2"],
+  ["Forecasting : profit and loss simulation 1",                                                          "11-25", "11-19", "11-19", "Wednesday",          "X X X O X", "-"],
+  ["Data evaluation & budget meeting with each Department",                                               "11-26", "11-20", "11-25", "Thursday - Tuesday", "O O O O O", "-"],
+  ["Forecasting : profit and loss simulation 2",                                                          "12-02", "11-28", "11-28", "Friday",             "X X X O X", "-"],
+  ["Final budget decision",                                                                               "12-06", "12-05", "12-05", "Friday",             "X X O O X", "-"],
+  ["Collecting & financing plan",                                                                         "12-06", "12-09", "12-09", "Tuesday",            "X X X O X", "-"],
+  ["Other income & expenses",                                                                             "12-06", "12-09", "12-09", "Tuesday",            "X X X O X", "-"],
+  ["{year} cashflow forecasting",                                                                         "12-10", "12-09", "12-09", "Tuesday",            "X X X O X", "-"],
+  ["{year} business plan report",                                                                         "12-24", "12-12", "12-12", "Friday",             "X X X O X", "-"],
+  ["Reporting business plan {year} to President Director",                                                "12-24", "12-15", "12-15", "Monday",             "X X X O O", "-"],
+  ["Reporting business plan {year} to BOD",                                                                "12-26", "12-17", "12-17", "Wednesday",          "X X X O O", "-"],
+  ["Reporting business plan {year} to Shareholders",                                                       "12-27", "12-19", "12-19", "Friday",             "X X X O O", "-"],
+];
+
+function buildDefaultSchedule(year) {
+  const y1 = year - 1, y2 = year - 2;
+  const mmdd = (md, y) => md ? `${y}-${md}` : "";
+  return {
+    subtitle: "Timeline of {year} Business Plan".replace("{year}", year),
+    activities: SCHEDULE_SEED_ROWS.map(([activity, prior, from, to, day, pic, remarks], i) => {
+      const statuses = pic.split(" ");
+      const departments = {};
+      SCHEDULE_DEPTS.forEach((d, di) => { departments[d.key] = { status: statuses[di] || "X", date: null }; });
+      return {
+        no: i + 1,
+        activity: activity.replace(/\{year\}/g, year),
+        prior_date: mmdd(prior, y2),
+        submission_from: mmdd(from, y1),
+        submission_to: mmdd(to, y1),
+        day,
+        departments,
+        remarks,
+      };
+    }),
+  };
+}
 
 const SCHEDULE_COLUMNS = [
-  { key: "no", label: "No", width: "w-10", align: "center" },
-  { key: "activity", label: "Activity Description", width: "flex-1 min-w-[280px]", align: "left" },
-  { key: "date", label: "Submission Date", width: "w-28", align: "center" },
-  { key: "day", label: "Day", width: "w-20", align: "center" },
-  { key: "sales", label: "Sales & Mkt", width: "w-16", align: "center" },
-  { key: "development", label: "Strategic Dev", width: "w-20", align: "center" },
-  { key: "plant", label: "Plant", width: "w-16", align: "center" },
-  { key: "admin", label: "Admin", width: "w-16", align: "center" },
-  { key: "director", label: "P. Director", width: "w-20", align: "center" },
-  { key: "remarks", label: "Remarks", width: "w-28", align: "center" },
+  { key: "no",              label: "No",   width: "w-10",  align: "center" },
+  { key: "activity",        label: "Activity Description", width: "min-w-[260px]", align: "left" },
+  { key: "prior_date",      label: "Prior Year Actual Date", width: "w-28", align: "center" },
+  { key: "submission_from", label: "Submission Date From",   width: "w-28", align: "center" },
+  { key: "submission_to",   label: "Submission Date To",     width: "w-28", align: "center" },
+  { key: "actual_from",     label: "Actual Date From",       width: "w-28", align: "center" },
+  { key: "actual_to",       label: "Actual Date To",         width: "w-28", align: "center" },
+  { key: "day",             label: "Day",  width: "w-24",  align: "center" },
+  ...SCHEDULE_DEPTS.map(d => ({ key: d.key, label: d.label, width: "w-16", align: "center" })),
+  { key: "remarks",         label: "Remarks", width: "w-24", align: "center" },
 ];
+
+function computeActualRange(departments) {
+  const dates = Object.values(departments || {})
+    .filter(d => d.status === "O" && d.date)
+    .map(d => d.date)
+    .sort();
+  return { from: dates[0] || null, to: dates[dates.length - 1] || null };
+}
 
 function SchedulePanel({ year }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [editingCell, setEditingCell] = useState(null); // `${rowIdx}:${deptKey}`
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1804,14 +1859,10 @@ function SchedulePanel({ year }) {
       if (res.success && res.data.length > 0) {
         setData(res.data[0]);
       } else {
-        const content = JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
-        content.activities = content.activities.map(a => Object.assign({}, a, { activity: a.activity.replace("{year}", year), remarks: String(a.remarks) }));
-        setData({ setup_module: "schedule", plan_year: year, content, status: "draft" });
+        setData({ setup_module: "schedule", plan_year: year, content: buildDefaultSchedule(year), status: "draft" });
       }
     } catch {
-      const content = JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
-      content.activities = content.activities.map(a => Object.assign({}, a, { activity: a.activity.replace("{year}", year), remarks: String(a.remarks) }));
-      setData({ setup_module: "schedule", plan_year: year, content, status: "draft" });
+      setData({ setup_module: "schedule", plan_year: year, content: buildDefaultSchedule(year), status: "draft" });
     } finally { setLoading(false); }
   }, [year]);
 
@@ -1827,6 +1878,20 @@ function SchedulePanel({ year }) {
     }));
   };
 
+  const setDeptDate = (idx, deptKey, val) => {
+    setData(prev => ({
+      ...prev,
+      content: {
+        ...prev.content,
+        activities: prev.content.activities.map((a, i) => {
+          if (i !== idx) return a;
+          const departments = { ...a.departments, [deptKey]: { ...a.departments[deptKey], date: val || null } };
+          return { ...a, departments };
+        }),
+      },
+    }));
+  };
+
   const save = async () => {
     setSaving(true);
     try {
@@ -1834,6 +1899,17 @@ function SchedulePanel({ year }) {
       const res = await pacApi.upsertSetupModule(payload);
       if (res.success) { setData(res.data); setSaved(true); setTimeout(() => setSaved(false), 2000); }
     } finally { setSaving(false); }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await pacApi.exportScheduleExcel(year);
+      const url = URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url; a.download = `Business plan schedule ${year}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } finally { setExporting(false); }
   };
 
   if (loading) return <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>;
@@ -1851,54 +1927,76 @@ function SchedulePanel({ year }) {
             className={BTN_SM(data.status === 'final' ? 'gray' : 'green')}>
             <CheckCircle size={11} /> {data.status === 'final' ? 'Mark Draft' : 'Mark Final'}
           </button>
+          <button onClick={handleExport} disabled={exporting} className={BTN_SM("teal")}>
+            {exporting ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+            Download Excel
+          </button>
           <button onClick={save} disabled={saving} className={BTN_SM("sky")}>
             {saving ? <Loader2 size={11} className="animate-spin" /> : saved ? <CheckCircle size={11} /> : <Save size={11} />}
             {saved ? "Saved!" : "Save"}
           </button>
         </div>
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-auto" style={{ maxHeight: "28rem" }}>
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="bg-gray-800/80">
               {SCHEDULE_COLUMNS.map(col => (
-                <th key={col.key} className={`${col.width} px-3 py-2.5 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${col.align === 'center' ? 'text-center' : ''}`}>{col.label}</th>
+                <th key={col.key} className={`sticky top-0 z-10 bg-gray-800 ${col.width} px-3 py-2.5 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${col.align === 'center' ? 'text-center' : ''}`}>{col.label}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {(data.content.activities || []).map((act, i) => (
-              <tr key={i} className={`border-b border-gray-800 transition-colors ${i % 2 === 0 ? 'bg-gray-900' : 'bg-gray-900/40'} hover:bg-gray-800/50`}>
-                <td className="px-3 py-2 border border-gray-700 text-center font-bold text-gray-400">{act.no}</td>
-                <td className="px-3 py-2 border border-gray-700">
-                  <textarea rows={1} className={`${TA} !py-1.5 !text-xs w-full`} value={act.activity} onChange={e => updateActivity(i, "activity", e.target.value)} />
-                </td>
-                <td className="px-3 py-2 border border-gray-700 text-center">
-                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.date} onChange={e => updateActivity(i, "date", e.target.value)} />
-                </td>
-                <td className="px-3 py-2 border border-gray-700 text-center">
-                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.day} onChange={e => updateActivity(i, "day", e.target.value)} />
-                </td>
-                <td className="px-3 py-2 border border-gray-700 text-center">
-                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.sales} onChange={e => updateActivity(i, "sales", e.target.value)} />
-                </td>
-                <td className="px-3 py-2 border border-gray-700 text-center">
-                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.development} onChange={e => updateActivity(i, "development", e.target.value)} />
-                </td>
-                <td className="px-3 py-2 border border-gray-700 text-center">
-                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.plant} onChange={e => updateActivity(i, "plant", e.target.value)} />
-                </td>
-                <td className="px-3 py-2 border border-gray-700 text-center">
-                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.admin} onChange={e => updateActivity(i, "admin", e.target.value)} />
-                </td>
-                <td className="px-3 py-2 border border-gray-700 text-center">
-                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.director} onChange={e => updateActivity(i, "director", e.target.value)} />
-                </td>
-                <td className="px-3 py-2 border border-gray-700 text-center">
-                  <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.remarks} onChange={e => updateActivity(i, "remarks", e.target.value)} />
-                </td>
-              </tr>
-            ))}
+            {(data.content.activities || []).map((act, i) => {
+              const { from: actualFrom, to: actualTo } = computeActualRange(act.departments);
+              return (
+                <tr key={i} className={`border-b border-gray-800 transition-colors ${i % 2 === 0 ? 'bg-gray-900' : 'bg-gray-900/40'} hover:bg-gray-800/50`}>
+                  <td className="px-3 py-2 border border-gray-700 text-center font-bold text-gray-400">{act.no}</td>
+                  <td className="px-3 py-2 border border-gray-700">
+                    <textarea rows={1} className={`${TA} !py-1.5 !text-xs w-full`} value={act.activity} onChange={e => updateActivity(i, "activity", e.target.value)} />
+                  </td>
+                  <td className="px-3 py-2 border border-gray-700 text-center">
+                    <input type="date" className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.prior_date || ""} onChange={e => updateActivity(i, "prior_date", e.target.value)} />
+                  </td>
+                  <td className="px-3 py-2 border border-gray-700 text-center">
+                    <input type="date" className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.submission_from || ""} onChange={e => updateActivity(i, "submission_from", e.target.value)} />
+                  </td>
+                  <td className="px-3 py-2 border border-gray-700 text-center">
+                    <input type="date" className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.submission_to || ""} onChange={e => updateActivity(i, "submission_to", e.target.value)} />
+                  </td>
+                  <td className="px-3 py-2 border border-gray-700 text-center text-gray-400 font-mono">{actualFrom || "—"}</td>
+                  <td className="px-3 py-2 border border-gray-700 text-center text-gray-400 font-mono">{actualTo || "—"}</td>
+                  <td className="px-3 py-2 border border-gray-700 text-center">
+                    <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.day} onChange={e => updateActivity(i, "day", e.target.value)} />
+                  </td>
+                  {SCHEDULE_DEPTS.map(dept => {
+                    const cell = act.departments[dept.key] || { status: "X", date: null };
+                    const cellId = `${i}:${dept.key}`;
+                    return (
+                      <td key={dept.key} className="px-1 py-2 border border-gray-700 text-center">
+                        {cell.status !== "O" ? (
+                          <span className="text-gray-500 font-mono font-bold">X</span>
+                        ) : editingCell === cellId ? (
+                          <input type="date" autoFocus className={`${INP} !text-center !py-1 !text-[10px] w-full`}
+                            defaultValue={cell.date || ""}
+                            onBlur={e => { setDeptDate(i, dept.key, e.target.value); setEditingCell(null); }}
+                            onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} />
+                        ) : (
+                          <button onClick={() => setEditingCell(cellId)}
+                            className="text-green-400 hover:text-green-300 font-mono font-bold underline decoration-dotted"
+                            title="Click to set actual submission date">
+                            {cell.date || "O"}
+                          </button>
+                        )}
+                      </td>
+                    );
+                  })}
+                  <td className="px-3 py-2 border border-gray-700 text-center">
+                    <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.remarks} onChange={e => updateActivity(i, "remarks", e.target.value)} />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

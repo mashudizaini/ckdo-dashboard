@@ -2,14 +2,24 @@
 Business Plan Setup Service — PAC module.
 Stores and retrieves Business Plan Setup documents (Schedule, Guideline, Outlook) in PostgreSQL.
 """
-from datetime import datetime
+import io
+from datetime import datetime, date
 from typing import Optional
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.responses import StreamingResponse
 from app.models.business_plan_setup import PACBusinessPlanSetup
 import structlog
 
 logger = structlog.get_logger()
+
+SCHEDULE_DEPTS = [
+    ("sales",       "Sales & Marketing"),
+    ("development", "Strategic Development"),
+    ("plant",        "Plant"),
+    ("admin",        "Admin"),
+    ("director",     "P. Director"),
+]
 
 
 class BusinessPlanSetupService:
@@ -81,6 +91,199 @@ class BusinessPlanSetupService:
         await db.flush()
         await db.refresh(row)
         return {"success": True, "data": self._to_dict(row)}
+
+    # ── Export Schedule to Excel ────────────────────────────────────────────────
+
+    async def export_schedule_excel(self, db: AsyncSession, plan_year: int):
+        """Build the Business Plan Schedule Excel, mirroring the layout of
+        Business plan schedule.xlsx: title block, a 2-row grouped header
+        (Submission Date From/To, Actual Date From/To, PIC per department),
+        one row per activity with consecutive-run merging on the date
+        columns, and green fill for department cells marked "O"."""
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+        from openpyxl.utils import get_column_letter
+
+        q = select(PACBusinessPlanSetup).where(
+            PACBusinessPlanSetup.setup_module == "schedule",
+            PACBusinessPlanSetup.plan_year == plan_year,
+        )
+        result = await db.execute(q)
+        row = result.scalar_one_or_none()
+        activities = (row.content or {}).get("activities", []) if row else []
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "BP Schedule"
+
+        thin = Side(style="thin", color="000000")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        bold = Font(bold=True)
+        center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        left_wrap = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        green_fill = PatternFill("solid", fgColor="C6EFCE")
+        hdr_fill = PatternFill("solid", fgColor="D9D9D9")
+
+        N_DEPT = len(SCHEDULE_DEPTS)
+        COL_NO, COL_ACT = 1, 2
+        COL_PRIOR = 3
+        COL_SUB_FROM, COL_SUB_TO = 4, 5
+        COL_ACT_FROM, COL_ACT_TO = 6, 7
+        COL_DAY = 8
+        COL_PIC_START = 9
+        COL_PIC_END = COL_PIC_START + N_DEPT - 1
+        COL_REQ = COL_PIC_END + 1
+        LAST_COL = COL_REQ
+
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=LAST_COL)
+        c = ws.cell(row=1, column=1, value="PT CKD OTTO Pharmaceuticals")
+        c.font = Font(bold=True, size=12)
+        c.alignment = Alignment(horizontal="left")
+
+        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=LAST_COL - 2)
+        c = ws.cell(row=2, column=1, value=f"Timeline & Schedule / Business Plan {plan_year}")
+        c.font = bold
+        c.alignment = Alignment(horizontal="left")
+        ws.merge_cells(start_row=2, start_column=LAST_COL - 1, end_row=2, end_column=LAST_COL)
+        c = ws.cell(row=2, column=LAST_COL - 1, value=date.today().strftime("%b %d, %Y"))
+        c.alignment = Alignment(horizontal="right")
+
+        HR1, HR2 = 4, 5
+
+        def merge_hdr(c1, c2, value):
+            if c1 == c2:
+                ws.merge_cells(start_row=HR1, start_column=c1, end_row=HR2, end_column=c2)
+            else:
+                ws.merge_cells(start_row=HR1, start_column=c1, end_row=HR1, end_column=c2)
+            cell = ws.cell(row=HR1, column=c1, value=value)
+            cell.font = bold
+            cell.alignment = center
+            cell.fill = hdr_fill
+
+        merge_hdr(COL_NO, COL_NO, "No")
+        merge_hdr(COL_ACT, COL_ACT, "Schedule")
+        merge_hdr(COL_PRIOR, COL_PRIOR, f"Submission Date of {plan_year - 1} BP (in {plan_year - 2})")
+        merge_hdr(COL_SUB_FROM, COL_SUB_TO, f"Submission Date of {plan_year} BP (in {plan_year - 1})")
+        merge_hdr(COL_ACT_FROM, COL_ACT_TO, "Actual Submission Date")
+        merge_hdr(COL_DAY, COL_DAY, "Day")
+        merge_hdr(COL_PIC_START, COL_PIC_END, "PIC")
+        merge_hdr(COL_REQ, COL_REQ, "Requirement (Form)")
+
+        ws.cell(row=HR2, column=COL_SUB_FROM, value="From").font = bold
+        ws.cell(row=HR2, column=COL_SUB_TO, value="To").font = bold
+        ws.cell(row=HR2, column=COL_ACT_FROM, value="From").font = bold
+        ws.cell(row=HR2, column=COL_ACT_TO, value="To").font = bold
+        for i, (_, label) in enumerate(SCHEDULE_DEPTS):
+            ws.cell(row=HR2, column=COL_PIC_START + i, value=label).font = bold
+
+        for r in (HR1, HR2):
+            for col in range(1, LAST_COL + 1):
+                cell = ws.cell(row=r, column=col)
+                cell.border = border
+                cell.fill = hdr_fill
+                if cell.alignment.horizontal is None:
+                    cell.alignment = center
+
+        def fmt_date(iso):
+            if not iso:
+                return None
+            try:
+                return datetime.strptime(iso, "%Y-%m-%d").date()
+            except (ValueError, TypeError):
+                return None
+
+        def actual_range(departments):
+            dates = sorted(
+                d.get("date") for d in (departments or {}).values()
+                if d.get("status") == "O" and d.get("date")
+            )
+            return (dates[0] if dates else None, dates[-1] if dates else None)
+
+        r0 = HR2 + 1
+        rows_data = []
+        for act in activities:
+            actual_from, actual_to = actual_range(act.get("departments"))
+            rows_data.append({
+                "no": act.get("no"),
+                "activity": act.get("activity", ""),
+                "prior": fmt_date(act.get("prior_date")),
+                "sub_from": fmt_date(act.get("submission_from")),
+                "sub_to": fmt_date(act.get("submission_to")),
+                "act_from": fmt_date(actual_from),
+                "act_to": fmt_date(actual_to),
+                "day": act.get("day", ""),
+                "departments": act.get("departments") or {},
+                "remarks": act.get("remarks", ""),
+            })
+
+        # Merge consecutive rows sharing the same value, mirroring the
+        # source file's boxed grouping on the date columns.
+        def merge_run(col, keyfn):
+            i = 0
+            while i < len(rows_data):
+                j = i
+                while j + 1 < len(rows_data) and keyfn(rows_data[j + 1]) == keyfn(rows_data[i]) and keyfn(rows_data[i]) is not None:
+                    j += 1
+                if j > i:
+                    ws.merge_cells(start_row=r0 + i, start_column=col, end_row=r0 + j, end_column=col)
+                i = j + 1
+
+        merge_run(COL_PRIOR, lambda r: r["prior"])
+
+        for r_idx, rd in enumerate(rows_data, start=r0):
+            ws.cell(row=r_idx, column=COL_NO, value=rd["no"])
+            ws.cell(row=r_idx, column=COL_ACT, value=rd["activity"])
+            ws.cell(row=r_idx, column=COL_PRIOR, value=rd["prior"])
+            ws.cell(row=r_idx, column=COL_SUB_FROM, value=rd["sub_from"])
+            ws.cell(row=r_idx, column=COL_SUB_TO, value=rd["sub_to"])
+            ws.cell(row=r_idx, column=COL_ACT_FROM, value=rd["act_from"])
+            ws.cell(row=r_idx, column=COL_ACT_TO, value=rd["act_to"])
+            ws.cell(row=r_idx, column=COL_DAY, value=rd["day"])
+            ws.cell(row=r_idx, column=COL_REQ, value=rd["remarks"])
+
+            for col in (COL_PRIOR, COL_SUB_FROM, COL_SUB_TO, COL_ACT_FROM, COL_ACT_TO):
+                ws.cell(row=r_idx, column=col).number_format = "dd-mmm-yy"
+
+            for i, (key, _) in enumerate(SCHEDULE_DEPTS):
+                dept = rd["departments"].get(key, {})
+                col = COL_PIC_START + i
+                cell = ws.cell(row=r_idx, column=col)
+                if dept.get("status") == "O":
+                    if dept.get("date"):
+                        cell.value = fmt_date(dept["date"])
+                        cell.number_format = "dd-mmm-yy"
+                    else:
+                        cell.value = "O"
+                    cell.fill = green_fill
+                else:
+                    cell.value = "X"
+
+            for col in range(1, LAST_COL + 1):
+                cell = ws.cell(row=r_idx, column=col)
+                cell.border = border
+                cell.alignment = left_wrap if col == COL_ACT else center
+
+        widths = {COL_NO: 5, COL_ACT: 42, COL_PRIOR: 13, COL_SUB_FROM: 12, COL_SUB_TO: 12,
+                  COL_ACT_FROM: 12, COL_ACT_TO: 12, COL_DAY: 12, COL_REQ: 14}
+        for i in range(N_DEPT):
+            widths[COL_PIC_START + i] = 12
+        for col, w in widths.items():
+            ws.column_dimensions[get_column_letter(col)].width = w
+
+        ws.page_setup.orientation = "landscape"
+        ws.page_setup.fitToWidth = 1
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.freeze_panes = ws.cell(row=r0, column=COL_ACT + 1)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        filename = f"Business plan schedule {plan_year}.xlsx"
+        return StreamingResponse(
+            buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     # ── Delete ────────────────────────────────────────────────────────────────
 

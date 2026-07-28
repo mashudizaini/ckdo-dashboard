@@ -181,6 +181,18 @@ async def delete_setup_module(
     return await BusinessPlanSetupService().delete_setup(db, setup_id)
 
 
+@router.get("/setup-modules/schedule/export")
+async def export_schedule_excel(
+    plan_year: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Export the Business Plan Schedule to Excel, matching the layout of
+    Business plan schedule.xlsx (extended with the Submission Date
+    From/To split and the auto-computed Actual Date From/To columns)."""
+    return await BusinessPlanSetupService().export_schedule_excel(db, plan_year)
+
+
 class GenerateOutlookRequest(BaseModel):
     year: int
     context: Optional[str] = None

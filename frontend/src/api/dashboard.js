@@ -186,6 +186,7 @@ export const pacApi = {
   upsertSetupModule:    (body) => api.post("/dashboard/pac/setup-modules", body),
   deleteSetupModule:    (id)   => api.delete(`/dashboard/pac/setup-modules/${id}`),
   generateOutlook:      (body) => api.post("/dashboard/pac/setup-modules/generate-outlook", body),
+  exportScheduleExcel:  (planYear) => api.get("/dashboard/pac/setup-modules/schedule/export", { params: { plan_year: planYear }, responseType: "blob" }),
 
   // Sales Plan (Simulation)
   listSalesPlans:       (p)    => api.get("/dashboard/pac/sales-plans", { params: p }),
