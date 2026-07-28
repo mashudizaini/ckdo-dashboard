@@ -108,6 +108,19 @@ async def upsert_business_plan(
     return await BusinessPlanService().upsert_plan(db, body.model_dump(), user.username)
 
 
+@router.post("/business-plans/upload")
+async def upload_business_plan_excel(
+    plan_year: int = Query(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Import a Strategy & Action Plan from an Excel file matching the
+    "Strategy_Action Plan - Mashudi.xlsx" template."""
+    content = await file.read()
+    return await BusinessPlanService().import_excel(db, content, plan_year, user.username)
+
+
 @router.delete("/business-plans/{plan_id}")
 async def delete_business_plan(
     plan_id: int,

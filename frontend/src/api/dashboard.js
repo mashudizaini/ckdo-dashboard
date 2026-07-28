@@ -174,6 +174,11 @@ export const pacApi = {
   getBusinessPlan:     (id)   => api.get(`/dashboard/pac/business-plans/${id}`),
   upsertBusinessPlan:  (body) => api.post("/dashboard/pac/business-plans", body),
   deleteBusinessPlan:  (id)   => api.delete(`/dashboard/pac/business-plans/${id}`),
+  uploadBusinessPlanExcel: (file, planYear) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/dashboard/pac/business-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
+  },
 
   // Setup Modules (Schedule / Guideline / Outlook)
   listSetupModules:     (p)    => api.get("/dashboard/pac/setup-modules", { params: p }),

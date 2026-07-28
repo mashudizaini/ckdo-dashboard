@@ -324,6 +324,9 @@ function SPPanel({ year }) {
   const [saved,      setSaved]      = useState(false);
   const [expanded,   setExpanded]   = useState({ 0: true, 1: false, 2: false });
   const [isNew,      setIsNew]      = useState(false);
+  const [uploading,  setUploading]  = useState(false);
+  const [uploadError, setUploadError] = useState(null);
+  const fileInputRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -414,15 +417,62 @@ function SPPanel({ year }) {
     if (activeDoc?.id === id) setActiveDoc(null);
   };
 
+  const handleUploadFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true); setUploadError(null);
+    try {
+      const res = await pacApi.uploadBusinessPlanExcel(file, year);
+      if (res.success) {
+        await load();
+        setActiveDoc(res.data); setIsNew(false); setExpanded({ 0: true });
+      } else {
+        setUploadError(res.error || "Upload failed");
+      }
+    } catch (err) {
+      setUploadError(err?.response?.data?.detail || err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
   const print = () => window.print();
+
+  // Flatten items → strategies → actions into print-ready rows with
+  // rowSpan markers, mirroring the merged-box look of the Excel template
+  // (one continuous cell per objective/strategy spanning its action rows).
+  const buildPrintRows = (items) => {
+    const rows = [];
+    (items || []).forEach(item => {
+      const strategies = (item.strategies && item.strategies.length) ? item.strategies : [{ letter: "", text: "", actions: [{ num: "", text: "" }] }];
+      const objRowCount = strategies.reduce((sum, s) => sum + ((s.actions && s.actions.length) ? s.actions.length : 1), 0);
+      let objRowIdx = 0;
+      strategies.forEach(strat => {
+        const actions = (strat.actions && strat.actions.length) ? strat.actions : [{ num: "", text: "" }];
+        actions.forEach((act, ai) => {
+          rows.push({
+            objText: objRowIdx === 0 ? `(${item.obj_num}) ${item.obj_text}` : null,
+            objRowSpan: objRowIdx === 0 ? objRowCount : 0,
+            stratText: ai === 0 ? `(${strat.letter}) ${strat.text}` : null,
+            stratRowSpan: ai === 0 ? actions.length : 0,
+            actText: `(${act.num}) ${act.text}`,
+          });
+          objRowIdx++;
+        });
+      });
+    });
+    return rows;
+  };
 
   return (
     <>
       <style>{`
         @media print {
+          @page { size: landscape; margin: 10mm; }
           body * { visibility: hidden !important; }
           #bp-sp-print, #bp-sp-print * { visibility: visible !important; }
-          #bp-sp-print { position: fixed; inset: 0; background: white; padding: 24px; font-family: Arial, sans-serif; font-size: 9.5pt; color: #000; }
+          #bp-sp-print { position: fixed; inset: 0; background: white; padding: 12px; font-family: Arial, sans-serif; font-size: 9pt; color: #000; }
           .no-print { display: none !important; }
         }
       `}</style>
@@ -432,8 +482,15 @@ function SPPanel({ year }) {
         <div className="col-span-1 space-y-2 no-print">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Documents {year}</p>
-            <button onClick={openNew} className={BTN_SM("violet")}><Plus size={11} /> New</button>
+            <div className="flex gap-1.5">
+              <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleUploadFile} />
+              <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM("teal")} title="Upload Strategy & Action Plan Excel">
+                {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+              </button>
+              <button onClick={openNew} className={BTN_SM("violet")}><Plus size={11} /> New</button>
+            </div>
           </div>
+          {uploadError && <p className="text-[11px] text-red-400 mb-2">{uploadError}</p>}
           {loading && <div className="text-xs text-gray-600 py-4 text-center"><Loader2 size={12} className="animate-spin inline mr-1" />Loading…</div>}
           {docs.length === 0 && !loading && (
             <p className="text-xs text-gray-600 text-center py-6">No documents yet.<br /><span className="text-violet-400 cursor-pointer underline" onClick={openNew}>Create one</span></p>
@@ -480,16 +537,52 @@ function SPPanel({ year }) {
 
               {/* Printable area */}
               <div id="bp-sp-print">
-                {/* Print header */}
-                <div className="hidden print:block mb-4 pb-3 border-b-2 border-gray-800">
-                  <p className="font-bold text-sm">PT CKD OTTO Pharmaceuticals</p>
-                  <p className="font-semibold">STRATEGY & ACTION PLAN {year}</p>
-                  <div className="flex gap-8 mt-1 text-xs text-gray-600">
-                    <span>Department: {activeDoc.department}</span>
-                    <span>Team: {activeDoc.team_code} / {activeDoc.team_name}</span>
-                    <span>Role: {activeDoc.plan_role}</span>
-                  </div>
+                {/* Print header — mirrors Strategy_Action Plan - Mashudi.xlsx layout */}
+                <div className="hidden print:block mb-3">
+                  <p className="text-center font-bold pb-1.5 mb-2 border-b-2 border-black" style={{ fontSize: "18pt" }}>Strategy & Action Plan</p>
+                  <table className="text-xs mb-2">
+                    <tbody>
+                      <tr>
+                        <td className="pr-2 py-0.5 text-gray-700">[ Department ]</td>
+                        <td className="pl-2 py-0.5 border-b border-gray-400 font-medium">{activeDoc.department}</td>
+                      </tr>
+                      <tr>
+                        <td className="pr-2 py-0.5 text-gray-700">[ Team Code / Name ]</td>
+                        <td className="pl-2 py-0.5 border-b border-gray-400 font-medium">
+                          {activeDoc.team_code}{activeDoc.team_code && activeDoc.team_name ? " / " : ""}{activeDoc.team_name}
+                          {activeDoc.plan_role ? <span className="ml-6">{activeDoc.plan_role}</span> : null}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
+
+                {/* Print table — flattened Objective / Strategy / Action Plan grid,
+                    rowSpan-merged to mirror the Excel template's boxed grouping. */}
+                <table className="hidden print:table w-full border-collapse text-xs mb-2" style={{ tableLayout: "fixed" }}>
+                  <colgroup><col style={{ width: "38%" }} /><col style={{ width: "30%" }} /><col style={{ width: "32%" }} /></colgroup>
+                  <thead>
+                    <tr>
+                      <th className="border border-black py-1.5 font-normal text-center">Managerial Objective</th>
+                      <th className="border border-black py-1.5 font-normal text-center">Strategy</th>
+                      <th className="border border-black py-1.5 font-normal text-center">Action Plan*</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {buildPrintRows(activeDoc.content?.items).map((row, i) => (
+                      <tr key={i}>
+                        {row.objRowSpan > 0 && (
+                          <td rowSpan={row.objRowSpan} className="border border-black align-top p-1.5">{row.objText}</td>
+                        )}
+                        {row.stratRowSpan > 0 && (
+                          <td rowSpan={row.stratRowSpan} className="border border-black align-top p-1.5">{row.stratText}</td>
+                        )}
+                        <td className="border border-black align-top p-1.5">{row.actText}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="hidden print:block text-[9px] italic">*) Action plan detail related to {year} KPI plan</p>
 
                 {/* Meta fields */}
                 <SectionCard title="Document Header">
@@ -509,11 +602,11 @@ function SPPanel({ year }) {
                   </div>
                 </SectionCard>
 
-                {/* Objectives */}
+                {/* Objectives — editing accordion (screen only; print uses the table above) */}
                 {(activeDoc.content?.items || []).map((item, oi) => (
-                  <div key={oi} className="rounded-xl border border-gray-800 bg-gray-900 mb-3 overflow-hidden">
+                  <div key={oi} className="rounded-xl border border-gray-800 bg-gray-900 mb-3 overflow-hidden no-print">
                     {/* Objective header */}
-                    <div className="flex items-center gap-3 px-4 py-3 bg-gray-800/50 cursor-pointer no-print"
+                    <div className="flex items-center gap-3 px-4 py-3 bg-gray-800/50 cursor-pointer"
                       onClick={() => setExpanded(prev => ({ ...prev, [oi]: !prev[oi] }))}>
                       {expanded[oi] ? <ChevronDown size={13} className="text-violet-400" /> : <ChevronRight size={13} className="text-violet-400" />}
                       <span className="w-6 h-6 rounded-full bg-violet-500/20 border border-violet-500/40 text-violet-400 text-xs flex items-center justify-center font-bold shrink-0">{item.obj_num}</span>
@@ -523,11 +616,6 @@ function SPPanel({ year }) {
                         onChange={e => setObjText(oi, "obj_text", e.target.value)}
                         onClick={e => e.stopPropagation()} />
                       <button onClick={e => { e.stopPropagation(); removeObj(oi); }} className={`shrink-0 ${BTN_SM("red")}`}><Trash2 size={10} /></button>
-                    </div>
-
-                    {/* Print-only objective header */}
-                    <div className="print:block hidden px-4 py-2 bg-gray-100">
-                      <span className="font-bold">({item.obj_num}) {item.obj_text}</span>
                     </div>
 
                     {expanded[oi] && (
