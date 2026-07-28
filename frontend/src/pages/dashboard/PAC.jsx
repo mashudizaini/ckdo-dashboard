@@ -2428,12 +2428,12 @@ function PurchasePlanPanel({ year }) {
 }
 
 function PurchasePlanTable({ items, editable, onUpdateItem, onUpdateMonth, onRemove }) {
-  const TH = "px-2 py-1.5 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap text-center";
+  const TH = "sticky top-0 z-10 bg-gray-800 px-2 py-1.5 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap text-center";
   const TD = "px-2 py-1 border border-gray-700 text-right font-mono text-xs";
   const fmtNum = (v) => Number(v || 0).toLocaleString();
 
   return (
-    <div className="overflow-x-auto border border-gray-700 rounded-lg">
+    <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "21rem" }}>
       <table className="w-full border-collapse text-xs" style={{ minWidth: 1600 }}>
         <thead>
           <tr className="bg-gray-800/80">
@@ -2803,10 +2803,10 @@ function PersonnelPlanPanel({ year }) {
 
 function PersonnelHeadcountTable({ data, editable, fmtNum, onUpdateRow, onRemove }) {
   if (!data) return null;
-  const TH = "px-2 py-1.5 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap";
+  const TH = "sticky top-0 z-10 bg-gray-800 px-2 py-1.5 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap";
   const TD = "px-2 py-1 border border-gray-700 text-right font-mono text-xs";
   return (
-    <div className="overflow-x-auto border border-gray-700 rounded-lg">
+    <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "21rem" }}>
       <table className="w-full border-collapse text-xs" style={{ minWidth: 1100 }}>
         <thead>
           <tr className="bg-gray-800/80">
@@ -2819,7 +2819,7 @@ function PersonnelHeadcountTable({ data, editable, fmtNum, onUpdateRow, onRemove
           </tr>
           <tr className="bg-gray-800/80">
             {["Permanent","Temporary","Total","Permanent","Temporary","Total","Permanent","Temporary","Total"].map((h, i) => (
-              <th key={i} className={`${TH} w-16`}>{h}</th>
+              <th key={i} className={`${TH} w-16`} style={{ top: "29px" }}>{h}</th>
             ))}
           </tr>
         </thead>
@@ -2866,12 +2866,12 @@ function PersonnelHeadcountTable({ data, editable, fmtNum, onUpdateRow, onRemove
 
 function PersonnelRecruitmentTable({ title, data, editable, fmtNum, onUpdateRow, onUpdateMonth, onRemove }) {
   if (!data) return null;
-  const TH = "px-2 py-1.5 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap";
+  const TH = "sticky top-0 z-10 bg-gray-800 px-2 py-1.5 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap";
   const TD = "px-2 py-1 border border-gray-700 text-right font-mono text-xs";
   return (
     <div className="space-y-1.5">
       {title && <p className="text-xs font-semibold text-gray-400">{title} · {data.year}</p>}
-      <div className="overflow-x-auto border border-gray-700 rounded-lg">
+      <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "21rem" }}>
         <table className="w-full border-collapse text-xs" style={{ minWidth: 1000 }}>
           <thead>
             <tr className="bg-gray-800/80">
@@ -3143,12 +3143,12 @@ function ManufacturePlanPanel({ year }) {
                   {selectedPlan.content.meta?.type && <span className="px-2 py-1 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-medium">{selectedPlan.content.meta.type}</span>}
                   <span className="text-gray-500">{selectedPlan.department} / {selectedPlan.team_code} - {selectedPlan.team_name}</span>
                 </div>
-                <div className="overflow-x-auto border border-gray-700 rounded-lg">
+                <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "21rem" }}>
                   <table className="w-full border-collapse text-xs" style={{ minWidth: 1900 }}>
                     <thead>
                       <tr className="bg-gray-800/80">
                         {(selectedPlan.content.headers || MFG_HEADERS).map((h, ci) => (
-                          <th key={ci} className="px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
+                          <th key={ci} className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -3195,14 +3195,14 @@ function ManufacturePlanPanel({ year }) {
                 <option value="final">Final</option>
               </select>
             </div>
-            <div className="overflow-x-auto border border-gray-700 rounded-lg">
+            <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "21rem" }}>
               <table className="w-full border-collapse text-xs" style={{ minWidth: 2000 }}>
                 <thead>
                   <tr className="bg-gray-800/80">
                     {(form.content.headers || MFG_HEADERS).map((h, ci) => (
-                      <th key={ci} className="px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
+                      <th key={ci} className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
                     ))}
-                    <th className="px-2 py-2 text-center border border-gray-700 w-10"></th>
+                    <th className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-center border border-gray-700 w-10"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3446,12 +3446,12 @@ function InvestmentPlanPanel({ year }) {
                   {selectedPlan.content.meta?.type && <span className="px-2 py-1 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-medium">{selectedPlan.content.meta.type}</span>}
                   <span className="text-gray-500">{selectedPlan.department} / {selectedPlan.team_code}</span>
                 </div>
-                <div className="overflow-x-auto border border-gray-700 rounded-lg">
+                <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "21rem" }}>
                   <table className="w-full border-collapse text-xs" style={{ minWidth: 1900 }}>
                     <thead>
                       <tr className="bg-gray-800/80">
                         {(selectedPlan.content.headers || INV_HEADERS).map((h, ci) => (
-                          <th key={ci} className="px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
+                          <th key={ci} className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -3496,14 +3496,14 @@ function InvestmentPlanPanel({ year }) {
                 <option value="final">Final</option>
               </select>
             </div>
-            <div className="overflow-x-auto border border-gray-700 rounded-lg">
+            <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "21rem" }}>
               <table className="w-full border-collapse text-xs" style={{ minWidth: 2000 }}>
                 <thead>
                   <tr className="bg-gray-800/80">
                     {(form.content.headers || INV_HEADERS).map((h, ci) => (
-                      <th key={ci} className="px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
+                      <th key={ci} className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
                     ))}
-                    <th className="px-2 py-2 text-center border border-gray-700 w-10"></th>
+                    <th className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-center border border-gray-700 w-10"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3751,12 +3751,12 @@ function OpexPlanPanel({ year }) {
                   {selectedPlan.content.meta?.type && <span className="px-2 py-1 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-medium">{selectedPlan.content.meta.type}</span>}
                   <span className="text-gray-500">{selectedPlan.department} / {selectedPlan.team_name || selectedPlan.team_code}</span>
                 </div>
-                <div className="overflow-x-auto border border-gray-700 rounded-lg">
+                <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "21rem" }}>
                   <table className="w-full border-collapse text-xs" style={{ minWidth: 2400 }}>
                     <thead>
                       <tr className="bg-gray-800/80">
                         {(selectedPlan.content.headers || OPEX_HEADERS).map((h, ci) => (
-                          <th key={ci} className="px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
+                          <th key={ci} className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -3801,14 +3801,14 @@ function OpexPlanPanel({ year }) {
                 <option value="final">Final</option>
               </select>
             </div>
-            <div className="overflow-x-auto border border-gray-700 rounded-lg">
+            <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "21rem" }}>
               <table className="w-full border-collapse text-xs" style={{ minWidth: 2500 }}>
                 <thead>
                   <tr className="bg-gray-800/80">
                     {(form.content.headers || OPEX_HEADERS).map((h, ci) => (
-                      <th key={ci} className="px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
+                      <th key={ci} className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-center text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">{h}</th>
                     ))}
-                    <th className="px-2 py-2 text-center border border-gray-700 w-10"></th>
+                    <th className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-center border border-gray-700 w-10"></th>
                   </tr>
                 </thead>
                 <tbody>
