@@ -1834,6 +1834,7 @@ const SCHEDULE_COLUMNS = [
   { key: "day",             label: "Day",  width: "w-24",  align: "center" },
   ...SCHEDULE_DEPTS.map(d => ({ key: d.key, label: d.label, width: "w-16", align: "center" })),
   { key: "remarks",         label: "Remarks", width: "w-24", align: "center" },
+  { key: "notes",           label: "Notes",   width: "w-20", align: "center" },
 ];
 
 function computeActualRange(departments) {
@@ -1844,8 +1845,58 @@ function computeActualRange(departments) {
   return { from: dates[0] || null, to: dates[dates.length - 1] || null };
 }
 
+// Signed count of working days (Mon-Fri) between two ISO dates, counting
+// the range (d1, d2] — negative if d2 precedes d1.
+function workingDaysDiff(d1, d2) {
+  if (!d1 || !d2) return null;
+  const a = new Date(`${d1}T00:00:00`), b = new Date(`${d2}T00:00:00`);
+  const sign = b < a ? -1 : 1;
+  const start = sign < 0 ? b : a;
+  const end = sign < 0 ? a : b;
+  let count = 0;
+  const cur = new Date(start);
+  cur.setDate(cur.getDate() + 1);
+  while (cur <= end) {
+    const dow = cur.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count * sign;
+}
+
+// Notes[i] = working days from the row above's Actual Date To to this
+// row's Actual Date From — aligned 1:1 with the activities array.
+function computeScheduleNotes(activities) {
+  let prevTo = null;
+  return (activities || []).map((act, i) => {
+    const { from, to } = computeActualRange(act.departments);
+    const note = (i > 0 && prevTo && from) ? workingDaysDiff(prevTo, from) : null;
+    prevTo = to;
+    return note;
+  });
+}
+
+function totalWorkingDays(activities) {
+  return computeScheduleNotes(activities).reduce((sum, n) => sum + (n || 0), 0);
+}
+
+// Activities (typically a prior, closed-out year) where a department
+// submitted its actual date after the row's planned Submission Date To.
+function computeLateReview(activities) {
+  const items = [];
+  (activities || []).forEach(act => {
+    const lateDepts = SCHEDULE_DEPTS.filter(d => {
+      const dep = act.departments?.[d.key];
+      return dep?.status === "O" && dep?.date && act.submission_to && dep.date > act.submission_to;
+    });
+    if (lateDepts.length) items.push({ no: act.no, activity: act.activity, lateDepts: lateDepts.map(d => d.label) });
+  });
+  return items;
+}
+
 function SchedulePanel({ year }) {
   const [data, setData] = useState(null);
+  const [prevData, setPrevData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1866,7 +1917,17 @@ function SchedulePanel({ year }) {
     } finally { setLoading(false); }
   }, [year]);
 
-  useEffect(() => { load(); }, [load]);
+  const loadPrev = useCallback(async () => {
+    try {
+      const res = await pacApi.listSetupModules({ setup_module: "schedule", plan_year: year - 1 });
+      if (res.success && res.data.length > 0) setPrevData(res.data[0]);
+      else setPrevData({ content: buildDefaultSchedule(year - 1) });
+    } catch {
+      setPrevData({ content: buildDefaultSchedule(year - 1) });
+    }
+  }, [year]);
+
+  useEffect(() => { load(); loadPrev(); }, [load, loadPrev]);
 
   const updateActivity = (idx, field, val) => {
     setData(prev => ({
@@ -1915,6 +1976,10 @@ function SchedulePanel({ year }) {
   if (loading) return <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>;
   if (!data) return null;
 
+  const currentTotalDays = totalWorkingDays(data.content.activities);
+  const prevTotalDays = prevData ? totalWorkingDays(prevData.content.activities) : null;
+  const lateReview = prevData ? computeLateReview(prevData.content.activities) : [];
+
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
@@ -1937,6 +2002,33 @@ function SchedulePanel({ year }) {
           </button>
         </div>
       </div>
+
+      <div className="grid grid-cols-3 gap-3 p-4 border-b border-gray-800">
+        <div className="rounded-lg border border-violet-500/30 bg-violet-500/5 p-3">
+          <p className="text-[10px] uppercase tracking-wider text-violet-400 font-semibold">BP {year} (Current)</p>
+          <p className="text-xl font-bold text-gray-100 mt-1">{currentTotalDays} <span className="text-xs font-normal text-gray-500">working days</span></p>
+        </div>
+        <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-3">
+          <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">BP {year - 1} (Previous)</p>
+          <p className="text-xl font-bold text-gray-100 mt-1">{prevTotalDays ?? "—"} <span className="text-xs font-normal text-gray-500">working days</span></p>
+        </div>
+        <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3">
+          <p className="text-[10px] uppercase tracking-wider text-red-400 font-semibold">Timeline Review — Late Submissions ({year - 1})</p>
+          {lateReview.length === 0 ? (
+            <p className="text-xs text-gray-500 mt-1.5">No late submissions</p>
+          ) : (
+            <div className="mt-1.5 max-h-14 overflow-y-auto space-y-0.5 pr-1">
+              {lateReview.slice(0, 4).map(item => (
+                <p key={item.no} className="text-[10px] text-red-300 truncate" title={`${item.activity} — ${item.lateDepts.join(", ")}`}>
+                  #{item.no} {item.activity} — {item.lateDepts.join(", ")}
+                </p>
+              ))}
+              {lateReview.length > 4 && <p className="text-[10px] text-gray-500">+{lateReview.length - 4} more</p>}
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="overflow-auto" style={{ maxHeight: "28rem" }}>
         <table className="w-full border-collapse text-xs">
           <thead>
@@ -1947,56 +2039,67 @@ function SchedulePanel({ year }) {
             </tr>
           </thead>
           <tbody>
-            {(data.content.activities || []).map((act, i) => {
-              const { from: actualFrom, to: actualTo } = computeActualRange(act.departments);
-              return (
-                <tr key={i} className={`border-b border-gray-800 transition-colors ${i % 2 === 0 ? 'bg-gray-900' : 'bg-gray-900/40'} hover:bg-gray-800/50`}>
-                  <td className="px-3 py-2 border border-gray-700 text-center font-bold text-gray-400">{act.no}</td>
-                  <td className="px-3 py-2 border border-gray-700">
-                    <textarea rows={1} className={`${TA} !py-1.5 !text-xs w-full`} value={act.activity} onChange={e => updateActivity(i, "activity", e.target.value)} />
-                  </td>
-                  <td className="px-3 py-2 border border-gray-700 text-center">
-                    <input type="date" className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.prior_date || ""} onChange={e => updateActivity(i, "prior_date", e.target.value)} />
-                  </td>
-                  <td className="px-3 py-2 border border-gray-700 text-center">
-                    <input type="date" className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.submission_from || ""} onChange={e => updateActivity(i, "submission_from", e.target.value)} />
-                  </td>
-                  <td className="px-3 py-2 border border-gray-700 text-center">
-                    <input type="date" className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.submission_to || ""} onChange={e => updateActivity(i, "submission_to", e.target.value)} />
-                  </td>
-                  <td className="px-3 py-2 border border-gray-700 text-center text-gray-400 font-mono">{actualFrom || "—"}</td>
-                  <td className="px-3 py-2 border border-gray-700 text-center text-gray-400 font-mono">{actualTo || "—"}</td>
-                  <td className="px-3 py-2 border border-gray-700 text-center">
-                    <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.day} onChange={e => updateActivity(i, "day", e.target.value)} />
-                  </td>
-                  {SCHEDULE_DEPTS.map(dept => {
-                    const cell = act.departments[dept.key] || { status: "X", date: null };
-                    const cellId = `${i}:${dept.key}`;
-                    return (
-                      <td key={dept.key} className="px-1 py-2 border border-gray-700 text-center">
-                        {cell.status !== "O" ? (
-                          <span className="text-gray-500 font-mono font-bold">X</span>
-                        ) : editingCell === cellId ? (
-                          <input type="date" autoFocus className={`${INP} !text-center !py-1 !text-[10px] w-full`}
-                            defaultValue={cell.date || ""}
-                            onBlur={e => { setDeptDate(i, dept.key, e.target.value); setEditingCell(null); }}
-                            onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} />
-                        ) : (
-                          <button onClick={() => setEditingCell(cellId)}
-                            className="text-green-400 hover:text-green-300 font-mono font-bold underline decoration-dotted"
-                            title="Click to set actual submission date">
-                            {cell.date || "O"}
-                          </button>
-                        )}
-                      </td>
-                    );
-                  })}
-                  <td className="px-3 py-2 border border-gray-700 text-center">
-                    <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.remarks} onChange={e => updateActivity(i, "remarks", e.target.value)} />
-                  </td>
-                </tr>
-              );
-            })}
+            {(() => {
+              const notes = computeScheduleNotes(data.content.activities);
+              return (data.content.activities || []).map((act, i) => {
+                const { from: actualFrom, to: actualTo } = computeActualRange(act.departments);
+                const actualToLate = actualTo && act.submission_to && actualTo > act.submission_to;
+                return (
+                  <tr key={i} className={`border-b border-gray-800 transition-colors ${i % 2 === 0 ? 'bg-gray-900' : 'bg-gray-900/40'} hover:bg-gray-800/50`}>
+                    <td className="px-3 py-2 border border-gray-700 text-center font-bold text-gray-400">{act.no}</td>
+                    <td className="px-3 py-2 border border-gray-700">
+                      <textarea rows={1} className={`${TA} !py-1.5 !text-xs w-full`} value={act.activity} onChange={e => updateActivity(i, "activity", e.target.value)} />
+                    </td>
+                    <td className="px-3 py-2 border border-gray-700 text-center">
+                      <input type="date" className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.prior_date || ""} onChange={e => updateActivity(i, "prior_date", e.target.value)} />
+                    </td>
+                    <td className="px-3 py-2 border border-gray-700 text-center">
+                      <input type="date" className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.submission_from || ""} onChange={e => updateActivity(i, "submission_from", e.target.value)} />
+                    </td>
+                    <td className="px-3 py-2 border border-gray-700 text-center">
+                      <input type="date" className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.submission_to || ""} onChange={e => updateActivity(i, "submission_to", e.target.value)} />
+                    </td>
+                    <td className="px-3 py-2 border border-gray-700 text-center text-gray-400 font-mono">{actualFrom || "—"}</td>
+                    <td className={`px-3 py-2 border border-gray-700 text-center font-mono ${actualToLate ? "text-red-400 font-bold" : "text-gray-400"}`}>{actualTo || "—"}</td>
+                    <td className="px-3 py-2 border border-gray-700 text-center">
+                      <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.day} onChange={e => updateActivity(i, "day", e.target.value)} />
+                    </td>
+                    {SCHEDULE_DEPTS.map(dept => {
+                      const cell = act.departments[dept.key] || { status: "X", date: null };
+                      const cellId = `${i}:${dept.key}`;
+                      const isLate = cell.status === "O" && cell.date && act.submission_to && cell.date > act.submission_to;
+                      return (
+                        <td key={dept.key} className="px-1 py-2 border border-gray-700 text-center">
+                          {cell.status !== "O" ? (
+                            <span className="text-gray-500 font-mono font-bold">X</span>
+                          ) : editingCell === cellId ? (
+                            <input type="date" autoFocus className={`${INP} !text-center !py-1 !text-[10px] w-full`}
+                              defaultValue={cell.date || ""}
+                              onBlur={e => { setDeptDate(i, dept.key, e.target.value); setEditingCell(null); }}
+                              onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} />
+                          ) : (
+                            <button onClick={() => setEditingCell(cellId)}
+                              className={`w-full rounded px-1.5 py-1 font-mono font-bold text-[10px] border transition-colors ${
+                                isLate ? "bg-red-500/25 border-red-500/50 text-red-300 hover:bg-red-500/35"
+                                       : "bg-green-500/25 border-green-500/50 text-green-300 hover:bg-green-500/35"
+                              }`}
+                              title={isLate ? "Late vs. planned Submission Date To" : "Click to set actual submission date"}>
+                              {cell.date || "O"}
+                            </button>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className="px-3 py-2 border border-gray-700 text-center">
+                      <input className={`${INP} !text-center !py-1.5 !text-xs w-full`} value={act.remarks} onChange={e => updateActivity(i, "remarks", e.target.value)} />
+                    </td>
+                    <td className="px-3 py-2 border border-gray-700 text-center font-mono text-gray-400">
+                      {notes[i] !== null && notes[i] !== undefined ? notes[i] : "—"}
+                    </td>
+                  </tr>
+                );
+              });
+            })()}
           </tbody>
         </table>
       </div>

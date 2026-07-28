@@ -3,7 +3,7 @@ Business Plan Setup Service — PAC module.
 Stores and retrieves Business Plan Setup documents (Schedule, Guideline, Outlook) in PostgreSQL.
 """
 import io
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -122,7 +122,9 @@ class BusinessPlanSetupService:
         center = Alignment(horizontal="center", vertical="center", wrap_text=True)
         left_wrap = Alignment(horizontal="left", vertical="center", wrap_text=True)
         green_fill = PatternFill("solid", fgColor="C6EFCE")
+        red_fill = PatternFill("solid", fgColor="FFC7CE")
         hdr_fill = PatternFill("solid", fgColor="D9D9D9")
+        red_font = Font(color="9C0006", bold=True)
 
         N_DEPT = len(SCHEDULE_DEPTS)
         COL_NO, COL_ACT = 1, 2
@@ -133,7 +135,8 @@ class BusinessPlanSetupService:
         COL_PIC_START = 9
         COL_PIC_END = COL_PIC_START + N_DEPT - 1
         COL_REQ = COL_PIC_END + 1
-        LAST_COL = COL_REQ
+        COL_NOTES = COL_REQ + 1
+        LAST_COL = COL_NOTES
 
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=LAST_COL)
         c = ws.cell(row=1, column=1, value="PT CKD OTTO Pharmaceuticals")
@@ -168,6 +171,7 @@ class BusinessPlanSetupService:
         merge_hdr(COL_DAY, COL_DAY, "Day")
         merge_hdr(COL_PIC_START, COL_PIC_END, "PIC")
         merge_hdr(COL_REQ, COL_REQ, "Requirement (Form)")
+        merge_hdr(COL_NOTES, COL_NOTES, "Notes")
 
         ws.cell(row=HR2, column=COL_SUB_FROM, value="From").font = bold
         ws.cell(row=HR2, column=COL_SUB_TO, value="To").font = bold
@@ -199,21 +203,44 @@ class BusinessPlanSetupService:
             )
             return (dates[0] if dates else None, dates[-1] if dates else None)
 
+        def working_days_diff(d1, d2):
+            """Signed working-day count over the range (d1, d2]."""
+            if not d1 or not d2:
+                return None
+            sign = 1
+            start, end = d1, d2
+            if d2 < d1:
+                sign, start, end = -1, d2, d1
+            count = 0
+            cur = start + timedelta(days=1)
+            while cur <= end:
+                if cur.weekday() < 5:
+                    count += 1
+                cur += timedelta(days=1)
+            return count * sign
+
         r0 = HR2 + 1
         rows_data = []
+        prev_act_to = None
         for act in activities:
             actual_from, actual_to = actual_range(act.get("departments"))
+            act_from_d, act_to_d = fmt_date(actual_from), fmt_date(actual_to)
+            note = working_days_diff(prev_act_to, act_from_d) if prev_act_to and act_from_d else None
+            prev_act_to = act_to_d
             rows_data.append({
                 "no": act.get("no"),
                 "activity": act.get("activity", ""),
                 "prior": fmt_date(act.get("prior_date")),
                 "sub_from": fmt_date(act.get("submission_from")),
                 "sub_to": fmt_date(act.get("submission_to")),
-                "act_from": fmt_date(actual_from),
-                "act_to": fmt_date(actual_to),
+                "sub_to_iso": act.get("submission_to"),
+                "act_from": act_from_d,
+                "act_to": act_to_d,
+                "act_to_iso": actual_to,
                 "day": act.get("day", ""),
                 "departments": act.get("departments") or {},
                 "remarks": act.get("remarks", ""),
+                "notes": note,
             })
 
         # Merge consecutive rows sharing the same value, mirroring the
@@ -240,21 +267,28 @@ class BusinessPlanSetupService:
             ws.cell(row=r_idx, column=COL_ACT_TO, value=rd["act_to"])
             ws.cell(row=r_idx, column=COL_DAY, value=rd["day"])
             ws.cell(row=r_idx, column=COL_REQ, value=rd["remarks"])
+            ws.cell(row=r_idx, column=COL_NOTES, value=rd["notes"])
 
             for col in (COL_PRIOR, COL_SUB_FROM, COL_SUB_TO, COL_ACT_FROM, COL_ACT_TO):
                 ws.cell(row=r_idx, column=col).number_format = "dd-mmm-yy"
+
+            act_to_cell = ws.cell(row=r_idx, column=COL_ACT_TO)
+            if rd["act_to_iso"] and rd["sub_to_iso"] and rd["act_to_iso"] > rd["sub_to_iso"]:
+                act_to_cell.font = red_font
 
             for i, (key, _) in enumerate(SCHEDULE_DEPTS):
                 dept = rd["departments"].get(key, {})
                 col = COL_PIC_START + i
                 cell = ws.cell(row=r_idx, column=col)
+                dept_date_iso = dept.get("date")
+                is_late = dept.get("status") == "O" and dept_date_iso and rd["sub_to_iso"] and dept_date_iso > rd["sub_to_iso"]
                 if dept.get("status") == "O":
-                    if dept.get("date"):
-                        cell.value = fmt_date(dept["date"])
+                    if dept_date_iso:
+                        cell.value = fmt_date(dept_date_iso)
                         cell.number_format = "dd-mmm-yy"
                     else:
                         cell.value = "O"
-                    cell.fill = green_fill
+                    cell.fill = red_fill if is_late else green_fill
                 else:
                     cell.value = "X"
 
@@ -264,7 +298,7 @@ class BusinessPlanSetupService:
                 cell.alignment = left_wrap if col == COL_ACT else center
 
         widths = {COL_NO: 5, COL_ACT: 42, COL_PRIOR: 13, COL_SUB_FROM: 12, COL_SUB_TO: 12,
-                  COL_ACT_FROM: 12, COL_ACT_TO: 12, COL_DAY: 12, COL_REQ: 14}
+                  COL_ACT_FROM: 12, COL_ACT_TO: 12, COL_DAY: 12, COL_REQ: 14, COL_NOTES: 9}
         for i in range(N_DEPT):
             widths[COL_PIC_START + i] = 12
         for col, w in widths.items():
