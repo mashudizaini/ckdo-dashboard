@@ -4162,12 +4162,12 @@ function SalesPlanPanel({ year }) {
                     <span className="text-gray-500">{selectedPlan.department} / {selectedPlan.team_code} - {selectedPlan.team_name}</span>
                   </div>
                 )}
-                <div className="overflow-x-auto border border-gray-700 rounded-lg">
+                <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "21rem" }}>
                   <table className="w-full border-collapse text-xs">
                     <thead>
                       <tr className="bg-gray-800/80">
                         {(selectedPlan.content.headers || DEFAULT_SALES_PLAN_CONTENT.headers).map((h, ci) => (
-                          <th key={ci} className={`px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${ci >= 2 && ci <= 13 ? 'text-center w-16' : ci === 14 || ci === 15 ? 'text-right w-20' : ''}`}>{h}</th>
+                          <th key={ci} className={`sticky top-0 z-10 bg-gray-800 px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${ci >= 2 && ci <= 13 ? 'text-center w-16' : ci === 14 || ci === 15 ? 'text-right w-20' : ''}`}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -4218,14 +4218,14 @@ function SalesPlanPanel({ year }) {
                 <option value="final">Final</option>
               </select>
             </div>
-            <div className="overflow-x-auto border border-gray-700 rounded-lg">
+            <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "21rem" }}>
               <table className="w-full border-collapse text-xs">
                 <thead>
                   <tr className="bg-gray-800/80">
                     {(form.content.headers || DEFAULT_SALES_PLAN_CONTENT.headers).map((h, ci) => (
-                      <th key={ci} className={`px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${ci >= 2 && ci <= 13 ? 'text-center w-16' : ci === 14 || ci === 15 ? 'text-right w-20' : ''}`}>{h}</th>
+                      <th key={ci} className={`sticky top-0 z-10 bg-gray-800 px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${ci >= 2 && ci <= 13 ? 'text-center w-16' : ci === 14 || ci === 15 ? 'text-right w-20' : ''}`}>{h}</th>
                     ))}
-                    <th className="px-2 py-2 text-center border border-gray-700 w-10"></th>
+                    <th className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-center border border-gray-700 w-10"></th>
                   </tr>
                 </thead>
                 <tbody>
