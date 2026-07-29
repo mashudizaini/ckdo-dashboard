@@ -3,6 +3,7 @@ Business Plan Setup Service — PAC module.
 Stores and retrieves Business Plan Setup documents (Schedule, Guideline, Outlook) in PostgreSQL.
 """
 import io
+import re
 from datetime import datetime, date, timedelta
 from typing import Optional
 from sqlalchemy import select, delete
@@ -421,6 +422,107 @@ class BusinessPlanSetupService:
         prs.save(buf)
         buf.seek(0)
         filename = f"Business plan guideline {plan_year}.pptx"
+        return StreamingResponse(
+            buf,
+            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    async def export_outlook_ppt(self, db: AsyncSession, plan_year: int):
+        """Build the Business Plan Outlook as a PPTX — a title slide plus
+        one slide per section (Global Economic / Indonesia Economic /
+        Pharmaceutical Industry), rendered from each section's free-text
+        Markdown content (bullet list, **bold** key terms)."""
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+        from pptx.dml.color import RGBColor
+
+        q = select(PACBusinessPlanSetup).where(
+            PACBusinessPlanSetup.setup_module == "outlook",
+            PACBusinessPlanSetup.plan_year == plan_year,
+        )
+        result = await db.execute(q)
+        row = result.scalar_one_or_none()
+        content = (row.content or {}) if row else {}
+
+        NAVY = RGBColor(0x1F, 0x2A, 0x44)
+        TEAL = RGBColor(0x0D, 0x94, 0x88)
+        WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+
+        prs = Presentation()
+        prs.slide_width = Inches(13.333)
+        prs.slide_height = Inches(7.5)
+        blank = prs.slide_layouts[6]
+
+        # ── Title slide ──────────────────────────────────────────────────
+        slide = prs.slides.add_slide(blank)
+        bg = slide.shapes.add_shape(1, 0, 0, prs.slide_width, prs.slide_height)
+        bg.fill.solid()
+        bg.fill.fore_color.rgb = NAVY
+        bg.line.fill.background()
+        bg.shadow.inherit = False
+
+        title_box = slide.shapes.add_textbox(Inches(0.8), Inches(2.6), Inches(11.7), Inches(1.2))
+        tf = title_box.text_frame
+        tf.text = "Business Plan Outlook"
+        tf.paragraphs[0].font.size = Pt(40)
+        tf.paragraphs[0].font.bold = True
+        tf.paragraphs[0].font.color.rgb = WHITE
+
+        sub_box = slide.shapes.add_textbox(Inches(0.8), Inches(3.7), Inches(11.7), Inches(0.8))
+        tf = sub_box.text_frame
+        tf.text = f"Economic & Industry Outlook {plan_year}"
+        tf.paragraphs[0].font.size = Pt(22)
+        tf.paragraphs[0].font.color.rgb = TEAL
+
+        company_box = slide.shapes.add_textbox(Inches(0.8), Inches(0.5), Inches(8), Inches(0.6))
+        tf = company_box.text_frame
+        tf.text = "PT CKD OTTO Pharmaceuticals"
+        tf.paragraphs[0].font.size = Pt(16)
+        tf.paragraphs[0].font.bold = True
+        tf.paragraphs[0].font.color.rgb = WHITE
+
+        # ── One slide per section ───────────────────────────────────────
+        for sec_key in ("global_economic", "indonesia_economic", "pharmaceutical"):
+            section = content.get(sec_key) or {}
+            slide = prs.slides.add_slide(blank)
+
+            head = slide.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(12.3), Inches(0.7))
+            tf = head.text_frame
+            tf.text = section.get("title", "")
+            tf.paragraphs[0].font.size = Pt(26)
+            tf.paragraphs[0].font.bold = True
+            tf.paragraphs[0].font.color.rgb = NAVY
+
+            body_box = slide.shapes.add_textbox(Inches(0.7), Inches(1.3), Inches(11.9), Inches(5.8))
+            body_tf = body_box.text_frame
+            body_tf.word_wrap = True
+
+            lines = [ln.strip() for ln in (section.get("text") or "").split("\n") if ln.strip()]
+            for i, line in enumerate(lines):
+                bullet_text = re.sub(r"^[-*]\s+", "", line)
+                p = body_tf.paragraphs[0] if i == 0 else body_tf.add_paragraph()
+                p.space_after = Pt(8)
+                parts = re.split(r"(\*\*[^*]+\*\*)", bullet_text)
+                first_run = True
+                for part in parts:
+                    if not part:
+                        continue
+                    is_bold = part.startswith("**") and part.endswith("**")
+                    run_text = part[2:-2] if is_bold else part
+                    if first_run:
+                        run_text = "•  " + run_text
+                        first_run = False
+                    run = p.add_run()
+                    run.text = run_text
+                    run.font.size = Pt(16)
+                    run.font.bold = is_bold
+                    run.font.color.rgb = NAVY
+
+        buf = io.BytesIO()
+        prs.save(buf)
+        buf.seek(0)
+        filename = f"Business plan outlook {plan_year}.pptx"
         return StreamingResponse(
             buf,
             media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",

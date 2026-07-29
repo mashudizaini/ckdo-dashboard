@@ -195,6 +195,7 @@ export const pacApi = {
   generateOutlook:      (body) => api.post("/dashboard/pac/setup-modules/generate-outlook", body),
   exportScheduleExcel:  (planYear) => api.get("/dashboard/pac/setup-modules/schedule/export", { params: { plan_year: planYear }, responseType: "blob" }),
   exportGuidelinePpt:   (planYear) => api.get("/dashboard/pac/setup-modules/guideline/export", { params: { plan_year: planYear }, responseType: "blob" }),
+  exportOutlookPpt:     (planYear) => api.get("/dashboard/pac/setup-modules/outlook/export", { params: { plan_year: planYear }, responseType: "blob" }),
   uploadOutlookMaterials: (files, planYear, category = "material") => {
     const form = new FormData();
     Array.from(files).forEach(f => form.append("files", f));

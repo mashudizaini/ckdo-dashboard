@@ -288,50 +288,49 @@ async def generate_outlook(
     prompt = f"""Generate a comprehensive Business Plan Outlook for PT CKD OTTO Pharmaceuticals for year {body.year}.
 {f'Additional context: {body.context}' if body.context else ''}
 
+For each of the 3 sections below, write the content as a single Markdown
+string (bullet list using "- ", key terms in **bold**) — freeform text the
+user can edit directly, not a fixed list of fields.
+
 Return ONLY valid JSON with this exact structure:
 {{
   "global_economic": {{
     "title": "I. Global Economic Outlook",
-    "items": [
-      {{"label": "Global GDP Forecast", "value": "..."}},
-      {{"label": "Key Factor 1", "value": "..."}},
-      {{"label": "Key Factor 2", "value": "..."}},
-      {{"label": "Fed Interest Rate", "value": "..."}},
-      {{"label": "Global Inflation", "value": "..."}}
-    ]
+    "text": "- **Global GDP Forecast**: ...\\n- **Key Factor 1**: ...\\n- **Fed Interest Rate**: ...\\n- **Global Inflation**: ..."
   }},
   "indonesia_economic": {{
     "title": "II. Indonesia Economic Outlook",
-    "items": [
-      {{"label": "GDP Forecast", "value": "..."}},
-      {{"label": "Inflation", "value": "..."}},
-      {{"label": "Interest Rate", "value": "..."}},
-      {{"label": "Exchange Rate", "value": "..."}},
-      {{"label": "Government Focus", "value": "..."}}
-    ]
+    "text": "- **GDP Forecast**: ...\\n- **Inflation**: ...\\n- **Interest Rate**: ...\\n- **Exchange Rate**: ...\\n- **Government Focus**: ..."
   }},
   "pharmaceutical": {{
     "title": "III. Pharmaceutical Industry",
-    "items": [
-      {{"label": "Global Market", "value": "..."}},
-      {{"label": "Indonesia Market", "value": "..."}},
-      {{"label": "Oncology", "value": "..."}},
-      {{"label": "CKD OTTO Strategy", "value": "..."}}
-    ]
+    "text": "- **Global Market**: ...\\n- **Indonesia Market**: ...\\n- **Oncology**: ...\\n- **CKD OTTO Strategy**: ..."
   }}
 }}
 
-Make it realistic for {body.year} with specific numbers and trends. Keep values concise but informative."""
+Make it realistic for {body.year} with specific numbers and trends. Keep each bullet concise but informative."""
 
     try:
         response = await ai.generate_chat_completion([
-            {"role": "system", "content": "You are a business analyst. Return only valid JSON, no markdown, no explanations."},
+            {"role": "system", "content": "You are a business analyst. Return only valid JSON, no markdown code fences, no explanations."},
             {"role": "user", "content": prompt}
         ])
         content = json.loads(response)
         return {"success": True, "data": {"setup_module": "outlook", "plan_year": body.year, "content": content, "status": "draft"}}
     except Exception as e:
         return {"success": False, "error": f"Failed to generate outlook: {str(e)}", "data": None}
+
+
+@router.get("/setup-modules/outlook/export")
+async def export_outlook_ppt(
+    plan_year: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Export the Business Plan Outlook (Global/Indonesia Economic +
+    Pharmaceutical Industry) to PowerPoint — one slide per section, rendered
+    from each section's Markdown text."""
+    return await BusinessPlanSetupService().export_outlook_ppt(db, plan_year)
 
 
 # ── Sales Plan ────────────────────────────────────────────────────────────────

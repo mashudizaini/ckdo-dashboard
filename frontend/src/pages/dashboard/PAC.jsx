@@ -2319,39 +2319,60 @@ function GuidelinePanel({ year }) {
 const DEFAULT_OUTLOOK = {
   global_economic: {
     title: "I. Global Economic Outlook",
-    items: [
-      { label: "Global GDP Forecast", value: "Decrease from 3.0% in 2023 to 2.7% in 2024" },
-      { label: "Key Factor 1", value: "Sharp slowdown in China — persistent Yuan weakness" },
-      { label: "Key Factor 2", value: "Declining inflation — reflecting drop in energy prices" },
-      { label: "Key Factor 3", value: "Russian invasion of Ukraine — ongoing recovery with OECD support" },
-      { label: "Fed Interest Rate", value: "5.5% (Sep 2023) -> Expected 5.7% Q4 2023 -> 5.5% in 2024" },
-      { label: "Global Inflation", value: "Projected to decline from 3.8% to 2.6% in 2024" },
-    ],
+    text: [
+      "- **Global GDP Forecast**: Decrease from 3.0% in 2023 to 2.7% in 2024",
+      "- **Key Factor 1**: Sharp slowdown in China — persistent Yuan weakness",
+      "- **Key Factor 2**: Declining inflation — reflecting drop in energy prices",
+      "- **Key Factor 3**: Russian invasion of Ukraine — ongoing recovery with OECD support",
+      "- **Fed Interest Rate**: 5.5% (Sep 2023) -> Expected 5.7% Q4 2023 -> 5.5% in 2024",
+      "- **Global Inflation**: Projected to decline from 3.8% to 2.6% in 2024",
+    ].join("\n"),
   },
   indonesia_economic: {
     title: "II. Indonesia Economic Outlook",
-    items: [
-      { label: "GDP Forecast", value: "5.1% in 2023 -> 5.2% in 2024" },
-      { label: "Annual Budget", value: "Income Rp 2.8 T + Financing Rp 0.5 T = Expense Rp 3.3 T" },
-      { label: "Target", value: "Accelerate inclusive and sustainable economic transformation" },
-      { label: "Inflation", value: "2.7% - 2.8%" },
-      { label: "Interest Rate", value: "6.0% - 6.9%" },
-      { label: "Exchange Rate", value: "IDR 15,000 - 15,100 / USD" },
-      { label: "Geopolitics", value: "Presidential election Feb 2024 — potential unstable economic condition" },
-      { label: "IKN Capital", value: "Move to Kalimantan (IKN) from 2024-2045" },
-    ],
+    text: [
+      "- **GDP Forecast**: 5.1% in 2023 -> 5.2% in 2024",
+      "- **Annual Budget**: Income Rp 2.8 T + Financing Rp 0.5 T = Expense Rp 3.3 T",
+      "- **Target**: Accelerate inclusive and sustainable economic transformation",
+      "- **Inflation**: 2.7% - 2.8%",
+      "- **Interest Rate**: 6.0% - 6.9%",
+      "- **Exchange Rate**: IDR 15,000 - 15,100 / USD",
+      "- **Geopolitics**: Presidential election Feb 2024 — potential unstable economic condition",
+      "- **IKN Capital**: Move to Kalimantan (IKN) from 2024-2045",
+    ].join("\n"),
   },
   pharmaceutical: {
     title: "III. Pharmaceutical Industry",
-    items: [
-      { label: "Global Market Size", value: "Expected $ 1.1 Trillion in 2023 to $ 1.2 Trillion in 2024" },
-      { label: "Indonesia Growth Rate", value: "Expected 12% in 2024" },
-      { label: "TKDN Objective", value: "Reduce importation of raw material by 24% in 2024" },
-      { label: "Oncology", value: "API for oncology still depend on import API" },
-      { label: "CKD OTTO Strategy", value: "Increasing TKDN score with local material purchase; Cooperate with foreign oncology medical worker" },
-    ],
+    text: [
+      "- **Global Market Size**: Expected $ 1.1 Trillion in 2023 to $ 1.2 Trillion in 2024",
+      "- **Indonesia Growth Rate**: Expected 12% in 2024",
+      "- **TKDN Objective**: Reduce importation of raw material by 24% in 2024",
+      "- **Oncology**: API for oncology still depend on import API",
+      "- **CKD OTTO Strategy**: Increasing TKDN score with local material purchase; Cooperate with foreign oncology medical worker",
+    ].join("\n"),
   },
 };
+
+// Older saved records may still use the { items: [{label,value}] } shape —
+// fold them into the same { title, text } markdown shape on read so the
+// editor never has to branch on which format it's looking at.
+function normalizeOutlookContent(content) {
+  if (!content) return content;
+  const out = {};
+  for (const key of Object.keys(content)) {
+    const sec = content[key] || {};
+    if (typeof sec.text === "string") { out[key] = sec; continue; }
+    if (Array.isArray(sec.items)) {
+      out[key] = {
+        title: sec.title || "",
+        text: sec.items.map(it => `- **${it.label}**: ${it.value}`).join("\n"),
+      };
+    } else {
+      out[key] = { title: sec.title || "", text: "" };
+    }
+  }
+  return out;
+}
 
 function formatFileSize(bytes) {
   if (!bytes && bytes !== 0) return "—";
@@ -2470,12 +2491,17 @@ function OutlookPanel({ year }) {
   const [saved, setSaved] = useState(false);
   const [generating, setGenerating] = useState(false);
 
+  const [exporting, setExporting] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await pacApi.listSetupModules({ setup_module: "outlook", plan_year: year });
-      if (res.success && res.data.length > 0) setData(res.data[0]);
-      else setData({ setup_module: "outlook", plan_year: year, content: JSON.parse(JSON.stringify(DEFAULT_OUTLOOK)), status: "draft" });
+      if (res.success && res.data.length > 0) {
+        setData(Object.assign({}, res.data[0], { content: normalizeOutlookContent(res.data[0].content) }));
+      } else {
+        setData({ setup_module: "outlook", plan_year: year, content: JSON.parse(JSON.stringify(DEFAULT_OUTLOOK)), status: "draft" });
+      }
     } catch {
       setData({ setup_module: "outlook", plan_year: year, content: JSON.parse(JSON.stringify(DEFAULT_OUTLOOK)), status: "draft" });
     } finally { setLoading(false); }
@@ -2483,17 +2509,26 @@ function OutlookPanel({ year }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const updateItem = (secKey, itemIdx, field, val) => {
+  const updateSectionText = (secKey, val) => {
     setData(prev => {
       if (!prev) return prev;
       return Object.assign({}, prev, {
         content: Object.assign({}, prev.content, {
-          [secKey]: Object.assign({}, prev.content[secKey], {
-            items: prev.content[secKey].items.map((it, i) => i === itemIdx ? Object.assign({}, it, { [field]: val }) : it),
-          }),
+          [secKey]: Object.assign({}, prev.content[secKey], { text: val }),
         }),
       });
     });
+  };
+
+  const handleExportPpt = async () => {
+    setExporting(true);
+    try {
+      const res = await pacApi.exportOutlookPpt(year);
+      const url = URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url; a.download = `Business plan outlook ${year}.pptx`; a.click();
+      URL.revokeObjectURL(url);
+    } finally { setExporting(false); }
   };
 
   const generateWithAI = async () => {
@@ -2501,7 +2536,7 @@ function OutlookPanel({ year }) {
     try {
       const res = await pacApi.generateOutlook({ year });
       if (res.success && res.data) {
-        setData(res.data);
+        setData(Object.assign({}, res.data, { content: normalizeOutlookContent(res.data.content) }));
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);
       } else {
@@ -2564,26 +2599,33 @@ function OutlookPanel({ year }) {
             {saving ? <Loader2 size={11} className="animate-spin" /> : saved ? <CheckCircle size={11} /> : <Save size={11} />}
             {saved ? "Saved!" : "Save"}
           </button>
+          <button onClick={handleExportPpt} disabled={exporting} className={BTN_SM("sky")}>
+            {exporting ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+            {exporting ? "Exporting…" : "Generate PPT"}
+          </button>
         </div>
       </div>
       <div className="p-5 space-y-4">
+        <p className="text-[11px] text-gray-500 -mt-1">
+          Edit langsung sebagai teks/Markdown (gunakan "- " untuk bullet, <span className="font-mono">**tebal**</span> untuk penekanan) — hasilnya dipakai apa adanya saat Generate PPT.
+        </p>
         {["global_economic", "indonesia_economic", "pharmaceutical"].map(secKey => {
           const colors = sectionColors[secKey];
+          const section = data.content[secKey] || { title: "", text: "" };
           return (
             <div key={secKey} className={`rounded-xl border ${colors.border} ${colors.bg} overflow-hidden`}>
               <div className={`px-4 py-2.5 border-b border-gray-700 ${colors.header} flex items-center gap-2`}>
                 <span className="text-sm">{colors.icon}</span>
-                <span className={`text-xs font-bold uppercase tracking-wider ${colors.title}`}>{data.content[secKey].title}</span>
+                <span className={`text-xs font-bold uppercase tracking-wider ${colors.title}`}>{section.title}</span>
               </div>
               <div className="p-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {data.content[secKey].items.map((item, ii) => (
-                    <div key={ii} className="flex items-start gap-3">
-                      <span className="text-xs text-gray-500 w-32 shrink-0 pt-1 font-medium">{item.label}</span>
-                      <textarea rows={2} className={`${TA} !text-xs flex-1`} value={item.value} onChange={e => updateItem(secKey, ii, "value", e.target.value)} />
-                    </div>
-                  ))}
-                </div>
+                <textarea
+                  rows={10}
+                  className={`${TA} !text-xs font-mono`}
+                  placeholder={"- **Label**: value\n- **Label**: value"}
+                  value={section.text || ""}
+                  onChange={e => updateSectionText(secKey, e.target.value)}
+                />
               </div>
             </div>
           );
