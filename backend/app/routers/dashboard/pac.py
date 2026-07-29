@@ -15,6 +15,7 @@ Endpoints:
 import asyncio
 import io
 import json
+import os
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.utils import get_column_letter
@@ -28,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.pac_service import PACService
 from app.services.business_plan_service import BusinessPlanService
 from app.services.business_plan_setup_service import BusinessPlanSetupService
+from app.services.outlook_material_service import OutlookMaterialService
 from app.services.sales_plan_service import SalesPlanService
 from app.services.purchase_plan_service import PurchasePlanService
 from app.services.personnel_plan_service import PersonnelPlanService
@@ -204,6 +206,61 @@ async def export_guideline_ppt(
     slide per section, each column-split into Current Year / Previous
     Year."""
     return await BusinessPlanSetupService().export_guideline_ppt(db, plan_year)
+
+
+@router.post("/setup-modules/outlook/materials")
+async def upload_outlook_materials(
+    plan_year: int = Query(...),
+    files: list[UploadFile] = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Upload one or more reference source files (economic reports, market
+    data, etc.) that will inform the Outlook write-up for plan_year."""
+    return await OutlookMaterialService().save_files(db, plan_year, files, user.username)
+
+
+@router.get("/setup-modules/outlook/materials")
+async def list_outlook_materials(
+    plan_year: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """List uploaded Outlook reference materials, optionally filtered by year."""
+    return await OutlookMaterialService().list_materials(db, plan_year)
+
+
+@router.get("/setup-modules/outlook/materials/{material_id}/download")
+async def download_outlook_material(
+    material_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Download a previously uploaded Outlook reference material."""
+    service = OutlookMaterialService()
+    row = await service.get_material(db, material_id)
+    if not row:
+        raise HTTPException(404, "Material tidak ditemukan")
+    path = service.storage_path(row.filename)
+    if not os.path.exists(path):
+        raise HTTPException(404, "File tidak ditemukan di server")
+    with open(path, "rb") as f:
+        content = f.read()
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=row.content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{row.original_name}"'},
+    )
+
+
+@router.delete("/setup-modules/outlook/materials/{material_id}")
+async def delete_outlook_material(
+    material_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Delete an uploaded Outlook reference material (file + row)."""
+    return await OutlookMaterialService().delete_material(db, material_id)
 
 
 class GenerateOutlookRequest(BaseModel):

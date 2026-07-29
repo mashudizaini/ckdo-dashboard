@@ -188,6 +188,14 @@ export const pacApi = {
   generateOutlook:      (body) => api.post("/dashboard/pac/setup-modules/generate-outlook", body),
   exportScheduleExcel:  (planYear) => api.get("/dashboard/pac/setup-modules/schedule/export", { params: { plan_year: planYear }, responseType: "blob" }),
   exportGuidelinePpt:   (planYear) => api.get("/dashboard/pac/setup-modules/guideline/export", { params: { plan_year: planYear }, responseType: "blob" }),
+  uploadOutlookMaterials: (files, planYear) => {
+    const form = new FormData();
+    Array.from(files).forEach(f => form.append("files", f));
+    return api.post("/dashboard/pac/setup-modules/outlook/materials", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
+  },
+  listOutlookMaterials:   (planYear) => api.get("/dashboard/pac/setup-modules/outlook/materials", { params: { plan_year: planYear } }),
+  downloadOutlookMaterial: (id) => api.get(`/dashboard/pac/setup-modules/outlook/materials/${id}/download`, { responseType: "blob" }),
+  deleteOutlookMaterial:  (id) => api.delete(`/dashboard/pac/setup-modules/outlook/materials/${id}`),
 
   // Sales Plan (Simulation)
   listSalesPlans:       (p)    => api.get("/dashboard/pac/sales-plans", { params: p }),

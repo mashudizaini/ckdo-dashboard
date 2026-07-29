@@ -2353,6 +2353,114 @@ const DEFAULT_OUTLOOK = {
   },
 };
 
+function formatFileSize(bytes) {
+  if (!bytes && bytes !== 0) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/* Reference source files (economic reports, market data, etc.) uploaded
+   ahead of writing the Outlook — kept separate from the actual generation
+   step, which is scoped for later. */
+function OutlookMaterialsPanel({ year }) {
+  const [materials, setMaterials] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
+  const fileInputRef = useRef(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await pacApi.listOutlookMaterials(year);
+      if (res.success) setMaterials(res.data || []);
+    } catch {
+      setMaterials([]);
+    } finally { setLoading(false); }
+  }, [year]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleUpload = async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setUploading(true); setUploadError(null);
+    try {
+      const res = await pacApi.uploadOutlookMaterials(files, year);
+      if (res.success) await load();
+      else setUploadError(res.error || "Upload failed");
+    } catch (err) {
+      setUploadError(err?.response?.data?.detail || err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleDownload = async (item) => {
+    const res = await pacApi.downloadOutlookMaterial(item.id);
+    const url = URL.createObjectURL(new Blob([res.data]));
+    const a = document.createElement("a");
+    a.href = url; a.download = item.original_name; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm("Hapus file ini?")) return;
+    await pacApi.deleteOutlookMaterial(id);
+    load();
+  };
+
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-200">Outlook Reference Materials</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Bahan dasar laporan ekonomi & pangsa pasar · {year}</p>
+        </div>
+        <div className="flex gap-2">
+          <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleUpload} />
+          <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM("teal")}>
+            {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+            {uploading ? "Uploading…" : "Upload Files"}
+          </button>
+        </div>
+      </div>
+      <div className="p-4">
+        {uploadError && (
+          <p className="text-xs text-red-400 mb-3 flex items-center gap-1.5"><AlertCircle size={12} />{uploadError}</p>
+        )}
+        {loading ? (
+          <div className="flex justify-center py-8 text-gray-500 text-sm gap-2"><Loader2 size={14} className="animate-spin" /> Loading…</div>
+        ) : materials.length === 0 ? (
+          <p className="text-xs text-gray-600 text-center py-8">
+            Belum ada file. Upload bahan (laporan ekonomi, data pasar, dsb — boleh lebih dari 10 file, berbagai format) sebagai dasar penyusunan Outlook.
+          </p>
+        ) : (
+          <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+            {materials.map(item => (
+              <div key={item.id} className="flex items-center gap-3 px-3 py-2 rounded-lg border border-gray-800 bg-gray-900 hover:border-gray-700 transition-colors">
+                <FileText size={14} className="text-teal-400 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-200 font-medium truncate">{item.original_name}</p>
+                  <p className="text-[10px] text-gray-500">{formatFileSize(item.file_size)} · {item.uploaded_by} · {item.created_at ? new Date(item.created_at).toLocaleDateString("id-ID") : ""}</p>
+                </div>
+                <button onClick={() => handleDownload(item)} className="shrink-0 p-1.5 rounded-md text-gray-400 hover:text-gray-200 hover:bg-gray-800" title="Download">
+                  <Download size={13} />
+                </button>
+                <button onClick={() => handleDelete(item.id)} className="shrink-0 p-1.5 rounded-md text-gray-400 hover:text-red-400 hover:bg-red-500/10" title="Delete">
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function OutlookPanel({ year }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -2423,6 +2531,8 @@ function OutlookPanel({ year }) {
   };
 
   return (
+    <div className="space-y-4">
+    <OutlookMaterialsPanel year={year} />
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
         <div>
@@ -2468,6 +2578,7 @@ function OutlookPanel({ year }) {
           );
         })}
       </div>
+    </div>
     </div>
   );
 }

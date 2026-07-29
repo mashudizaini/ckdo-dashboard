@@ -25,6 +25,7 @@ import app.models.db_browser_audit  # noqa: F401
 import app.models.org_structure  # noqa: F401
 import app.models.user_api_key  # noqa: F401
 import app.models.meeting_recording  # noqa: F401
+import app.models.outlook_material  # noqa: F401
 
 # ── Dashboard Routers ──
 from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement
