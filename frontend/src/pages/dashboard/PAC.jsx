@@ -2360,10 +2360,12 @@ function formatFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/* Reference source files (economic reports, market data, etc.) uploaded
-   ahead of writing the Outlook — kept separate from the actual generation
-   step, which is scoped for later. */
-function OutlookMaterialsPanel({ year }) {
+/* Reference files uploaded ahead of writing the Outlook — kept separate
+   from the actual generation step. Two categories share this same panel:
+   "material" = source data (economic reports, market data, etc.) and
+   "format" = example/template files defining the desired report format,
+   which can be several and are all used as reference during generation. */
+function OutlookMaterialsPanel({ year, category = "material", title, description, accent = "teal" }) {
   const [materials, setMaterials] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -2373,12 +2375,12 @@ function OutlookMaterialsPanel({ year }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await pacApi.listOutlookMaterials(year);
+      const res = await pacApi.listOutlookMaterials(year, category);
       if (res.success) setMaterials(res.data || []);
     } catch {
       setMaterials([]);
     } finally { setLoading(false); }
-  }, [year]);
+  }, [year, category]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -2387,7 +2389,7 @@ function OutlookMaterialsPanel({ year }) {
     if (!files || files.length === 0) return;
     setUploading(true); setUploadError(null);
     try {
-      const res = await pacApi.uploadOutlookMaterials(files, year);
+      const res = await pacApi.uploadOutlookMaterials(files, year, category);
       if (res.success) await load();
       else setUploadError(res.error || "Upload failed");
     } catch (err) {
@@ -2416,12 +2418,12 @@ function OutlookMaterialsPanel({ year }) {
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-gray-200">Outlook Reference Materials</h3>
-          <p className="text-xs text-gray-500 mt-0.5">Bahan dasar laporan ekonomi & pangsa pasar · {year}</p>
+          <h3 className="text-sm font-semibold text-gray-200">{title}</h3>
+          <p className="text-xs text-gray-500 mt-0.5">{description} · {year}</p>
         </div>
         <div className="flex gap-2">
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleUpload} />
-          <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM("teal")}>
+          <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM(accent)}>
             {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
             {uploading ? "Uploading…" : "Upload Files"}
           </button>
@@ -2435,13 +2437,13 @@ function OutlookMaterialsPanel({ year }) {
           <div className="flex justify-center py-8 text-gray-500 text-sm gap-2"><Loader2 size={14} className="animate-spin" /> Loading…</div>
         ) : materials.length === 0 ? (
           <p className="text-xs text-gray-600 text-center py-8">
-            Belum ada file. Upload bahan (laporan ekonomi, data pasar, dsb — boleh lebih dari 10 file, berbagai format) sebagai dasar penyusunan Outlook.
+            Belum ada file. Upload {category === "format" ? "contoh/format laporan outlook (boleh lebih dari 1 file, berbagai format) sebagai acuan struktur laporan yang akan digenerate." : "bahan (laporan ekonomi, data pasar, dsb — boleh lebih dari 10 file, berbagai format) sebagai dasar penyusunan Outlook."}
           </p>
         ) : (
           <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
             {materials.map(item => (
               <div key={item.id} className="flex items-center gap-3 px-3 py-2 rounded-lg border border-gray-800 bg-gray-900 hover:border-gray-700 transition-colors">
-                <FileText size={14} className="text-teal-400 shrink-0" />
+                <FileText size={14} className={`shrink-0 ${accent === "teal" ? "text-teal-400" : "text-violet-400"}`} />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-gray-200 font-medium truncate">{item.original_name}</p>
                   <p className="text-[10px] text-gray-500">{formatFileSize(item.file_size)} · {item.uploaded_by} · {item.created_at ? new Date(item.created_at).toLocaleDateString("id-ID") : ""}</p>
@@ -2532,7 +2534,16 @@ function OutlookPanel({ year }) {
 
   return (
     <div className="space-y-4">
-    <OutlookMaterialsPanel year={year} />
+    <OutlookMaterialsPanel
+      year={year} category="material" accent="teal"
+      title="Outlook Reference Materials"
+      description="Bahan dasar laporan ekonomi & pangsa pasar"
+    />
+    <OutlookMaterialsPanel
+      year={year} category="format" accent="violet"
+      title="Outlook Report Format"
+      description="Contoh/format laporan sebagai acuan generate Outlook"
+    />
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
         <div>

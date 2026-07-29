@@ -211,23 +211,29 @@ async def export_guideline_ppt(
 @router.post("/setup-modules/outlook/materials")
 async def upload_outlook_materials(
     plan_year: int = Query(...),
+    category: str = Query("material", pattern="^(material|format)$"),
     files: list[UploadFile] = File(...),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.PAC)),
 ):
-    """Upload one or more reference source files (economic reports, market
-    data, etc.) that will inform the Outlook write-up for plan_year."""
-    return await OutlookMaterialService().save_files(db, plan_year, files, user.username)
+    """Upload one or more reference files for plan_year. category="material"
+    (default) = source data (economic reports, market data, etc.) that
+    informs the Outlook write-up. category="format" = example/template
+    files defining the desired output format/structure — there can be
+    several, and all of them are used as reference when generating the
+    Outlook report."""
+    return await OutlookMaterialService().save_files(db, plan_year, files, user.username, category=category)
 
 
 @router.get("/setup-modules/outlook/materials")
 async def list_outlook_materials(
     plan_year: Optional[int] = Query(None),
+    category:  Optional[str] = Query(None, pattern="^(material|format)$"),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.PAC)),
 ):
-    """List uploaded Outlook reference materials, optionally filtered by year."""
-    return await OutlookMaterialService().list_materials(db, plan_year)
+    """List uploaded Outlook reference files, optionally filtered by year and category."""
+    return await OutlookMaterialService().list_materials(db, plan_year, category)
 
 
 @router.get("/setup-modules/outlook/materials/{material_id}/download")

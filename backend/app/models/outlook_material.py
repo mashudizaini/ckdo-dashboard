@@ -11,6 +11,10 @@ class OutlookMaterial(Base):
 
     id            = Column(Integer, primary_key=True, autoincrement=True)
     plan_year     = Column(Integer, nullable=False, index=True)
+    # "material" = source data (economic reports, market data, etc.) that
+    # informs the Outlook write-up. "format" = example/template files that
+    # define the desired output format/structure of the generated report.
+    category      = Column(String(20), nullable=False, default="material", server_default="material", index=True)
     filename      = Column(String(255), nullable=False)   # stored name on disk
     original_name = Column(String(255), nullable=False)
     content_type  = Column(String(100))

@@ -30,17 +30,19 @@ class OutlookMaterialService:
         plan_year: int,
         files: list,
         username: str,
+        category: str = "material",
     ) -> dict:
         saved = []
         for file in files:
             content = await file.read()
             ext = os.path.splitext(file.filename or "")[1]
-            stored_name = f"{plan_year}_{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}{ext}"
+            stored_name = f"{category}_{plan_year}_{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}{ext}"
             with open(self.storage_path(stored_name), "wb") as f:
                 f.write(content)
 
             row = OutlookMaterial(
                 plan_year=plan_year,
+                category=category,
                 filename=stored_name,
                 original_name=file.filename or stored_name,
                 content_type=file.content_type,
@@ -53,10 +55,12 @@ class OutlookMaterialService:
             saved.append(self._to_dict(row))
         return {"success": True, "count": len(saved), "data": saved}
 
-    async def list_materials(self, db: AsyncSession, plan_year: Optional[int] = None) -> dict:
+    async def list_materials(self, db: AsyncSession, plan_year: Optional[int] = None, category: Optional[str] = None) -> dict:
         q = select(OutlookMaterial).order_by(OutlookMaterial.created_at.desc())
         if plan_year:
             q = q.where(OutlookMaterial.plan_year == plan_year)
+        if category:
+            q = q.where(OutlookMaterial.category == category)
         result = await db.execute(q)
         rows = result.scalars().all()
         return {"success": True, "count": len(rows), "data": [self._to_dict(r) for r in rows]}
@@ -78,6 +82,7 @@ class OutlookMaterialService:
         return {
             "id":            row.id,
             "plan_year":     row.plan_year,
+            "category":      row.category,
             "original_name": row.original_name,
             "content_type":  row.content_type,
             "file_size":     row.file_size,
