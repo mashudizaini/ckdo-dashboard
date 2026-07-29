@@ -48,6 +48,7 @@ class Employee(Base):
     bank_account_name=Column(String(200))
     personal_email  = Column(String(200))
     company_email   = Column(String(200))
+    photo_filename  = Column(String(255))  # stored name on disk under uploads/employee_photos/
 
     # Upload metadata
     upload_batch_id = Column(String(50), index=True)
@@ -68,3 +69,17 @@ class EmployeeUploadLog(Base):
     uploaded_by    = Column(String(100))
     uploaded_at    = Column(DateTime, default=datetime.utcnow)
     notes          = Column(Text)
+
+
+class EmployeeHistory(Base):
+    """Field-level change log for an employee — lets HR trace movements
+    (department/team/position/supervisor/status changes) over time."""
+    __tablename__ = "employee_history"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    user_id     = Column(String(20), index=True, nullable=False)
+    field       = Column(String(50), nullable=False)
+    old_value   = Column(String(300))
+    new_value   = Column(String(300))
+    changed_by  = Column(String(100))
+    changed_at  = Column(DateTime, default=datetime.utcnow)

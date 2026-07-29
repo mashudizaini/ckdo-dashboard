@@ -4,6 +4,7 @@ Route prefix : /api/v1/dashboard/hr/employees
 Upload file Excel karyawan (export standar Talenta) → REPLACE seluruh data di PostgreSQL.
 """
 import io
+import os
 import re
 from datetime import datetime, date, timedelta
 from calendar import monthrange
@@ -19,9 +20,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import require_role, get_current_user, CurrentUser, Roles
-from app.models.employee import Employee, EmployeeUploadLog
+from app.models.employee import Employee, EmployeeUploadLog, EmployeeHistory
 
 router = APIRouter()
+
+_PHOTO_UPLOAD_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "uploads", "employee_photos"
+)
+os.makedirs(_PHOTO_UPLOAD_DIR, exist_ok=True)
 
 # ── Mapping kolom Excel → field model ─────────────────────────────────────────
 # Index berdasarkan posisi kolom di baris 1 (0-based), sesuai export standar Talenta
@@ -543,6 +549,11 @@ async def get_birthdays_this_month(
 
 @router.get("/summary")
 async def get_employee_summary(
+    search:     str           = Query(""),
+    department: Optional[str] = Query(None),
+    status:     Optional[str] = Query(None),
+    employment_status: Optional[str] = Query(None),
+    team:       Optional[str] = Query(None),
     join_month: Optional[int] = Query(None, ge=1, le=12),  # same cumulative cutoff as the list below —
     join_year:  Optional[int] = Query(None),                # keeps the KPI cards in sync with what's shown
     db:   AsyncSession = Depends(get_db),
@@ -550,11 +561,16 @@ async def get_employee_summary(
 ):
     """Statistik ringkasan untuk KPI cards.
 
-    Accepts the same join_month/join_year cumulative cutoff as the list below
-    it, and applies it to every count here — otherwise the cards (unfiltered)
-    silently disagree with the filtered list (e.g. "Resign" card showing more
-    than the list actually displays for the same cutoff)."""
-    base = _apply_employee_filters(select(Employee), join_month=join_month, join_year=join_year)
+    Accepts the same filter set as the list endpoint below it (search,
+    department, status, employment_status, team, join_month/join_year) so the
+    cards always match whatever the Employee List is currently showing —
+    otherwise the cards (unfiltered) silently disagree with the filtered list
+    (e.g. "Resign" card showing more than the list actually displays)."""
+    base = _apply_employee_filters(
+        select(Employee), search=search, department=department, status=status,
+        employment_status=employment_status, team=team,
+        join_month=join_month, join_year=join_year,
+    )
 
     def counted(*conditions):
         q = base
@@ -660,6 +676,7 @@ def _emp_dict(e: Employee) -> dict:
         "npwp_number":      e.npwp_number,
         "bank_account_bca": e.bank_account_bca,
         "bank_account_name": e.bank_account_name,
+        "has_photo":        bool(e.photo_filename),
     }
 
 
@@ -1722,6 +1739,17 @@ async def update_employee(
     if body.supervisor_id and body.supervisor_id != target.supervisor_id:
         await _check_supervisor_loop(db, user_id, body.supervisor_id)
 
+    for field in _HISTORY_TRACKED_FIELDS:
+        old_val = getattr(target, field)
+        new_val = getattr(body, field) or None
+        if (old_val or None) != new_val:
+            db.add(EmployeeHistory(
+                user_id=user_id, field=field,
+                old_value=str(old_val) if old_val else None,
+                new_value=str(new_val) if new_val else None,
+                changed_by=user.username,
+            ))
+
     _apply_upsert_fields(target, body)
     await db.flush()
     return _emp_dict(target)
@@ -1748,11 +1776,126 @@ async def resign_employee(
     if not resign_date:
         raise HTTPException(status_code=400, detail="resign_date must be in YYYY-MM-DD format")
 
+    old_status = target.employment_status
     target.resign_date = resign_date
     target.resign_reason = body.reason or None
     target.employment_status = "Resign"
+    if old_status != "Resign":
+        db.add(EmployeeHistory(
+            user_id=user_id, field="employment_status",
+            old_value=old_status, new_value="Resign", changed_by=user.username,
+        ))
     await db.flush()
     return _emp_dict(target)
+
+
+_PHOTO_MAX_BYTES = 3 * 1024 * 1024  # 3 MB
+
+
+@router.post("/{user_id}/photo")
+async def upload_employee_photo(
+    user_id: str,
+    file: UploadFile = File(...),
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Upload/replace an employee's photo — shown as a thumbnail in Employee
+    List and in the detail popup."""
+    target = await db.scalar(select(Employee).where(Employee.user_id == user_id))
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Employee {user_id} not found")
+
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    content = await file.read()
+    if len(content) > _PHOTO_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Photo must be 3 MB or smaller")
+
+    ext = os.path.splitext(file.filename or "")[1] or ".jpg"
+    stored_name = f"{user_id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}{ext}"
+
+    old_path = os.path.join(_PHOTO_UPLOAD_DIR, target.photo_filename) if target.photo_filename else None
+    with open(os.path.join(_PHOTO_UPLOAD_DIR, stored_name), "wb") as f:
+        f.write(content)
+    if old_path and os.path.exists(old_path):
+        os.remove(old_path)
+
+    target.photo_filename = stored_name
+    await db.flush()
+    return {"success": True, "photo_filename": stored_name}
+
+
+@router.get("/{user_id}/photo")
+async def get_employee_photo(
+    user_id: str,
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Stream an employee's photo, if one has been uploaded."""
+    target = await db.scalar(select(Employee).where(Employee.user_id == user_id))
+    if not target or not target.photo_filename:
+        raise HTTPException(status_code=404, detail="No photo on file")
+    path = os.path.join(_PHOTO_UPLOAD_DIR, target.photo_filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Photo file missing on server")
+    with open(path, "rb") as f:
+        content = f.read()
+    ext = os.path.splitext(target.photo_filename)[1].lower()
+    media_type = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif", "webp": "image/webp"}.get(ext.lstrip("."), "application/octet-stream")
+    return StreamingResponse(io.BytesIO(content), media_type=media_type)
+
+
+@router.delete("/{user_id}/photo")
+async def delete_employee_photo(
+    user_id: str,
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Remove an employee's photo."""
+    target = await db.scalar(select(Employee).where(Employee.user_id == user_id))
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Employee {user_id} not found")
+    if target.photo_filename:
+        path = os.path.join(_PHOTO_UPLOAD_DIR, target.photo_filename)
+        if os.path.exists(path):
+            os.remove(path)
+        target.photo_filename = None
+        await db.flush()
+    return {"success": True}
+
+
+_HISTORY_TRACKED_FIELDS = [
+    "department", "division", "team", "job_title", "level",
+    "supervisor_id", "status", "employment_status", "work_placement",
+]
+
+
+@router.get("/{user_id}/history")
+async def get_employee_history(
+    user_id: str,
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Field-level change history for one employee (department/team/position/
+    supervisor/status movements), most recent first."""
+    result = await db.execute(
+        select(EmployeeHistory)
+        .where(EmployeeHistory.user_id == user_id)
+        .order_by(EmployeeHistory.changed_at.desc())
+    )
+    rows = result.scalars().all()
+    return [
+        {
+            "id":         r.id,
+            "field":      r.field,
+            "old_value":  r.old_value,
+            "new_value":  r.new_value,
+            "changed_by": r.changed_by,
+            "changed_at": r.changed_at.isoformat() if r.changed_at else None,
+        }
+        for r in rows
+    ]
 
 
 @router.get("/org-chart")

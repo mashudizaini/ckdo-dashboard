@@ -15,7 +15,7 @@ import { SortableTH, toggleSort, sortRows } from "@/components/SortableTH";
 
 const API = "/api/v1/dashboard/hr/employees";
 
-export default function EmployeeUpload() {
+export default function EmployeeUpload({ onUploaded } = {}) {
   const [file,        setFile]        = useState(null);
   const [dragging,    setDragging]    = useState(false);
   const [notes,       setNotes]       = useState("");
@@ -80,6 +80,7 @@ export default function EmployeeUpload() {
       setFile(null); setNotes("");
       if (inputRef.current) inputRef.current.value = "";
       await loadLogs();
+      onUploaded?.();
     } catch (e) {
       setError(e.message);
     } finally {

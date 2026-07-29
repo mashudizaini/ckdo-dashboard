@@ -67,6 +67,13 @@ export const hrApi = {
   updateTodoTask:  (id, d) => api.put(`/dashboard/hr/todo/tasks/${id}`, d),
   deleteTodoTask:  (id)    => api.delete(`/dashboard/hr/todo/tasks/${id}`),
   getEmployeeNames: ()     => api.get("/dashboard/hr/employees/names"),
+  uploadEmployeePhoto: (userId, file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return api.post(`/dashboard/hr/employees/${userId}/photo`, fd, { headers: { "Content-Type": undefined } });
+  },
+  deleteEmployeePhoto: (userId) => api.delete(`/dashboard/hr/employees/${userId}/photo`),
+  getEmployeeHistory: (userId) => api.get(`/dashboard/hr/employees/${userId}/history`),
   getOrgChart:     ()      => api.get("/dashboard/hr/employees/org-chart"),
   setSupervisor:   (userId, supervisorId) => api.patch(`/dashboard/hr/employees/${userId}/supervisor`, { supervisor_id: supervisorId }),
   getCvJobs:       ()       => api.get("/dashboard/hr/cv-screening/jobs"),

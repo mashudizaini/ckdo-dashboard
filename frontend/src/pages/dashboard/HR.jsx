@@ -6,6 +6,7 @@ import {
   Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck,
   Wallet, Download, ChevronDown, ChevronUp, ListChecks, FileSearch, BookOpen, Trash2,
   QrCode, Plus, Minus, ArrowUpDown, Pencil, ZoomIn, ZoomOut, Maximize2, Minimize2, Network,
+  SlidersHorizontal, User, Camera, History,
 } from "lucide-react";
 import EmployeeUpload from "./EmployeeUpload";
 import AttendanceUpload from "./AttendanceUpload";
@@ -79,6 +80,43 @@ function SubTabs({ tabs, active, onChange }) {
   );
 }
 
+// ── Authenticated employee photo thumbnail (photo endpoint is role-gated, so
+// plain <img src> won't carry the bearer token — fetch as a blob instead) ──
+function EmployeePhotoThumb({ userId, hasPhoto, size = 32 }) {
+  const { token } = useAuthStore();
+  const [src, setSrc] = useState(null);
+
+  useEffect(() => {
+    if (!hasPhoto || !userId) { setSrc(null); return; }
+    let cancelled = false;
+    let objUrl = null;
+    (async () => {
+      try {
+        const res = await fetch(`${API}/${userId}/photo`, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) {
+          const blob = await res.blob();
+          objUrl = URL.createObjectURL(blob);
+          if (!cancelled) setSrc(objUrl);
+        }
+      } catch (_) {}
+    })();
+    return () => { cancelled = true; if (objUrl) URL.revokeObjectURL(objUrl); };
+  }, [userId, hasPhoto, token]);
+
+  return (
+    <div
+      style={{
+        width: size, height: size, borderRadius: "50%", overflow: "hidden", flexShrink: 0,
+        background: "#334155", display: "flex", alignItems: "center", justifyContent: "center",
+      }}
+    >
+      {src
+        ? <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        : <User size={Math.round(size * 0.55)} className="text-gray-500" />}
+    </div>
+  );
+}
+
 const HR_TABS = ["employees", "attendance", "todo", "cv", "budget", "emagazine"];
 
 export default function HRDashboard() {
@@ -107,7 +145,6 @@ export default function HRDashboard() {
               { id: "graph",    label: "Employee Graph" },
               { id: "orgchart", label: "Organization Chart" },
               { id: "turnover", label: "Turnover Report" },
-              { id: "upload",   label: "Upload Excel" },
             ]}
             active={empSub} onChange={setEmpSub}
           />
@@ -116,7 +153,6 @@ export default function HRDashboard() {
           {empSub === "graph"    && <EmployeeGraphSection />}
           {empSub === "orgchart" && <OrganizationChartSection />}
           {empSub === "turnover" && <TurnoverSection />}
-          {empSub === "upload"   && <EmployeeUpload />}
         </SectionCard>
       )}
 
@@ -165,7 +201,7 @@ function EmployeeTable() {
   const [search,     setSearch]     = useState("");
   const [deptFilter, setDeptFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [employmentStatusFilter, setEmploymentStatusFilter] = useState("");
+  const [employmentStatusFilter, setEmploymentStatusFilter] = useState("Active");
   const [joinMonthFilter, setJoinMonthFilter] = useState(() => String(new Date().getMonth() + 1));
   const [joinYearFilter, setJoinYearFilter] = useState(() => String(new Date().getFullYear()));
   const [teamFilter, setTeamFilter] = useState("");
@@ -176,6 +212,8 @@ function EmployeeTable() {
   const [sortBy,     setSortBy]     = useState("full_name");
   const [sortDir,    setSortDir]    = useState("asc");
   const [showExportPicker, setShowExportPicker] = useState(false);
+  const [showFiltersPanel, setShowFiltersPanel] = useState(false);
+  const [showUploadPanel, setShowUploadPanel] = useState(false);
   const [exportFields, setExportFields] = useState(() => Object.fromEntries(EMPLOYEE_COLS.map(c => [c.key, true])));
   const [exporting, setExporting] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
@@ -207,13 +245,18 @@ function EmployeeTable() {
   const fetchSummary = useCallback(async () => {
     try {
       const params = new URLSearchParams({
+        ...(search       ? { search }                : {}),
+        ...(deptFilter   ? { department: deptFilter } : {}),
+        ...(statusFilter ? { status: statusFilter }   : {}),
+        ...(employmentStatusFilter ? { employment_status: employmentStatusFilter } : {}),
         ...(joinMonthFilter ? { join_month: joinMonthFilter } : {}),
         ...(joinYearFilter  ? { join_year: joinYearFilter }   : {}),
+        ...(teamFilter   ? { team: teamFilter }        : {}),
       });
       const res = await fetch(`${API}/summary?${params}`, { headers });
       if (res.ok) setSummary(await res.json());
     } catch (_) {}
-  }, [joinMonthFilter, joinYearFilter]); // eslint-disable-line
+  }, [search, deptFilter, statusFilter, employmentStatusFilter, joinMonthFilter, joinYearFilter, teamFilter]); // eslint-disable-line
 
   const fetchJoinYears = useCallback(async () => {
     try {
@@ -248,7 +291,7 @@ function EmployeeTable() {
   useEffect(() => { fetchSummary(); }, [fetchSummary]);
   useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
 
-  const [activeCard, setActiveCard] = useState("");
+  const [activeCard, setActiveCard] = useState("active");
 
   const handleSearch   = (v) => { setSearch(v);       setPage(1); };
   const handleDept     = (v) => { setDeptFilter(v);   setTeamFilter(""); fetchTeams(v); setPage(1); };
@@ -348,17 +391,17 @@ function EmployeeTable() {
         </div>
       )}
 
-      {/* Filter bar */}
+      {/* Toolbar — search + Filters popup + actions */}
       <div className="flex flex-wrap items-end gap-2">
-        <div className="relative flex-1 min-w-[180px]">
-          <label className="mb-1 block text-[10px] font-medium text-gray-500">Search</label>
-          <Search size={13} className="absolute left-2.5 top-[29px] text-gray-500" />
+        <div className="relative flex-1 min-w-[220px]">
+          <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Search</label>
+          <Search size={13} className="absolute left-2.5 top-[30px] text-gray-500" />
           <input
             type="text"
             placeholder="Search name / NIK / position..."
             value={search}
             onChange={(e) => handleSearch(e.target.value)}
-            className="w-full rounded-lg border border-gray-700 bg-gray-900 pl-8 pr-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500 transition-colors"
+            className="w-full rounded-lg border border-gray-700 bg-gray-900 pl-8 pr-3 py-2 text-xs text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500 transition-colors"
           />
           {search && (
             <button onClick={() => handleSearch("")} className="absolute right-2 top-[30px] text-gray-600 hover:text-gray-400">
@@ -367,95 +410,120 @@ function EmployeeTable() {
           )}
         </div>
 
-        <div>
-          <label className="mb-1 block text-[10px] font-medium text-gray-500">Department</label>
-          <select
-            value={deptFilter}
-            onChange={(e) => handleDept(e.target.value)}
-            className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+        <div className="relative">
+          <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">&nbsp;</label>
+          <button
+            onClick={() => setShowFiltersPanel(v => !v)}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-semibold text-gray-300 hover:border-indigo-500 hover:text-white transition-colors"
           >
-            <option value="">All</option>
-            {departments.map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
-        </div>
+            <SlidersHorizontal size={13} /> Filters
+          </button>
+          {showFiltersPanel && (
+            <>
+              <div onClick={() => setShowFiltersPanel(false)} className="fixed inset-0 z-20" />
+              <div className="absolute left-0 top-full mt-2 z-30 w-[560px] rounded-xl border border-gray-700 bg-gray-900 shadow-2xl p-4">
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Department</label>
+                    <select
+                      value={deptFilter}
+                      onChange={(e) => handleDept(e.target.value)}
+                      className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="">All</option>
+                      {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
 
-        <div>
-          <label className="mb-1 block text-[10px] font-medium text-gray-500">Status</label>
-          <select
-            value={statusFilter}
-            onChange={(e) => handleStatus(e.target.value)}
-            className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
-          >
-            <option value="">All</option>
-            <option value="Permanent">Permanent</option>
-            <option value="Contract">Contract</option>
-            <option value="Probation">Probation</option>
-          </select>
-        </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Team</label>
+                    <select
+                      value={teamFilter}
+                      onChange={(e) => handleTeam(e.target.value)}
+                      className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="">All</option>
+                      {teams.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
 
-        <div>
-          <label className="mb-1 block text-[10px] font-medium text-gray-500">Employment State</label>
-          <select
-            value={employmentStatusFilter}
-            onChange={(e) => { setEmploymentStatusFilter(e.target.value); setActiveCard(""); setPage(1); }}
-            className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
-          >
-            <option value="">All</option>
-            <option value="Active">ACTIVE</option>
-            <option value="Resign">INACTIVE</option>
-          </select>
-        </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Status</label>
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => handleStatus(e.target.value)}
+                      className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="">All</option>
+                      <option value="Permanent">Permanent</option>
+                      <option value="Contract">Contract</option>
+                      <option value="Probation">Probation</option>
+                    </select>
+                  </div>
 
-        <div>
-          <label className="mb-1 block text-[10px] font-medium text-gray-500" title="Shows employees who joined on or before the selected Month/Year">
-            Joined up to (Month)
-          </label>
-          <select
-            value={joinMonthFilter}
-            onChange={(e) => { setJoinMonthFilter(e.target.value); setPage(1); }}
-            className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
-          >
-            <option value="">All</option>
-            {MONTHS_ID.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-          </select>
-        </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Employment State</label>
+                    <select
+                      value={employmentStatusFilter}
+                      onChange={(e) => { setEmploymentStatusFilter(e.target.value); setActiveCard(""); setPage(1); }}
+                      className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="">All</option>
+                      <option value="Active">Active</option>
+                      <option value="Resign">Inactive</option>
+                    </select>
+                  </div>
 
-        <div>
-          <label className="mb-1 block text-[10px] font-medium text-gray-500" title="Shows employees who joined on or before the selected Month/Year">
-            Joined up to (Year)
-          </label>
-          <select
-            value={joinYearFilter}
-            onChange={(e) => { setJoinYearFilter(e.target.value); setPage(1); }}
-            className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
-          >
-            <option value="">All</option>
-            {joinYears.map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
-        </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide" title="Shows employees who joined on or before the selected Month/Year">
+                      Joined up to (Month)
+                    </label>
+                    <select
+                      value={joinMonthFilter}
+                      onChange={(e) => { setJoinMonthFilter(e.target.value); setPage(1); }}
+                      className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="">All</option>
+                      {MONTHS_ID.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                    </select>
+                  </div>
 
-        <div>
-          <label className="mb-1 block text-[10px] font-medium text-gray-500">Team</label>
-          <select
-            value={teamFilter}
-            onChange={(e) => handleTeam(e.target.value)}
-            className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
-          >
-            <option value="">All</option>
-            {teams.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide" title="Shows employees who joined on or before the selected Month/Year">
+                      Joined up to (Year)
+                    </label>
+                    <select
+                      value={joinYearFilter}
+                      onChange={(e) => { setJoinYearFilter(e.target.value); setPage(1); }}
+                      className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="">All</option>
+                      {joinYears.map((y) => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <button
           onClick={() => setAddingEmployee(true)}
-          className="flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-2 text-sm font-semibold text-white transition-colors"
+          className="flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-2 text-xs font-semibold text-white transition-colors"
         >
           <Plus size={14} /> Add Employee
         </button>
 
         <button
-          onClick={() => fetchEmployees()}
-          className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-400 hover:border-gray-600 hover:text-gray-200 transition-colors"
+          onClick={() => setShowUploadPanel(v => !v)}
+          className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-semibold text-gray-300 hover:border-indigo-500 hover:text-white transition-colors"
+        >
+          <Upload size={13} /> {showUploadPanel ? "Hide Upload Employee" : "Upload Employee"}
+        </button>
+
+        <button
+          onClick={() => { fetchEmployees(); fetchSummary(); }}
+          className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-semibold text-gray-400 hover:border-gray-600 hover:text-gray-200 transition-colors"
         >
           <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Refresh
         </button>
@@ -463,7 +531,7 @@ function EmployeeTable() {
         <div className="relative">
           <button
             onClick={() => setShowExportPicker(v => !v)}
-            className="flex items-center gap-1.5 rounded-lg border border-emerald-700/50 bg-emerald-900/20 px-3 py-2 text-sm text-emerald-400 hover:border-emerald-600 hover:bg-emerald-900/30 transition-colors"
+            className="flex items-center gap-1.5 rounded-lg border border-emerald-700/50 bg-emerald-900/20 px-3 py-2 text-xs font-semibold text-emerald-400 hover:border-emerald-600 hover:bg-emerald-900/30 transition-colors"
           >
             <Download size={13} /> Download Excel
           </button>
@@ -501,6 +569,13 @@ function EmployeeTable() {
         </div>
       </div>
 
+      {/* Upload Employee — moved here from the old standalone "Upload Excel" tab */}
+      {showUploadPanel && (
+        <div className="rounded-xl border border-gray-800 bg-gray-900 p-4">
+          <EmployeeUpload onUploaded={() => { fetchEmployees(); fetchSummary(); fetchDepts(); fetchTeams(deptFilter); fetchJoinYears(); fetchEmployeeNames(); }} />
+        </div>
+      )}
+
       {/* Tabel — every field on the Employee record gets its own column */}
       {(() => {
         const fmtDate = (v) => v
@@ -514,6 +589,8 @@ function EmployeeTable() {
         );
 
         const COLS = [
+          { label: "Photo",            field: "__photo",           align: "center", noSort: true,
+            render: (e) => <EmployeePhotoThumb userId={e.user_id} hasPhoto={e.has_photo} size={28} /> },
           { label: "NIK",              field: "user_id",          mono: true, bold: true },
           { label: "Name",             field: "full_name",        bold: true },
           { label: "Gender",           field: "sex",               align: "center",
@@ -567,23 +644,25 @@ function EmployeeTable() {
             <table className="w-full text-sm" style={{ minWidth: 4200 }}>
               <thead className="sticky top-0 z-10">
                 <tr className="bg-gray-800">
-                  {COLS.map(({ label, field }) => {
-                    const active = sortBy === field;
+                  {COLS.map(({ label, field, noSort }) => {
+                    const active = !noSort && sortBy === field;
                     return (
                       <th
                         key={field}
-                        onClick={() => handleSort(field)}
-                        className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer select-none group"
+                        onClick={() => !noSort && handleSort(field)}
+                        className={`px-3 py-2.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap select-none group ${noSort ? "" : "cursor-pointer"}`}
                         style={{ color: active ? "#a5b4fc" : "#6b7280", textAlign: "center" }}
                       >
-                        <span className="inline-flex items-center gap-1 justify-center">
-                          {label}
-                          <span className={`transition-opacity ${active ? "opacity-100" : "opacity-0 group-hover:opacity-50"}`}>
-                            {active
-                              ? (sortDir === "asc" ? <ChevronUp size={11} className="text-indigo-400" /> : <ChevronDown size={11} className="text-indigo-400" />)
-                              : <ArrowUpDown size={10} />}
+                        {noSort ? label : (
+                          <span className="inline-flex items-center gap-1 justify-center">
+                            {label}
+                            <span className={`transition-opacity ${active ? "opacity-100" : "opacity-0 group-hover:opacity-50"}`}>
+                              {active
+                                ? (sortDir === "asc" ? <ChevronUp size={11} className="text-indigo-400" /> : <ChevronDown size={11} className="text-indigo-400" />)
+                                : <ArrowUpDown size={10} />}
+                            </span>
                           </span>
-                        </span>
+                        )}
                       </th>
                     );
                   })}
@@ -743,8 +822,58 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
   const [supervisorQuery, setSupervisorQuery] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [hasPhoto, setHasPhoto] = useState(!!employee?.has_photo);
+  const [photoVersion, setPhotoVersion] = useState(0);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const photoInputRef = useRef(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const setField = (key, val) => setForm((f) => ({ ...f, [key]: val }));
+
+  const handlePhotoSelect = async (file) => {
+    if (!file || isNew) return;
+    setUploadingPhoto(true);
+    try {
+      await hrApi.uploadEmployeePhoto(employee.user_id, file);
+      setHasPhoto(true);
+      setPhotoVersion((v) => v + 1);
+    } catch (_) {
+    } finally {
+      setUploadingPhoto(false);
+      if (photoInputRef.current) photoInputRef.current.value = "";
+    }
+  };
+
+  const handlePhotoRemove = async () => {
+    if (isNew) return;
+    setUploadingPhoto(true);
+    try {
+      await hrApi.deleteEmployeePhoto(employee.user_id);
+      setHasPhoto(false);
+      setPhotoVersion((v) => v + 1);
+    } catch (_) {
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const loadHistory = async () => {
+    if (isNew) return;
+    setLoadingHistory(true);
+    try { setHistory((await hrApi.getEmployeeHistory(employee.user_id)) || []); }
+    catch (_) {}
+    finally { setLoadingHistory(false); }
+  };
+
+  const toggleHistory = () => {
+    setShowHistory((v) => {
+      const next = !v;
+      if (next) loadHistory();
+      return next;
+    });
+  };
 
   const supervisorName = employeeNames.find(n => n.user_id === form.supervisor_id)?.full_name;
 
@@ -785,13 +914,38 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
           className="sticky top-0 z-10 flex items-center justify-between px-6 py-4"
           style={{ background: "linear-gradient(135deg, #2563eb, #3b82f6)", borderRadius: "16px 16px 0 0" }}
         >
-          <div>
-            <h3 style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>{isNew ? "Add Employee" : (form.full_name || "—")}</h3>
+          <div className="flex items-center gap-3">
             {!isNew && (
-              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.85)", fontWeight: 600, marginTop: 2 }}>
-                {employee.user_id} · {form.job_title || "—"}
-              </p>
+              <div className="relative" style={{ flexShrink: 0 }}>
+                <EmployeePhotoThumb key={photoVersion} userId={employee.user_id} hasPhoto={hasPhoto} size={52} />
+                <button
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={uploadingPhoto}
+                  title="Change photo"
+                  style={{
+                    position: "absolute", bottom: -2, right: -2, padding: 4, borderRadius: "50%",
+                    border: "2px solid #2563eb", background: "#fff", color: "#2563eb", cursor: "pointer", lineHeight: 0,
+                  }}
+                >
+                  {uploadingPhoto ? <Loader2 size={11} className="animate-spin" /> : <Camera size={11} />}
+                </button>
+                <input ref={photoInputRef} type="file" accept="image/*" className="hidden"
+                  onChange={(e) => handlePhotoSelect(e.target.files[0])} />
+              </div>
             )}
+            <div>
+              <h3 style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>{isNew ? "Add Employee" : (form.full_name || "—")}</h3>
+              {!isNew && (
+                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.85)", fontWeight: 600, marginTop: 2, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span>{employee.user_id} · {form.job_title || "—"}</span>
+                  {hasPhoto && (
+                    <button onClick={handlePhotoRemove} style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.75)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>
+                      Remove photo
+                    </button>
+                  )}
+                </p>
+              )}
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -912,6 +1066,61 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
               </div>
             </div>
           ))}
+
+          {!isNew && (
+            <div style={{ borderRadius: 10, background: "#e8edf5", boxShadow: "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff", overflow: "hidden" }}>
+              <button
+                onClick={toggleHistory}
+                style={{
+                  width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "10px 14px", border: "none", background: "transparent", cursor: "pointer",
+                }}
+              >
+                <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 800, color: "#2563eb", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  <History size={13} /> Movement History
+                </span>
+                {showHistory ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />}
+              </button>
+              {showHistory && (
+                <div style={{ padding: "0 14px 14px" }}>
+                  {loadingHistory ? (
+                    <div className="flex justify-center py-4"><Loader2 size={15} className="animate-spin text-gray-400" /></div>
+                  ) : history.length === 0 ? (
+                    <p style={{ fontSize: 11.5, color: "#94a3b8", padding: "6px 0" }}>No recorded changes yet</p>
+                  ) : (
+                    <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                      <table className="w-full" style={{ fontSize: 11.5 }}>
+                        <thead>
+                          <tr style={{ textAlign: "left", color: "#94a3b8", fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                            <th style={{ padding: "4px 6px" }}>When</th>
+                            <th style={{ padding: "4px 6px" }}>Field</th>
+                            <th style={{ padding: "4px 6px" }}>From</th>
+                            <th style={{ padding: "4px 6px" }}>To</th>
+                            <th style={{ padding: "4px 6px" }}>By</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {history.map((h) => (
+                            <tr key={h.id} style={{ borderTop: "1px solid rgba(148,163,184,0.25)" }}>
+                              <td style={{ padding: "5px 6px", color: "#64748b", whiteSpace: "nowrap" }}>
+                                {h.changed_at ? new Date(h.changed_at).toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                              </td>
+                              <td style={{ padding: "5px 6px", color: "#334155", fontWeight: 700, textTransform: "capitalize" }}>
+                                {(h.field || "").replace(/_/g, " ")}
+                              </td>
+                              <td style={{ padding: "5px 6px", color: "#dc2626" }}>{h.old_value || "—"}</td>
+                              <td style={{ padding: "5px 6px", color: "#16a34a", fontWeight: 600 }}>{h.new_value || "—"}</td>
+                              <td style={{ padding: "5px 6px", color: "#64748b" }}>{h.changed_by || "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="flex items-center justify-end gap-3 pt-2">
             {saveError && <span style={{ fontSize: 11.5, color: "#dc2626", fontWeight: 600 }}>{saveError}</span>}
