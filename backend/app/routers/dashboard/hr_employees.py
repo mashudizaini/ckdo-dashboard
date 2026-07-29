@@ -680,10 +680,21 @@ def _apply_employee_filters(
             Employee.job_title.ilike(term)
         )
     if department:
-        # Case-insensitive — the source Excel has case duplicates for the
-        # same department ("Plant" / "PLANT"); an exact match would silently
-        # miss half of them.
-        q = q.where(func.upper(Employee.department) == department.upper())
+        if department in DEPT_GROUPS:
+            # One of the 4 canonical Employee Summary groups (e.g. drilling
+            # down from the summary view) — match every raw department value
+            # that rolls up into this group, not just an exact string match.
+            # Needed both for case-duplicates ("Plant"/"PLANT") and for
+            # misfiled raw values ("Director", "Validation", ...) that group
+            # display labels don't literally match (e.g. "Strategy &
+            # Development" vs the raw "Strategy Development").
+            raw_uppers = [k for k, v in _DEPT_GROUP_MAP.items() if v == department]
+            q = q.where(func.upper(Employee.department).in_(raw_uppers))
+        else:
+            # Case-insensitive — the source Excel has case duplicates for the
+            # same department ("Plant" / "PLANT"); an exact match would
+            # silently miss half of them.
+            q = q.where(func.upper(Employee.department) == department.upper())
     if division:
         q = q.where(Employee.division == division)
     if sex:
@@ -1222,6 +1233,39 @@ def _normalize_dept(raw: Optional[str]) -> str:
     return raw.strip()
 
 
+# The business tracks headcount by exactly 4 top-level departments. The raw
+# Employee.department column has case-duplicates ("Plant" / "PLANT") plus a
+# handful of misfiled values that are really sub-functions of one of the 4 —
+# confirmed empirically by cross-checking job_title/team for each (query run
+# 2026-07-29): "Director" (President Director / Plant Director) -> the
+# corporate/admin function; "Mkt & BD" (Product Executive) -> Sales &
+# Marketing; "RA & BD" (Business Development / Regulatory Affairs Manager,
+# Supervisor, Staff) -> matches Strategy & Development's existing
+# Business Development / Regulatory Affairs teams; "Validation" (Validation
+# Supervisor) -> matches Plant > Quality Management > Validation team.
+DEPT_GROUPS = ["Administration", "Sales & Marketing", "Strategy & Development", "Plant"]
+
+_DEPT_GROUP_MAP = {
+    "ADMINISTRATION":        "Administration",
+    "DIRECTOR":              "Administration",
+    "SALES & MARKETING":     "Sales & Marketing",
+    "MKT & BD":              "Sales & Marketing",
+    "STRATEGY DEVELOPMENT":  "Strategy & Development",
+    "RA & BD":               "Strategy & Development",
+    "PLANT":                 "Plant",
+    "VALIDATION":            "Plant",
+}
+
+
+def _group_department(raw: Optional[str]) -> Optional[str]:
+    """Raw Employee.department value -> one of the 4 canonical DEPT_GROUPS,
+    or None to exclude (blank/numeric-corrupted rows — same exclusion
+    _normalize_dept already applied)."""
+    if not raw or raw.strip().isdigit():
+        return None
+    return _DEPT_GROUP_MAP.get(raw.strip().upper())
+
+
 def _dept_display_labels(raw_values) -> dict:
     """UPPER(dept) -> best display label — prefers a mixed-case variant
     ("Plant") over an all-caps one ("PLANT") when both exist."""
@@ -1240,37 +1284,38 @@ async def get_summary_by_year(
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Headcount by department, Beginning/Ending per year — same "active as of
-    a date" windowing used by /turnover-summary and /monthly-summary."""
+    """Headcount by department (grouped into the 4 canonical DEPT_GROUPS),
+    Beginning/Ending per year — same "active as of a date" windowing used
+    by /turnover-summary and /monthly-summary."""
     rows_q = await db.execute(
         select(Employee.department, Employee.date_of_joining, Employee.resign_date)
         .where(Employee.date_of_joining.isnot(None))
     )
-    emps = [(_normalize_dept(d), j, r) for d, j, r in rows_q.fetchall()]
+    emps = [(_group_department(d), j, r) for d, j, r in rows_q.fetchall()]
+    emps = [(d, j, r) for d, j, r in emps if d is not None]
 
     today = date.today()
     year_from = min((j.year for _d, j, _r in emps), default=today.year)
     years = list(range(year_from, today.year + 1))
 
-    dept_keys = _dept_display_labels({d for d, _j, _r in emps if d != "—"})
-    departments = sorted(dept_keys.values())
+    departments = DEPT_GROUPS
 
     def active_count(snapshot, dept_filter=None):
         return sum(
             1 for d, j, r in emps
             if j <= snapshot and (r is None or r >= snapshot)
-            and (dept_filter is None or d.upper() == dept_filter)
+            and (dept_filter is None or d == dept_filter)
         )
 
     rows = []
-    for dept_upper, label in sorted(dept_keys.items(), key=lambda kv: kv[1]):
+    for label in DEPT_GROUPS:
         by_year = {}
         for y in years:
             beg_snapshot = date(y, 1, 1)
             end_snapshot = min(date(y, 12, 31), today)
             by_year[y] = {
-                "beginning": active_count(beg_snapshot, dept_upper),
-                "ending":    active_count(end_snapshot, dept_upper),
+                "beginning": active_count(beg_snapshot, label),
+                "ending":    active_count(end_snapshot, label),
             }
         rows.append({"department": label, "by_year": by_year})
 
@@ -1293,12 +1338,13 @@ async def get_summary_by_month(
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Headcount by department > division > team, end-of-month snapshot for
-    each month of the given year (default: current year). Division is only
-    populated for some departments (currently just Plant) — departments
-    without it go straight from department to team rows. Department/
-    division/team are each employee's *current* value — the Employee table
-    isn't historized — same caveat as /monthly-summary."""
+    """Headcount by department (grouped into the 4 canonical DEPT_GROUPS) >
+    division > team, end-of-month snapshot for each month of the given year
+    (default: current year). Division is only populated for some departments
+    (currently just Plant) — departments without it go straight from
+    department to team rows. Department/division/team are each employee's
+    *current* value — the Employee table isn't historized — same caveat as
+    /monthly-summary."""
     target_year = year or date.today().year
     rows_q = await db.execute(
         select(Employee.department, Employee.division, Employee.team,
@@ -1306,19 +1352,19 @@ async def get_summary_by_month(
         .where(Employee.date_of_joining.isnot(None))
     )
     emps = [
-        (_normalize_dept(d), (v or "").strip() or None, (t or "").strip() or None, j, r)
+        (_group_department(d), (v or "").strip() or None, (t or "").strip() or None, j, r)
         for d, v, t, j, r in rows_q.fetchall()
     ]
+    emps = [(d, v, t, j, r) for d, v, t, j, r in emps if d is not None]
 
     today = date.today()
     months = list(range(1, 13))
-    dept_keys = _dept_display_labels({d for d, _v, _t, _j, _r in emps if d != "—"})
 
     def active_count(snapshot, dept_filter=None, division_filter=None, team_filter=None):
         return sum(
             1 for d, v, t, j, r in emps
             if j <= snapshot and (r is None or r >= snapshot)
-            and (dept_filter is None or d.upper() == dept_filter)
+            and (dept_filter is None or d == dept_filter)
             and (division_filter is None or v == division_filter)
             and (team_filter is None or t == team_filter)
         )
@@ -1330,31 +1376,31 @@ async def get_summary_by_month(
         return {m: active_count(snapshot_for(m), dept_filter, division_filter, team_filter) for m in months}
 
     rows = []
-    for dept_upper, label in sorted(dept_keys.items(), key=lambda kv: kv[1]):
-        rows.append({"department": label, "division": None, "team": None, "by_month": by_month_for(dept_upper)})
+    for label in DEPT_GROUPS:
+        rows.append({"department": label, "division": None, "team": None, "by_month": by_month_for(label)})
 
-        divisions_in_dept = sorted({v for d, v, _t, _j, _r in emps if d.upper() == dept_upper and v})
-        teams_direct = sorted({t for d, v, t, _j, _r in emps if d.upper() == dept_upper and not v and t})
+        divisions_in_dept = sorted({v for d, v, _t, _j, _r in emps if d == label and v})
+        teams_direct = sorted({t for d, v, t, _j, _r in emps if d == label and not v and t})
 
         for division in divisions_in_dept:
             rows.append({
                 "department": label, "division": division, "team": None,
-                "by_month": by_month_for(dept_upper, division),
+                "by_month": by_month_for(label, division),
             })
             teams_in_division = sorted({
                 t for d, v, t, _j, _r in emps
-                if d.upper() == dept_upper and v == division and t
+                if d == label and v == division and t
             })
             for team in teams_in_division:
                 rows.append({
                     "department": label, "division": division, "team": team,
-                    "by_month": by_month_for(dept_upper, division, team),
+                    "by_month": by_month_for(label, division, team),
                 })
 
         for team in teams_direct:
             rows.append({
                 "department": label, "division": None, "team": team,
-                "by_month": by_month_for(dept_upper, None, team),
+                "by_month": by_month_for(label, None, team),
             })
 
     total = by_month_for()

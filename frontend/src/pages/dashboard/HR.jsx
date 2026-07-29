@@ -5,7 +5,7 @@ import {
   UserCheck, RefreshCw,
   Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck,
   Wallet, Download, ChevronDown, ChevronUp, ListChecks, FileSearch, BookOpen, Trash2,
-  QrCode, Plus, ArrowUpDown, Pencil, ZoomIn, ZoomOut, Maximize2, Minimize2, Network,
+  QrCode, Plus, Minus, ArrowUpDown, Pencil, ZoomIn, ZoomOut, Maximize2, Minimize2, Network,
 } from "lucide-react";
 import EmployeeUpload from "./EmployeeUpload";
 import AttendanceUpload from "./AttendanceUpload";
@@ -1774,22 +1774,57 @@ const SUMMARY_COLS = [
 ];
 
 function EmployeeSummarySection() {
+  const [drillYear, setDrillYear] = useState(null); // null = Yearly Summary; a year = Monthly Summary for that year
+  const [listModal, setListModal] = useState(null); // drill-down filter payload, or null
+
+  return (
+    <div className="space-y-4 mt-2">
+      {drillYear == null ? (
+        <EmployeeYearSummaryTable onYearClick={setDrillYear} />
+      ) : (
+        <div className="space-y-3">
+          <button
+            onClick={() => setDrillYear(null)}
+            className="flex items-center gap-1 text-xs font-medium text-indigo-400 hover:text-indigo-300"
+          >
+            <ChevronLeft size={13} /> Back to Yearly Summary
+          </button>
+          <EmployeeMonthSummaryTable
+            year={drillYear}
+            onDrillDown={(department, division, team, month, year) =>
+              setListModal({ department, division, team, month, year })
+            }
+          />
+        </div>
+      )}
+
+      {listModal && (
+        <EmployeeListModal initialFilters={listModal} onClose={() => setListModal(null)} />
+      )}
+    </div>
+  );
+}
+
+// ── Employee List — opened as a modal from a Summary per Month drill-down
+// click, filtered to exactly the employees behind that number ("active as
+// of" that month, same windowing the summary cell was computed with) ──────
+function EmployeeListModal({ initialFilters, onClose }) {
   const { token } = useAuthStore();
   const headers = { Authorization: `Bearer ${token}` };
 
   const [data, setData] = useState({ employees: [], total: 0, pages: 1 });
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
-  const [deptFilter, setDeptFilter] = useState("");
-  const [divisionFilter, setDivisionFilter] = useState("");
+  const [deptFilter, setDeptFilter] = useState(initialFilters?.department || "");
+  const [divisionFilter, setDivisionFilter] = useState(initialFilters?.division || "");
   const [educationFilter, setEducationFilter] = useState("");
   const [levelFilter, setLevelFilter] = useState("");
-  const [teamFilter, setTeamFilter] = useState("");
+  const [teamFilter, setTeamFilter] = useState(initialFilters?.team || "");
   const [employmentStatusFilter, setEmploymentStatusFilter] = useState("");
   const [maritalFilter, setMaritalFilter] = useState("");
   const [sexFilter, setSexFilter] = useState("");
-  const [asOfMonth, setAsOfMonth] = useState(() => String(new Date().getMonth() + 1));
-  const [asOfYear, setAsOfYear] = useState(() => String(new Date().getFullYear()));
+  const [asOfMonth, setAsOfMonth] = useState(() => String(initialFilters?.month || new Date().getMonth() + 1));
+  const [asOfYear, setAsOfYear] = useState(() => String(initialFilters?.year || new Date().getFullYear()));
   const [departments, setDepartments] = useState([]);
   const [educations, setEducations] = useState([]);
   const [levels, setLevels] = useState([]);
@@ -1801,7 +1836,6 @@ function EmployeeSummarySection() {
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [employeeNames, setEmployeeNames] = useState([]);
   const [exporting, setExporting] = useState(false);
-  const [viewMode, setViewMode] = useState("list"); // "list" | "year" | "month"
 
   const PAGE_SIZE = 8;
 
@@ -1878,24 +1912,11 @@ function EmployeeSummarySection() {
     }
   };
 
-  useEffect(() => { fetchLov(); fetchEmployeeNames(); }, [fetchLov, fetchEmployeeNames]);
+  useEffect(() => {
+    fetchLov(); fetchEmployeeNames();
+    if (initialFilters?.department) fetchTeams(initialFilters.department);
+  }, []); // eslint-disable-line
   useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
-
-  // Drill-down from Summary per Month — clicking a dept/division/team cell
-  // jumps to the List filtered to exactly those employees ("active as of"
-  // that month, same windowing the summary cell was computed with).
-  const drillDown = (department, division, team, month, year) => {
-    setDeptFilter(department);
-    fetchTeams(department);
-    setDivisionFilter(division || "");
-    setTeamFilter(team || "");
-    setEducationFilter(""); setLevelFilter(""); setEmploymentStatusFilter("");
-    setMaritalFilter(""); setSexFilter("");
-    setAsOfMonth(String(month));
-    setAsOfYear(String(year));
-    setPage(1);
-    setViewMode("list");
-  };
 
   const handleSort = (field) => {
     if (sortBy === field) setSortDir((d) => d === "asc" ? "desc" : "asc");
@@ -1918,179 +1939,176 @@ function EmployeeSummarySection() {
   );
 
   return (
-    <div className="space-y-4 mt-2">
-      <SubTabs
-        tabs={[
-          { id: "year",  label: "Summary per Year" },
-          { id: "month", label: "Summary per Month" },
-          { id: "list",  label: "List" },
-        ]}
-        active={viewMode}
-        onChange={setViewMode}
-      />
-
-      {viewMode === "year"  && <EmployeeYearSummaryTable />}
-      {viewMode === "month" && <EmployeeMonthSummaryTable onDrillDown={drillDown} />}
-
-      {viewMode === "list" && (<>
-      {/* Total + Download */}
-      <div className="flex items-center justify-between">
-        <div className="rounded-lg border border-gray-800 bg-gray-900 px-3 py-1.5 inline-block">
-          <span className="text-base font-bold text-indigo-400">{data.total}</span>
-          <span className="text-[10px] font-semibold text-gray-400 ml-1.5">Employees Shown</span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-6xl max-h-[90vh] overflow-auto rounded-xl border border-gray-700 bg-gray-950 p-5 space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-gray-200">Employee List</h3>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-800 hover:text-gray-300">
+            <X size={16} />
+          </button>
         </div>
-        <button
-          onClick={handleExport}
-          disabled={exporting}
-          className="flex items-center gap-1.5 rounded-lg border border-green-700/50 bg-green-500/10 px-3 py-1.5 text-xs font-medium text-green-400 hover:bg-green-500/20 transition-colors disabled:opacity-50"
-        >
-          {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-          Download Excel
-        </button>
-      </div>
 
-      {/* Filter bar */}
-      <div className="flex flex-wrap items-end gap-2">
-        {filterSelect("Department", deptFilter, handleDeptFilter, departments)}
-        {filterSelect("Team", teamFilter, (v) => { setTeamFilter(v); setPage(1); }, teams)}
-        {filterSelect("Education", educationFilter, setEducationFilter, educations)}
-        {filterSelect("Level", levelFilter, setLevelFilter, levels)}
-        <div className="w-32">
-          <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">Employee Status</label>
-          <select
-            value={employmentStatusFilter}
-            onChange={(e) => { setEmploymentStatusFilter(e.target.value); setPage(1); }}
-            className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+        {/* Total + Download */}
+        <div className="flex items-center justify-between">
+          <div className="rounded-lg border border-gray-800 bg-gray-900 px-3 py-1.5 inline-block">
+            <span className="text-base font-bold text-indigo-400">{data.total}</span>
+            <span className="text-[10px] font-semibold text-gray-400 ml-1.5">Employees Shown</span>
+          </div>
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="flex items-center gap-1.5 rounded-lg border border-green-700/50 bg-green-500/10 px-3 py-1.5 text-xs font-medium text-green-400 hover:bg-green-500/20 transition-colors disabled:opacity-50"
           >
-            <option value="">All</option>
-            <option value="Active">ACTIVE</option>
-            <option value="Resign">INACTIVE</option>
-          </select>
+            {exporting ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+            Download Excel
+          </button>
         </div>
-        {filterSelect("Marital Status", maritalFilter, setMaritalFilter, maritalStatuses)}
-        <div className="w-32">
-          <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">Sex</label>
-          <select
-            value={sexFilter}
-            onChange={(e) => { setSexFilter(e.target.value); setPage(1); }}
-            className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
-          >
-            <option value="">All</option>
-            <option value="M">Male</option>
-            <option value="F">Female</option>
-          </select>
-        </div>
-        <div className="w-32" title="Shows employees active as of the end of the selected Month/Year (joined on/before, not yet resigned)">
-          <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">As of (Mo)</label>
-          <select
-            value={asOfMonth}
-            onChange={(e) => { setAsOfMonth(e.target.value); setPage(1); }}
-            className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
-          >
-            <option value="">All</option>
-            {MONTHS_ID.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-          </select>
-        </div>
-        <div className="w-32" title="Shows employees active as of the end of the selected Month/Year (joined on/before, not yet resigned)">
-          <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">As of (Yr)</label>
-          <select
-            value={asOfYear}
-            onChange={(e) => { setAsOfYear(e.target.value); setPage(1); }}
-            className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
-          >
-            <option value="">All</option>
-            {joinYears.map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
-        </div>
-      </div>
 
-      {/* Table — capped to fit ~8 rows so the scrollbar shows within the viewport */}
-      <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 360 }}>
-        <table className="w-full text-sm" style={{ minWidth: 1160 }}>
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-gray-800">
-              {SUMMARY_COLS.map(({ label, field }) => {
-                const active = sortBy === field;
-                return (
-                  <th
-                    key={field}
-                    onClick={() => handleSort(field)}
-                    className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer select-none group"
-                    style={{ color: active ? "#a5b4fc" : "#6b7280", textAlign: "center" }}
-                  >
-                    <span className="inline-flex items-center gap-1 justify-center">
-                      {label}
-                      <span className={`transition-opacity ${active ? "opacity-100" : "opacity-0 group-hover:opacity-50"}`}>
-                        {active
-                          ? (sortDir === "asc" ? <ChevronUp size={11} className="text-indigo-400" /> : <ChevronDown size={11} className="text-indigo-400" />)
-                          : <ArrowUpDown size={10} />}
-                      </span>
-                    </span>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-800">
-            {loading ? (
-              <tr><td colSpan={SUMMARY_COLS.length} className="py-12 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></td></tr>
-            ) : data.employees.length === 0 ? (
-              <tr><td colSpan={SUMMARY_COLS.length} className="py-12 text-center text-xs text-gray-600">No employees matching filter</td></tr>
-            ) : data.employees.map((e) => (
-              <tr key={e.user_id} onClick={() => setSelectedEmployee(e)} className="hover:bg-gray-800/40 transition-colors cursor-pointer">
-                {SUMMARY_COLS.map(({ field, mono, bold, align, render }) => (
-                  <td
-                    key={field}
-                    className={`px-3 py-2.5 whitespace-nowrap text-xs ${mono ? "font-mono" : ""} ${bold ? "font-medium text-gray-200" : "text-gray-500"}`}
-                    style={{ textAlign: align || "left" }}
-                  >
-                    {render ? render(e) : (e[field] || "—")}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Pagination */}
-      {data.pages > 1 && (
-        <div className="flex items-center justify-between" style={{ padding: "10px 0", fontSize: 12 }}>
-          <span style={{ color: "#94a3b8", fontWeight: 600 }}>
-            {data.total} employees · page {page} of {data.pages}
-          </span>
-          <div className="flex gap-1">
-            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
-              className="rounded-lg border border-gray-700 bg-gray-900 p-1.5 text-gray-400 disabled:opacity-40">
-              <ChevronLeft size={13} />
-            </button>
-            <button onClick={() => setPage((p) => Math.min(data.pages, p + 1))} disabled={page === data.pages}
-              className="rounded-lg border border-gray-700 bg-gray-900 p-1.5 text-gray-400 disabled:opacity-40">
-              <ChevronRight size={13} />
-            </button>
+        {/* Filter bar */}
+        <div className="flex flex-wrap items-end gap-2">
+          {filterSelect("Department", deptFilter, handleDeptFilter, departments)}
+          {filterSelect("Team", teamFilter, (v) => { setTeamFilter(v); setPage(1); }, teams)}
+          {filterSelect("Education", educationFilter, setEducationFilter, educations)}
+          {filterSelect("Level", levelFilter, setLevelFilter, levels)}
+          <div className="w-32">
+            <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">Employee Status</label>
+            <select
+              value={employmentStatusFilter}
+              onChange={(e) => { setEmploymentStatusFilter(e.target.value); setPage(1); }}
+              className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="">All</option>
+              <option value="Active">ACTIVE</option>
+              <option value="Resign">INACTIVE</option>
+            </select>
+          </div>
+          {filterSelect("Marital Status", maritalFilter, setMaritalFilter, maritalStatuses)}
+          <div className="w-32">
+            <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">Sex</label>
+            <select
+              value={sexFilter}
+              onChange={(e) => { setSexFilter(e.target.value); setPage(1); }}
+              className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="">All</option>
+              <option value="M">Male</option>
+              <option value="F">Female</option>
+            </select>
+          </div>
+          <div className="w-32" title="Shows employees active as of the end of the selected Month/Year (joined on/before, not yet resigned)">
+            <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">As of (Mo)</label>
+            <select
+              value={asOfMonth}
+              onChange={(e) => { setAsOfMonth(e.target.value); setPage(1); }}
+              className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="">All</option>
+              {MONTHS_ID.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+            </select>
+          </div>
+          <div className="w-32" title="Shows employees active as of the end of the selected Month/Year (joined on/before, not yet resigned)">
+            <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">As of (Yr)</label>
+            <select
+              value={asOfYear}
+              onChange={(e) => { setAsOfYear(e.target.value); setPage(1); }}
+              className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              <option value="">All</option>
+              {joinYears.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
           </div>
         </div>
-      )}
-      </>)}
 
-      {selectedEmployee && (
-        <EmployeeDetailModal
-          employee={selectedEmployee}
-          onClose={() => setSelectedEmployee(null)}
-          employeeNames={employeeNames}
-          onSaved={() => {
-            setSelectedEmployee(null);
-            fetchEmployees(); fetchEmployeeNames(); fetchLov();
-          }}
-        />
-      )}
+        {/* Table */}
+        <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 360 }}>
+          <table className="w-full text-sm" style={{ minWidth: 1160 }}>
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-gray-800">
+                {SUMMARY_COLS.map(({ label, field }) => {
+                  const active = sortBy === field;
+                  return (
+                    <th
+                      key={field}
+                      onClick={() => handleSort(field)}
+                      className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer select-none group"
+                      style={{ color: active ? "#a5b4fc" : "#6b7280", textAlign: "center" }}
+                    >
+                      <span className="inline-flex items-center gap-1 justify-center">
+                        {label}
+                        <span className={`transition-opacity ${active ? "opacity-100" : "opacity-0 group-hover:opacity-50"}`}>
+                          {active
+                            ? (sortDir === "asc" ? <ChevronUp size={11} className="text-indigo-400" /> : <ChevronDown size={11} className="text-indigo-400" />)
+                            : <ArrowUpDown size={10} />}
+                        </span>
+                      </span>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800">
+              {loading ? (
+                <tr><td colSpan={SUMMARY_COLS.length} className="py-12 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></td></tr>
+              ) : data.employees.length === 0 ? (
+                <tr><td colSpan={SUMMARY_COLS.length} className="py-12 text-center text-xs text-gray-600">No employees matching filter</td></tr>
+              ) : data.employees.map((e) => (
+                <tr key={e.user_id} onClick={() => setSelectedEmployee(e)} className="hover:bg-gray-800/40 transition-colors cursor-pointer">
+                  {SUMMARY_COLS.map(({ field, mono, bold, align, render }) => (
+                    <td
+                      key={field}
+                      className={`px-3 py-2.5 whitespace-nowrap text-xs ${mono ? "font-mono" : ""} ${bold ? "font-medium text-gray-200" : "text-gray-500"}`}
+                      style={{ textAlign: align || "left" }}
+                    >
+                      {render ? render(e) : (e[field] || "—")}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination */}
+        {data.pages > 1 && (
+          <div className="flex items-center justify-between" style={{ padding: "10px 0", fontSize: 12 }}>
+            <span style={{ color: "#94a3b8", fontWeight: 600 }}>
+              {data.total} employees · page {page} of {data.pages}
+            </span>
+            <div className="flex gap-1">
+              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
+                className="rounded-lg border border-gray-700 bg-gray-900 p-1.5 text-gray-400 disabled:opacity-40">
+                <ChevronLeft size={13} />
+              </button>
+              <button onClick={() => setPage((p) => Math.min(data.pages, p + 1))} disabled={page === data.pages}
+                className="rounded-lg border border-gray-700 bg-gray-900 p-1.5 text-gray-400 disabled:opacity-40">
+                <ChevronRight size={13} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {selectedEmployee && (
+          <EmployeeDetailModal
+            employee={selectedEmployee}
+            onClose={() => setSelectedEmployee(null)}
+            employeeNames={employeeNames}
+            onSaved={() => {
+              setSelectedEmployee(null);
+              fetchEmployees(); fetchEmployeeNames(); fetchLov();
+            }}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
 // ── Employee Summary: Summary per Year — headcount by dept, Beginning/Ending
 // per year (format reference: SUMMARY sheet, "Yearly" block) ──────────────
-function EmployeeYearSummaryTable() {
+function EmployeeYearSummaryTable({ onYearClick }) {
   const { token } = useAuthStore();
   const headers = { Authorization: `Bearer ${token}` };
   const [d, setD] = useState(null);
@@ -2111,12 +2129,24 @@ function EmployeeYearSummaryTable() {
   const TD = "px-2.5 py-2 text-xs text-right whitespace-nowrap";
 
   return (
-    <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 480 }}>
+    <div className="space-y-2">
+      <p className="text-[10px] text-gray-600">Click a year to view its monthly breakdown by department / division / team</p>
+      <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 480 }}>
       <table className="text-sm" style={{ minWidth: 200 + d.years.length * 140 }}>
         <thead className="sticky top-0 z-10 bg-gray-800">
           <tr>
             <th className={`${TH} text-left sticky left-0 bg-gray-800 z-20`} rowSpan={2}>Department</th>
-            {d.years.map((y) => <th key={y} className={TH} colSpan={2}>{y}</th>)}
+            {d.years.map((y) => (
+              <th
+                key={y}
+                colSpan={2}
+                onClick={() => onYearClick && onYearClick(y)}
+                className={`${TH} ${onYearClick ? "cursor-pointer select-none hover:text-indigo-300 hover:bg-gray-700/60" : ""}`}
+                title={onYearClick ? `View monthly summary for ${y}` : undefined}
+              >
+                {y}
+              </th>
+            ))}
           </tr>
           <tr>
             {d.years.map((y) => ([
@@ -2155,16 +2185,16 @@ function EmployeeYearSummaryTable() {
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
 
 // ── Employee Summary: Summary per Month — headcount by dept, end-of-month
 // snapshot (format reference: SUMMARY sheet, "Monthly" block) ─────────────
-function EmployeeMonthSummaryTable({ onDrillDown }) {
+function EmployeeMonthSummaryTable({ year, onDrillDown }) {
   const { token } = useAuthStore();
   const headers = { Authorization: `Bearer ${token}` };
-  const [year, setYear] = useState(() => new Date().getFullYear());
   const [d, setD] = useState(null);
   const [loading, setLoading] = useState(true);
   const [collapsedDepts, setCollapsedDepts] = useState(() => new Set());
@@ -2193,26 +2223,14 @@ function EmployeeMonthSummaryTable({ onDrillDown }) {
     return true;
   }) : [];
 
-  const curYear = new Date().getFullYear();
-  const yearOptions = Array.from({ length: 6 }, (_, i) => curYear - i);
-
   const TH = "px-3 py-2 text-xs font-semibold uppercase tracking-wider text-gray-500 whitespace-nowrap text-center border-b border-gray-800";
   const TD = "px-3 py-2 text-xs text-right whitespace-nowrap";
 
   return (
     <div className="space-y-3">
-      <div className="flex items-end justify-between">
-        <div className="w-32">
-          <label className="mb-1 block text-[10px] font-medium text-gray-500">Year</label>
-          <select
-            value={year}
-            onChange={(e) => setYear(Number(e.target.value))}
-            className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
-          >
-            {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
-        </div>
-        <p className="text-[10px] text-gray-600">Click a value to view that exact list of employees</p>
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-200">Monthly Summary · {year}</h3>
+        <p className="text-[10px] text-gray-600">Click + to expand a department's teams · click a value to view that exact list of employees</p>
       </div>
 
       {loading ? (
@@ -2246,8 +2264,17 @@ function EmployeeMonthSummaryTable({ onDrillDown }) {
                   <td
                     onClick={hasChildren ? () => (level === 0 ? toggleDept(toggleKey) : toggleDivision(toggleKey)) : undefined}
                     className={`px-3 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${level === 2 ? "text-gray-400 bg-gray-900" : level === 1 ? "text-gray-300 bg-gray-900/40" : "text-gray-200 bg-gray-800/30"} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
+                    title={hasChildren && level === 0 ? (isOpen ? "Collapse team list" : "Expand team list") : undefined}
                   >
-                    {hasChildren && (isOpen ? <ChevronDown size={11} className="inline mr-1 -mt-0.5" /> : <ChevronRight size={11} className="inline mr-1 -mt-0.5" />)}
+                    {hasChildren && (
+                      level === 0
+                        ? (isOpen
+                            ? <Minus size={11} className="inline mr-1 -mt-0.5 text-indigo-400" />
+                            : <Plus size={11} className="inline mr-1 -mt-0.5 text-indigo-400" />)
+                        : (isOpen
+                            ? <ChevronDown size={11} className="inline mr-1 -mt-0.5" />
+                            : <ChevronRight size={11} className="inline mr-1 -mt-0.5" />)
+                    )}
                     {label}
                   </td>
                   {d.months.map((m) => (
