@@ -319,6 +319,114 @@ class BusinessPlanSetupService:
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
+    # ── Export Guideline to PowerPoint ──────────────────────────────────────────
+
+    async def export_guideline_ppt(self, db: AsyncSession, plan_year: int):
+        """Build the Business Plan Guideline as a PPTX, mirroring Business
+        plan guideline.xlsx: a title slide, then one table slide per
+        section with Current Year ({plan_year}) / Previous Year
+        ({plan_year - 1}) columns."""
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+        from pptx.dml.color import RGBColor
+        from pptx.enum.text import PP_ALIGN
+
+        q = select(PACBusinessPlanSetup).where(
+            PACBusinessPlanSetup.setup_module == "guideline",
+            PACBusinessPlanSetup.plan_year == plan_year,
+        )
+        result = await db.execute(q)
+        row = result.scalar_one_or_none()
+        sections = (row.content or {}).get("sections", []) if row else []
+
+        NAVY = RGBColor(0x1F, 0x2A, 0x44)
+        TEAL = RGBColor(0x0D, 0x94, 0x88)
+        WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+        HDR_GREY = RGBColor(0xD9, 0xD9, 0xD9)
+
+        prs = Presentation()
+        prs.slide_width = Inches(13.333)
+        prs.slide_height = Inches(7.5)
+        blank = prs.slide_layouts[6]
+
+        # ── Title slide ──────────────────────────────────────────────────
+        slide = prs.slides.add_slide(blank)
+        bg = slide.shapes.add_shape(1, 0, 0, prs.slide_width, prs.slide_height)
+        bg.fill.solid()
+        bg.fill.fore_color.rgb = NAVY
+        bg.line.fill.background()
+        bg.shadow.inherit = False
+
+        title_box = slide.shapes.add_textbox(Inches(0.8), Inches(2.6), Inches(11.7), Inches(1.2))
+        tf = title_box.text_frame
+        tf.text = "Business Plan Guideline"
+        tf.paragraphs[0].font.size = Pt(40)
+        tf.paragraphs[0].font.bold = True
+        tf.paragraphs[0].font.color.rgb = WHITE
+
+        sub_box = slide.shapes.add_textbox(Inches(0.8), Inches(3.7), Inches(11.7), Inches(0.8))
+        tf = sub_box.text_frame
+        tf.text = f"{plan_year} vs {plan_year - 1}"
+        tf.paragraphs[0].font.size = Pt(22)
+        tf.paragraphs[0].font.color.rgb = TEAL
+
+        company_box = slide.shapes.add_textbox(Inches(0.8), Inches(0.5), Inches(8), Inches(0.6))
+        tf = company_box.text_frame
+        tf.text = "PT CKD OTTO Pharmaceuticals"
+        tf.paragraphs[0].font.size = Pt(16)
+        tf.paragraphs[0].font.bold = True
+        tf.paragraphs[0].font.color.rgb = WHITE
+
+        # ── One table slide per section ─────────────────────────────────
+        for section in sections:
+            slide = prs.slides.add_slide(blank)
+
+            head = slide.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(12.3), Inches(0.7))
+            tf = head.text_frame
+            tf.text = f"{section.get('icon', '')}  {section.get('title', '')}".strip()
+            tf.paragraphs[0].font.size = Pt(26)
+            tf.paragraphs[0].font.bold = True
+            tf.paragraphs[0].font.color.rgb = NAVY
+
+            items = section.get("items", [])
+            n_rows = len(items) + 1
+            table_shape = slide.shapes.add_table(n_rows, 3, Inches(0.5), Inches(1.2), Inches(12.3), Inches(5.7))
+            table = table_shape.table
+            table.columns[0].width = Inches(6.3)
+            table.columns[1].width = Inches(3.0)
+            table.columns[2].width = Inches(3.0)
+
+            headers = ["", f"Current Year ({plan_year})", f"Previous Year ({plan_year - 1})"]
+            for c, htext in enumerate(headers):
+                cell = table.cell(0, c)
+                cell.text = htext
+                cell.fill.solid()
+                cell.fill.fore_color.rgb = HDR_GREY
+                p = cell.text_frame.paragraphs[0]
+                p.font.bold = True
+                p.font.size = Pt(14)
+                p.alignment = PP_ALIGN.CENTER if c else PP_ALIGN.LEFT
+
+            for r, item in enumerate(items, start=1):
+                table.cell(r, 0).text = str(item.get("label", ""))
+                table.cell(r, 1).text = str(item.get("current", ""))
+                table.cell(r, 2).text = str(item.get("previous", ""))
+                for c in range(3):
+                    p = table.cell(r, c).text_frame.paragraphs[0]
+                    p.font.size = Pt(13)
+                    if c:
+                        p.alignment = PP_ALIGN.CENTER
+
+        buf = io.BytesIO()
+        prs.save(buf)
+        buf.seek(0)
+        filename = f"Business plan guideline {plan_year}.pptx"
+        return StreamingResponse(
+            buf,
+            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     # ── Delete ────────────────────────────────────────────────────────────────
 
     async def delete_setup(self, db: AsyncSession, setup_id: int) -> dict:

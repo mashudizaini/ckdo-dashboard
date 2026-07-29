@@ -2004,16 +2004,16 @@ function SchedulePanel({ year }) {
       </div>
 
       <div className="grid grid-cols-3 gap-3 p-4 border-b border-gray-800">
-        <div className="rounded-lg border border-violet-500/30 bg-violet-500/5 p-3">
-          <p className="text-[10px] uppercase tracking-wider text-violet-400 font-semibold">BP {year} (Current)</p>
+        <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-3">
+          <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">BP {year} (Current)</p>
           <p className="text-xl font-bold text-gray-100 mt-1">{currentTotalDays} <span className="text-xs font-normal text-gray-500">working days</span></p>
         </div>
         <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-3">
           <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">BP {year - 1} (Previous)</p>
           <p className="text-xl font-bold text-gray-100 mt-1">{prevTotalDays ?? "—"} <span className="text-xs font-normal text-gray-500">working days</span></p>
         </div>
-        <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3">
-          <p className="text-[10px] uppercase tracking-wider text-red-400 font-semibold">Timeline Review — Late Submissions ({year - 1})</p>
+        <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-3">
+          <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Timeline Review — Late Submissions ({year - 1})</p>
           {lateReview.length === 0 ? (
             <p className="text-xs text-gray-500 mt-1.5">No late submissions</p>
           ) : (
@@ -2079,9 +2079,9 @@ function SchedulePanel({ year }) {
                               onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }} />
                           ) : (
                             <button onClick={() => setEditingCell(cellId)}
-                              className={`w-full rounded px-1.5 py-1 font-mono font-bold text-[10px] border transition-colors ${
-                                isLate ? "bg-red-500/25 border-red-500/50 text-red-300 hover:bg-red-500/35"
-                                       : "bg-green-500/25 border-green-500/50 text-green-300 hover:bg-green-500/35"
+                              className={`w-full rounded px-1.5 py-1 font-mono font-bold text-[10px] text-black border transition-colors ${
+                                isLate ? "bg-red-500/70 border-red-600/60 hover:bg-red-500/80"
+                                       : "bg-green-500/70 border-green-600/60 hover:bg-green-500/80"
                               }`}
                               title={isLate ? "Late vs. planned Submission Date To" : "Click to set actual submission date"}>
                               {cell.date || "O"}
@@ -2109,39 +2109,88 @@ function SchedulePanel({ year }) {
 
 /* ══ Guideline Panel ══════════════════════════════════════════════════════════ */
 
+// Seed data transcribed from Business plan guideline.xlsx (FY2026 "current"
+// vs FY2025 "previous" pages) — figures are best-effort reads off a scanned
+// template and editable afterward; the field set is what matters (Working
+// Days, Exchange Rate, Utilities incl. gasoline/electricity, Meeting/
+// Business-Trip minimum salary, and regional UMK for DKI Jakarta / Kab.
+// Bekasi-Cikarang).
 const DEFAULT_GUIDELINE = {
   sections: [
     {
       title: "1. Working Days",
       icon: "📅",
       items: [
-        { label: "Jan", value: 22 }, { label: "Feb", value: 20 }, { label: "Mar", value: 23 },
-        { label: "Apr", value: 21 }, { label: "May", value: 22 }, { label: "Jun", value: 20 },
-        { label: "Jul", value: 23 }, { label: "Aug", value: 21 }, { label: "Sep", value: 21 },
-        { label: "Oct", value: 23 }, { label: "Nov", value: 19 }, { label: "Dec", value: 20 },
+        { label: "Jan", current: 23, previous: 23 },
+        { label: "Feb", current: 18, previous: 20 },
+        { label: "Mar", current: 22, previous: 19 },
+        { label: "Apr", current: 22, previous: 21 },
+        { label: "May", current: 16, previous: 20 },
+        { label: "Jun", current: 20, previous: 17 },
+        { label: "Jul", current: 23, previous: 22 },
+        { label: "Aug", current: 22, previous: 21 },
+        { label: "Sep", current: 22, previous: 20 },
+        { label: "Oct", current: 22, previous: 23 },
+        { label: "Nov", current: 21, previous: 20 },
+        { label: "Dec", current: 21, previous: 22 },
+        { label: "Total", current: 240, previous: 233 },
       ],
     },
     {
-      title: "2. Economic Indicator for Budgeting",
-      icon: "📊",
+      title: "2. Exchange Rate",
+      icon: "💱",
       items: [
-        { label: "Exchange Rate (IDR/USD)", value: "15,100 - 15,200" },
-        { label: "Minimum Salary (UMR)", value: "Rp 5,000,000" },
-        { label: "Inflation", value: "2.5% - 3.0%" },
+        { label: "USD / IDR", current: "Rp 15,300", previous: "Rp 15,712" },
+        { label: "EUR / IDR", current: "Rp 17,700", previous: "Rp 17,240" },
+        { label: "KRW / IDR", current: "Rp 11.70", previous: "Rp 11.68" },
       ],
     },
     {
-      title: "3. Meeting & Business Trip",
+      title: "3. Utilities & Others",
+      icon: "🔌",
+      items: [
+        { label: "Gasoline (Pertalite / Pertamax)", current: "Rp 10,000", previous: "Rp 13,350" },
+        { label: "Electricity, etc (Inflation)", current: "2.7%", previous: "5.1%" },
+        { label: "Loan Interest — USD/IDR", current: "8.3%", previous: "6.8%" },
+        { label: "Loan Interest — EUR/IDR", current: "6.1%", previous: "5.1%" },
+        { label: "Loan Interest — KRW/IDR", current: "7.9%", previous: "7.7%" },
+      ],
+    },
+    {
+      title: "4. Minimum Salary — Meeting Allowance",
+      icon: "👔",
+      items: [
+        { label: "Director (Max)", current: "Rp 1,500,000", previous: "Rp 1,500,000" },
+        { label: "General Manager (Max)", current: "Rp 1,200,000", previous: "Rp 1,200,000" },
+        { label: "Manager (Max)", current: "Rp 800,000", previous: "Rp 800,000" },
+        { label: "Assistant Manager (Max)", current: "Rp 600,000", previous: "Rp 600,000" },
+        { label: "Supervisor / Product Specialist (Max)", current: "Rp 400,000", previous: "Rp 400,000" },
+        { label: "Officer / Senior Staff (Max)", current: "Rp 170,000", previous: "Rp 140,000" },
+        { label: "Clerk (Max)", current: "Rp 120,000", previous: "Rp 120,000" },
+      ],
+    },
+    {
+      title: "5. Business Trip — Domestic",
+      icon: "🚗",
+      items: [
+        { label: "Hotel Limit / Day", current: "Rp 600,000", previous: "Rp 600,000" },
+        { label: "Meal Allowance / Day", current: "Rp 120,000", previous: "Rp 120,000" },
+      ],
+    },
+    {
+      title: "6. Business Trip — International",
       icon: "✈️",
       items: [
-        { label: "Domestic — Director", value: "Rp 800,000 / day" },
-        { label: "Domestic — General Manager", value: "Rp 700,000 / day" },
-        { label: "Domestic — Senior Manager", value: "Rp 600,000 / day" },
-        { label: "Domestic — Manager", value: "Rp 500,000 / day" },
-        { label: "Domestic — Staff", value: "Rp 400,000 / day" },
-        { label: "International — Director", value: "$300 / day" },
-        { label: "International — Manager", value: "$200 / day" },
-        { label: "International — Staff", value: "$150 / day" },
+        { label: "Hotel Limit / Day", current: "$150", previous: "$150" },
+        { label: "Meal Allowance / Day", current: "$40", previous: "$40" },
+      ],
+    },
+    {
+      title: "7. Minimum Salary — Regional (UMK/UMR)",
+      icon: "🏙️",
+      items: [
+        { label: "DKI Jakarta", current: "Rp 5,657,752", previous: "Rp 5,396,761" },
+        { label: "Kab. Bekasi - Cikarang", current: "Rp 5,643,032", previous: "Rp 5,397,838" },
       ],
     },
   ],
@@ -2152,6 +2201,7 @@ function GuidelinePanel({ year }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2188,6 +2238,17 @@ function GuidelinePanel({ year }) {
     } finally { setSaving(false); }
   };
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const res = await pacApi.exportGuidelinePpt(year);
+      const url = URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement("a");
+      a.href = url; a.download = `Business plan guideline ${year}.pptx`; a.click();
+      URL.revokeObjectURL(url);
+    } finally { setExporting(false); }
+  };
+
   if (loading) return <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>;
   if (!data) return null;
 
@@ -2196,21 +2257,25 @@ function GuidelinePanel({ year }) {
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-gray-200">Business Plan Guideline</h3>
-          <p className="text-xs text-gray-500 mt-0.5">Guidelines & Parameters · {year}</p>
+          <p className="text-xs text-gray-500 mt-0.5">Guidelines & Parameters · {year} vs {year - 1}</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => setData(prev => prev ? Object.assign({}, prev, { status: prev.status === 'final' ? 'draft' : 'final' }) : prev)}
             className={BTN_SM(data.status === 'final' ? 'gray' : 'green')}>
             <CheckCircle size={11} /> {data.status === 'final' ? 'Mark Draft' : 'Mark Final'}
           </button>
-          <button onClick={save} disabled={saving} className={BTN_SM("teal")}>
+          <button onClick={handleExport} disabled={exporting} className={BTN_SM("teal")}>
+            {exporting ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+            Export PPT
+          </button>
+          <button onClick={save} disabled={saving} className={BTN_SM("sky")}>
             {saving ? <Loader2 size={11} className="animate-spin" /> : saved ? <CheckCircle size={11} /> : <Save size={11} />}
             {saved ? "Saved!" : "Save"}
           </button>
         </div>
       </div>
       <div className="p-5">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {(data.content.sections || []).map((section, si) => (
             <div key={si} className="rounded-xl border border-gray-700/60 bg-gray-800/40 overflow-hidden">
               <div className="px-4 py-3 bg-gray-800/60 border-b border-gray-700 flex items-center gap-2">
@@ -2219,12 +2284,22 @@ function GuidelinePanel({ year }) {
               </div>
               <div className="p-3">
                 <table className="w-full">
+                  <thead>
+                    <tr className="text-[10px] uppercase tracking-wider text-gray-500">
+                      <td className="pb-1.5"></td>
+                      <td className="pb-1.5 pl-2 text-center font-semibold">Current Year ({year})</td>
+                      <td className="pb-1.5 pl-2 text-center font-semibold">Previous Year ({year - 1})</td>
+                    </tr>
+                  </thead>
                   <tbody>
                     {section.items.map((item, ii) => (
                       <tr key={ii} className="border-b border-gray-800 last:border-0">
-                        <td className="py-2.5 pr-3 text-xs text-gray-400 font-medium w-32 whitespace-nowrap">{item.label}</td>
-                        <td className="py-2.5">
-                          <input className={`${INP} w-full !text-xs`} value={item.value} onChange={e => updateItem(si, ii, "value", e.target.value)} />
+                        <td className="py-2 pr-2 text-xs text-gray-400 font-medium whitespace-nowrap">{item.label}</td>
+                        <td className="py-2 pl-2">
+                          <input className={`${INP} w-full !text-xs !text-center`} value={item.current} onChange={e => updateItem(si, ii, "current", e.target.value)} />
+                        </td>
+                        <td className="py-2 pl-2">
+                          <input className={`${INP} w-full !text-xs !text-center`} value={item.previous} onChange={e => updateItem(si, ii, "previous", e.target.value)} />
                         </td>
                       </tr>
                     ))}

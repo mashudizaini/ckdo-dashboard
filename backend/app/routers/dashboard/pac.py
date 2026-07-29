@@ -193,6 +193,19 @@ async def export_schedule_excel(
     return await BusinessPlanSetupService().export_schedule_excel(db, plan_year)
 
 
+@router.get("/setup-modules/guideline/export")
+async def export_guideline_ppt(
+    plan_year: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Export the Business Plan Guideline to PowerPoint, matching the
+    layout of Business plan guideline.xlsx: a title slide plus one table
+    slide per section, each column-split into Current Year / Previous
+    Year."""
+    return await BusinessPlanSetupService().export_guideline_ppt(db, plan_year)
+
+
 class GenerateOutlookRequest(BaseModel):
     year: int
     context: Optional[str] = None
