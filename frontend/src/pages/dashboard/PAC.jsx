@@ -2386,11 +2386,30 @@ function formatFileSize(bytes) {
    "material" = source data (economic reports, market data, etc.) and
    "format" = example/template files defining the desired report format,
    which can be several and are all used as reference during generation. */
+function OutlookBriefStatusBadge({ status }) {
+  const map = {
+    pending:    { icon: Clock,       cls: "text-gray-400 bg-gray-700/40 border-gray-600",           label: "Belum di-convert" },
+    converting: { icon: Loader2,     cls: "text-sky-300 bg-sky-500/10 border-sky-500/30",            label: "Converting…", spin: true },
+    done:       { icon: CheckCircle, cls: "text-green-400 bg-green-500/10 border-green-500/30",      label: "Converted" },
+    failed:     { icon: AlertCircle, cls: "text-red-400 bg-red-500/10 border-red-500/30",             label: "Gagal" },
+  };
+  const s = map[status] || map.pending;
+  const Icon = s.icon;
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-semibold whitespace-nowrap ${s.cls}`}>
+      <Icon size={9} className={s.spin ? "animate-spin" : ""} /> {s.label}
+    </span>
+  );
+}
+
 function OutlookMaterialsPanel({ year, category = "material", title, description, accent = "teal" }) {
   const [materials, setMaterials] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
+  const [converting, setConverting] = useState({});   // { [id]: true } while a single convert is in flight
+  const [convertingAll, setConvertingAll] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
   const fileInputRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -2435,6 +2454,34 @@ function OutlookMaterialsPanel({ year, category = "material", title, description
     load();
   };
 
+  const convertOne = async (id) => {
+    setConverting(prev => Object.assign({}, prev, { [id]: true }));
+    try {
+      const res = await pacApi.convertOutlookMaterial(id);
+      setMaterials(prev => prev.map(m => m.id === id ? res.data : m));
+    } catch (err) {
+      // reflect failure locally even if the request itself errored (network, etc.)
+      setMaterials(prev => prev.map(m => m.id === id ? Object.assign({}, m, { brief_status: "failed", brief_error: err?.response?.data?.detail || err.message }) : m));
+    } finally {
+      setConverting(prev => { const n = Object.assign({}, prev); delete n[id]; return n; });
+    }
+  };
+
+  const convertAll = async () => {
+    const todo = materials.filter(m => m.brief_status !== "done").map(m => m.id);
+    if (todo.length === 0) return;
+    setConvertingAll(true);
+    try {
+      for (const id of todo) {
+        await convertOne(id);
+      }
+    } finally {
+      setConvertingAll(false);
+    }
+  };
+
+  const pendingCount = materials.filter(m => m.brief_status !== "done").length;
+
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
@@ -2443,6 +2490,12 @@ function OutlookMaterialsPanel({ year, category = "material", title, description
           <p className="text-xs text-gray-500 mt-0.5">{description} · {year}</p>
         </div>
         <div className="flex gap-2">
+          {materials.length > 0 && pendingCount > 0 && (
+            <button onClick={convertAll} disabled={convertingAll} className={BTN_SM("indigo")}>
+              {convertingAll ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+              {convertingAll ? "Converting…" : `Convert All (${pendingCount})`}
+            </button>
+          )}
           <input ref={fileInputRef} type="file" multiple className="hidden" onChange={handleUpload} />
           <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM(accent)}>
             {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
@@ -2461,22 +2514,46 @@ function OutlookMaterialsPanel({ year, category = "material", title, description
             Belum ada file. Upload {category === "format" ? "contoh/format laporan outlook (boleh lebih dari 1 file, berbagai format) sebagai acuan struktur laporan yang akan digenerate." : "bahan (laporan ekonomi, data pasar, dsb — boleh lebih dari 10 file, berbagai format) sebagai dasar penyusunan Outlook."}
           </p>
         ) : (
-          <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-            {materials.map(item => (
-              <div key={item.id} className="flex items-center gap-3 px-3 py-2 rounded-lg border border-gray-800 bg-gray-900 hover:border-gray-700 transition-colors">
-                <FileText size={14} className={`shrink-0 ${accent === "teal" ? "text-teal-400" : "text-violet-400"}`} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-gray-200 font-medium truncate">{item.original_name}</p>
-                  <p className="text-[10px] text-gray-500">{formatFileSize(item.file_size)} · {item.uploaded_by} · {item.created_at ? new Date(item.created_at).toLocaleDateString("id-ID") : ""}</p>
+          <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
+            {materials.map(item => {
+              const isConverting = !!converting[item.id] || item.brief_status === "converting";
+              const isExpanded = expandedId === item.id;
+              return (
+                <div key={item.id} className="rounded-lg border border-gray-800 bg-gray-900 hover:border-gray-700 transition-colors">
+                  <div className="flex items-center gap-3 px-3 py-2">
+                    <FileText size={14} className={`shrink-0 ${accent === "teal" ? "text-teal-400" : "text-violet-400"}`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-gray-200 font-medium truncate">{item.original_name}</p>
+                      <p className="text-[10px] text-gray-500">{formatFileSize(item.file_size)} · {item.uploaded_by} · {item.created_at ? new Date(item.created_at).toLocaleDateString("id-ID") : ""}</p>
+                    </div>
+                    <OutlookBriefStatusBadge status={isConverting ? "converting" : item.brief_status} />
+                    {item.brief_status === "done" ? (
+                      <button onClick={() => setExpandedId(isExpanded ? null : item.id)} className="shrink-0 p-1.5 rounded-md text-gray-400 hover:text-gray-200 hover:bg-gray-800" title="Lihat ringkasan">
+                        {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                      </button>
+                    ) : (
+                      <button onClick={() => convertOne(item.id)} disabled={isConverting} className="shrink-0 p-1.5 rounded-md text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-40" title="Convert jadi ringkasan poin-poin">
+                        {isConverting ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                      </button>
+                    )}
+                    <button onClick={() => handleDownload(item)} className="shrink-0 p-1.5 rounded-md text-gray-400 hover:text-gray-200 hover:bg-gray-800" title="Download">
+                      <Download size={13} />
+                    </button>
+                    <button onClick={() => handleDelete(item.id)} className="shrink-0 p-1.5 rounded-md text-gray-400 hover:text-red-400 hover:bg-red-500/10" title="Delete">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                  {item.brief_status === "failed" && item.brief_error && (
+                    <p className="px-3 pb-2 text-[10px] text-red-400 flex items-start gap-1"><AlertCircle size={10} className="mt-0.5 shrink-0" />{item.brief_error}</p>
+                  )}
+                  {isExpanded && item.brief_status === "done" && (
+                    <div className="mx-3 mb-3 p-3 rounded-md bg-gray-950 border border-gray-800">
+                      <pre className="text-[10.5px] text-gray-300 whitespace-pre-wrap font-mono leading-relaxed">{item.brief_text}</pre>
+                    </div>
+                  )}
                 </div>
-                <button onClick={() => handleDownload(item)} className="shrink-0 p-1.5 rounded-md text-gray-400 hover:text-gray-200 hover:bg-gray-800" title="Download">
-                  <Download size={13} />
-                </button>
-                <button onClick={() => handleDelete(item.id)} className="shrink-0 p-1.5 rounded-md text-gray-400 hover:text-red-400 hover:bg-red-500/10" title="Delete">
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -2539,6 +2616,11 @@ function OutlookPanel({ year }) {
         setData(Object.assign({}, res.data, { content: normalizeOutlookContent(res.data.content) }));
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);
+        if (!res.materials_used && !res.format_examples_used) {
+          alert("Outlook di-generate secara umum — belum ada bahan referensi yang sudah di-convert untuk tahun ini. Upload & convert file di panel di atas agar hasil generate lebih akurat.");
+        } else if (res.not_converted > 0) {
+          alert(`Outlook di-generate menggunakan ${res.materials_used} bahan & ${res.format_examples_used} contoh format yang sudah di-convert. Masih ada ${res.not_converted} file belum di-convert — convert dulu agar ikut dipakai.`);
+        }
       } else {
         alert(res.error || "Failed to generate outlook");
       }

@@ -236,6 +236,21 @@ async def list_outlook_materials(
     return await OutlookMaterialService().list_materials(db, plan_year, category)
 
 
+@router.post("/setup-modules/outlook/materials/{material_id}/convert")
+async def convert_outlook_material(
+    material_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Extract text from the file and summarize it into a structured
+    Markdown brief — done once per file, then reused by generate_outlook
+    on every generation instead of re-reading the raw file each time."""
+    result = await OutlookMaterialService().convert_material(db, material_id)
+    if result.get("data") is None:
+        raise HTTPException(404, result.get("error", "Material tidak ditemukan"))
+    return result
+
+
 @router.get("/setup-modules/outlook/materials/{material_id}/download")
 async def download_outlook_material(
     material_id: int,
@@ -282,11 +297,34 @@ async def generate_outlook(
 ):
     """
     Generate Business Plan Outlook content using AI based on the selected year.
+    Reads the already-converted briefs of uploaded reference materials/format
+    files (not the raw files themselves — see convert_outlook_material) as
+    grounding context, so generation is fast and consistent across reruns.
     Returns structured outlook data that can be saved via upsert.
     """
+    mat_result = await OutlookMaterialService().list_materials(db, body.year)
+    materials = mat_result.get("data", [])
+    material_briefs = [m for m in materials if m["category"] == "material" and m["brief_status"] == "done" and m["brief_text"]]
+    format_briefs = [m for m in materials if m["category"] == "format" and m["brief_status"] == "done" and m["brief_text"]]
+    not_converted = sum(1 for m in materials if m["brief_status"] != "done")
+
+    context_parts = []
+    if material_briefs:
+        context_parts.append("## Ringkasan Bahan Referensi (sumber data)\n" + "\n\n".join(
+            f"### {m['original_name']}\n{m['brief_text']}" for m in material_briefs
+        ))
+    if format_briefs:
+        context_parts.append("## Ringkasan Contoh Format Laporan (acuan struktur)\n" + "\n\n".join(
+            f"### {m['original_name']}\n{m['brief_text']}" for m in format_briefs
+        ))
+    reference_context = "\n\n".join(context_parts)
+
     ai = AIService()
     prompt = f"""Generate a comprehensive Business Plan Outlook for PT CKD OTTO Pharmaceuticals for year {body.year}.
 {f'Additional context: {body.context}' if body.context else ''}
+
+{"Ground your answer in the reference material below — prefer these figures/trends over generic knowledge whenever they're relevant, and follow the structural cues from the format examples if given." if reference_context else "No converted reference materials are available yet for this year — generate a realistic, generic outlook (upload and convert reference files first for a more accurate, grounded result)."}
+{f"{chr(10)}{chr(10)}{reference_context}" if reference_context else ""}
 
 For each of the 3 sections below, write the content as a single Markdown
 string (bullet list using "- ", key terms in **bold**) — freeform text the
@@ -311,12 +349,24 @@ Return ONLY valid JSON with this exact structure:
 Make it realistic for {body.year} with specific numbers and trends. Keep each bullet concise but informative."""
 
     try:
-        response = await ai.generate_chat_completion([
-            {"role": "system", "content": "You are a business analyst. Return only valid JSON, no markdown code fences, no explanations."},
-            {"role": "user", "content": prompt}
-        ])
-        content = json.loads(response)
-        return {"success": True, "data": {"setup_module": "outlook", "plan_year": body.year, "content": content, "status": "draft"}}
+        response = await ai.complete(
+            "You are a business analyst. Return only valid JSON, no markdown code fences, no explanations.",
+            prompt,
+            num_ctx=16384,
+        )
+        json_text = response.strip()
+        if json_text.startswith("```"):
+            json_text = json_text.strip("`")
+            if json_text.lower().startswith("json"):
+                json_text = json_text[4:]
+        content = json.loads(json_text)
+        return {
+            "success": True,
+            "data": {"setup_module": "outlook", "plan_year": body.year, "content": content, "status": "draft"},
+            "materials_used": len(material_briefs),
+            "format_examples_used": len(format_briefs),
+            "not_converted": not_converted,
+        }
     except Exception as e:
         return {"success": False, "error": f"Failed to generate outlook: {str(e)}", "data": None}
 

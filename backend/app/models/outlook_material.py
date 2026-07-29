@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, BigInteger, DateTime
+from sqlalchemy import Column, Integer, String, BigInteger, DateTime, Text
 from app.database import Base
 
 
@@ -21,3 +21,11 @@ class OutlookMaterial(Base):
     file_size     = Column(BigInteger)
     uploaded_by   = Column(String(100))
     created_at    = Column(DateTime, default=datetime.utcnow)
+
+    # ── Convert stage: file -> structured point-form brief, done once and
+    # reused on every Outlook generation instead of re-reading the raw file
+    # each time (cheaper, faster, and consistent across regenerations). ──
+    brief_status  = Column(String(20), nullable=False, default="pending", server_default="pending", index=True)  # pending | converting | done | failed
+    brief_text    = Column(Text)     # AI-generated Markdown bullet brief
+    brief_error   = Column(Text)
+    converted_at  = Column(DateTime)

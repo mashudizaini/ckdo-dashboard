@@ -42,6 +42,23 @@ class AIService:
         self.base_url = settings.ollama_api_url.rstrip("/")
         self.model = settings.ollama_chat_model
 
+    async def complete(self, system: str, message: str, num_ctx: int = 8192) -> str:
+        """One-shot, non-streaming completion on the local Ollama server —
+        for batch/background tasks (e.g. summarizing an uploaded reference
+        file into a structured brief, or generating the Outlook write-up)
+        that just need the final text, not token-by-token SSE."""
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": message}]
+        async with httpx.AsyncClient(timeout=OLLAMA_CHAT_TIMEOUT_SECONDS) as client:
+            response = await client.post(
+                f"{self.base_url}/api/chat",
+                json={"model": self.model, "messages": messages, "stream": False, "options": {"num_ctx": num_ctx}},
+            )
+            response.raise_for_status()
+            data = response.json()
+            if data.get("error"):
+                raise RuntimeError(data["error"])
+            return data.get("message", {}).get("content", "")
+
     async def stream_chat(self, message: str, history: list[dict], user, department_filter: list[str] = None, provider: str = "onprem", gemini_api_key: str = None):
         """
         Stream chat response from the local Ollama server as SSE, grounded in company docs when available.

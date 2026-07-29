@@ -2,13 +2,21 @@
 Outlook Material Service — PAC module.
 Stores and retrieves the reference source files (economic reports, market
 data, etc.) uploaded ahead of writing the Business Plan Outlook.
+
+Convert stage: each file is summarized into a structured Markdown "brief"
+once (convert_material), and that brief — not the raw file — is what
+generate_outlook reads from on every generation. This avoids re-reading
+potentially large PDFs on every regenerate (slow, expensive, and prone to
+drift between runs) in favor of a compact, reusable, point-form reference.
 """
+import asyncio
 import os
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.outlook_material import OutlookMaterial
+from app.services.ai_service import AIService
 import structlog
 
 logger = structlog.get_logger()
@@ -17,6 +25,10 @@ _UPLOAD_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads", "outlook_materials"
 )
 os.makedirs(_UPLOAD_DIR, exist_ok=True)
+
+# Conservative cap so extracted text + prompt + output stay comfortably
+# within the num_ctx window used for the summarization call.
+_MAX_EXTRACT_CHARS = 15000
 
 
 class OutlookMaterialService:
@@ -78,6 +90,110 @@ class OutlookMaterialService:
         await db.execute(delete(OutlookMaterial).where(OutlookMaterial.id == material_id))
         return {"success": True, "message": f"Deleted material #{material_id}"}
 
+    # ── Convert stage ────────────────────────────────────────────────────
+
+    def _extract_text(self, path: str, original_name: str) -> str:
+        ext = os.path.splitext(original_name or path)[1].lower()
+
+        if ext == ".pdf":
+            import fitz
+            doc = fitz.open(path)
+            try:
+                return "\n".join(page.get_text() for page in doc)
+            finally:
+                doc.close()
+
+        if ext in (".docx", ".doc"):
+            import docx
+            d = docx.Document(path)
+            return "\n".join(p.text for p in d.paragraphs)
+
+        if ext in (".xlsx", ".xlsm"):
+            import openpyxl
+            wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+            lines = []
+            for ws in wb.worksheets:
+                lines.append(f"# Sheet: {ws.title}")
+                for row in ws.iter_rows(values_only=True):
+                    vals = [str(v) for v in row if v is not None]
+                    if vals:
+                        lines.append(" | ".join(vals))
+            return "\n".join(lines)
+
+        if ext in (".txt", ".csv", ".md"):
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                return f.read()
+
+        raise ValueError(f"Format {ext or '(tanpa ekstensi)'} belum didukung untuk convert otomatis")
+
+    async def convert_material(self, db: AsyncSession, material_id: int) -> dict:
+        """Extract text from the uploaded file and summarize it into a
+        structured Markdown brief via AI — run once per file, reused on
+        every Outlook generation afterwards."""
+        row = await db.get(OutlookMaterial, material_id)
+        if not row:
+            return {"success": False, "error": "Not found"}
+
+        row.brief_status = "converting"
+        await db.flush()
+
+        try:
+            path = self.storage_path(row.filename)
+            if not os.path.exists(path):
+                raise FileNotFoundError("File tidak ditemukan di server")
+
+            raw_text = await asyncio.to_thread(self._extract_text, path, row.original_name)
+            raw_text = (raw_text or "").strip()
+            if not raw_text:
+                raise ValueError("Tidak ada teks yang bisa diekstrak dari file ini (kemungkinan hasil scan/gambar)")
+
+            truncated = len(raw_text) > _MAX_EXTRACT_CHARS
+            text_for_ai = raw_text[:_MAX_EXTRACT_CHARS]
+            truncation_note = "\n[...dipotong, dokumen aslinya lebih panjang dari ini...]" if truncated else ""
+
+            purpose = (
+                "acuan STRUKTUR/FORMAT laporan Business Plan Outlook (Global Economic Outlook, "
+                "Indonesia Economic Outlook, Pharmaceutical Industry) — fokus pada bagian/section "
+                "apa saja yang ada dan bagaimana kontennya disusun"
+                if row.category == "format" else
+                "bahan sumber DATA untuk menyusun laporan Business Plan Outlook (Global Economic "
+                "Outlook, Indonesia Economic Outlook, Pharmaceutical Industry)"
+            )
+            system = (
+                "Kamu adalah analis riset yang meringkas dokumen sumber menjadi poin-poin "
+                "terstruktur untuk dipakai berulang kali sebagai referensi oleh AI lain — bukan "
+                "narasi panjang. Ringkasan harus padat, faktual, dan mempertahankan semua "
+                "angka/statistik/tanggal penting yang ada di dokumen."
+            )
+            prompt = (
+                f'Dokumen berikut adalah {purpose}: "{row.original_name}".\n\n'
+                "Ringkas menjadi Markdown bullet list berisi poin-poin kunci saja — angka, tren, "
+                "tanggal, dan fakta penting, tanpa basa-basi pembuka/penutup. Gunakan **bold** "
+                "untuk angka/istilah kunci. Maksimal sekitar 20 bullet.\n\n"
+                "=== ISI DOKUMEN ===\n"
+                f"{text_for_ai}{truncation_note}\n"
+                "=== AKHIR DOKUMEN ==="
+            )
+
+            ai = AIService()
+            brief = await ai.complete(system, prompt)
+            brief = (brief or "").strip()
+            if not brief:
+                raise ValueError("AI tidak mengembalikan ringkasan (respons kosong)")
+
+            row.brief_text = brief
+            row.brief_status = "done"
+            row.brief_error = None
+            row.converted_at = datetime.utcnow()
+        except Exception as e:
+            logger.warning("outlook_material_convert_failed", material_id=material_id, error=str(e))
+            row.brief_status = "failed"
+            row.brief_error = str(e)[:2000]
+
+        await db.flush()
+        await db.refresh(row)
+        return {"success": row.brief_status == "done", "data": self._to_dict(row)}
+
     def _to_dict(self, row: OutlookMaterial) -> dict:
         return {
             "id":            row.id,
@@ -88,4 +204,8 @@ class OutlookMaterialService:
             "file_size":     row.file_size,
             "uploaded_by":   row.uploaded_by,
             "created_at":    row.created_at.isoformat() if row.created_at else None,
+            "brief_status":  row.brief_status,
+            "brief_text":    row.brief_text,
+            "brief_error":   row.brief_error,
+            "converted_at":  row.converted_at.isoformat() if row.converted_at else None,
         }
