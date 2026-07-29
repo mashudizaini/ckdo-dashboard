@@ -1301,10 +1301,11 @@ async def upload_opex_plan_excel(
 @router.get("/exchange-rates")
 async def get_exchange_rates(
     refresh: bool = Query(False, description="Force re-scrape even if cache is fresh"),
+    source: str = Query("auto", description="Data source: auto, bi_html, exchangerate_api, frankfurter"),
     user: CurrentUser = Depends(require_role(Roles.PAC)),
 ):
-    """Kurs Transaksi Bank Indonesia — scraped daily, cached 4 hours."""
-    return await asyncio.to_thread(exchange_rate_service.get_rates, refresh)
+    """Kurs — multi-source fallback: Bank Indonesia, ExchangeRate-API, Frankfurter."""
+    return await asyncio.to_thread(exchange_rate_service.get_rates, source, refresh)
 
 
 class PushToEBSRequest(BaseModel):
@@ -1324,9 +1325,9 @@ async def push_exchange_rates_to_ebs(
     GL_DAILY_RATES_API.INSERT_RATE / UPDATE_RATE.
     """
     # Get current cached rates (don't re-scrape unless cache is empty)
-    cached = await asyncio.to_thread(exchange_rate_service.get_rates, False)
+    cached = await asyncio.to_thread(exchange_rate_service.get_rates, "auto", False)
     if not cached.get("rates"):
-        return {"success": False, "error": "Tidak ada data kurs — ambil data dari BI terlebih dahulu", "results": []}
+        return {"success": False, "error": "Tidak ada data kurs — ambil data kurs terlebih dahulu", "results": []}
 
     results = await asyncio.to_thread(
         exchange_rate_service.push_rates_to_ebs,

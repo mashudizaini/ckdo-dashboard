@@ -1180,7 +1180,7 @@ function MetricCard({ label, value, gradient }) {
 }
 
 /* ══════════════════════════════════════════════════
-   EXCHANGE RATE — Bank Indonesia Kurs Transaksi
+   EXCHANGE RATE — Multi-source (BI / ExchangeRate-API / Frankfurter)
    ══════════════════════════════════════════════════ */
 
 const FEATURED_CODES = ["USD", "EUR", "SGD", "JPY", "GBP", "AUD", "CNY", "MYR"];
@@ -1481,23 +1481,27 @@ function ExchangeRateSection() {
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState(null);
   const [showPushDlg, setShowPushDlg] = useState(false);
+  const [source,     setSource]     = useState("auto");
 
   const load = useCallback(async (refresh = false) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await pacApi.getExchangeRates(refresh);
+      const res = await pacApi.getExchangeRates(refresh, source);
       setData(res.data);
       if (res.data?.error) setError(res.data.error);
     } catch (e) {
-      setError(e.response?.data?.detail || "Gagal memuat data kurs dari Bank Indonesia");
+      setError(e.response?.data?.detail || "Gagal memuat data kurs");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [source]);
 
 
   useEffect(() => { load(); }, [load]);
+
+  const sourceLabel = data?.source || "Bank Indonesia — Kurs Transaksi BI";
+  const isMidMarket = data?.source_id && data.source_id !== "bi_html";
 
   const ratesMap = Object.fromEntries((data?.rates ?? []).map(r => [r.code, r]));
   const allRates = data?.rates ?? [];
@@ -1531,11 +1535,17 @@ function ExchangeRateSection() {
           </h2>
           <p className="text-gray-400 text-xs mt-1">
             {loading
-              ? "Mengambil data dari Bank Indonesia…"
+              ? "Mengambil data kurs…"
               : data?.date
                 ? `Tanggal kurs: ${data.date}`
                 : "Tanggal tidak tersedia"
             }
+            {!loading && data?.source && (
+              <span className="ml-2 text-gray-500">
+                · Sumber: {sourceLabel}
+                {isMidMarket && <span className="ml-1 text-amber-500/60">(mid-market)</span>}
+              </span>
+            )}
             {!loading && fmtTs(data?.cached_at) && (
               <span className="ml-2 text-gray-600">
                 · Diperbarui: {fmtTs(data.cached_at)}
@@ -1545,6 +1555,15 @@ function ExchangeRateSection() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <select
+            value={source}
+            onChange={e => setSource(e.target.value)}
+            className="rounded-lg border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-gray-300 focus:border-amber-500/50 focus:outline-none"
+          >
+            {(data?.available_sources || []).map(s => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
           {allRates.length > 0 && (
             <button
               onClick={() => setShowPushDlg(true)}
@@ -1628,7 +1647,7 @@ function ExchangeRateSection() {
       {/* ── Full Table ────────────────────────────────────── */}
       <div className="rounded-xl border border-gray-800 bg-gray-900 overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-          <span className="text-gray-300 text-sm font-medium">Semua Kurs Transaksi BI</span>
+          <span className="text-gray-300 text-sm font-medium">Semua Mata Uang</span>
           <span className="text-gray-500 text-xs">
             {loading ? "memuat…" : `${allRates.length} mata uang`}
           </span>
@@ -1637,7 +1656,7 @@ function ExchangeRateSection() {
         {loading ? (
           <div className="flex items-center justify-center py-12 gap-2 text-gray-500">
             <Loader2 size={16} className="animate-spin" />
-            <span className="text-sm">Mengambil data dari Bank Indonesia…</span>
+            <span className="text-sm">Mengambil data kurs…</span>
           </div>
         ) : allRates.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 gap-2 text-gray-600">
@@ -1701,16 +1720,18 @@ function ExchangeRateSection() {
 
         <div className="px-4 py-2.5 border-t border-gray-800 bg-gray-900/50 flex items-center justify-between">
           <span className="text-gray-600 text-xs">
-            Sumber: Bank Indonesia — Kurs Transaksi BI (diperbarui setiap hari kerja)
+            {data?.source || "Sumber: Bank Indonesia — Kurs Transaksi BI"}
           </span>
-          <a
-            href="https://www.bi.go.id/id/statistik/informasi-kurs/transaksi-bi/Default.aspx"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1 text-xs text-amber-400/70 hover:text-amber-400 transition-colors"
-          >
-            Lihat di BI <ExternalLink size={10} />
-          </a>
+          {data?.source_id === "bi_html" && (
+            <a
+              href="https://www.bi.go.id/id/statistik/informasi-kurs/transaksi-bi/Default.aspx"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-xs text-amber-400/70 hover:text-amber-400 transition-colors"
+            >
+              Lihat di BI <ExternalLink size={10} />
+            </a>
+          )}
         </div>
       </div>
     </div>
