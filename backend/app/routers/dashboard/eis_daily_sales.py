@@ -96,10 +96,15 @@ def _parse_excel(content: bytes, filename: str = "") -> dict:
     last_month_with_data = None
     for i, month in enumerate(MONTHS):
         ms = month_starts[i]
-        for row in rows[2:]:
-            if row[ms] is not None:
-                month_targets[month] = round(float(row[ms]), 3)
-                break
+        # Target is a single BP figure repeated down every WD row for the
+        # month, not a per-day curve. Taking the *first* non-blank cell used
+        # to mean a stray 0/placeholder in an early row (before the plan was
+        # finalized) silently became "the" target, which zeroed out the
+        # dashed reference line for months that otherwise had real target
+        # data further down the column. Taking the max survives that.
+        values = [round(float(row[ms]), 3) for row in rows[2:] if row[ms] is not None]
+        if values:
+            month_targets[month] = max(values)
         if any(r[month]["acc"] is not None for r in table_rows):
             last_month_with_data = month
 
@@ -112,18 +117,64 @@ def _parse_excel(content: bytes, filename: str = "") -> dict:
 
     if perf_idx is not None:
         ws2 = wb[wb.sheetnames[perf_idx]]
-        for row in ws2.iter_rows(min_row=1, max_row=12, values_only=True):
-            nums = [v for v in row if isinstance(v, (int, float))]
-            if len(nums) >= 3:
-                bp_c, exp_c, ach_c = nums[0], nums[1], nums[2]
-                if 1000 < bp_c < 50000 and 0 < ach_c < 2:
-                    bp = round(bp_c, 3)
-                    exp_closing = round(exp_c, 3)
-                    ach_pct = round(ach_c * 100, 2)
+        perf_rows = list(ws2.iter_rows(min_row=1, max_row=15, values_only=True))
+
+        # Locate the "Business Plan" / "Expectation Closing" / "Achievement"
+        # labels (spelling varies across templates, e.g. "Bussiness Plan",
+        # "Achievment") and read the number that sits a couple of rows below
+        # in the same column. This replaces guessing which of the sheet's
+        # numeric cells is which by magnitude (previously: BP had to fall
+        # between 1000-50000 and achievement between 0-200%), which broke
+        # silently — leaving BP/Expectation Closing/Achievement all at 0 —
+        # whenever a real figure fell outside those hardcoded ranges.
+        label_aliases = {
+            "business_plan": ("business plan", "bussiness plan"),
+            "expectation_closing": ("expectation closing",),
+            "achievement_pct": ("achievement", "achievment"),
+        }
+        label_positions = {}
+        for r_idx, row in enumerate(perf_rows):
+            for col_idx, cell in enumerate(row):
+                if not isinstance(cell, str):
+                    continue
+                low = cell.strip().lower()
+                for key, aliases in label_aliases.items():
+                    if key not in label_positions and low in aliases:
+                        label_positions[key] = (r_idx, col_idx)
+
+        if len(label_positions) == len(label_aliases):
+            for key, (r_idx, col_idx) in label_positions.items():
+                val = None
+                for row in perf_rows[r_idx + 1: r_idx + 6]:
+                    if col_idx < len(row) and isinstance(row[col_idx], (int, float)):
+                        val = row[col_idx]
+                        break
+                if val is None:
+                    continue
+                if key == "business_plan":
+                    bp = round(val, 3)
+                elif key == "expectation_closing":
+                    exp_closing = round(val, 3)
+                elif key == "achievement_pct":
+                    ach_pct = round(val * 100, 2)
+        else:
+            # Fallback for templates where the labels above aren't found.
+            for row in perf_rows:
+                nums = [v for v in row if isinstance(v, (int, float))]
+                if len(nums) >= 3:
+                    bp_c, exp_c, ach_c = nums[0], nums[1], nums[2]
+                    if 1000 < bp_c < 50000 and 0 < ach_c < 2:
+                        bp = round(bp_c, 3)
+                        exp_closing = round(exp_c, 3)
+                        ach_pct = round(ach_c * 100, 2)
+                        break
+
+        for row in perf_rows:
             dates = [v for v in row if isinstance(v, datetime.datetime)]
             if dates:
                 as_of = dates[0].strftime("%Y-%m-%d")
                 year_from_perf = dates[0].year
+                break
 
     # Prioritas sumber tahun: kolom YEAR di sheet Chart > tanggal di sheet
     # performance/summary > angka tahun pada nama file > tahun berjalan.

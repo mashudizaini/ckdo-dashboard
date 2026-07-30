@@ -513,7 +513,7 @@ export default function AppLauncher() {
                 <span style={{ fontSize: 16 }}>📰</span>
                 <div>
                   <span style={{ fontSize: 9.5, color: "#2563eb", fontWeight: 700, letterSpacing: "0.1em", display: "block" }}>INTERNAL MAGAZINE</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>CKDO e-Magazine Reading Room</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>CKD OTTO e-Magz</span>
                 </div>
               </div>
               <a
