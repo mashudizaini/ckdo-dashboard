@@ -208,6 +208,20 @@ tbody td {
   letter-spacing: normal !important;
   text-align: center !important;
 }
+/* Profit or Loss Monthly's 3-row grouped header (ACCOUNT / AMOUNT / year
+   dates / MTD-YTD) — black background with a white cell grid instead of
+   the shared navy header, per the reference layout. Chained with
+   .fs-table for higher specificity than the plain ".fs-table thead th"
+   rule above. */
+.fs-table.pl-monthly-table thead tr { background: #000000 !important; }
+.fs-table.pl-monthly-table thead th {
+  color: #ffffff !important;
+  background: transparent !important;
+  border: 1px solid #ffffff !important;
+  text-align: center !important;
+  vertical-align: middle !important;
+}
+
 .fs-table tbody tr[data-type] { background-color: transparent !important; }
 .fs-table tbody tr[data-type="header"] td {
   font-weight: 700 !important;

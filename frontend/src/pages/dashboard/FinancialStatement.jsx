@@ -56,7 +56,7 @@ const FS_SUBTABS = [
   { id: "balance-sheet",        label: "Balance Sheet",         icon: FileBarChart2 },
   { id: "balance-sheet-detail", label: "Balance Sheet Detail",  icon: Table2 },
   { id: "profit-loss",          label: "Profit or Loss",        icon: TrendingUp },
-  { id: "profit-loss-monthly",  label: "Profit and Loss Monthly", icon: CalendarDays },
+  { id: "profit-loss-monthly",  label: "Profit or Loss Monthly", icon: CalendarDays },
 ];
 
 const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
@@ -649,7 +649,42 @@ function ProfitLossPanel({ periods }) {
   );
 }
 
-/* ── Profit and Loss Monthly ──────────────────────────────────────────── */
+/* ── Profit or Loss Monthly ───────────────────────────────────────────── */
+
+// Bespoke 3-row grouped header (ACCOUNT spanning all three rows, AMOUNT
+// spanning both year-blocks, each year-block's actual period-end date
+// spanning its MTD/YTD pair, then the MTD/YTD labels themselves) — black
+// background with a white grid, matching the reference layout. Only the
+// <thead> is custom; the body reuses FsRow so line/total/header row
+// styling stays identical to every other Financial Statement table.
+function PlMonthlyTable({ rows, dateLast, dateThis }) {
+  const columnCount = 4; // MTD/YTD x 2 years, fixed for this report
+  return (
+    <div style={{ overflowX: "auto", borderRadius: 12, boxShadow: NEU.shadowOutSm }}>
+      <table className="fs-table pl-monthly-table" style={{ width: "100%", fontSize: 12.5, minWidth: 480 + columnCount * 130 }}>
+        <thead>
+          <tr>
+            <th rowSpan={3}>ACCOUNT</th>
+            <th colSpan={columnCount}>AMOUNT</th>
+          </tr>
+          <tr>
+            <th colSpan={2}>{dateLast}</th>
+            <th colSpan={2}>{dateThis}</th>
+          </tr>
+          <tr>
+            <th>MTD</th>
+            <th>YTD</th>
+            <th>MTD</th>
+            <th>YTD</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, ri) => <FsRow key={ri} row={row} columnCount={columnCount} />)}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function ProfitLossMonthlyPanel({ periods }) {
   const latest = useMemo(() => latestActivePeriod(periods), [periods]);
@@ -691,10 +726,23 @@ function ProfitLossMonthlyPanel({ periods }) {
     if (!params) return;
     downloadExport(
       () => financialStatementApi.exportProfitLossMonthly(params),
-      `Profit_and_Loss_Monthly_${period}.xlsx`,
+      `Profit_or_Loss_Monthly_${period}.xlsx`,
       setExporting, setError,
     );
   };
+
+  // Actual period-end dates ("June 30, 2026") for the header's year-block
+  // labels, matching the reference layout — periodLabel() alone only gives
+  // "Jun 2026", not the full date.
+  const headerDates = useMemo(() => {
+    const fmt = (p) => p?.end_date
+      ? new Date(p.end_date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
+      : "";
+    const p = periods.find(x => x.period_name === period);
+    if (!p) return { this: "", last: "" };
+    const lastYearP = periods.find(x => x.period_year === p.period_year - 1 && x.period_num === p.period_num && x.adjustment_period_flag !== "Y");
+    return { this: fmt(p), last: fmt(lastYearP) };
+  }, [period, periods]);
 
   const rows = useMemo(() => {
     if (!data) return [];
@@ -748,7 +796,7 @@ function ProfitLossMonthlyPanel({ periods }) {
       ) : error ? (
         <div style={{ padding: 16, color: "#dc2626", fontSize: 13 }}>{error}</div>
       ) : data ? (
-        <FsTable columns={data.columns} rows={rows} />
+        <PlMonthlyTable rows={rows} dateLast={headerDates.last} dateThis={headerDates.this} />
       ) : null}
     </div>
   );
