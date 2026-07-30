@@ -1,6 +1,15 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { FileBarChart2, Table2, TrendingUp, CalendarDays, Loader2, RefreshCw, AlertTriangle, Download } from "lucide-react";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, ResponsiveContainer,
+} from "recharts";
 import { financialStatementApi } from "@/api/dashboard";
+
+// Fixed categorical order (never cycled) — validated for CVD-safe adjacent
+// pairs, see the dataviz skill's reference palette. Gross Profit / Profit
+// (Loss) Before Tax / Total Comprehensive Income always map to these three
+// slots in this order.
+const CHART_COLORS = { grossProfit: "#2a78d6", pbt: "#eb6834", tci: "#1baf7a" };
 
 const NEU = {
   bg:          "#e8edf5",
@@ -46,7 +55,7 @@ async function downloadExport(apiCall, filename, setBusy, setErr) {
 const FS_SUBTABS = [
   { id: "balance-sheet",        label: "Balance Sheet",         icon: FileBarChart2 },
   { id: "balance-sheet-detail", label: "Balance Sheet Detail",  icon: Table2 },
-  { id: "profit-loss",          label: "Profit and Loss",       icon: TrendingUp },
+  { id: "profit-loss",          label: "Profit or Loss",        icon: TrendingUp },
   { id: "profit-loss-monthly",  label: "Profit and Loss Monthly", icon: CalendarDays },
 ];
 
@@ -56,6 +65,16 @@ const MONTH_LABEL = { JAN:"Jan",FEB:"Feb",MAR:"Mar",APR:"Apr",MAY:"May",JUN:"Jun
 function fmtNum(v) {
   const n = Number(v) || 0;
   const s = Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
+  return n < 0 ? `(${s})` : s;
+}
+
+function fmtShort(v) {
+  const n = Number(v) || 0;
+  const abs = Math.abs(n);
+  const s = abs >= 1_000_000_000 ? (abs / 1_000_000_000).toFixed(1) + "B"
+    : abs >= 1_000_000 ? (abs / 1_000_000).toFixed(0) + "M"
+    : abs >= 1_000 ? (abs / 1_000).toFixed(0) + "K"
+    : String(abs);
   return n < 0 ? `(${s})` : s;
 }
 
@@ -246,12 +265,8 @@ function BalanceSheetPanel({ periods, detail }) {
 
   // Period From / Period To — replaces the old single "Compare To" period
   // with a range, so up to ~10 years of history can be compared at once.
-  // Both Month selects share one state var (rangeMonth): the range steps
-  // year-by-year at a single month, so "Period From: Jun 2015" + "Period
-  // To: Dec 2024" (different months) has no well-defined yearly step —
-  // keeping one shared month avoids that dead/ambiguous combination while
-  // still showing a Month+Year control under each label.
-  const [rangeMonth, setRangeMonth] = useState("DEC");
+  // Year-only (no month picker) — these are always fiscal year-end (Dec)
+  // snapshots, so the month is fixed rather than user-selectable.
   const [fromYear, setFromYear] = useState("");
   const [toYear, setToYear] = useState("");
 
@@ -289,20 +304,20 @@ function BalanceSheetPanel({ periods, detail }) {
     [periods, asOfMonth, asOfYear],
   );
 
-  // Chronological annual snapshots between Period From and Period To
-  // (inclusive), one per year at rangeMonth — e.g. From=2015/To=2024 with
-  // rangeMonth=DEC gives DEC-15..DEC-24. Collapses to a single period when
-  // From and To are the same year (identical to the old single Compare To).
+  // Chronological annual (December) snapshots between Period From and
+  // Period To (inclusive) — e.g. From=2015/To=2024 gives DEC-15..DEC-24.
+  // Collapses to a single period when From and To are the same year
+  // (identical to the old single Compare To).
   const rangePeriods = useMemo(() => {
     if (!fromYear || !toYear) return [];
     const lo = Math.min(fromYear, toYear), hi = Math.max(fromYear, toYear);
     const names = [];
     for (let y = lo; y <= hi; y++) {
-      const pn = periodNameForMonthYear(periods, rangeMonth, y);
+      const pn = periodNameForMonthYear(periods, "DEC", y);
       if (pn && pn !== asOf) names.push(pn);
     }
     return names;
-  }, [periods, fromYear, toYear, rangeMonth, asOf]);
+  }, [periods, fromYear, toYear, asOf]);
 
   const periodList = useMemo(() => (asOf ? [...rangePeriods, asOf] : []), [rangePeriods, asOf]);
 
@@ -403,27 +418,17 @@ function BalanceSheetPanel({ periods, detail }) {
         </div>
         <div>
           <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period From</label>
-          <div style={{ display: "flex", gap: 6 }}>
-            <select style={SELECT} value={rangeMonth} onChange={e => setRangeMonth(e.target.value)}>
-              {MONTHS.map(m => <option key={m} value={m}>{MONTH_LABEL[m]}</option>)}
-            </select>
-            <select style={SELECT} value={fromYear} onChange={e => setFromYear(e.target.value ? Number(e.target.value) : "")}>
-              <option value="">— None —</option>
-              {years.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </div>
+          <select style={SELECT} value={fromYear} onChange={e => setFromYear(e.target.value ? Number(e.target.value) : "")}>
+            <option value="">— None —</option>
+            {years.map(y => <option key={y} value={y}>{`Dec ${y}`}</option>)}
+          </select>
         </div>
         <div>
           <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period To</label>
-          <div style={{ display: "flex", gap: 6 }}>
-            <select style={SELECT} value={rangeMonth} onChange={e => setRangeMonth(e.target.value)}>
-              {MONTHS.map(m => <option key={m} value={m}>{MONTH_LABEL[m]}</option>)}
-            </select>
-            <select style={SELECT} value={toYear} onChange={e => setToYear(e.target.value ? Number(e.target.value) : "")}>
-              <option value="">— None —</option>
-              {years.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
-          </div>
+          <select style={SELECT} value={toYear} onChange={e => setToYear(e.target.value ? Number(e.target.value) : "")}>
+            <option value="">— None —</option>
+            {years.map(y => <option key={y} value={y}>{`Dec ${y}`}</option>)}
+          </select>
         </div>
         <button onClick={load} disabled={loading} style={BTN}>
           {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
@@ -455,20 +460,91 @@ function BalanceSheetPanel({ periods, detail }) {
   );
 }
 
-/* ── Profit and Loss ──────────────────────────────────────────────────── */
+/* ── Profit or Loss ───────────────────────────────────────────────────── */
+
+// Trend chart shown above the table — Gross Profit / Profit (Loss) Before
+// Tax / Total Comprehensive Income (Loss), one grouped bar per selected
+// fiscal year. A ReferenceLine at 0 matters here since any of the three
+// can go negative (a loss year).
+function ProfitLossChart({ data }) {
+  const chartData = useMemo(() => {
+    if (!data) return [];
+    return data.columns.map((label, i) => ({
+      label,
+      grossProfit: data.gross_profit[i],
+      pbt: data.profit_before_tax[i],
+      tci: data.total_comprehensive[i],
+    }));
+  }, [data]);
+
+  if (!chartData.length) return null;
+
+  return (
+    <div style={{ borderRadius: 12, boxShadow: NEU.shadowOutSm, background: "#ffffff", padding: "14px 18px" }}>
+      <p style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>Gross Profit vs Profit (Loss) Before Tax vs Total Comprehensive Income (Loss) — IDR</p>
+      <ResponsiveContainer width="100%" height={280}>
+        <BarChart data={chartData} margin={{ top: 4, right: 16, left: 16, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
+          <XAxis dataKey="label" tick={{ fill: "#64748b", fontSize: 11 }} />
+          <YAxis tickFormatter={fmtShort} tick={{ fill: "#64748b", fontSize: 10 }} />
+          <ReferenceLine y={0} stroke="#c3c2b7" />
+          <Tooltip
+            contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, fontSize: 12, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
+            formatter={(v, name) => [fmtNum(v), name]}
+          />
+          <Legend wrapperStyle={{ fontSize: 11, color: "#64748b" }} />
+          <Bar dataKey="grossProfit" name="Gross Profit" fill={CHART_COLORS.grossProfit} radius={[4, 4, 0, 0]} />
+          <Bar dataKey="pbt" name="Profit (Loss) Before Tax" fill={CHART_COLORS.pbt} radius={[4, 4, 0, 0]} />
+          <Bar dataKey="tci" name="Total Comprehensive Income (Loss)" fill={CHART_COLORS.tci} radius={[4, 4, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
 
 function ProfitLossPanel({ periods }) {
   const years = useMemo(() => fiscalYears(periods), [periods]);
-  const [selectedYears, setSelectedYears] = useState([]);
+
+  // Period — the current/reporting fiscal year (analogous to Balance
+  // Sheet's Single Period, year-only since a P&L column is a whole fiscal
+  // year, not a point in time).
+  const [periodYear, setPeriodYear] = useState("");
+  // Period From / Period To — comparison range (analogous to Balance
+  // Sheet's Period From/To), replacing the old Fiscal Years checkbox list.
+  // Same year on both = 1 prior year (old default); different years =
+  // multi-year trend.
+  const [fromYear, setFromYear] = useState("");
+  const [toYear, setToYear] = useState("");
+
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
-    if (years.length && selectedYears.length === 0) setSelectedYears(years.slice(0, 2).reverse());
+    if (!years.length || periodYear) return;
+    const latestYear = years[0]; // fiscalYears() sorts descending
+    setPeriodYear(latestYear);
+    const prevYear = latestYear - 1;
+    if (years.includes(prevYear)) {
+      setFromYear(prevYear);
+      setToYear(prevYear);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [years]);
+
+  const rangeYears = useMemo(() => {
+    if (!fromYear || !toYear) return [];
+    const lo = Math.min(fromYear, toYear), hi = Math.max(fromYear, toYear);
+    const ys = [];
+    for (let y = lo; y <= hi; y++) if (y !== periodYear) ys.push(y);
+    return ys;
+  }, [fromYear, toYear, periodYear]);
+
+  const selectedYears = useMemo(
+    () => (periodYear ? [...rangeYears, periodYear] : []),
+    [rangeYears, periodYear],
+  );
 
   const columnsForYears = useCallback(
     () => selectedYears.map(y => ({ label: `FY ${y}`, periods: fyColumnPeriods(periods, y) })),
@@ -491,7 +567,7 @@ function ProfitLossPanel({ periods }) {
   const handleExport = () => {
     downloadExport(
       () => financialStatementApi.exportProfitLoss(columnsForYears()),
-      `Profit_and_Loss_${selectedYears.join("-")}.xlsx`,
+      `Profit_or_Loss_${selectedYears.join("-")}.xlsx`,
       setExporting, setError,
     );
   };
@@ -525,15 +601,27 @@ function ProfitLossPanel({ periods }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ fontSize: 11, color: "#64748b" }}>Fiscal Years:</span>
-        {years.map(y => (
-          <label key={y} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, padding: "4px 9px", borderRadius: 8, background: NEU.bg, boxShadow: selectedYears.includes(y) ? NEU.shadowIn : NEU.shadowOutSm, cursor: "pointer" }}>
-            <input type="checkbox" checked={selectedYears.includes(y)}
-              onChange={e => setSelectedYears(s => e.target.checked ? [...s, y].sort() : s.filter(x => x !== y))} />
-            FY{y}
-          </label>
-        ))}
+      <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period</label>
+          <select style={SELECT} value={periodYear} onChange={e => setPeriodYear(e.target.value ? Number(e.target.value) : "")}>
+            {years.map(y => <option key={y} value={y}>{`FY ${y}`}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period From</label>
+          <select style={SELECT} value={fromYear} onChange={e => setFromYear(e.target.value ? Number(e.target.value) : "")}>
+            <option value="">— None —</option>
+            {years.map(y => <option key={y} value={y}>{`FY ${y}`}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period To</label>
+          <select style={SELECT} value={toYear} onChange={e => setToYear(e.target.value ? Number(e.target.value) : "")}>
+            <option value="">— None —</option>
+            {years.map(y => <option key={y} value={y}>{`FY ${y}`}</option>)}
+          </select>
+        </div>
         <button onClick={load} disabled={loading} style={BTN}>
           {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
         </button>
@@ -552,7 +640,10 @@ function ProfitLossPanel({ periods }) {
       ) : error ? (
         <div style={{ padding: 16, color: "#dc2626", fontSize: 13 }}>{error}</div>
       ) : data ? (
-        <FsTable columns={data.columns} rows={rows} />
+        <>
+          <ProfitLossChart data={data} />
+          <FsTable columns={data.columns} rows={rows} />
+        </>
       ) : null}
     </div>
   );
