@@ -159,8 +159,8 @@ export const eisApi = {
   getEtlJobData:  (jobName, year, month) => api.get(`${EIS}/etl/job-data/${jobName}`, { params: { year, month: month || undefined } }),
 
   // Daily Sales
-  getDailySales:    ()         => api.get(`${EIS}/daily-sales/data`),
-  uploadDailySales: (formData) => api.post(`${EIS}/daily-sales/upload`, formData, { headers: { "Content-Type": "multipart/form-data" } }),
+  getDailySales:    (year)         => api.get(`${EIS}/daily-sales/data`, { params: { year } }),
+  uploadDailySales: (formData, year) => api.post(`${EIS}/daily-sales/upload`, formData, { params: { year }, headers: { "Content-Type": "multipart/form-data" } }),
 
   // Data Upload
   getOvertimeData:   (year)         => api.get(`${EIS}/data-upload/overtime`, { params: { year } }),

@@ -834,22 +834,28 @@ function EisBusinessPlanTab({ year }) {
 }
 
 /* ─── Tab: Daily Sales ──────────────────────────────────────────── */
-function EisDailySalesTab() {
+function EisDailySalesTab({ year }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [msg, setMsg] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState("december");
+  // Upload target year — defaults to the page's shared Year selector but is
+  // independently adjustable, same convention as the Data Upload tab's
+  // uploaders. Required on every upload so the file is stored under the
+  // right year instead of silently overwriting whatever was there before.
+  const [uploadYear, setUploadYear] = useState(year);
   const fileRef = useRef(null);
+  const YEARS = Array.from({ length: 5 }, (_, i) => CY - i);
 
-  const load = async () => {
+  const load = async (y) => {
     setLoading(true);
-    try { setData((await eisApi.getDailySales()).data); }
+    try { setData((await eisApi.getDailySales(y)).data); }
     catch (e) { console.error("Failed to load daily sales:", e); }
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, []); // eslint-disable-line
+  useEffect(() => { load(year); }, [year]); // eslint-disable-line
 
   const handleUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -858,9 +864,9 @@ function EisDailySalesTab() {
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await eisApi.uploadDailySales(fd);
-      setData(res.data);
-      setMsg({ type: "ok", text: `Data berhasil diupdate dari "${file.name}"` });
+      const res = await eisApi.uploadDailySales(fd, uploadYear);
+      setMsg({ type: "ok", text: res.message || `Data berhasil diupdate dari "${file.name}"` });
+      if (uploadYear === year) setData(res.data);
     } catch (err) {
       setMsg({ type: "err", text: "Gagal upload: " + (err?.response?.data?.detail || err?.detail || err.message) });
     }
@@ -880,8 +886,11 @@ function EisDailySalesTab() {
       <ChartCard title="Upload Data Excel" subtitle={`Worksheet "Chart" (WD, Target, Acc, Sales per bulan) + "Daily Sales Performance". Format referensi: EIS_Sales_Daily.xlsx`}
         right={
           <div className="flex items-center gap-2 shrink-0">
+            <select value={uploadYear} onChange={(e) => setUploadYear(Number(e.target.value))} className={selCls} title="Tahun data yang diupload">
+              {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
             <button onClick={() => fileRef.current?.click()} disabled={uploading} className={`${uploadBtnCls} bg-cyan-600 hover:bg-cyan-700`}>
-              {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {uploading ? "Mengupload..." : "Pilih File (.xlsx)"}
+              {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {uploading ? "Mengupload..." : `Pilih File untuk ${uploadYear} (.xlsx)`}
             </button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleUpload} />
           </div>
@@ -889,7 +898,7 @@ function EisDailySalesTab() {
         <MsgBanner msg={msg} onClose={() => setMsg(null)} />
       </ChartCard>
 
-      <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Daily Sales Performance — {data?.year || ""} ({data?.month || ""})</h2>
+      <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Daily Sales Performance — {year} ({data?.month || "belum ada data"})</h2>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <EisKpiCard title="Business Plan" value={`${fmtN(data?.business_plan, 2)} M`} icon={Target} color="cyan" />
@@ -1496,7 +1505,7 @@ export default function EISDashboard() {
       {tab === "expansion" && <EisExpansionTab year={year} period={period} />}
       {tab === "administration" && <EisAdministrationTab year={year} />}
       {tab === "business-plan" && <EisBusinessPlanTab year={year} />}
-      {tab === "daily-sales" && <EisDailySalesTab />}
+      {tab === "daily-sales" && <EisDailySalesTab year={year} />}
       {tab === "data-upload" && <EisDataUploadTab year={year} />}
       {tab === "etl" && <EisEtlAdminTab />}
     </div>

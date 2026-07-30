@@ -3,7 +3,7 @@ import io
 import re
 import datetime
 from pathlib import Path
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
 from app.dependencies import get_current_user
 
 router = APIRouter()
@@ -17,19 +17,27 @@ MONTHS = [
 ]
 
 
-def _load_data() -> dict:
+def _load_store() -> dict:
+    """The on-disk file is a dict keyed by fiscal year (as a string), e.g.
+    {"2025": {...}, "2026": {...}} -- each value has the same shape the old
+    single-blob format used (year/month/rows/...). Keyed storage is what
+    lets the Year selector actually change what's displayed; previously
+    the whole file WAS one year's data, so switching the dropdown had no
+    effect and a new upload silently overwrote whatever year was there
+    before, regardless of which year the data was actually for."""
     for path in (DATA_FILE, DEFAULT_FILE):
         if path.exists():
             try:
-                return json.loads(path.read_text(encoding="utf-8"))
+                data = json.loads(path.read_text(encoding="utf-8"))
+                return data if isinstance(data, dict) else {}
             except Exception:
                 continue
     return {}
 
 
-def _save_data(data: dict):
+def _save_store(store: dict):
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    DATA_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    DATA_FILE.write_text(json.dumps(store, ensure_ascii=False), encoding="utf-8")
 
 
 def _parse_excel(content: bytes, filename: str = "") -> dict:
@@ -128,7 +136,7 @@ def _parse_excel(content: bytes, filename: str = "") -> dict:
         year = datetime.date.today().year
 
     return {
-        "year": year,
+        "detected_year": year,
         "month": month_label,
         "as_of": as_of,
         "business_plan": bp,
@@ -140,18 +148,38 @@ def _parse_excel(content: bytes, filename: str = "") -> dict:
 
 
 @router.get("/data")
-async def get_daily_sales(user = Depends(get_current_user)):
-    return {"data": _load_data()}
+async def get_daily_sales(
+    year: int = Query(..., description="Fiscal year to display"),
+    user = Depends(get_current_user),
+):
+    store = _load_store()
+    entry = store.get(str(year))
+    if entry is None:
+        return {"data": None}
+    return {"data": {**entry, "year": year}}
 
 
 @router.post("/upload")
 async def upload_daily_sales(
+    year: int = Query(..., description="Fiscal year this file's data belongs to — required so it's stored under the right year instead of overwriting whatever was there before"),
     file: UploadFile = File(...),
     user = Depends(get_current_user),
 ):
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=422, detail="File harus berformat .xlsx atau .xls")
     content = await file.read()
-    data = _parse_excel(content, file.filename)
-    _save_data(data)
-    return {"message": "Data berhasil diupload", "data": data}
+    parsed = _parse_excel(content, file.filename)
+    detected_year = parsed.pop("detected_year", None)
+
+    store = _load_store()
+    store[str(year)] = parsed
+    _save_store(store)
+
+    result = {**parsed, "year": year}
+    message = f"Data berhasil diupload untuk tahun {year}"
+    if detected_year and detected_year != year:
+        message += (
+            f" (perhatian: tahun yang terbaca dari file adalah {detected_year}, "
+            f"berbeda dari tahun {year} yang dipilih — periksa kembali file atau pilihan tahunnya)"
+        )
+    return {"message": message, "detected_year": detected_year, "data": result}
