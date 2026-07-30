@@ -4,7 +4,7 @@ import {
   Banknote, ExternalLink, RefreshCw, Filter, X,
   Download, Loader2, TrendingUp, TrendingDown, Minus,
   BookOpen, Plus, Trash2, Save, Printer, ChevronDown, ChevronRight,
-  CheckCircle, Clock, Edit3, FileText, Globe, Upload, AlertCircle, Calendar, BookOpenCheck, Sparkles, Settings, Users, Factory, Wallet,
+  CheckCircle, Clock, Edit3, FileText, Globe, Upload, AlertCircle, Calendar, BookOpenCheck, Sparkles, Settings, Users, Factory, Wallet, KeyRound,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line,
@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import * as XLSX from "xlsx";
 import { pacApi } from "@/api/dashboard";
+import GeminiApiKeyModal from "@/components/ai/GeminiApiKeyModal";
 
 /* ─── Tabs ────────────────────────────────────────── */
 const TABS = [
@@ -2423,7 +2424,7 @@ function OutlookBriefStatusBadge({ status }) {
   );
 }
 
-function OutlookMaterialsPanel({ year, category = "material", title, description, accent = "teal" }) {
+function OutlookMaterialsPanel({ year, category = "material", title, description, accent = "teal", provider = "onprem" }) {
   const [materials, setMaterials] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -2478,7 +2479,7 @@ function OutlookMaterialsPanel({ year, category = "material", title, description
   const convertOne = async (id) => {
     setConverting(prev => Object.assign({}, prev, { [id]: true }));
     try {
-      const res = await pacApi.convertOutlookMaterial(id);
+      const res = await pacApi.convertOutlookMaterial(id, provider);
       setMaterials(prev => prev.map(m => m.id === id ? res.data : m));
     } catch (err) {
       // reflect failure locally even if the request itself errored (network, etc.)
@@ -2588,6 +2589,8 @@ function OutlookPanel({ year }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [provider, setProvider] = useState("onprem");
+  const [showApiKey, setShowApiKey] = useState(false);
 
   const [exporting, setExporting] = useState(false);
 
@@ -2632,7 +2635,7 @@ function OutlookPanel({ year }) {
   const generateWithAI = async () => {
     setGenerating(true);
     try {
-      const res = await pacApi.generateOutlook({ year });
+      const res = await pacApi.generateOutlook({ year, provider });
       if (res.success && res.data) {
         setData(Object.assign({}, res.data, { content: normalizeOutlookContent(res.data.content) }));
         setSaved(true);
@@ -2672,15 +2675,18 @@ function OutlookPanel({ year }) {
 
   return (
     <div className="space-y-4">
+    {showApiKey && <GeminiApiKeyModal onClose={() => setShowApiKey(false)} />}
     <OutlookMaterialsPanel
       year={year} category="material" accent="teal"
       title="Outlook Reference Materials"
       description="Bahan dasar laporan ekonomi & pangsa pasar"
+      provider={provider}
     />
     <OutlookMaterialsPanel
       year={year} category="format" accent="violet"
       title="Outlook Report Format"
       description="Contoh/format laporan sebagai acuan generate Outlook"
+      provider={provider}
     />
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
@@ -2689,6 +2695,21 @@ function OutlookPanel({ year }) {
           <p className="text-xs text-gray-500 mt-0.5">Economic & Industry Outlook · {year}</p>
         </div>
         <div className="flex gap-2">
+          <select
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            title="AI provider used for Convert and AI Generate"
+            className="rounded-md border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs font-medium text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+          >
+            <option value="onprem">Standard (On-Premise)</option>
+            <option value="gemini">Gemini</option>
+          </select>
+          {provider === "gemini" && (
+            <button onClick={() => setShowApiKey(true)} title="Use your own personal Gemini API key"
+              className="flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium border border-gray-700 bg-gray-800 text-gray-300 hover:border-violet-500 hover:text-violet-400 transition-colors">
+              <KeyRound size={11} /> My API Key
+            </button>
+          )}
           <button onClick={generateWithAI} disabled={generating}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 transition-all disabled:opacity-50">
             {generating ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}

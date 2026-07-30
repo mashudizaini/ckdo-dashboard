@@ -126,7 +126,7 @@ class OutlookMaterialService:
 
         raise ValueError(f"Format {ext or '(tanpa ekstensi)'} belum didukung untuk convert otomatis")
 
-    async def convert_material(self, db: AsyncSession, material_id: int) -> dict:
+    async def convert_material(self, db: AsyncSession, material_id: int, provider: str = "onprem", gemini_api_key: str = None) -> dict:
         """Extract text from the uploaded file and summarize it into a
         structured Markdown brief via AI — run once per file, reused on
         every Outlook generation afterwards."""
@@ -176,7 +176,7 @@ class OutlookMaterialService:
             )
 
             ai = AIService()
-            brief = await ai.complete(system, prompt)
+            brief = await ai.complete(system, prompt, provider=provider, gemini_api_key=gemini_api_key)
             brief = (brief or "").strip()
             if not brief:
                 raise ValueError("AI tidak mengembalikan ringkasan (respons kosong)")

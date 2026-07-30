@@ -79,6 +79,33 @@ def to_gemini_tools(ollama_tools: list[dict]) -> list[dict]:
     return [{"functionDeclarations": declarations}]
 
 
+async def generate(system_prompt: str, contents: list[dict], api_key: str = None) -> str:
+    """One-shot, non-streaming completion — for batch/background tasks
+    (summarizing an uploaded reference file, generating the Outlook
+    write-up) that just need the final text, mirroring AIService.complete()
+    for the Ollama path.
+    """
+    payload = {
+        "contents": contents,
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "generationConfig": _GENERATION_CONFIG,
+    }
+    async with httpx.AsyncClient(timeout=STREAM_TIMEOUT_SECONDS) as client:
+        resp = await client.post(
+            f"{BASE_URL}/models/{settings.gemini_model}:generateContent",
+            params={"key": api_key or settings.gemini_api_key},
+            json=payload,
+        )
+        resp.raise_for_status()
+        result = resp.json()
+
+    candidates = result.get("candidates") or []
+    if not candidates:
+        return ""
+    parts = candidates[0].get("content", {}).get("parts", [])
+    return "".join(p.get("text", "") for p in parts)
+
+
 async def generate_with_tools(system_prompt: str, contents: list[dict], tools: list[dict], api_key: str = None) -> dict:
     """
     Non-streaming call with tools attached — the model decides whether to

@@ -38,6 +38,10 @@ from app.services.investment_plan_service import InvestmentPlanService
 from app.services.opex_plan_service import OpexPlanService
 from app.services.ai_service import AIService
 from app.services import exchange_rate_service
+from app.services import user_api_key_service
+from app.config import get_settings
+
+settings = get_settings()
 
 router = APIRouter()
 
@@ -236,16 +240,25 @@ async def list_outlook_materials(
     return await OutlookMaterialService().list_materials(db, plan_year, category)
 
 
+async def _resolve_gemini_key(db: AsyncSession, user: CurrentUser) -> str:
+    """User's own saved Gemini key if they set one, else the shared company key."""
+    user_key = await user_api_key_service.get_user_key(db, user.username, "gemini")
+    return user_key or settings.gemini_api_key
+
+
 @router.post("/setup-modules/outlook/materials/{material_id}/convert")
 async def convert_outlook_material(
     material_id: int,
+    provider: str = Query("onprem", pattern="^(onprem|gemini)$"),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.PAC)),
 ):
     """Extract text from the file and summarize it into a structured
     Markdown brief — done once per file, then reused by generate_outlook
-    on every generation instead of re-reading the raw file each time."""
-    result = await OutlookMaterialService().convert_material(db, material_id)
+    on every generation instead of re-reading the raw file each time.
+    provider: "onprem" (local, free — default) or "gemini"."""
+    gemini_key = await _resolve_gemini_key(db, user) if provider == "gemini" else None
+    result = await OutlookMaterialService().convert_material(db, material_id, provider, gemini_key)
     if result.get("data") is None:
         raise HTTPException(404, result.get("error", "Material tidak ditemukan"))
     return result
@@ -287,6 +300,7 @@ async def delete_outlook_material(
 class GenerateOutlookRequest(BaseModel):
     year: int
     context: Optional[str] = None
+    provider: str = "onprem"  # "onprem" (local, free — default) or "gemini"
 
 
 @router.post("/setup-modules/generate-outlook")
@@ -302,6 +316,10 @@ async def generate_outlook(
     grounding context, so generation is fast and consistent across reruns.
     Returns structured outlook data that can be saved via upsert.
     """
+    if body.provider not in ("onprem", "gemini"):
+        raise HTTPException(400, 'Invalid provider — use "onprem" or "gemini"')
+    gemini_key = await _resolve_gemini_key(db, user) if body.provider == "gemini" else None
+
     mat_result = await OutlookMaterialService().list_materials(db, body.year)
     materials = mat_result.get("data", [])
     material_briefs = [m for m in materials if m["category"] == "material" and m["brief_status"] == "done" and m["brief_text"]]
@@ -353,6 +371,8 @@ Make it realistic for {body.year} with specific numbers and trends. Keep each bu
             "You are a business analyst. Return only valid JSON, no markdown code fences, no explanations.",
             prompt,
             num_ctx=16384,
+            provider=body.provider,
+            gemini_api_key=gemini_key,
         )
         json_text = response.strip()
         if json_text.startswith("```"):

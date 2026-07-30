@@ -203,7 +203,7 @@ export const pacApi = {
     return api.post("/dashboard/pac/setup-modules/outlook/materials", form, { params: { plan_year: planYear, category }, headers: { "Content-Type": "multipart/form-data" } });
   },
   listOutlookMaterials:   (planYear, category) => api.get("/dashboard/pac/setup-modules/outlook/materials", { params: { plan_year: planYear, category } }),
-  convertOutlookMaterial: (id) => api.post(`/dashboard/pac/setup-modules/outlook/materials/${id}/convert`),
+  convertOutlookMaterial: (id, provider = "onprem") => api.post(`/dashboard/pac/setup-modules/outlook/materials/${id}/convert`, null, { params: { provider } }),
   downloadOutlookMaterial: (id) => api.get(`/dashboard/pac/setup-modules/outlook/materials/${id}/download`, { responseType: "blob" }),
   deleteOutlookMaterial:  (id) => api.delete(`/dashboard/pac/setup-modules/outlook/materials/${id}`),
 

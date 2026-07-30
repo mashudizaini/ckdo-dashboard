@@ -42,11 +42,16 @@ class AIService:
         self.base_url = settings.ollama_api_url.rstrip("/")
         self.model = settings.ollama_chat_model
 
-    async def complete(self, system: str, message: str, num_ctx: int = 8192) -> str:
-        """One-shot, non-streaming completion on the local Ollama server —
-        for batch/background tasks (e.g. summarizing an uploaded reference
-        file into a structured brief, or generating the Outlook write-up)
-        that just need the final text, not token-by-token SSE."""
+    async def complete(self, system: str, message: str, num_ctx: int = 8192, provider: str = "onprem", gemini_api_key: str = None) -> str:
+        """One-shot, non-streaming completion — for batch/background tasks
+        (e.g. summarizing an uploaded reference file into a structured
+        brief, or generating the Outlook write-up) that just need the final
+        text, not token-by-token SSE. provider: "onprem" (local Ollama,
+        default) or "gemini"."""
+        if provider == "gemini":
+            contents = [{"role": "user", "parts": [{"text": message}]}]
+            return await gemini_service.generate(system, contents, gemini_api_key)
+
         messages = [{"role": "system", "content": system}, {"role": "user", "content": message}]
         async with httpx.AsyncClient(timeout=OLLAMA_CHAT_TIMEOUT_SECONDS) as client:
             response = await client.post(
