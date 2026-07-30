@@ -21,12 +21,12 @@ import { eisApi } from "@/api/dashboard";
 const CY = new Date().getFullYear();
 const MONTHS_SHORT = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const MONTHS_FULL_ID = [
-  { key: "january", label: "Januari" }, { key: "february", label: "Februari" },
-  { key: "march", label: "Maret" }, { key: "april", label: "April" },
-  { key: "may", label: "Mei" }, { key: "june", label: "Juni" },
-  { key: "july", label: "Juli" }, { key: "august", label: "Agustus" },
-  { key: "september", label: "September" }, { key: "october", label: "Oktober" },
-  { key: "november", label: "November" }, { key: "december", label: "Desember" },
+  { key: "january", label: "January" }, { key: "february", label: "February" },
+  { key: "march", label: "March" }, { key: "april", label: "April" },
+  { key: "may", label: "May" }, { key: "june", label: "June" },
+  { key: "july", label: "July" }, { key: "august", label: "August" },
+  { key: "september", label: "September" }, { key: "october", label: "October" },
+  { key: "november", label: "November" }, { key: "december", label: "December" },
 ];
 const BP_MONTHS = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec_val"];
 const BP_MONTH_LABELS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -876,23 +876,23 @@ function EisDailySalesTab({ year }) {
       const fd = new FormData();
       fd.append("file", file);
       const res = await eisApi.uploadDailySales(fd, uploadYear);
-      setMsg({ type: "ok", text: res.message || `Data berhasil diupdate dari "${file.name}"` });
+      setMsg({ type: "ok", text: res.message || `Data successfully updated from "${file.name}"` });
       if (uploadYear === year) setData(res.data);
     } catch (err) {
-      setMsg({ type: "err", text: "Gagal upload: " + (err?.response?.data?.detail || err?.detail || err.message) });
+      setMsg({ type: "err", text: "Upload failed: " + (err?.response?.data?.detail || err?.detail || err.message) });
     }
     setUploading(false); e.target.value = "";
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`Hapus data Daily Sales tahun ${year}? Tindakan ini tidak bisa dibatalkan.`)) return;
+    if (!window.confirm(`Delete Daily Sales data for ${year}? This action cannot be undone.`)) return;
     setDeleting(true); setMsg(null);
     try {
       const res = await eisApi.deleteDailySales(year);
-      setMsg({ type: "ok", text: res.message || `Data tahun ${year} berhasil dihapus` });
+      setMsg({ type: "ok", text: res.message || `Data for ${year} successfully deleted` });
       setData(null);
     } catch (err) {
-      setMsg({ type: "err", text: "Gagal menghapus: " + (err?.response?.data?.detail || err?.detail || err.message) });
+      setMsg({ type: "err", text: "Delete failed: " + (err?.response?.data?.detail || err?.detail || err.message) });
     }
     setDeleting(false);
   };
@@ -907,20 +907,20 @@ function EisDailySalesTab({ year }) {
 
   return (
     <div className="space-y-4">
-      <ChartCard title="Upload Data Excel" subtitle={`Worksheet "Chart" (WD, Target, Acc, Sales per bulan) + "Daily Sales Performance". Format referensi: EIS_Sales_Daily.xlsx`}
+      <ChartCard title="Upload Data Excel" subtitle={`Worksheet "Chart" (WD, Target, Acc, Sales per month) + "Daily Sales Performance". Reference format: EIS_Sales_Daily.xlsx`}
         right={
           <div className="flex items-center gap-2 shrink-0">
-            <select value={uploadYear} onChange={(e) => setUploadYear(Number(e.target.value))} className={selCls} title="Tahun data yang diupload">
+            <select value={uploadYear} onChange={(e) => setUploadYear(Number(e.target.value))} className={selCls} title="Year the data belongs to">
               {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
             </select>
             <button onClick={() => fileRef.current?.click()} disabled={uploading} className={`${uploadBtnCls} bg-cyan-600 hover:bg-cyan-700`}>
-              {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {uploading ? "Mengupload..." : `Pilih File untuk ${uploadYear} (.xlsx)`}
+              {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {uploading ? "Uploading..." : `Choose File for ${uploadYear} (.xlsx)`}
             </button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleUpload} />
             {data && (
-              <button onClick={handleDelete} disabled={deleting} title={`Hapus data Daily Sales tahun ${year}`}
+              <button onClick={handleDelete} disabled={deleting} title={`Delete Daily Sales data for ${year}`}
                 className={`${uploadBtnCls} bg-red-600/80 hover:bg-red-600`}>
-                {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Hapus Data {year}
+                {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Delete Data {year}
               </button>
             )}
           </div>
@@ -928,7 +928,7 @@ function EisDailySalesTab({ year }) {
         <MsgBanner msg={msg} onClose={() => setMsg(null)} />
       </ChartCard>
 
-      <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Daily Sales Performance — {year} ({data?.month || "belum ada data"})</h2>
+      <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Daily Sales Performance — {year} ({data?.month || "no data yet"})</h2>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <EisKpiCard title="Business Plan" value={`${fmtN(data?.business_plan, 2)} M`} icon={Target} color="cyan" />
@@ -964,7 +964,7 @@ function EisDailySalesTab({ year }) {
         </ResponsiveContainer>
       </ChartCard>
 
-      <ChartCard title="Detail Penjualan Harian per Working Day" subtitle="in Million IDR · Acc = Accumulated, Sales = Daily" className="overflow-x-auto">
+      <ChartCard title="Daily Sales Detail per Working Day" subtitle="in Million IDR · Acc = Accumulated, Sales = Daily" className="overflow-x-auto">
         <table className="text-[11px] border-collapse" style={{ minWidth: "1100px", width: "100%" }}>
           <thead>
             <tr className="bg-gray-950 text-gray-200">
