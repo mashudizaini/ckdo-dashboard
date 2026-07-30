@@ -851,7 +851,17 @@ function EisDailySalesTab({ year }) {
 
   const load = async (y) => {
     setLoading(true);
-    try { setData((await eisApi.getDailySales(y)).data); }
+    try {
+      const d = (await eisApi.getDailySales(y)).data;
+      setData(d);
+      // Point the month selector at whatever month this year's data actually
+      // has (backend's last_month_with_data), instead of leaving it on
+      // whatever month was selected for the previous year — otherwise
+      // switching to a year that hasn't reached that month yet (e.g. every
+      // year before it's over) shows a chart with zero rows and looks like
+      // the whole chart failed to load.
+      if (d?.month) setSelectedMonth(d.month.toLowerCase());
+    }
     catch (e) { console.error("Failed to load daily sales:", e); }
     setLoading(false);
   };
@@ -947,7 +957,7 @@ function EisDailySalesTab({ year }) {
             <YAxis tick={AXIS_TICK} tickFormatter={(v) => `${(v / 1000).toFixed(1)}K`} width={52} />
             <Tooltip formatter={(v, name) => [`${fmtN(v, 2)} M IDR`, name]} labelFormatter={(l) => `Working Day ${l}`} contentStyle={TOOLTIP_STYLE} />
             <Legend wrapperStyle={{ fontSize: 12 }} />
-            {monthTarget > 0 && <ReferenceLine y={monthTarget} stroke={COLOR_PRIMARY} strokeWidth={2} strokeDasharray="6 3" label={{ value: `BP ${fmtN(monthTarget, 0)}M`, fill: COLOR_PRIMARY, fontSize: 10, position: "insideTopRight" }} />}
+            {monthTarget > 0 && <ReferenceLine y={monthTarget} ifOverflow="extendDomain" stroke={COLOR_PRIMARY} strokeWidth={2} strokeDasharray="6 3" label={{ value: `BP ${fmtN(monthTarget, 0)}M`, fill: COLOR_PRIMARY, fontSize: 10, position: "insideTopRight" }} />}
             <Bar dataKey="sales" fill="#6b7280" name="Sales" maxBarSize={14} radius={[2, 2, 0, 0]} />
             <Line type="monotone" dataKey="acc" stroke="#e07b39" strokeWidth={2.5} dot={{ r: 2.5, fill: "#e07b39", strokeWidth: 0 }} activeDot={{ r: 5 }} name="Acc" />
           </ComposedChart>
