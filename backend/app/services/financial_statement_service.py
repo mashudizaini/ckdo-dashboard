@@ -405,6 +405,7 @@ class FinancialStatementService:
         return {
             "success": True,
             "periods": period_names,
+            "column_labels": [self.period_display_label(p) for p in period_names],
             "current_assets": current_assets, "total_current_assets": total_current_assets,
             "noncurrent_assets": noncurrent_assets, "total_noncurrent_assets": total_noncurrent_assets,
             "total_assets": total_assets,
@@ -443,7 +444,11 @@ class FinancialStatementService:
             acc["values"] = [acc["values"].get(p, 0) for p in period_names]
             out.append(acc)
         out.sort(key=lambda a: (a["account_type"], a["account_code"]))
-        return {"success": True, "periods": period_names, "accounts": out}
+        return {
+            "success": True, "periods": period_names,
+            "column_labels": [self.period_display_label(p) for p in period_names],
+            "accounts": out,
+        }
 
     # ── Profit & Loss ────────────────────────────────────────────────────
 

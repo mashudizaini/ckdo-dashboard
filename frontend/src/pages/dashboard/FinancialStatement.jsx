@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
-import { FileBarChart2, Table2, TrendingUp, CalendarDays, Loader2, RefreshCw, AlertTriangle, Download } from "lucide-react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { FileBarChart2, Table2, TrendingUp, CalendarDays, Loader2, RefreshCw, AlertTriangle, Download, Upload, Database, FileSpreadsheet } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, ResponsiveContainer,
 } from "recharts";
@@ -252,14 +252,107 @@ function computeGrowth(values, mode, cagrYears) {
   return { cagr };
 }
 
+/* ── Data source toggle + Excel upload (shared: Balance Sheet, Profit or
+   Loss, Profit or Loss Monthly) ─────────────────────────────────────────
+   Transition period from manual Excel reporting to Oracle: each of the 3
+   reports can be switched between the live Oracle query and whatever was
+   last uploaded for that report_type. reportType matches the backend's
+   report_type enum: balance_sheet | profit_loss | profit_loss_monthly. */
+
+function fmtUploadTs(iso) {
+  if (!iso) return null;
+  try {
+    return new Date(iso).toLocaleString("id-ID", {
+      day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+    });
+  } catch { return iso; }
+}
+
+function FsSourceControl({ reportType, source, setSource, onStatus, onUploaded }) {
+  const [status, setStatus] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState(null);
+  const fileRef = useRef(null);
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const res = await financialStatementApi.getUploadStatus(reportType);
+      const data = res.success ? res.data : null;
+      setStatus(data);
+      onStatus?.(data);
+    } catch (e) { /* upload status is informational only */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportType]);
+
+  useEffect(() => { loadStatus(); }, [loadStatus]);
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true); setErr(null);
+    try {
+      const res = await financialStatementApi.uploadExcel(reportType, file);
+      if (res.success) {
+        await loadStatus();
+        onUploaded?.();
+      } else {
+        setErr(res.error || "Upload gagal");
+      }
+    } catch (e2) {
+      setErr(e2?.response?.data?.detail || e2?.detail || String(e2));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const toggleBtn = (active) => ({
+    padding: "7px 13px", border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer",
+    display: "flex", alignItems: "center", gap: 5,
+    background: active ? "#1F4E78" : "transparent",
+    color: active ? "#ffffff" : "#64748b",
+  });
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", borderRadius: 9, overflow: "hidden", boxShadow: NEU.shadowIn }}>
+        <button onClick={() => setSource("oracle")} style={toggleBtn(source === "oracle")}><Database size={12} /> Oracle</button>
+        <button onClick={() => setSource("excel")} style={toggleBtn(source === "excel")}><FileSpreadsheet size={12} /> Excel</button>
+      </div>
+      <input ref={fileRef} type="file" accept=".xlsx" style={{ display: "none" }} onChange={handleFile} />
+      <button onClick={() => fileRef.current?.click()} disabled={uploading} style={BTN}>
+        {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Upload Excel
+      </button>
+      {status ? (
+        <span style={{ fontSize: 11, color: "#64748b" }}>
+          Terakhir di-upload: {status.original_filename} · {status.uploaded_by} · {fmtUploadTs(status.uploaded_at)}
+        </span>
+      ) : (
+        <span style={{ fontSize: 11, color: "#94a3b8" }}>Belum ada data Excel yang di-upload</span>
+      )}
+      {err && <span style={{ fontSize: 11, color: "#dc2626" }}>{err}</span>}
+    </div>
+  );
+}
+
 /* ── Balance Sheet ────────────────────────────────────────────────────── */
 
 function BalanceSheetPanel({ periods, detail }) {
   const years = useMemo(() => fiscalYears(periods), [periods]);
   const latest = useMemo(() => latestActivePeriod(periods), [periods]);
 
+  // Data source toggle — Oracle (live GL_BALANCES) vs the last uploaded
+  // Excel snapshot. Detail (drill-down) has no Excel equivalent (the
+  // manual file has no natural-account granularity), so it's Oracle-only
+  // and never renders the toggle.
+  const [source, setSource] = useState("oracle");
+  const [excelStatus, setExcelStatus] = useState(null);
+  const excelYears = excelStatus?.years || [];
+  const pickerYears = source === "excel" ? excelYears : years;
+
   // Single Period — the report date (renamed from "As of Period"), split
-  // into separate Month/Year selects.
+  // into separate Month/Year selects. Excel mode has no month picker: the
+  // uploaded file only has one snapshot per fiscal year.
   const [asOfMonth, setAsOfMonth] = useState("");
   const [asOfYear, setAsOfYear] = useState("");
 
@@ -275,49 +368,60 @@ function BalanceSheetPanel({ periods, detail }) {
   const [error, setError] = useState(null);
   const [exporting, setExporting] = useState(false);
 
+  // Default (and re-default on source switch) — oracle uses the latest GL
+  // period; excel uses the newest year the uploaded file covers.
   useEffect(() => {
-    if (!latest || asOfYear) return;
-    setAsOfMonth(MONTHS[latest.period_num - 1]);
-    setAsOfYear(latest.period_year);
-    const prevYear = latest.period_year - 1;
-    const { isClosed, yp } = yearEndInfo(periods, prevYear);
-    const dec = yp.find(p => p.period_num === 12);
-    if (isClosed && dec) {
-      setFromYear(prevYear);
-      setToYear(prevYear);
+    if (!pickerYears.length) return;
+    const latestY = source === "excel" ? Math.max(...pickerYears) : (latest?.period_year ?? Math.max(...pickerYears));
+    if (!asOfYear || !pickerYears.includes(asOfYear)) {
+      setAsOfYear(latestY);
+      if (source === "oracle" && latest) setAsOfMonth(MONTHS[latest.period_num - 1]);
+    }
+    if (!fromYear || !toYear || !pickerYears.includes(fromYear) || !pickerYears.includes(toYear)) {
+      const prevY = latestY - 1;
+      if (pickerYears.includes(prevY)) { setFromYear(prevY); setToYear(prevY); }
+      else { setFromYear(""); setToYear(""); }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [latest]);
+  }, [source, pickerYears.join(","), latest]);
 
   // If the year changes and the currently-selected month no longer has
   // posted activity in it (e.g. switching from a closed year to the
-  // current partial year), snap to the latest month that does.
+  // current partial year), snap to the latest month that does. Oracle
+  // only — excel mode has no month picker.
   useEffect(() => {
-    if (!asOfYear) return;
+    if (source !== "oracle" || !asOfYear) return;
     const opts = monthOptionsForYear(periods, asOfYear);
     if (opts.length && !opts.includes(asOfMonth)) setAsOfMonth(opts[opts.length - 1]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [asOfYear, periods]);
+  }, [asOfYear, periods, source]);
 
-  const asOf = useMemo(
-    () => (asOfMonth && asOfYear ? periodNameForMonthYear(periods, asOfMonth, asOfYear) : ""),
-    [periods, asOfMonth, asOfYear],
-  );
+  // The Single Period identifier sent to the API — a resolved GL
+  // period_name in oracle mode ("JUN-26"), or the bare year in excel mode
+  // (2026) since the uploaded file only has one column per year.
+  const asOf = useMemo(() => {
+    if (source === "excel") return asOfYear || "";
+    return asOfMonth && asOfYear ? periodNameForMonthYear(periods, asOfMonth, asOfYear) : "";
+  }, [source, periods, asOfMonth, asOfYear]);
 
-  // Chronological annual (December) snapshots between Period From and
-  // Period To (inclusive) — e.g. From=2015/To=2024 gives DEC-15..DEC-24.
+  // Chronological snapshots between Period From and Period To (inclusive)
+  // — GL December period_names in oracle mode, bare years in excel mode.
   // Collapses to a single period when From and To are the same year
   // (identical to the old single Compare To).
   const rangePeriods = useMemo(() => {
     if (!fromYear || !toYear) return [];
     const lo = Math.min(fromYear, toYear), hi = Math.max(fromYear, toYear);
-    const names = [];
+    const list = [];
     for (let y = lo; y <= hi; y++) {
-      const pn = periodNameForMonthYear(periods, "DEC", y);
-      if (pn && pn !== asOf) names.push(pn);
+      if (source === "excel") {
+        if (excelYears.includes(y) && y !== asOf) list.push(y);
+      } else {
+        const pn = periodNameForMonthYear(periods, "DEC", y);
+        if (pn && pn !== asOf) list.push(pn);
+      }
     }
-    return names;
-  }, [periods, fromYear, toYear, asOf]);
+    return list;
+  }, [source, periods, fromYear, toYear, asOf, excelYears]);
 
   const periodList = useMemo(() => (asOf ? [...rangePeriods, asOf] : []), [rangePeriods, asOf]);
 
@@ -327,10 +431,11 @@ function BalanceSheetPanel({ periods, detail }) {
   const growthMode = rangePeriods.length === 1 ? "diff" : rangePeriods.length > 1 ? "cagr" : "none";
   const cagrYears = useMemo(() => {
     if (growthMode !== "cagr" || !rangePeriods.length) return 0;
+    if (source === "excel") return Number(asOf) - Number(rangePeriods[0]);
     const first = periods.find(p => p.period_name === rangePeriods[0]);
     const last = periods.find(p => p.period_name === asOf);
     return first && last ? last.period_year - first.period_year : 0;
-  }, [growthMode, rangePeriods, asOf, periods]);
+  }, [growthMode, rangePeriods, asOf, periods, source]);
 
   const load = useCallback(async () => {
     if (!periodList.length) return;
@@ -338,20 +443,22 @@ function BalanceSheetPanel({ periods, detail }) {
     try {
       const res = detail
         ? await financialStatementApi.getBalanceSheetDetail(periodList)
-        : await financialStatementApi.getBalanceSheet(periodList);
+        : await financialStatementApi.getBalanceSheet(periodList, source);
       if (res.success) setData(res); else setError(res.error || "Failed to load");
     } catch (e) {
       setError(e?.response?.data?.detail || e?.detail || String(e));
     } finally { setLoading(false); }
-  }, [periodList, detail]);
+  }, [periodList, detail, source]);
 
   useEffect(() => { load(); }, [load]);
 
-  const columnLabels = data ? data.periods.map(pn => periodLabel(periods.find(p => p.period_name === pn))) : [];
+  // Backend supplies pre-formatted column labels for both sources (GL
+  // period_display_label for oracle, "Dec YYYY" / the file's own as-of
+  // date for excel) — no need to resolve against the GL periods list here.
+  const columnLabels = data?.column_labels || [];
 
   const handleExport = () => {
-    const asOfP = periods.find(p => p.period_name === asOf);
-    const label = periodLabel(asOfP);
+    const label = source === "excel" ? (columnLabels[columnLabels.length - 1] || "") : periodLabel(periods.find(p => p.period_name === asOf));
     const apiFn = detail ? financialStatementApi.exportBalanceSheetDetail : financialStatementApi.exportBalanceSheet;
     downloadExport(
       () => apiFn(periodList, label),
@@ -404,15 +511,23 @@ function BalanceSheetPanel({ periods, detail }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {!detail && (
+        <FsSourceControl
+          reportType="balance_sheet" source={source} setSource={setSource}
+          onStatus={setExcelStatus} onUploaded={load}
+        />
+      )}
       <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
         <div>
           <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Single Period</label>
           <div style={{ display: "flex", gap: 6 }}>
-            <select style={SELECT} value={asOfMonth} onChange={e => setAsOfMonth(e.target.value)}>
-              {monthOptionsForYear(periods, asOfYear).map(m => <option key={m} value={m}>{MONTH_LABEL[m]}</option>)}
-            </select>
+            {source === "oracle" && (
+              <select style={SELECT} value={asOfMonth} onChange={e => setAsOfMonth(e.target.value)}>
+                {monthOptionsForYear(periods, asOfYear).map(m => <option key={m} value={m}>{MONTH_LABEL[m]}</option>)}
+              </select>
+            )}
             <select style={SELECT} value={asOfYear} onChange={e => setAsOfYear(Number(e.target.value))}>
-              {years.map(y => <option key={y} value={y}>{y}</option>)}
+              {pickerYears.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
         </div>
@@ -420,20 +535,21 @@ function BalanceSheetPanel({ periods, detail }) {
           <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period From</label>
           <select style={SELECT} value={fromYear} onChange={e => setFromYear(e.target.value ? Number(e.target.value) : "")}>
             <option value="">— None —</option>
-            {years.map(y => <option key={y} value={y}>{`Dec ${y}`}</option>)}
+            {pickerYears.map(y => <option key={y} value={y}>{source === "oracle" ? `Dec ${y}` : y}</option>)}
           </select>
         </div>
         <div>
           <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period To</label>
           <select style={SELECT} value={toYear} onChange={e => setToYear(e.target.value ? Number(e.target.value) : "")}>
             <option value="">— None —</option>
-            {years.map(y => <option key={y} value={y}>{`Dec ${y}`}</option>)}
+            {pickerYears.map(y => <option key={y} value={y}>{source === "oracle" ? `Dec ${y}` : y}</option>)}
           </select>
         </div>
         <button onClick={load} disabled={loading} style={BTN}>
           {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
         </button>
-        <button onClick={handleExport} disabled={exporting || !data} style={BTN}>
+        <button onClick={handleExport} disabled={exporting || !data || source === "excel"} style={BTN}
+          title={source === "excel" ? "Export Excel belum didukung untuk sumber data Excel" : undefined}>
           {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download Excel
         </button>
         {data?.unmapped_accounts?.length > 0 && (
@@ -443,9 +559,9 @@ function BalanceSheetPanel({ periods, detail }) {
         )}
       </div>
 
-      {growthMode === "cagr" && (
+      {growthMode === "cagr" && columnLabels.length > 1 && (
         <div style={{ fontSize: 11, color: "#64748b" }}>
-          Membandingkan {rangePeriods.length} tahun ({periodLabel(periods.find(p => p.period_name === rangePeriods[0]))} → {periodLabel(periods.find(p => p.period_name === asOf))}) — kolom growth memakai CAGR ({cagrYears} tahun).
+          Membandingkan {rangePeriods.length} tahun ({columnLabels[0]} → {columnLabels[columnLabels.length - 1]}) — kolom growth memakai CAGR ({cagrYears} tahun).
         </div>
       )}
 
@@ -505,6 +621,12 @@ function ProfitLossChart({ data }) {
 function ProfitLossPanel({ periods }) {
   const years = useMemo(() => fiscalYears(periods), [periods]);
 
+  // Data source toggle — Oracle (live GL_BALANCES YTD) vs the last
+  // uploaded Excel snapshot (the "Profit or loss" sheet).
+  const [source, setSource] = useState("oracle");
+  const [excelStatus, setExcelStatus] = useState(null);
+  const pickerYears = source === "excel" ? (excelStatus?.years || []) : years;
+
   // Period — the current/reporting fiscal year (analogous to Balance
   // Sheet's Single Period, year-only since a P&L column is a whole fiscal
   // year, not a point in time).
@@ -521,25 +643,29 @@ function ProfitLossPanel({ periods }) {
   const [error, setError] = useState(null);
   const [exporting, setExporting] = useState(false);
 
+  // Default (and re-default on source switch) — years[] sorts descending
+  // so years[0] is the latest either way.
   useEffect(() => {
-    if (!years.length || periodYear) return;
-    const latestYear = years[0]; // fiscalYears() sorts descending
-    setPeriodYear(latestYear);
-    const prevYear = latestYear - 1;
-    if (years.includes(prevYear)) {
-      setFromYear(prevYear);
-      setToYear(prevYear);
+    if (!pickerYears.length) return;
+    const latestYear = source === "excel" ? Math.max(...pickerYears) : pickerYears[0];
+    if (!periodYear || !pickerYears.includes(periodYear)) {
+      setPeriodYear(latestYear);
+    }
+    if (!fromYear || !toYear || !pickerYears.includes(fromYear) || !pickerYears.includes(toYear)) {
+      const prevYear = latestYear - 1;
+      if (pickerYears.includes(prevYear)) { setFromYear(prevYear); setToYear(prevYear); }
+      else { setFromYear(""); setToYear(""); }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [years]);
+  }, [source, pickerYears.join(",")]);
 
   const rangeYears = useMemo(() => {
     if (!fromYear || !toYear) return [];
     const lo = Math.min(fromYear, toYear), hi = Math.max(fromYear, toYear);
     const ys = [];
-    for (let y = lo; y <= hi; y++) if (y !== periodYear) ys.push(y);
+    for (let y = lo; y <= hi; y++) if (y !== periodYear && pickerYears.includes(y)) ys.push(y);
     return ys;
-  }, [fromYear, toYear, periodYear]);
+  }, [fromYear, toYear, periodYear, pickerYears]);
 
   const selectedYears = useMemo(
     () => (periodYear ? [...rangeYears, periodYear] : []),
@@ -555,12 +681,14 @@ function ProfitLossPanel({ periods }) {
     if (!selectedYears.length) return;
     setLoading(true); setError(null);
     try {
-      const res = await financialStatementApi.getProfitLoss(columnsForYears());
+      const res = source === "excel"
+        ? await financialStatementApi.getProfitLoss(null, source, selectedYears)
+        : await financialStatementApi.getProfitLoss(columnsForYears(), source);
       if (res.success) setData(res); else setError(res.error || "Failed to load");
     } catch (e) {
       setError(e?.response?.data?.detail || e?.detail || String(e));
     } finally { setLoading(false); }
-  }, [selectedYears, columnsForYears]);
+  }, [selectedYears, columnsForYears, source]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -601,31 +729,36 @@ function ProfitLossPanel({ periods }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <FsSourceControl
+        reportType="profit_loss" source={source} setSource={setSource}
+        onStatus={setExcelStatus} onUploaded={load}
+      />
       <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
         <div>
           <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period</label>
           <select style={SELECT} value={periodYear} onChange={e => setPeriodYear(e.target.value ? Number(e.target.value) : "")}>
-            {years.map(y => <option key={y} value={y}>{`FY ${y}`}</option>)}
+            {pickerYears.map(y => <option key={y} value={y}>{`FY ${y}`}</option>)}
           </select>
         </div>
         <div>
           <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period From</label>
           <select style={SELECT} value={fromYear} onChange={e => setFromYear(e.target.value ? Number(e.target.value) : "")}>
             <option value="">— None —</option>
-            {years.map(y => <option key={y} value={y}>{`FY ${y}`}</option>)}
+            {pickerYears.map(y => <option key={y} value={y}>{`FY ${y}`}</option>)}
           </select>
         </div>
         <div>
           <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period To</label>
           <select style={SELECT} value={toYear} onChange={e => setToYear(e.target.value ? Number(e.target.value) : "")}>
             <option value="">— None —</option>
-            {years.map(y => <option key={y} value={y}>{`FY ${y}`}</option>)}
+            {pickerYears.map(y => <option key={y} value={y}>{`FY ${y}`}</option>)}
           </select>
         </div>
         <button onClick={load} disabled={loading} style={BTN}>
           {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
         </button>
-        <button onClick={handleExport} disabled={exporting || !data} style={BTN}>
+        <button onClick={handleExport} disabled={exporting || !data || source === "excel"} style={BTN}
+          title={source === "excel" ? "Export Excel belum didukung untuk sumber data Excel" : undefined}>
           {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download Excel
         </button>
         {data?.unmapped_accounts?.length > 0 && (
@@ -688,6 +821,16 @@ function PlMonthlyTable({ rows, dateLast, dateThis }) {
 
 function ProfitLossMonthlyPanel({ periods }) {
   const latest = useMemo(() => latestActivePeriod(periods), [periods]);
+
+  // Data source toggle — Oracle (live MTD/YTD this-vs-last-year query) vs
+  // the last uploaded Excel snapshot (the "PL_monthly" sheet). Excel mode
+  // has no Period selector: the uploaded file is a single fixed MTD/YTD
+  // comparison as of whatever date it was saved at, not a range to pick
+  // from — its own date_last/date_this drive the header instead of GL
+  // periods.
+  const [source, setSource] = useState("oracle");
+  const [excelStatus, setExcelStatus] = useState(null);
+
   const [period, setPeriod] = useState("");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -707,17 +850,27 @@ function ProfitLossMonthlyPanel({ periods }) {
   }, [period, periods]);
 
   const load = useCallback(async () => {
+    if (source === "excel") {
+      setLoading(true); setError(null);
+      try {
+        const res = await financialStatementApi.getProfitLossMonthly({}, "excel");
+        if (res.success) setData(res); else setError(res.error || "Failed to load");
+      } catch (e) {
+        setError(e?.response?.data?.detail || e?.detail || String(e));
+      } finally { setLoading(false); }
+      return;
+    }
     if (!period) return;
     const params = buildParams();
     if (!params) { setError("No corresponding period found in the prior year."); setData(null); return; }
     setLoading(true); setError(null);
     try {
-      const res = await financialStatementApi.getProfitLossMonthly(params);
+      const res = await financialStatementApi.getProfitLossMonthly(params, "oracle");
       if (res.success) setData(res); else setError(res.error || "Failed to load");
     } catch (e) {
       setError(e?.response?.data?.detail || e?.detail || String(e));
     } finally { setLoading(false); }
-  }, [period, buildParams]);
+  }, [period, buildParams, source]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -733,8 +886,10 @@ function ProfitLossMonthlyPanel({ periods }) {
 
   // Actual period-end dates ("June 30, 2026") for the header's year-block
   // labels, matching the reference layout — periodLabel() alone only gives
-  // "Jun 2026", not the full date.
+  // "Jun 2026", not the full date. Excel mode gets these directly from the
+  // uploaded file instead of resolving GL periods.
   const headerDates = useMemo(() => {
+    if (source === "excel") return { this: data?.date_this || "", last: data?.date_last || "" };
     const fmt = (p) => p?.end_date
       ? new Date(p.end_date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
       : "";
@@ -742,7 +897,7 @@ function ProfitLossMonthlyPanel({ periods }) {
     if (!p) return { this: "", last: "" };
     const lastYearP = periods.find(x => x.period_year === p.period_year - 1 && x.period_num === p.period_num && x.adjustment_period_flag !== "Y");
     return { this: fmt(p), last: fmt(lastYearP) };
-  }, [period, periods]);
+  }, [source, data, period, periods]);
 
   const rows = useMemo(() => {
     if (!data) return [];
@@ -774,19 +929,30 @@ function ProfitLossMonthlyPanel({ periods }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <FsSourceControl
+        reportType="profit_loss_monthly" source={source} setSource={setSource}
+        onStatus={setExcelStatus} onUploaded={load}
+      />
       <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
-        <div>
-          <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period</label>
-          <select style={SELECT} value={period} onChange={e => setPeriod(e.target.value)}>
-            {periods.filter(p => p.has_activity === "Y" && p.adjustment_period_flag !== "Y").map(p => (
-              <option key={p.period_name} value={p.period_name}>{periodLabel(p)}</option>
-            ))}
-          </select>
-        </div>
+        {source === "oracle" ? (
+          <div>
+            <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period</label>
+            <select style={SELECT} value={period} onChange={e => setPeriod(e.target.value)}>
+              {periods.filter(p => p.has_activity === "Y" && p.adjustment_period_flag !== "Y").map(p => (
+                <option key={p.period_name} value={p.period_name}>{periodLabel(p)}</option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <span style={{ fontSize: 11, color: "#64748b" }}>
+            {excelStatus ? `Snapshot ter-upload: ${headerDates.last} vs ${headerDates.this}` : "Belum ada data Excel yang di-upload"}
+          </span>
+        )}
         <button onClick={load} disabled={loading} style={BTN}>
           {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
         </button>
-        <button onClick={handleExport} disabled={exporting || !data} style={BTN}>
+        <button onClick={handleExport} disabled={exporting || !data || source === "excel"} style={BTN}
+          title={source === "excel" ? "Export Excel belum didukung untuk sumber data Excel" : undefined}>
           {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download Excel
         </button>
       </div>

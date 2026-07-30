@@ -25,11 +25,14 @@ from typing import Optional
 
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import require_role, CurrentUser, Roles
+from app.database import get_db
 from app.services.financial_statement_service import FinancialStatementService
+from app.services.financial_statement_upload_service import FinancialStatementUploadService
 
 router = APIRouter()
 
@@ -41,12 +44,151 @@ async def get_periods(user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)
     return await FinancialStatementService().get_periods()
 
 
+# ── Excel upload source (transition from manual Excel reporting to Oracle) ──
+# One uploaded snapshot per report_type, replacing the live Oracle query
+# when the frontend's source toggle is set to "excel". See
+# financial_statement_upload_service.py for the parser / storage shape.
+
+@router.get("/upload-status")
+async def get_upload_status(
+    report_type: str = Query(..., pattern="^(balance_sheet|profit_loss|profit_loss_monthly)$"),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
+):
+    """Metadata about the currently-stored Excel upload for a report, if
+    any — lets the frontend show "last uploaded by X on Y" and restrict
+    its year pickers to whatever years the uploaded file actually covers."""
+    upload = await FinancialStatementUploadService().get_upload(db, report_type)
+    if not upload:
+        return {"success": True, "data": None}
+    content = upload["content"]
+    return {
+        "success": True,
+        "data": {
+            "original_filename": upload["original_filename"],
+            "uploaded_by": upload["uploaded_by"],
+            "uploaded_at": upload["uploaded_at"],
+            "years": content.get("years"),
+            "as_of_label": content.get("as_of_label"),
+            "date_last": content.get("date_last"),
+            "date_this": content.get("date_this"),
+        },
+    }
+
+
+@router.post("/upload")
+async def upload_financial_statement_excel(
+    report_type: str = Query(..., pattern="^(balance_sheet|profit_loss|profit_loss_monthly)$"),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
+):
+    """Upload the manual Excel report for one of the 3 supported report
+    types — parses the matching sheet (Balance sheet / Profit or loss /
+    PL_monthly) and stores it, replacing any previous upload for that
+    report_type."""
+    content = await file.read()
+    result = await FinancialStatementUploadService().save_upload(db, report_type, content, file.filename, user.username)
+    if not result.get("success"):
+        raise HTTPException(400, result.get("error") or "Gagal memproses file")
+    return {"success": True, "uploaded_at": result.get("uploaded_at")}
+
+
+async def _balance_sheet_from_excel(db: AsyncSession, periods_csv: str) -> dict:
+    upload = await FinancialStatementUploadService().get_upload(db, "balance_sheet")
+    if not upload:
+        return {"success": False, "error": "Belum ada data Excel yang di-upload untuk Balance Sheet."}
+    content = upload["content"]
+    all_years = content["years"]
+    years = [int(p.strip()) for p in periods_csv.split(",") if p.strip().isdigit() and int(p.strip()) in all_years]
+    if not years:
+        return {"success": False, "error": "Tahun yang diminta tidak ada di data Excel yang di-upload."}
+    idx = [all_years.index(y) for y in years]
+    latest_year = max(all_years)
+
+    def pick(arr):
+        return [arr[i] for i in idx]
+
+    def pick_rows(rows):
+        return [{"label": r["label"], "values": pick(r["values"])} for r in rows]
+
+    def col_label(y):
+        # The uploaded file's newest column is whatever mid-year snapshot
+        # date it was saved at (e.g. "June 30, 2026"), not a Dec 31
+        # close -- closed prior years genuinely are Dec 31 snapshots.
+        if y == latest_year and content.get("as_of_label"):
+            return content["as_of_label"]
+        return f"Dec {y}"
+
+    return {
+        "success": True,
+        "periods": [str(y) for y in years],
+        "column_labels": [col_label(y) for y in years],
+        "current_assets": pick_rows(content["current_assets"]), "total_current_assets": pick(content["total_current_assets"]),
+        "noncurrent_assets": pick_rows(content["noncurrent_assets"]), "total_noncurrent_assets": pick(content["total_noncurrent_assets"]),
+        "total_assets": pick(content["total_assets"]),
+        "current_liabilities": pick_rows(content["current_liabilities"]), "total_current_liabilities": pick(content["total_current_liabilities"]),
+        "noncurrent_liabilities": pick_rows(content["noncurrent_liabilities"]), "total_noncurrent_liabilities": pick(content["total_noncurrent_liabilities"]),
+        "total_liabilities": pick(content["total_liabilities"]),
+        "equity": pick_rows(content["equity"]), "total_equity": pick(content["total_equity"]),
+        "total_liabilities_and_equity": pick(content["total_liabilities_and_equity"]),
+        "check_diff": pick(content["check_diff"]),
+        "unmapped_accounts": content["unmapped_accounts"],
+    }
+
+
+async def _profit_loss_from_excel(db: AsyncSession, years_csv: str) -> dict:
+    upload = await FinancialStatementUploadService().get_upload(db, "profit_loss")
+    if not upload:
+        return {"success": False, "error": "Belum ada data Excel yang di-upload untuk Profit or Loss."}
+    content = upload["content"]
+    all_years = content["years"]
+    years = [int(y.strip()) for y in years_csv.split(",") if y.strip().isdigit() and int(y.strip()) in all_years]
+    if not years:
+        return {"success": False, "error": "Tahun yang diminta tidak ada di data Excel yang di-upload."}
+    idx = [all_years.index(y) for y in years]
+
+    def pick(arr):
+        return [arr[i] for i in idx]
+
+    def pick_rows(rows):
+        return [{"label": r["label"], "values": pick(r["values"])} for r in rows]
+
+    return {
+        "success": True, "columns": [f"FY {y}" for y in years],
+        "sales_lines": pick_rows(content["sales_lines"]), "contra_lines": [], "total_net_sales": pick(content["total_net_sales"]),
+        "cogs_lines": pick_rows(content["cogs_lines"]), "total_cogs": pick(content["total_cogs"]),
+        "gross_profit": pick(content["gross_profit"]),
+        "expense_lines": pick_rows(content["expense_lines"]), "total_expenses": pick(content["total_expenses"]),
+        "other_lines": pick_rows(content["other_lines"]), "total_other": pick(content["total_other"]),
+        "profit_before_tax": pick(content["profit_before_tax"]),
+        "tax_lines": pick_rows(content["tax_lines"]), "total_tax": pick(content["total_tax"]),
+        "profit_after_tax": pick(content["profit_after_tax"]),
+        "oci": pick(content["oci"]), "total_comprehensive": pick(content["total_comprehensive"]),
+        "unmapped_accounts": [],
+    }
+
+
+async def _profit_loss_monthly_from_excel(db: AsyncSession) -> dict:
+    upload = await FinancialStatementUploadService().get_upload(db, "profit_loss_monthly")
+    if not upload:
+        return {"success": False, "error": "Belum ada data Excel yang di-upload untuk Profit or Loss Monthly."}
+    result = dict(upload["content"])
+    result["success"] = True
+    result.setdefault("unmapped_accounts", [])
+    return result
+
+
 @router.get("/balance-sheet")
 async def get_balance_sheet(
-    periods: str = Query(..., description="Comma-separated GL period names, e.g. DEC-24,DEC-25,JAN-26,FEB-26"),
+    periods: str = Query(..., description="Comma-separated GL period names (oracle) or fiscal years (excel)"),
+    source: str = Query("oracle", pattern="^(oracle|excel)$"),
+    db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
     """Balance Sheet grouped into line items — one column per period."""
+    if source == "excel":
+        return await _balance_sheet_from_excel(db, periods)
     period_list = [p.strip() for p in periods.split(",") if p.strip()]
     return await FinancialStatementService().get_balance_sheet(period_list)
 
@@ -56,30 +198,41 @@ async def get_balance_sheet_detail(
     periods: str = Query(..., description="Comma-separated GL period names"),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
-    """Balance Sheet at natural-account granularity — drill-down view."""
+    """Balance Sheet at natural-account granularity — drill-down view.
+    Oracle-only: the manual Excel report has no natural-account detail to
+    drill into, only the same bucketed line items the summary view shows."""
     period_list = [p.strip() for p in periods.split(",") if p.strip()]
     return await FinancialStatementService().get_balance_sheet_detail(period_list)
 
 
 @router.get("/profit-loss")
 async def get_profit_and_loss(
-    columns: str = Query(..., description='JSON list of {"label","periods":[...]} — one per fiscal year/YTD range'),
+    columns: Optional[str] = Query(None, description='JSON list of {"label","periods":[...]} — oracle source only'),
+    source: str = Query("oracle", pattern="^(oracle|excel)$"),
+    years: Optional[str] = Query(None, description="Comma-separated fiscal years — excel source only"),
+    db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
     """P&L grouped into line items — one column per fiscal year / YTD range."""
+    if source == "excel":
+        return await _profit_loss_from_excel(db, years or "")
     col_list = json.loads(columns)
     return await FinancialStatementService().get_profit_and_loss(col_list)
 
 
 @router.get("/profit-loss-monthly")
 async def get_profit_and_loss_monthly(
-    period_this: str = Query(..., description="This year's MTD period, e.g. JUN-26"),
-    ytd_this: str = Query(..., description="Comma-separated periods JAN-26,...,JUN-26"),
-    period_last: str = Query(..., description="Same month last year, e.g. JUN-25"),
-    ytd_last: str = Query(..., description="Comma-separated periods JAN-25,...,JUN-25"),
+    period_this: Optional[str] = Query(None, description="This year's MTD period, e.g. JUN-26 — oracle source only"),
+    ytd_this: Optional[str] = Query(None, description="Comma-separated periods JAN-26,...,JUN-26 — oracle source only"),
+    period_last: Optional[str] = Query(None, description="Same month last year, e.g. JUN-25 — oracle source only"),
+    ytd_last: Optional[str] = Query(None, description="Comma-separated periods JAN-25,...,JUN-25 — oracle source only"),
+    source: str = Query("oracle", pattern="^(oracle|excel)$"),
+    db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
     """MTD/YTD comparison — this year's period vs the same period last year."""
+    if source == "excel":
+        return await _profit_loss_monthly_from_excel(db)
     ytd_this_list = [p.strip() for p in ytd_this.split(",") if p.strip()]
     ytd_last_list = [p.strip() for p in ytd_last.split(",") if p.strip()]
     return await FinancialStatementService().get_profit_and_loss_monthly(

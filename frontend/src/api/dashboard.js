@@ -293,13 +293,30 @@ export const accountingApi = {
 
 export const financialStatementApi = {
   getPeriods:  () => api.get("/dashboard/accounting/financial-statement/periods"),
-  getBalanceSheet:       (periods) => api.get("/dashboard/accounting/financial-statement/balance-sheet", { params: { periods: periods.join(",") } }),
+  getBalanceSheet:       (periods, source = "oracle") => api.get("/dashboard/accounting/financial-statement/balance-sheet", { params: { periods: periods.join(","), source } }),
   getBalanceSheetDetail: (periods) => api.get("/dashboard/accounting/financial-statement/balance-sheet-detail", { params: { periods: periods.join(",") } }),
-  getProfitLoss:         (columns) => api.get("/dashboard/accounting/financial-statement/profit-loss", { params: { columns: JSON.stringify(columns) } }),
-  getProfitLossMonthly:  ({ periodThis, ytdThis, periodLast, ytdLast }) =>
+  getProfitLoss:         (columns, source = "oracle", years = []) => api.get("/dashboard/accounting/financial-statement/profit-loss", {
+    params: source === "excel"
+      ? { source, years: years.join(",") }
+      : { source, columns: JSON.stringify(columns) },
+  }),
+  getProfitLossMonthly:  ({ periodThis, ytdThis, periodLast, ytdLast } = {}, source = "oracle") =>
     api.get("/dashboard/accounting/financial-statement/profit-loss-monthly", {
-      params: { period_this: periodThis, ytd_this: ytdThis.join(","), period_last: periodLast, ytd_last: ytdLast.join(",") },
+      params: source === "excel"
+        ? { source }
+        : { source, period_this: periodThis, ytd_this: ytdThis.join(","), period_last: periodLast, ytd_last: ytdLast.join(",") },
     }),
+  // Excel upload source (transition from manual reporting to Oracle) —
+  // reportType: balance_sheet | profit_loss | profit_loss_monthly
+  getUploadStatus: (reportType) => api.get("/dashboard/accounting/financial-statement/upload-status", { params: { report_type: reportType } }),
+  uploadExcel: (reportType, file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return api.post("/dashboard/accounting/financial-statement/upload", fd, {
+      params: { report_type: reportType },
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  },
   exportBalanceSheet:       (periods, asOfLabel) => api.get("/dashboard/accounting/financial-statement/balance-sheet/export", { params: { periods: periods.join(","), as_of_label: asOfLabel || "" }, responseType: "blob" }),
   exportBalanceSheetDetail: (periods, asOfLabel) => api.get("/dashboard/accounting/financial-statement/balance-sheet-detail/export", { params: { periods: periods.join(","), as_of_label: asOfLabel || "" }, responseType: "blob" }),
   exportProfitLoss:         (columns, dateLabel) => api.get("/dashboard/accounting/financial-statement/profit-loss/export", { params: { columns: JSON.stringify(columns), date_label: dateLabel || "" }, responseType: "blob" }),
