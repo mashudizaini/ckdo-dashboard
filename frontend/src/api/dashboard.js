@@ -161,6 +161,7 @@ export const eisApi = {
   // Daily Sales
   getDailySales:    (year)         => api.get(`${EIS}/daily-sales/data`, { params: { year } }),
   uploadDailySales: (formData, year) => api.post(`${EIS}/daily-sales/upload`, formData, { params: { year }, headers: { "Content-Type": "multipart/form-data" } }),
+  deleteDailySales: (year)         => api.delete(`${EIS}/daily-sales/data`, { params: { year } }),
 
   // Data Upload
   getOvertimeData:   (year)         => api.get(`${EIS}/data-upload/overtime`, { params: { year } }),

@@ -183,3 +183,18 @@ async def upload_daily_sales(
             f"berbeda dari tahun {year} yang dipilih — periksa kembali file atau pilihan tahunnya)"
         )
     return {"message": message, "detected_year": detected_year, "data": result}
+
+
+@router.delete("/data")
+async def delete_daily_sales(
+    year: int = Query(..., description="Fiscal year to remove"),
+    user = Depends(get_current_user),
+):
+    """Remove one year's uploaded Daily Sales data — lets a bad upload be
+    cleared without having to overwrite it with another file first."""
+    store = _load_store()
+    if str(year) not in store:
+        raise HTTPException(status_code=404, detail=f"Tidak ada data Daily Sales untuk tahun {year}")
+    del store[str(year)]
+    _save_store(store)
+    return {"message": f"Data Daily Sales tahun {year} berhasil dihapus"}

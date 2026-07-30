@@ -845,6 +845,7 @@ function EisDailySalesTab({ year }) {
   // uploaders. Required on every upload so the file is stored under the
   // right year instead of silently overwriting whatever was there before.
   const [uploadYear, setUploadYear] = useState(year);
+  const [deleting, setDeleting] = useState(false);
   const fileRef = useRef(null);
   const YEARS = Array.from({ length: 5 }, (_, i) => CY - i);
 
@@ -873,6 +874,19 @@ function EisDailySalesTab({ year }) {
     setUploading(false); e.target.value = "";
   };
 
+  const handleDelete = async () => {
+    if (!window.confirm(`Hapus data Daily Sales tahun ${year}? Tindakan ini tidak bisa dibatalkan.`)) return;
+    setDeleting(true); setMsg(null);
+    try {
+      const res = await eisApi.deleteDailySales(year);
+      setMsg({ type: "ok", text: res.message || `Data tahun ${year} berhasil dihapus` });
+      setData(null);
+    } catch (err) {
+      setMsg({ type: "err", text: "Gagal menghapus: " + (err?.response?.data?.detail || err?.detail || err.message) });
+    }
+    setDeleting(false);
+  };
+
   if (loading) return <Loading />;
   const rows = data?.rows || [];
   const monthTargets = data?.month_targets || {};
@@ -893,6 +907,12 @@ function EisDailySalesTab({ year }) {
               {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {uploading ? "Mengupload..." : `Pilih File untuk ${uploadYear} (.xlsx)`}
             </button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleUpload} />
+            {data && (
+              <button onClick={handleDelete} disabled={deleting} title={`Hapus data Daily Sales tahun ${year}`}
+                className={`${uploadBtnCls} bg-red-600/80 hover:bg-red-600`}>
+                {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Hapus Data {year}
+              </button>
+            )}
           </div>
         }>
         <MsgBanner msg={msg} onClose={() => setMsg(null)} />
