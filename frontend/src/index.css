@@ -212,7 +212,7 @@ tbody td {
 .fs-table tbody tr[data-type="header"] td {
   font-weight: 700 !important;
   color: #1e293b !important;
-  background: #ffffff !important;
+  background: #F1F5F9 !important;
   border-bottom: none !important;
 }
 .fs-table tbody tr[data-type="line"] td {

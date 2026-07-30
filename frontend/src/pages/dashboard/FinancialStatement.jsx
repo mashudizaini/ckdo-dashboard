@@ -98,6 +98,22 @@ function periodLabel(p) {
   return p.adjustment_period_flag === "Y" ? `ADJ ${p.period_year}` : `${MONTH_LABEL[MONTHS[p.period_num - 1]]} ${p.period_year}`;
 }
 
+// Month options for a given year's Single Period picker — restricted to
+// months that actually have posted balances, same constraint the old flat
+// "As of Period" dropdown enforced.
+function monthOptionsForYear(periods, year) {
+  if (!year) return [];
+  return periodsOfYear(periods, year).filter(p => p.has_activity === "Y").map(p => MONTHS[p.period_num - 1]);
+}
+
+// Resolves a (month, year) pair to its GL period_name, or null if that
+// period doesn't exist / has no posted activity yet (e.g. a future month
+// in the currently-open fiscal year).
+function periodNameForMonthYear(periods, month, year) {
+  const p = periodsOfYear(periods, year).find(pp => MONTHS[pp.period_num - 1] === month);
+  return p && p.has_activity === "Y" ? p.period_name : null;
+}
+
 /* ── Generic line-item table ──────────────────────────────────────────────
  * Row model mirrors the Excel export / management-report look: a dark-navy
  * "ACCOUNT" header, bold no-fill group/section headers (ASSETS, CURRENT
@@ -114,18 +130,24 @@ function periodLabel(p) {
 // uniform padding and font-weight on every plain <table> via !important,
 // which silently defeats inline styles. A scoped class + data attributes
 // is this codebase's established fix for that (see .inv-rmpm-table).
-function FsTable({ columns, rows, checkDiff }) {
+// growthMode: "none" (default, all other FsTable callers) | "diff" (1 prior
+// period -> absolute delta + %) | "cagr" (>1 prior periods spanning years ->
+// compound annual growth rate). Only BalanceSheetPanel passes this — every
+// other caller keeps its original 1-column-per-period layout.
+function FsTable({ columns, rows, checkDiff, growthMode = "none" }) {
+  const growthHeaders = growthMode === "diff" ? ["Growth", "Growth %"] : growthMode === "cagr" ? ["CAGR %"] : [];
+  const allColumns = [...columns, ...growthHeaders];
   return (
     <div style={{ overflowX: "auto", borderRadius: 12, boxShadow: NEU.shadowOutSm }}>
-      <table className="fs-table" style={{ width: "100%", fontSize: 12.5, minWidth: 480 + columns.length * 130 }}>
+      <table className="fs-table" style={{ width: "100%", fontSize: 12.5, minWidth: 480 + allColumns.length * 130 }}>
         <thead>
           <tr>
             <th>ACCOUNT</th>
-            {columns.map((c, i) => <th key={i} style={{ whiteSpace: "nowrap" }}>{c}</th>)}
+            {allColumns.map((c, i) => <th key={i} style={{ whiteSpace: "nowrap" }}>{c}</th>)}
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, ri) => <FsRow key={ri} row={row} />)}
+          {rows.map((row, ri) => <FsRow key={ri} row={row} columnCount={allColumns.length} growthMode={growthMode} />)}
         </tbody>
       </table>
       {checkDiff && (
@@ -137,25 +159,78 @@ function FsTable({ columns, rows, checkDiff }) {
   );
 }
 
-function FsRow({ row }) {
+function fmtPct(v) {
+  if (v == null || !isFinite(v)) return "n/a";
+  const s = Math.abs(v).toFixed(1) + "%";
+  return v < 0 ? `(${s})` : s;
+}
+
+function growthColor(v) {
+  if (v == null || !isFinite(v)) return "#94a3b8";
+  return v > 0 ? "#16a34a" : v < 0 ? "#dc2626" : "#334155";
+}
+
+function FsRow({ row, columnCount = 0, growthMode = "none" }) {
   const level = Math.min(row.level || 0, 2);
+  // Header (section title) rows previously rendered zero <td> for the value
+  // columns (row.values was undefined, so `(row.values||[]).map(...)` gave
+  // an empty array) — the browser just left those column positions with no
+  // cell at all, letting the page background show through as a stray grey
+  // box under the period columns. Rendering the full columnCount of blank
+  // cells here makes the row's background fill apply uniformly across it.
   if (row.type === "header") {
     return (
       <tr data-type="header">
         <td data-lvl={level}>{row.label}</td>
-        {(row.values || []).map((_, ci) => <td key={ci} />)}
+        {Array.from({ length: columnCount }, (_, ci) => <td key={ci} />)}
       </tr>
     );
   }
   const values = row.values || [];
+  const g = row.growth;
   return (
     <tr data-type={row.type}>
       <td data-lvl={level}>{row.label}</td>
       {values.map((v, ci) => (
         <td key={ci} style={{ textAlign: "right", fontFamily: "monospace" }}>{fmtNum(v)}</td>
       ))}
+      {growthMode === "diff" && (
+        <>
+          <td style={{ textAlign: "right", fontFamily: "monospace" }}>{g ? fmtNum(g.delta) : "—"}</td>
+          <td style={{ textAlign: "right", fontFamily: "monospace", color: growthColor(g?.pct) }}>{g ? fmtPct(g.pct) : "—"}</td>
+        </>
+      )}
+      {growthMode === "cagr" && (
+        <td style={{ textAlign: "right", fontFamily: "monospace", color: growthColor(g?.cagr) }}>{g ? fmtPct(g.cagr) : "—"}</td>
+      )}
     </tr>
   );
+}
+
+// Growth-rate helper shared by the Balance Sheet's Single Period vs Period
+// From/To comparison. `values` is the row's array aligned to periodList
+// (chronological, Single Period always last):
+//   mode "diff" — exactly 1 prior period: absolute delta + % change.
+//   mode "cagr" — >1 prior periods (a multi-year Period From/To range):
+//     CAGR = (End/Begin)^(1/n) − 1, n = years between the earliest prior
+//     period and the Single Period. Undefined (shown "n/a") when the
+//     beginning value is zero or the sign flips (asset/liability turning
+//     negative to positive, e.g.), since a fractional power of a negative
+//     base isn't a real percentage rate.
+function computeGrowth(values, mode, cagrYears) {
+  if (mode === "none" || !values || values.length < 2) return null;
+  const begin = values[0], end = values[values.length - 1];
+  if (mode === "diff") {
+    const delta = end - begin;
+    const pct = begin !== 0 ? (delta / Math.abs(begin)) * 100 : null;
+    return { delta, pct };
+  }
+  if (!cagrYears || cagrYears < 1 || begin === 0 || (begin < 0) !== (end < 0)) {
+    return { cagr: null };
+  }
+  const sign = end < 0 ? -1 : 1;
+  const cagr = sign * (Math.pow(Math.abs(end) / Math.abs(begin), 1 / cagrYears) - 1) * 100;
+  return { cagr };
 }
 
 /* ── Balance Sheet ────────────────────────────────────────────────────── */
@@ -163,28 +238,89 @@ function FsRow({ row }) {
 function BalanceSheetPanel({ periods, detail }) {
   const years = useMemo(() => fiscalYears(periods), [periods]);
   const latest = useMemo(() => latestActivePeriod(periods), [periods]);
-  const [asOf, setAsOf] = useState("");
-  const [compareTo, setCompareTo] = useState("");
+
+  // Single Period — the report date (renamed from "As of Period"), split
+  // into separate Month/Year selects.
+  const [asOfMonth, setAsOfMonth] = useState("");
+  const [asOfYear, setAsOfYear] = useState("");
+
+  // Period From / Period To — replaces the old single "Compare To" period
+  // with a range, so up to ~10 years of history can be compared at once.
+  // Both Month selects share one state var (rangeMonth): the range steps
+  // year-by-year at a single month, so "Period From: Jun 2015" + "Period
+  // To: Dec 2024" (different months) has no well-defined yearly step —
+  // keeping one shared month avoids that dead/ambiguous combination while
+  // still showing a Month+Year control under each label.
+  const [rangeMonth, setRangeMonth] = useState("DEC");
+  const [fromYear, setFromYear] = useState("");
+  const [toYear, setToYear] = useState("");
+
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
-    if (!latest || asOf) return;
-    setAsOf(latest.period_name);
+    if (!latest || asOfYear) return;
+    setAsOfMonth(MONTHS[latest.period_num - 1]);
+    setAsOfYear(latest.period_year);
     const prevYear = latest.period_year - 1;
     const { isClosed, yp } = yearEndInfo(periods, prevYear);
     const dec = yp.find(p => p.period_num === 12);
-    if (isClosed && dec) setCompareTo(dec.period_name);
+    if (isClosed && dec) {
+      setFromYear(prevYear);
+      setToYear(prevYear);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latest]);
 
+  // If the year changes and the currently-selected month no longer has
+  // posted activity in it (e.g. switching from a closed year to the
+  // current partial year), snap to the latest month that does.
+  useEffect(() => {
+    if (!asOfYear) return;
+    const opts = monthOptionsForYear(periods, asOfYear);
+    if (opts.length && !opts.includes(asOfMonth)) setAsOfMonth(opts[opts.length - 1]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asOfYear, periods]);
+
+  const asOf = useMemo(
+    () => (asOfMonth && asOfYear ? periodNameForMonthYear(periods, asOfMonth, asOfYear) : ""),
+    [periods, asOfMonth, asOfYear],
+  );
+
+  // Chronological annual snapshots between Period From and Period To
+  // (inclusive), one per year at rangeMonth — e.g. From=2015/To=2024 with
+  // rangeMonth=DEC gives DEC-15..DEC-24. Collapses to a single period when
+  // From and To are the same year (identical to the old single Compare To).
+  const rangePeriods = useMemo(() => {
+    if (!fromYear || !toYear) return [];
+    const lo = Math.min(fromYear, toYear), hi = Math.max(fromYear, toYear);
+    const names = [];
+    for (let y = lo; y <= hi; y++) {
+      const pn = periodNameForMonthYear(periods, rangeMonth, y);
+      if (pn && pn !== asOf) names.push(pn);
+    }
+    return names;
+  }, [periods, fromYear, toYear, rangeMonth, asOf]);
+
+  const periodList = useMemo(() => (asOf ? [...rangePeriods, asOf] : []), [rangePeriods, asOf]);
+
+  // Growth-rate mode: exactly 1 prior period -> simple diff & %; more than
+  // 1 (a multi-year Period From/To range) -> CAGR from the earliest period
+  // to the Single Period, n = years spanned between them.
+  const growthMode = rangePeriods.length === 1 ? "diff" : rangePeriods.length > 1 ? "cagr" : "none";
+  const cagrYears = useMemo(() => {
+    if (growthMode !== "cagr" || !rangePeriods.length) return 0;
+    const first = periods.find(p => p.period_name === rangePeriods[0]);
+    const last = periods.find(p => p.period_name === asOf);
+    return first && last ? last.period_year - first.period_year : 0;
+  }, [growthMode, rangePeriods, asOf, periods]);
+
   const load = useCallback(async () => {
-    if (!asOf) return;
+    if (!periodList.length) return;
     setLoading(true); setError(null);
     try {
-      const periodList = compareTo ? [compareTo, asOf] : [asOf];
       const res = detail
         ? await financialStatementApi.getBalanceSheetDetail(periodList)
         : await financialStatementApi.getBalanceSheet(periodList);
@@ -192,14 +328,13 @@ function BalanceSheetPanel({ periods, detail }) {
     } catch (e) {
       setError(e?.response?.data?.detail || e?.detail || String(e));
     } finally { setLoading(false); }
-  }, [asOf, compareTo, detail]);
+  }, [periodList, detail]);
 
   useEffect(() => { load(); }, [load]);
 
   const columnLabels = data ? data.periods.map(pn => periodLabel(periods.find(p => p.period_name === pn))) : [];
 
   const handleExport = () => {
-    const periodList = compareTo ? [compareTo, asOf] : [asOf];
     const asOfP = periods.find(p => p.period_name === asOf);
     const label = periodLabel(asOfP);
     const apiFn = detail ? financialStatementApi.exportBalanceSheetDetail : financialStatementApi.exportBalanceSheet;
@@ -210,63 +345,85 @@ function BalanceSheetPanel({ periods, detail }) {
     );
   };
 
+  const withGrowth = useCallback(
+    (row) => ({ ...row, growth: computeGrowth(row.values, growthMode, cagrYears) }),
+    [growthMode, cagrYears],
+  );
+
   const rows = useMemo(() => {
     if (!data) return [];
     if (detail) {
       const byType = { A: [], L: [], O: [] };
       data.accounts.forEach(a => byType[a.account_type]?.push(a));
-      const toLines = (accs) => accs.map(a => ({ type: "line", level: 1, label: `${a.account_code} — ${a.account_desc || a.line_item}`, values: a.values }));
+      const toLines = (accs) => accs.map(a => withGrowth({ type: "line", level: 1, label: `${a.account_code} — ${a.account_desc || a.line_item}`, values: a.values }));
       return [
         { type: "header", level: 0, label: "ASSETS" }, ...toLines(byType.A),
         { type: "header", level: 0, label: "LIABILITIES" }, ...toLines(byType.L),
         { type: "header", level: 0, label: "EQUITY" }, ...toLines(byType.O),
       ];
     }
-    const lines = (arr) => arr.map(r => ({ type: "line", level: 2, label: r.label, values: r.values }));
+    const lines = (arr) => arr.map(r => withGrowth({ type: "line", level: 2, label: r.label, values: r.values }));
     return [
       { type: "header", level: 0, label: "ASSETS" },
       { type: "header", level: 1, label: "CURRENT ASSETS" },
       ...lines(data.current_assets),
-      { type: "total", level: 1, label: "TOTAL CURRENT ASSETS", values: data.total_current_assets },
+      withGrowth({ type: "total", level: 1, label: "TOTAL CURRENT ASSETS", values: data.total_current_assets }),
       { type: "header", level: 1, label: "NON CURRENT ASSET" },
       ...lines(data.noncurrent_assets),
-      { type: "total", level: 1, label: "TOTAL NON CURRENT ASSETS", values: data.total_noncurrent_assets },
-      { type: "total", level: 0, label: "TOTAL ASSETS", values: data.total_assets },
+      withGrowth({ type: "total", level: 1, label: "TOTAL NON CURRENT ASSETS", values: data.total_noncurrent_assets }),
+      withGrowth({ type: "total", level: 0, label: "TOTAL ASSETS", values: data.total_assets }),
       { type: "header", level: 0, label: "LIABILITIES" },
       { type: "header", level: 1, label: "CURRENT LIABILITIES" },
       ...lines(data.current_liabilities),
-      { type: "total", level: 1, label: "TOTAL CURRENT LIABILITIES", values: data.total_current_liabilities },
+      withGrowth({ type: "total", level: 1, label: "TOTAL CURRENT LIABILITIES", values: data.total_current_liabilities }),
       { type: "header", level: 1, label: "NONCURRENT LIABILITIES" },
       ...lines(data.noncurrent_liabilities),
-      { type: "total", level: 1, label: "TOTAL NONCURRENT LIABILITIES", values: data.total_noncurrent_liabilities },
-      { type: "total", level: 0, label: "TOTAL  LIABILITIES", values: data.total_liabilities },
+      withGrowth({ type: "total", level: 1, label: "TOTAL NONCURRENT LIABILITIES", values: data.total_noncurrent_liabilities }),
+      withGrowth({ type: "total", level: 0, label: "TOTAL  LIABILITIES", values: data.total_liabilities }),
       { type: "header", level: 0, label: "EQUITY" },
-      ...data.equity.map(r => ({ type: "line", level: 1, label: r.label, values: r.values })),
-      { type: "total", level: 0, label: "TOTAL  EQUITY", values: data.total_equity },
-      { type: "total", level: 0, label: "TOTAL  LIABILITIES AND EQUITY", values: data.total_liabilities_and_equity },
+      ...data.equity.map(r => withGrowth({ type: "line", level: 1, label: r.label, values: r.values })),
+      withGrowth({ type: "total", level: 0, label: "TOTAL  EQUITY", values: data.total_equity }),
+      withGrowth({ type: "total", level: 0, label: "TOTAL  LIABILITIES AND EQUITY", values: data.total_liabilities_and_equity }),
     ];
-  }, [data, detail]);
+  }, [data, detail, withGrowth]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
         <div>
-          <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>As of Period</label>
-          <select style={SELECT} value={asOf} onChange={e => setAsOf(e.target.value)}>
-            {periods.filter(p => p.has_activity === "Y").map(p => (
-              <option key={p.period_name} value={p.period_name}>{periodLabel(p)}</option>
-            ))}
-          </select>
+          <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Single Period</label>
+          <div style={{ display: "flex", gap: 6 }}>
+            <select style={SELECT} value={asOfMonth} onChange={e => setAsOfMonth(e.target.value)}>
+              {monthOptionsForYear(periods, asOfYear).map(m => <option key={m} value={m}>{MONTH_LABEL[m]}</option>)}
+            </select>
+            <select style={SELECT} value={asOfYear} onChange={e => setAsOfYear(Number(e.target.value))}>
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
         </div>
         <div>
-          <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Compare To</label>
-          <select style={SELECT} value={compareTo} onChange={e => setCompareTo(e.target.value)}>
-            <option value="">— None —</option>
-            {years.map(y => {
-              const { dec, isClosed } = yearEndInfo(periods, y);
-              return isClosed && dec ? <option key={y} value={dec.period_name}>FY {y} (Dec)</option> : null;
-            })}
-          </select>
+          <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period From</label>
+          <div style={{ display: "flex", gap: 6 }}>
+            <select style={SELECT} value={rangeMonth} onChange={e => setRangeMonth(e.target.value)}>
+              {MONTHS.map(m => <option key={m} value={m}>{MONTH_LABEL[m]}</option>)}
+            </select>
+            <select style={SELECT} value={fromYear} onChange={e => setFromYear(e.target.value ? Number(e.target.value) : "")}>
+              <option value="">— None —</option>
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period To</label>
+          <div style={{ display: "flex", gap: 6 }}>
+            <select style={SELECT} value={rangeMonth} onChange={e => setRangeMonth(e.target.value)}>
+              {MONTHS.map(m => <option key={m} value={m}>{MONTH_LABEL[m]}</option>)}
+            </select>
+            <select style={SELECT} value={toYear} onChange={e => setToYear(e.target.value ? Number(e.target.value) : "")}>
+              <option value="">— None —</option>
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
         </div>
         <button onClick={load} disabled={loading} style={BTN}>
           {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
@@ -281,12 +438,18 @@ function BalanceSheetPanel({ periods, detail }) {
         )}
       </div>
 
+      {growthMode === "cagr" && (
+        <div style={{ fontSize: 11, color: "#64748b" }}>
+          Membandingkan {rangePeriods.length} tahun ({periodLabel(periods.find(p => p.period_name === rangePeriods[0]))} → {periodLabel(periods.find(p => p.period_name === asOf))}) — kolom growth memakai CAGR ({cagrYears} tahun).
+        </div>
+      )}
+
       {loading && !data ? (
         <div style={{ padding: 40, textAlign: "center", color: "#64748b" }}><Loader2 size={20} className="animate-spin" /></div>
       ) : error ? (
         <div style={{ padding: 16, color: "#dc2626", fontSize: 13 }}>{error}</div>
       ) : data ? (
-        <FsTable columns={columnLabels} rows={rows} checkDiff={!detail ? data.check_diff : null} />
+        <FsTable columns={columnLabels} rows={rows} checkDiff={!detail ? data.check_diff : null} growthMode={growthMode} />
       ) : null}
     </div>
   );
