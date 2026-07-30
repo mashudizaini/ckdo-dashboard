@@ -108,6 +108,25 @@ class OutlookMaterialService:
             d = docx.Document(path)
             return "\n".join(p.text for p in d.paragraphs)
 
+        if ext in (".pptx", ".ppt"):
+            from pptx import Presentation
+            prs = Presentation(path)
+            lines = []
+            for i, slide in enumerate(prs.slides, start=1):
+                slide_lines = []
+                for shape in slide.shapes:
+                    if shape.has_text_frame and shape.text_frame.text.strip():
+                        slide_lines.append(shape.text_frame.text)
+                    elif shape.has_table:
+                        for row in shape.table.rows:
+                            cells = [c.text for c in row.cells if c.text]
+                            if cells:
+                                slide_lines.append(" | ".join(cells))
+                if slide_lines:
+                    lines.append(f"# Slide {i}")
+                    lines.extend(slide_lines)
+            return "\n".join(lines)
+
         if ext in (".xlsx", ".xlsm"):
             import openpyxl
             wb = openpyxl.load_workbook(path, data_only=True, read_only=True)

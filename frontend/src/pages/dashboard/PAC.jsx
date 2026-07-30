@@ -2409,11 +2409,16 @@ function formatFileSize(bytes) {
    "format" = example/template files defining the desired report format,
    which can be several and are all used as reference during generation. */
 function OutlookBriefStatusBadge({ status }) {
+  // Solid (opaque) backgrounds instead of low-opacity tints — a tint over
+  // this panel's own translucent container let the light app-shell
+  // background bleed through, washing out the badge text's contrast
+  // regardless of theme. Opaque colors read correctly no matter what's
+  // behind them.
   const map = {
-    pending:    { icon: Clock,       cls: "text-gray-400 bg-gray-700/40 border-gray-600",           label: "Belum di-convert" },
-    converting: { icon: Loader2,     cls: "text-sky-300 bg-sky-500/10 border-sky-500/30",            label: "Converting…", spin: true },
-    done:       { icon: CheckCircle, cls: "text-green-400 bg-green-500/10 border-green-500/30",      label: "Converted" },
-    failed:     { icon: AlertCircle, cls: "text-red-400 bg-red-500/10 border-red-500/30",             label: "Gagal" },
+    pending:    { icon: Clock,       cls: "text-gray-100 bg-gray-600 border-gray-500",           label: "Belum di-convert" },
+    converting: { icon: Loader2,     cls: "text-white bg-sky-600 border-sky-400",                 label: "Converting…", spin: true },
+    done:       { icon: CheckCircle, cls: "text-white bg-green-600 border-green-400",             label: "Converted" },
+    failed:     { icon: AlertCircle, cls: "text-white bg-red-600 border-red-400",                 label: "Gagal" },
   };
   const s = map[status] || map.pending;
   const Icon = s.icon;
@@ -2431,6 +2436,7 @@ function OutlookMaterialsPanel({ year, category = "material", title, description
   const [uploadError, setUploadError] = useState(null);
   const [converting, setConverting] = useState({});   // { [id]: true } while a single convert is in flight
   const [convertingAll, setConvertingAll] = useState(false);
+  const [convertProgress, setConvertProgress] = useState({ done: 0, total: 0 });
   const [expandedId, setExpandedId] = useState(null);
   const fileInputRef = useRef(null);
 
@@ -2493,20 +2499,23 @@ function OutlookMaterialsPanel({ year, category = "material", title, description
     const todo = materials.filter(m => m.brief_status !== "done").map(m => m.id);
     if (todo.length === 0) return;
     setConvertingAll(true);
+    setConvertProgress({ done: 0, total: todo.length });
     try {
       for (const id of todo) {
         await convertOne(id);
+        setConvertProgress(prev => ({ ...prev, done: prev.done + 1 }));
       }
     } finally {
       setConvertingAll(false);
+      setConvertProgress({ done: 0, total: 0 });
     }
   };
 
   const pendingCount = materials.filter(m => m.brief_status !== "done").length;
 
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
-      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
+    <div className="rounded-xl border border-gray-800 bg-gray-900 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-gray-200">{title}</h3>
           <p className="text-xs text-gray-500 mt-0.5">{description} · {year}</p>
@@ -2525,6 +2534,20 @@ function OutlookMaterialsPanel({ year, category = "material", title, description
           </button>
         </div>
       </div>
+      {convertingAll && convertProgress.total > 0 && (
+        <div className="px-5 pt-3 pb-1">
+          <div className="flex items-center justify-between text-[10px] text-gray-400 mb-1">
+            <span>Converting file {convertProgress.done + 1} of {convertProgress.total}…</span>
+            <span>{Math.round((convertProgress.done / convertProgress.total) * 100)}%</span>
+          </div>
+          <div className="h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-indigo-500 transition-all duration-300 ease-out"
+              style={{ width: `${Math.round((convertProgress.done / convertProgress.total) * 100)}%` }}
+            />
+          </div>
+        </div>
+      )}
       <div className="p-4">
         {uploadError && (
           <p className="text-xs text-red-400 mb-3 flex items-center gap-1.5"><AlertCircle size={12} />{uploadError}</p>
@@ -2565,6 +2588,11 @@ function OutlookMaterialsPanel({ year, category = "material", title, description
                       <Trash2 size={13} />
                     </button>
                   </div>
+                  {isConverting && (
+                    <div className="mx-3 mb-2 h-1 rounded-full bg-gray-800 overflow-hidden">
+                      <div className="h-full w-2/5 rounded-full bg-sky-500 animate-pulse" />
+                    </div>
+                  )}
                   {item.brief_status === "failed" && item.brief_error && (
                     <p className="px-3 pb-2 text-[10px] text-red-400 flex items-start gap-1"><AlertCircle size={10} className="mt-0.5 shrink-0" />{item.brief_error}</p>
                   )}
@@ -2688,8 +2716,8 @@ function OutlookPanel({ year }) {
       description="Contoh/format laporan sebagai acuan generate Outlook"
       provider={provider}
     />
-    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
-      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
+    <div className="rounded-xl border border-gray-800 bg-gray-900 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-gray-200">Business Plan Outlook</h3>
           <p className="text-xs text-gray-500 mt-0.5">Economic & Industry Outlook · {year}</p>
