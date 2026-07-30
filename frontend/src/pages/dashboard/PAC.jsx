@@ -1488,8 +1488,8 @@ function ExchangeRateSection() {
     setError(null);
     try {
       const res = await pacApi.getExchangeRates(refresh, source);
-      setData(res.data);
-      if (res.data?.error) setError(res.data.error);
+      setData(res);
+      if (res?.error) setError(res.error);
     } catch (e) {
       setError(e.response?.data?.detail || "Gagal memuat data kurs");
     } finally {
