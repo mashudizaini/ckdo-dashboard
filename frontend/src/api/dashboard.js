@@ -193,7 +193,10 @@ export const pacApi = {
   getSetupModule:       (id)   => api.get(`/dashboard/pac/setup-modules/${id}`),
   upsertSetupModule:    (body) => api.post("/dashboard/pac/setup-modules", body),
   deleteSetupModule:    (id)   => api.delete(`/dashboard/pac/setup-modules/${id}`),
-  generateOutlook:      (body) => api.post("/dashboard/pac/setup-modules/generate-outlook", body),
+  // 3-minute timeout — web-search-grounded generation (Claude provider) can
+  // legitimately run past the api client's default 30s, especially with
+  // multiple search rounds; the backend/nginx side already allows up to 10min.
+  generateOutlook:      (body) => api.post("/dashboard/pac/setup-modules/generate-outlook", body, { timeout: 180000 }),
   exportScheduleExcel:  (planYear) => api.get("/dashboard/pac/setup-modules/schedule/export", { params: { plan_year: planYear }, responseType: "blob" }),
   exportGuidelinePpt:   (planYear) => api.get("/dashboard/pac/setup-modules/guideline/export", { params: { plan_year: planYear }, responseType: "blob" }),
   exportOutlookPpt:     (planYear) => api.get("/dashboard/pac/setup-modules/outlook/export", { params: { plan_year: planYear }, responseType: "blob" }),
@@ -203,7 +206,7 @@ export const pacApi = {
     return api.post("/dashboard/pac/setup-modules/outlook/materials", form, { params: { plan_year: planYear, category }, headers: { "Content-Type": "multipart/form-data" } });
   },
   listOutlookMaterials:   (planYear, category) => api.get("/dashboard/pac/setup-modules/outlook/materials", { params: { plan_year: planYear, category } }),
-  convertOutlookMaterial: (id, provider = "onprem") => api.post(`/dashboard/pac/setup-modules/outlook/materials/${id}/convert`, null, { params: { provider } }),
+  convertOutlookMaterial: (id, provider = "onprem") => api.post(`/dashboard/pac/setup-modules/outlook/materials/${id}/convert`, null, { params: { provider }, timeout: 120000 }),
   downloadOutlookMaterial: (id) => api.get(`/dashboard/pac/setup-modules/outlook/materials/${id}/download`, { responseType: "blob" }),
   deleteOutlookMaterial:  (id) => api.delete(`/dashboard/pac/setup-modules/outlook/materials/${id}`),
 
