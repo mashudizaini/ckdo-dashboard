@@ -2415,10 +2415,10 @@ function OutlookBriefStatusBadge({ status }) {
   // regardless of theme. Opaque colors read correctly no matter what's
   // behind them.
   const map = {
-    pending:    { icon: Clock,       cls: "text-gray-100 bg-gray-600 border-gray-500",           label: "Belum di-convert" },
+    pending:    { icon: Clock,       cls: "text-gray-100 bg-gray-600 border-gray-500",           label: "Not converted" },
     converting: { icon: Loader2,     cls: "text-white bg-sky-600 border-sky-400",                 label: "Converting…", spin: true },
     done:       { icon: CheckCircle, cls: "text-white bg-green-600 border-green-400",             label: "Converted" },
-    failed:     { icon: AlertCircle, cls: "text-white bg-red-600 border-red-400",                 label: "Gagal" },
+    failed:     { icon: AlertCircle, cls: "text-white bg-red-600 border-red-400",                 label: "Failed" },
   };
   const s = map[status] || map.pending;
   const Icon = s.icon;
@@ -2477,7 +2477,7 @@ function OutlookMaterialsPanel({ year, category = "material", title, description
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Hapus file ini?")) return;
+    if (!confirm("Delete this file?")) return;
     await pacApi.deleteOutlookMaterial(id);
     load();
   };
@@ -2556,7 +2556,7 @@ function OutlookMaterialsPanel({ year, category = "material", title, description
           <div className="flex justify-center py-8 text-gray-500 text-sm gap-2"><Loader2 size={14} className="animate-spin" /> Loading…</div>
         ) : materials.length === 0 ? (
           <p className="text-xs text-gray-600 text-center py-8">
-            Belum ada file. Upload {category === "format" ? "contoh/format laporan outlook (boleh lebih dari 1 file, berbagai format) sebagai acuan struktur laporan yang akan digenerate." : "bahan (laporan ekonomi, data pasar, dsb — boleh lebih dari 10 file, berbagai format) sebagai dasar penyusunan Outlook."}
+            No files yet. Upload {category === "format" ? "example/format outlook reports (more than 1 file allowed, various formats) as a structural reference for the generated report." : "materials (economic reports, market data, etc. — more than 10 files allowed, various formats) as the basis for drafting the Outlook."}
           </p>
         ) : (
           <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
@@ -2573,11 +2573,11 @@ function OutlookMaterialsPanel({ year, category = "material", title, description
                     </div>
                     <OutlookBriefStatusBadge status={isConverting ? "converting" : item.brief_status} />
                     {item.brief_status === "done" ? (
-                      <button onClick={() => setExpandedId(isExpanded ? null : item.id)} className="shrink-0 p-1.5 rounded-md text-gray-400 hover:text-gray-200 hover:bg-gray-800" title="Lihat ringkasan">
+                      <button onClick={() => setExpandedId(isExpanded ? null : item.id)} className="shrink-0 p-1.5 rounded-md text-gray-400 hover:text-gray-200 hover:bg-gray-800" title="View summary">
                         {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                       </button>
                     ) : (
-                      <button onClick={() => convertOne(item.id)} disabled={isConverting} className="shrink-0 p-1.5 rounded-md text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-40" title="Convert jadi ringkasan poin-poin">
+                      <button onClick={() => convertOne(item.id)} disabled={isConverting} className="shrink-0 p-1.5 rounded-md text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-40" title="Convert into a bullet-point summary">
                         {isConverting ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
                       </button>
                     )}
@@ -2718,13 +2718,13 @@ function OutlookPanel({ year }) {
     <OutlookMaterialsPanel
       year={year} category="material" accent="teal"
       title="Outlook Reference Materials"
-      description="Bahan dasar laporan ekonomi & pangsa pasar"
+      description="Base material for the economic & market share report"
       provider={provider}
     />
     <OutlookMaterialsPanel
       year={year} category="format" accent="violet"
       title="Outlook Report Format"
-      description="Contoh/format laporan sebagai acuan generate Outlook"
+      description="Example/format report used as a reference for generating the Outlook"
       provider={provider}
     />
     <div className="rounded-xl border border-gray-800 bg-gray-900 overflow-hidden">
@@ -2805,7 +2805,7 @@ function OutlookPanel({ year }) {
       )}
       <div className="p-5 space-y-4">
         <p className="text-[11px] text-gray-500 -mt-1">
-          Edit langsung sebagai teks/Markdown (gunakan "- " untuk bullet, <span className="font-mono">**tebal**</span> untuk penekanan) — hasilnya dipakai apa adanya saat Generate PPT.
+          Edit directly as text/Markdown (use "- " for bullets, <span className="font-mono">**bold**</span> for emphasis) — the result is used as-is when generating the PPT.
         </p>
         {["global_economic", "indonesia_economic", "pharmaceutical"].map(secKey => {
           const colors = sectionColors[secKey];
@@ -2838,7 +2838,7 @@ function OutlookPanel({ year }) {
 const SIM_SUBTABS = [
   { id: "data_collection",  label: "Purchase Plan",     icon: FileText },
   { id: "sales_plan",       label: "Sales Plan",        icon: BarChart },
-  { id: "personnel_plan",   label: "Personal Plan",     icon: Users },
+  { id: "personnel_plan",   label: "Personnel Plan",    icon: Users },
   { id: "manufacture_plan", label: "Manufacture Plan",  icon: Factory },
   { id: "investment_plan",  label: "Investment Plan",   icon: Banknote },
   { id: "opex_plan",        label: "OPEX Plan",         icon: Wallet },
@@ -3027,7 +3027,7 @@ function PurchasePlanPanel({ year }) {
       const res = await pacApi.uploadPurchasePlanExcel(file, year);
       if (res.success) {
         const summary = res.imported.map(x => `${x.category} (${x.items} items)`).join(", ");
-        alert(`Import berhasil: ${summary}`);
+        alert(`Import successful: ${summary}`);
         await loadPlans();
       } else {
         alert(res.error || "Import failed");
@@ -3078,12 +3078,12 @@ function PurchasePlanPanel({ year }) {
         ) : !showForm ? (
           <>
             <div className="mb-4">
-              <label className="text-xs text-gray-500 mb-1 block">Pilih Purchase Plan:</label>
+              <label className="text-xs text-gray-500 mb-1 block">Select Purchase Plan:</label>
               <select value={selectedPlan?.id || ""} onChange={e => {
                 const plan = plans.find(p => String(p.id) === e.target.value);
                 setSelectedPlan(plan || null);
               }} className={`${SELECT} w-full max-w-md`}>
-                <option value="">-- Pilih Purchase Plan --</option>
+                <option value="">-- Select Purchase Plan --</option>
                 {plans.map(p => (
                   <option key={p.id} value={p.id}>
                     {p.plan_year} - {p.department || "(no dept)"} / {p.team_name || "(no team)"} [{p.plan_category}]
@@ -3400,7 +3400,7 @@ function PersonnelPlanPanel({ year }) {
       const res = await pacApi.uploadPersonnelPlanExcel(file, year);
       if (res.success) {
         const s = res.rows_imported;
-        alert(`Import berhasil: Headcount ${s.headcount} baris, Recruitment Permanent ${s.recruitment_permanent} baris, Recruitment Temporary ${s.recruitment_temporary} baris (${res.data?.department}).`);
+        alert(`Import successful: Headcount ${s.headcount} rows, Recruitment Permanent ${s.recruitment_permanent} rows, Recruitment Temporary ${s.recruitment_temporary} rows (${res.data?.department}).`);
         await loadPlans();
       } else {
         alert(res.error || "Import failed");
@@ -3418,8 +3418,8 @@ function PersonnelPlanPanel({ year }) {
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-gray-200">Personal Plan Data</h3>
-          <p className="text-xs text-gray-500 mt-0.5">Input perencanaan personil (headcount & recruitment) · {year}</p>
+          <h3 className="text-sm font-semibold text-gray-200">Personnel Plan Data</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Personnel planning input (headcount & recruitment) · {year}</p>
         </div>
         <div className="flex gap-2">
           {!showForm ? (
@@ -3451,12 +3451,12 @@ function PersonnelPlanPanel({ year }) {
         ) : !showForm ? (
           <>
             <div>
-              <label className="text-xs text-gray-500 mb-1 block">Pilih Personal Plan:</label>
+              <label className="text-xs text-gray-500 mb-1 block">Select Personnel Plan:</label>
               <select value={selectedPlan?.id || ""} onChange={e => {
                 const plan = plans.find(p => String(p.id) === e.target.value);
                 setSelectedPlan(plan || null);
               }} className={`${SELECT} w-full max-w-md`}>
-                <option value="">-- Pilih Personal Plan --</option>
+                <option value="">-- Select Personnel Plan --</option>
                 {plans.map(p => (
                   <option key={p.id} value={p.id}>{p.plan_year} - {p.department || "(no dept)"}</option>
                 ))}
@@ -3775,7 +3775,7 @@ function ManufacturePlanPanel({ year }) {
     try {
       const res = await pacApi.uploadManufacturePlanExcel(file, year);
       if (res.success) {
-        alert(`Import berhasil: ${res.rows_imported} baris produk (${res.data?.department} / ${res.data?.team_name}).`);
+        alert(`Import successful: ${res.rows_imported} product rows (${res.data?.department} / ${res.data?.team_name}).`);
         await loadPlans();
       } else {
         alert(res.error || "Import failed");
@@ -3816,7 +3816,7 @@ function ManufacturePlanPanel({ year }) {
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-gray-200">Manufacture Plan Data</h3>
-          <p className="text-xs text-gray-500 mt-0.5">Input perencanaan produksi · {year}</p>
+          <p className="text-xs text-gray-500 mt-0.5">Production planning input · {year}</p>
         </div>
         <div className="flex gap-2">
           {!showForm ? (
@@ -3852,12 +3852,12 @@ function ManufacturePlanPanel({ year }) {
         ) : !showForm ? (
           <>
             <div className="mb-4">
-              <label className="text-xs text-gray-500 mb-1 block">Pilih Manufacture Plan:</label>
+              <label className="text-xs text-gray-500 mb-1 block">Select Manufacture Plan:</label>
               <select value={selectedPlan?.id || ""} onChange={e => {
                 const plan = plans.find(p => String(p.id) === e.target.value);
                 setSelectedPlan(plan || null);
               }} className={`${SELECT} w-full max-w-md`}>
-                <option value="">-- Pilih Manufacture Plan --</option>
+                <option value="">-- Select Manufacture Plan --</option>
                 {plans.map(p => (
                   <option key={p.id} value={p.id}>{p.plan_year} - {p.department || "(no dept)"} / {p.team_name || "(no team)"}</option>
                 ))}
@@ -4101,7 +4101,7 @@ function InvestmentPlanPanel({ year }) {
     try {
       const res = await pacApi.uploadInvestmentPlanExcel(file, year);
       if (res.success) {
-        alert(`Import berhasil: ${res.rows_imported} baris kategori (${res.data?.department} / ${res.data?.team_name || res.data?.team_code}).`);
+        alert(`Import successful: ${res.rows_imported} category rows (${res.data?.department} / ${res.data?.team_name || res.data?.team_code}).`);
         await loadPlans();
       } else {
         alert(res.error || "Import failed");
@@ -4123,7 +4123,7 @@ function InvestmentPlanPanel({ year }) {
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-gray-200">Investment Plan Data</h3>
-          <p className="text-xs text-gray-500 mt-0.5">Input perencanaan investasi (capex) · {year}</p>
+          <p className="text-xs text-gray-500 mt-0.5">Investment (capex) planning input · {year}</p>
         </div>
         <div className="flex gap-2">
           {!showForm ? (
@@ -4155,12 +4155,12 @@ function InvestmentPlanPanel({ year }) {
         ) : !showForm ? (
           <>
             <div className="mb-4">
-              <label className="text-xs text-gray-500 mb-1 block">Pilih Investment Plan:</label>
+              <label className="text-xs text-gray-500 mb-1 block">Select Investment Plan:</label>
               <select value={selectedPlan?.id || ""} onChange={e => {
                 const plan = plans.find(p => String(p.id) === e.target.value);
                 setSelectedPlan(plan || null);
               }} className={`${SELECT} w-full max-w-md`}>
-                <option value="">-- Pilih Investment Plan --</option>
+                <option value="">-- Select Investment Plan --</option>
                 {plans.map(p => (
                   <option key={p.id} value={p.id}>{p.plan_year} - {p.department || "(no dept)"} / {p.team_code || "(no team)"}</option>
                 ))}
@@ -4405,8 +4405,8 @@ function OpexPlanPanel({ year }) {
     try {
       const res = await pacApi.uploadOpexPlanExcel(file, year);
       if (res.success) {
-        const summary = (res.imported || []).map(x => `${x.sheet} (${x.rows} baris)`).join(", ");
-        alert(`Import berhasil: ${res.imported?.length || 0} sheet — ${summary}.`);
+        const summary = (res.imported || []).map(x => `${x.sheet} (${x.rows} rows)`).join(", ");
+        alert(`Import successful: ${res.imported?.length || 0} sheet(s) — ${summary}.`);
         await loadPlans();
       } else {
         alert(res.error || "Import failed");
@@ -4428,7 +4428,7 @@ function OpexPlanPanel({ year }) {
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-gray-200">OPEX Plan Data</h3>
-          <p className="text-xs text-gray-500 mt-0.5">Input perencanaan biaya operasional (OPEX) · {year}</p>
+          <p className="text-xs text-gray-500 mt-0.5">Operational cost (OPEX) planning input · {year}</p>
         </div>
         <div className="flex gap-2">
           {!showForm ? (
@@ -4460,12 +4460,12 @@ function OpexPlanPanel({ year }) {
         ) : !showForm ? (
           <>
             <div className="mb-4">
-              <label className="text-xs text-gray-500 mb-1 block">Pilih OPEX Plan:</label>
+              <label className="text-xs text-gray-500 mb-1 block">Select OPEX Plan:</label>
               <select value={selectedPlan?.id || ""} onChange={e => {
                 const plan = plans.find(p => String(p.id) === e.target.value);
                 setSelectedPlan(plan || null);
               }} className={`${SELECT} w-full max-w-md`}>
-                <option value="">-- Pilih OPEX Plan --</option>
+                <option value="">-- Select OPEX Plan --</option>
                 {plans.map(p => (
                   <option key={p.id} value={p.id}>{p.plan_year} - {p.department || "(no dept)"} / {p.team_name || p.team_code || "(no team)"}</option>
                 ))}
@@ -4719,14 +4719,14 @@ function SalesPlanPanel({ year }) {
   const exportExcel = async (planType) => {
     const targetId = selectedPlan?.id;
     if (!targetId) {
-      alert("Pilih sales plan terlebih dahulu sebelum export.");
+      alert("Select a sales plan before exporting.");
       return;
     }
     setExporting(true);
     try {
       const res = await pacApi.exportSalesPlanExcel(targetId, planType);
       if (res.success) {
-        alert(`Export berhasil: ${res.filename}`);
+        alert(`Export successful: ${res.filename}`);
       } else {
         alert(res.error || "Export failed");
       }
@@ -4749,7 +4749,7 @@ function SalesPlanPanel({ year }) {
     try {
       const res = await pacApi.uploadSalesPlanExcel(file, year);
       if (res.success) {
-        alert(`Import berhasil: ${res.rows_imported} baris produk (${res.data?.department} / ${res.data?.team_name}).`);
+        alert(`Import successful: ${res.rows_imported} product rows (${res.data?.department} / ${res.data?.team_name}).`);
         await loadPlans();
       } else {
         alert(res.error || "Import failed");
@@ -4818,7 +4818,7 @@ function SalesPlanPanel({ year }) {
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-gray-200">Sales Plan Data</h3>
-          <p className="text-xs text-gray-500 mt-0.5">Input perencanaan penjualan · {year}</p>
+          <p className="text-xs text-gray-500 mt-0.5">Sales planning input · {year}</p>
         </div>
         <div className="flex gap-2">
           {!showForm ? (
@@ -4857,12 +4857,12 @@ function SalesPlanPanel({ year }) {
           <>
             <div className="mb-4 flex items-end gap-3">
               <div className="flex-1">
-                <label className="text-xs text-gray-500 mb-1 block">Pilih Sales Plan:</label>
+                <label className="text-xs text-gray-500 mb-1 block">Select Sales Plan:</label>
                 <select value={selectedPlan?.id || ""} onChange={e => {
                   const plan = plans.find(p => String(p.id) === e.target.value);
                   setSelectedPlan(plan || null);
                 }} className={`${SELECT} w-full max-w-md`}>
-                  <option value="">-- Pilih Sales Plan --</option>
+                  <option value="">-- Select Sales Plan --</option>
                   {plans.map(p => (
                     <option key={p.id} value={p.id}>
                       {p.plan_year} - {p.department || "(no dept)"} / {p.team_code || "(no team)"} [{p.plan_type}]
