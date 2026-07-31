@@ -338,41 +338,72 @@ async def generate_outlook(
     reference_context = "\n\n".join(context_parts)
 
     ai = AIService()
-    prompt = f"""Generate a comprehensive Business Plan Outlook for PT CKD OTTO Pharmaceuticals for year {body.year}.
+    use_web_search = body.provider == "anthropic"
+
+    expert_persona = (
+        "You are a senior macroeconomic and financial markets analyst — the kind "
+        "of outside consultant a pharmaceutical manufacturer's board would retain "
+        "to write its annual Business Plan outlook. Write with an expert's "
+        "judgment: synthesize the data into a point of view, not just a list of "
+        "figures. Each section should read like a page from a professional "
+        "economic/industry outlook report — substantive and directly useful for "
+        "management decision-making, not a superficial summary."
+    )
+    search_instruction = (
+        "\n\nYou have web search available. Use it to ground every section in "
+        "current, verifiable data — recent GDP/inflation/interest-rate figures, "
+        "current pharmaceutical market sizing, recent policy changes — rather "
+        "than relying only on prior knowledge, especially for anything "
+        "time-sensitive. Prefer primary/official sources (IMF, World Bank, Bank "
+        "Indonesia, BPS, Kemenkes/BPOM, established industry reports) over "
+        "secondary summaries. Do not narrate your search process in visible "
+        "text — search silently, then respond with your final answer only."
+        if use_web_search else ""
+    )
+
+    prompt = f"""{expert_persona}{search_instruction}
+
+Generate a comprehensive Business Plan Outlook for PT CKD OTTO Pharmaceuticals for year {body.year}.
 {f'Additional context: {body.context}' if body.context else ''}
 
-{"Ground your answer in the reference material below — prefer these figures/trends over generic knowledge whenever they're relevant, and follow the structural cues from the format examples if given." if reference_context else "No converted reference materials are available yet for this year — generate a realistic, generic outlook (upload and convert reference files first for a more accurate, grounded result)."}
+{"Ground your answer in the reference material below — prefer these figures/trends over generic knowledge whenever they're relevant, and follow the structural cues from the format examples if given." if reference_context else "No converted reference materials are available yet for this year — generate a realistic, well-grounded outlook (upload and convert reference files first for an even more accurate result)."}
 {f"{chr(10)}{chr(10)}{reference_context}" if reference_context else ""}
 
 For each of the 3 sections below, write the content as a single Markdown
-string (bullet list using "- ", key terms in **bold**) — freeform text the
-user can edit directly, not a fixed list of fields.
+string: 1-2 short paragraphs of analyst framing/narrative FIRST, THEN a
+"- " bullet list of the specific supporting figures and facts with key
+terms and numbers in **bold**. This should read as expert commentary, not
+a bare bullet dump — freeform text the user can edit directly, not a fixed
+list of fields. Aim for real depth: 5-8 substantive bullets per section
+minimum, each with a concrete number, trend, or specific policy/event —
+not vague statements.
 
 Return ONLY valid JSON with this exact structure:
 {{
   "global_economic": {{
     "title": "I. Global Economic Outlook",
-    "text": "- **Global GDP Forecast**: ...\\n- **Key Factor 1**: ...\\n- **Fed Interest Rate**: ...\\n- **Global Inflation**: ..."
+    "text": "Brief analyst framing paragraph.\\n\\n- **Global GDP Forecast**: ...\\n- **Key Factor 1**: ...\\n- **Fed Interest Rate**: ...\\n- **Global Inflation**: ..."
   }},
   "indonesia_economic": {{
     "title": "II. Indonesia Economic Outlook",
-    "text": "- **GDP Forecast**: ...\\n- **Inflation**: ...\\n- **Interest Rate**: ...\\n- **Exchange Rate**: ...\\n- **Government Focus**: ..."
+    "text": "Brief analyst framing paragraph.\\n\\n- **GDP Forecast**: ...\\n- **Inflation**: ...\\n- **Interest Rate**: ...\\n- **Exchange Rate**: ...\\n- **Government Focus**: ..."
   }},
   "pharmaceutical": {{
     "title": "III. Pharmaceutical Industry",
-    "text": "- **Global Market**: ...\\n- **Indonesia Market**: ...\\n- **Oncology**: ...\\n- **CKD OTTO Strategy**: ..."
+    "text": "Brief analyst framing paragraph.\\n\\n- **Global Market**: ...\\n- **Indonesia Market**: ...\\n- **Oncology**: ...\\n- **CKD OTTO Strategy**: ..."
   }}
 }}
 
-Make it realistic for {body.year} with specific numbers and trends. Keep each bullet concise but informative."""
+Make it realistic and current for {body.year}, with specific numbers, trends, and sources where relevant."""
 
     try:
         response = await ai.complete(
-            "You are a business analyst. Return only valid JSON, no markdown code fences, no explanations.",
+            "You are a senior financial/economic analyst producing a management report. Return only valid JSON, no markdown code fences, no explanations.",
             prompt,
             num_ctx=16384,
             provider=body.provider,
             gemini_api_key=gemini_key,
+            web_search=use_web_search,
         )
         json_text = response.strip()
         if json_text.startswith("```"):

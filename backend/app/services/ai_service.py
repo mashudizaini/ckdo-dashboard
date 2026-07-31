@@ -53,13 +53,53 @@ class AIService:
         )
         return response.content[0].text.strip()
 
-    async def complete(self, system: str, message: str, num_ctx: int = 8192, provider: str = "onprem", gemini_api_key: str = None) -> str:
+    def _anthropic_complete_with_search(self, system: str, message: str, max_tokens: int = 8192) -> str:
+        """Same as _anthropic_complete but with the web_search server-side
+        tool enabled, on the current flagship model — for grounding a
+        response in current information instead of training-data-only
+        knowledge. Web search runs entirely server-side (Claude decides
+        when to search and reads the results itself), so this is still a
+        single request/response, not a client-side tool loop — except for
+        the rare case where Claude's internal search loop pauses mid-turn
+        (stop_reason "pause_turn"), which we resume automatically.
+        Response content interleaves a pre-search narration text block
+        ("I'll search for that."), server_tool_use/tool_result blocks, and
+        THEN the actual answer — itself possibly split across several
+        trailing text blocks (empirically confirmed against the live API,
+        not assumed). So: find the last non-text block and join every text
+        block after it — that's the answer with the narration excluded,
+        without assuming it's a single block."""
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        messages = [{"role": "user", "content": message}]
+        tools = [{"type": "web_search_20260209", "name": "web_search"}]
+        response = None
+        for _ in range(3):
+            response = client.messages.create(
+                model="claude-opus-5",
+                max_tokens=max_tokens,
+                system=system,
+                messages=messages,
+                tools=tools,
+            )
+            if response.stop_reason != "pause_turn":
+                break
+            messages = messages + [{"role": "assistant", "content": response.content}]
+        last_tool_idx = -1
+        for i, block in enumerate(response.content):
+            if block.type != "text":
+                last_tool_idx = i
+        answer_blocks = [b.text for b in response.content[last_tool_idx + 1:] if b.type == "text"]
+        return "".join(answer_blocks).strip()
+
+    async def complete(self, system: str, message: str, num_ctx: int = 8192, provider: str = "onprem", gemini_api_key: str = None, web_search: bool = False) -> str:
         """One-shot, non-streaming completion — for batch/background tasks
         (e.g. summarizing an uploaded reference file into a structured
         brief, or generating the Outlook write-up) that just need the final
         text, not token-by-token SSE. provider: "onprem" (local Ollama,
         default), "gemini", or "anthropic" (Claude — shared company key
-        only, same as the other Claude-backed tools in this app)."""
+        only, same as the other Claude-backed tools in this app).
+        web_search: only meaningful with provider="anthropic" — grounds the
+        response in live web search results via Claude's server-side tool."""
         if provider == "gemini":
             contents = [{"role": "user", "parts": [{"text": message}]}]
             return await gemini_service.generate(system, contents, gemini_api_key)
@@ -67,6 +107,8 @@ class AIService:
         if provider == "anthropic":
             # anthropic's SDK is sync-only; run off the event loop thread
             # like meeting_notes_service's Claude path does.
+            if web_search:
+                return await asyncio.to_thread(self._anthropic_complete_with_search, system, message)
             return await asyncio.to_thread(self._anthropic_complete, system, message)
 
         messages = [{"role": "system", "content": system}, {"role": "user", "content": message}]
