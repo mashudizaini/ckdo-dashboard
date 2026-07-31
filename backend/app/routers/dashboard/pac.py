@@ -350,14 +350,15 @@ async def generate_outlook(
         "management decision-making, not a superficial summary."
     )
     search_instruction = (
-        "\n\nYou have web search available. Use it to ground every section in "
-        "current, verifiable data — recent GDP/inflation/interest-rate figures, "
-        "current pharmaceutical market sizing, recent policy changes — rather "
-        "than relying only on prior knowledge, especially for anything "
-        "time-sensitive. Prefer primary/official sources (IMF, World Bank, Bank "
-        "Indonesia, BPS, Kemenkes/BPOM, established industry reports) over "
-        "secondary summaries. Do not narrate your search process in visible "
-        "text — search silently, then respond with your final answer only."
+        "\n\nYou have web search available (max 8 searches — budget it "
+        "carefully). Use it only for the 2-4 most important, time-sensitive "
+        "figures per section (the current policy rate, latest inflation print, "
+        "a key market-size number) — general trend commentary and structural "
+        "analysis can rely on your own knowledge. Prefer primary/official "
+        "sources (IMF, World Bank, Bank Indonesia, BPS, Kemenkes/BPOM, "
+        "established industry reports) over secondary summaries. Do not "
+        "narrate your search process in visible text — search silently, then "
+        "respond with your final answer only."
         if use_web_search else ""
     )
 

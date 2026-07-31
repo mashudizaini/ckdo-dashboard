@@ -193,10 +193,11 @@ export const pacApi = {
   getSetupModule:       (id)   => api.get(`/dashboard/pac/setup-modules/${id}`),
   upsertSetupModule:    (body) => api.post("/dashboard/pac/setup-modules", body),
   deleteSetupModule:    (id)   => api.delete(`/dashboard/pac/setup-modules/${id}`),
-  // 3-minute timeout — web-search-grounded generation (Claude provider) can
-  // legitimately run past the api client's default 30s, especially with
-  // multiple search rounds; the backend/nginx side already allows up to 10min.
-  generateOutlook:      (body) => api.post("/dashboard/pac/setup-modules/generate-outlook", body, { timeout: 180000 }),
+  // 6-minute timeout — web-search-grounded generation (Claude provider) can
+  // legitimately run past the api client's default 30s; measured up to ~5.5min
+  // on an uncapped search budget (now capped server-side, but keep headroom).
+  // The backend/nginx side already allows up to 10min.
+  generateOutlook:      (body) => api.post("/dashboard/pac/setup-modules/generate-outlook", body, { timeout: 360000 }),
   exportScheduleExcel:  (planYear) => api.get("/dashboard/pac/setup-modules/schedule/export", { params: { plan_year: planYear }, responseType: "blob" }),
   exportGuidelinePpt:   (planYear) => api.get("/dashboard/pac/setup-modules/guideline/export", { params: { plan_year: planYear }, responseType: "blob" }),
   exportOutlookPpt:     (planYear) => api.get("/dashboard/pac/setup-modules/outlook/export", { params: { plan_year: planYear }, responseType: "blob" }),

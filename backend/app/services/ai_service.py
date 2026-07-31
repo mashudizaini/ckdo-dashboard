@@ -71,7 +71,11 @@ class AIService:
         without assuming it's a single block."""
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         messages = [{"role": "user", "content": message}]
-        tools = [{"type": "web_search_20260209", "name": "web_search"}]
+        # Unbounded, a "ground everything" prompt drove Claude to 35 searches
+        # and 5.5 minutes on one measured run — way past any reasonable HTTP
+        # request lifetime. Capping max_uses bounds worst-case latency while
+        # still allowing solid grounding across a handful of key figures.
+        tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 8}]
         response = None
         for _ in range(3):
             response = client.messages.create(

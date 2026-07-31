@@ -2665,7 +2665,12 @@ function OutlookPanel({ year }) {
 
   const generateWithAI = async () => {
     setGenerating(true);
-    setGenStatus({ type: "info", text: `Generating with ${PROVIDER_LABELS[provider]}… this can take up to a minute.` });
+    setGenStatus({
+      type: "info",
+      text: provider === "anthropic"
+        ? "Generating with Claude AI — grounding the outlook in live web search, this can take a few minutes. Please keep this tab open."
+        : `Generating with ${PROVIDER_LABELS[provider]}… this can take up to a minute.`,
+    });
     try {
       const res = await pacApi.generateOutlook({ year, provider });
       if (res.success && res.data) {
@@ -2746,8 +2751,12 @@ function OutlookPanel({ year }) {
             </button>
           )}
           <button onClick={generateWithAI} disabled={generating}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 transition-all disabled:opacity-50">
-            {generating ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold border transition-all ${
+              generating
+                ? "border-indigo-400 bg-indigo-600 text-white"
+                : "border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20"
+            }`}>
+            {generating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={11} />}
             {generating ? "Generating…" : "AI Generate"}
           </button>
           <button onClick={() => setData(prev => prev ? Object.assign({}, prev, { status: prev.status === 'final' ? 'draft' : 'final' }) : prev)}
@@ -2765,17 +2774,32 @@ function OutlookPanel({ year }) {
         </div>
       </div>
       {genStatus && (
-        <div className={`flex items-start gap-2 px-5 py-2.5 border-b text-xs ${
-          genStatus.type === "err" ? "bg-red-500/15 border-red-500/30 text-red-300" :
-          genStatus.type === "ok" ? "bg-green-500/15 border-green-500/30 text-green-300" :
-          "bg-sky-500/15 border-sky-500/30 text-sky-300"
+        <div className={`px-5 py-4 border-b ${
+          genStatus.type === "err" ? "bg-red-950/70 border-red-500/40" :
+          genStatus.type === "ok" ? "bg-green-950/70 border-green-500/40" :
+          "bg-indigo-950/70 border-indigo-500/40"
         }`}>
-          {generating ? <Loader2 size={13} className="animate-spin shrink-0 mt-0.5" /> :
-            genStatus.type === "err" ? <AlertCircle size={13} className="shrink-0 mt-0.5" /> :
-            <CheckCircle size={13} className="shrink-0 mt-0.5" />}
-          <span className="flex-1">{genStatus.text}</span>
-          {!generating && (
-            <button onClick={() => setGenStatus(null)} className="text-gray-400 hover:text-gray-200"><X size={13} /></button>
+          <div className="flex items-center gap-3">
+            {generating ? (
+              <Loader2 size={22} className="animate-spin shrink-0 text-indigo-300" />
+            ) : genStatus.type === "err" ? (
+              <AlertCircle size={22} className="shrink-0 text-red-400" />
+            ) : (
+              <CheckCircle size={22} className="shrink-0 text-green-400" />
+            )}
+            <span className={`flex-1 text-sm font-semibold ${
+              genStatus.type === "err" ? "text-red-200" :
+              genStatus.type === "ok" ? "text-green-200" :
+              "text-indigo-200"
+            }`}>{genStatus.text}</span>
+            {!generating && (
+              <button onClick={() => setGenStatus(null)} className="shrink-0 text-gray-400 hover:text-gray-200"><X size={16} /></button>
+            )}
+          </div>
+          {generating && (
+            <div className="mt-3 h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
+              <div className="h-full w-1/3 rounded-full bg-indigo-400 animate-pulse" />
+            </div>
           )}
         </div>
       )}
