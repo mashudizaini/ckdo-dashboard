@@ -12,6 +12,7 @@ sumber/AI_Chat_Implementation_Guide.md (chat: qwen2.5, embeddings: nomic-embed-t
 import asyncio
 import json
 import httpx
+import anthropic
 from app.config import get_settings
 from app.services import rag_service
 from app.services import gemini_service
@@ -42,15 +43,31 @@ class AIService:
         self.base_url = settings.ollama_api_url.rstrip("/")
         self.model = settings.ollama_chat_model
 
+    def _anthropic_complete(self, system: str, message: str) -> str:
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        response = client.messages.create(
+            model="claude-opus-4-8",
+            max_tokens=4096,
+            system=system,
+            messages=[{"role": "user", "content": message}],
+        )
+        return response.content[0].text.strip()
+
     async def complete(self, system: str, message: str, num_ctx: int = 8192, provider: str = "onprem", gemini_api_key: str = None) -> str:
         """One-shot, non-streaming completion — for batch/background tasks
         (e.g. summarizing an uploaded reference file into a structured
         brief, or generating the Outlook write-up) that just need the final
         text, not token-by-token SSE. provider: "onprem" (local Ollama,
-        default) or "gemini"."""
+        default), "gemini", or "anthropic" (Claude — shared company key
+        only, same as the other Claude-backed tools in this app)."""
         if provider == "gemini":
             contents = [{"role": "user", "parts": [{"text": message}]}]
             return await gemini_service.generate(system, contents, gemini_api_key)
+
+        if provider == "anthropic":
+            # anthropic's SDK is sync-only; run off the event loop thread
+            # like meeting_notes_service's Claude path does.
+            return await asyncio.to_thread(self._anthropic_complete, system, message)
 
         messages = [{"role": "system", "content": system}, {"role": "user", "content": message}]
         async with httpx.AsyncClient(timeout=OLLAMA_CHAT_TIMEOUT_SECONDS) as client:

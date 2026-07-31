@@ -1988,7 +1988,7 @@ function SchedulePanel({ year }) {
     setExporting(true);
     try {
       const res = await pacApi.exportScheduleExcel(year);
-      const url = URL.createObjectURL(new Blob([res.data]));
+      const url = URL.createObjectURL(new Blob([res])); // api client's response interceptor already unwraps to the Blob itself
       const a = document.createElement("a");
       a.href = url; a.download = `Business plan schedule ${year}.xlsx`; a.click();
       URL.revokeObjectURL(url);
@@ -2264,7 +2264,7 @@ function GuidelinePanel({ year }) {
     setExporting(true);
     try {
       const res = await pacApi.exportGuidelinePpt(year);
-      const url = URL.createObjectURL(new Blob([res.data]));
+      const url = URL.createObjectURL(new Blob([res])); // api client's response interceptor already unwraps to the Blob itself
       const a = document.createElement("a");
       a.href = url; a.download = `Business plan guideline ${year}.pptx`; a.click();
       URL.revokeObjectURL(url);
@@ -2470,7 +2470,7 @@ function OutlookMaterialsPanel({ year, category = "material", title, description
 
   const handleDownload = async (item) => {
     const res = await pacApi.downloadOutlookMaterial(item.id);
-    const url = URL.createObjectURL(new Blob([res.data]));
+    const url = URL.createObjectURL(new Blob([res])); // api client's response interceptor already unwraps to the Blob itself
     const a = document.createElement("a");
     a.href = url; a.download = item.original_name; a.click();
     URL.revokeObjectURL(url);
@@ -2611,12 +2611,15 @@ function OutlookMaterialsPanel({ year, category = "material", title, description
   );
 }
 
+const PROVIDER_LABELS = { onprem: "Standard (On-Premise)", gemini: "Gemini", anthropic: "Claude AI" };
+
 function OutlookPanel({ year }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [genStatus, setGenStatus] = useState(null); // { type: "info"|"ok"|"err", text }
   const [provider, setProvider] = useState("onprem");
   const [showApiKey, setShowApiKey] = useState(false);
 
@@ -2653,7 +2656,7 @@ function OutlookPanel({ year }) {
     setExporting(true);
     try {
       const res = await pacApi.exportOutlookPpt(year);
-      const url = URL.createObjectURL(new Blob([res.data]));
+      const url = URL.createObjectURL(new Blob([res])); // api client's response interceptor already unwraps to the Blob itself
       const a = document.createElement("a");
       a.href = url; a.download = `Business plan outlook ${year}.pptx`; a.click();
       URL.revokeObjectURL(url);
@@ -2662,6 +2665,7 @@ function OutlookPanel({ year }) {
 
   const generateWithAI = async () => {
     setGenerating(true);
+    setGenStatus({ type: "info", text: `Generating with ${PROVIDER_LABELS[provider]}… this can take up to a minute.` });
     try {
       const res = await pacApi.generateOutlook({ year, provider });
       if (res.success && res.data) {
@@ -2669,15 +2673,17 @@ function OutlookPanel({ year }) {
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);
         if (!res.materials_used && !res.format_examples_used) {
-          alert("Outlook di-generate secara umum — belum ada bahan referensi yang sudah di-convert untuk tahun ini. Upload & convert file di panel di atas agar hasil generate lebih akurat.");
+          setGenStatus({ type: "info", text: "Generated with general knowledge only — no converted reference materials yet for this year. Upload & convert files above for a more accurate result." });
         } else if (res.not_converted > 0) {
-          alert(`Outlook di-generate menggunakan ${res.materials_used} bahan & ${res.format_examples_used} contoh format yang sudah di-convert. Masih ada ${res.not_converted} file belum di-convert — convert dulu agar ikut dipakai.`);
+          setGenStatus({ type: "ok", text: `Generated using ${res.materials_used} material(s) & ${res.format_examples_used} format example(s). ${res.not_converted} file(s) still not converted — convert them to include in the next generate.` });
+        } else {
+          setGenStatus({ type: "ok", text: `Generated using ${res.materials_used} material(s) & ${res.format_examples_used} format example(s).` });
         }
       } else {
-        alert(res.error || "Failed to generate outlook");
+        setGenStatus({ type: "err", text: res.error || "Failed to generate outlook" });
       }
     } catch (e) {
-      alert("Failed to generate outlook: " + e.message);
+      setGenStatus({ type: "err", text: "Failed to generate outlook: " + (e?.response?.data?.detail || e.message) });
     } finally {
       setGenerating(false);
     }
@@ -2731,6 +2737,7 @@ function OutlookPanel({ year }) {
           >
             <option value="onprem">Standard (On-Premise)</option>
             <option value="gemini">Gemini</option>
+            <option value="anthropic">Claude AI</option>
           </select>
           {provider === "gemini" && (
             <button onClick={() => setShowApiKey(true)} title="Use your own personal Gemini API key"
@@ -2757,6 +2764,21 @@ function OutlookPanel({ year }) {
           </button>
         </div>
       </div>
+      {genStatus && (
+        <div className={`flex items-start gap-2 px-5 py-2.5 border-b text-xs ${
+          genStatus.type === "err" ? "bg-red-500/15 border-red-500/30 text-red-300" :
+          genStatus.type === "ok" ? "bg-green-500/15 border-green-500/30 text-green-300" :
+          "bg-sky-500/15 border-sky-500/30 text-sky-300"
+        }`}>
+          {generating ? <Loader2 size={13} className="animate-spin shrink-0 mt-0.5" /> :
+            genStatus.type === "err" ? <AlertCircle size={13} className="shrink-0 mt-0.5" /> :
+            <CheckCircle size={13} className="shrink-0 mt-0.5" />}
+          <span className="flex-1">{genStatus.text}</span>
+          {!generating && (
+            <button onClick={() => setGenStatus(null)} className="text-gray-400 hover:text-gray-200"><X size={13} /></button>
+          )}
+        </div>
+      )}
       <div className="p-5 space-y-4">
         <p className="text-[11px] text-gray-500 -mt-1">
           Edit langsung sebagai teks/Markdown (gunakan "- " untuk bullet, <span className="font-mono">**tebal**</span> untuk penekanan) — hasilnya dipakai apa adanya saat Generate PPT.

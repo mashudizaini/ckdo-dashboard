@@ -249,14 +249,14 @@ async def _resolve_gemini_key(db: AsyncSession, user: CurrentUser) -> str:
 @router.post("/setup-modules/outlook/materials/{material_id}/convert")
 async def convert_outlook_material(
     material_id: int,
-    provider: str = Query("onprem", pattern="^(onprem|gemini)$"),
+    provider: str = Query("onprem", pattern="^(onprem|gemini|anthropic)$"),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.PAC)),
 ):
     """Extract text from the file and summarize it into a structured
     Markdown brief — done once per file, then reused by generate_outlook
     on every generation instead of re-reading the raw file each time.
-    provider: "onprem" (local, free — default) or "gemini"."""
+    provider: "onprem" (local, free — default), "gemini", or "anthropic" (Claude)."""
     gemini_key = await _resolve_gemini_key(db, user) if provider == "gemini" else None
     result = await OutlookMaterialService().convert_material(db, material_id, provider, gemini_key)
     if result.get("data") is None:
@@ -300,7 +300,7 @@ async def delete_outlook_material(
 class GenerateOutlookRequest(BaseModel):
     year: int
     context: Optional[str] = None
-    provider: str = "onprem"  # "onprem" (local, free — default) or "gemini"
+    provider: str = "onprem"  # "onprem" (local, free — default), "gemini", or "anthropic" (Claude)
 
 
 @router.post("/setup-modules/generate-outlook")
@@ -316,8 +316,8 @@ async def generate_outlook(
     grounding context, so generation is fast and consistent across reruns.
     Returns structured outlook data that can be saved via upsert.
     """
-    if body.provider not in ("onprem", "gemini"):
-        raise HTTPException(400, 'Invalid provider — use "onprem" or "gemini"')
+    if body.provider not in ("onprem", "gemini", "anthropic"):
+        raise HTTPException(400, 'Invalid provider — use "onprem", "gemini", or "anthropic"')
     gemini_key = await _resolve_gemini_key(db, user) if body.provider == "gemini" else None
 
     mat_result = await OutlookMaterialService().list_materials(db, body.year)
