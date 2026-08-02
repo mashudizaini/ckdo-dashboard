@@ -22,18 +22,53 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+// Meeting info + participant defaults mirror the company's actual recurring
+// weekly MOM template (sumber/4. MOM Admin Jul 24, 2026.pdf) so the form
+// isn't blank for a meeting that happens every week with mostly the same
+// title/venue/agenda/attendees — the user overwrites what's different.
+const DEFAULT_PARTICIPANTS = [
+  { name: "Mr. Lee Sunho", position: "Administration GM" },
+  { name: "Ms. Tika", position: "Planning & Coordination Sr. Manager" },
+  { name: "Ms. Dessy", position: "Accounting & Tax Manager" },
+  { name: "Ms. Maria", position: "Purchasing Sr. Manager" },
+  { name: "Mr. Mashudi", position: "IT Manager" },
+  { name: "Mr. Utomo", position: "IT Asst. Manager" },
+  { name: "Ms. Ellvin", position: "HRGA Sr. Manager" },
+  { name: "", position: "" },
+  { name: "", position: "" },
+  { name: "", position: "" },
+];
+
 export default function MeetingNotes() {
   const [tab, setTab] = useState("new");
   const { token } = useAuthStore();
   const headers = { Authorization: `Bearer ${token}` };
 
+  // Wizard step within "New Recording" — side tabs instead of one long
+  // scrolling page, so each stage (record, transcript, MOM) fits its own
+  // shorter pane. Auto-advances on successful transcribe/generate, but the
+  // user can always click back to an earlier step.
+  const [step, setStep] = useState("setup"); // "setup" | "transcript" | "mom"
+
   // Meeting info
-  const [title, setTitle] = useState("");
-  const [participants, setParticipants] = useState("");
-  const [date, setDate] = useState("");
-  const [time, setTime] = useState("");
-  const [venue, setVenue] = useState("");
-  const [agenda, setAgenda] = useState("");
+  const [title, setTitle] = useState("Administration Weekly Meeting");
+  const [date, setDate] = useState("Friday, July 24th, 2026");
+  const [time, setTime] = useState("10.30 AM – 11.45 AM");
+  const [venue, setVenue] = useState("Tezobel Room - HQ Office");
+  const [agenda, setAgenda] = useState("Administration Weekly Activities - Review and Follow-up Issues");
+
+  // Participants — 10 structured (name, position) slots instead of one
+  // free-text field, matching how the final MOM actually lists attendees.
+  const [participantRows, setParticipantRows] = useState(() => DEFAULT_PARTICIPANTS.map((p) => ({ ...p })));
+  const updateParticipant = (i, field, value) => {
+    setParticipantRows((prev) => prev.map((p, idx) => (idx === i ? { ...p, [field]: value } : p)));
+  };
+  // Derived "Name (Position)" comma-separated string — the wire format the
+  // backend already expects (unchanged), so only the input UI changes here.
+  const participants = participantRows
+    .filter((p) => p.name.trim())
+    .map((p) => (p.position.trim() ? `${p.name.trim()} (${p.position.trim()})` : p.name.trim()))
+    .join(", ");
 
   const [file, setFile] = useState(null);
   const fileRef = useRef(null);
@@ -271,6 +306,7 @@ export default function MeetingNotes() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.detail || "Transcription failed");
       setTranscript(data);
+      setStep("transcript");
       fetchHistory();
     } catch (e) {
       setTranscribeError(e.message || String(e));
@@ -291,6 +327,7 @@ export default function MeetingNotes() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.detail || "MOM generation failed");
       setMom(data.mom_json);
+      setStep("mom");
     } catch (e) {
       setGenerateError(e.message || String(e));
     } finally {
@@ -405,7 +442,40 @@ export default function MeetingNotes() {
 
       {/* Tab: New Recording */}
       {tab === "new" && (
-        <div className="space-y-4">
+        <div className="flex items-start gap-5">
+          {/* Side tab rail — wizard steps instead of one long scrolling page,
+              so each stage gets its own shorter pane (like Otter/Fireflies). */}
+          <div className="w-60 shrink-0 rounded-xl border border-gray-800 bg-gray-900 p-2 sticky top-6 space-y-1">
+            {[
+              { id: "setup", label: "Setup & Record", hint: "Meeting info, participants, audio" },
+              { id: "transcript", label: "Transcript", hint: "Review the transcribed text" },
+              { id: "mom", label: "Minutes of Meeting", hint: "Review, edit & download" },
+            ].map((s, idx) => {
+              const isActive = step === s.id;
+              const isDone = (s.id === "setup" && !!transcript) || (s.id === "transcript" && !!mom);
+              return (
+                <button key={s.id} onClick={() => setStep(s.id)}
+                  className={`w-full flex items-start gap-3 rounded-lg px-3 py-3 text-left transition-colors ${
+                    isActive ? "bg-blue-600/15 border border-blue-500/40" : "border border-transparent hover:bg-gray-800/60"
+                  }`}>
+                  <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold mt-0.5 ${
+                    isDone ? "bg-green-500/20 text-green-400" : isActive ? "bg-blue-500/20 text-blue-300" : "bg-gray-800 text-gray-500"
+                  }`}>
+                    {isDone ? <CheckCircle2 size={13} /> : idx + 1}
+                  </span>
+                  <span className="min-w-0">
+                    <span className={`block text-sm font-medium ${isActive ? "text-blue-300" : "text-gray-200"}`}>{s.label}</span>
+                    <span className="block text-[11px] text-gray-600 mt-0.5">{s.hint}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Step content */}
+          <div className="flex-1 min-w-0 space-y-4">
+          {step === "setup" && (
+            <>
           {/* Info form */}
           <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
             <h3 className="text-sm font-semibold text-gray-200 mb-4">Meeting Information</h3>
@@ -417,21 +487,15 @@ export default function MeetingNotes() {
                   className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 transition-colors" />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1.5">Participants</label>
-                <input type="text" value={participants} onChange={(e) => setParticipants(e.target.value)}
-                  placeholder="Participant names, separated by comma"
-                  className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 transition-colors" />
-              </div>
-              <div>
                 <label className="block text-xs text-gray-500 mb-1.5">Date</label>
                 <input type="text" value={date} onChange={(e) => setDate(e.target.value)}
-                  placeholder="e.g. 27 Juli 2026"
+                  placeholder="e.g. Friday, July 24th, 2026"
                   className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 transition-colors" />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1.5">Time</label>
                 <input type="text" value={time} onChange={(e) => setTime(e.target.value)}
-                  placeholder="e.g. 10:00 - 11:00"
+                  placeholder="e.g. 10.30 AM – 11.45 AM"
                   className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 transition-colors" />
               </div>
               <div>
@@ -446,6 +510,27 @@ export default function MeetingNotes() {
                   placeholder="e.g. Weekly Coordination"
                   className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 transition-colors" />
               </div>
+            </div>
+          </div>
+
+          {/* Participants — 10 structured slots (name + position), pre-filled
+              from the recurring meeting's usual attendees; blank rows are
+              simply left out of the final MOM. */}
+          <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
+            <h3 className="text-sm font-semibold text-gray-200 mb-1">Participants</h3>
+            <p className="text-xs text-gray-600 mb-4">Up to 10 attendees — leave a row blank to skip it.</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
+              {participantRows.map((p, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="w-4 shrink-0 text-xs text-gray-600 text-right">{i + 1}.</span>
+                  <input type="text" value={p.name} onChange={(e) => updateParticipant(i, "name", e.target.value)}
+                    placeholder="Name"
+                    className="flex-1 min-w-0 rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 transition-colors" />
+                  <input type="text" value={p.position} onChange={(e) => updateParticipant(i, "position", e.target.value)}
+                    placeholder="Position"
+                    className="flex-1 min-w-0 rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 transition-colors" />
+                </div>
+              ))}
             </div>
           </div>
 
@@ -587,29 +672,16 @@ export default function MeetingNotes() {
           <div className="rounded-xl border border-purple-500/30 bg-purple-500/5 p-5">
             <div className="flex items-center gap-3 mb-3">
               <Sparkles size={18} className="text-purple-400" />
-              <h3 className="text-sm font-semibold text-gray-200">Transcribe & Generate MOM with AI</h3>
+              <h3 className="text-sm font-semibold text-gray-200">Transcribe Audio</h3>
             </div>
             <p className="text-xs text-gray-500 mb-4">
-              Transcribe always runs on the on-premise GPU (Claude has no audio support). MOM generation can use either provider.
-              Transcript opens in a new tab once ready.
+              Runs on the on-premise GPU (Claude has no audio support). You'll move to the Transcript step automatically once it's done.
             </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <button onClick={handleTranscribe} disabled={!file || transcribing}
-                className="flex items-center gap-2 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium px-4 py-2 transition-colors">
-                {transcribing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                {transcribing ? "Transcribing…" : "1. Transcribe"}
-              </button>
-              <button onClick={handleGenerateMom} disabled={!transcript?.text || generating}
-                className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium px-4 py-2 transition-colors">
-                {generating ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
-                {generating ? "Generating…" : "2. Generate MOM"}
-              </button>
-              <select value={momProvider} onChange={(e) => setMomProvider(e.target.value)} title="Provider for Generate MOM"
-                className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs font-medium text-gray-300 outline-none focus:border-blue-500 cursor-pointer">
-                <option value="onprem">Standard (On-Premise)</option>
-                <option value="anthropic">Claude</option>
-              </select>
-            </div>
+            <button onClick={handleTranscribe} disabled={!file || transcribing}
+              className="flex items-center gap-2 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium px-4 py-2 transition-colors">
+              {transcribing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+              {transcribing ? "Transcribing…" : "Transcribe"}
+            </button>
 
             {transcribing && (
               <div className="mt-3 rounded-lg border border-purple-500/40 bg-purple-950/50 px-4 py-3">
@@ -622,35 +694,34 @@ export default function MeetingNotes() {
                 </div>
               </div>
             )}
-            {generating && (
-              <div className="mt-3 rounded-lg border border-blue-500/40 bg-blue-950/50 px-4 py-3">
-                <div className="flex items-center gap-2.5">
-                  <Loader2 size={18} className="animate-spin text-blue-300 shrink-0" />
-                  <span className="text-sm font-semibold text-blue-200">Generating Minutes of Meeting with {momProvider === "anthropic" ? "Claude" : "the on-premise model"}…</span>
-                </div>
-                <div className="mt-2.5 h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
-                  <div className="h-full w-1/3 rounded-full bg-blue-400 animate-pulse" />
-                </div>
-              </div>
-            )}
 
             {transcribeError && (
               <div className="mt-3 flex items-start gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
                 <AlertTriangle size={13} className="shrink-0 mt-0.5" />{transcribeError}
               </div>
             )}
-            {generateError && (
-              <div className="mt-3 flex items-start gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
-                <AlertTriangle size={13} className="shrink-0 mt-0.5" />{generateError}
-              </div>
-            )}
           </div>
+            </>
+          )}
 
+          {step === "transcript" && (
+            <>
+          {!transcript ? (
+            <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900 p-10 text-center">
+              <FileText size={28} className="text-gray-700 mx-auto mb-3" />
+              <p className="text-sm text-gray-400 mb-1">No transcript yet</p>
+              <p className="text-xs text-gray-600 mb-4">Record or upload audio and transcribe it first.</p>
+              <button onClick={() => setStep("setup")}
+                className="rounded-lg border border-blue-600 text-blue-400 hover:bg-blue-600/10 text-sm font-medium px-4 py-2 transition-colors">
+                Go to Setup & Record
+              </button>
+            </div>
+          ) : (
+            <>
           {/* Transcript result — always shown once a transcribe attempt completes,
               even when the text comes back empty (e.g. silent/muted recording),
               so the user always gets a visible outcome instead of nothing happening. */}
-          {transcript && (
-            <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
+          <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-semibold text-gray-200 flex items-center gap-2">
                   {transcript.text?.trim() ? (
@@ -690,12 +761,64 @@ export default function MeetingNotes() {
                   </div>
                 </div>
               )}
+          </div>
+
+          {/* Generate MOM */}
+          <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-5">
+            <div className="flex items-center gap-3 mb-3">
+              <FileText size={18} className="text-blue-400" />
+              <h3 className="text-sm font-semibold text-gray-200">Generate Minutes of Meeting with AI</h3>
             </div>
+            <p className="text-xs text-gray-500 mb-4">Structures the transcript into departments, topics, discussion points & action plans.</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button onClick={handleGenerateMom} disabled={!transcript?.text || generating}
+                className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium px-4 py-2 transition-colors">
+                {generating ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+                {generating ? "Generating…" : "Generate MOM"}
+              </button>
+              <select value={momProvider} onChange={(e) => setMomProvider(e.target.value)} title="Provider for Generate MOM"
+                className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs font-medium text-gray-300 outline-none focus:border-blue-500 cursor-pointer">
+                <option value="onprem">Standard (On-Premise)</option>
+                <option value="anthropic">Claude</option>
+              </select>
+            </div>
+
+            {generating && (
+              <div className="mt-3 rounded-lg border border-blue-500/40 bg-blue-950/50 px-4 py-3">
+                <div className="flex items-center gap-2.5">
+                  <Loader2 size={18} className="animate-spin text-blue-300 shrink-0" />
+                  <span className="text-sm font-semibold text-blue-200">Generating Minutes of Meeting with {momProvider === "anthropic" ? "Claude" : "the on-premise model"}…</span>
+                </div>
+                <div className="mt-2.5 h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
+                  <div className="h-full w-1/3 rounded-full bg-blue-400 animate-pulse" />
+                </div>
+              </div>
+            )}
+            {generateError && (
+              <div className="mt-3 flex items-start gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                <AlertTriangle size={13} className="shrink-0 mt-0.5" />{generateError}
+              </div>
+            )}
+          </div>
+            </>
+          )}
+            </>
           )}
 
-          {/* MOM result — editable */}
-          {mom && (
-            <div className="rounded-xl border border-gray-800 bg-gray-900 p-5 space-y-4">
+          {step === "mom" && (
+            <>
+          {!mom ? (
+            <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900 p-10 text-center">
+              <CheckCircle2 size={28} className="text-gray-700 mx-auto mb-3" />
+              <p className="text-sm text-gray-400 mb-1">No Minutes of Meeting yet</p>
+              <p className="text-xs text-gray-600 mb-4">Generate the MOM from a transcript first.</p>
+              <button onClick={() => setStep("transcript")}
+                className="rounded-lg border border-blue-600 text-blue-400 hover:bg-blue-600/10 text-sm font-medium px-4 py-2 transition-colors">
+                Go to Transcript
+              </button>
+            </div>
+          ) : (
+          <div className="rounded-xl border border-gray-800 bg-gray-900 p-5 space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-gray-200 flex items-center gap-2">
                   <CheckCircle2 size={15} className="text-green-400" /> Minutes of Meeting
@@ -770,6 +893,9 @@ export default function MeetingNotes() {
               </button>
             </div>
           )}
+            </>
+          )}
+          </div>
         </div>
       )}
 

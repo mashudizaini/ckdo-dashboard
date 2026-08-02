@@ -272,7 +272,12 @@ async def download_mom_docx(
     docx_bytes = MeetingNotesService().build_mom_docx(
         rec.mom_json, rec.meeting_title or "Meeting", rec.participants or "", rec.mom_meta or {}
     )
-    filename = f"{(rec.meeting_title or 'MOM').replace(' ', '_')}.docx"
+    # "MOM {title} {short date}.docx" — matches the naming convention of the
+    # company's own MOM files (e.g. "MOM Admin Jul 24, 2026.docx"), using the
+    # recording's actual timestamp rather than the free-text date field so
+    # it's always well-formed regardless of what the user typed there.
+    date_part = rec.created_at.strftime("%b %-d, %Y") if rec.created_at else ""
+    filename = f"MOM {rec.meeting_title or 'Meeting'} {date_part}.docx".replace("  ", " ").strip()
     return Response(
         content=docx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
