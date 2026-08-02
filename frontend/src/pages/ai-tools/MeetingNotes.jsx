@@ -62,6 +62,83 @@ export default function MeetingNotes() {
   const streamRef = useRef(null);
   const timerRef = useRef(null);
 
+  // Microphone device selection — lets the user pick the right input instead
+  // of silently relying on whatever the OS/browser treats as "default",
+  // which is the most common cause of a recording coming back silent.
+  const [micDevices, setMicDevices] = useState([]);
+  const [selectedMicId, setSelectedMicId] = useState("");
+
+  // Live input level meter + silence detection — gives immediate feedback
+  // that the mic is actually picking up sound, instead of only finding out
+  // after a full record -> transcribe round trip that nothing was captured.
+  const [audioLevel, setAudioLevel] = useState(0); // 0-100, live while recording
+  const [micWarning, setMicWarning] = useState(null); // live "no sound detected" text
+  const [recordingWasSilent, setRecordingWasSilent] = useState(false); // set on stop
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const levelRafRef = useRef(null);
+  const peakLevelRef = useRef(0);
+  const lastLoudTsRef = useRef(0);
+
+  const loadMicDevices = async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setMicDevices(devices.filter((d) => d.kind === "audioinput"));
+    } catch (_) { /* enumerateDevices needs a secure context; ignore if unavailable */ }
+  };
+
+  useEffect(() => { loadMicDevices(); }, []);
+
+  const SILENCE_LEVEL = 4;        // level below this counts as "no signal"
+  const SILENCE_WARN_MS = 3000;   // how long it must stay silent before warning live
+
+  const startLevelMeter = (stream) => {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    audioContextRef.current = ctx;
+    analyserRef.current = analyser;
+    peakLevelRef.current = 0;
+    lastLoudTsRef.current = Date.now();
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    const tick = () => {
+      analyser.getByteTimeDomainData(data);
+      let sumSq = 0;
+      for (let i = 0; i < data.length; i++) {
+        const v = (data[i] - 128) / 128;
+        sumSq += v * v;
+      }
+      const rms = Math.sqrt(sumSq / data.length);
+      const level = Math.min(100, Math.round(rms * 400));
+      peakLevelRef.current = Math.max(peakLevelRef.current, level);
+      setAudioLevel(level);
+      const now = Date.now();
+      if (level > SILENCE_LEVEL) {
+        lastLoudTsRef.current = now;
+        setMicWarning(null);
+      } else if (now - lastLoudTsRef.current > SILENCE_WARN_MS) {
+        setMicWarning("No sound detected — check that the right microphone is selected and it isn't muted.");
+      }
+      levelRafRef.current = requestAnimationFrame(tick);
+    };
+    tick();
+  };
+
+  const stopLevelMeter = () => {
+    if (levelRafRef.current) cancelAnimationFrame(levelRafRef.current);
+    levelRafRef.current = null;
+    analyserRef.current = null;
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    setAudioLevel(0);
+  };
+
   // History
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -71,6 +148,8 @@ export default function MeetingNotes() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
+      if (levelRafRef.current) cancelAnimationFrame(levelRafRef.current);
+      audioContextRef.current?.close().catch(() => {});
     };
   }, []);
 
@@ -116,18 +195,24 @@ export default function MeetingNotes() {
 
   const handleStartRecording = async () => {
     setRecordError(null);
+    setMicWarning(null);
+    setRecordingWasSilent(false);
     if (!navigator.mediaDevices?.getUserMedia) {
       const isInsecureHttp = window.location.protocol === "http:" && !["localhost", "127.0.0.1"].includes(window.location.hostname);
       setRecordError(
         isInsecureHttp
-          ? { message: "Halaman ini diakses tanpa HTTPS — microphone butuh koneksi aman.", needsHttps: true }
-          : { message: "Browser ini tidak mendukung perekaman microphone." }
+          ? { message: "This page is loaded without HTTPS — the microphone needs a secure connection.", needsHttps: true }
+          : { message: "This browser doesn't support microphone recording." }
       );
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: selectedMicId ? { deviceId: { exact: selectedMicId } } : true,
+      });
       streamRef.current = stream;
+      loadMicDevices(); // device labels are only populated after permission is granted
+      startLevelMeter(stream);
       const mimeType = pickMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       audioChunksRef.current = [];
@@ -139,7 +224,9 @@ export default function MeetingNotes() {
         const recordedFile = new File([blob], filename, { type: blob.type });
         setFile(recordedFile);
         setRecordedBlobInfo({ blob, filename });
+        setRecordingWasSilent(peakLevelRef.current <= SILENCE_LEVEL);
         resetResults();
+        stopLevelMeter();
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
       };
@@ -150,9 +237,9 @@ export default function MeetingNotes() {
       timerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
     } catch (e) {
       if (e.name === "NotAllowedError") {
-        setRecordError({ message: "Akses microphone ditolak. Izinkan akses microphone di pengaturan browser lalu coba lagi." });
+        setRecordError({ message: "Microphone access denied. Allow microphone access in your browser settings, then try again." });
       } else {
-        setRecordError({ message: `Gagal mengakses microphone: ${e.message || e.name}` });
+        setRecordError({ message: `Failed to access microphone: ${e.message || e.name}` });
       }
     }
   };
@@ -371,7 +458,7 @@ export default function MeetingNotes() {
                 <Mic size={28} className="text-red-400" />
               </div>
               <p className="text-sm font-medium text-gray-200 mb-1">Live Recording</p>
-              <p className="text-xs text-gray-600 mb-4">
+              <p className="text-xs text-gray-600 mb-3">
                 {recording ? (
                   <span className="flex items-center justify-center gap-1.5 text-red-400 font-medium">
                     <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" /> Recording… {fmtElapsed(recordingSeconds)}
@@ -382,6 +469,46 @@ export default function MeetingNotes() {
                   "Record directly from your microphone"
                 )}
               </p>
+
+              {!recording && (
+                <div className="mb-3 text-left">
+                  <label className="block text-[11px] text-gray-500 mb-1">Microphone</label>
+                  {micDevices.length === 0 ? (
+                    <p className="text-[11px] text-amber-400 flex items-center gap-1">
+                      <AlertTriangle size={11} /> No microphone detected yet — click Start Recording to grant access.
+                    </p>
+                  ) : (
+                    <select value={selectedMicId} onChange={(e) => setSelectedMicId(e.target.value)}
+                      className="w-full rounded-md border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-blue-500 cursor-pointer">
+                      <option value="">Default microphone</option>
+                      {micDevices.map((d, i) => (
+                        <option key={d.deviceId || i} value={d.deviceId}>{d.label || `Microphone ${i + 1}`}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
+
+              {recording && (
+                <div className="mb-3">
+                  <div className="h-2.5 w-full rounded-full bg-gray-800 overflow-hidden border border-gray-700">
+                    <div
+                      className={`h-full rounded-full transition-all duration-75 ${audioLevel > SILENCE_LEVEL ? "bg-green-500" : "bg-gray-600"}`}
+                      style={{ width: `${Math.max(4, audioLevel)}%` }}
+                    />
+                  </div>
+                  <p className={`text-[10px] mt-1 ${micWarning ? "text-amber-400 font-medium" : "text-gray-600"}`}>
+                    {micWarning ? (
+                      <span className="flex items-center justify-center gap-1"><AlertTriangle size={10} />{micWarning}</span>
+                    ) : audioLevel > SILENCE_LEVEL ? (
+                      "Mic level ● sound is being picked up"
+                    ) : (
+                      "Speak now — the bar above should move"
+                    )}
+                  </p>
+                </div>
+              )}
+
               {recording ? (
                 <button onClick={handleStopRecording}
                   className="w-full flex items-center justify-center gap-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium py-2 transition-colors">
@@ -409,18 +536,29 @@ export default function MeetingNotes() {
                 </div>
               )}
               {recordedBlobInfo && !recording && (
-                <div className="mt-3 text-left rounded-lg border border-green-600/40 bg-green-500/10 px-3 py-2.5">
-                  <p className="flex items-center gap-1.5 text-xs font-semibold text-green-300">
-                    <CheckCircle2 size={13} /> Recording captured
+                <div className={`mt-3 text-left rounded-lg border px-3 py-2.5 ${
+                  recordingWasSilent ? "border-amber-600/40 bg-amber-500/10" : "border-green-600/40 bg-green-500/10"
+                }`}>
+                  <p className={`flex items-center gap-1.5 text-xs font-semibold ${recordingWasSilent ? "text-amber-300" : "text-green-300"}`}>
+                    {recordingWasSilent ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} />}
+                    {recordingWasSilent ? "Recording captured — but no sound was detected" : "Recording captured"}
                   </p>
                   <p className="text-[11px] text-gray-400 mt-1.5 break-all">
                     <span className="text-gray-500">File:</span> {recordedBlobInfo.filename}
                     <span className="text-gray-500"> · </span>{fmtElapsed(recordingSeconds)}
                     <span className="text-gray-500"> · </span>{fmtBytes(recordedBlobInfo.blob.size)}
                   </p>
-                  <p className="text-[11px] text-gray-500 mt-1.5 leading-relaxed">
-                    This will be uploaded and saved permanently on the server (in the recordings history) when you click <strong className="text-gray-300">Transcribe</strong> below.
-                  </p>
+                  {recordingWasSilent ? (
+                    <p className="text-[11px] text-amber-400/90 mt-1.5 leading-relaxed">
+                      The audio level never rose above silence during this recording. Transcribing it will almost
+                      certainly come back empty. Check the microphone selected above isn't muted or set to the
+                      wrong device, then try Record Again.
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-gray-500 mt-1.5 leading-relaxed">
+                      This will be uploaded and saved permanently on the server (in the recordings history) when you click <strong className="text-gray-300">Transcribe</strong> below.
+                    </p>
+                  )}
                   <button onClick={handleSaveRecordingLocally}
                     className="mt-2 flex items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 hover:border-blue-500 hover:text-blue-400 px-2.5 py-1.5 text-[11px] font-medium text-gray-300 transition-colors">
                     <Download size={12} /> Save a copy to this device
