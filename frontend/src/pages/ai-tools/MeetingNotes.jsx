@@ -101,7 +101,7 @@ export default function MeetingNotes() {
   const handlePickFile = (f) => {
     if (!f) return;
     if (f.size > 100 * 1024 * 1024) {
-      setTranscribeError("File terlalu besar — maksimal 100MB.");
+      setTranscribeError("File too large — maximum 100MB.");
       return;
     }
     setFile(f);
@@ -377,9 +377,9 @@ export default function MeetingNotes() {
                     <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" /> Recording… {fmtElapsed(recordingSeconds)}
                   </span>
                 ) : recordedBlobInfo ? (
-                  `Rekaman siap ditranskrip (${fmtElapsed(recordingSeconds)})`
+                  `Recording ready (${fmtElapsed(recordingSeconds)})`
                 ) : (
-                  "Rekam langsung dari microphone"
+                  "Record directly from your microphone"
                 )}
               </p>
               {recording ? (
@@ -388,18 +388,10 @@ export default function MeetingNotes() {
                   <Square size={13} /> Stop Recording
                 </button>
               ) : (
-                <div className="flex gap-2">
-                  <button onClick={handleStartRecording}
-                    className="flex-1 flex items-center justify-center gap-2 rounded-lg border border-red-600 text-red-400 hover:bg-red-600/10 text-sm font-medium py-2 transition-colors">
-                    <Mic size={14} /> {recordedBlobInfo ? "Record Again" : "Start Recording"}
-                  </button>
-                  {recordedBlobInfo && (
-                    <button onClick={handleSaveRecordingLocally} title="Save recording to local disk"
-                      className="flex items-center justify-center gap-1.5 rounded-lg border border-gray-700 text-gray-300 hover:border-blue-500 hover:text-blue-400 text-sm font-medium px-3 py-2 transition-colors">
-                      <Download size={14} />
-                    </button>
-                  )}
-                </div>
+                <button onClick={handleStartRecording}
+                  className="w-full flex items-center justify-center gap-2 rounded-lg border border-red-600 text-red-400 hover:bg-red-600/10 text-sm font-medium py-2 transition-colors">
+                  <Mic size={14} /> {recordedBlobInfo ? "Record Again" : "Start Recording"}
+                </button>
               )}
               {recordError && (
                 <div className="mt-2 text-left">
@@ -411,9 +403,28 @@ export default function MeetingNotes() {
                       onClick={() => { window.location.href = "https:" + window.location.href.slice(window.location.protocol.length); }}
                       className="mt-1.5 w-full rounded-md bg-red-600/20 hover:bg-red-600/30 border border-red-600/40 text-red-300 text-[11px] font-medium py-1.5 transition-colors"
                     >
-                      Buka via HTTPS
+                      Open via HTTPS
                     </button>
                   )}
+                </div>
+              )}
+              {recordedBlobInfo && !recording && (
+                <div className="mt-3 text-left rounded-lg border border-green-600/40 bg-green-500/10 px-3 py-2.5">
+                  <p className="flex items-center gap-1.5 text-xs font-semibold text-green-300">
+                    <CheckCircle2 size={13} /> Recording captured
+                  </p>
+                  <p className="text-[11px] text-gray-400 mt-1.5 break-all">
+                    <span className="text-gray-500">File:</span> {recordedBlobInfo.filename}
+                    <span className="text-gray-500"> · </span>{fmtElapsed(recordingSeconds)}
+                    <span className="text-gray-500"> · </span>{fmtBytes(recordedBlobInfo.blob.size)}
+                  </p>
+                  <p className="text-[11px] text-gray-500 mt-1.5 leading-relaxed">
+                    This will be uploaded and saved permanently on the server (in the recordings history) when you click <strong className="text-gray-300">Transcribe</strong> below.
+                  </p>
+                  <button onClick={handleSaveRecordingLocally}
+                    className="mt-2 flex items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 hover:border-blue-500 hover:text-blue-400 px-2.5 py-1.5 text-[11px] font-medium text-gray-300 transition-colors">
+                    <Download size={12} /> Save a copy to this device
+                  </button>
                 </div>
               )}
             </div>
@@ -423,7 +434,7 @@ export default function MeetingNotes() {
                 <Upload size={28} className="text-blue-400" />
               </div>
               <p className="text-sm font-medium text-gray-200 mb-1">Upload Audio</p>
-              <p className="text-xs text-gray-600 mb-4">MP3, WAV, M4A — maks 100MB. Otomatis tersimpan di server bersama rekaman lain.</p>
+              <p className="text-xs text-gray-600 mb-4">MP3, WAV, M4A — max 100MB. Saved on the server alongside other recordings once transcribed.</p>
               <input ref={fileRef} type="file" accept="audio/*,.mp3,.wav,.m4a" className="hidden"
                 onChange={(e) => handlePickFile(e.target.files?.[0])} />
               <button onClick={() => fileRef.current?.click()}
@@ -455,12 +466,35 @@ export default function MeetingNotes() {
                 {generating ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
                 {generating ? "Generating…" : "2. Generate MOM"}
               </button>
-              <select value={momProvider} onChange={(e) => setMomProvider(e.target.value)} title="Provider untuk Generate MOM"
+              <select value={momProvider} onChange={(e) => setMomProvider(e.target.value)} title="Provider for Generate MOM"
                 className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs font-medium text-gray-300 outline-none focus:border-blue-500 cursor-pointer">
                 <option value="onprem">Standard (On-Premise)</option>
                 <option value="anthropic">Claude</option>
               </select>
             </div>
+
+            {transcribing && (
+              <div className="mt-3 rounded-lg border border-purple-500/40 bg-purple-950/50 px-4 py-3">
+                <div className="flex items-center gap-2.5">
+                  <Loader2 size={18} className="animate-spin text-purple-300 shrink-0" />
+                  <span className="text-sm font-semibold text-purple-200">Transcribing audio via GPU Whisper… please wait, this tab will update automatically.</span>
+                </div>
+                <div className="mt-2.5 h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
+                  <div className="h-full w-1/3 rounded-full bg-purple-400 animate-pulse" />
+                </div>
+              </div>
+            )}
+            {generating && (
+              <div className="mt-3 rounded-lg border border-blue-500/40 bg-blue-950/50 px-4 py-3">
+                <div className="flex items-center gap-2.5">
+                  <Loader2 size={18} className="animate-spin text-blue-300 shrink-0" />
+                  <span className="text-sm font-semibold text-blue-200">Generating Minutes of Meeting with {momProvider === "anthropic" ? "Claude" : "the on-premise model"}…</span>
+                </div>
+                <div className="mt-2.5 h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
+                  <div className="h-full w-1/3 rounded-full bg-blue-400 animate-pulse" />
+                </div>
+              </div>
+            )}
 
             {transcribeError && (
               <div className="mt-3 flex items-start gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
@@ -474,27 +508,50 @@ export default function MeetingNotes() {
             )}
           </div>
 
-          {/* Transcript result */}
-          {transcript?.text && (
+          {/* Transcript result — always shown once a transcribe attempt completes,
+              even when the text comes back empty (e.g. silent/muted recording),
+              so the user always gets a visible outcome instead of nothing happening. */}
+          {transcript && (
             <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-sm font-semibold text-gray-200 flex items-center gap-2">
-                  <CheckCircle2 size={15} className="text-green-400" /> Transcript
+                  {transcript.text?.trim() ? (
+                    <><CheckCircle2 size={15} className="text-green-400" /> Transcript</>
+                  ) : (
+                    <><AlertTriangle size={15} className="text-amber-400" /> Transcript</>
+                  )}
                 </h3>
-                <div className="flex items-center gap-3 text-xs text-gray-500">
-                  <span>{Math.round(transcript.audio_duration_seconds)}s audio · processed in {transcript.processing_time_seconds}s</span>
-                  <button onClick={() => window.open(`/ai/meeting-notes/view/${transcript.id}`, "_blank")}
-                    className="flex items-center gap-1 text-gray-400 hover:text-gray-200">
-                    <ExternalLink size={12} />Open in tab
-                  </button>
-                  <button onClick={copyTranscript} className="flex items-center gap-1 text-gray-400 hover:text-gray-200">
-                    <Copy size={12} />{copied ? "Copied!" : "Copy"}
-                  </button>
+                {transcript.text?.trim() && (
+                  <div className="flex items-center gap-3 text-xs text-gray-500">
+                    <span>{Math.round(transcript.audio_duration_seconds)}s audio · processed in {transcript.processing_time_seconds}s</span>
+                    <button onClick={() => window.open(`/ai/meeting-notes/view/${transcript.id}`, "_blank")}
+                      className="flex items-center gap-1 text-gray-400 hover:text-gray-200">
+                      <ExternalLink size={12} />Open in tab
+                    </button>
+                    <button onClick={copyTranscript} className="flex items-center gap-1 text-gray-400 hover:text-gray-200">
+                      <Copy size={12} />{copied ? "Copied!" : "Copy"}
+                    </button>
+                  </div>
+                )}
+              </div>
+              {transcript.text?.trim() ? (
+                <div className="max-h-64 overflow-y-auto text-sm text-gray-300 whitespace-pre-wrap leading-relaxed bg-gray-800/50 rounded-lg p-3">
+                  {transcript.text}
                 </div>
-              </div>
-              <div className="max-h-64 overflow-y-auto text-sm text-gray-300 whitespace-pre-wrap leading-relaxed bg-gray-800/50 rounded-lg p-3">
-                {transcript.text}
-              </div>
+              ) : (
+                <div className="flex items-start gap-2.5 rounded-lg border border-amber-600/40 bg-amber-500/10 px-4 py-3">
+                  <AlertTriangle size={16} className="text-amber-400 shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-200 leading-relaxed">
+                    <p className="font-semibold mb-1">No speech detected</p>
+                    <p>
+                      The recording ({Math.round(transcript.audio_duration_seconds || 0)}s) was processed successfully,
+                      but came back with no words — this usually means the microphone was muted, the wrong input
+                      device was selected, or the room was silent while recording. Check your microphone settings
+                      and try recording again.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
