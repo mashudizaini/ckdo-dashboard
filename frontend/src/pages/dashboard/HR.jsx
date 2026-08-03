@@ -4982,10 +4982,10 @@ function EMagazineSection() {
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      const { data } = await hrApi.eMagazineList();
+      const data = await hrApi.eMagazineList();
       setList(Array.isArray(data) ? data : []);
     } catch (err) {
-      setError(err?.response?.data?.detail || "Failed to load e-magazine list.");
+      setError(err?.detail || "Failed to load e-magazine list.");
       setList([]);
     } finally { setLoading(false); }
   }, []);
@@ -5008,7 +5008,7 @@ function EMagazineSection() {
       e.target.reset();
       load();
     } catch (err) {
-      setError(err?.response?.data?.detail || "Upload failed.");
+      setError(err?.detail || "Upload failed.");
     } finally { setUploading(false); }
   };
 
@@ -5028,11 +5028,11 @@ function EMagazineSection() {
   const handleConvertToText = async (filename) => {
     setConverting(filename); setError(""); setSuccess("");
     try {
-      const { data } = await hrApi.eMagazineConvertToText(filename);
+      const data = await hrApi.eMagazineConvertToText(filename);
       setSuccess(`"${filename}" converted to text — ${data.pages} pages, now searchable in the public reader.`);
       load();
     } catch (err) {
-      setError(err?.response?.data?.detail || "Failed to convert to text.");
+      setError(err?.detail || "Failed to convert to text.");
     } finally { setConverting(null); }
   };
 
@@ -5050,7 +5050,7 @@ function EMagazineSection() {
       setEditQr(null);
       load();
     } catch (err) {
-      setError(err?.response?.data?.detail || "Failed to save QR links.");
+      setError(err?.detail || "Failed to save QR links.");
     } finally { setSavingQr(null); }
   };
 
@@ -5175,6 +5175,11 @@ function EMagazineSection() {
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 size={20} className="animate-spin text-teal-400" />
+          </div>
+        ) : list.length === 0 && error ? (
+          <div className="py-10 text-center text-xs">
+            <p className="text-red-400 font-medium mb-2">Failed to load edition list: {error}</p>
+            <button onClick={load} className="text-teal-400 hover:text-teal-300 underline">Try again</button>
           </div>
         ) : list.length === 0 ? (
           <p className="py-10 text-center text-xs text-gray-600">No e-magazines yet. Upload a PDF above.</p>
