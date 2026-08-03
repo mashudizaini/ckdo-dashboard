@@ -86,9 +86,25 @@
     color:var(--mist);cursor:pointer;font-family:'Inter',sans-serif;
   }
   .search-result:hover,.search-result:focus-visible{background:var(--panel-2);outline:none}
-  .search-result .pg{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--copper-soft);margin-bottom:2px}
+  .search-result .pg{
+    display:inline-flex;align-items:center;gap:4px;
+    font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;
+    color:var(--ink);background:var(--copper-soft);
+    border-radius:5px;padding:2px 7px;margin-bottom:4px;
+  }
+  .search-result:hover .pg{background:var(--copper)}
   .search-result .snip{font-size:12.5px;line-height:1.5;color:var(--mist-dim)}
   .search-result .snip mark{background:rgba(196,118,59,.35);color:var(--mist);border-radius:2px;padding:0 1px}
+
+  /* ── On-screen confirmation toast (search jump) ─── */
+  #jumpToast{
+    position:fixed;left:50%;top:70px;transform:translateX(-50%) translateY(-8px);
+    background:var(--panel);border:1px solid var(--copper);border-radius:10px;
+    padding:10px 16px;font-family:'Inter',sans-serif;font-size:13px;color:var(--mist);
+    box-shadow:var(--shadow);z-index:100;opacity:0;pointer-events:none;
+    transition:opacity .2s,transform .2s;
+  }
+  #jumpToast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
   .btn{
     font-family:'Inter',sans-serif;font-size:13px;font-weight:500;
@@ -355,6 +371,7 @@
   </aside>
 </div>
 <div id="drawerScrim"></div>
+<div id="jumpToast"></div>
 
 <footer>
   <span id="pageInfo">— / —</span>
@@ -386,7 +403,8 @@ const els = {
   stage:$("stage"), viewer:$("viewer"),
   editionList:$("editionList"), panel:$("editionsPanel"),
   scrim:$("drawerScrim"), toggle:$("editionsToggle"),
-  searchInput:$("searchInput"), searchResults:$("searchResults")
+  searchInput:$("searchInput"), searchResults:$("searchResults"),
+  jumpToast:$("jumpToast")
 };
 
 let pdf = null, numPages = 0, aspect = 0.707;
@@ -890,6 +908,14 @@ async function runSearch(query){
   renderSearchResults(results, q, anyUnsearchable);
 }
 
+let jumpToastTimer = null;
+function showJumpToast(text){
+  els.jumpToast.textContent = text;
+  els.jumpToast.classList.add("show");
+  clearTimeout(jumpToastTimer);
+  jumpToastTimer = setTimeout(() => els.jumpToast.classList.remove("show"), 3000);
+}
+
 async function goToSearchResult(r){
   console.log("[search] jumping to", r.editionTitle, "page", r.page, "(current edition:", activeEdition, ", target:", r.editionIndex, ")");
   els.searchResults.classList.add("hidden");
@@ -906,8 +932,10 @@ async function goToSearchResult(r){
     void els.book.offsetWidth; // restart the animation if it's already running
     els.book.classList.add("search-jump");
     els.stage.scrollIntoView({block:"center", inline:"center"});
+    showJumpToast(`→ ${r.editionTitle}, page ${r.page} (now showing page ${singleMode ? singlePage : spreadPages(spread).filter(Boolean).join("–")})`);
   }catch(err){
     console.error("[search] goToSearchResult failed:", err);
+    showJumpToast(`Failed to jump — see console for details`);
   }
 }
 
