@@ -52,26 +52,33 @@ def _write_index(entries: list[dict]) -> None:
 
 
 def _extract_pdf_pages_text(pdf_path: Path) -> list[str]:
-    """Per-page text extraction — identical pipeline to the AI Chatbot's
-    document ingest (chatbot.py POST /documents): PyMuPDF native text first,
-    falling back to Tesseract OCR (300dpi, ind+eng) for pages with no text
-    layer, which is the common case for a photo/graphic-heavy magazine
-    spread. Runs in-process on the backend container (on-premise, no
-    external API), same as that feature."""
+    """Per-page text extraction — based on the AI Chatbot's document ingest
+    pipeline (chatbot.py POST /documents), but OCR runs on EVERY page here
+    rather than only pages with zero native text. That "OCR only if fully
+    blank" heuristic works for a plain policy document (usually either
+    fully-scanned or fully-digital), but a designed magazine spread
+    routinely mixes a tiny bit of real text (a running footer/page number)
+    with a full-bleed graphic headline or photo layout that carries no text
+    layer at all — confirmed live: several pages extracted to just "CKD OTTO
+    e-Magz ... | July 2026\\n8" (the footer) while the actual article title
+    and body were part of the page's image content, silently invisible to
+    search. OCR-ing every page and merging both catches that content too, at
+    the cost of a slower conversion (already an accepted trade-off for this
+    on-premise, on-demand button)."""
     import fitz
     os.environ["TESSDATA_PREFIX"] = "/usr/share/tesseract-ocr/5/tessdata"
     doc = fitz.open(pdf_path)
     pages = []
     try:
         for page in doc:
-            text = page.get_text()
-            if not text.strip():
-                try:
-                    tp = page.get_textpage_ocr(dpi=300, language="ind+eng", full=True)
-                    text = page.get_text(textpage=tp)
-                except Exception:
-                    text = ""
-            pages.append(text.strip())
+            native = page.get_text().strip()
+            ocr_text = ""
+            try:
+                tp = page.get_textpage_ocr(dpi=300, language="ind+eng", full=True)
+                ocr_text = page.get_text(textpage=tp).strip()
+            except Exception:
+                pass
+            pages.append("\n".join(t for t in (native, ocr_text) if t))
     finally:
         doc.close()
     return pages
