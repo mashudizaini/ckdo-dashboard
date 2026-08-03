@@ -108,6 +108,16 @@
   #stage{position:relative;transition:transform .25s ease;transform-origin:center}
 
   .book{position:relative;display:flex;filter:drop-shadow(var(--shadow));perspective:2600px}
+  /* Confirms a search-result jump landed even when the target page was
+     already the one on screen (e.g. it's in the spread shown by default). */
+  @keyframes searchJumpFlash{
+    0%{box-shadow:0 0 0 0 rgba(196,118,59,.85)}
+    100%{box-shadow:0 0 0 22px rgba(196,118,59,0)}
+  }
+  .book.search-jump::before{
+    content:"";position:absolute;inset:-4px;border-radius:10px;
+    animation:searchJumpFlash .9s ease-out;pointer-events:none;z-index:30;
+  }
   .half{position:relative;background:var(--paper);overflow:hidden;width:var(--pw);height:var(--ph)}
   .half.left{border-radius:6px 0 0 6px}
   .half.right{border-radius:0 6px 6px 0}
@@ -881,13 +891,24 @@ async function runSearch(query){
 }
 
 async function goToSearchResult(r){
-  if(activeEdition !== r.editionIndex){
-    await selectEdition(r.editionIndex);
-  }
-  if(singleMode) showSingle(r.page);
-  else showSpread(Math.floor((r.page-1)/2));
+  console.log("[search] jumping to", r.editionTitle, "page", r.page, "(current edition:", activeEdition, ", target:", r.editionIndex, ")");
   els.searchResults.classList.add("hidden");
   els.searchInput.blur();
+  try{
+    if(activeEdition !== r.editionIndex){
+      await selectEdition(r.editionIndex);
+    }
+    if(singleMode) await showSingle(r.page);
+    else await showSpread(Math.floor((r.page-1)/2));
+    // Visible confirmation even when the target page was already the one
+    // on screen (common for early pages — they land in the default spread).
+    els.book.classList.remove("search-jump");
+    void els.book.offsetWidth; // restart the animation if it's already running
+    els.book.classList.add("search-jump");
+    els.stage.scrollIntoView({block:"center", inline:"center"});
+  }catch(err){
+    console.error("[search] goToSearchResult failed:", err);
+  }
 }
 
 let searchDebounce = null;
