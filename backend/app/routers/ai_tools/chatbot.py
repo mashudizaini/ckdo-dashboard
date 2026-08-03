@@ -266,8 +266,10 @@ async def delete_document(
     title: str,
     user: CurrentUser = Depends(require_role(Roles.IT, Roles.HR, Roles.ACCOUNTING, Roles.PAC, Roles.PURCHASING, Roles.ADMIN)),
 ):
-    rag_service.delete_document(source, title)
-    return {"message": "Deleted"}
+    deleted = await asyncio.to_thread(rag_service.delete_document, source, title)
+    if deleted == 0:
+        raise HTTPException(404, f"No document matched source={source!r} title={title!r} — nothing was deleted.")
+    return {"message": f"Deleted {deleted} chunk(s)"}
 
 
 @router.delete("/documents/cleanup/text-only")

@@ -169,22 +169,6 @@ class AIService:
             "jawab dalam Bahasa Inggris. Jika bahasa pertanyaan tidak jelas (mis. hanya angka/kode), "
             "default ke Bahasa Inggris. Istilah teknis boleh tetap dalam Bahasa Inggris di kedua kasus.\n\n"
 
-            "## Cara Menalar dari Dokumen\n"
-            "- Pertanyaan user sering menggunakan kata berbeda dari yang ada di dokumen. "
-            "Kenali MAKSUD pertanyaan, bukan hanya kata-katanya. Contoh:\n"
-            "  · \"biaya yang diperbolehkan\" = bisa berarti \"plafon\", \"budget\", \"amount\", \"limit\"\n"
-            "  · \"level manager\" = bisa berarti baris dengan kata Manager/Manajer di tabel\n"
-            "  · \"training\" = bisa ada di tabel Approval Matrix, Budget Policy, SOP, dll.\n"
-            "- Jika dokumen berisi TABEL atau MATRIKS yang relevan, ekstrak dan tampilkan SELURUH "
-            "isi yang berkaitan — jangan hanya sebagian.\n"
-            "- Jika informasi tersebar di beberapa bagian dokumen, GABUNGKAN menjadi jawaban yang koheren.\n"
-            "- Jika dokumen menyebut kondisi, pengecualian, atau catatan penting terkait topik — sertakan.\n"
-            "- JANGAN menjawab 'informasi tidak tersedia' atau 'tidak tercantum' selama konteks dokumen "
-            "masih mengandung data yang relevan, meski tidak persis sama kata-katanya. "
-            "Gunakan nalar untuk menyimpulkan dan jelaskan dari mana kesimpulan itu berasal.\n"
-            "- Hanya katakan 'tidak ada informasi' jika setelah bernalar dengan cermat, "
-            "dokumen memang benar-benar tidak memiliki informasi yang relevan sama sekali.\n\n"
-
             "Fokus topik: Oracle EBS, produksi farmasi, HR (termasuk training, benefit, cuti, "
             "perjalanan dinas), keuangan, purchasing, dan IT perusahaan.\n"
         )
@@ -195,8 +179,31 @@ class AIService:
             )
 
         if context:
+            # This whole "reason from documents, don't say unavailable"
+            # block only makes sense when there IS retrieved context to
+            # reason from — it used to be part of base_system unconditionally,
+            # which meant an empty-KB query still got told "never say info
+            # isn't available, reason your way to a conclusion" with nothing
+            # to reason from, inviting exactly the kind of confident,
+            # specific-sounding hallucination (a fabricated allowance amount)
+            # that made this worth fixing.
             system = (
                 f"{base_system}\n\n"
+                "## Cara Menalar dari Dokumen\n"
+                "- Pertanyaan user sering menggunakan kata berbeda dari yang ada di dokumen. "
+                "Kenali MAKSUD pertanyaan, bukan hanya kata-katanya. Contoh:\n"
+                "  · \"biaya yang diperbolehkan\" = bisa berarti \"plafon\", \"budget\", \"amount\", \"limit\"\n"
+                "  · \"level manager\" = bisa berarti baris dengan kata Manager/Manajer di tabel\n"
+                "  · \"training\" = bisa ada di tabel Approval Matrix, Budget Policy, SOP, dll.\n"
+                "- Jika dokumen berisi TABEL atau MATRIKS yang relevan, ekstrak dan tampilkan SELURUH "
+                "isi yang berkaitan — jangan hanya sebagian.\n"
+                "- Jika informasi tersebar di beberapa bagian dokumen, GABUNGKAN menjadi jawaban yang koheren.\n"
+                "- Jika dokumen menyebut kondisi, pengecualian, atau catatan penting terkait topik — sertakan.\n"
+                "- JANGAN menjawab 'informasi tidak tersedia' atau 'tidak tercantum' selama konteks dokumen "
+                "masih mengandung data yang relevan, meski tidak persis sama kata-katanya. "
+                "Gunakan nalar untuk menyimpulkan dan jelaskan dari mana kesimpulan itu berasal.\n"
+                "- Hanya katakan 'tidak ada informasi' jika setelah bernalar dengan cermat, "
+                "dokumen memang benar-benar tidak memiliki informasi yang relevan sama sekali.\n\n"
                 "## Dokumen Internal yang Tersedia\n"
                 "Gunakan dokumen berikut sebagai sumber utama. "
                 "Nalar dari seluruh konteks yang ada — "
@@ -204,7 +211,23 @@ class AIService:
                 f"{context}"
             )
         else:
-            system = base_system
+            # No relevant document was retrieved (empty/irrelevant Knowledge
+            # Base, or the search simply found nothing above the similarity
+            # threshold for this query). The opposite instruction from
+            # above: be explicit that fabricating a specific-sounding
+            # company fact (an amount, a policy detail) here would be a
+            # hallucination, not a confident answer.
+            system = (
+                f"{base_system}\n\n"
+                "## Tidak Ada Dokumen Relevan Ditemukan\n"
+                "Pencarian di Knowledge Base tidak menemukan dokumen internal yang relevan dengan "
+                "pertanyaan ini. JANGAN mengarang atau menebak angka, kebijakan, atau fakta spesifik "
+                "perusahaan (nominal tunjangan, cuti, budget, prosedur, dll) — itu bisa salah dan "
+                "menyesatkan pengguna. Katakan dengan jujur bahwa informasi ini belum tersedia di "
+                "Knowledge Base internal, dan sarankan user menghubungi departemen terkait atau "
+                "mengunggah dokumen yang relevan. Kamu tetap boleh membantu untuk pertanyaan umum di "
+                "luar data spesifik perusahaan (mis. penjelasan konsep umum, cara pakai sistem)."
+            )
 
         # The SSE response has already committed a 200 OK by the time this
         # generator runs (StreamingResponse sends headers before iterating

@@ -253,12 +253,19 @@ def delete_all_documents() -> int:
         conn.close()
 
 
-def delete_document(source: str, title: str):
+def delete_document(source: str, title: str) -> int:
+    """Delete a document by (source, title). Returns rows deleted — the
+    caller should treat 0 as a failure (mismatched source/title) rather
+    than silently reporting success, since a document that "fails" to
+    delete this way still answers queries afterward with no visible sign
+    anything went wrong."""
     conn = _get_pg()
     try:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM company_documents WHERE source = %s AND title = %s", (source, title))
+            count = cur.rowcount
         conn.commit()
+        return count
     finally:
         conn.close()
 

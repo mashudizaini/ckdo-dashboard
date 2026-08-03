@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, BookOpen, Upload, Trash2, X, Loader2, FileText, AlignLeft, AlertTriangle, KeyRound } from "lucide-react";
+import { Send, Bot, User, BookOpen, Upload, Trash2, X, Loader2, FileText, AlignLeft, AlertTriangle, KeyRound, RotateCcw } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStream } from "@/hooks/useChatStream";
 import { CHAT_MODES, CHAT_MODE_ORDER } from "@/config/chatModes";
@@ -7,7 +7,8 @@ import { DeptBadge, renderSource } from "@/components/ai/ChatSourceBadges";
 import GeminiApiKeyModal from "@/components/ai/GeminiApiKeyModal";
 
 function KnowledgeBasePanel({ onClose }) {
-  const { token } = useAuthStore();
+  const { token, hasAnyRole } = useAuthStore();
+  const canWipeAll = hasAnyRole("it_staff", "admin"); // matches the backend's cleanup/all role gate
   const [docs, setDocs] = useState([]);
   const [departments, setDepartments] = useState(["General", "HR", "Accounting", "PAC", "Purchasing", "IT"]);
   const [loading, setLoading] = useState(false);
@@ -94,7 +95,9 @@ function KnowledgeBasePanel({ onClose }) {
     try {
       const params = new URLSearchParams({ source, title });
       const res = await fetch(`/api/v1/ai/chatbot/documents?${params}`, { method: "DELETE", headers });
+      const d = await res.json().catch(() => ({}));
       if (res.ok) { showMsg("success", `Document "${title}" deleted`); fetchDocs(); }
+      else { showMsg("error", d.detail || `Delete failed (${res.status})`); }
     } catch (e) { showMsg("error", `Failed to delete: ${e.message}`); }
   };
 
@@ -172,6 +175,25 @@ function KnowledgeBasePanel({ onClose }) {
                       className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 disabled:opacity-50">
                       <Loader2 size={11} className={loading ? "animate-spin" : ""} /> Refresh
                     </button>
+                    {canWipeAll && docs.length > 0 && (
+                      <button
+                        onClick={async () => {
+                          const typed = prompt(
+                            `This deletes ALL ${docs.length} documents from the Knowledge Base — every department, files and text-paste alike. This cannot be undone.\n\nType DELETE ALL to confirm:`
+                          );
+                          if (typed !== "DELETE ALL") return;
+                          try {
+                            const res = await fetch("/api/v1/ai/chatbot/documents/cleanup/all", { method: "DELETE", headers });
+                            const d = await res.json();
+                            showMsg("success", d.message);
+                            fetchDocs();
+                          } catch (e) { showMsg("error", `Wipe failed: ${e.message}`); }
+                        }}
+                        title="IT/Admin only — permanently deletes the entire Knowledge Base"
+                        className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 border border-red-600/40 rounded px-2 py-0.5 hover:bg-red-600/10 transition-colors">
+                        <Trash2 size={11} /> Wipe Entire Knowledge Base
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -312,6 +334,12 @@ export default function Chatbot() {
           <button onClick={() => setShowApiKey(true)} title="Pakai API key Gemini pribadi Anda sendiri"
             className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs font-medium text-gray-300 hover:border-violet-500 hover:text-violet-400 transition-colors">
             <KeyRound size={14} /> API Key Saya
+          </button>
+          <button
+            onClick={() => { if (confirm("Clear this conversation's history? This cannot be undone.")) chat.clearHistory(); }}
+            title="Riwayat percakapan tersimpan di browser ini dan ikut dikirim sebagai konteks di setiap pertanyaan baru — kosongkan kalau jawaban lama masih 'nyangkut' meski Knowledge Base sudah diubah."
+            className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs font-medium text-gray-300 hover:border-amber-500 hover:text-amber-400 transition-colors">
+            <RotateCcw size={14} /> Clear Conversation
           </button>
           {activeTab === "policy" && canManageKB && (
             <button onClick={() => setShowKB(true)}
