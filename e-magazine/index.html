@@ -52,6 +52,43 @@
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   }
   .spacer{flex:1}
+
+  /* ── Content search ─────────────────────── */
+  .search-wrap{position:relative;flex:0 1 300px;min-width:120px}
+  .search-input{
+    width:100%;
+    font-family:'Inter',sans-serif;font-size:13px;
+    color:var(--mist);background:var(--panel-2);
+    border:1px solid var(--line);border-radius:8px;
+    padding:8px 12px 8px 32px;
+    transition:border-color .15s;
+  }
+  .search-input::placeholder{color:var(--mist-dim)}
+  .search-input:focus{outline:none;border-color:var(--copper)}
+  .search-wrap::before{
+    content:"🔍";position:absolute;left:10px;top:50%;transform:translateY(-50%);
+    font-size:12px;opacity:.6;pointer-events:none;
+  }
+  .search-results{
+    position:absolute;top:calc(100% + 6px);left:0;right:0;
+    max-height:min(60vh,420px);overflow-y:auto;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    box-shadow:var(--shadow);z-index:80;
+    padding:6px;scrollbar-width:thin;
+  }
+  .search-results.hidden{display:none}
+  .search-hint{padding:10px 12px;font-size:12px;color:var(--mist-dim)}
+  .search-group{padding:6px 8px 2px;font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--copper-soft)}
+  .search-result{
+    display:block;width:100%;text-align:left;
+    padding:8px 10px;border-radius:8px;border:none;background:transparent;
+    color:var(--mist);cursor:pointer;font-family:'Inter',sans-serif;
+  }
+  .search-result:hover,.search-result:focus-visible{background:var(--panel-2);outline:none}
+  .search-result .pg{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--copper-soft);margin-bottom:2px}
+  .search-result .snip{font-size:12.5px;line-height:1.5;color:var(--mist-dim)}
+  .search-result .snip mark{background:rgba(196,118,59,.35);color:var(--mist);border-radius:2px;padding:0 1px}
+
   .btn{
     font-family:'Inter',sans-serif;font-size:13px;font-weight:500;
     color:var(--mist);background:var(--panel-2);
@@ -267,6 +304,10 @@
     <span class="eyebrow">Internal Magazine</span>
     <h1 id="magTitle">Reading Room</h1>
   </div>
+  <div class="search-wrap">
+    <input type="search" id="searchInput" class="search-input" placeholder="Search inside magazines…" autocomplete="off">
+    <div id="searchResults" class="search-results hidden"></div>
+  </div>
   <div class="spacer"></div>
   <div id="qrLinksBar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"></div>
   <button class="btn icon" id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
@@ -333,7 +374,8 @@ const els = {
   overlayMsg:$("overlayMsg"), bar:$("bar"), barFill:$("barFill"), ribbon:$("ribbonFill"),
   stage:$("stage"), viewer:$("viewer"),
   editionList:$("editionList"), panel:$("editionsPanel"),
-  scrim:$("drawerScrim"), toggle:$("editionsToggle")
+  scrim:$("drawerScrim"), toggle:$("editionsToggle"),
+  searchInput:$("searchInput"), searchResults:$("searchResults")
 };
 
 let pdf = null, numPages = 0, aspect = 0.707;
@@ -506,7 +548,7 @@ function selectEdition(i){
   activeEdition = i;
   markActiveEdition();
   updateQRLinksBar(e);
-  loadEdition(e.file, e.title);
+  return loadEdition(e.file, e.title);
 }
 
 /* drawer (mobile) */
@@ -746,15 +788,133 @@ if(new URLSearchParams(location.search).get("embed") === "1"){
   document.querySelector("aside").style.display  = "none";
 }
 
+/* ── Content search ─────────────────────── */
+/* Searches per-page text extracted server-side via the HR Dashboard's
+   "Convert to Text" button (backend writes magazines/{filename}.pages.json
+   next to each PDF). An edition with no such file simply isn't searchable
+   yet — handled as a soft miss, not an error. */
+const pagesTextCache = new Map(); // editionIndex -> string[] | null
+let searchSeq = 0; // guards against a slow/stale search overwriting a newer one
+
+async function getEditionPages(i){
+  if(pagesTextCache.has(i)) return pagesTextCache.get(i);
+  const e = CONFIG.editions[i];
+  let pages = null;
+  try{
+    const res = await fetch("magazines/" + encodeURIComponent(e.filename) + ".pages.json?_=" + Date.now());
+    if(res.ok){
+      const data = await res.json();
+      pages = Array.isArray(data.pages) ? data.pages : null;
+    }
+  }catch(_){ /* not converted yet, or offline — treat as unsearchable */ }
+  pagesTextCache.set(i, pages);
+  return pages;
+}
+
+function escapeHtml(s){
+  return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function snippetHtml(text, pos, qLen){
+  const start = Math.max(0, pos-40);
+  const end   = Math.min(text.length, pos+qLen+70);
+  const before = escapeHtml(text.slice(start,pos));
+  const match  = escapeHtml(text.slice(pos,pos+qLen));
+  const after  = escapeHtml(text.slice(pos+qLen,end));
+  return (start>0?"…":"") + before + "<mark>" + match + "</mark>" + after + (end<text.length?"…":"");
+}
+
+function renderSearchResults(results, query, anyUnsearchable){
+  els.searchResults.innerHTML = "";
+  els.searchResults.classList.remove("hidden");
+  if(!query){ els.searchResults.classList.add("hidden"); return; }
+  if(!results.length){
+    const hint = document.createElement("div");
+    hint.className = "search-hint";
+    hint.textContent = anyUnsearchable
+      ? "No matches. Some editions aren't searchable yet — convert them to text via HR Dashboard → e-Magazine."
+      : `No matches for "${query}".`;
+    els.searchResults.appendChild(hint);
+    return;
+  }
+  let lastEdition = null;
+  results.slice(0, 40).forEach(r => {
+    if(r.editionTitle !== lastEdition){
+      const g = document.createElement("div");
+      g.className = "search-group";
+      g.textContent = r.editionTitle;
+      els.searchResults.appendChild(g);
+      lastEdition = r.editionTitle;
+    }
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "search-result";
+    b.innerHTML = `<div class="pg">PAGE ${r.page}</div><div class="snip">${r.html}</div>`;
+    b.addEventListener("click", () => goToSearchResult(r));
+    els.searchResults.appendChild(b);
+  });
+}
+
+async function runSearch(query){
+  const q = query.trim();
+  const mySeq = ++searchSeq;
+  if(q.length < 2){ renderSearchResults([], "", false); return; }
+  const qLower = q.toLowerCase();
+  const results = [];
+  let anyUnsearchable = false;
+  for(let i=0;i<CONFIG.editions.length;i++){
+    const pages = await getEditionPages(i);
+    if(mySeq !== searchSeq) return; // a newer keystroke superseded this search
+    if(!pages){ anyUnsearchable = true; continue; }
+    pages.forEach((text, idx) => {
+      if(!text) return;
+      const pos = text.toLowerCase().indexOf(qLower);
+      if(pos === -1) return;
+      results.push({
+        editionIndex: i, editionTitle: CONFIG.editions[i].title, page: idx+1,
+        html: snippetHtml(text, pos, q.length),
+      });
+    });
+  }
+  if(mySeq !== searchSeq) return;
+  renderSearchResults(results, q, anyUnsearchable);
+}
+
+async function goToSearchResult(r){
+  if(activeEdition !== r.editionIndex){
+    await selectEdition(r.editionIndex);
+  }
+  if(singleMode) showSingle(r.page);
+  else showSpread(Math.floor((r.page-1)/2));
+  els.searchResults.classList.add("hidden");
+  els.searchInput.blur();
+}
+
+let searchDebounce = null;
+els.searchInput.addEventListener("input", e => {
+  clearTimeout(searchDebounce);
+  const q = e.target.value;
+  searchDebounce = setTimeout(() => runSearch(q), 250);
+});
+els.searchInput.addEventListener("focus", () => {
+  if(els.searchInput.value.trim().length >= 2) els.searchResults.classList.remove("hidden");
+});
+document.addEventListener("click", e => {
+  if(!e.target.closest(".search-wrap")) els.searchResults.classList.add("hidden");
+});
+els.searchInput.addEventListener("keydown", e => {
+  if(e.key === "Escape"){ els.searchInput.value=""; els.searchResults.classList.add("hidden"); els.searchInput.blur(); }
+});
+
 /* ── Start — load editions from server ───── */
 (async function(){
   try{
     const res  = await fetch("magazines/index.json?_=" + Date.now());
     const list = res.ok ? await res.json() : [];
     CONFIG.editions = list.map(e => ({
-      title: e.title || e.filename,
-      date:  e.date  || "",
-      file:  "magazines/" + encodeURIComponent(e.filename),
+      title:    e.title || e.filename,
+      date:     e.date  || "",
+      file:     "magazines/" + encodeURIComponent(e.filename),
+      filename: e.filename,
     }));
   }catch(_){
     CONFIG.editions = [];

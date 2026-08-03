@@ -6,7 +6,7 @@ import {
   Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck,
   Wallet, Download, ChevronDown, ChevronUp, ListChecks, FileSearch, BookOpen, Trash2,
   QrCode, Plus, Minus, ArrowUpDown, Pencil, ZoomIn, ZoomOut, Maximize2, Minimize2, Network,
-  SlidersHorizontal, User, Camera, History,
+  SlidersHorizontal, User, Camera, History, FileText, Sparkles, CheckCircle2,
 } from "lucide-react";
 import EmployeeUpload from "./EmployeeUpload";
 import AttendanceUpload from "./AttendanceUpload";
@@ -4966,6 +4966,7 @@ function EMagazineSection() {
   const [loading,       setLoading]       = useState(true);
   const [uploading,     setUploading]     = useState(false);
   const [deleting,      setDeleting]      = useState(null);
+  const [converting,    setConverting]    = useState(null); // filename currently being converted to text
   const [error,         setError]         = useState("");
   const [success,       setSuccess]       = useState("");
   const [title,         setTitle]         = useState("");
@@ -5022,6 +5023,17 @@ function EMagazineSection() {
     } catch {
       setError("Failed to delete file.");
     } finally { setDeleting(null); }
+  };
+
+  const handleConvertToText = async (filename) => {
+    setConverting(filename); setError(""); setSuccess("");
+    try {
+      const { data } = await hrApi.eMagazineConvertToText(filename);
+      setSuccess(`"${filename}" converted to text — ${data.pages} pages, now searchable in the public reader.`);
+      load();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to convert to text.");
+    } finally { setConverting(null); }
   };
 
   const openEditQr = (ed) => {
@@ -5181,12 +5193,28 @@ function EMagazineSection() {
               {sortRows(list, sortBy, sortDir, []).map((ed, i) => (
                 <>
                   <tr key={i} className="hover:bg-gray-800/40 transition-colors">
-                    <td className="px-4 py-3 font-medium text-gray-200">{ed.title}</td>
+                    <td className="px-4 py-3 font-medium text-gray-200">
+                      {ed.title}
+                      {ed.text_pages > 0 && (
+                        <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-green-400 align-middle">
+                          <CheckCircle2 size={10} /> Text ready ({ed.text_pages}p)
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-gray-400">{ed.date || "-"}</td>
                     <td className="px-4 py-3 text-gray-500 text-xs font-mono">{ed.filename}</td>
                     <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(ed.uploaded_at)}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => handleConvertToText(ed.filename)}
+                          disabled={converting === ed.filename}
+                          title="Extract text on-premise (PyMuPDF + Tesseract OCR fallback, same pipeline as the AI Chatbot's document ingest) so this edition becomes searchable in the public reader."
+                          className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-purple-400 hover:bg-purple-500/10 disabled:opacity-40 transition-colors"
+                        >
+                          {converting === ed.filename ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                          {converting === ed.filename ? "Converting…" : ed.text_pages > 0 ? "Re-convert" : "Convert to Text"}
+                        </button>
                         <button
                           onClick={() => editQr?.filename === ed.filename ? setEditQr(null) : openEditQr(ed)}
                           className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${

@@ -94,6 +94,10 @@ export const hrApi = {
   eMagazineUpload:     (form)          => api.post("/dashboard/hr/e-magazine/upload", form, { headers: { "Content-Type": "multipart/form-data" } }),
   eMagazineDelete:     (filename)      => api.delete(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}`),
   eMagazineUpdateQR:   (filename, qrs) => api.patch(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/qr-links`, qrs),
+  // OCR on a photo-heavy magazine can take minutes (mirrors the AI
+  // Chatbot's document-ingest pipeline) — override the client's default
+  // 30s timeout to match nginx's 600s proxy_read_timeout.
+  eMagazineConvertToText: (filename)   => api.post(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/convert-to-text`, null, { timeout: 600000 }),
 
   // Organization Structure (manual add/edit/delete org chart)
   getOrgStructureTree:    ()          => api.get("/dashboard/hr/org-structure/tree"),

@@ -6,6 +6,7 @@ Required role: hr_staff OR admin
 Upload dir is mounted from host: ./e-magazine/magazines -> /app/magazine-uploads
 index.json in that dir is the canonical list served statically by nginx.
 """
+import asyncio
 import json
 import os
 import re
@@ -48,6 +49,32 @@ def _read_index() -> list[dict]:
 def _write_index(entries: list[dict]) -> None:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     INDEX_FILE.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _extract_pdf_pages_text(pdf_path: Path) -> list[str]:
+    """Per-page text extraction — identical pipeline to the AI Chatbot's
+    document ingest (chatbot.py POST /documents): PyMuPDF native text first,
+    falling back to Tesseract OCR (300dpi, ind+eng) for pages with no text
+    layer, which is the common case for a photo/graphic-heavy magazine
+    spread. Runs in-process on the backend container (on-premise, no
+    external API), same as that feature."""
+    import fitz
+    os.environ["TESSDATA_PREFIX"] = "/usr/share/tesseract-ocr/5/tessdata"
+    doc = fitz.open(pdf_path)
+    pages = []
+    try:
+        for page in doc:
+            text = page.get_text()
+            if not text.strip():
+                try:
+                    tp = page.get_textpage_ocr(dpi=300, language="ind+eng", full=True)
+                    text = page.get_text(textpage=tp)
+                except Exception:
+                    text = ""
+            pages.append(text.strip())
+    finally:
+        doc.close()
+    return pages
 
 
 # ── endpoints ─────────────────────────────────────────────────────────────────
@@ -134,3 +161,40 @@ async def delete_magazine(
     entries = [e for e in _read_index() if e["filename"] != safe_name]
     _write_index(entries)
     return {"ok": True, "deleted": safe_name}
+
+
+@router.post("/files/{filename}/convert-to-text")
+async def convert_to_text(
+    filename: str,
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    """Extract per-page text from a magazine PDF and write it as a sibling
+    {filename}.pages.json next to the PDF — the same directory nginx serves
+    statically at /e-magazine/magazines/, so the public viewer's search
+    feature can fetch it directly with no new read endpoint."""
+    safe_name = _safe_filename(filename)
+    pdf_path = UPLOAD_DIR / safe_name
+    if not pdf_path.exists():
+        raise HTTPException(404, "File tidak ditemukan.")
+
+    try:
+        pages = await asyncio.to_thread(_extract_pdf_pages_text, pdf_path)
+    except Exception as e:
+        raise HTTPException(500, f"Konversi teks gagal: {e}")
+
+    converted_at = datetime.now(timezone.utc).isoformat()
+    text_path = UPLOAD_DIR / f"{safe_name}.pages.json"
+    text_path.write_text(
+        json.dumps({"pages": pages, "converted_at": converted_at}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    entries = _read_index()
+    for e in entries:
+        if e["filename"] == safe_name:
+            e["text_pages"] = len(pages)
+            e["text_converted_at"] = converted_at
+            break
+    _write_index(entries)
+
+    return {"ok": True, "filename": safe_name, "pages": len(pages), "chars": sum(len(p) for p in pages)}
