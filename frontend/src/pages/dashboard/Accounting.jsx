@@ -10,10 +10,10 @@ import APAutoInvoice from "./APAutoInvoice";
 import { accountingApi } from "@/api/dashboard";
 
 const NEU = {
-  bg:          "#e8edf5",
-  shadowOut:   "6px 6px 14px #c5cad8, -6px -6px 14px #ffffff",
-  shadowOutSm: "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff",
-  shadowIn:    "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+  bg:          "#f1f5f9",
+  shadowOut:   "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)",
+  shadowOutSm: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
+  shadowIn:    "inset 0 2px 5px rgba(15,23,42,0.09)",
 };
 
 const TABS = [
@@ -171,7 +171,7 @@ function APOutstandingPanel() {
   const rowBg = (r, i) => {
     if (r.payment_status === "Partially Paid") return i%2===0 ? "rgba(245,158,11,0.07)" : "rgba(245,158,11,0.04)";
     if (r.payment_status === "Not Paid")       return i%2===0 ? "rgba(239,68,68,0.06)"  : "rgba(239,68,68,0.03)";
-    return i % 2 === 0 ? "#f0f3f9" : "#e8edf5";
+    return i % 2 === 0 ? "#f8fafc" : "#f1f5f9";
   };
 
   const sm = data?.summary;
@@ -309,7 +309,7 @@ function APOutstandingPanel() {
       )}
 
       {!data && !loading && !error && (
-        <div style={{ padding: "48px", textAlign: "center", background: "#f0f3f9", borderRadius: 12, boxShadow: NEU.shadowIn }}>
+        <div style={{ padding: "48px", textAlign: "center", background: "#f8fafc", borderRadius: 12, boxShadow: NEU.shadowIn }}>
           <DollarSign size={28} style={{ color: "#3b82f6", marginBottom: 10 }} />
           <p style={{ fontSize: 13, fontWeight: 600, color: "#475569", margin: 0 }}>Set as-of date and click Load to fetch AP outstanding data</p>
           <p style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>Default: today · Excludes fully Paid invoices</p>
@@ -546,9 +546,9 @@ function AROutstandingPanel() {
                     const globalIndex = (page - 1) * AR_PAGE_SIZE + i;
                     return (
                     <tr key={globalIndex}
-                      style={{ background: rowBg(r) || (i % 2 === 0 ? "#f0f3f9" : "#e8edf5") }}
+                      style={{ background: rowBg(r) || (i % 2 === 0 ? "#f8fafc" : "#f1f5f9") }}
                       onMouseEnter={e => e.currentTarget.style.background = "rgba(245,158,11,0.08)"}
-                      onMouseLeave={e => e.currentTarget.style.background = rowBg(r) || (i % 2 === 0 ? "#f0f3f9" : "#e8edf5")}
+                      onMouseLeave={e => e.currentTarget.style.background = rowBg(r) || (i % 2 === 0 ? "#f8fafc" : "#f1f5f9")}
                     >
                       <td style={{ ...TD, color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>{globalIndex + 1}</td>
                       <td style={{ ...TD, fontWeight: 700, color: "#1e293b", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.customer_name}>{r.customer_name}</td>
@@ -580,7 +580,7 @@ function AROutstandingPanel() {
       )}
 
       {!data && !loading && !error && (
-        <div style={{ padding: "48px", textAlign: "center", background: "#f0f3f9", borderRadius: 12, boxShadow: NEU.shadowIn }}>
+        <div style={{ padding: "48px", textAlign: "center", background: "#f8fafc", borderRadius: 12, boxShadow: NEU.shadowIn }}>
           <AlertTriangle size={28} style={{ color: "#f59e0b", marginBottom: 10 }} />
           <p style={{ fontSize: 13, fontWeight: 600, color: "#475569", margin: 0 }}>Set filters and click Load to fetch AR outstanding data</p>
           <p style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>Default: Open invoices (INV + DM), up to 500 rows</p>
@@ -895,9 +895,9 @@ function InventoryRMPMPanel() {
                         const rKey    = r.item_code;
                         const isOpen  = expandedRows[rKey];
                         return [
-                          <tr key={rKey} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5", transition: "background 0.1s" }}
+                          <tr key={rKey} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9", transition: "background 0.1s" }}
                             onMouseEnter={e => e.currentTarget.style.background="rgba(16,185,129,0.05)"}
-                            onMouseLeave={e => e.currentTarget.style.background= i%2===0?"#f0f3f9":"#e8edf5"}
+                            onMouseLeave={e => e.currentTarget.style.background= i%2===0?"#f8fafc":"#f1f5f9"}
                           >
                             <td style={{ ...TD, color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>{(groupPage - 1) * INV_PAGE_SIZE + i + 1}</td>
                             <td style={{ ...TD, fontFamily: "monospace", fontWeight: 700, color: "#1e293b", whiteSpace: "nowrap" }}>{r.item_code}</td>
@@ -922,7 +922,7 @@ function InventoryRMPMPanel() {
                             <td style={{ ...TD }}>
                               {r.movements?.length > 0 && (
                                 <button onClick={() => setExpandedRows(prev => ({ ...prev, [rKey]: !isOpen }))}
-                                  style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, border: "none", cursor: "pointer", background: isOpen ? "#e8edf5" : "rgba(16,185,129,0.1)", color: "#10b981", boxShadow: NEU.shadowOutSm }}>
+                                  style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, border: "none", cursor: "pointer", background: isOpen ? "#f1f5f9" : "rgba(16,185,129,0.1)", color: "#10b981", boxShadow: NEU.shadowOutSm }}>
                                   {isOpen ? "▲" : `▾ ${r.movements.length}`}
                                 </button>
                               )}
@@ -987,7 +987,7 @@ function InventoryRMPMPanel() {
       )}
 
       {!data && !loading && !error && (
-        <div style={{ padding: "40px", textAlign: "center", fontSize: 12, color: "#94a3b8", background: "#f0f3f9", borderRadius: 12, boxShadow: NEU.shadowIn }}>
+        <div style={{ padding: "40px", textAlign: "center", fontSize: 12, color: "#94a3b8", background: "#f8fafc", borderRadius: 12, boxShadow: NEU.shadowIn }}>
           Select a period and click Load to generate the Inventory RM PM report
         </div>
       )}
@@ -1101,7 +1101,7 @@ function ItemCostComponentPanel() {
   let colorIdx = 0;
   (data?.data || []).forEach(r => {
     if (!(r.segment1 in itemColors)) {
-      itemColors[r.segment1] = colorIdx++ % 2 === 0 ? "#f0f3f9" : "#e8edf5";
+      itemColors[r.segment1] = colorIdx++ % 2 === 0 ? "#f8fafc" : "#f1f5f9";
     }
   });
 
@@ -1177,7 +1177,7 @@ function ItemCostComponentPanel() {
               ) : (
                 pagedRows.map((row, i) => {
                   const globalIndex = (page - 1) * ICC_PAGE_SIZE + i;
-                  const rowBg = itemColors[row.segment1] ?? "#f0f3f9";
+                  const rowBg = itemColors[row.segment1] ?? "#f8fafc";
                   return (
                     <tr key={globalIndex}
                       style={{ background: rowBg, transition: "background 0.1s" }}
@@ -1417,9 +1417,9 @@ function MaterialTransactionPanel() {
                   const globalIndex = (page - 1) * MTX_PAGE_SIZE + i;
                   return (
                     <tr key={row.transaction_id ?? globalIndex}
-                      style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5", transition: "background 0.1s" }}
+                      style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9", transition: "background 0.1s" }}
                       onMouseEnter={e => e.currentTarget.style.background = "rgba(16,185,129,0.05)"}
-                      onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f0f3f9" : "#e8edf5"}
+                      onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f8fafc" : "#f1f5f9"}
                     >
                       <td style={{ ...TD, color: "#94a3b8", fontFamily: "monospace", fontSize: 10 }}>{globalIndex + 1}</td>
                       {MTX_HEADERS.map(h => {
@@ -1555,7 +1555,7 @@ function DataTable({ headers, rows, placeholder }) {
         <tbody>
           {rows?.length ? (
             rows.map((row, i) => (
-              <tr key={i} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+              <tr key={i} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
                 {row.map((cell, j) => (
                   <td key={j} style={{ ...TD, fontWeight: j === 0 ? 700 : 500 }}>{cell}</td>
                 ))}

@@ -8,11 +8,11 @@ import { useAuthStore } from "@/store/authStore";
 import { toggleSort, sortRows } from "@/components/SortableTH";
 
 const NEU = {
-  bg: "#e8edf5",
-  shadowOut: "6px 6px 14px #c5cad8, -6px -6px 14px #ffffff",
-  shadowOutSm: "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff",
-  shadowIn: "inset 4px 4px 10px #c5cad8, inset -4px -4px 10px #ffffff",
-  shadowBtn: "3px 3px 6px #c5cad8, -2px -2px 4px #ffffff",
+  bg: "#f1f5f9",
+  shadowOut: "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)",
+  shadowOutSm: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
+  shadowIn: "inset 0 2px 5px rgba(15,23,42,0.09)",
+  shadowBtn: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
 };
 
 const REC_CFG = {
@@ -98,7 +98,7 @@ function JobForm({ onSave, onCancel, saving, initial }) {
     });
   };
 
-  const inputStyle = { width: "100%", fontSize: 13, padding: "8px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff", outline: "none", boxSizing: "border-box" };
+  const inputStyle = { width: "100%", fontSize: 13, padding: "8px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)", outline: "none", boxSizing: "border-box" };
   const labelStyle = { fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 };
 
   return (
@@ -192,7 +192,7 @@ function JdGeneratorPanel({ onUseCriteria, onCancel }) {
   };
 
   const improved = result?.improved_jd;
-  const inputStyle = { width: "100%", fontSize: 12.5, padding: "10px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff", outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
+  const inputStyle = { width: "100%", fontSize: 12.5, padding: "10px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)", outline: "none", boxSizing: "border-box", fontFamily: "inherit" };
 
   return (
     <div style={{ background: NEU.bg, boxShadow: NEU.shadowOut, borderRadius: 16, padding: 18, marginBottom: 16 }}>
@@ -236,7 +236,7 @@ function JdGeneratorPanel({ onUseCriteria, onCancel }) {
       {error && <p style={{ color: "#dc2626", fontSize: 12, marginTop: 10 }}>{error}</p>}
 
       {improved && (
-        <div style={{ marginTop: 14, padding: 14, borderRadius: 12, background: "#f0f3f9", boxShadow: NEU.shadowIn }}>
+        <div style={{ marginTop: 14, padding: 14, borderRadius: 12, background: "#f8fafc", boxShadow: NEU.shadowIn }}>
           <p style={{ fontSize: 13, fontWeight: 800, color: "#1e293b" }}>{improved.position_title}</p>
           <p style={{ fontSize: 11.5, color: "#64748b", marginTop: 4 }}>{improved.overview}</p>
 
@@ -284,7 +284,7 @@ function CandidateRow({ c, i, onDelete, onHire }) {
 
   return (
     <>
-      <tr style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5", cursor: "pointer" }} onClick={() => setExpanded(!expanded)}>
+      <tr style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9", cursor: "pointer" }} onClick={() => setExpanded(!expanded)}>
         <td style={{ padding: "8px 12px", fontSize: 12, color: "#64748b" }}>{expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</td>
         <td style={{ padding: "8px 12px", fontSize: 12.5, fontWeight: 700, color: "#1e293b" }}>{c.name}</td>
         <td style={{ padding: "8px 12px", fontSize: 11.5, color: "#64748b" }}>{c.email || "—"}</td>
@@ -307,7 +307,7 @@ function CandidateRow({ c, i, onDelete, onHire }) {
         </td>
       </tr>
       {expanded && (
-        <tr style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+        <tr style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
           <td colSpan={9} style={{ padding: "0 12px 14px 36px" }}>
             {c.error ? (
               <div style={{ fontSize: 12, color: "#dc2626", fontWeight: 600 }}>Error: {c.error}</div>
@@ -607,7 +607,7 @@ function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
             <div style={{ position: "relative" }}>
               <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name / email..."
-                style={{ fontSize: 12, padding: "6px 12px 6px 30px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff", outline: "none", width: 200 }} />
+                style={{ fontSize: 12, padding: "6px 12px 6px 30px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)", outline: "none", width: 200 }} />
             </div>
           </div>
 
@@ -727,7 +727,7 @@ function RequirementTab({ jobs, fetchJobs, activeJobId, setActiveJobId }) {
               </thead>
               <tbody>
                 {sortRows(jobs, sortBy, sortDir, ["min_experience"]).map((j, i) => (
-                  <tr key={j.id} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                  <tr key={j.id} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
                     <td style={{ ...TD, fontWeight: 700, color: "#1e293b" }}>{j.position_title}</td>
                     <td style={{ ...TD, whiteSpace: "normal", maxWidth: 260 }}>{j.key_responsibilities?.join("; ") || "—"}</td>
                     <td style={{ ...TD, whiteSpace: "normal", maxWidth: 260 }}>{j.required_skills.join(", ") || "—"}</td>
@@ -819,7 +819,7 @@ function DetailTab({ jobs }) {
               </thead>
               <tbody>
                 {paged.map((r, i) => (
-                  <tr key={r.candidate_id} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                  <tr key={r.candidate_id} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
                     <td style={{ ...TD, fontWeight: 700, color: "#1e293b" }}>{r.position_title}</td>
                     <td style={TD}>{r.candidate_name}</td>
                     <td style={TD}>{fmtDays(r.time_to_hire)}</td>
@@ -881,7 +881,7 @@ function CandidateDatabaseTab() {
       <div style={{ position: "relative", width: 260 }}>
         <Search size={13} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name / email..."
-          style={{ width: "100%", boxSizing: "border-box", fontSize: 12, padding: "6px 12px 6px 30px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff", outline: "none" }} />
+          style={{ width: "100%", boxSizing: "border-box", fontSize: 12, padding: "6px 12px 6px 30px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)", outline: "none" }} />
       </div>
 
       {loading ? (
@@ -902,7 +902,7 @@ function CandidateDatabaseTab() {
               </thead>
               <tbody>
                 {paged.map((c, i) => (
-                  <tr key={c.id} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                  <tr key={c.id} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
                     <td style={TD}>{(page - 1) * PAGE_SIZE + i + 1}</td>
                     <td style={{ ...TD, fontWeight: 700, color: "#1e293b" }}>{c.position_title}</td>
                     <td style={TD}>{c.name || "—"}</td>

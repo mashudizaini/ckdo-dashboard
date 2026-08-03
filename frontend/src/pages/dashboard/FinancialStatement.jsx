@@ -12,10 +12,10 @@ import { financialStatementApi } from "@/api/dashboard";
 const CHART_COLORS = { grossProfit: "#2a78d6", pbt: "#eb6834", tci: "#1baf7a" };
 
 const NEU = {
-  bg:          "#e8edf5",
-  shadowOut:   "6px 6px 14px #c5cad8, -6px -6px 14px #ffffff",
-  shadowOutSm: "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff",
-  shadowIn:    "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+  bg:          "#f1f5f9",
+  shadowOut:   "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)",
+  shadowOutSm: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
+  shadowIn:    "inset 0 2px 5px rgba(15,23,42,0.09)",
 };
 
 // colorScheme:"light" forces native form controls (the <select>'s own

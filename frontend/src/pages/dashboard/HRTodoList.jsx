@@ -7,11 +7,11 @@ import { hrApi } from "@/api/dashboard";
 import { toggleSort, sortRows } from "@/components/SortableTH";
 
 const NEU = {
-  bg: "#e8edf5",
-  shadowOut: "6px 6px 14px #c5cad8, -6px -6px 14px #ffffff",
-  shadowOutSm: "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff",
-  shadowIn: "inset 4px 4px 10px #c5cad8, inset -4px -4px 10px #ffffff",
-  shadowBtn: "3px 3px 6px #c5cad8, -2px -2px 4px #ffffff",
+  bg: "#f1f5f9",
+  shadowOut: "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)",
+  shadowOutSm: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
+  shadowIn: "inset 0 2px 5px rgba(15,23,42,0.09)",
+  shadowBtn: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
 };
 
 const STATUS_CFG = {
@@ -61,7 +61,7 @@ function AssignedToSelect({ value, onChange, employees }) {
         onClick={() => setOpen(true)}
         style={{
           width: "100%", minHeight: 34, padding: "5px 8px", borderRadius: 10, boxSizing: "border-box",
-          background: NEU.bg, boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff",
+          background: NEU.bg, boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)",
           display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center", cursor: "text",
         }}>
         {selected.map(name => (
@@ -90,7 +90,7 @@ function AssignedToSelect({ value, onChange, employees }) {
           <div style={{
             position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 21,
             maxHeight: 220, overflowY: "auto", borderRadius: 10, background: "#fff",
-            boxShadow: "6px 6px 14px #c5cad8, -6px -6px 14px #ffffff",
+            boxShadow: "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)",
           }}>
             {matches.length === 0 ? (
               <p style={{ fontSize: 11.5, color: "#94a3b8", padding: "10px 12px" }}>No matching employees.</p>
@@ -100,7 +100,7 @@ function AssignedToSelect({ value, onChange, employees }) {
                   display: "block", width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
                   background: "none", cursor: "pointer", fontSize: 12,
                 }}
-                onMouseEnter={ev => ev.currentTarget.style.background = "#f0f3f9"}
+                onMouseEnter={ev => ev.currentTarget.style.background = "#f8fafc"}
                 onMouseLeave={ev => ev.currentTarget.style.background = "none"}
               >
                 <span style={{ fontWeight: 600, color: "#1e293b" }}>{e.full_name}</span>
@@ -136,12 +136,12 @@ function TaskForm({ initial, onSave, onCancel, saving, employees }) {
         <div style={{ gridColumn: "1 / -1" }}>
           <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>ACTIVITY TITLE *</label>
           <input value={form.title} onChange={set("title")} placeholder="e.g. Review vendor invoice PT XYZ"
-            style={{ width: "100%", fontSize: 13, padding: "8px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff", outline: "none", boxSizing: "border-box" }} />
+            style={{ width: "100%", fontSize: 13, padding: "8px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)", outline: "none", boxSizing: "border-box" }} />
         </div>
         <div style={{ gridColumn: "1 / -1" }}>
           <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>DESCRIPTION</label>
           <textarea value={form.description} onChange={set("description")} rows={2} placeholder="Details (optional)"
-            style={{ width: "100%", fontSize: 12, padding: "8px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff", outline: "none", boxSizing: "border-box", resize: "vertical" }} />
+            style={{ width: "100%", fontSize: 12, padding: "8px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)", outline: "none", boxSizing: "border-box", resize: "vertical" }} />
         </div>
         <div>
           <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>CATEGORY</label>
@@ -186,7 +186,7 @@ function TaskForm({ initial, onSave, onCancel, saving, employees }) {
         <div>
           <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>ALERT (DAYS BEFORE DUE DATE)</label>
           <input type="number" min="0" value={form.alert_days_before} onChange={set("alert_days_before")} placeholder="e.g. 7 — leave blank for no alert"
-            style={{ width: "100%", fontSize: 12, padding: "8px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff", outline: "none", boxSizing: "border-box" }} />
+            style={{ width: "100%", fontSize: 12, padding: "8px 12px", borderRadius: 10, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)", outline: "none", boxSizing: "border-box" }} />
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 18 }}>
           <input type="checkbox" checked={!!form.is_vendor} onChange={handleVendorToggle} id="is_vendor"
@@ -247,7 +247,7 @@ function ListView({ tasks, loading, onEdit, onDelete, onToggleComplete }) {
         </thead>
         <tbody>
           {sortRows(tasks, sortBy, sortDir, []).map((t, i) => (
-            <tr key={t.id} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+            <tr key={t.id} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
               <td style={{ padding: "8px 12px", fontSize: 12.5, fontWeight: 700, color: "#1e293b" }}>
                 {t.title}
                 {t.alert_active && (
@@ -535,7 +535,7 @@ export default function HRTodoList() {
               Vendor Alert Only
             </label>
             <input value={filters.search} onChange={e => handleFilter("search", e.target.value)} placeholder="Search title / assignee..."
-              style={{ fontSize: 12, padding: "6px 12px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff", outline: "none", width: 200 }} />
+              style={{ fontSize: 12, padding: "6px 12px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)", outline: "none", width: 200 }} />
           </div>
 
           <ListView tasks={tasks} loading={loading} onEdit={handleEdit} onDelete={handleDelete} onToggleComplete={handleToggleComplete} />

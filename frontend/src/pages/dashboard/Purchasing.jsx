@@ -555,7 +555,7 @@ function Pagination({ total, page, onPage, pageSize = PAGE_SIZE }) {
     <div style={{
       display: "flex", alignItems: "center", justifyContent: "space-between",
       padding: "10px 16px", borderTop: "1px solid rgba(0,0,0,0.06)",
-      background: "#e8edf5",
+      background: "#f1f5f9",
     }}>
       <span style={{ fontSize: 12, color: "#475569", fontWeight: 600 }}>
         {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total} rows
@@ -564,8 +564,8 @@ function Pagination({ total, page, onPage, pageSize = PAGE_SIZE }) {
         <button onClick={() => onPage(page - 1)} disabled={page === 1}
           style={{
             padding: 4, borderRadius: 6, border: "none", cursor: page === 1 ? "not-allowed" : "pointer",
-            background: "#e8edf5", color: page === 1 ? "#cbd5e1" : "#475569",
-            boxShadow: "2px 2px 5px #c5cad8, -2px -2px 5px #ffffff",
+            background: "#f1f5f9", color: page === 1 ? "#cbd5e1" : "#475569",
+            boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
           }}>
           <ChevronLeft size={14} />
         </button>
@@ -583,18 +583,18 @@ function Pagination({ total, page, onPage, pageSize = PAGE_SIZE }) {
               style={{
                 width: 28, height: 28, borderRadius: 8, border: "none",
                 fontSize: 12, fontWeight: 700, cursor: "pointer",
-                background: p === page ? "#2563eb" : "#e8edf5",
+                background: p === page ? "#2563eb" : "#f1f5f9",
                 color: p === page ? "#ffffff" : "#475569",
                 boxShadow: p === page
                   ? "inset 2px 2px 4px rgba(0,0,0,0.2)"
-                  : "2px 2px 5px #c5cad8, -2px -2px 5px #ffffff",
+                  : "0 1px 2px rgba(15,23,42,0.08)",
               }}>{p}</button>
           ))}
         <button onClick={() => onPage(page + 1)} disabled={page === pages}
           style={{
             padding: 4, borderRadius: 6, border: "none", cursor: page === pages ? "not-allowed" : "pointer",
-            background: "#e8edf5", color: page === pages ? "#cbd5e1" : "#475569",
-            boxShadow: "2px 2px 5px #c5cad8, -2px -2px 5px #ffffff",
+            background: "#f1f5f9", color: page === pages ? "#cbd5e1" : "#475569",
+            boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
           }}>
           <ChevronRight size={14} />
         </button>

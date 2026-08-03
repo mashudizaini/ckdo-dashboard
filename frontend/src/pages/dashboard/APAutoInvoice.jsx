@@ -6,11 +6,11 @@ import {
 import { apInvoiceApi } from "@/api/dashboard";
 
 const NEU = {
-  bg: "#e8edf5",
-  shadowOut: "6px 6px 14px #c5cad8, -6px -6px 14px #ffffff",
-  shadowOutSm: "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff",
-  shadowIn: "inset 4px 4px 10px #c5cad8, inset -4px -4px 10px #ffffff",
-  shadowBtn: "3px 3px 6px #c5cad8, -2px -2px 4px #ffffff",
+  bg: "#f1f5f9",
+  shadowOut: "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)",
+  shadowOutSm: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
+  shadowIn: "inset 0 2px 5px rgba(15,23,42,0.09)",
+  shadowBtn: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
   shadowBtnIn: "inset 2px 2px 4px rgba(0,0,0,0.15)",
 };
 
@@ -67,7 +67,7 @@ function EditInput({ value, onChange, type = "text", align = "left", style: extr
       style={{
         width: "100%", padding: "6px 10px", borderRadius: 8, border: "none",
         background: NEU.bg, fontSize: 13, fontWeight: 600, color: "#1e293b",
-        boxShadow: "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff",
+        boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)",
         outline: "none", textAlign: align, boxSizing: "border-box",
         ...extraStyle,
       }}
@@ -227,11 +227,11 @@ export default function APAutoInvoice() {
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <select value={ocrProvider} onChange={e => setOcrProvider(e.target.value)} disabled={uploading}
             title="AI provider used to extract data from the PDF"
-            style={{ fontSize: 11.5, fontWeight: 600, padding: "8px 12px", borderRadius: 10, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: NEU.shadowOutSm, cursor: "pointer", outline: "none", colorScheme: "light" }}>
+            style={{ fontSize: 11.5, fontWeight: 600, padding: "8px 12px", borderRadius: 10, border: "none", background: "#f1f5f9", color: "#1e293b", boxShadow: NEU.shadowOutSm, cursor: "pointer", outline: "none", colorScheme: "light" }}>
             <option value="onprem">Standard (On-Premise AI)</option>
             <option value="anthropic">Premium (Anthropic Claude)</option>
           </select>
-          <NeuBtn icon={RefreshCw} label="Refresh" color="#e8edf5" textColor="#475569" onClick={refresh} loading={loading} />
+          <NeuBtn icon={RefreshCw} label="Refresh" color="#f1f5f9" textColor="#475569" onClick={refresh} loading={loading} />
           <label style={{ cursor: "pointer" }}>
             <input ref={fileRef} type="file" accept=".pdf" onChange={handleUpload} style={{ display: "none" }} />
             <NeuBtn icon={Upload} label={uploading ? "Uploading..." : "Upload PDF"} color="#2563eb" onClick={() => fileRef.current?.click()} loading={uploading} />
@@ -278,13 +278,13 @@ export default function APAutoInvoice() {
                   onClick={() => loadDetail(inv.stg_id)}
                   style={{
                     padding: "12px 18px", cursor: "pointer",
-                    background: selectedId === inv.stg_id ? "rgba(37,99,235,0.08)" : i % 2 === 0 ? "#f0f3f9" : "#e8edf5",
+                    background: selectedId === inv.stg_id ? "rgba(37,99,235,0.08)" : i % 2 === 0 ? "#f8fafc" : "#f1f5f9",
                     borderLeft: selectedId === inv.stg_id ? "3px solid #2563eb" : "3px solid transparent",
                     borderBottom: "1px solid rgba(0,0,0,0.04)",
                     transition: "all 0.15s ease",
                   }}
                   onMouseEnter={e => { if (selectedId !== inv.stg_id) e.currentTarget.style.background = "rgba(37,99,235,0.04)"; }}
-                  onMouseLeave={e => { if (selectedId !== inv.stg_id) e.currentTarget.style.background = i % 2 === 0 ? "#f0f3f9" : "#e8edf5"; }}
+                  onMouseLeave={e => { if (selectedId !== inv.stg_id) e.currentTarget.style.background = i % 2 === 0 ? "#f8fafc" : "#f1f5f9"; }}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
                     <span style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>{inv.invoice_num}</span>
@@ -410,10 +410,10 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <StatusPill status={d.status} />
           {canEdit && !editing && (
-            <NeuBtn icon={Pencil} label="Edit" color="#e8edf5" textColor="#2563eb" onClick={startEdit} small />
+            <NeuBtn icon={Pencil} label="Edit" color="#f1f5f9" textColor="#2563eb" onClick={startEdit} small />
           )}
           {canDelete && !editing && (
-            <NeuBtn icon={Trash2} label="Delete" color="#e8edf5" textColor="#dc2626" onClick={() => onDelete(d.stg_id)} loading={actionLoading === "delete"} small />
+            <NeuBtn icon={Trash2} label="Delete" color="#f1f5f9" textColor="#dc2626" onClick={() => onDelete(d.stg_id)} loading={actionLoading === "delete"} small />
           )}
         </div>
       </div>
@@ -458,7 +458,7 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
         {editing && (
           <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
             <NeuBtn icon={Save} label="Save" color="#059669" onClick={saveEdit} loading={actionLoading === "save"} />
-            <NeuBtn icon={X} label="Cancel" color="#e8edf5" textColor="#64748b" onClick={cancelEdit} />
+            <NeuBtn icon={X} label="Cancel" color="#f1f5f9" textColor="#64748b" onClick={cancelEdit} />
           </div>
         )}
 
@@ -490,7 +490,7 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                 </thead>
                 <tbody>
                   {(editing ? editLines : d.lines).map((ln, i) => (
-                    <tr key={i} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                    <tr key={i} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
                       <td style={{ padding: "8px 12px", fontSize: 12, fontWeight: 600, color: "#64748b", textAlign: "right", width: 40 }}>
                         {ln.line_num}
                       </td>

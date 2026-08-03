@@ -47,9 +47,9 @@ const STATUS_CONFIG = {
   direct:  { label: "Direct Link", dot: "#8b5cf6", color: "#7c3aed", accent: "#ede9fe" },
 };
 
-const NEU_BG     = "#e8edf5";
-const SHADOW_OUT = "6px 6px 14px #c5cad8, -6px -6px 14px #ffffff";
-const SHADOW_IN  = "inset 4px 4px 10px #c5cad8, inset -4px -4px 10px #ffffff";
+const NEU_BG     = "#f1f5f9";
+const SHADOW_OUT = "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)";
+const SHADOW_IN  = "inset 0 2px 5px rgba(15,23,42,0.09)";
 
 // ─── App Card ────────────────────────────────────────────────────
 function AppCard({ app, index, onNavigate, onDashboardClick }) {
@@ -90,7 +90,7 @@ function AppCard({ app, index, onNavigate, onDashboardClick }) {
       <div style={{
         width: 40, height: 40, borderRadius: 11,
         background: NEU_BG,
-        boxShadow: pressed ? `inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff` : `4px 4px 10px #c5cad8, -4px -4px 10px #ffffff`,
+        boxShadow: pressed ? `inset 0 2px 5px rgba(15,23,42,0.09)` : `0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)`,
         display: "flex", alignItems: "center", justifyContent: "center",
         fontSize: 20, transition: "box-shadow 0.18s ease", position: "relative",
       }}>
@@ -171,7 +171,7 @@ function AnnouncementRow({ item }) {
         display: "flex", alignItems: "center", gap: 10,
         padding: "9px 12px", marginBottom: 8, borderRadius: 12,
         background: item.is_overdue ? "linear-gradient(135deg, #fee2e2, #fecaca)" : "#fff",
-        boxShadow: item.is_overdue ? "0 0 0 1.5px #dc2626, 3px 3px 8px #c5cad8" : "2px 2px 6px #c5cad8, -2px -2px 6px #ffffff",
+        boxShadow: item.is_overdue ? "0 0 0 1.5px #dc2626, 0 2px 4px rgba(15,23,42,0.08)" : "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
       }}>
         <div style={{
           width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
@@ -200,7 +200,7 @@ function AnnouncementRow({ item }) {
       display: "flex", alignItems: "center", gap: 10,
       padding: "9px 12px", marginBottom: 8, borderRadius: 12,
       background: item.is_today ? "linear-gradient(135deg, #fef3c7, #fde68a)" : "#fff",
-      boxShadow: item.is_today ? "0 0 0 1.5px #f59e0b, 3px 3px 8px #c5cad8" : "2px 2px 6px #c5cad8, -2px -2px 6px #ffffff",
+      boxShadow: item.is_today ? "0 0 0 1.5px #f59e0b, 0 2px 4px rgba(15,23,42,0.08)" : "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
     }}>
       <div style={{
         width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
@@ -359,8 +359,8 @@ export default function AppLauncher() {
         .birthday-marquee:hover .birthday-marquee__track--scroll { animation-play-state: paused; }
         * { box-sizing:border-box; margin:0; padding:0; }
         ::-webkit-scrollbar { width: 5px; }
-        ::-webkit-scrollbar-track { background: #e8edf5; }
-        ::-webkit-scrollbar-thumb { background: #c5cad8; border-radius: 4px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .drag-divider:hover > div { background: linear-gradient(180deg, #2563eb88, #2563eb44, #2563eb88) !important; }
       `}</style>
 
@@ -368,7 +368,7 @@ export default function AppLauncher() {
 
         {/* ── HEADER ── */}
         <header style={{
-          background: NEU_BG, boxShadow: "0 4px 16px #c5cad8, 0 -2px 8px #ffffff",
+          background: NEU_BG, boxShadow: "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)",
           padding: "12px 32px", display: "flex", alignItems: "center", justifyContent: "space-between",
           position: "sticky", top: 0, zIndex: 20, animation: "slideIn 0.6s ease forwards",
         }}>
@@ -386,8 +386,8 @@ export default function AppLauncher() {
             <p style={{ fontSize: 10.5, color: "#2563eb", fontWeight: 700, letterSpacing: "0.06em", whiteSpace: "nowrap" }}>
               BETTER LIFE THROUGH BETTER MEDICINE
             </p>
-            <div style={{ width: 1, height: 34, background: "#c5cad8" }} />
-            <div style={{ background: NEU_BG, borderRadius: 10, padding: "5px 12px", boxShadow: `inset 2px 2px 6px #c5cad8, inset -2px -2px 6px #ffffff`, textAlign: "right" }}>
+            <div style={{ width: 1, height: 34, background: "#cbd5e1" }} />
+            <div style={{ background: NEU_BG, borderRadius: 10, padding: "5px 12px", boxShadow: `inset 0 1px 3px rgba(15,23,42,0.07)`, textAlign: "right" }}>
               <p style={{ fontSize: 14, fontWeight: 600, color: "#1e293b", letterSpacing: "0.04em" }}>
                 {time.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
               </p>
@@ -395,9 +395,9 @@ export default function AppLauncher() {
                 {time.toLocaleDateString("en-US", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
               </p>
             </div>
-            <div style={{ width: 1, height: 34, background: "#c5cad8" }} />
+            <div style={{ width: 1, height: 34, background: "#cbd5e1" }} />
             <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#2563eb,#0891b2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "white", boxShadow: "3px 3px 8px #c5cad8,-2px -2px 6px #ffffff" }}>
+              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg,#2563eb,#0891b2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "white", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>
                 {user?.fullName?.charAt(0) || user?.username?.charAt(0) || "U"}
               </div>
               <div>
@@ -427,7 +427,7 @@ export default function AppLauncher() {
             animation: "fadeUp 0.5s ease 0.1s forwards", opacity: 0,
           }}>
             {/* Welcome strip */}
-            <div style={{ background: NEU_BG, borderRadius: 12, padding: "7px 14px", boxShadow: `inset 2px 2px 6px #c5cad8, inset -2px -2px 6px #ffffff`, flexShrink: 0 }}>
+            <div style={{ background: NEU_BG, borderRadius: 12, padding: "7px 14px", boxShadow: `inset 0 1px 3px rgba(15,23,42,0.07)`, flexShrink: 0 }}>
               <span style={{ fontSize: 9.5, color: "#2563eb", fontWeight: 700, letterSpacing: "0.1em" }}>WELCOME BACK</span>
               <p style={{ fontSize: 12.5, fontWeight: 700, color: "#1e293b", marginTop: 2 }}>{user?.fullName || user?.username || "User"}</p>
             </div>
@@ -438,7 +438,7 @@ export default function AppLauncher() {
               background: NEU_BG,
               borderRadius: 18,
               padding: "14px 12px",
-              boxShadow: `inset 4px 4px 12px #c5cad8, inset -4px -4px 12px #ffffff`,
+              boxShadow: `inset 0 2px 5px rgba(15,23,42,0.09)`,
               overflowY: "auto",
               display: "flex",
               flexDirection: "column",
@@ -492,8 +492,8 @@ export default function AppLauncher() {
           >
             <div style={{
               width: 4, height: "60%", minHeight: 80, borderRadius: 4,
-              background: "linear-gradient(180deg, #c5cad8, #ffffff88, #c5cad8)",
-              boxShadow: "1px 0 3px #c5cad888, -1px 0 3px #c5cad888",
+              background: "linear-gradient(180deg, #e2e8f0, #ffffff88, #e2e8f0)",
+              boxShadow: "1px 0 2px rgba(15,23,42,0.05), -1px 0 2px rgba(15,23,42,0.05)",
               transition: "background 0.15s",
             }} />
           </div>
@@ -509,7 +509,7 @@ export default function AppLauncher() {
           }}>
             {/* Magazine header label */}
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-              <div style={{ background: NEU_BG, borderRadius: 10, padding: "6px 14px", boxShadow: `inset 2px 2px 6px #c5cad8, inset -2px -2px 6px #ffffff`, display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ background: NEU_BG, borderRadius: 10, padding: "6px 14px", boxShadow: `inset 0 1px 3px rgba(15,23,42,0.07)`, display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontSize: 16 }}>📰</span>
                 <div>
                   <span style={{ fontSize: 9.5, color: "#2563eb", fontWeight: 700, letterSpacing: "0.1em", display: "block" }}>INTERNAL MAGAZINE</span>
@@ -538,7 +538,7 @@ export default function AppLauncher() {
               flex: 1,
               background: NEU_BG,
               borderRadius: 18,
-              boxShadow: `inset 4px 4px 12px #c5cad8, inset -4px -4px 12px #ffffff`,
+              boxShadow: `inset 0 2px 5px rgba(15,23,42,0.09)`,
               overflow: "hidden",
               minHeight: 0,
             }}>
@@ -555,8 +555,8 @@ export default function AppLauncher() {
           <div style={{ width: 14, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div style={{
               width: 4, height: "60%", minHeight: 80, borderRadius: 4,
-              background: "linear-gradient(180deg, #c5cad8, #ffffff88, #c5cad8)",
-              boxShadow: "1px 0 3px #c5cad888, -1px 0 3px #c5cad888",
+              background: "linear-gradient(180deg, #e2e8f0, #ffffff88, #e2e8f0)",
+              boxShadow: "1px 0 2px rgba(15,23,42,0.05), -1px 0 2px rgba(15,23,42,0.05)",
             }} />
           </div>
 
@@ -568,7 +568,7 @@ export default function AppLauncher() {
             minWidth: 0,
           }}>
             {/* Header label */}
-            <div style={{ background: NEU_BG, borderRadius: 10, padding: "6px 14px", boxShadow: `inset 2px 2px 6px #c5cad8, inset -2px -2px 6px #ffffff`, display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <div style={{ background: NEU_BG, borderRadius: 10, padding: "6px 14px", boxShadow: `inset 0 1px 3px rgba(15,23,42,0.07)`, display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
               <span style={{ fontSize: 16 }}>📢</span>
               <div>
                 <span style={{ fontSize: 9.5, color: "#2563eb", fontWeight: 700, letterSpacing: "0.1em", display: "block" }}>ANNOUNCEMENT & NOTIFICATION</span>
@@ -584,7 +584,7 @@ export default function AppLauncher() {
               background: NEU_BG,
               borderRadius: 18,
               padding: "14px 12px",
-              boxShadow: `inset 4px 4px 12px #c5cad8, inset -4px -4px 12px #ffffff`,
+              boxShadow: `inset 0 2px 5px rgba(15,23,42,0.09)`,
               display: "flex",
               flexDirection: "column",
               minHeight: 0,

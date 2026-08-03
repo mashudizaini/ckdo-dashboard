@@ -56,9 +56,9 @@ const EMPLOYMENT_STATUS_BADGE = {
 };
 
 const NEU_TAB = {
-  bg: "#e8edf5",
-  out: "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff",
-  inset: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff",
+  bg: "#f1f5f9",
+  out: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
+  inset: "inset 0 1px 3px rgba(15,23,42,0.07)",
 };
 
 function SubTabs({ tabs, active, onChange }) {
@@ -374,10 +374,10 @@ function EmployeeTable() {
               <button key={id} onClick={() => handleCardClick(id)}
                 style={{
                   padding: "6px 8px", borderRadius: 10, border: "none",
-                  background: isActive ? color : "#e8edf5",
+                  background: isActive ? color : "#f1f5f9",
                   boxShadow: isActive
                     ? "inset 2px 2px 4px rgba(0,0,0,0.2)"
-                    : "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff",
+                    : "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
                   cursor: "pointer", textAlign: "center",
                   transform: isActive ? "scale(0.97)" : "scale(1)",
                   transition: "all 0.2s ease",
@@ -722,8 +722,8 @@ function EmployeeTable() {
               disabled={page === 1}
               style={{
                 padding: 6, borderRadius: 8, border: "none", cursor: page === 1 ? "not-allowed" : "pointer",
-                background: "#e8edf5", color: page === 1 ? "#cbd5e1" : "#475569",
-                boxShadow: "2px 2px 5px #c5cad8, -2px -2px 5px #ffffff",
+                background: "#f1f5f9", color: page === 1 ? "#cbd5e1" : "#475569",
+                boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
               }}
             >
               <ChevronLeft size={13} />
@@ -733,8 +733,8 @@ function EmployeeTable() {
               disabled={page === data.pages}
               style={{
                 padding: 6, borderRadius: 8, border: "none", cursor: page === data.pages ? "not-allowed" : "pointer",
-                background: "#e8edf5", color: page === data.pages ? "#cbd5e1" : "#475569",
-                boxShadow: "2px 2px 5px #c5cad8, -2px -2px 5px #ffffff",
+                background: "#f1f5f9", color: page === data.pages ? "#cbd5e1" : "#475569",
+                boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
               }}
             >
               <ChevronRight size={13} />
@@ -908,7 +908,7 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
       <div
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-5xl max-h-[85vh] overflow-y-auto rounded-2xl"
-        style={{ background: "#e8edf5", boxShadow: "8px 8px 20px #c5cad8, -8px -8px 20px #ffffff" }}
+        style={{ background: "#f1f5f9", boxShadow: "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)" }}
       >
         <div
           className="sticky top-0 z-10 flex items-center justify-between px-6 py-4"
@@ -975,8 +975,8 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
                     <div
                       key={key}
                       style={{
-                        padding: "8px 12px", borderRadius: 10, background: "#e8edf5",
-                        boxShadow: "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff",
+                        padding: "8px 12px", borderRadius: 10, background: "#f1f5f9",
+                        boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)",
                         gridColumn: (key === "address" || (isSupervisor && editingSupervisor)) ? "1 / -1" : undefined,
                       }}
                     >
@@ -1068,7 +1068,7 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
           ))}
 
           {!isNew && (
-            <div style={{ borderRadius: 10, background: "#e8edf5", boxShadow: "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff", overflow: "hidden" }}>
+            <div style={{ borderRadius: 10, background: "#f1f5f9", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)", overflow: "hidden" }}>
               <button
                 onClick={toggleHistory}
                 style={{
@@ -1171,7 +1171,7 @@ function ResignEmployeeModal({ employee, onClose, onSaved }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,0.6)" }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-2xl" style={{ background: "#e8edf5", boxShadow: "8px 8px 20px #c5cad8, -8px -8px 20px #ffffff" }}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-2xl" style={{ background: "#f1f5f9", boxShadow: "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)" }}>
         <div className="flex items-center justify-between px-6 py-4" style={{ background: "linear-gradient(135deg, #dc2626, #ef4444)", borderRadius: "16px 16px 0 0" }}>
           <div>
             <h3 style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>Mark as Resigned</h3>
@@ -1418,7 +1418,7 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,0.6)" }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl" style={{ background: "#e8edf5", boxShadow: "8px 8px 20px #c5cad8, -8px -8px 20px #ffffff" }}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl" style={{ background: "#f1f5f9", boxShadow: "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)" }}>
         <div className="flex items-center justify-between px-6 py-4" style={{ background: "linear-gradient(135deg, #2563eb, #3b82f6)", borderRadius: "16px 16px 0 0" }}>
           <h3 style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>{isNew ? "Add Position" : "Edit Position"}</h3>
           <button onClick={onClose} style={{ padding: 6, borderRadius: 8, border: "none", background: "rgba(255,255,255,0.2)", color: "#fff", cursor: "pointer" }}><X size={16} /></button>
@@ -1633,7 +1633,7 @@ function OrgChartView() {
       <div style={{
         borderRadius: 14, padding: "12px 0", textAlign: "center",
         background: "linear-gradient(135deg, #2563eb, #3b82f6)",
-        boxShadow: "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff",
+        boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
       }}>
         <h2 style={{ fontSize: 14, fontWeight: 800, color: "#fff", letterSpacing: "0.12em", textTransform: "uppercase" }}>
           <Network size={13} style={{ display: "inline", marginRight: 6, verticalAlign: -2 }} />
@@ -1646,7 +1646,7 @@ function OrgChartView() {
       <div style={{
         display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
         padding: "10px 14px", borderRadius: 14,
-        background: "#e8edf5", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff",
+        background: "#f1f5f9", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)",
       }}>
         <div style={{ position: "relative", minWidth: 220 }}>
           <Search size={12} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
@@ -1665,7 +1665,7 @@ function OrgChartView() {
 
         <button onClick={handleDownloadImage} disabled={exportingImage} title="Download as image"
           className="flex items-center gap-1.5"
-          style={{ padding: "7px 12px", borderRadius: 8, border: "none", cursor: exportingImage ? "wait" : "pointer", background: "#2563eb", color: "#fff", fontSize: 11.5, fontWeight: 700, boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff" }}>
+          style={{ padding: "7px 12px", borderRadius: 8, border: "none", cursor: exportingImage ? "wait" : "pointer", background: "#2563eb", color: "#fff", fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>
           {exportingImage ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
           {exportingImage ? "Exporting..." : "Download Image"}
         </button>
@@ -1678,7 +1678,7 @@ function OrgChartView() {
           { icon: RefreshCw, title: "Refresh",      onClick: load },
         ].map(({ icon: Icon, title, onClick }) => (
           <button key={title} onClick={onClick} title={title}
-            style={{ padding: 8, borderRadius: 8, border: "none", cursor: "pointer", background: "#e8edf5", color: "#64748b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff" }}>
+            style={{ padding: 8, borderRadius: 8, border: "none", cursor: "pointer", background: "#f1f5f9", color: "#64748b", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>
             <Icon size={13} />
           </button>
         ))}
@@ -3179,12 +3179,12 @@ function AttendanceTodaySection() {
 // ── Sub-komponen untuk Attendance Ratio ───────────────────────────────────────
 
 const NEU_CARD = {
-  background: "#e8edf5",
+  background: "#f1f5f9",
   borderRadius: 16,
-  boxShadow: "6px 6px 14px #c5cad8, -6px -6px 14px #ffffff",
+  boxShadow: "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)",
   padding: 16,
 };
-const NEU_IN = { background: "#e8edf5", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff" };
+const NEU_IN = { background: "#f1f5f9", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)" };
 
 function DeptBarChart({ data }) {
   if (!data.length) return <p style={{ padding: "24px 0", textAlign: "center", color: "#94a3b8", fontSize: 13 }}>No data</p>;
@@ -3216,11 +3216,11 @@ function DeptBarChart({ data }) {
                 <div style={{ width: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 2, height: BAR_H }}>
                   <div style={{ width: "40%", display: "flex", flexDirection: "column", alignItems: "center" }}>
                     <span style={{ fontSize: 11, color: "#1e293b", fontWeight: 700 }}>{dept.plan}</span>
-                    <div style={{ width: "100%", height: planH, background: "linear-gradient(180deg, #60a5fa, #3b82f6)", borderRadius: "6px 6px 0 0", boxShadow: "2px 2px 4px #c5cad8" }} />
+                    <div style={{ width: "100%", height: planH, background: "linear-gradient(180deg, #60a5fa, #3b82f6)", borderRadius: "6px 6px 0 0", boxShadow: "0 1px 2px rgba(15,23,42,0.08)" }} />
                   </div>
                   <div style={{ width: "40%", display: "flex", flexDirection: "column", alignItems: "center" }}>
                     <span style={{ fontSize: 11, color: "#ea580c", fontWeight: 700 }}>{dept.actual}</span>
-                    <div style={{ width: "100%", height: actualH, background: "linear-gradient(180deg, #fb923c, #f97316)", borderRadius: "6px 6px 0 0", boxShadow: "2px 2px 4px #c5cad8" }} />
+                    <div style={{ width: "100%", height: actualH, background: "linear-gradient(180deg, #fb923c, #f97316)", borderRadius: "6px 6px 0 0", boxShadow: "0 1px 2px rgba(15,23,42,0.08)" }} />
                   </div>
                 </div>
                 <p style={{ fontSize: 10, color: "#475569", fontWeight: 600, marginTop: 4, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "center" }}>{short}</p>
@@ -3257,7 +3257,7 @@ function WhosOffWidget({ data }) {
                 background: "linear-gradient(135deg, #3b82f6, #60a5fa)",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 fontSize: 11, fontWeight: 700, color: "#fff", flexShrink: 0,
-                boxShadow: "2px 2px 4px #c5cad8",
+                boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
               }}>
                 {emp.name?.charAt(0) || "?"}
               </div>
@@ -3295,7 +3295,7 @@ function StatBreakdown({ title, data }) {
                   height: "100%", borderRadius: 99,
                   background: "linear-gradient(90deg, #3b82f6, #60a5fa)",
                   width: `${Math.max(item.rate, 2)}%`,
-                  boxShadow: "2px 2px 4px #c5cad8",
+                  boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
                   transition: "width 0.5s ease",
                 }} />
               </div>
@@ -3329,11 +3329,11 @@ function MiniBarChart({ data }) {
               <div style={{ width: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 2, height: H - 40 }}>
                 <div style={{ width: "40%", display: "flex", flexDirection: "column", alignItems: "center" }}>
                   <span style={{ fontSize: 10, color: "#475569", fontWeight: 700 }}>{m.plan}</span>
-                  <div style={{ width: "100%", height: planH, background: "linear-gradient(180deg, #60a5fa, #3b82f6)", borderRadius: "5px 5px 0 0", boxShadow: "2px 2px 4px #c5cad8" }} />
+                  <div style={{ width: "100%", height: planH, background: "linear-gradient(180deg, #60a5fa, #3b82f6)", borderRadius: "5px 5px 0 0", boxShadow: "0 1px 2px rgba(15,23,42,0.08)" }} />
                 </div>
                 <div style={{ width: "40%", display: "flex", flexDirection: "column", alignItems: "center" }}>
                   <span style={{ fontSize: 10, color: "#ea580c", fontWeight: 700 }}>{m.actual}</span>
-                  <div style={{ width: "100%", height: actualH, background: "linear-gradient(180deg, #fb923c, #f97316)", borderRadius: "5px 5px 0 0", boxShadow: "2px 2px 4px #c5cad8" }} />
+                  <div style={{ width: "100%", height: actualH, background: "linear-gradient(180deg, #fb923c, #f97316)", borderRadius: "5px 5px 0 0", boxShadow: "0 1px 2px rgba(15,23,42,0.08)" }} />
                 </div>
               </div>
               <p style={{ fontSize: 10, color: "#475569", fontWeight: 600, marginTop: 3 }}>{m.period}</p>
@@ -3391,15 +3391,15 @@ function EmployeeDetailPanel({ headers, apiBase }) {
             style={{
               width: "100%", paddingLeft: 32, paddingRight: 12, padding: "9px 12px 9px 32px",
               borderRadius: 12, border: "none", fontSize: 13, fontWeight: 500,
-              color: "#1e293b", background: "#e8edf5",
-              boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff",
+              color: "#1e293b", background: "#f1f5f9",
+              boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)",
               outline: "none", boxSizing: "border-box",
             }}
           />
           {results.length > 0 && (
             <div style={{
               position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20, marginTop: 4,
-              borderRadius: 12, background: "#fff", boxShadow: "6px 6px 14px #c5cad8, -6px -6px 14px #ffffff",
+              borderRadius: 12, background: "#fff", boxShadow: "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)",
               maxHeight: 200, overflowY: "auto",
             }}>
               {results.map((r) => (
@@ -3431,8 +3431,8 @@ function EmployeeDetailPanel({ headers, apiBase }) {
                 { label: "Location",   val: detail.employee.work_placement },
               ].map(({ label, val }) => (
                 <div key={label} style={{
-                  padding: "8px 12px", borderRadius: 12, background: "#e8edf5",
-                  boxShadow: "4px 4px 8px #c5cad8, -4px -4px 8px #ffffff",
+                  padding: "8px 12px", borderRadius: 12, background: "#f1f5f9",
+                  boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
                 }}>
                   <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</p>
                   <p style={{ fontSize: 12, fontWeight: 600, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{val || "—"}</p>
@@ -3442,7 +3442,7 @@ function EmployeeDetailPanel({ headers, apiBase }) {
 
             <div>
               <h4 style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", marginBottom: 8 }}>Absence Records</h4>
-              <div style={{ maxHeight: 200, overflowY: "auto", borderRadius: 12, boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff" }}>
+              <div style={{ maxHeight: 200, overflowY: "auto", borderRadius: 12, boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
                     <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)", position: "sticky", top: 0 }}>
@@ -3458,7 +3458,7 @@ function EmployeeDetailPanel({ headers, apiBase }) {
                     {!detail.absences.length ? (
                       <tr><td colSpan={2} style={{ padding: "16px 12px", textAlign: "center", color: "#94a3b8", fontSize: 12 }}>No absence records</td></tr>
                     ) : sortRows(detail.absences, absSortBy, absSortDir, []).map((a, i) => (
-                      <tr key={i} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                      <tr key={i} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
                         <td style={{ padding: "6px 12px", fontSize: 12, color: "#475569", fontWeight: 500, whiteSpace: "nowrap" }}>{fmtDate(a.date)}</td>
                         <td style={{ padding: "6px 12px", fontSize: 12, color: "#64748b", fontWeight: 500 }}>{a.reason}</td>
                       </tr>
@@ -3482,8 +3482,8 @@ function EmployeeDetailPanel({ headers, apiBase }) {
           : (
             <div style={{
               display: "flex", alignItems: "center", justifyContent: "center", height: 200,
-              borderRadius: 16, background: "#e8edf5",
-              boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+              borderRadius: 16, background: "#f1f5f9",
+              boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)",
             }}>
               <p style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>Monthly chart will appear after selecting an employee</p>
             </div>
@@ -3522,7 +3522,7 @@ function TargetAchievementPanel({ apiBase, headers }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
         <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>Target vs Achievement</h4>
         <select value={year} onChange={(e) => setYear(Number(e.target.value))}
-          style={{ fontSize: 11, fontWeight: 700, padding: "5px 12px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#2563eb", boxShadow: NEU_IN.boxShadow, outline: "none", cursor: "pointer" }}>
+          style={{ fontSize: 11, fontWeight: 700, padding: "5px 12px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#2563eb", boxShadow: NEU_IN.boxShadow, outline: "none", cursor: "pointer" }}>
           {years.map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
       </div>
@@ -3549,7 +3549,7 @@ function TargetAchievementPanel({ apiBase, headers }) {
             </thead>
             <tbody>
               {sortRows(rows, sortBy, sortDir, ["headcount", "working_days", "target", "achievement", "rate"]).map((m, i) => (
-                <tr key={m.period} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                <tr key={m.period} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
                   <td style={{ padding: "7px 10px", fontWeight: 700, color: "#1e293b" }}>{m.period}</td>
                   <td style={{ padding: "7px 10px", textAlign: "center", color: "#475569" }}>{m.headcount}</td>
                   <td style={{ padding: "7px 10px", textAlign: "center", color: "#475569" }}>{m.working_days}</td>
@@ -3629,7 +3629,7 @@ function AttendanceRateSection() {
       <div style={{
         borderRadius: 14, padding: "12px 0", textAlign: "center",
         background: "linear-gradient(135deg, #2563eb, #3b82f6)",
-        boxShadow: "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff",
+        boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
       }}>
         <h2 style={{ fontSize: 14, fontWeight: 800, color: "#fff", letterSpacing: "0.12em", textTransform: "uppercase" }}>Attendance Ratio</h2>
       </div>
@@ -3640,11 +3640,11 @@ function AttendanceRateSection() {
           <button key={id} onClick={() => setActiveTab(id)}
             style={{
               padding: "8px 20px", borderRadius: 10, border: "none", fontSize: 12, fontWeight: 700,
-              background: "#e8edf5", cursor: "pointer",
+              background: "#f1f5f9", cursor: "pointer",
               color: activeTab === id ? "#2563eb" : "#64748b",
               boxShadow: activeTab === id
-                ? "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff"
-                : "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff",
+                ? "inset 0 1px 3px rgba(15,23,42,0.07)"
+                : "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
               transition: "all 0.2s ease",
             }}>
             {label}
@@ -3653,8 +3653,8 @@ function AttendanceRateSection() {
         <div style={{ flex: 1 }} />
         <button onClick={loadSummary} style={{
           padding: 8, borderRadius: 8, border: "none", cursor: "pointer",
-          background: "#e8edf5", color: "#64748b",
-          boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff",
+          background: "#f1f5f9", color: "#64748b",
+          boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
         }}>
           <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
         </button>
@@ -3665,12 +3665,12 @@ function AttendanceRateSection() {
         <div style={{
           display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap",
           padding: "12px 16px", borderRadius: 14,
-          background: "#e8edf5", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff",
+          background: "#f1f5f9", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)",
         }}>
           <div>
             <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Department</label>
             <select value={fDept} onChange={e => setFDept(e.target.value)}
-              style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", cursor: "pointer", outline: "none" }}>
+              style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#1e293b", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)", cursor: "pointer", outline: "none" }}>
               <option value="">All Departments</option>
               {departments.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
@@ -3678,7 +3678,7 @@ function AttendanceRateSection() {
           <div>
             <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Month</label>
             <select value={fMonth} onChange={e => setFMonth(e.target.value)}
-              style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", cursor: "pointer", outline: "none" }}>
+              style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#1e293b", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)", cursor: "pointer", outline: "none" }}>
               <option value="">All Months</option>
               {MONTHS_ID.map((m, i) => <option key={i+1} value={i+1}>{m}</option>)}
             </select>
@@ -3686,13 +3686,13 @@ function AttendanceRateSection() {
           <div>
             <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Year</label>
             <select value={fYear} onChange={e => setFYear(e.target.value)}
-              style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", cursor: "pointer", outline: "none" }}>
+              style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#1e293b", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)", cursor: "pointer", outline: "none" }}>
               {[curYear, curYear - 1, curYear - 2].map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
           {(fDept || fMonth) && (
             <button onClick={() => { setFDept(""); setFMonth(""); setFYear(curYear); }}
-              style={{ fontSize: 11, fontWeight: 700, padding: "6px 14px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#dc2626", cursor: "pointer", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff" }}>
+              style={{ fontSize: 11, fontWeight: 700, padding: "6px 14px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#dc2626", cursor: "pointer", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>
               Reset
             </button>
           )}
@@ -4071,15 +4071,15 @@ function WorkingCalendarPanel() {
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <select value={year} onChange={e => setYear(Number(e.target.value))}
-            style={{ fontSize: 12, fontWeight: 600, padding: "6px 12px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", cursor: "pointer", outline: "none" }}>
+            style={{ fontSize: 12, fontWeight: 600, padding: "6px 12px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#1e293b", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)", cursor: "pointer", outline: "none" }}>
             {[curYear - 1, curYear, curYear + 1].map(y => <option key={y} value={y}>{y}</option>)}
           </select>
           <button onClick={() => setShowForm(!showForm)}
-            style={{ fontSize: 12, fontWeight: 700, padding: "6px 14px", borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff" }}>
+            style={{ fontSize: 12, fontWeight: 700, padding: "6px 14px", borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>
             + Add Holiday
           </button>
           <button onClick={() => window.print()} disabled={!summary}
-            style={{ fontSize: 12, fontWeight: 700, padding: "6px 14px", borderRadius: 8, border: "none", background: "#059669", color: "#fff", cursor: summary ? "pointer" : "not-allowed", opacity: summary ? 1 : 0.5, boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff" }}>
+            style={{ fontSize: 12, fontWeight: 700, padding: "6px 14px", borderRadius: 8, border: "none", background: "#059669", color: "#fff", cursor: summary ? "pointer" : "not-allowed", opacity: summary ? 1 : 0.5, boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>
             🖨 Print Calendar
           </button>
         </div>
@@ -4091,27 +4091,27 @@ function WorkingCalendarPanel() {
       {showForm && (
         <div style={{
           display: "flex", gap: 8, alignItems: "flex-end", padding: "12px 16px", borderRadius: 14,
-          background: "#e8edf5", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff",
+          background: "#f1f5f9", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)",
         }}>
           <div>
             <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>DATE</label>
             <input type="date" value={form.holiday_date} onChange={e => setForm(p => ({ ...p, holiday_date: e.target.value }))}
-              style={{ fontSize: 12, padding: "6px 10px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", outline: "none" }} />
+              style={{ fontSize: 12, padding: "6px 10px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#1e293b", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)", outline: "none" }} />
           </div>
           <div style={{ flex: 1 }}>
             <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>HOLIDAY NAME</label>
             <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Eid al-Fitr"
-              style={{ width: "100%", fontSize: 12, padding: "6px 10px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", outline: "none", boxSizing: "border-box" }} />
+              style={{ width: "100%", fontSize: 12, padding: "6px 10px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#1e293b", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)", outline: "none", boxSizing: "border-box" }} />
           </div>
           <div>
             <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 3 }}>TYPE</label>
             <select value={form.holiday_type} onChange={e => setForm(p => ({ ...p, holiday_type: e.target.value }))}
-              style={{ fontSize: 12, padding: "6px 10px", borderRadius: 8, border: "none", background: "#e8edf5", color: "#1e293b", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", cursor: "pointer", outline: "none" }}>
+              style={{ fontSize: 12, padding: "6px 10px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#1e293b", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)", cursor: "pointer", outline: "none" }}>
               {Object.entries(HTYPE_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
           </div>
           <button onClick={handleAdd} disabled={adding || !form.holiday_date || !form.name}
-            style={{ fontSize: 12, fontWeight: 700, padding: "6px 16px", borderRadius: 8, border: "none", background: "#059669", color: "#fff", cursor: "pointer", boxShadow: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff", opacity: adding ? 0.5 : 1 }}>
+            style={{ fontSize: 12, fontWeight: 700, padding: "6px 16px", borderRadius: 8, border: "none", background: "#059669", color: "#fff", cursor: "pointer", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)", opacity: adding ? 0.5 : 1 }}>
             {adding ? "..." : "Save"}
           </button>
         </div>
@@ -4186,7 +4186,7 @@ function WorkingCalendarPanel() {
       {summary && (
         <div style={{ ...NEU_CARD }}>
           <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 10 }}>Summary — {year}</h4>
-          <div style={{ borderRadius: 12, overflow: "hidden", boxShadow: "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff" }}>
+          <div style={{ borderRadius: 12, overflow: "hidden", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
@@ -4200,7 +4200,7 @@ function WorkingCalendarPanel() {
               </thead>
               <tbody>
                 {sortRows(summary.months, sortBy, sortDir, ["month", "calendar_days", "weekends", "national", "collective", "company", "working_days"]).map((m, i) => (
-                  <tr key={m.month} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                  <tr key={m.month} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
                     <td style={{ padding: "8px 10px", fontSize: 12, fontWeight: 700, color: "#1e293b" }}>{MONTH_NAMES[m.month - 1]}</td>
                     <td style={{ padding: "8px 10px", fontSize: 12, fontWeight: 500, color: "#475569", textAlign: "center" }}>{m.calendar_days}</td>
                     <td style={{ padding: "8px 10px", fontSize: 12, fontWeight: 500, color: "#475569", textAlign: "center" }}>{m.weekends}</td>
@@ -4885,16 +4885,16 @@ function LeaveDataSection() {
             <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
               style={{
                 padding: 6, borderRadius: 8, border: "none", cursor: page === 1 ? "not-allowed" : "pointer",
-                background: "#e8edf5", color: page === 1 ? "#cbd5e1" : "#475569",
-                boxShadow: "2px 2px 5px #c5cad8, -2px -2px 5px #ffffff",
+                background: "#f1f5f9", color: page === 1 ? "#cbd5e1" : "#475569",
+                boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
               }}>
               <ChevronLeft size={13} />
             </button>
             <button onClick={() => setPage(p => Math.min(data.pages, p + 1))} disabled={page === data.pages}
               style={{
                 padding: 6, borderRadius: 8, border: "none", cursor: page === data.pages ? "not-allowed" : "pointer",
-                background: "#e8edf5", color: page === data.pages ? "#cbd5e1" : "#475569",
-                boxShadow: "2px 2px 5px #c5cad8, -2px -2px 5px #ffffff",
+                background: "#f1f5f9", color: page === data.pages ? "#cbd5e1" : "#475569",
+                boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
               }}>
               <ChevronRight size={13} />
             </button>

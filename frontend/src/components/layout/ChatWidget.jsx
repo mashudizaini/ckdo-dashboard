@@ -37,9 +37,9 @@ function renderWidgetSource(modeKey, s, j) {
 }
 
 const NEU = {
-  bg: "#e8edf5",
-  shadowOut: "8px 8px 18px #c5cad8, -8px -8px 18px #ffffff",
-  shadowBtn: "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff",
+  bg: "#f1f5f9",
+  shadowOut: "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)",
+  shadowBtn: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
 };
 
 /* ── Lightweight markdown renderer ── */
@@ -419,7 +419,7 @@ export default function ChatWidget() {
               style={{
                 flex: 1, fontSize: 12, padding: "8px 12px", borderRadius: 10, border: "none",
                 background: "#fff", color: "#1e293b", outline: "none",
-                boxShadow: "inset 2px 2px 5px #d6dbe3, inset -2px -2px 5px #ffffff",
+                boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)",
               }}
             />
             <button
@@ -461,7 +461,7 @@ export default function ChatWidget() {
             : "linear-gradient(135deg, #4f46e5 0%, #7c3aed 55%, #9333ea 100%)",
           boxShadow: open
             ? NEU.shadowBtn
-            : "0 8px 28px rgba(124,58,237,0.5), 0 2px 8px rgba(0,0,0,0.15), 4px 4px 12px #c5cad8, -4px -4px 12px #fff",
+            : "0 8px 28px rgba(124,58,237,0.5), 0 2px 8px rgba(0,0,0,0.15)",
           transition: "background 0.22s, box-shadow 0.22s, padding 0.18s",
           whiteSpace: "nowrap",
           userSelect: "none",

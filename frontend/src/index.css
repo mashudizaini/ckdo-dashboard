@@ -18,11 +18,11 @@
 
 @layer base {
   html {
-    background-color: var(--bg-main, #e8edf5);
-    color: var(--text-primary, #1e293b);
+    background-color: var(--bg-main, #f1f4f8);
+    color: var(--text-primary, #0f172a);
     font-family: 'Inter', 'Segoe UI', -apple-system, sans-serif;
   }
-  * { border-color: var(--border, rgba(0,0,0,0.06)); }
+  * { border-color: var(--border, rgba(15,23,42,0.09)); }
   ::-webkit-scrollbar { width: 5px; }
   ::-webkit-scrollbar-track { background: var(--scrollbar-track, #f1f5f9); }
   ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb, #2563eb); border-radius: 999px; }
@@ -30,94 +30,95 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   NEUMORPHIC PORTAL STYLE — 3D CONVEX cards (cembung/raised)
-   Shadow out: 6px 6px 14px #c5cad8, -6px -6px 14px #ffffff
-   Shadow in:  inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #fff
+   FLAT WHITE STYLE — white cards, thin borders, soft elevation
+   shadow (not neumorphic blend) for depth. See themes.js for the
+   --card-shadow tokens these rules build on.
 ═══════════════════════════════════════════════════════════════ */
 
-/* ── Card utama (bg-gray-900) — CONVEX raised 3D ── */
+/* ── Card utama (bg-gray-900) — white surface, elevated ── */
 .bg-gray-900 {
   background-color: var(--bg-card) !important;
   box-shadow: var(--card-shadow) !important;
-  border: none !important;
-  border-radius: 20px !important;
-}
-
-/* ── Card dalam (bg-gray-800) — also CONVEX, slightly smaller shadow ── */
-.bg-gray-800 {
-  background-color: var(--bg-card) !important;
-  box-shadow: 4px 4px 10px var(--shadow-dark), -4px -4px 10px var(--shadow-light) !important;
-  border: none !important;
+  border: 1px solid var(--border) !important;
   border-radius: 14px !important;
 }
 
-/* ── Inner inset wells ── */
+/* ── Card dalam (bg-gray-800) — nested panel, flat ── */
+.bg-gray-800 {
+  background-color: var(--bg-card2) !important;
+  box-shadow: none !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+}
+
+/* ── Inner recessed wells ── */
 .bg-gray-950 {
   background-color: var(--bg-card3) !important;
-  border-radius: 12px !important;
-  box-shadow: inset 2px 2px 6px var(--shadow-dark), inset -2px -2px 6px var(--shadow-light) !important;
-  border: none !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  border: 1px solid var(--border) !important;
 }
 .bg-gray-700 {
   background-color: var(--bg-card3) !important;
-  box-shadow: inset 2px 2px 6px var(--shadow-dark), inset -2px -2px 6px var(--shadow-light) !important;
-  border: none !important;
+  box-shadow: none !important;
+  border: 1px solid var(--border) !important;
 }
-.bg-gray-600 { background-color: var(--bg-card2) !important; }
+.bg-gray-600 { background-color: var(--bg-card2) !important; border: 1px solid var(--border) !important; }
 
 /* ── Hover states ── */
 .hover\:bg-gray-900:hover {
   background-color: var(--bg-card-hover) !important;
   box-shadow: var(--card-shadow-hover) !important;
-  transition: all 0.25s ease;
+  transition: all 0.2s ease;
 }
 .hover\:bg-gray-800:hover {
   background-color: var(--bg-card-hover) !important;
 }
 
-/* ── Tab / card variants — CONVEX raised ── */
+/* ── Tab / card variants — nested panel, flat ── */
 .bg-gray-800\/60,
 .bg-gray-800\/50,
 .bg-gray-800\/40 {
-  background-color: var(--bg-card) !important;
-  box-shadow: 4px 4px 10px var(--shadow-dark), -4px -4px 10px var(--shadow-light) !important;
-  border: none !important;
-  border-radius: 14px !important;
+  background-color: var(--bg-card2) !important;
+  box-shadow: none !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
 }
 .hover\:bg-gray-800\/60:hover {
-  box-shadow: inset 3px 3px 8px var(--shadow-dark), inset -3px -3px 8px var(--shadow-light) !important;
+  background-color: var(--bg-card-hover) !important;
 }
 .bg-gray-800\/90 {
-  background-color: var(--bg-card) !important;
+  background-color: var(--bg-card2) !important;
 }
 
-/* ── Borders — transparent (shadow replaces border) ── */
-.border-gray-800  { border-color: transparent !important; }
-.border-gray-700  { border-color: transparent !important; }
-.border-gray-600  { border-color: rgba(0,0,0,0.08) !important; }
-.hover\:border-gray-700:hover { border-color: rgba(0,0,0,0.06) !important; }
+/* ── Borders — real, visible (crisp card edges instead of shadow-only) ── */
+.border-gray-800  { border-color: var(--border) !important; }
+.border-gray-700  { border-color: var(--border) !important; }
+.border-gray-600  { border-color: var(--border2) !important; }
+.hover\:border-gray-700:hover { border-color: var(--border2) !important; }
 .hover\:border-gray-600:hover { border-color: var(--accent) !important; }
 
-/* ── Text — bold & alive ── */
-.text-white     { color: #1e293b !important; font-weight: 700; }
-.text-gray-100  { color: #1e293b !important; font-weight: 600; }
-.text-gray-200  { color: #1e293b !important; font-weight: 700; }
-.text-gray-300  { color: #374151 !important; font-weight: 600; }
-.text-gray-400  { color: #475569 !important; font-weight: 600; }
+/* ── Text — dark on white needs far less forced weight than the old
+   low-contrast neumorphic scheme did; kept just enough for hierarchy ── */
+.text-white     { color: #0f172a !important; font-weight: 700; }
+.text-gray-100  { color: #0f172a !important; font-weight: 600; }
+.text-gray-200  { color: #0f172a !important; font-weight: 600; }
+.text-gray-300  { color: #334155 !important; font-weight: 500; }
+.text-gray-400  { color: #475569 !important; font-weight: 500; }
 .text-gray-500  { color: #64748b !important; font-weight: 500; }
-.text-gray-600  { color: #94a3b8 !important; }
+.text-gray-600  { color: #94a3b8 !important; font-weight: 400; }
 
 /* ── Dividers ── */
-.divide-gray-800 > * + * { border-color: rgba(0,0,0,0.06) !important; }
-.divide-gray-700 > * + * { border-color: rgba(0,0,0,0.08) !important; }
+.divide-gray-800 > * + * { border-color: var(--border) !important; }
+.divide-gray-700 > * + * { border-color: var(--border2) !important; }
 
 /* ── Ring ── */
 .ring-gray-800 { --tw-ring-color: transparent !important; }
 .ring-gray-700 { --tw-ring-color: transparent !important; }
 
-/* ── Tab aktif — inset pressed effect ── */
+/* ── Tab aktif — pressed effect ── */
 .ring-1.ring-inset {
-  box-shadow: inset 3px 3px 8px var(--shadow-dark), inset -3px -3px 8px var(--shadow-light) !important;
+  box-shadow: var(--card-shadow-in) !important;
 }
 
 /* ── Colored badge backgrounds ── */
@@ -175,10 +176,10 @@ thead th {
 }
 
 tbody tr:nth-child(odd) {
-  background-color: #f0f3f9 !important;
+  background-color: #ffffff !important;
 }
 tbody tr:nth-child(even) {
-  background-color: #e8edf5 !important;
+  background-color: #f8fafc !important;
 }
 tbody tr:hover td {
   background-color: rgba(37,99,235,0.06) !important;
@@ -304,18 +305,18 @@ tbody td {
   width: 0;
   height: 22px;
 }
-/* ── Input/select — neumorphic inset ── */
+/* ── Input/select — flat, bordered ── */
 input, select, textarea {
-  background-color: var(--bg-card) !important;
+  background-color: #ffffff !important;
   color: var(--text-primary) !important;
-  border: none !important;
-  border-radius: 10px !important;
-  box-shadow: inset 3px 3px 6px var(--shadow-dark), inset -3px -3px 6px var(--shadow-light) !important;
+  border: 1px solid var(--border2) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
   font-weight: 500 !important;
 }
 input::placeholder, textarea::placeholder { color: var(--text-muted) !important; }
 input:focus, select:focus, textarea:focus {
   outline: none !important;
-  box-shadow: inset 3px 3px 6px var(--shadow-dark), inset -3px -3px 6px var(--shadow-light),
-              0 0 0 2px rgba(var(--accent-rgb), 0.25) !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.15) !important;
 }

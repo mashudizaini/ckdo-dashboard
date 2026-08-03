@@ -174,7 +174,7 @@ const AUTO_OPTS = [
 
 function AutoRefreshSelector({ value, onChange }) {
   return (
-    <div style={{ display: "flex", background: "#e8edf5", borderRadius: 10, padding: 3, boxShadow: "inset 2px 2px 6px #c5cad8, inset -2px -2px 6px #ffffff", gap: 2 }}>
+    <div style={{ display: "flex", background: "#f1f5f9", borderRadius: 10, padding: 3, boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)", gap: 2 }}>
       {AUTO_OPTS.map(o => (
         <button key={o.v} onClick={() => onChange(o.v)} style={{
           padding: "4px 10px", borderRadius: 7, border: "none", cursor: "pointer",
@@ -254,7 +254,7 @@ function TopProcessesPanel({ processes, loading, onRefresh }) {
         </div>
         <div className="flex items-center gap-2">
           {/* Tab selector */}
-          <div style={{ display: "flex", background: "#e8edf5", borderRadius: 9, padding: 3, boxShadow: "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff", gap: 2 }}>
+          <div style={{ display: "flex", background: "#f1f5f9", borderRadius: 9, padding: 3, boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)", gap: 2 }}>
             {[["cpu", "▲ CPU"], ["mem", "▲ Memory"]].map(([k, l]) => (
               <button key={k} onClick={() => setTab(k)} style={{
                 ...TAB_S,
@@ -269,7 +269,7 @@ function TopProcessesPanel({ processes, loading, onRefresh }) {
         </div>
       </div>
 
-      <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff" }}>
+      <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)" }}>
         <table className="w-full">
           <thead>
             <tr style={{ background: "linear-gradient(135deg,#dfe5ed,#d8dee8)" }}>
@@ -290,9 +290,9 @@ function TopProcessesPanel({ processes, loading, onRefresh }) {
                 const cpuColor = cpuNum >= 30 ? "#ef4444" : cpuNum >= 10 ? "#f59e0b" : "#22c55e";
                 const memColor = memNum >= 30 ? "#ef4444" : memNum >= 10 ? "#f59e0b" : "#22c55e";
                 return (
-                  <tr key={i} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5", transition: "background 0.12s" }}
+                  <tr key={i} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9", transition: "background 0.12s" }}
                     onMouseEnter={e => e.currentTarget.style.background = "rgba(37,99,235,0.06)"}
-                    onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f0f3f9" : "#e8edf5"}
+                    onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f8fafc" : "#f1f5f9"}
                   >
                     <td style={{ padding: "8px 13px", fontSize: 12, color: "#334155", fontWeight: 600 }}>{p.user}</td>
                     <td style={{ padding: "8px 13px", fontSize: 11, color: "#64748b", fontFamily: "monospace" }}>{p.pid}</td>
@@ -335,7 +335,7 @@ function OracleSessionsPanel({ sessions, loading, onLoad, onKill, panelRef }) {
           <Database size={13} color="#7c3aed" />
           <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.08em" }}>Oracle Sessions (v$session)</span>
           {sessions && (
-            <span style={{ fontSize: 10, color: "#64748b", background: "#e8edf5", borderRadius: 99, padding: "1px 8px", boxShadow: "inset 1px 1px 3px #c5cad8, inset -1px -1px 3px #fff" }}>
+            <span style={{ fontSize: 10, color: "#64748b", background: "#f1f5f9", borderRadius: 99, padding: "1px 8px", boxShadow: "inset 0 1px 2px rgba(15,23,42,0.06)" }}>
               {sessions.count} sessions
             </span>
           )}
@@ -344,11 +344,11 @@ function OracleSessionsPanel({ sessions, loading, onLoad, onKill, panelRef }) {
       </div>
 
       {sessions === null ? (
-        <div style={{ padding: "28px", textAlign: "center", fontSize: 12, color: "#94a3b8", background: "#f0f3f9", borderRadius: 12, boxShadow: "inset 2px 2px 6px #c5cad8, inset -2px -2px 6px #fff" }}>
+        <div style={{ padding: "28px", textAlign: "center", fontSize: 12, color: "#94a3b8", background: "#f8fafc", borderRadius: 12, boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)" }}>
           Click "Load Sessions" to view active Oracle sessions from v$session
         </div>
       ) : (
-        <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff" }}>
+        <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)" }}>
           <div style={{ overflowX: "auto" }}>
             <table className="w-full" style={{ minWidth: 760 }}>
               <thead>
@@ -367,7 +367,7 @@ function OracleSessionsPanel({ sessions, loading, onLoad, onKill, panelRef }) {
                   const isUserIO        = s.wait_class === "User I/O";
                   const isVeryLongIdle  = !isActive && idleSecs > 86400;
                   const isLongIdle      = !isActive && idleSecs > 3600;
-                  const rowBg           = isVeryLongIdle ? "rgba(239,68,68,0.05)" : isActive ? "rgba(34,197,94,0.05)" : i % 2 === 0 ? "#f0f3f9" : "#e8edf5";
+                  const rowBg           = isVeryLongIdle ? "rgba(239,68,68,0.05)" : isActive ? "rgba(34,197,94,0.05)" : i % 2 === 0 ? "#f8fafc" : "#f1f5f9";
                   const killDisabled    = isActive && isUserIO;
                   return (
                     <tr key={s.sid} style={{ background: rowBg, transition: "background 0.12s" }}
@@ -395,7 +395,7 @@ function OracleSessionsPanel({ sessions, loading, onLoad, onKill, panelRef }) {
                       <td style={{ padding: "7px 10px" }}>
                         <button onClick={() => !killDisabled && onKill(s)} disabled={killDisabled}
                           title={killDisabled ? "Session is actively doing I/O — do not kill" : `Kill SID ${s.sid}`}
-                          style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, border: "none", cursor: killDisabled ? "not-allowed" : "pointer", background: killDisabled ? "#e8edf5" : "rgba(239,68,68,0.12)", color: killDisabled ? "#94a3b8" : "#dc2626", boxShadow: killDisabled ? "none" : "1px 1px 3px rgba(239,68,68,0.2)", transition: "all 0.15s" }}
+                          style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, border: "none", cursor: killDisabled ? "not-allowed" : "pointer", background: killDisabled ? "#f1f5f9" : "rgba(239,68,68,0.12)", color: killDisabled ? "#94a3b8" : "#dc2626", boxShadow: killDisabled ? "none" : "1px 1px 3px rgba(239,68,68,0.2)", transition: "all 0.15s" }}
                         >Kill</button>
                       </td>
                     </tr>
@@ -427,7 +427,7 @@ function KillSessionModal({ session, loading, onClose, onConfirm }) {
   ];
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)" }}>
-      <div style={{ width: "100%", maxWidth: 500, borderRadius: 20, background: "#e8edf5", boxShadow: "10px 10px 30px #b0b5c3, -10px -10px 30px #ffffff" }}>
+      <div style={{ width: "100%", maxWidth: 500, borderRadius: 20, background: "#ffffff", boxShadow: "0 20px 40px rgba(15,23,42,0.16), 0 8px 20px rgba(15,23,42,0.08)" }}>
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: "#dc2626" }}>Kill Oracle Session</h3>
           <button onClick={onClose} style={{ color: "#94a3b8" }}><X size={16} /></button>
@@ -449,7 +449,7 @@ function KillSessionModal({ session, loading, onClose, onConfirm }) {
             <p style={{ fontSize: 11.5, color: "#dc2626" }}>⚠️ This will immediately terminate the session. Any uncommitted transactions will be rolled back.</p>
           </div>
           <div className="flex gap-3 justify-end">
-            <button onClick={onClose} style={{ padding: "8px 18px", fontSize: 12, fontWeight: 700, borderRadius: 10, border: "none", background: "#e8edf5", color: "#475569", cursor: "pointer", boxShadow: "3px 3px 8px #c5cad8, -3px -3px 8px #ffffff" }}>Cancel</button>
+            <button onClick={onClose} style={{ padding: "8px 18px", fontSize: 12, fontWeight: 700, borderRadius: 10, border: "none", background: "#f1f5f9", color: "#475569", cursor: "pointer", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>Cancel</button>
             <button onClick={onConfirm} disabled={loading} style={{ padding: "8px 18px", fontSize: 12, fontWeight: 700, borderRadius: 10, border: "none", background: loading ? "#94a3b8" : "#dc2626", color: "#fff", cursor: loading ? "not-allowed" : "pointer", boxShadow: loading ? "none" : "3px 3px 8px rgba(220,38,38,0.3)" }}>
               {loading ? "Killing..." : "Kill Session"}
             </button>
@@ -718,8 +718,8 @@ function ConfigModal({ initial, onClose, onSaved, onTest, testResult }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.3)", backdropFilter: "blur(4px)" }}>
       <div style={{
         width: "100%", maxWidth: 420, borderRadius: 20,
-        background: "#e8edf5",
-        boxShadow: "10px 10px 30px #b0b5c3, -10px -10px 30px #ffffff",
+        background: "#ffffff",
+        boxShadow: "0 20px 40px rgba(15,23,42,0.16), 0 8px 20px rgba(15,23,42,0.08)",
       }}>
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: "#1e293b" }}>SSH Server Configuration</h3>
@@ -795,8 +795,8 @@ function MiniChart({ title, data, dataKey, color, domain }) {
       {data.length === 0 ? (
         <div style={{
           height: 80, borderRadius: 14,
-          background: "#e8edf5",
-          boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+          background: "#f1f5f9",
+          boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)",
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
           <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>Start monitoring to view charts</span>
@@ -804,8 +804,8 @@ function MiniChart({ title, data, dataKey, color, domain }) {
       ) : (
         <div style={{
           height: 80, borderRadius: 14, overflow: "hidden",
-          background: "#e8edf5",
-          boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+          background: "#f1f5f9",
+          boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)",
         }}>
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -30 }}>
@@ -940,15 +940,15 @@ function TablespaceSection() {
                 style={{
                   display: "inline-flex", alignItems: "center", gap: 4,
                   padding: "4px 9px", borderRadius: 8, border: "none",
-                  background: "#e8edf5",
-                  boxShadow: "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff",
+                  background: "#f1f5f9",
+                  boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
                   color: "#2563eb", fontSize: 11, fontWeight: 700,
                   cursor: "pointer", whiteSpace: "nowrap",
                   transition: "box-shadow 0.15s ease",
                 }}
-                onMouseDown={e => e.currentTarget.style.boxShadow = "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff"}
-                onMouseUp={e => e.currentTarget.style.boxShadow = "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff"}
-                onMouseLeave={e => e.currentTarget.style.boxShadow = "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff"}
+                onMouseDown={e => e.currentTarget.style.boxShadow = "inset 0 1px 3px rgba(15,23,42,0.07)"}
+                onMouseUp={e => e.currentTarget.style.boxShadow = "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)"}
+                onMouseLeave={e => e.currentTarget.style.boxShadow = "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)"}
               >
                 <PlusCircle size={11} /> Add File
               </button>
@@ -958,15 +958,15 @@ function TablespaceSection() {
                 style={{
                   display: "inline-flex", alignItems: "center", gap: 4,
                   padding: "4px 9px", borderRadius: 8, border: "none",
-                  background: "#e8edf5",
-                  boxShadow: "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff",
+                  background: "#f1f5f9",
+                  boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
                   color: "#7c3aed", fontSize: 11, fontWeight: 700,
                   cursor: "pointer", whiteSpace: "nowrap",
                   transition: "box-shadow 0.15s ease",
                 }}
-                onMouseDown={e => e.currentTarget.style.boxShadow = "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff"}
-                onMouseUp={e => e.currentTarget.style.boxShadow = "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff"}
-                onMouseLeave={e => e.currentTarget.style.boxShadow = "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff"}
+                onMouseDown={e => e.currentTarget.style.boxShadow = "inset 0 1px 3px rgba(15,23,42,0.07)"}
+                onMouseUp={e => e.currentTarget.style.boxShadow = "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)"}
+                onMouseLeave={e => e.currentTarget.style.boxShadow = "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)"}
               >
                 <Maximize2 size={11} /> Resize File
               </button>
@@ -1065,8 +1065,8 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
     }
   };
 
-  const neu    = { background: "#e8edf5" };
-  const shadow = "10px 10px 30px #b0b5c3, -10px -10px 30px #ffffff";
+  const neu    = { background: "#ffffff" };
+  const shadow = "0 20px 40px rgba(15,23,42,0.16), 0 8px 20px rgba(15,23,42,0.08)";
   const divider= { borderBottom: "1px solid rgba(0,0,0,0.06)" };
 
   return (
@@ -1100,8 +1100,8 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
                 </p>
                 <div style={{
                   borderRadius: 10, padding: "10px 12px",
-                  background: "#e8edf5",
-                  boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+                  background: "#f1f5f9",
+                  boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)",
                   maxHeight: 100, overflowY: "auto",
                 }}>
                   {loadingFiles ? (
@@ -1179,8 +1179,8 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
                   </p>
                   <div style={{
                     borderRadius: 10, padding: "10px 12px",
-                    background: "#e8edf5",
-                    boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+                    background: "#f1f5f9",
+                    boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)",
                     fontSize: 11, fontFamily: "monospace", color: "#1e40af",
                     wordBreak: "break-all", lineHeight: 1.6,
                   }}>
@@ -1228,8 +1228,8 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
                 </p>
                 <div style={{
                   borderRadius: 10, padding: "12px 14px",
-                  background: "#e8edf5",
-                  boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+                  background: "#f1f5f9",
+                  boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)",
                   fontSize: 12, fontFamily: "monospace", color: "#1e40af",
                   wordBreak: "break-all", lineHeight: 1.7,
                 }}>
@@ -1247,8 +1247,8 @@ function AddDatafileModal({ tablespace, onClose, onSuccess }) {
                 ].map(([k, v]) => (
                   <div key={k} style={{
                     borderRadius: 8, padding: "8px 12px",
-                    background: "#e8edf5",
-                    boxShadow: "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff",
+                    background: "#f1f5f9",
+                    boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)",
                   }}>
                     <p style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>{k}</p>
                     <p style={{ fontSize: 11.5, color: "#1e293b", fontWeight: 600 }}>{v}</p>
@@ -1343,8 +1343,8 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
     }
   };
 
-  const neu    = { background: "#e8edf5" };
-  const shadow = "10px 10px 30px #b0b5c3, -10px -10px 30px #ffffff";
+  const neu    = { background: "#ffffff" };
+  const shadow = "0 20px 40px rgba(15,23,42,0.16), 0 8px 20px rgba(15,23,42,0.08)";
   const divider= { borderBottom: "1px solid rgba(0,0,0,0.06)" };
 
   return (
@@ -1390,10 +1390,10 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
                           onClick={() => setSelected(f)}
                           style={{
                             borderRadius: 10, padding: "10px 14px",
-                            background: "#e8edf5",
+                            background: "#f1f5f9",
                             boxShadow: isSelected
-                              ? "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff"
-                              : "3px 3px 7px #c5cad8, -3px -3px 7px #ffffff",
+                              ? "inset 0 2px 5px rgba(15,23,42,0.09)"
+                              : "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
                             cursor: "pointer",
                             border: isSelected ? "1.5px solid #7c3aed" : "1.5px solid transparent",
                             transition: "all 0.15s ease",
@@ -1402,7 +1402,7 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <div style={{
                               width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
-                              background: isSelected ? "#7c3aed" : "#c5cad8",
+                              background: isSelected ? "#7c3aed" : "#cbd5e1",
                               boxShadow: isSelected ? "0 0 5px #7c3aed" : "none",
                               transition: "all 0.15s ease",
                             }} />
@@ -1453,8 +1453,8 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
               {selected && addNum > 0 && (
                 <div style={{
                   borderRadius: 12, padding: "12px 14px",
-                  background: "#e8edf5",
-                  boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+                  background: "#f1f5f9",
+                  boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)",
                   display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10,
                 }}>
                   {[
@@ -1479,8 +1479,8 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
                   </p>
                   <div style={{
                     borderRadius: 10, padding: "10px 12px",
-                    background: "#e8edf5",
-                    boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+                    background: "#f1f5f9",
+                    boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)",
                     fontSize: 11, fontFamily: "monospace", color: "#5b21b6",
                     wordBreak: "break-all", lineHeight: 1.6,
                   }}>
@@ -1528,8 +1528,8 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
                 </p>
                 <div style={{
                   borderRadius: 10, padding: "12px 14px",
-                  background: "#e8edf5",
-                  boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+                  background: "#f1f5f9",
+                  boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)",
                   fontSize: 12, fontFamily: "monospace", color: "#5b21b6",
                   wordBreak: "break-all", lineHeight: 1.7,
                 }}>
@@ -1549,8 +1549,8 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
                 ].map(([k, v]) => (
                   <div key={k} style={{
                     borderRadius: 8, padding: "8px 12px",
-                    background: "#e8edf5",
-                    boxShadow: "inset 2px 2px 5px #c5cad8, inset -2px -2px 5px #ffffff",
+                    background: "#f1f5f9",
+                    boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)",
                   }}>
                     <p style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>{k}</p>
                     <p style={{ fontSize: 11.5, color: "#1e293b", fontWeight: 600, wordBreak: "break-all" }}>{v}</p>
@@ -1684,8 +1684,8 @@ function DiskUsageSection() {
           {chartData.length > 0 && (
             <div style={{
               borderRadius: 16, padding: 16,
-              background: "#e8edf5",
-              boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+              background: "#f1f5f9",
+              boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)",
             }}>
               <p style={{ fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 12 }}>
                 {DISK_SERVERS_CFG.find(s => s.key === activeTab)?.label} — Disk Usage per Mount Point (GB)
@@ -1723,7 +1723,7 @@ function DiskUsageSection() {
           {/* Detail table */}
           <div style={{
             borderRadius: 16, overflow: "hidden",
-            boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+            boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)",
           }}>
             <div style={{
               padding: "10px 16px",
@@ -1753,11 +1753,11 @@ function DiskUsageSection() {
                     <tr><td colSpan={7} style={{ padding: "40px 14px", textAlign: "center", color: "#94a3b8", fontSize: 12 }}>No mount points found</td></tr>
                   ) : rows.map((r, i) => (
                     <tr key={i} style={{
-                      background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5",
+                      background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9",
                       transition: "background 0.15s ease",
                     }}
                       onMouseEnter={e => e.currentTarget.style.background = "rgba(37,99,235,0.06)"}
-                      onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f0f3f9" : "#e8edf5"}
+                      onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f8fafc" : "#f1f5f9"}
                     >
                       <td style={{ padding: "10px 14px", color: "#1e293b", fontFamily: "monospace", fontWeight: 700, fontSize: 12.5 }}>{r.mountpoint}</td>
                       <td style={{ padding: "10px 14px", color: "#64748b", fontFamily: "monospace", fontSize: 11.5, fontWeight: 500, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.filesystem}>{r.filesystem}</td>
@@ -1781,9 +1781,9 @@ function DiskUsageSection() {
 /* ─── Section: Database Browser ───────────────────── */
 
 const DB_NEU = {
-  bg: "#e8edf5",
-  out: "3px 3px 6px #c5cad8, -3px -3px 6px #ffffff",
-  in:  "inset 3px 3px 6px #c5cad8, inset -3px -3px 6px #ffffff",
+  bg: "#f1f5f9",
+  out: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
+  in:  "inset 0 1px 3px rgba(15,23,42,0.07)",
 };
 
 function DatabaseBrowserSection() {
@@ -1931,7 +1931,7 @@ function DbObjectsBrowser() {
       <div style={{ minHeight: 400 }}>
         {!selected ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 400, background: DB_NEU.bg, borderRadius: 16, boxShadow: DB_NEU.in }}>
-            <Database size={28} color="#c5cad8" />
+            <Database size={28} color="#cbd5e1" />
             <p style={{ fontSize: 12.5, color: "#94a3b8", marginTop: 10, fontWeight: 500 }}>Select an object on the left to view its structure and data.</p>
           </div>
         ) : selected.type === "table" || selected.type === "materialized_view" || selected.type === "view" ? (
@@ -2050,7 +2050,7 @@ function DbTableDetail({ schema, name, meta }) {
                 </thead>
                 <tbody>
                   {structure.columns.map((c, i) => (
-                    <tr key={c.column_name} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                    <tr key={c.column_name} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
                       <td style={{ padding: "7px 12px", fontWeight: 700, color: "#1e293b", fontFamily: "monospace" }}>
                         {c.is_primary_key && <Key size={10} color="#d97706" style={{ display: "inline", marginRight: 5, verticalAlign: -1 }} />}
                         {c.column_name}
@@ -2115,7 +2115,7 @@ function DbTableDetail({ schema, name, meta }) {
                   </thead>
                   <tbody>
                     {dataResult.rows.map((row, i) => (
-                      <tr key={i} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                      <tr key={i} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
                         {row.map((cell, j) => (
                           <td key={j} style={{ padding: "6px 10px", color: "#334155", fontFamily: "monospace", whiteSpace: "nowrap", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }} title={cell == null ? "" : String(cell)}>
                             {cell === null ? <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>null</span> : String(cell)}
@@ -2240,7 +2240,7 @@ function DbSqlConsole() {
             </thead>
             <tbody>
               {result.rows.map((row, i) => (
-                <tr key={i} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+                <tr key={i} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
                   {row.map((cell, j) => (
                     <td key={j} style={{ padding: "6px 10px", color: "#334155", fontFamily: "monospace", whiteSpace: "nowrap", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis" }} title={cell == null ? "" : String(cell)}>
                       {cell === null ? <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>null</span> : String(cell)}
@@ -2307,7 +2307,7 @@ function DbAuditLog() {
             ) : logs.length === 0 ? (
               <tr><td colSpan={7} style={{ padding: "30px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No queries executed yet.</td></tr>
             ) : logs.map((l, i) => (
-              <tr key={l.id} style={{ background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5" }}>
+              <tr key={l.id} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
                 <td style={{ padding: "7px 12px", color: "#64748b", whiteSpace: "nowrap" }}>{fmtTime(l.executed_at)}</td>
                 <td style={{ padding: "7px 12px", color: "#334155", fontWeight: 600, whiteSpace: "nowrap" }}>{l.executed_by}</td>
                 <td style={{ padding: "7px 12px" }}>
@@ -2374,9 +2374,9 @@ function WorkflowErrorSection() {
 function SectionCard({ title, subtitle, action, children }) {
   return (
     <div style={{
-      background: "#e8edf5",
+      background: "#f1f5f9",
       borderRadius: 20,
-      boxShadow: "6px 6px 14px #c5cad8, -6px -6px 14px #ffffff",
+      boxShadow: "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)",
     }}>
       <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
         <div>
@@ -2395,10 +2395,10 @@ function ActionBtn({ icon: Icon, label, color, onClick }) {
     <button
       onClick={onClick}
       className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs text-white transition-all ${color}`}
-      style={{ fontWeight: 700, letterSpacing: "0.02em", boxShadow: "3px 3px 6px #c5cad8, -2px -2px 4px #ffffff" }}
+      style={{ fontWeight: 700, letterSpacing: "0.02em", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}
       onMouseDown={e => e.currentTarget.style.boxShadow = "inset 2px 2px 4px rgba(0,0,0,0.15)"}
-      onMouseUp={e => e.currentTarget.style.boxShadow = "3px 3px 6px #c5cad8, -2px -2px 4px #ffffff"}
-      onMouseLeave={e => e.currentTarget.style.boxShadow = "3px 3px 6px #c5cad8, -2px -2px 4px #ffffff"}
+      onMouseUp={e => e.currentTarget.style.boxShadow = "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)"}
+      onMouseLeave={e => e.currentTarget.style.boxShadow = "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)"}
     >
       <Icon size={13} />{label}
     </button>
@@ -2408,7 +2408,7 @@ function ActionBtn({ icon: Icon, label, color, onClick }) {
 function MetricCard({ label, value, sub, gradient }) {
   return (
     <div className={`rounded-xl bg-gradient-to-br ${gradient} p-5 text-center`}
-      style={{ color: "#ffffff", boxShadow: "4px 4px 10px #c5cad8, -4px -4px 10px #ffffff", borderRadius: 16 }}>
+      style={{ color: "#ffffff", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)", borderRadius: 16 }}>
       <p style={{ fontSize: 11, fontWeight: 600, opacity: 0.9, marginBottom: 6 }}>{label}</p>
       <p style={{ fontSize: 24, fontWeight: 800 }}>{value}</p>
       {sub && <p style={{ fontSize: 11, opacity: 0.8, marginTop: 4, fontWeight: 500 }}>{sub}</p>}
@@ -2420,8 +2420,8 @@ function ChartPlaceholder({ label, className = "" }) {
   return (
     <div className={className} style={{
       height: 112, borderRadius: 14,
-      background: "#e8edf5",
-      boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+      background: "#f1f5f9",
+      boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)",
       display: "flex", alignItems: "center", justifyContent: "center",
     }}>
       <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>{label}</span>
@@ -2433,7 +2433,7 @@ function DataTable({ headers, rows = [], placeholder }) {
   return (
     <div style={{
       borderRadius: 16,
-      boxShadow: "inset 3px 3px 8px #c5cad8, inset -3px -3px 8px #ffffff",
+      boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)",
       overflow: "hidden",
     }}>
       <table className="w-full text-sm">
@@ -2460,11 +2460,11 @@ function DataTable({ headers, rows = [], placeholder }) {
           ) : (
             rows.map((row, i) => (
               <tr key={i} style={{
-                background: i % 2 === 0 ? "#f0f3f9" : "#e8edf5",
+                background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9",
                 transition: "background 0.15s ease",
               }}
                 onMouseEnter={e => e.currentTarget.style.background = "rgba(37,99,235,0.06)"}
-                onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f0f3f9" : "#e8edf5"}
+                onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f8fafc" : "#f1f5f9"}
               >
                 {row.map((cell, j) => (
                   <td key={j} style={{
@@ -2490,8 +2490,8 @@ function UsageBar({ pct }) {
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
       <div style={{
         width: 80, height: 7, borderRadius: 99,
-        background: "#e8edf5",
-        boxShadow: "inset 2px 2px 4px #c5cad8, inset -2px -2px 4px #ffffff",
+        background: "#f1f5f9",
+        boxShadow: "inset 0 1px 2px rgba(15,23,42,0.06)",
       }}>
         <div style={{ height: "100%", width: `${pct}%`, borderRadius: 99, background: barColor, transition: "width 0.3s ease" }} />
       </div>

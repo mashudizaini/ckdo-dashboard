@@ -6,7 +6,7 @@ export default function Layout() {
   return (
     <div
       className="flex h-screen overflow-hidden"
-      style={{ background: "#e8edf5", color: "#1e293b" }}
+      style={{ background: "var(--bg-main)", color: "var(--text-primary)" }}
     >
       <Sidebar />
       <main className="flex-1 overflow-y-auto">
