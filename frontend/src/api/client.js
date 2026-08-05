@@ -11,8 +11,18 @@
 import axios from "axios";
 import { useAuthStore } from "@/store/authStore";
 
+// VITE_API_URL is a fixed build-time string (currently "http://..." on the
+// dev server) — same mixed-content trap authStore.js already documents and
+// fixes for Keycloak: an https:// page calling out to a hardcoded http://
+// endpoint gets blocked outright (Chrome logs it as "Mixed Content" and the
+// request never leaves the browser). Swap in whichever scheme the page
+// actually loaded with, so every API call works consistently under either.
+// No-op when VITE_API_URL is unset (falls back to the already-relative
+// "/api/v1", which has no scheme prefix for the regex to match anyway).
+const apiBaseURL = (import.meta.env.VITE_API_URL || "/api/v1").replace(/^https?:/, window.location.protocol);
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "/api/v1",
+  baseURL: apiBaseURL,
   timeout: 30000,
   headers: { "Content-Type": "application/json" },
 });
