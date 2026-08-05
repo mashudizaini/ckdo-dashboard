@@ -75,26 +75,50 @@
   background-color: var(--bg-card-hover) !important;
 }
 
-/* ── Tab / card variants — nested panel, flat ── */
-.bg-gray-800\/60,
-.bg-gray-800\/50,
-.bg-gray-800\/40 {
+/* ── Opacity variants (bg-gray-9xx/NN, any percentage) — attribute-selector
+   match instead of enumerating each percentage by hand, which is how this
+   went stale before: only /60, /50, /40 of bg-gray-800 were ever listed,
+   so bg-gray-900/60 (used across Purchasing's chart cards, among others)
+   fell through unstyled and rendered as literal dark gray against the
+   flat-white theme everywhere else. [class^="…"] catches the class as the
+   first token, [class*=" …"] (leading space) catches it anywhere after —
+   together they match the plain class as a whole token while correctly
+   NOT matching "hover:bg-gray-800/60" (no space precedes "bg-gray-800/"
+   there, so it needs its own selector below), which a plain substring
+   match without the anchors would have wrongly caught. ── */
+[class^="bg-gray-900/"], [class*=" bg-gray-900/"] {
+  background-color: var(--bg-card) !important;
+  box-shadow: var(--card-shadow) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+}
+[class^="bg-gray-800/"], [class*=" bg-gray-800/"],
+[class^="bg-gray-700/"], [class*=" bg-gray-700/"],
+[class^="bg-gray-600/"], [class*=" bg-gray-600/"] {
   background-color: var(--bg-card2) !important;
   box-shadow: none !important;
   border: 1px solid var(--border) !important;
   border-radius: 12px !important;
 }
-.hover\:bg-gray-800\/60:hover {
-  background-color: var(--bg-card-hover) !important;
+[class^="bg-gray-950/"], [class*=" bg-gray-950/"] {
+  background-color: var(--bg-card3) !important;
+  box-shadow: none !important;
+  border: 1px solid var(--border) !important;
 }
-.bg-gray-800\/90 {
-  background-color: var(--bg-card2) !important;
+[class^="hover:bg-gray-900/"]:hover, [class*=" hover:bg-gray-900/"]:hover,
+[class^="hover:bg-gray-800/"]:hover, [class*=" hover:bg-gray-800/"]:hover,
+[class^="hover:bg-gray-700/"]:hover, [class*=" hover:bg-gray-700/"]:hover {
+  background-color: var(--bg-card-hover) !important;
 }
 
 /* ── Borders — real, visible (crisp card edges instead of shadow-only) ── */
 .border-gray-800  { border-color: var(--border) !important; }
 .border-gray-700  { border-color: var(--border) !important; }
 .border-gray-600  { border-color: var(--border2) !important; }
+[class^="border-gray-800/"], [class*=" border-gray-800/"],
+[class^="border-gray-700/"], [class*=" border-gray-700/"] {
+  border-color: var(--border) !important;
+}
 .hover\:border-gray-700:hover { border-color: var(--border2) !important; }
 .hover\:border-gray-600:hover { border-color: var(--accent) !important; }
 
