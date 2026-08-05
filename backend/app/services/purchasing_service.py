@@ -294,9 +294,28 @@ class PurchasingService:
                                         ON buyer_p.person_id     = poh.agent_id
                                        AND SYSDATE BETWEEN buyer_p.effective_start_date
                                                         AND buyer_p.effective_end_date
-        LEFT JOIN xxckdo_manufacturer_master mfr
-                                        ON mfr.item_id           = msi.inventory_item_id
-                                       AND mfr.organization_id   = msi.organization_id
+        -- Manufacturer/country-of-origin is a property of the ITEM, not of
+        -- which org a given PO happened to be raised in — matching on
+        -- organization_id too (as this used to) meant a Manufacturer
+        -- Master row entered under one org silently failed to link to
+        -- Purchase History rows for the same item under a different org,
+        -- which is exactly why newly-added data "didn't show up." Joins by
+        -- item_id alone now. Deduplicated to one row per item_id (most
+        -- recently updated wins) so a leftover pre-existing org-scoped
+        -- duplicate for the same item can't fan out a PO line into
+        -- multiple result rows.
+        LEFT JOIN (
+            SELECT item_id, manufacturer_name, country_of_origin
+            FROM (
+                SELECT item_id, manufacturer_name, country_of_origin,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY item_id
+                           ORDER BY NVL(last_update_date, creation_date) DESC
+                       ) AS rn
+                FROM xxckdo_manufacturer_master
+            )
+            WHERE rn = 1
+        ) mfr ON mfr.item_id = msi.inventory_item_id
         LEFT JOIN hr_all_organization_units hou
                                         ON hou.organization_id   = msi.organization_id
         LEFT JOIN fnd_lookup_values_vl  lv_mt

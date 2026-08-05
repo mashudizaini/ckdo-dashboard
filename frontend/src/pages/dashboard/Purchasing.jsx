@@ -2528,7 +2528,6 @@ function PriceDetailTable({ tableRows, years }) {
 const MFR_COLS = [
   { key: "item_code",         label: "Item Code" },
   { key: "item_description",  label: "Item Description" },
-  { key: "organization_id",   label: "Org ID",       numeric: true },
   { key: "manufacturer_name", label: "Manufacturer" },
   { key: "country_of_origin", label: "Country" },
   { key: "created_by",        label: "Created By" },
@@ -2539,7 +2538,6 @@ const MFR_PAGE_SIZE = 10;
 
 function ManufacturerMasterSection() {
   const [data,       setData]       = useState([]);
-  const [orgs,       setOrgs]       = useState([]);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState(null);
   const [showForm,   setShowForm]   = useState(false);
@@ -2548,8 +2546,11 @@ function ManufacturerMasterSection() {
   const [sort,       setSort]       = useState({ key: null, dir: "asc" });
   const [page,       setPage]       = useState(1);
 
+  // No Organization filter — manufacturer/country-of-origin is a property
+  // of the item, not of which Oracle org a PO happened to be raised in
+  // (see the join fix in purchasing_service.py's _PH_FROM).
   const [f, setF] = useState({
-    org_id: "", item_code: "", item_desc: "", manufacturer_name: "", country_of_origin: "",
+    item_code: "", item_desc: "", manufacturer_name: "", country_of_origin: "",
   });
 
   const toggleSort = (key) => {
@@ -2574,7 +2575,6 @@ function ManufacturerMasterSection() {
     setLoading(true); setError(null);
     try {
       const p = {};
-      if (filters.org_id)            p.org_id            = filters.org_id;
       if (filters.item_code)         p.item_code         = filters.item_code;
       if (filters.item_desc)         p.item_desc         = filters.item_desc;
       if (filters.manufacturer_name) p.manufacturer_name = filters.manufacturer_name;
@@ -2587,14 +2587,11 @@ function ManufacturerMasterSection() {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => {
-    loadList();
-    purchasingApi.getOrganizations().then(r => { if (r.success) setOrgs(r.data ?? []); }).catch(() => {});
-  }, []); // eslint-disable-line
+  useEffect(() => { loadList(); }, []); // eslint-disable-line
 
   const handleSearch = () => { setPage(1); loadList(f); };
   const handleReset = () => {
-    const empty = { org_id: "", item_code: "", item_desc: "", manufacturer_name: "", country_of_origin: "" };
+    const empty = { item_code: "", item_desc: "", manufacturer_name: "", country_of_origin: "" };
     setF(empty); setPage(1); loadList(empty);
   };
 
@@ -2615,13 +2612,7 @@ function ManufacturerMasterSection() {
     <>
       {/* Filter Panel */}
       <div className="rounded-xl border border-gray-800 bg-gray-900 p-4 mb-3">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-          <Field label="Organization">
-            <select className={SELECT} value={f.org_id} onChange={e => setF(p => ({ ...p, org_id: e.target.value }))}>
-              <option value="">— All —</option>
-              {orgs.map(o => <option key={o.organization_id} value={o.organization_id}>{o.name}</option>)}
-            </select>
-          </Field>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
           <Field label="Item Code">
             <input className={INPUT} value={f.item_code} onChange={e => setF(p => ({ ...p, item_code: e.target.value }))} placeholder="Partial search..." />
           </Field>
@@ -2674,7 +2665,7 @@ function ManufacturerMasterSection() {
             <tbody>
               {data.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-3 py-10 text-center text-xs text-gray-600">
+                  <td colSpan={7} className="px-3 py-10 text-center text-xs text-gray-600">
                     {loading ? "Loading data..." : "No data yet. Click Add to create a record."}
                   </td>
                 </tr>
@@ -2683,7 +2674,6 @@ function ManufacturerMasterSection() {
                   <tr key={row.manufacturer_id} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
                     <td className="px-3 py-2.5 text-xs font-mono text-blue-400 whitespace-nowrap">{row.item_code}</td>
                     <td className="px-3 py-2.5 text-xs text-gray-300 max-w-[200px] truncate" title={row.item_description}>{row.item_description}</td>
-                    <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">{row.organization_id}</td>
                     <td className="px-3 py-2.5 text-xs text-gray-200 font-medium whitespace-nowrap">{row.manufacturer_name}</td>
                     <td className="px-3 py-2.5 text-xs text-gray-400 whitespace-nowrap">{row.country_of_origin}</td>
                     <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">{row.created_by}</td>
@@ -2732,9 +2722,7 @@ function ManufacturerMasterSection() {
 /* ─── Manufacturer Input Form (Modal) ────────────── */
 
 function ManufacturerForm({ editing, onClose, onSaved }) {
-  const [orgs,        setOrgs]        = useState([]);
   const [items,       setItems]       = useState([]);
-  const [orgLoading,  setOrgLoading]  = useState(true);
   const [itemLoading, setItemLoading] = useState(false);
   const [saving,      setSaving]      = useState(false);
   const [error,       setError]       = useState(null);
@@ -2751,13 +2739,24 @@ function ManufacturerForm({ editing, onClose, onSaved }) {
     country_of_origin:  editing?.country_of_origin ?? "",
   });
 
-  // Load organizations
+  // Manufacturer/country-of-origin is a property of the item, not of which
+  // Oracle org it happens to be stocked in — org is no longer a
+  // user-facing concept here (was previously a required dropdown, and
+  // records saved under one org silently failed to link to Purchase
+  // History for the same item under a different org). Still needed
+  // under the hood purely because MTL_SYSTEM_ITEMS_B — the table the item
+  // search below queries — is itself org-scoped in Oracle, so picking
+  // *some* org to search against is unavoidable; just picks the first
+  // one automatically instead of asking.
   useEffect(() => {
+    if (editing?.organization_id) return; // editing an existing row — keep its own org
     purchasingApi.getOrganizations()
-      .then((r) => { if (r.success) setOrgs(r.data ?? []); })
-      .catch(() => {})
-      .finally(() => setOrgLoading(false));
-  }, []);
+      .then((r) => {
+        const first = r.success ? r.data?.[0]?.organization_id : null;
+        if (first) setForm((p) => ({ ...p, organization_id: first }));
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line
 
   const searchItems = (orgId, search) => {
     if (!orgId) return;
@@ -2769,13 +2768,6 @@ function ManufacturerForm({ editing, onClose, onSaved }) {
         if (r.success) { setItems(r.data ?? []); setShowDrop(true); }
       } finally { setItemLoading(false); }
     }, 200);
-  };
-
-  const handleOrgChange = (e) => {
-    setForm((p) => ({ ...p, organization_id: e.target.value, item_id: "", item_code: "", item_description: "" }));
-    setItems([]);
-    setItemSearch("");
-    setShowDrop(false);
   };
 
   const handleItemInput = (e) => {
@@ -2799,8 +2791,12 @@ function ManufacturerForm({ editing, onClose, onSaved }) {
   };
 
   const handleSave = async () => {
-    if (!form.organization_id || !form.item_code.trim() || !form.manufacturer_name.trim()) {
-      setError("Organization, Item Code, and Manufacturer Name are required");
+    if (!form.item_code.trim() || !form.manufacturer_name.trim()) {
+      setError("Item Code and Manufacturer Name are required");
+      return;
+    }
+    if (!form.organization_id) {
+      setError("Still preparing the item search — try again in a moment");
       return;
     }
     setSaving(true); setError(null);
@@ -2834,24 +2830,6 @@ function ManufacturerForm({ editing, onClose, onSaved }) {
         </div>
 
         <div className="p-5 space-y-4 overflow-visible">
-          {/* Organization dropdown */}
-          <Field label="Organization *">
-            {orgLoading ? (
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Loader2 size={12} className="animate-spin" /> Loading organizations...
-              </div>
-            ) : (
-              <select value={form.organization_id} onChange={handleOrgChange} className={SELECT}>
-                <option value="">-- Select Organization --</option>
-                {orgs.map((o) => (
-                  <option key={o.organization_id} value={o.organization_id}>
-                    {o.name}
-                  </option>
-                ))}
-              </select>
-            )}
-          </Field>
-
           {/* Item Code searchable LOV */}
           <Field label="Item Code *">
             <div className="relative">
@@ -2862,7 +2840,7 @@ function ManufacturerForm({ editing, onClose, onSaved }) {
                   onChange={handleItemInput}
                   onFocus={() => { if (items.length > 0) setShowDrop(true); }}
                   onBlur={() => setTimeout(() => setShowDrop(false), 150)}
-                  placeholder={form.organization_id ? "Type item code to search..." : "Select organization first"}
+                  placeholder={form.organization_id ? "Type item code to search..." : "Loading…"}
                   disabled={!form.organization_id}
                 />
                 <span className="absolute right-3 top-2 text-gray-600">
