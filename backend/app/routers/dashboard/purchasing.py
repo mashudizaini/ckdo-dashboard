@@ -110,8 +110,8 @@ async def get_active_suppliers(
 async def ph_detail(
     org_id:              Optional[int]   = Query(None),
     exchange_rate_type:  Optional[str]   = Query("Corporate"),
-    year_from:           Optional[int]   = Query(None),
-    year_to:             Optional[int]   = Query(None),
+    date_from:           Optional[str]   = Query(None, description="YYYY-MM-DD, based on PO Date"),
+    date_to:             Optional[str]   = Query(None, description="YYYY-MM-DD, based on PO Date"),
     item_code:           Optional[str]   = Query(None),
     item_desc:           Optional[str]   = Query(None),
     vendor_name:         Optional[str]   = Query(None),
@@ -125,7 +125,7 @@ async def ph_detail(
     user: CurrentUser = Depends(require_role(Roles.PURCHASING)),
 ):
     filters = dict(org_id=org_id, exchange_rate_type=exchange_rate_type,
-                   year_from=year_from, year_to=year_to, item_code=item_code,
+                   date_from=date_from, date_to=date_to, item_code=item_code,
                    item_desc=item_desc, vendor_name=vendor_name, manufacturer=manufacturer,
                    country_of_origin=country_of_origin, category=category,
                    currency_code=currency_code, material_type=material_type,
@@ -137,8 +137,8 @@ async def ph_detail(
 async def ph_by_item(
     org_id:              Optional[int]   = Query(None),
     exchange_rate_type:  Optional[str]   = Query("Corporate"),
-    year_from:           Optional[int]   = Query(None),
-    year_to:             Optional[int]   = Query(None),
+    date_from:           Optional[str]   = Query(None, description="YYYY-MM-DD, based on PO Date"),
+    date_to:             Optional[str]   = Query(None, description="YYYY-MM-DD, based on PO Date"),
     item_code:           Optional[str]   = Query(None),
     item_desc:           Optional[str]   = Query(None),
     vendor_name:         Optional[str]   = Query(None),
@@ -152,7 +152,7 @@ async def ph_by_item(
     user: CurrentUser = Depends(require_role(Roles.PURCHASING)),
 ):
     filters = dict(org_id=org_id, exchange_rate_type=exchange_rate_type,
-                   year_from=year_from, year_to=year_to, item_code=item_code,
+                   date_from=date_from, date_to=date_to, item_code=item_code,
                    item_desc=item_desc, vendor_name=vendor_name, manufacturer=manufacturer,
                    country_of_origin=country_of_origin, category=category,
                    currency_code=currency_code, material_type=material_type,
@@ -164,8 +164,8 @@ async def ph_by_item(
 async def ph_by_supplier(
     org_id:              Optional[int]   = Query(None),
     exchange_rate_type:  Optional[str]   = Query("Corporate"),
-    year_from:           Optional[int]   = Query(None),
-    year_to:             Optional[int]   = Query(None),
+    date_from:           Optional[str]   = Query(None, description="YYYY-MM-DD, based on PO Date"),
+    date_to:             Optional[str]   = Query(None, description="YYYY-MM-DD, based on PO Date"),
     item_code:           Optional[str]   = Query(None),
     item_desc:           Optional[str]   = Query(None),
     vendor_name:         Optional[str]   = Query(None),
@@ -179,7 +179,7 @@ async def ph_by_supplier(
     user: CurrentUser = Depends(require_role(Roles.PURCHASING)),
 ):
     filters = dict(org_id=org_id, exchange_rate_type=exchange_rate_type,
-                   year_from=year_from, year_to=year_to, item_code=item_code,
+                   date_from=date_from, date_to=date_to, item_code=item_code,
                    item_desc=item_desc, vendor_name=vendor_name, manufacturer=manufacturer,
                    country_of_origin=country_of_origin, category=category,
                    currency_code=currency_code, material_type=material_type,

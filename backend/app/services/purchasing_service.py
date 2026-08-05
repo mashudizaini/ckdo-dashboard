@@ -261,14 +261,25 @@ class PurchasingService:
                                         AND lv_mt.lookup_type         = 'CKDO_MTRL_TYPE_DIRECT_INDIRECT'
     """
 
-    _PH_WHERE = """
+    def _ph_where(self, category_clause: str = "1=1") -> str:
+        """Shared WHERE clause for all Purchase History-family queries
+        (detail/by-item/by-supplier/active-suppliers/monthly-spend).
+        category_clause is injected dynamically (see _category_filter) since
+        it's now a multi-select IN(...) instead of a single '=' comparison —
+        an f-string constant can't hold a per-call bind list, so this became
+        a method instead of the plain string constant it used to be."""
+        return f"""
         poh.type_lookup_code IN ('STANDARD','BLANKET','CONTRACT')
         AND poh.authorization_status NOT IN ('CANCELLED','INCOMPLETE')
         AND NVL(pol.cancel_flag,'N') = 'N'
         AND (:p_org_id       IS NULL OR NVL(msi.organization_id, poll.ship_to_organization_id) = :p_org_id)
-        AND EXTRACT(YEAR FROM poh.creation_date) BETWEEN
-              NVL(:p_year_from, EXTRACT(YEAR FROM poh.creation_date))
-          AND NVL(:p_year_to,   EXTRACT(YEAR FROM poh.creation_date))
+        -- Date range based on PO Date (poh.creation_date) — was a
+        -- year_from/year_to whole-year filter; still accepts year_from/
+        -- year_to too (converted to a date range in _ph_params) so
+        -- Active Suppliers / Monthly Spend, which weren't asked to change
+        -- their own filter UI, keep working unmodified.
+        AND (:p_date_from IS NULL OR poh.creation_date >= TO_DATE(:p_date_from, 'YYYY-MM-DD'))
+        AND (:p_date_to   IS NULL OR poh.creation_date <  TO_DATE(:p_date_to,   'YYYY-MM-DD') + 1)
         AND (:p_item_code    IS NULL OR NVL(msi.segment1, TO_CHAR(pol.item_id)) = :p_item_code)
         AND (:p_item_desc    IS NULL
              OR UPPER(pol.item_description) LIKE UPPER('%'||:p_item_desc||'%')
@@ -276,7 +287,7 @@ class PurchasingService:
         AND (:p_vendor_name  IS NULL OR UPPER(aps.vendor_name)           LIKE UPPER('%'||:p_vendor_name||'%'))
         AND (:p_manufacturer IS NULL OR UPPER(mfr.manufacturer_name)     LIKE UPPER('%'||:p_manufacturer||'%'))
         AND (:p_country      IS NULL OR mfr.country_of_origin            = :p_country)
-        AND (:p_category     IS NULL OR NVL(mcb.segment1,'—')             = :p_category)
+        AND ({category_clause})
         AND (:p_currency     IS NULL OR poh.currency_code                = :p_currency)
         AND (:p_mat_type IS NULL OR lv_mt.tag = :p_mat_type)
         AND (:p_po_number    IS NULL OR UPPER(poh.segment1)               LIKE UPPER('%'||:p_po_number||'%'))
@@ -303,32 +314,69 @@ class PurchasingService:
     _MAT_TYPE = "lv_mt.tag"
 
     def _ph_params(self, f: dict) -> dict:
+        # Purchase History's own filter form now sends date_from/date_to
+        # directly (based on PO Date); Active Suppliers / Monthly Spend
+        # still send year_from/year_to, converted here to the same
+        # first-day/last-day-of-year date range so _ph_where's single
+        # date-range comparison covers both without branching in SQL.
+        date_from = f.get("date_from") or None
+        date_to   = f.get("date_to") or None
+        if not date_from and f.get("year_from"):
+            date_from = f"{int(f['year_from'])}-01-01"
+        if not date_to and f.get("year_to"):
+            date_to = f"{int(f['year_to'])}-12-31"
         return {
             "p_org_id":       f.get("org_id")             or None,
             "p_ert":          f.get("exchange_rate_type") or "Corporate",
-            "p_year_from":    f.get("year_from")           or None,
-            "p_year_to":      f.get("year_to")             or None,
+            "p_date_from":    date_from,
+            "p_date_to":      date_to,
             "p_item_code":    f.get("item_code")           or None,
             "p_item_desc":    f.get("item_desc")           or None,
             "p_vendor_name":  f.get("vendor_name")         or None,
             "p_manufacturer": f.get("manufacturer")        or None,
             "p_country":      f.get("country_of_origin")   or None,
-            "p_category":     f.get("category")            or None,
             "p_currency":     f.get("currency_code")       or None,
             "p_mat_type":     f.get("material_type")       or None,
             "p_po_number":    f.get("po_number")           or None,
             "p_buyer":        f.get("buyer")                or None,
         }
 
+    def _ph_year_range(self, f: dict) -> tuple[int, int]:
+        """Year span for the by-item/by-supplier pivot columns — derived
+        from date_from/date_to when present (Purchase History's own filter,
+        now a date range rather than year_from/year_to), else from
+        year_from/year_to directly (Active Suppliers / Monthly Spend)."""
+        date_from = f.get("date_from")
+        date_to   = f.get("date_to")
+        if date_from and date_to:
+            return int(str(date_from)[:4]), int(str(date_to)[:4])
+        return int(f.get("year_from") or 2020), int(f.get("year_to") or 2026)
+
+    def _category_filter(self, f: dict) -> tuple[str, dict]:
+        """Category is now a multi-select checkbox list on the Purchase
+        History frontend (was single-select) — arrives here as a
+        comma-joined string, matched exactly against each selected value."""
+        category_list = [c.strip() for c in (f.get("category") or "").split(",") if c.strip()]
+        if not category_list:
+            return "1=1", {}
+        binds = {}
+        placeholders = []
+        for i, val in enumerate(category_list):
+            key = f"p_cat_{i}"
+            placeholders.append(f":{key}")
+            binds[key] = val
+        return f"NVL(mcb.segment1,'-') IN ({','.join(placeholders)})", binds
+
     async def get_purchase_history_detail(self, filters: dict) -> dict:
         """Output 1: Individual PO line detail (like Oracle PO report)."""
+        category_clause, category_binds = self._category_filter(filters)
         sql = f"""
             SELECT
                 poh.segment1                                             AS po_number,
                 pol.line_num                                             AS line_num,
                 NVL(msi.segment1, TO_CHAR(pol.item_id))                  AS item_code,
                 NVL(msi.description, pol.item_description)               AS item_description,
-                NVL(mcb.segment1, '—')                                   AS category,
+                NVL(mcb.segment1, '-')                                   AS category,
                 NVL(msi.item_type, '—')                                  AS item_type,
                 ({self._MAT_TYPE})                                       AS material_type,
                 aps.vendor_name                                          AS supplier_name,
@@ -344,11 +392,12 @@ class PurchasingService:
                 NVL(hou.name, TO_CHAR(poll.ship_to_organization_id))     AS organization_name,
                 COALESCE(mfr.country_of_origin,'UNKNOWN')                AS country_of_origin
             FROM {self._PH_FROM}
-            WHERE {self._PH_WHERE}
+            WHERE {self._ph_where(category_clause)}
             ORDER BY poh.creation_date DESC, poh.segment1, pol.line_num
         """
         try:
-            rows = await asyncio.to_thread(self._query, sql, self._ph_params(filters))
+            params = {**self._ph_params(filters), **category_binds}
+            rows = await asyncio.to_thread(self._query, sql, params)
             return {"success": True, "count": len(rows), "data": rows}
         except Exception as e:
             logger.error("ph_detail_error", error=str(e))
@@ -356,9 +405,9 @@ class PurchasingService:
 
     async def get_purchase_history_by_item(self, filters: dict) -> dict:
         """Output 2: Per-item pivot by year — Value IDR + Qty per year."""
-        year_from = int(filters.get("year_from") or 2020)
-        year_to   = int(filters.get("year_to")   or 2026)
+        year_from, year_to = self._ph_year_range(filters)
         years     = list(range(year_from, year_to + 1))
+        category_clause, category_binds = self._category_filter(filters)
         pivot     = ",\n            ".join(
             f"SUM(CASE WHEN trx_year={y} THEN line_amount_idr ELSE 0 END) AS value_idr_{y},"
             f"\n            SUM(CASE WHEN trx_year={y} THEN line_qty ELSE 0 END) AS qty_{y}"
@@ -371,7 +420,7 @@ class PurchasingService:
                     NVL(hou.name, TO_CHAR(poll.ship_to_organization_id))     AS organization_name,
                     NVL(msi.segment1, TO_CHAR(pol.item_id))                  AS item_code,
                     NVL(msi.description, pol.item_description)               AS item_description,
-                    NVL(mcb.segment1, '—')                                   AS category,
+                    NVL(mcb.segment1, '-')                                   AS category,
                     ({self._MAT_TYPE})                                       AS material_type,
                     COALESCE(mfr.country_of_origin,'UNKNOWN')                AS country_of_origin,
                     poh.currency_code,
@@ -380,7 +429,7 @@ class PurchasingService:
                     pol.quantity * pol.unit_price * ({self._RATE_CASE})       AS line_amount_idr,
                     pol.quantity                                              AS line_qty
                 FROM {self._PH_FROM}
-                WHERE {self._PH_WHERE}
+                WHERE {self._ph_where(category_clause)}
             )
             SELECT
                 organization_id, organization_name,
@@ -393,7 +442,8 @@ class PurchasingService:
             ORDER BY item_code
         """
         try:
-            rows = await asyncio.to_thread(self._query, sql, self._ph_params(filters))
+            params = {**self._ph_params(filters), **category_binds}
+            rows = await asyncio.to_thread(self._query, sql, params)
             return {"success": True, "count": len(rows), "data": rows, "years": years}
         except Exception as e:
             logger.error("ph_by_item_error", error=str(e))
@@ -401,9 +451,9 @@ class PurchasingService:
 
     async def get_purchase_history_by_supplier(self, filters: dict) -> dict:
         """Output 3: Per supplier pivot by year."""
-        year_from = int(filters.get("year_from") or 2020)
-        year_to   = int(filters.get("year_to")   or 2026)
+        year_from, year_to = self._ph_year_range(filters)
         years     = list(range(year_from, year_to + 1))
+        category_clause, category_binds = self._category_filter(filters)
         pivot     = ",\n            ".join(
             f"SUM(CASE WHEN trx_year={y} THEN line_amount_orig ELSE 0 END) AS value_orig_{y},"
             f"\n            SUM(CASE WHEN trx_year={y} THEN line_amount_idr  ELSE 0 END) AS value_idr_{y},"
@@ -422,7 +472,7 @@ class PurchasingService:
                     COUNT(DISTINCT NVL(msi.segment1, TO_CHAR(pol.item_id))) OVER (PARTITION BY aps.vendor_name)  AS item_count,
                     COUNT(DISTINCT poh.po_header_id) OVER (PARTITION BY aps.vendor_name) AS po_count
                 FROM {self._PH_FROM}
-                WHERE {self._PH_WHERE}
+                WHERE {self._ph_where(category_clause)}
             )
             SELECT
                 supplier_name, currency_code,
@@ -437,7 +487,8 @@ class PurchasingService:
             ORDER BY supplier_name
         """
         try:
-            rows = await asyncio.to_thread(self._query, sql, self._ph_params(filters))
+            params = {**self._ph_params(filters), **category_binds}
+            rows = await asyncio.to_thread(self._query, sql, params)
             return {"success": True, "count": len(rows), "data": rows, "years": years}
         except Exception as e:
             logger.error("ph_by_supplier_error", error=str(e))
@@ -456,7 +507,7 @@ class PurchasingService:
                 aps.vendor_name                                                 AS supplier_name,
                 COUNT(DISTINCT poh.po_header_id)                               AS po_count,
                 COUNT(DISTINCT msi.inventory_item_id)                          AS item_count,
-                COUNT(DISTINCT NVL(mcb.segment1,'—'))                             AS category_count,
+                COUNT(DISTINCT NVL(mcb.segment1,'-'))                             AS category_count,
                 TO_CHAR(MAX(poh.creation_date), 'YYYY-MM-DD')                  AS last_po_date,
                 ROUND(SUM(
                     CASE WHEN ({self._MAT_TYPE}) = 'Direct Material'
@@ -471,7 +522,7 @@ class PurchasingService:
                 ROUND(SUM(pol.quantity * pol.unit_price
                           * ({self._RATE_CASE})), 0)                           AS total_idr
             FROM {self._PH_FROM}
-            WHERE {self._PH_WHERE}
+            WHERE {self._ph_where()}
             GROUP BY aps.vendor_id, aps.vendor_name
             ORDER BY total_idr DESC
         """
@@ -501,7 +552,7 @@ class PurchasingService:
                 ROUND(SUM(pol.quantity * pol.unit_price
                           * ({self._RATE_CASE})), 0)                    AS spend_idr
             FROM {self._PH_FROM}
-            WHERE {self._PH_WHERE}
+            WHERE {self._ph_where()}
             GROUP BY
                 EXTRACT(YEAR  FROM poh.creation_date),
                 EXTRACT(MONTH FROM poh.creation_date),
@@ -813,6 +864,7 @@ class PurchasingService:
         year_from = int(filters.get("year_from") or 2022)
         year_to   = int(filters.get("year_to")   or 2025)
         years     = list(range(year_from, year_to + 1))
+        category_clause, category_binds = self._category_filter(filters)
 
         sql = f"""
             SELECT
@@ -835,7 +887,7 @@ class PurchasingService:
                 ROUND(AVG(pol.unit_price), 4)                               AS avg_price_orig,
                 ROUND(AVG(pol.unit_price * ({self._RATE_CASE})), 4)         AS avg_price_idr
             FROM {self._PH_FROM}
-            WHERE {self._PH_WHERE}
+            WHERE {self._ph_where(category_clause)}
             GROUP BY
                 NVL(msi.organization_id, poll.ship_to_organization_id),
                 NVL(hou.name, TO_CHAR(poll.ship_to_organization_id)),
@@ -847,7 +899,7 @@ class PurchasingService:
                 EXTRACT(YEAR FROM poh.creation_date)
             ORDER BY aps.vendor_name, EXTRACT(YEAR FROM poh.creation_date)
         """
-        params = self._ph_params(filters)
+        params = {**self._ph_params(filters), **category_binds}
         try:
             rows = await asyncio.to_thread(self._query, sql, params)
 

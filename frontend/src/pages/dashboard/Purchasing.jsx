@@ -8,6 +8,7 @@ import {
 import * as XLSX from "xlsx";
 import {
   LineChart, Line, BarChart, Bar, Cell,
+  PieChart, Pie,
   XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
@@ -101,7 +102,7 @@ const OPEN_PR_COLS = [
   { key: "aging_days",          label: "Aging",              numeric: true },
 ];
 
-function RequestorMultiSelect({ options, selected, onChange }) {
+function CheckboxMultiSelect({ options, selected, onChange }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -284,7 +285,7 @@ function OpenPRSection() {
             <input className={INPUT} value={f.item_desc} onChange={setFld("item_desc")} placeholder="partial search…" />
           </Field>
           <Field label="Requestor">
-            <RequestorMultiSelect options={requestors} selected={f.requestor}
+            <CheckboxMultiSelect options={requestors} selected={f.requestor}
               onChange={(next) => setF(p => ({ ...p, requestor: next }))} />
           </Field>
           <Field label="Date From">
@@ -398,6 +399,11 @@ const fmtIDR = (n) => n == null ? "-" : Number(n).toLocaleString("id-ID");
 const fmtQty = (n) => n == null ? "-" : Number(n).toLocaleString();
 
 function PurchaseHistorySection() {
+  const today = new Date();
+  const pad2  = (n) => String(n).padStart(2, "0");
+  const toISO = (d) => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+  const firstOfYear = `${today.getFullYear()}-01-01`;
+
   const [orgs,       setOrgs]       = useState([]);
   const [categories, setCategories] = useState([]);
   const [currencies, setCurrencies] = useState([]);
@@ -410,9 +416,9 @@ function PurchaseHistorySection() {
 
   const [f, setF] = useState({
     org_id: "", exchange_rate_type: "Corporate",
-    year_from: CY - 1, year_to: CY,
+    date_from: firstOfYear, date_to: toISO(today),
     item_code: "", item_desc: "", vendor_name: "", manufacturer: "",
-    country_of_origin: "", category: "", currency_code: "", material_type: "",
+    country_of_origin: "", category: [], currency_code: "", material_type: "",
     po_number: "", buyer: BUYER_ALL,
   });
 
@@ -426,14 +432,14 @@ function PurchaseHistorySection() {
   const params = useMemo(() => ({
     org_id:             f.org_id             || undefined,
     exchange_rate_type: f.exchange_rate_type || "Corporate",
-    year_from:          f.year_from          || undefined,
-    year_to:            f.year_to            || undefined,
+    date_from:          f.date_from          || undefined,
+    date_to:            f.date_to            || undefined,
     item_code:          f.item_code          || undefined,
     item_desc:          f.item_desc          || undefined,
     vendor_name:        f.vendor_name        || undefined,
     manufacturer:       f.manufacturer       || undefined,
     country_of_origin:  f.country_of_origin  || undefined,
-    category:           f.category           || undefined,
+    category:           f.category.length ? f.category.join(",") : undefined,
     currency_code:      f.currency_code      || undefined,
     material_type:      f.material_type      || undefined,
     po_number:          f.po_number          || undefined,
@@ -441,7 +447,7 @@ function PurchaseHistorySection() {
   }), [f]);
 
   const handleSearch = async () => {
-    if (!f.year_from || !f.year_to) { setFilterErr("Year From and Year To are required"); return; }
+    if (!f.date_from || !f.date_to) { setFilterErr("Date From and Date To are required"); return; }
     setFilterErr(null);
     setSearched(true);
     setLoadingMap({ detail: true, "by-item": true, "by-supplier": true });
@@ -459,9 +465,9 @@ function PurchaseHistorySection() {
   };
 
   const handleReset = () => {
-    setF({ org_id: "", exchange_rate_type: "Corporate", year_from: CY - 1, year_to: CY,
+    setF({ org_id: "", exchange_rate_type: "Corporate", date_from: firstOfYear, date_to: toISO(today),
            item_code: "", item_desc: "", vendor_name: "", manufacturer: "",
-           country_of_origin: "", category: "", currency_code: "", material_type: "",
+           country_of_origin: "", category: [], currency_code: "", material_type: "",
            po_number: "", buyer: BUYER_ALL });
     setSearched(false); setResults({ detail: null, "by-item": null, "by-supplier": null }); setFilterErr(null);
   };
@@ -486,11 +492,11 @@ function PurchaseHistorySection() {
               {orgs.map(o => <option key={o.organization_id} value={o.organization_id}>{o.name}</option>)}
             </select>
           </Field>
-          <Field label="Year From *">
-            <input className={YEAR_INPUT} type="number" maxLength={4} value={f.year_from} onChange={e => setF(p => ({ ...p, year_from: e.target.value }))} />
+          <Field label="Date From * (PO Date)">
+            <input className={INPUT} type="date" value={f.date_from} onChange={e => setF(p => ({ ...p, date_from: e.target.value }))} />
           </Field>
-          <Field label="Year To *">
-            <input className={YEAR_INPUT} type="number" maxLength={4} value={f.year_to} onChange={e => setF(p => ({ ...p, year_to: e.target.value }))} />
+          <Field label="Date To * (PO Date)">
+            <input className={INPUT} type="date" value={f.date_to} onChange={e => setF(p => ({ ...p, date_to: e.target.value }))} />
           </Field>
           <Field label="Exchange Rate Type">
             {inp("exchange_rate_type", { placeholder: "Corporate" })}
@@ -501,10 +507,8 @@ function PurchaseHistorySection() {
           <Field label="Manufacturer">{inp("manufacturer", { placeholder: "Partial search..." })}</Field>
           <Field label="Country of Origin">{inp("country_of_origin", { placeholder: "e.g. INDONESIA" })}</Field>
           <Field label="Category">
-            <select className={SELECT} value={f.category} onChange={e => setF(p => ({ ...p, category: e.target.value }))}>
-              <option value="">— All —</option>
-              {categories.map(c => <option key={c.category} value={c.category}>{c.category}</option>)}
-            </select>
+            <CheckboxMultiSelect options={categories.map(c => c.category)} selected={f.category}
+              onChange={(next) => setF(p => ({ ...p, category: next }))} />
           </Field>
           <Field label="Currency">
             <select className={SELECT} value={f.currency_code} onChange={e => setF(p => ({ ...p, currency_code: e.target.value }))}>
@@ -1328,6 +1332,16 @@ function PHSummaryView({ data, loading, error }) {
 
 const PH_CHART_COLORS = ["#f97316","#34d399","#60a5fa","#a78bfa","#f59e0b","#fb923c","#4ade80","#38bdf8","#c084fc","#fbbf24"];
 
+// Validated categorical palette (dataviz skill: lightness band, CVD separation,
+// normal-vision floor all PASS against this app's white card surface) — used
+// for the Country of Origin pie below rather than PH_CHART_COLORS above,
+// which fails those same checks. Gray appended deliberately for the "Other"
+// fold (intentionally desaturated so it reads as "not a real category" —
+// the validator's chroma-floor check flags this correctly, but it doesn't
+// apply here since gray is never used for an actual country).
+const PH_COUNTRY_COLORS = ["#2a78d6","#eb6834","#1baf7a","#eda100","#e87ba4","#008300","#4a3aa7"];
+const PH_COUNTRY_OTHER_COLOR = "#94a3b8";
+
 function PHGraphView({ data, loading, error, byItemData, byItemYears, bySupData, bySupYears }) {
   const chartData = useMemo(() => {
     if (!data.length) return null;
@@ -1338,11 +1352,13 @@ function PHGraphView({ data, loading, error, byItemData, byItemYears, bySupData,
     const byType= {};
     const bySup = {};
     const byYear= {};
+    const byCountry = {};
     data.forEach(r => {
-      const cat  = r.category      || "(Uncategorized)";
-      const type = r.material_type || "(Unknown)";
-      const sup  = r.supplier_name || "(Unknown)";
-      const yr   = r.creation_date ? r.creation_date.slice(0, 4) : "(Unknown)";
+      const cat     = r.category           || "(Uncategorized)";
+      const type    = r.material_type      || "(Unknown)";
+      const sup     = r.supplier_name      || "(Unknown)";
+      const yr      = r.creation_date ? r.creation_date.slice(0, 4) : "(Unknown)";
+      const country = r.country_of_origin  || "UNKNOWN";
       const idr  = Number(r.amount_idr) || 0;
 
       if (!byCat[cat])  byCat[cat]  = { name: cat,  value: 0 };
@@ -1356,12 +1372,26 @@ function PHGraphView({ data, loading, error, byItemData, byItemYears, bySupData,
 
       if (!byYear[yr])  byYear[yr]  = { name: yr,   value: 0 };
       byYear[yr].value += idr;
+
+      if (!byCountry[country]) byCountry[country] = { name: country, value: 0 };
+      byCountry[country].value += idr;
     });
 
     const topCats = Object.values(byCat).sort((a, b) => b.value - a.value).slice(0, 10).reverse();
     const topSups = Object.values(bySup).sort((a, b) => b.value - a.value).slice(0, 10);
     const typeArr = Object.values(byType).sort((a, b) => b.value - a.value);
     const yearArr = Object.values(byYear).sort((a, b) => a.name.localeCompare(b.name));
+
+    // Country of Origin distribution — cap direct slices at 7 (dataviz
+    // skill's series-count ladder: past ~7-8, fold the tail into "Other"
+    // rather than seat more categorical hues nobody can tell apart).
+    const countrySorted = Object.values(byCountry).sort((a, b) => b.value - a.value);
+    const countryTop = countrySorted.slice(0, 7);
+    const countryRest = countrySorted.slice(7);
+    const countryOtherTotal = countryRest.reduce((s, c) => s + c.value, 0);
+    const countryArr = countryOtherTotal > 0
+      ? [...countryTop, { name: "Other", value: countryOtherTotal }]
+      : countryTop;
 
     // Year trend from by-item pivot
     const itemYearTrend = byItemYears.map(yr => ({
@@ -1375,7 +1405,7 @@ function PHGraphView({ data, loading, error, byItemData, byItemYears, bySupData,
       direct:   bySupData.reduce((s, r) => s + (Number(r[`value_idr_${yr}`]) || 0), 0),
     }));
 
-    return { totalIDR, topCats, topSups, typeArr, yearArr, itemYearTrend, supYearTrend };
+    return { totalIDR, topCats, topSups, typeArr, yearArr, countryArr, itemYearTrend, supYearTrend };
   }, [data, byItemData, byItemYears, bySupData, bySupYears]);
 
   if (loading) return (
@@ -1454,6 +1484,32 @@ function PHGraphView({ data, loading, error, byItemData, byItemYears, bySupData,
           })}
         </div>
       </div>
+
+      {/* Country of Origin Distribution */}
+      <ChartCard title="Country of Origin Distribution — Amount IDR" height={340}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+            <Pie
+              data={chartData.countryArr}
+              dataKey="value"
+              nameKey="name"
+              cx="38%"
+              cy="50%"
+              outerRadius={110}
+              paddingAngle={1}
+              label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
+              labelLine={false}
+            >
+              {chartData.countryArr.map((c, i) => (
+                <Cell key={i} fill={c.name === "Other" ? PH_COUNTRY_OTHER_COLOR : PH_COUNTRY_COLORS[i % PH_COUNTRY_COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip {...tooltipStyle} formatter={(v, n) => [fmtIDR(v), n]} />
+            <Legend layout="vertical" align="right" verticalAlign="middle"
+              wrapperStyle={{ fontSize: 11, color: "#9ca3af", lineHeight: "20px" }} />
+          </PieChart>
+        </ResponsiveContainer>
+      </ChartCard>
 
       {/* Top 10 Categories */}
       <ChartCard title="Top 10 Categories — Amount IDR" height={320}>
