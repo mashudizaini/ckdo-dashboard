@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   FileText, History, Banknote, Truck, BookOpen, BarChart2,
   RefreshCw, Plus, Trash2, X, Loader2, CheckCircle, Search, Filter,
-  Download, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, ChevronDown,
+  Download, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, ChevronDown, Pencil,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import {
@@ -2535,13 +2535,22 @@ const MFR_COLS = [
   { key: "creation_date",     label: "Date" },
 ];
 
+const MFR_PAGE_SIZE = 10;
+
 function ManufacturerMasterSection() {
   const [data,       setData]       = useState([]);
+  const [orgs,       setOrgs]       = useState([]);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState(null);
   const [showForm,   setShowForm]   = useState(false);
+  const [editingRow, setEditingRow] = useState(null); // row being edited, or null for "Add"
   const [deletingId, setDeletingId] = useState(null);
   const [sort,       setSort]       = useState({ key: null, dir: "asc" });
+  const [page,       setPage]       = useState(1);
+
+  const [f, setF] = useState({
+    org_id: "", item_code: "", item_desc: "", manufacturer_name: "", country_of_origin: "",
+  });
 
   const toggleSort = (key) => {
     setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
@@ -2559,10 +2568,18 @@ function ManufacturerMasterSection() {
     });
   }, [data, sort]);
 
-  const loadList = async () => {
+  const paged = sorted.slice((page - 1) * MFR_PAGE_SIZE, page * MFR_PAGE_SIZE);
+
+  const loadList = async (filters = f) => {
     setLoading(true); setError(null);
     try {
-      const r = await purchasingApi.getManufacturerList();
+      const p = {};
+      if (filters.org_id)            p.org_id            = filters.org_id;
+      if (filters.item_code)         p.item_code         = filters.item_code;
+      if (filters.item_desc)         p.item_desc         = filters.item_desc;
+      if (filters.manufacturer_name) p.manufacturer_name = filters.manufacturer_name;
+      if (filters.country_of_origin) p.country_of_origin = filters.country_of_origin;
+      const r = await purchasingApi.getManufacturerList(p);
       if (r.success) setData(r.data ?? []);
       else setError(r.error);
     } catch (e) {
@@ -2570,7 +2587,16 @@ function ManufacturerMasterSection() {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { loadList(); }, []);
+  useEffect(() => {
+    loadList();
+    purchasingApi.getOrganizations().then(r => { if (r.success) setOrgs(r.data ?? []); }).catch(() => {});
+  }, []); // eslint-disable-line
+
+  const handleSearch = () => { setPage(1); loadList(f); };
+  const handleReset = () => {
+    const empty = { org_id: "", item_code: "", item_desc: "", manufacturer_name: "", country_of_origin: "" };
+    setF(empty); setPage(1); loadList(empty);
+  };
 
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this record?")) return;
@@ -2582,15 +2608,46 @@ function ManufacturerMasterSection() {
     } finally { setDeletingId(null); }
   };
 
+  const openAdd  = () => { setEditingRow(null); setShowForm(true); };
+  const openEdit = (row) => { setEditingRow(row); setShowForm(true); };
+
   return (
     <>
+      {/* Filter Panel */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900 p-4 mb-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+          <Field label="Organization">
+            <select className={SELECT} value={f.org_id} onChange={e => setF(p => ({ ...p, org_id: e.target.value }))}>
+              <option value="">— All —</option>
+              {orgs.map(o => <option key={o.organization_id} value={o.organization_id}>{o.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Item Code">
+            <input className={INPUT} value={f.item_code} onChange={e => setF(p => ({ ...p, item_code: e.target.value }))} placeholder="Partial search..." />
+          </Field>
+          <Field label="Item Description">
+            <input className={INPUT} value={f.item_desc} onChange={e => setF(p => ({ ...p, item_desc: e.target.value }))} placeholder="Partial search..." />
+          </Field>
+          <Field label="Manufacturer Name">
+            <input className={INPUT} value={f.manufacturer_name} onChange={e => setF(p => ({ ...p, manufacturer_name: e.target.value }))} placeholder="Partial search..." />
+          </Field>
+          <Field label="Country of Origin">
+            <input className={INPUT} value={f.country_of_origin} onChange={e => setF(p => ({ ...p, country_of_origin: e.target.value }))} placeholder="e.g. Indonesia" />
+          </Field>
+        </div>
+        <div className="flex items-center justify-end gap-2 mt-3">
+          <ActionBtn icon={RefreshCw} label="Reset"  color="bg-gray-700 hover:bg-gray-600"  onClick={handleReset} />
+          <ActionBtn icon={loading ? Loader2 : Search} label="Search" color="bg-purple-600 hover:bg-purple-700" onClick={handleSearch} />
+        </div>
+      </div>
+
       <SectionCard
         title="Manufacturer Master"
         subtitle="Factory/manufacturer master data per Oracle item"
         action={
           <div className="flex gap-2">
-            <ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-gray-700 hover:bg-gray-600" onClick={loadList} />
-            <ActionBtn icon={Plus} label="Add" color="bg-purple-600 hover:bg-purple-700" onClick={() => setShowForm(true)} />
+            <ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-gray-700 hover:bg-gray-600" onClick={() => loadList()} />
+            <ActionBtn icon={Plus} label="Add" color="bg-purple-600 hover:bg-purple-700" onClick={openAdd} />
           </div>
         }
       >
@@ -2622,7 +2679,7 @@ function ManufacturerMasterSection() {
                   </td>
                 </tr>
               ) : (
-                sorted.map((row) => (
+                paged.map((row) => (
                   <tr key={row.manufacturer_id} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
                     <td className="px-3 py-2.5 text-xs font-mono text-blue-400 whitespace-nowrap">{row.item_code}</td>
                     <td className="px-3 py-2.5 text-xs text-gray-300 max-w-[200px] truncate" title={row.item_description}>{row.item_description}</td>
@@ -2632,15 +2689,25 @@ function ManufacturerMasterSection() {
                     <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">{row.created_by}</td>
                     <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">{row.creation_date}</td>
                     <td className="px-3 py-2.5">
-                      <button
-                        onClick={() => handleDelete(row.manufacturer_id)}
-                        disabled={deletingId === row.manufacturer_id}
-                        className="p-1.5 rounded text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
-                      >
-                        {deletingId === row.manufacturer_id
-                          ? <Loader2 size={13} className="animate-spin" />
-                          : <Trash2 size={13} />}
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => openEdit(row)}
+                          className="p-1.5 rounded text-gray-600 hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
+                          title="Edit"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(row.manufacturer_id)}
+                          disabled={deletingId === row.manufacturer_id}
+                          className="p-1.5 rounded text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+                          title="Delete"
+                        >
+                          {deletingId === row.manufacturer_id
+                            ? <Loader2 size={13} className="animate-spin" />
+                            : <Trash2 size={13} />}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -2648,10 +2715,12 @@ function ManufacturerMasterSection() {
             </tbody>
           </table>
         </div>
+        <Pagination total={sorted.length} page={page} onPage={setPage} pageSize={MFR_PAGE_SIZE} />
       </SectionCard>
 
       {showForm && (
         <ManufacturerForm
+          editing={editingRow}
           onClose={() => setShowForm(false)}
           onSaved={() => { setShowForm(false); loadList(); }}
         />
@@ -2662,24 +2731,24 @@ function ManufacturerMasterSection() {
 
 /* ─── Manufacturer Input Form (Modal) ────────────── */
 
-function ManufacturerForm({ onClose, onSaved }) {
+function ManufacturerForm({ editing, onClose, onSaved }) {
   const [orgs,        setOrgs]        = useState([]);
   const [items,       setItems]       = useState([]);
   const [orgLoading,  setOrgLoading]  = useState(true);
   const [itemLoading, setItemLoading] = useState(false);
   const [saving,      setSaving]      = useState(false);
   const [error,       setError]       = useState(null);
-  const [itemSearch,  setItemSearch]  = useState("");
+  const [itemSearch,  setItemSearch]  = useState(editing?.item_code ?? "");
   const [showDrop,    setShowDrop]    = useState(false);
   const searchTimer = useRef(null);
 
   const [form, setForm] = useState({
-    organization_id:   "",
-    item_id:           "",
-    item_code:         "",
-    item_description:  "",
-    manufacturer_name: "",
-    country_of_origin: "",
+    organization_id:   editing?.organization_id ?? "",
+    item_id:            editing?.item_id ?? "",
+    item_code:          editing?.item_code ?? "",
+    item_description:   editing?.item_description ?? "",
+    manufacturer_name:  editing?.manufacturer_name ?? "",
+    country_of_origin:  editing?.country_of_origin ?? "",
   });
 
   // Load organizations
@@ -2712,7 +2781,14 @@ function ManufacturerForm({ onClose, onSaved }) {
   const handleItemInput = (e) => {
     const val = e.target.value;
     setItemSearch(val);
-    setForm((p) => ({ ...p, item_id: "", item_code: val, item_description: "" }));
+    // Bug fix: this used to also reset item_description to "" on every
+    // keystroke here, which wiped it out the moment the user touched the
+    // Item Code field again after picking a suggestion (or typed a code
+    // manually that isn't in the Oracle item LOV at all, e.g. a new item)
+    // — there was no way to type a description by hand. item_description
+    // now only changes via selectItem() (auto-fill on picking a real LOV
+    // suggestion) or the dedicated Item Description field below.
+    setForm((p) => ({ ...p, item_id: "", item_code: val }));
     searchItems(form.organization_id, val);
   };
 
@@ -2729,14 +2805,17 @@ function ManufacturerForm({ onClose, onSaved }) {
     }
     setSaving(true); setError(null);
     try {
-      const r = await purchasingApi.createManufacturer({
+      const payload = {
         item_id:           form.item_id ? Number(form.item_id) : 0,
         organization_id:   Number(form.organization_id),
         item_code:         form.item_code,
         item_description:  form.item_description,
         manufacturer_name: form.manufacturer_name,
         country_of_origin: form.country_of_origin,
-      });
+      };
+      const r = editing
+        ? await purchasingApi.updateManufacturer(editing.manufacturer_id, payload)
+        : await purchasingApi.createManufacturer(payload);
       if (r.success) onSaved();
       else setError(r.error);
     } catch (e) {
@@ -2748,7 +2827,7 @@ function ManufacturerForm({ onClose, onSaved }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="w-full max-w-lg rounded-xl border border-gray-700 bg-gray-900 shadow-2xl overflow-visible">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
-          <h3 className="text-sm font-semibold text-gray-200">Add Manufacturer Master</h3>
+          <h3 className="text-sm font-semibold text-gray-200">{editing ? "Edit Manufacturer Master" : "Add Manufacturer Master"}</h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors">
             <X size={16} />
           </button>
@@ -2809,9 +2888,19 @@ function ManufacturerForm({ onClose, onSaved }) {
                 </div>
               )}
             </div>
-            {form.item_description && (
-              <p className="mt-1 text-xs text-gray-500 truncate" title={form.item_description}>{form.item_description}</p>
-            )}
+          </Field>
+
+          {/* Item Description — a real editable field now (was a read-only
+              auto-filled <p>, with no way to type one by hand for an item
+              not found in the Oracle LOV search). Auto-fills when picking
+              a suggestion above, but can always be typed/edited directly. */}
+          <Field label="Item Description">
+            <input
+              className={INPUT}
+              value={form.item_description}
+              onChange={(e) => setForm((p) => ({ ...p, item_description: e.target.value }))}
+              placeholder="Auto-fills when you pick an item above, or type it manually"
+            />
           </Field>
 
           {/* Manufacturer Name */}
@@ -2847,7 +2936,7 @@ function ManufacturerForm({ onClose, onSaved }) {
           </button>
           <ActionBtn
             icon={saving ? Loader2 : CheckCircle}
-            label={saving ? "Saving..." : "Save"}
+            label={saving ? "Saving..." : editing ? "Save Changes" : "Save"}
             color="bg-purple-600 hover:bg-purple-700"
             onClick={handleSave}
           />

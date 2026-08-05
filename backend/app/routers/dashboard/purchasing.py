@@ -238,9 +238,18 @@ class ManufacturerIn(BaseModel):
 
 
 @router.get("/manufacturer-master")
-async def get_manufacturer_list(user: CurrentUser = Depends(require_role(Roles.PURCHASING))):
-    """List all XXCKDO_MANUFACTURER_MASTER records."""
-    return await PurchasingService().get_manufacturer_list()
+async def get_manufacturer_list(
+    org_id:             Optional[int] = Query(None),
+    item_code:          Optional[str] = Query(None),
+    item_desc:          Optional[str] = Query(None),
+    manufacturer_name:  Optional[str] = Query(None),
+    country_of_origin:  Optional[str] = Query(None),
+    user: CurrentUser = Depends(require_role(Roles.PURCHASING)),
+):
+    """List XXCKDO_MANUFACTURER_MASTER records, optionally filtered."""
+    filters = dict(org_id=org_id, item_code=item_code, item_desc=item_desc,
+                   manufacturer_name=manufacturer_name, country_of_origin=country_of_origin)
+    return await PurchasingService().get_manufacturer_list(filters)
 
 
 @router.post("/manufacturer-master")
@@ -251,6 +260,17 @@ async def create_manufacturer(
     """Insert a new row into XXCKDO_MANUFACTURER_MASTER."""
     username = user.username or user.id or "unknown"
     return await PurchasingService().create_manufacturer(body.model_dump(), username)
+
+
+@router.put("/manufacturer-master/{manufacturer_id}")
+async def update_manufacturer(
+    manufacturer_id: int,
+    body: ManufacturerIn,
+    user: CurrentUser = Depends(require_role(Roles.PURCHASING)),
+):
+    """Update an existing row in XXCKDO_MANUFACTURER_MASTER."""
+    username = user.username or user.id or "unknown"
+    return await PurchasingService().update_manufacturer(manufacturer_id, body.model_dump(), username)
 
 
 @router.delete("/manufacturer-master/{manufacturer_id}")

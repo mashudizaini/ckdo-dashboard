@@ -373,8 +373,9 @@ export const purchasingApi = {
   getMetalsLatest:  ()  => api.get("/dashboard/purchasing/metals/latest"),
 
   // Manufacturer Master
-  getManufacturerList: () => api.get("/dashboard/purchasing/manufacturer-master"),
+  getManufacturerList: (p) => api.get("/dashboard/purchasing/manufacturer-master", { params: p }),
   createManufacturer:  (data) => api.post("/dashboard/purchasing/manufacturer-master", data),
+  updateManufacturer:  (id, data) => api.put(`/dashboard/purchasing/manufacturer-master/${id}`, data),
   deleteManufacturer:  (id) => api.delete(`/dashboard/purchasing/manufacturer-master/${id}`),
 };
 

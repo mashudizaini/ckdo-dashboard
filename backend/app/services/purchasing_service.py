@@ -108,7 +108,8 @@ class PurchasingService:
 
     # ── Manufacturer Master ───────────────────────────────────────────────────
 
-    async def get_manufacturer_list(self) -> dict:
+    async def get_manufacturer_list(self, filters: dict = None) -> dict:
+        filters = filters or {}
         sql = """
             SELECT
                 MANUFACTURER_ID,
@@ -123,10 +124,22 @@ class PurchasingService:
                 LAST_UPDATED_BY,
                 TO_CHAR(LAST_UPDATE_DATE, 'DD-MON-YYYY') AS LAST_UPDATE_DATE
             FROM XXCKDO_MANUFACTURER_MASTER
+            WHERE (:p_org_id      IS NULL OR ORGANIZATION_ID = :p_org_id)
+              AND (:p_item_code   IS NULL OR UPPER(ITEM_CODE)         LIKE UPPER('%'||:p_item_code||'%'))
+              AND (:p_item_desc   IS NULL OR UPPER(ITEM_DESCRIPTION)  LIKE UPPER('%'||:p_item_desc||'%'))
+              AND (:p_mfr_name    IS NULL OR UPPER(MANUFACTURER_NAME) LIKE UPPER('%'||:p_mfr_name||'%'))
+              AND (:p_country     IS NULL OR UPPER(COUNTRY_OF_ORIGIN) LIKE UPPER('%'||:p_country||'%'))
             ORDER BY CREATION_DATE DESC
         """
+        params = {
+            "p_org_id":    filters.get("org_id") or None,
+            "p_item_code": filters.get("item_code") or None,
+            "p_item_desc": filters.get("item_desc") or None,
+            "p_mfr_name":  filters.get("manufacturer_name") or None,
+            "p_country":   filters.get("country_of_origin") or None,
+        }
         try:
-            rows = await asyncio.to_thread(self._query, sql)
+            rows = await asyncio.to_thread(self._query, sql, params)
             return {"success": True, "count": len(rows), "data": rows}
         except Exception as e:
             logger.error("manufacturer_list_error", error=str(e))
@@ -157,6 +170,37 @@ class PurchasingService:
             return {"success": True, "message": "Data berhasil disimpan"}
         except Exception as e:
             logger.error("manufacturer_create_error", error=str(e))
+            return {"success": False, "error": str(e)}
+
+    async def update_manufacturer(self, manufacturer_id: int, data: dict, username: str) -> dict:
+        sql = """
+            UPDATE XXCKDO_MANUFACTURER_MASTER
+               SET ITEM_ID           = :item_id,
+                   ORGANIZATION_ID   = :organization_id,
+                   ITEM_CODE         = :item_code,
+                   ITEM_DESCRIPTION  = :item_description,
+                   MANUFACTURER_NAME = :manufacturer_name,
+                   COUNTRY_OF_ORIGIN = :country_of_origin,
+                   LAST_UPDATED_BY   = :updated_by,
+                   LAST_UPDATE_DATE  = SYSDATE
+             WHERE MANUFACTURER_ID   = :id
+        """
+        try:
+            rows = await asyncio.to_thread(self._execute, sql, {
+                "item_id":          data["item_id"],
+                "organization_id":  data["organization_id"],
+                "item_code":        data["item_code"],
+                "item_description": data.get("item_description", ""),
+                "manufacturer_name": data["manufacturer_name"],
+                "country_of_origin": data.get("country_of_origin", ""),
+                "updated_by":       username,
+                "id":               manufacturer_id,
+            })
+            if rows == 0:
+                return {"success": False, "error": "Record tidak ditemukan"}
+            return {"success": True, "message": "Data berhasil diperbarui"}
+        except Exception as e:
+            logger.error("manufacturer_update_error", error=str(e))
             return {"success": False, "error": str(e)}
 
     async def delete_manufacturer(self, manufacturer_id: int) -> dict:
