@@ -81,25 +81,36 @@ class PurchasingService:
 
     # ── LOV: Items ────────────────────────────────────────────────────────────
 
-    async def get_items(self, org_id: int, search: str = "") -> dict:
-        """Search items in MTL_SYSTEM_ITEMS_B for the given org."""
+    async def get_items(self, search: str = "") -> dict:
+        """Search items in MTL_SYSTEM_ITEMS_B across ALL orgs (not scoped to
+        one organization_id). Used to be org-scoped — real bug: the same
+        inventory_item_id an item shares across orgs in Oracle's multi-org
+        item master isn't enabled in EVERY org, so a search limited to one
+        org came back empty for an item that only exists in others, and the
+        Manufacturer Master form let the user type the code anyway, saving
+        item_id=0 (never matches anything real) instead of failing loudly.
+        Deduplicated to one row per inventory_item_id since the same item
+        can otherwise appear once per org it's enabled in."""
         sql = """
-            SELECT IB.INVENTORY_ITEM_ID AS item_id,
-                   IB.SEGMENT1          AS item_code,
-                   IT.DESCRIPTION       AS item_description
-            FROM MTL_SYSTEM_ITEMS_B IB, MTL_SYSTEM_ITEMS_TL IT
-            WHERE IB.ORGANIZATION_ID = IT.ORGANIZATION_ID
-              AND IB.INVENTORY_ITEM_ID = IT.INVENTORY_ITEM_ID
-              AND IB.ORGANIZATION_ID = :org_id
-              AND (:search IS NULL OR UPPER(IB.SEGMENT1) LIKE UPPER(:search_like))
-            ORDER BY IB.SEGMENT1
+            SELECT item_id, item_code, MIN(item_description) AS item_description
+            FROM (
+                SELECT IB.INVENTORY_ITEM_ID AS item_id,
+                       IB.SEGMENT1          AS item_code,
+                       IT.DESCRIPTION       AS item_description
+                FROM MTL_SYSTEM_ITEMS_B IB, MTL_SYSTEM_ITEMS_TL IT
+                WHERE IB.ORGANIZATION_ID = IT.ORGANIZATION_ID
+                  AND IB.INVENTORY_ITEM_ID = IT.INVENTORY_ITEM_ID
+                  AND (:search IS NULL OR UPPER(IB.SEGMENT1) LIKE UPPER(:search_like))
+            )
+            GROUP BY item_id, item_code
+            ORDER BY item_code
             FETCH FIRST 50 ROWS ONLY
         """
         search_like = f"%{search}%" if search else None
         try:
             rows = await asyncio.to_thread(
                 self._query, sql,
-                {"org_id": org_id, "search": search or None, "search_like": search_like}
+                {"search": search or None, "search_like": search_like}
             )
             return {"success": True, "data": rows}
         except Exception as e:
@@ -146,6 +157,18 @@ class PurchasingService:
             return {"success": False, "error": str(e), "data": []}
 
     async def create_manufacturer(self, data: dict, username: str) -> dict:
+        # One manufacturer record per item (item_code is org-agnostic here
+        # now — see the join fix in _PH_FROM) — without this check the form
+        # let the same item be added repeatedly with no warning, which is
+        # exactly how it went "dobel" (duplicated).
+        dupe_check_sql = "SELECT COUNT(*) AS c FROM XXCKDO_MANUFACTURER_MASTER WHERE UPPER(ITEM_CODE) = UPPER(:item_code)"
+        try:
+            existing = await asyncio.to_thread(self._query, dupe_check_sql, {"item_code": data["item_code"]})
+            if existing and existing[0]["c"] > 0:
+                return {"success": False, "error": f"\"{data['item_code']}\" sudah ada di Manufacturer Master — edit data yang sudah ada, bukan menambah baru."}
+        except Exception as e:
+            logger.error("manufacturer_dupe_check_error", error=str(e))
+
         sql = """
             INSERT INTO XXCKDO_MANUFACTURER_MASTER (
                 ITEM_ID, ORGANIZATION_ID, ITEM_CODE, ITEM_DESCRIPTION,
@@ -173,6 +196,17 @@ class PurchasingService:
             return {"success": False, "error": str(e)}
 
     async def update_manufacturer(self, manufacturer_id: int, data: dict, username: str) -> dict:
+        dupe_check_sql = (
+            "SELECT COUNT(*) AS c FROM XXCKDO_MANUFACTURER_MASTER "
+            "WHERE UPPER(ITEM_CODE) = UPPER(:item_code) AND MANUFACTURER_ID != :id"
+        )
+        try:
+            existing = await asyncio.to_thread(self._query, dupe_check_sql, {"item_code": data["item_code"], "id": manufacturer_id})
+            if existing and existing[0]["c"] > 0:
+                return {"success": False, "error": f"\"{data['item_code']}\" sudah ada di record lain di Manufacturer Master."}
+        except Exception as e:
+            logger.error("manufacturer_dupe_check_error", error=str(e))
+
         sql = """
             UPDATE XXCKDO_MANUFACTURER_MASTER
                SET ITEM_ID           = :item_id,

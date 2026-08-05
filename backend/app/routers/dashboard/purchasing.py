@@ -197,12 +197,15 @@ async def get_organizations(user: CurrentUser = Depends(require_role(Roles.PURCH
 
 @router.get("/lov/items")
 async def get_items(
-    org_id: int = Query(..., description="Organization ID"),
     search: Optional[str] = Query(None, description="Item code search string"),
     user: CurrentUser = Depends(require_role(Roles.PURCHASING)),
 ):
-    """Search items in MTL_SYSTEM_ITEMS_B for given org (max 50 rows)."""
-    return await PurchasingService().get_items(org_id, search or "")
+    """Search items in MTL_SYSTEM_ITEMS_B across all orgs (max 50 rows).
+    No longer org-scoped — an item not enabled in whichever org used to be
+    passed here came back empty, even though it's a perfectly real item in
+    others; searching across every org and deduplicating by item_id fixes
+    that (see get_items in purchasing_service.py)."""
+    return await PurchasingService().get_items(search or "")
 
 
 @router.get("/lov/categories")

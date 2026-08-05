@@ -2740,14 +2740,15 @@ function ManufacturerForm({ editing, onClose, onSaved }) {
   });
 
   // Manufacturer/country-of-origin is a property of the item, not of which
-  // Oracle org it happens to be stocked in — org is no longer a
-  // user-facing concept here (was previously a required dropdown, and
-  // records saved under one org silently failed to link to Purchase
-  // History for the same item under a different org). Still needed
-  // under the hood purely because MTL_SYSTEM_ITEMS_B — the table the item
-  // search below queries — is itself org-scoped in Oracle, so picking
-  // *some* org to search against is unavoidable; just picks the first
-  // one automatically instead of asking.
+  // Oracle org it happens to be stocked in. organization_id is still sent
+  // on save purely because the Oracle column presumably isn't nullable —
+  // auto-filled invisibly, never asked of the user. It used to also gate
+  // the item search below (a real bug: CKD21R0530 wasn't enabled in
+  // whichever org got auto-picked, so the search came back empty and the
+  // user typed the code manually, silently saving item_id=0 — which never
+  // matches a real item, hence showing UNKNOWN forever in Purchase
+  // History) — search is no longer org-scoped at all (see get_items in
+  // purchasing_service.py), so that whole failure mode is gone.
   useEffect(() => {
     if (editing?.organization_id) return; // editing an existing row — keep its own org
     purchasingApi.getOrganizations()
@@ -2758,13 +2759,12 @@ function ManufacturerForm({ editing, onClose, onSaved }) {
       .catch(() => {});
   }, []); // eslint-disable-line
 
-  const searchItems = (orgId, search) => {
-    if (!orgId) return;
+  const searchItems = (search) => {
     setItemLoading(true);
     clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(async () => {
       try {
-        const r = await purchasingApi.getItems(orgId, search);
+        const r = await purchasingApi.getItems(search);
         if (r.success) { setItems(r.data ?? []); setShowDrop(true); }
       } finally { setItemLoading(false); }
     }, 200);
@@ -2781,7 +2781,7 @@ function ManufacturerForm({ editing, onClose, onSaved }) {
     // now only changes via selectItem() (auto-fill on picking a real LOV
     // suggestion) or the dedicated Item Description field below.
     setForm((p) => ({ ...p, item_id: "", item_code: val }));
-    searchItems(form.organization_id, val);
+    searchItems(val);
   };
 
   const selectItem = (item) => {
@@ -2798,6 +2798,18 @@ function ManufacturerForm({ editing, onClose, onSaved }) {
     if (!form.organization_id) {
       setError("Still preparing the item search — try again in a moment");
       return;
+    }
+    // The exact root cause of the "CKD21R0530 shows UNKNOWN in Purchase
+    // History" report: item_id was never picked from the search dropdown
+    // (it fell back to 0, which never matches a real item), and the form
+    // saved it anyway with no warning at all. Still allowed — the item
+    // might genuinely not be in Oracle yet — but now explicit instead of
+    // silent.
+    if (!form.item_id) {
+      const proceed = window.confirm(
+        `"${form.item_code}" wasn't selected from the search results — this record will NOT show up in Purchase History until it is. Save anyway?`
+      );
+      if (!proceed) return;
     }
     setSaving(true); setError(null);
     try {
@@ -2840,8 +2852,7 @@ function ManufacturerForm({ editing, onClose, onSaved }) {
                   onChange={handleItemInput}
                   onFocus={() => { if (items.length > 0) setShowDrop(true); }}
                   onBlur={() => setTimeout(() => setShowDrop(false), 150)}
-                  placeholder={form.organization_id ? "Type item code to search..." : "Loading…"}
-                  disabled={!form.organization_id}
+                  placeholder="Type item code to search..."
                 />
                 <span className="absolute right-3 top-2 text-gray-600">
                   {itemLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
