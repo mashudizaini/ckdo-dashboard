@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   FileText, History, Banknote, Truck, BookOpen, BarChart2,
   RefreshCw, Plus, Trash2, X, Loader2, CheckCircle, Search, Filter,
-  Download, ChevronLeft, ChevronRight, TrendingUp, TrendingDown,
+  Download, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, ChevronDown,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import {
@@ -101,6 +101,46 @@ const OPEN_PR_COLS = [
   { key: "aging_days",          label: "Aging",              numeric: true },
 ];
 
+function RequestorMultiSelect({ options, selected, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onClickOutside = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  const toggle = (name) => {
+    onChange(selected.includes(name) ? selected.filter((n) => n !== name) : [...selected, name]);
+  };
+
+  const label = selected.length === 0 ? "— All —" : selected.length === 1 ? selected[0] : `${selected.length} selected`;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" onClick={() => setOpen((o) => !o)}
+        className={`${SELECT} text-left flex items-center justify-between`}>
+        <span className={`truncate ${selected.length ? "" : "text-gray-500"}`}>{label}</span>
+        <ChevronDown size={14} className="text-gray-500 shrink-0 ml-1" />
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto rounded-md border border-gray-700 bg-gray-800 shadow-lg py-1">
+          {options.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-gray-500">No data</p>
+          ) : options.map((name) => (
+            <label key={name} className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-700 cursor-pointer">
+              <input type="checkbox" checked={selected.includes(name)} onChange={() => toggle(name)}
+                className="rounded border-gray-600 bg-gray-900 text-blue-500 focus:ring-blue-500 focus:ring-offset-0" />
+              {name}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OpenPRSection() {
   const today = new Date();
   const pad2  = (n) => String(n).padStart(2, "0");
@@ -109,7 +149,7 @@ function OpenPRSection() {
 
   const [f, setF] = useState({
     pr_status: "", material_type: "", pr_number: "",
-    item_code: "", item_desc: "", requestor: "",
+    item_code: "", item_desc: "", requestor: [],
     currency_code: "", date_from: firstOfYear, date_to: toISO(today),
     exchange_rate_type: "Corporate",
   });
@@ -120,9 +160,11 @@ function OpenPRSection() {
   const [page,     setPage]     = useState(1);
   const [sort,     setSort]     = useState({ key: null, dir: "asc" });
   const [matTypes, setMatTypes] = useState([]);
+  const [requestors, setRequestors] = useState([]);
 
   useEffect(() => {
     purchasingApi.getMaterialTypes().then(r => { if (r.success) setMatTypes(r.data ?? []); }).catch(() => {});
+    purchasingApi.getRequestors().then(r => { if (r.success) setRequestors((r.data ?? []).map(d => d.name)); }).catch(() => {});
   }, []);
 
   const setFld = (k) => (e) => setF(p => ({ ...p, [k]: e.target.value }));
@@ -136,7 +178,7 @@ function OpenPRSection() {
       if (f.pr_number)          p.pr_number          = f.pr_number;
       if (f.item_code)          p.item_code          = f.item_code;
       if (f.item_desc)          p.item_desc          = f.item_desc;
-      if (f.requestor)          p.requestor          = f.requestor;
+      if (f.requestor.length)   p.requestor          = f.requestor.join(",");
       if (f.currency_code)      p.currency_code      = f.currency_code;
       if (f.date_from)          p.date_from          = f.date_from;
       if (f.date_to)            p.date_to            = f.date_to;
@@ -157,7 +199,7 @@ function OpenPRSection() {
 
   const handleReset = () => {
     setF({ pr_status: "", material_type: "", pr_number: "", item_code: "",
-           item_desc: "", requestor: "", currency_code: "",
+           item_desc: "", requestor: [], currency_code: "",
            date_from: firstOfYear, date_to: toISO(today), exchange_rate_type: "Corporate" });
     setRows([]); setSearched(false); setError(""); setPage(1);
   };
@@ -242,7 +284,8 @@ function OpenPRSection() {
             <input className={INPUT} value={f.item_desc} onChange={setFld("item_desc")} placeholder="partial search…" />
           </Field>
           <Field label="Requestor">
-            <input className={INPUT} value={f.requestor} onChange={setFld("requestor")} placeholder="username / dept" />
+            <RequestorMultiSelect options={requestors} selected={f.requestor}
+              onChange={(next) => setF(p => ({ ...p, requestor: next }))} />
           </Field>
           <Field label="Date From">
             <input className={INPUT} type="date" value={f.date_from} onChange={setFld("date_from")} />

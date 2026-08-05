@@ -4,10 +4,14 @@ Purchasing Service
 Oracle EBS queries + Manufacturer Master CRUD (stored in Oracle).
 """
 import asyncio
+from datetime import date, datetime, timedelta
+import psycopg2
 from app.database import get_oracle_connection
+from app.config import get_settings
 import structlog
 
 logger = structlog.get_logger()
+settings = get_settings()
 
 
 class PurchasingService:
@@ -18,6 +22,36 @@ class PurchasingService:
             cursor.execute(sql, params or {})
             columns = [col[0].lower() for col in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def _fetch_holidays(self) -> set:
+        """Company holiday calendar lives in this app's own Postgres DB (HR >
+        Working Calendar), not Oracle — so Open PR aging (Oracle-sourced) is
+        computed in Python after the query, not in Oracle SQL, to cross this
+        DB boundary."""
+        conn = psycopg2.connect(settings.database_url)
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT holiday_date FROM working_calendar_holidays")
+            return {row[0] for row in cur.fetchall()}
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _working_days_between(start: date, end: date, holidays: set) -> int | None:
+        """Working days elapsed from start to end, excluding weekends and
+        company holidays. Returns None if either date is missing, 0 if
+        start >= end (same day or a future-dated basis)."""
+        if not start or not end:
+            return None
+        if start >= end:
+            return 0
+        days = 0
+        d = start
+        while d < end:
+            d += timedelta(days=1)
+            if d.weekday() < 5 and d not in holidays:
+                days += 1
+        return days
 
     def _execute(self, sql: str, params: dict = None) -> int:
         """Execute DML, return rowcount."""
@@ -502,6 +536,32 @@ class PurchasingService:
         ), 1) END
     """
 
+    async def get_requestors(self) -> dict:
+        """LOV: distinct PR requestors, for the Open PR multi-select checkbox
+        filter — same not-cancelled/not-superseded scoping as the main Open
+        PR query, and excludes the two fully-scrubbed names (ELLVIN, AFNI)
+        outright so they can't even be selected; SHERLIN stays since only
+        her rows paired with supplier ELLVIN are excluded, not all of hers."""
+        sql = """
+            SELECT DISTINCT fu.user_name AS name
+            FROM po_requisition_headers_all prh
+            JOIN po_requisition_lines_all prl
+                ON prl.requisition_header_id = prh.requisition_header_id
+            LEFT JOIN fnd_user fu ON fu.user_id = prh.created_by
+            WHERE NVL(prl.cancel_flag, 'N') = 'N'
+              AND prh.authorization_status NOT IN ('CANCELLED')
+              AND NVL(prl.modified_by_agent_flag, 'N') = 'N'
+              AND fu.user_name IS NOT NULL
+              AND UPPER(fu.user_name) NOT IN ('ELLVIN', 'AFNI')
+            ORDER BY fu.user_name
+        """
+        try:
+            rows = await asyncio.to_thread(self._query, sql)
+            return {"success": True, "data": rows}
+        except Exception as e:
+            logger.error("requestors_lov_error", error=str(e))
+            return {"success": False, "error": str(e), "data": []}
+
     async def get_open_pr(self, filters: dict) -> dict:
         """
         PR Approval Status report from Oracle EBS.
@@ -513,11 +573,26 @@ class PurchasingService:
         pr_number = filters.get("pr_number") or None
         item_code = filters.get("item_code") or None
         item_desc = filters.get("item_desc") or None
-        requestor = filters.get("requestor") or None
         currency  = filters.get("currency_code") or None
         date_from = filters.get("date_from") or None
         date_to   = filters.get("date_to") or None
         ert       = filters.get("exchange_rate_type") or "Corporate"
+
+        # Requestor is now a multi-select checkbox list on the frontend
+        # (was free-text substring search) — arrives here as a
+        # comma-joined string, matched exactly (not LIKE) against each
+        # selected name.
+        requestor_list = [r.strip() for r in (filters.get("requestor") or "").split(",") if r.strip()]
+        requestor_binds: dict = {}
+        if requestor_list:
+            placeholders = []
+            for i, val in enumerate(requestor_list):
+                key = f"p_req_{i}"
+                placeholders.append(f":{key}")
+                requestor_binds[key] = val.upper()
+            requestor_clause = f"UPPER(fu.user_name) IN ({','.join(placeholders)})"
+        else:
+            requestor_clause = "1=1"
 
         sql = f"""
             SELECT
@@ -541,9 +616,17 @@ class PurchasingService:
                 prh.authorization_status                                    AS pr_status,
                 TO_CHAR(prh.creation_date, 'YYYY-MM-DD')                   AS creation_date,
                 TO_CHAR(prl.need_by_date, 'YYYY-MM-DD')                    AS due_date,
-                CASE WHEN po_link.po_number IS NOT NULL THEN NULL
-                     ELSE TRUNC(SYSDATE) - TRUNC(NVL(appr.approved_date, prh.creation_date))
-                END                                                          AS aging_days,
+                -- Aging basis: once a PO exists, age from when the PO was
+                -- approved (how long it's been open at the PO stage);
+                -- before that, fall back to when the PR itself was
+                -- approved, or its creation date if never separately
+                -- approved. Actual working-day count (excluding weekends
+                -- + company holidays) is computed in Python below — Oracle
+                -- doesn't have the holiday calendar, that lives in this
+                -- app's own Postgres DB (HR > Working Calendar).
+                TO_CHAR(NVL(po_appr.approved_date,
+                            NVL(appr.approved_date, prh.creation_date)),
+                        'YYYY-MM-DD')                                       AS aging_basis_date,
                 NVL(aps.vendor_name,
                     NVL(lastpo.last_supplier_name,
                         NVL(prl.suggested_vendor_name, '-')))              AS supplier_name,
@@ -581,10 +664,11 @@ class PurchasingService:
                 -- (not the fuzzy item-description match "lastpo" below uses).
                 -- Picks the most recently created PO if a line was split
                 -- across more than one.
-                SELECT requisition_line_id, po_number
+                SELECT requisition_line_id, po_number, po_header_id
                 FROM (
                     SELECT prd.requisition_line_id,
                            poh2.segment1 AS po_number,
+                           poh2.po_header_id AS po_header_id,
                            ROW_NUMBER() OVER (
                                PARTITION BY prd.requisition_line_id
                                ORDER BY poh2.creation_date DESC
@@ -596,6 +680,20 @@ class PurchasingService:
                 )
                 WHERE rn = 1
             ) po_link ON po_link.requisition_line_id = prl.requisition_line_id
+            LEFT JOIN (
+                -- PO header approval date — object_type_code = 'PO' is the
+                -- standard EBS lookup for standard/blanket PO approvals in
+                -- PO_ACTION_HISTORY (mirrors the 'REQUISITION' one above).
+                -- Worst case if this code is off for this instance: aging
+                -- silently falls back to the PR-approved/creation date for
+                -- PO'd lines too (NULL join, not a wrong value) — flagged
+                -- for verification against a real approved PO.
+                SELECT pah.object_id, MAX(pah.action_date) AS approved_date
+                FROM po_action_history pah
+                WHERE pah.action_code      = 'APPROVE'
+                  AND pah.object_type_code = 'PO'
+                GROUP BY pah.object_id
+            ) po_appr ON po_appr.object_id = po_link.po_header_id
             LEFT JOIN (
                 SELECT item_desc_key, unit_price AS last_price,
                        currency_code AS last_currency, vendor_name AS last_supplier_name
@@ -631,6 +729,20 @@ class PurchasingService:
               -- (qty 2892.1 + 2886 + 2221.9 = 8000 exactly) each with
               -- MODIFIED_BY_AGENT_FLAG NULL.
               AND NVL(prl.modified_by_agent_flag, 'N') = 'N'
+              -- Known dummy/test data scrubbed from the report — not
+              -- user-adjustable filters, always excluded:
+              --   i.  Requestor SHERLIN + Supplier ELLVIN together
+              --   ii. Requestor ELLVIN (any supplier)
+              --   iii. Requestor AFNI (any supplier)
+              AND NOT (
+                  UPPER(fu.user_name) IN ('ELLVIN', 'AFNI')
+                  OR (
+                      UPPER(fu.user_name) = 'SHERLIN'
+                      AND UPPER(NVL(aps.vendor_name,
+                              NVL(lastpo.last_supplier_name,
+                                  NVL(prl.suggested_vendor_name, '-')))) = 'ELLVIN'
+                  )
+              )
               AND (:p_pr_status IS NULL OR prh.authorization_status = :p_pr_status)
               AND (:p_pr_number IS NULL OR UPPER(prh.segment1)
                    LIKE UPPER('%' || :p_pr_number || '%'))
@@ -638,8 +750,7 @@ class PurchasingService:
                    LIKE UPPER('%' || :p_item_code || '%'))
               AND (:p_item_desc IS NULL OR UPPER(prl.item_description)
                    LIKE UPPER('%' || :p_item_desc || '%'))
-              AND (:p_requestor IS NULL OR UPPER(fu.user_name)
-                   LIKE UPPER('%' || :p_requestor || '%'))
+              AND ({requestor_clause})
               AND (:p_currency IS NULL OR prl.currency_code = :p_currency)
               AND (:p_date_from IS NULL OR prh.creation_date
                    >= TO_DATE(:p_date_from, 'YYYY-MM-DD'))
@@ -654,14 +765,22 @@ class PurchasingService:
             "p_pr_number": pr_number,
             "p_item_code": item_code,
             "p_item_desc": item_desc,
-            "p_requestor": requestor,
             "p_currency":  currency,
             "p_date_from": date_from,
             "p_date_to":   date_to,
             "p_mat_type":  mat_type,
+            **requestor_binds,
         }
         try:
             rows = await asyncio.to_thread(self._query, sql, params)
+            holidays = await asyncio.to_thread(self._fetch_holidays)
+
+            today = date.today()
+            for r in rows:
+                basis_str = r.pop("aging_basis_date", None)
+                basis_date = datetime.strptime(basis_str, "%Y-%m-%d").date() if basis_str else None
+                r["aging_days"] = self._working_days_between(basis_date, today, holidays)
+
             # KPIs computed server-side
             total_pr_headers = len({r["pr_number"] for r in rows})
             overdue = sum(1 for r in rows if (r.get("aging_days") or 0) > 7)

@@ -366,6 +366,7 @@ export const purchasingApi = {
   getCategories:     () => api.get("/dashboard/purchasing/lov/categories"),
   getCurrencies:     () => api.get("/dashboard/purchasing/lov/currencies"),
   getMaterialTypes:  () => api.get("/dashboard/purchasing/lov/material-types"),
+  getRequestors:     () => api.get("/dashboard/purchasing/lov/requestors"),
 
   // PO Price Analysis
   getPriceAnalysis: (p) => api.get("/dashboard/purchasing/price-analysis", { params: p }),

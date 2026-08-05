@@ -220,6 +220,12 @@ async def get_material_types(user: CurrentUser = Depends(require_role(Roles.PURC
     return await PurchasingService().get_material_types()
 
 
+@router.get("/lov/requestors")
+async def get_requestors(user: CurrentUser = Depends(require_role(Roles.PURCHASING))):
+    """LOV: distinct Open PR requestors, for the multi-select checkbox filter."""
+    return await PurchasingService().get_requestors()
+
+
 # ── Manufacturer Master ───────────────────────────────────────────────────────
 
 class ManufacturerIn(BaseModel):
