@@ -28,9 +28,11 @@ import app.models.meeting_recording  # noqa: F401
 import app.models.outlook_material  # noqa: F401
 import app.models.financial_statement_upload  # noqa: F401
 import app.models.document_conversion_job  # noqa: F401
+from app.models.ebs_backup import init_ebs_db
 
 # ── Dashboard Routers ──
 from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement
+from app.routers.dashboard import ebs_backup
 from app.routers.dashboard import (
     eis_summary, eis_performance, eis_production, eis_expansion, eis_administration,
     eis_business_plan, eis_daily_sales, eis_data_upload, eis_etl_admin,
@@ -73,8 +75,15 @@ async def lifespan(app: FastAPI):
     from app.services import rag_service
     rag_service.ensure_schema()
 
+    # EBS Backup Recovery — dedicated sync tables (ebs_*) + its own 60s
+    # schedule poller (ported from the standalone ebs-backup-dashboard app).
+    init_ebs_db()
+    from app.services.ebs_backup import scheduler as ebs_backup_scheduler
+    ebs_backup_scheduler.start()
+
     yield
 
+    ebs_backup_scheduler.stop()
     logger.info("Shutting down CKDO Dashboard API")
     await async_engine.dispose()
 
@@ -142,6 +151,15 @@ app.include_router(health.router, prefix=API_PREFIX, tags=["Health"])
 # Dashboard modules
 app.include_router(it.router,         prefix=f"{API_PREFIX}/dashboard/it",         tags=["Dashboard - IT"])
 app.include_router(it_db_browser.router, prefix=f"{API_PREFIX}/dashboard/it/db-browser", tags=["Dashboard - IT DB Browser"])
+# Ported from the standalone ebs-backup-dashboard app, which had NO auth at all
+# (relied on network isolation) — gated here at the router level instead of
+# per-route, since none of its ~40 endpoints (including a Dev-database
+# restore) should be reachable without it_staff/admin.
+app.include_router(
+    ebs_backup.router, prefix=f"{API_PREFIX}/dashboard/it/ebs-backup",
+    tags=["Dashboard - IT - EBS Backup Recovery"],
+    dependencies=[Depends(require_role(Roles.IT))],
+)
 app.include_router(hr.router,         prefix=f"{API_PREFIX}/dashboard/hr",         tags=["Dashboard - HR"])
 app.include_router(pac.router,        prefix=f"{API_PREFIX}/dashboard/pac",        tags=["Dashboard - PAC"])
 app.include_router(accounting.router, prefix=f"{API_PREFIX}/dashboard/accounting", tags=["Dashboard - Accounting"])

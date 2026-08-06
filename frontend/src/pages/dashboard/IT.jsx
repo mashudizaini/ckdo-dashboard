@@ -14,6 +14,7 @@ import {
   XAxis, YAxis, Tooltip, ResponsiveContainer, LabelList,
 } from "recharts";
 import { itApi } from "@/api/dashboard";
+import EbsBackupRecovery from "@/pages/dashboard/it/EbsBackupRecovery";
 
 /* ─── Tab definitions ─────────────────────────────── */
 
@@ -22,7 +23,7 @@ const TABS = [
   { id: "tablespace-usage",  icon: Activity,      color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Oracle Tablespace Monitoring"  },
   { id: "disk-usage",        icon: HardDrive,     color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Oracle Storage Monitoring"        },
   { id: "db-browser",        icon: Database,      color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Postgre DB Browser"  },
-  { id: "workflow-error",    icon: AlertTriangle, color: "text-red-400",    bg: "bg-red-500/10",    activeBorder: "border-red-500/40",    label: "Workflow Error"    },
+  { id: "ebs-backup-recovery", icon: RefreshCw,   color: "text-red-400",    bg: "bg-red-500/10",    activeBorder: "border-red-500/40",    label: "Oracle EBS Backup Recovery" },
 ];
 
 /* ─── Main Page ───────────────────────────────────── */
@@ -48,7 +49,7 @@ export default function ITDashboard() {
       {activeId === "tablespace-usage"  && <TablespaceSection />}
       {activeId === "disk-usage"        && <DiskUsageSection />}
       {activeId === "db-browser"        && <DatabaseBrowserSection />}
-      {activeId === "workflow-error"    && <WorkflowErrorSection />}
+      {activeId === "ebs-backup-recovery" && <EbsBackupRecovery />}
     </div>
   );
 }
@@ -2329,43 +2330,6 @@ function DbAuditLog() {
         </table>
       </div>
     </div>
-  );
-}
-
-/* ─── Section: Workflow Error ─────────────────────── */
-
-function WorkflowErrorSection() {
-  const [data,    setData]    = useState([]);
-  const [summary, setSummary] = useState({ error: 0, suspended: 0, notified: 0 });
-  const [loading, setLoading] = useState(false);
-
-  const refresh = async () => {
-    setLoading(true);
-    try {
-      const res = await itApi.getWorkflowError();
-      setData(res.data ?? []);
-      if (res.summary) setSummary(res.summary);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <SectionCard
-      title="Oracle Workflow — Error & Pending Items (Top 10)"
-      action={<ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-blue-600 hover:bg-blue-700" onClick={refresh} />}
-    >
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <MetricCard label="Error"     value={summary.error}     gradient="from-red-500 to-red-700" />
-        <MetricCard label="Suspended" value={summary.suspended} gradient="from-amber-500 to-orange-600" />
-        <MetricCard label="Notified"  value={summary.notified}  gradient="from-blue-500 to-blue-700" />
-      </div>
-      <DataTable
-        headers={["Item Key", "Item Type", "Activity Name", "Status", "Error Message", "Begin Date", "Days Pending"]}
-        rows={data.map((r) => [r.item_key, r.item_type, r.activity_name, r.activity_status, r.error_message, r.begin_date, r.days_pending])}
-        placeholder="Click Refresh to load workflow data"
-      />
-    </SectionCard>
   );
 }
 

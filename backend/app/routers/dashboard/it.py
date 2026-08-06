@@ -15,7 +15,6 @@ Endpoints:
   POST /tablespace-add-datafile       — ALTER TABLESPACE ADD DATAFILE
   GET  /disk-usage                    — Disk usage via SSH df
   GET  /pending-jobs                  — Concurrent requests Oracle
-  GET  /workflow-error                — Oracle Workflow errors
 """
 
 from fastapi import APIRouter, Depends
@@ -181,11 +180,3 @@ async def get_disk_usage(user: CurrentUser = Depends(require_role(Roles.IT))):
 async def get_pending_jobs(user: CurrentUser = Depends(require_role(Roles.IT))):
     """Concurrent requests from Oracle FND_CONCURRENT_REQUESTS."""
     return await OracleITService().get_pending_jobs()
-
-
-# ── Workflow Error ────────────────────────────────────────────────────────────
-
-@router.get("/workflow-error")
-async def get_workflow_error(user: CurrentUser = Depends(require_role(Roles.IT))):
-    """Oracle Workflow error/pending items from WF_ITEM_ACTIVITY_STATUSES."""
-    return await OracleITService().get_workflow_errors()

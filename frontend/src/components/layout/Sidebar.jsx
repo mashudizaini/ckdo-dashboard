@@ -18,7 +18,7 @@ const NAV_ITEMS = [
     { label: "Oracle Tablespace Monitoring", path: "/dashboard/it/tablespace-usage" },
     { label: "Oracle Storage Monitoring", path: "/dashboard/it/disk-usage" },
     { label: "Postgre DB Browser", path: "/dashboard/it/db-browser" },
-    { label: "Workflow Error", path: "/dashboard/it/workflow-error" },
+    { label: "Oracle EBS Backup Recovery", path: "/dashboard/it/ebs-backup-recovery" },
   ] },
   { label: "HRGA", path: "/dashboard/hr", icon: Users, roles: ["hr_staff"], children: [
     { label: "Employee Data", path: "/dashboard/hr/employees" },

@@ -31,7 +31,6 @@ export const itApi = {
   resizeTablespaceDatafile:(body) => api.post("/dashboard/it/tablespace-resize-datafile", body),
   getDiskUsage:     () => api.get("/dashboard/it/disk-usage"),
   getPendingJobs:   () => api.get("/dashboard/it/pending-jobs"),
-  getWorkflowError: () => api.get("/dashboard/it/workflow-error"),
 
   // Database Browser (PostgreSQL — ckdo_dashboard)
   getDbObjects:   ()                     => api.get("/dashboard/it/db-browser/objects"),

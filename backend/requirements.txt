@@ -75,3 +75,9 @@ paramiko==3.4.0
 
 # Coretax browser automation
 playwright>=1.44.0
+
+# Oracle EBS Backup Recovery (ported from the standalone ebs-backup-dashboard
+# app) — schedule polling, MinIO object storage client, cron-expression math
+apscheduler==3.10.4
+minio==7.2.9
+croniter==3.0.3
