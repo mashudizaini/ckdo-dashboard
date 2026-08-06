@@ -165,7 +165,7 @@ class PurchasingService:
         try:
             existing = await asyncio.to_thread(self._query, dupe_check_sql, {"item_code": data["item_code"]})
             if existing and existing[0]["c"] > 0:
-                return {"success": False, "error": f"\"{data['item_code']}\" sudah ada di Manufacturer Master — edit data yang sudah ada, bukan menambah baru."}
+                return {"success": False, "error": f"\"{data['item_code']}\" already exists in Manufacturer Master — edit the existing record instead of adding a new one."}
         except Exception as e:
             logger.error("manufacturer_dupe_check_error", error=str(e))
 
@@ -190,7 +190,7 @@ class PurchasingService:
                 "country_of_origin": data.get("country_of_origin", ""),
                 "created_by":       username,
             })
-            return {"success": True, "message": "Data berhasil disimpan"}
+            return {"success": True, "message": "Data saved successfully"}
         except Exception as e:
             logger.error("manufacturer_create_error", error=str(e))
             return {"success": False, "error": str(e)}
@@ -203,7 +203,7 @@ class PurchasingService:
         try:
             existing = await asyncio.to_thread(self._query, dupe_check_sql, {"item_code": data["item_code"], "id": manufacturer_id})
             if existing and existing[0]["c"] > 0:
-                return {"success": False, "error": f"\"{data['item_code']}\" sudah ada di record lain di Manufacturer Master."}
+                return {"success": False, "error": f"\"{data['item_code']}\" already exists in another Manufacturer Master record."}
         except Exception as e:
             logger.error("manufacturer_dupe_check_error", error=str(e))
 
@@ -231,8 +231,8 @@ class PurchasingService:
                 "id":               manufacturer_id,
             })
             if rows == 0:
-                return {"success": False, "error": "Record tidak ditemukan"}
-            return {"success": True, "message": "Data berhasil diperbarui"}
+                return {"success": False, "error": "Record not found"}
+            return {"success": True, "message": "Data updated successfully"}
         except Exception as e:
             logger.error("manufacturer_update_error", error=str(e))
             return {"success": False, "error": str(e)}
@@ -242,8 +242,8 @@ class PurchasingService:
         try:
             rows = await asyncio.to_thread(self._execute, sql, {"id": manufacturer_id})
             if rows == 0:
-                return {"success": False, "error": "Record tidak ditemukan"}
-            return {"success": True, "message": "Data berhasil dihapus"}
+                return {"success": False, "error": "Record not found"}
+            return {"success": True, "message": "Data deleted successfully"}
         except Exception as e:
             logger.error("manufacturer_delete_error", error=str(e))
             return {"success": False, "error": str(e)}

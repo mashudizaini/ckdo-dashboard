@@ -820,7 +820,7 @@ function PHByItemTable({ data, years, loading, error }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-gray-500">{data.length} rows ditemukan</span>
+        <span className="text-xs text-gray-500">{data.length} rows found</span>
         <button onClick={handleDownload} disabled={data.length === 0}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600/20 hover:bg-green-600/30 text-green-400 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
           <Download size={12} /> Download Excel
@@ -928,7 +928,7 @@ function PHBySupplierTable({ data, years, loading, error }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-gray-500">{data.length} rows ditemukan</span>
+        <span className="text-xs text-gray-500">{data.length} rows found</span>
         <button onClick={handleDownload} disabled={data.length === 0}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600/20 hover:bg-green-600/30 text-green-400 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
           <Download size={12} /> Download Excel
