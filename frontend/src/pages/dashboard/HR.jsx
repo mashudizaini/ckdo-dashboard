@@ -4046,7 +4046,7 @@ function AttendanceRateSection() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        {[["summary", "Summary"], ["today", "Attendance Today"], ["detail", "Detail"], ["leaveData", "Attendance Leave"], ["correction", "Data Correction"], ["coverage", "Data Coverage"], ["calendar", "Working Calendar"], ["upload", "Upload"]].map(([id, label]) => (
+        {[["summary", "Summary"], ["today", "Attendance Today"], ["detail", "Detail"], ["leaveData", "Attendance Leave"], ["annualReport", "Annual Leave Report"], ["correction", "Data Correction"], ["coverage", "Data Coverage"], ["calendar", "Working Calendar"], ["upload", "Upload"]].map(([id, label]) => (
           <button key={id} onClick={() => setActiveTab(id)}
             style={{
               padding: "8px 20px", borderRadius: 10, border: "none", fontSize: 12, fontWeight: 700,
@@ -4182,6 +4182,11 @@ function AttendanceRateSection() {
       {/* ── Leave (moved from the former standalone Leave tab) ── */}
       {activeTab === "leaveData" && (
         <LeaveDataSection />
+      )}
+
+      {/* ── Annual leave report (Jan-Dec matrix per employee) ── */}
+      {activeTab === "annualReport" && (
+        <AnnualLeaveReportSection />
       )}
 
       {/* ── Manual data correction ── */}
@@ -5321,6 +5326,127 @@ function LeaveDataSection() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Annual leave report (Jan-Dec matrix per employee) ──────────────────────────
+function AnnualLeaveReportSection() {
+  const curYear = new Date().getFullYear();
+  const [year, setYear] = useState(curYear);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [department, setDepartment] = useState("");
+  const [departments, setDepartments] = useState([]);
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState("employee_name");
+  const [sortDir, setSortDir] = useState("asc");
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
+
+  useEffect(() => {
+    hrApi.getLeaveDepartments().then(setDepartments).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    hrApi.getAnnualLeaveReport(year)
+      .then(setData)
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, [year]);
+
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  const filtered = (data?.employees || []).filter(e => {
+    if (department && e.department !== department) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      if (!e.employee_name?.toLowerCase().includes(q) && !e.employee_id?.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+
+  const rows = sortBy === "employee_name" || sortBy === "total"
+    ? [...filtered].sort((a, b) => {
+        const dir = sortDir === "asc" ? 1 : -1;
+        if (sortBy === "total") return (a.total - b.total) * dir;
+        return (a.employee_name || "").localeCompare(b.employee_name || "") * dir;
+      })
+    : filtered;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2 items-end">
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Year</label>
+          <select value={year} onChange={e => setYear(Number(e.target.value))}
+            className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5">
+            {[curYear + 1, curYear, curYear - 1, curYear - 2, curYear - 3].map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Department</label>
+          <select value={department} onChange={e => setDepartment(e.target.value)}
+            className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5">
+            <option value="">All</option>
+            {departments.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Search</label>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Name / ID..."
+            className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5 w-36" />
+        </div>
+        {loading && <Loader2 size={14} className="animate-spin text-gray-500" />}
+        <div className="flex-1" />
+        <span className="text-xs text-gray-600">{rows.length} employees</span>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-gray-800">
+        <table className="text-xs border-collapse">
+          <thead>
+            <tr>
+              <th className="px-3 py-2 text-left text-gray-500 bg-gray-800/60 sticky left-0 cursor-pointer" onClick={() => handleSort("employee_name")}>
+                Employee {sortBy === "employee_name" && (sortDir === "asc" ? "▲" : "▼")}
+              </th>
+              <th className="px-2 py-2 text-left text-gray-500 bg-gray-800/60">Department</th>
+              {MONTHS.map(m => <th key={m} className="px-2 py-2 text-center text-gray-500 bg-gray-800/60 font-medium">{m}</th>)}
+              <th className="px-3 py-2 text-center text-gray-300 bg-gray-800/60 font-bold cursor-pointer" onClick={() => handleSort("total")}>
+                Total {sortBy === "total" && (sortDir === "asc" ? "▲" : "▼")}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={15} className="py-10 text-center"><Loader2 size={14} className="animate-spin inline mr-2 text-gray-500" />Loading...</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td colSpan={15} className="py-10 text-center text-gray-600">No employees match these filters.</td></tr>
+            ) : rows.map(emp => (
+              <tr key={emp.employee_id} className="border-t border-gray-800 hover:bg-gray-800/30">
+                <td className="px-3 py-2 text-gray-200 font-medium whitespace-nowrap bg-gray-900 sticky left-0">
+                  {emp.employee_name || emp.employee_id}
+                  <div className="text-[10px] text-gray-600 font-mono">{emp.employee_id}</div>
+                </td>
+                <td className="px-2 py-2 text-gray-400">{emp.department || "—"}</td>
+                {emp.months.map(m => {
+                  const tooltip = m.total > 0
+                    ? Object.entries(m.by_code).map(([k, v]) => `${k}: ${v}`).join("\n")
+                    : "";
+                  return (
+                    <td key={m.month} className="px-1 py-2 text-center" title={tooltip}>
+                      <span className={m.total > 0 ? "text-amber-300 font-semibold" : "text-gray-700"}>
+                        {m.total > 0 ? m.total : "–"}
+                      </span>
+                    </td>
+                  );
+                })}
+                <td className="px-3 py-2 text-center font-bold text-gray-100 bg-gray-800/30">{emp.total}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

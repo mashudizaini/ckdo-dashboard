@@ -352,3 +352,88 @@ async def get_employee_leave_detail(
             for h in history
         ],
     }
+
+
+@router.get("/annual-report")
+async def get_annual_leave_report(
+    year: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    """Per-employee leave matrix for one year — every leave/BT day, broken
+    down by month, so HR can see total leave taken Jan-Dec at a glance (and
+    who took none at all). Every code counts here (including BT/H), same
+    scope as /summary and the Leave Distribution chart."""
+    from app.models.employee import Employee
+
+    yr = year or datetime.utcnow().year
+
+    rows_result = await db.execute(
+        select(
+            AttendanceRecord.employee_id,
+            extract("month", AttendanceRecord.attendance_date).label("month"),
+            AttendanceRecord.leave_code,
+            func.count().label("count"),
+        )
+        .where(AttendanceRecord.leave_code.isnot(None))
+        .where(extract("year", AttendanceRecord.attendance_date) == yr)
+        .group_by(AttendanceRecord.employee_id, extract("month", AttendanceRecord.attendance_date), AttendanceRecord.leave_code)
+    )
+
+    by_employee = {}
+    for emp_id, month, code, count in rows_result.fetchall():
+        month, count = int(month), int(count)
+        bucket = by_employee.setdefault(emp_id, {})
+        cell = bucket.setdefault(month, {"total": 0, "by_code": {}})
+        cell["total"] += count
+        cell["by_code"][code] = cell["by_code"].get(code, 0) + count
+
+    # Base roster: active employees, plus anyone with leave data this year
+    # who may have since resigned — so a mid-year resignation doesn't drop
+    # their leave history for that year off the report.
+    active_result = await db.execute(
+        select(Employee.user_id, Employee.full_name, Employee.department)
+        .where(Employee.employment_status == "Active")
+    )
+    roster = {r[0]: {"name": r[1], "department": r[2]} for r in active_result.fetchall()}
+
+    missing_ids = set(by_employee.keys()) - set(roster.keys())
+    if missing_ids:
+        extra_result = await db.execute(
+            select(Employee.user_id, Employee.full_name, Employee.department)
+            .where(Employee.user_id.in_(missing_ids))
+        )
+        for r in extra_result.fetchall():
+            roster[r[0]] = {"name": r[1], "department": r[2]}
+        # Employees not found in the master at all (rare — e.g. an
+        # employee_id typo'd into a manual entry) still get a row, using
+        # whatever name AttendanceRecord itself carries.
+        still_missing = missing_ids - set(roster.keys())
+        if still_missing:
+            name_result = await db.execute(
+                select(AttendanceRecord.employee_id, AttendanceRecord.employee_name, AttendanceRecord.department)
+                .where(AttendanceRecord.employee_id.in_(still_missing))
+            )
+            for emp_id, name, dept in name_result.fetchall():
+                roster.setdefault(emp_id, {"name": name, "department": dept})
+
+    employees = []
+    for emp_id, info in roster.items():
+        months_data = by_employee.get(emp_id, {})
+        months = []
+        year_total = 0
+        for m in range(1, 13):
+            cell = months_data.get(m, {"total": 0, "by_code": {}})
+            months.append({"month": m, "total": cell["total"], "by_code": cell["by_code"]})
+            year_total += cell["total"]
+        employees.append({
+            "employee_id": emp_id,
+            "employee_name": info["name"],
+            "department": info["department"],
+            "months": months,
+            "total": year_total,
+        })
+
+    employees.sort(key=lambda e: e["employee_name"] or "")
+
+    return {"year": yr, "employees": employees}
