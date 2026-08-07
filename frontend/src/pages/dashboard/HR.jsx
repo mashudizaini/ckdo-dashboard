@@ -3779,6 +3779,7 @@ function AttendanceRateSection() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <AttendanceUpload kind="intercom" />
           <AttendanceUpload kind="talenta" />
+          <AttendanceUpload kind="plant" />
           <LeaveUpload />
         </div>
       )}

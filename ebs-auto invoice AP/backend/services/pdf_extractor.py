@@ -70,7 +70,7 @@ def _pdf_to_images_base64(pdf_path: str) -> list[str]:
 
 
 def _call_claude_vision(images: list[str]) -> dict:
-    """Kirim semua page images ke Claude Vision API, return parsed dict."""
+    """Transfer All Pages images to Claude Vision API, return parsed dict."""
     client = anthropic.Anthropic(
         api_key=os.getenv("ANTHROPIC_API_KEY")
     )

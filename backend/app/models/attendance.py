@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Date, DateTime, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Date, DateTime, Text, Boolean, UniqueConstraint
 from app.database import Base
 
 
@@ -25,6 +25,12 @@ class AttendanceRecord(Base):
     actual_checkout    = Column(String(10))
     attendance_status  = Column(String(10))   # W=Worked, L=Late, E=Early leave, LE=Late+Early, A=Absent (Intercom's own determination)
     notes              = Column(Text)
+    # True for a day the employee's own shift schedule marks as a rest day
+    # (Plant source: ON DUTY column literally says "OFF") — distinct from a
+    # calendar weekend, since Plant shift rotations can put a rest day on
+    # any weekday. Excluded from the attendance-rate plan/actual the same
+    # way a weekend is. Always False for Intercom/Talenta-sourced rows.
+    is_day_off         = Column(Boolean, default=False, nullable=False)
 
     upload_batch_id    = Column(String(50), index=True)
     uploaded_at        = Column(DateTime, default=datetime.utcnow)

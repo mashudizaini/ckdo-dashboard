@@ -1,17 +1,19 @@
 /**
  * AttendanceUpload.jsx
- * Two upload sources, both feeding the same Attendance Ratio reports:
+ * Three upload sources, all feeding the same Attendance Ratio reports:
  *   - Intercom (kind="intercom") — daily physical check-in/out log
  *     e.g. "Attendance JUN-2026-Intercom.xlsx"
  *   - Talenta  (kind="talenta")  — leave & business-trip days
  *     e.g. "Attendance MAY-JUN-2026 Talenta.xlsx"
+ *   - Plant    (kind="plant")    — combined physical + leave log for plant
+ *     employees, one workbook with a sheet per month, e.g. "Attendance Plant 2026.xlsx"
  */
 
 import { useState, useRef, useEffect } from "react";
 import {
   Upload, FileSpreadsheet, CheckCircle2, XCircle,
   Loader2, RefreshCw, Clock, ChevronDown, ChevronUp,
-  CalendarCheck, FilePlus, RotateCcw, AlertCircle, Briefcase
+  CalendarCheck, FilePlus, RotateCcw, AlertCircle, Briefcase, Factory
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { SortableTH, toggleSort, sortRows } from "@/components/SortableTH";
@@ -26,6 +28,23 @@ const CONFIG = {
     example: "Attendance JUN-2026-Intercom.xlsx",
     guidance: "Daily physical check-in/out log from the Intercom access-control system. Header in row 1, data starts at row 2. Existing records are updated based on Employee ID + date.",
     icon: CalendarCheck,
+    columns: [
+      { idx: 0,  name: "Name", required: false },
+      { idx: 1,  name: "ID", required: true, note: "Employee ID" },
+      { idx: 2,  name: "Department", required: false, note: "ignored — real dept comes from Team" },
+      { idx: 3,  name: "Team", required: false, note: "used as department" },
+      { idx: 4,  name: "Date", required: true },
+      { idx: 5,  name: "Week", required: false },
+      { idx: 6,  name: "Time Period", required: false },
+      { idx: 7,  name: "Required Check-In Time", required: false },
+      { idx: 8,  name: "Required Check-Out Time", required: false },
+      { idx: 9,  name: "Actual Check-In Time", required: false },
+      { idx: 10, name: "Actual Check-Out Time", required: false },
+      { idx: 11, name: "Attendance Records", required: false, note: "ignored" },
+      { idx: 12, name: "Required Work Hours", required: false, note: "ignored" },
+      { idx: 13, name: "Total Work Hours", required: false, note: "ignored" },
+      { idx: 14, name: "Attendance Status", required: false, note: "W/L/E/LE/A" },
+    ],
     accent: {
       text: "text-teal-300", banner: "border-teal-500/20 bg-teal-500/5",
       dragActive: "border-teal-500 bg-teal-500/10", focus: "focus:border-teal-500",
@@ -39,10 +58,54 @@ const CONFIG = {
     example: "Attendance MAY-JUN-2026 Talenta.xlsx",
     guidance: "Leave and business-trip days from Talenta. Only rows with an Attendance Code or Time Off Code are stored — these explain days an employee wasn't physically checked in (leave is excluded from the attendance rate entirely; Business Trip counts as present).",
     icon: Briefcase,
+    columns: [
+      { idx: 0,  name: "Employee ID", required: true },
+      { idx: 1,  name: "Full Name", required: false },
+      { idx: 2,  name: "Branch", required: false, note: "ignored" },
+      { idx: 3,  name: "department", required: true },
+      { idx: 4,  name: "Job Position", required: false, note: "ignored" },
+      { idx: 5,  name: "Date", required: true },
+      { idx: 6,  name: "Shift", required: false, note: "ignored" },
+      { idx: 7,  name: "Shift Code", required: false, note: "ignored" },
+      { idx: 8,  name: "Shift Label", required: false, note: "ignored" },
+      { idx: 9,  name: "Schedule Check In", required: false, note: "ignored" },
+      { idx: 10, name: "Schedule Check Out", required: false, note: "ignored" },
+      { idx: 11, name: "Attendance Code", required: "either", note: "row kept only if this or Time Off Code is filled" },
+      { idx: 12, name: "Time Off Code", required: "either", note: "row kept only if this or Attendance Code is filled" },
+    ],
     accent: {
       text: "text-indigo-300", banner: "border-indigo-500/20 bg-indigo-500/5",
       dragActive: "border-indigo-500 bg-indigo-500/10", focus: "focus:border-indigo-500",
       button: "bg-indigo-600 hover:bg-indigo-500",
+    },
+  },
+  plant: {
+    title: "Attendance Plant",
+    uploadPath: "/upload-plant",
+    logSource: "plant",
+    example: "Attendance Plant 2026.xlsx",
+    guidance: "Combined physical check-in/out AND leave/BT log for plant employees. Title in row 1, header in row 2, data from row 3. The workbook has one sheet per month (JAN–DEC) — every sheet is read and merged automatically, so upload the whole file at once. \"OFF\" in On Duty (or Remark = RDO) marks a scheduled shift rest day, excluded from the attendance rate like a weekend. Remark text (Annual/Sick/Unpaid Leave, Business Trip, Event Leave, Half Day Leave, Collective Leave) is mapped to the same leave codes Talenta uses; Late Attend and Back To Home Early set the attendance status instead; Overtime is informational only.",
+    icon: Factory,
+    columns: [
+      { idx: 0,  name: "NO", required: false, note: "ignored" },
+      { idx: 1,  name: "TEAM", required: false, note: "used as department" },
+      { idx: 2,  name: "EMPLOYEE ID", required: true },
+      { idx: 3,  name: "EMPLOYEE NAME", required: false },
+      { idx: 4,  name: "DAY", required: false },
+      { idx: 5,  name: "DATE", required: true },
+      { idx: 6,  name: "ON DUTY", required: false, note: "\"OFF\" = scheduled shift rest day" },
+      { idx: 7,  name: "OFF DUTY", required: false },
+      { idx: 8,  name: "START OVERTIME", required: false, note: "ignored" },
+      { idx: 9,  name: "CLOCK IN", required: false },
+      { idx: 10, name: "CLOCK OUT", required: false },
+      { idx: 11, name: "LATE (duration)", required: false, note: "ignored" },
+      { idx: 12, name: "LATE (status)", required: false, note: "\"LATE ATTEND\" → attendance status L" },
+      { idx: 13, name: "REMARK", required: false, note: "Annual/Sick/Unpaid/Collective Leave, Business Trip, Event Leave, Half Day Leave → leave code; RDO → day off; Back To Home Early → status E; Overtime → ignored" },
+    ],
+    accent: {
+      text: "text-amber-300", banner: "border-amber-500/20 bg-amber-500/5",
+      dragActive: "border-amber-500 bg-amber-500/10", focus: "focus:border-amber-500",
+      button: "bg-amber-600 hover:bg-amber-500",
     },
   },
 };
@@ -58,6 +121,7 @@ export default function AttendanceUpload({ kind = "intercom" }) {
   const [error,       setError]       = useState(null);
   const [logs,        setLogs]        = useState([]);
   const [showLogs,    setShowLogs]    = useState(false);
+  const [showCols,    setShowCols]    = useState(false);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [sortBy,  setSortBy]  = useState(null);
   const [sortDir, setSortDir] = useState("asc");
@@ -141,6 +205,48 @@ export default function AttendanceUpload({ kind = "intercom" }) {
         <span>
           {cfg.guidance} Example file: <strong>{cfg.example}</strong>.
         </span>
+      </div>
+
+      {/* ── Required columns ───────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900">
+        <button
+          onClick={() => setShowCols((v) => !v)}
+          className="flex w-full items-center justify-between px-5 py-3 text-sm font-medium text-gray-300 hover:text-white transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <FileSpreadsheet size={14} className="text-gray-500" />
+            Required Columns ({cfg.columns.length})
+          </div>
+          {showCols ? <ChevronUp size={15} className="text-gray-500" /> : <ChevronDown size={15} className="text-gray-500" />}
+        </button>
+        {showCols && (
+          <div className="border-t border-gray-800 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-800/50">
+                  <th className="px-3 py-2 text-left text-gray-500 font-medium">Col</th>
+                  <th className="px-3 py-2 text-left text-gray-500 font-medium">Column Name</th>
+                  <th className="px-3 py-2 text-left text-gray-500 font-medium">Required</th>
+                  <th className="px-3 py-2 text-left text-gray-500 font-medium">Note</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800">
+                {cfg.columns.map((c) => (
+                  <tr key={c.idx}>
+                    <td className="px-3 py-2 text-gray-500">{c.idx}</td>
+                    <td className="px-3 py-2 text-gray-200 font-medium">{c.name}</td>
+                    <td className="px-3 py-2">
+                      {c.required === true && <span className="text-red-400 font-semibold">Yes</span>}
+                      {c.required === "either" && <span className="text-amber-400 font-semibold">One of</span>}
+                      {c.required === false && <span className="text-gray-600">No</span>}
+                    </td>
+                    <td className="px-3 py-2 text-gray-500">{c.note || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* ── Drop zone ───────────────────────────────────────────────────────── */}

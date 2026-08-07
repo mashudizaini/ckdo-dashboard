@@ -2,21 +2,25 @@
 HR Attendance Router
 Route prefix : /api/v1/dashboard/hr/attendance
 
-Two upload sources, combined for every report/graph below:
+Three upload sources, combined for every report/graph below:
   - Intercom (POST /upload)         — daily physical check-in/out log
                                        (e.g. "Attendance JUN-2026-Intercom.xlsx")
   - Talenta  (POST /upload-talenta) — leave & business-trip days
                                        (e.g. "Attendance MAY-JUN-2026 Talenta.xlsx")
+  - Plant    (POST /upload-plant)   — combined physical + leave log for plant
+                                       employees, one workbook with a sheet per
+                                       month (e.g. "Attendance Plant 2026.xlsx")
 
-Combination rule for every attendance-rate calculation below: a Talenta
-Business Trip (BT) day counts as present (worked off-site); a Talenta leave
-day (SL/AL/ALAB/ML/EM/UL/ULBB) is excluded from both the numerator and
+Combination rule for every attendance-rate calculation below: a Business Trip
+(BT) day counts as present (worked off-site); a leave day
+(SL/AL/ALAB/ML/EM/UL/ULBB/EL/HD) is excluded from both the numerator and
 denominator of the rate entirely — it isn't a required working day for that
-person that day. Everything else falls back to the Intercom attendance_status
-(or, for legacy rows with no status, whether actual_checkin was recorded).
+person that day. A Plant shift rest day (is_day_off) is excluded the same
+way. Everything else falls back to the Intercom/Plant attendance_status (or,
+for legacy rows with no status, whether actual_checkin was recorded).
 """
 import io
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, time, timedelta
 from typing import Optional
 
 import openpyxl
@@ -34,7 +38,10 @@ WEEKENDS       = ["Saturday", "Sunday"]
 # "H" = Holiday, a per-record calendar-holiday marker Talenta puts on the
 # employee's row (distinct from WorkingCalendarHoliday) — treated the same
 # as leave: not a required working day, excluded from both plan and actual.
-LEAVE_CODES    = ("SL", "AL", "ALAB", "ML", "EM", "UL", "ULBB", "H")
+# "EL"/"HD" (Event Leave / Half Day Leave) come from the Plant source's
+# REMARK column — same treatment, excluded entirely rather than partially
+# scored, since the model has no concept of a fractional working day.
+LEAVE_CODES    = ("SL", "AL", "ALAB", "ML", "EM", "UL", "ULBB", "H", "EL", "HD")
 BT_CODE        = "BT"
 PRESENT_STATUSES = ("W", "L", "E", "LE")
 
@@ -42,7 +49,7 @@ LEAVE_LABELS = {
     "SL": "Sick Leave", "AL": "Annual Leave", "ALAB": "Annual Leave",
     "ML": "Maternity Leave", "EM": "Employee Marriage",
     "UL": "Unpaid Leave", "ULBB": "Unpaid Leave", "BT": "Business Trip",
-    "H": "Holiday",
+    "H": "Holiday", "EL": "Event Leave", "HD": "Half Day Leave",
 }
 
 IS_WEEKDAY = AttendanceRecord.week_day.notin_(WEEKENDS)
@@ -72,8 +79,10 @@ def _is_present_intercom():
 
 
 def _plan_expr():
-    """1 if this is a required working day (weekday, not on excluded leave)."""
+    """1 if this is a required working day (weekday, not a Plant shift rest
+    day, not on excluded leave)."""
     return case(
+        (AttendanceRecord.is_day_off.is_(True), 0),
         (and_(IS_WEEKDAY, _is_leave_code()), 0),
         (IS_WEEKDAY, 1),
         else_=0,
@@ -81,8 +90,10 @@ def _plan_expr():
 
 
 def _actual_expr():
-    """1 if counted as present — Business Trip, or Intercom-present — and not on excluded leave."""
+    """1 if counted as present — Business Trip, or Intercom-present — and not
+    on excluded leave or a Plant shift rest day."""
     return case(
+        (AttendanceRecord.is_day_off.is_(True), 0),
         (and_(IS_WEEKDAY, _is_leave_code()), 0),
         (and_(IS_WEEKDAY, _is_bt_code()), 1),
         (and_(IS_WEEKDAY, _is_present_intercom()), 1),
@@ -426,6 +437,260 @@ async def upload_attendance_talenta(
         "total_rows": len(rows_parsed), "inserted": inserted, "updated": updated,
         "skipped": 0, "stub_days_created": stub_created,
         "message": f"Upload successful: {inserted} new leave/BT records, {updated} updated.",
+    }
+
+
+# ── Plant upload: daily attendance + leave, combined in one row ────────────────
+# Real export layout: one workbook, one sheet per month (JAN..DEC), title in
+# row 1, header in row 2, data from row 3. Every sheet's DATE column carries
+# a full date, so all sheets in the workbook are read and merged — no need
+# to know which sheet is "current". Column layout (0-based, within a row):
+#   NO | TEAM | Employee ID | Employee Name | Day | Date | On Duty | Off Duty |
+#   Start Overtime | Clock In | Clock Out | Late (duration) | Late (status) |
+#   Remark | ...(unrelated join/leaver announcements in the trailing columns)
+PCOL_TEAM         = 1
+PCOL_ID           = 2
+PCOL_NAME         = 3
+PCOL_DAY          = 4
+PCOL_DATE         = 5
+PCOL_ON_DUTY      = 6
+PCOL_OFF_DUTY     = 7
+PCOL_CLOCK_IN     = 9
+PCOL_CLOCK_OUT    = 10
+PCOL_LATE_STATUS  = 12
+PCOL_REMARK       = 13
+
+# REMARK text -> the same short leave/BT codes Talenta uses, so Plant rows
+# plug into the exact same _is_leave_code()/_is_bt_code() scoring above.
+# COLLECTIVE LEAVE maps to "H" — the same per-record calendar-holiday code
+# Talenta already uses (see LEAVE_CODES above). LATE ATTEND, OVERTIME, BACK
+# TO HOME EARLY, and RDO are handled separately below (status / day-off,
+# not a leave event).
+PLANT_REMARK_LEAVE_MAP = {
+    "ANNUAL LEAVE":     "AL",
+    "SICK LEAVE":       "SL",
+    "UNPAID LEAVE":     "UL",
+    "BUSINESS TRIP":    "BT",
+    "EVENT LEAVE":      "EL",
+    "HALF DAY LEAVE":   "HD",
+    "COLLECTIVE LEAVE": "H",
+}
+
+
+def _read_plant_rows(contents: bytes) -> list:
+    """Read every data row (from row 3 onward — row 1 title, row 2 header)
+    across every worksheet in the Plant workbook (one sheet per month)."""
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True)
+        return [r for ws in wb.worksheets for r in ws.iter_rows(min_row=3, values_only=True)]
+    except Exception:
+        pass
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contents), data_only=True, read_only=True)
+        return [r for ws in wb.worksheets for r in ws.iter_rows(min_row=3, values_only=True)]
+    except Exception:
+        pass
+    from python_calamine import CalamineWorkbook
+    wb = CalamineWorkbook.from_filelike(io.BytesIO(contents))
+    rows = []
+    for name in wb.sheet_names:
+        sheet_rows = wb.get_sheet_by_name(name).to_python()
+        rows.extend(tuple(r) for r in sheet_rows[2:])  # skip title + header rows
+    return rows
+
+
+def _plant_time_str(val) -> Optional[str]:
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        val = val.time()
+    if isinstance(val, time):
+        return val.strftime("%H:%M")
+    s = str(val).strip()
+    return s or None
+
+
+def _is_off_marker(val) -> bool:
+    return isinstance(val, str) and val.strip().upper() == "OFF"
+
+
+def _parse_plant_row(row: tuple, batch_id: str) -> Optional[tuple]:
+    """Returns (attendance_record_dict, leave_event_dict_or_None), or None to skip."""
+    if len(row) <= PCOL_ID:
+        return None
+    employee_id = _to_str(row[PCOL_ID])
+    if not employee_id:
+        return None
+
+    att_date = _to_date(row[PCOL_DATE]) if len(row) > PCOL_DATE else None
+    if att_date is None:
+        return None
+
+    on_duty_raw   = row[PCOL_ON_DUTY]   if len(row) > PCOL_ON_DUTY   else None
+    clock_in_raw  = row[PCOL_CLOCK_IN]  if len(row) > PCOL_CLOCK_IN  else None
+    clock_out_raw = row[PCOL_CLOCK_OUT] if len(row) > PCOL_CLOCK_OUT else None
+    late_status   = _to_str(row[PCOL_LATE_STATUS]) if len(row) > PCOL_LATE_STATUS else None
+    remark        = _to_str(row[PCOL_REMARK])       if len(row) > PCOL_REMARK       else None
+
+    remark_upper = remark.upper() if remark else None
+    # RDO (Rostered Day Off) is a scheduled rest day communicated only via
+    # REMARK, not the On Duty column — same treatment as an explicit "OFF".
+    is_day_off = _is_off_marker(on_duty_raw) or remark_upper == "RDO"
+    actual_checkin  = None if _is_off_marker(clock_in_raw)  else _plant_time_str(clock_in_raw)
+    actual_checkout = None if _is_off_marker(clock_out_raw) else _plant_time_str(clock_out_raw)
+
+    remark_code = PLANT_REMARK_LEAVE_MAP.get(remark_upper) if remark_upper else None
+
+    if is_day_off:
+        attendance_status = None
+    elif late_status and late_status.upper() == "LATE ATTEND":
+        attendance_status = "L"
+    elif remark_upper == "BACK TO HOME EARLY":
+        attendance_status = "E"
+    elif remark_code is None and actual_checkin is None and actual_checkout is None:
+        attendance_status = "A"
+    else:
+        attendance_status = None
+
+    ar_data = {
+        "employee_id":        employee_id,
+        "employee_name":      _to_str(row[PCOL_NAME]) if len(row) > PCOL_NAME else None,
+        "department":         _to_str(row[PCOL_TEAM]) if len(row) > PCOL_TEAM else None,
+        "team":               None,
+        "attendance_date":    att_date,
+        "week_day":           _to_str(row[PCOL_DAY]) if len(row) > PCOL_DAY else None,
+        "time_period":        None,
+        "scheduled_checkin":  None if is_day_off else _plant_time_str(on_duty_raw),
+        "scheduled_checkout": None if is_day_off else _plant_time_str(row[PCOL_OFF_DUTY] if len(row) > PCOL_OFF_DUTY else None),
+        "actual_checkin":     actual_checkin,
+        "actual_checkout":    actual_checkout,
+        "attendance_status":  attendance_status,
+        "notes":              f"Plant remark: {remark}" if remark else None,
+        "is_day_off":         is_day_off,
+        "upload_batch_id":    batch_id,
+        "uploaded_at":        datetime.utcnow(),
+    }
+
+    leave_data = None
+    if remark_code:
+        leave_data = {
+            "employee_id":     employee_id,
+            "employee_name":   ar_data["employee_name"],
+            "department":      ar_data["department"],
+            "attendance_date": att_date,
+            "attendance_code": remark_code,
+            "time_off_code":   None,
+            "upload_batch_id": batch_id,
+            "uploaded_at":     datetime.utcnow(),
+        }
+
+    return ar_data, leave_data
+
+
+@router.post("/upload-plant")
+async def upload_attendance_plant(
+    file:  UploadFile    = File(...),
+    notes: str           = Form(""),
+    db:    AsyncSession  = Depends(get_db),
+    user:  CurrentUser   = Depends(require_role(Roles.HR)),
+):
+    """Upload the Plant attendance workbook (one sheet per month, all sheets
+    read and merged). Unlike Intercom/Talenta, each row carries both the
+    physical check-in/out AND the leave/BT remark at once, so this writes to
+    both AttendanceRecord and AttendanceLeaveEvent from the same row.
+    UPSERT by employee_id + attendance_date."""
+    if not file.filename.endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="File must be .xlsx or .xlsm format")
+
+    contents = await file.read()
+    batch_id = f"plt_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+
+    try:
+        data_rows = _read_plant_rows(contents)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid Excel file: {e}. Try opening it in Excel and doing "
+                   f"File > Save As > .xlsx to normalize the file, then re-upload.",
+        )
+
+    parsed = [_parse_plant_row(row, batch_id) for row in data_rows]
+    parsed = [p for p in parsed if p is not None]
+
+    if not parsed:
+        raise HTTPException(
+            status_code=422,
+            detail="No attendance rows found. Make sure the file matches the Plant "
+                   "export template (title row 1, header row 2, data from row 3).",
+        )
+
+    ar_rows    = [p[0] for p in parsed]
+    leave_rows = [p[1] for p in parsed if p[1] is not None]
+
+    # Same department normalization as Intercom/Talenta.
+    from app.models.employee import Employee
+    emp_dept_q = await db.execute(select(Employee.user_id, Employee.department))
+    emp_dept_map = {r[0]: r[1] for r in emp_dept_q.fetchall() if r[1]}
+    for data in ar_rows:
+        if data["employee_id"] in emp_dept_map:
+            data["department"] = emp_dept_map[data["employee_id"]]
+    for data in leave_rows:
+        if data["employee_id"] in emp_dept_map:
+            data["department"] = emp_dept_map[data["employee_id"]]
+
+    ar_keys_result = await db.execute(select(AttendanceRecord.employee_id, AttendanceRecord.attendance_date))
+    existing_ar_keys = {(r[0], r[1]) for r in ar_keys_result.fetchall()}
+
+    inserted = updated = 0
+    for data in ar_rows:
+        key = (data["employee_id"], data["attendance_date"])
+        if key in existing_ar_keys:
+            await db.execute(
+                update(AttendanceRecord)
+                .where(AttendanceRecord.employee_id == key[0])
+                .where(AttendanceRecord.attendance_date == key[1])
+                .values(**data)
+            )
+            updated += 1
+        else:
+            db.add(AttendanceRecord(**data))
+            existing_ar_keys.add(key)
+            inserted += 1
+
+    leave_keys_result = await db.execute(select(AttendanceLeaveEvent.employee_id, AttendanceLeaveEvent.attendance_date))
+    existing_leave_keys = {(r[0], r[1]) for r in leave_keys_result.fetchall()}
+
+    leave_inserted = leave_updated = 0
+    for data in leave_rows:
+        key = (data["employee_id"], data["attendance_date"])
+        if key in existing_leave_keys:
+            await db.execute(
+                update(AttendanceLeaveEvent)
+                .where(AttendanceLeaveEvent.employee_id == key[0])
+                .where(AttendanceLeaveEvent.attendance_date == key[1])
+                .values(**data)
+            )
+            leave_updated += 1
+        else:
+            db.add(AttendanceLeaveEvent(**data))
+            existing_leave_keys.add(key)
+            leave_inserted += 1
+
+    await db.flush()
+
+    log = AttendanceUploadLog(
+        batch_id=batch_id, source="plant", filename=file.filename,
+        total_rows=len(ar_rows), inserted=inserted, updated=updated, skipped=0,
+        uploaded_by=user.username or "unknown", notes=notes or None,
+    )
+    db.add(log)
+
+    return {
+        "batch_id": batch_id, "filename": file.filename, "source": "plant",
+        "total_rows": len(ar_rows), "inserted": inserted, "updated": updated, "skipped": 0,
+        "leave_rows": len(leave_rows), "leave_inserted": leave_inserted, "leave_updated": leave_updated,
+        "message": f"Upload successful: {inserted} new attendance records, {updated} updated "
+                   f"(including {len(leave_rows)} leave/BT days).",
     }
 
 

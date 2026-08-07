@@ -280,14 +280,14 @@ Top-level (not nested under a dashboard module). KB-management actions are furth
 
 ### 7.1 AI Chatbot (`/ai/chatbot`)
 3 independent, concurrently-persisted chat threads (mode tabs): **Company Policy** (RAG over an internal Knowledge Base, department-scoped), **Oracle ERP** (tool-calling over predefined parameterized queries, not free-form SQL), **General** (plain LLM, no RAG/tools).
-- **Inputs:** Provider selector (Standard On-Premise / Gemini) per active tab; "API Key Saya" modal to manage a personal Gemini key (validated live on save, masked hint only); message input + clickable suggestion chips (prefill, don't auto-send).
+- **Inputs:** Provider selector (Standard On-Premise / Gemini) per active tab; "My API Key" modal to manage a personal Gemini key (validated live on save, masked hint only); message input + clickable suggestion chips (prefill, don't auto-send).
 - **Knowledge Base management** (Company Policy tab, role-gated — see §9): add document (Source/Title/Department required + text-paste or file `.pdf/.docx/.doc/.txt`), document list with FILE/TEXT + department badges, per-doc **Delete** (`confirm()`), bulk **Delete text-paste entries** (`confirm()`, only shown if any exist), **Refresh**. Shows a distinct "RAG not configured" banner if `OLLAMA_API_URL` is unset.
 - **Streaming/errors:** SSE response streaming with a distinct error bubble on failure (excluded from history sent back to the backend); source citations shown as badges in RAG mode.
 
 ### 7.2 Document Converter (`/ai/document-converter`)
 Upload PDF/DOCX/image → structured Markdown (docling OCR + table recognition) → edit → download and/or send to Chatbot's Knowledge Base.
 - **Inputs:** file dropzone (`.pdf/.docx/.doc/.png/.jpg/.jpeg`) OR pick an existing KB document to re-open/edit; metadata form (Source/Title auto-prefilled from filename/Department) for sending to KB.
-- **Actions:** **Konversi ke Markdown** (disabled until file chosen), **Download .md**, **Kirim ke KB Chatbot**/**Simpan Perubahan** (label changes when editing an existing doc — save flow deletes old chunks then re-posts, so a failed delete aborts the save), Cancel-edit.
+- **Actions:** **Konversi ke Markdown** (disabled until file chosen), **Download .md**, **Transfer ke KB Chatbot**/**Simpan Perubahan** (label changes when editing an existing doc — save flow deletes old chunks then re-posts, so a failed delete aborts the save), Cancel-edit.
 - **Streaming:** SSE `progress`/`page_result`/`done`/`error` events — markdown builds incrementally per page; can take minutes for scanned docs.
 
 ### 7.3 Meeting Notes (`/ai/meeting-notes`) — 2 tabs

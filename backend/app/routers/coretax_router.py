@@ -638,7 +638,7 @@ async def get_captcha_image(job_id: str):
 
 @coretax_router.post("/captcha/{job_id}")
 async def submit_captcha(job_id: str, body: CaptchaSubmit):
-    """Kirim kode CAPTCHA. Background task akan lanjut otomatis."""
+    """Transfer code CAPTCHA. Background task akan lanjut otomatis."""
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job tidak ditemukan")
     if jobs[job_id].get("status") != "waiting_captcha":

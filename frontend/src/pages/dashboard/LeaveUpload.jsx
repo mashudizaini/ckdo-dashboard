@@ -1,9 +1,20 @@
 import { useState, useRef, useEffect } from "react";
-import { Upload, Loader2, CheckCircle, X, FileText } from "lucide-react";
+import { Upload, Loader2, CheckCircle, X, FileText, FileSpreadsheet, ChevronDown, ChevronUp } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { SortableTH, toggleSort, sortRows } from "@/components/SortableTH";
 
 const API = "/api/v1/dashboard/hr/leave";
+
+const REQUIRED_COLUMNS = [
+  { idx: 0, name: "Employee ID", required: true },
+  { idx: 1, name: "Full Name", required: false },
+  { idx: 2, name: "Date", required: true },
+  { idx: 3, name: "Shift", required: false, note: "stored as organization" },
+  { idx: 4, name: "Schedule Check In", required: false, note: "ignored" },
+  { idx: 5, name: "Schedule Check Out", required: false, note: "ignored" },
+  { idx: 6, name: "Attendance Code", required: false, note: "ignored" },
+  { idx: 7, name: "Time Off Code", required: true, note: "row skipped if empty" },
+];
 
 export default function LeaveUpload() {
   const [file, setFile] = useState(null);
@@ -12,6 +23,7 @@ export default function LeaveUpload() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [history, setHistory] = useState([]);
+  const [showCols, setShowCols] = useState(false);
   const [sortBy,  setSortBy]  = useState(null);
   const [sortDir, setSortDir] = useState("asc");
   const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
@@ -79,6 +91,45 @@ export default function LeaveUpload() {
         <p className="text-xs text-gray-500 mb-3">
           System reads column "Time Off Code" to extract leave records (SL, AL, EM, UL, ML, BT).
         </p>
+
+        <div className="rounded-xl border border-gray-800 bg-gray-900 mb-3">
+          <button
+            onClick={() => setShowCols((v) => !v)}
+            className="flex w-full items-center justify-between px-4 py-2.5 text-sm font-medium text-gray-300 hover:text-white transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet size={14} className="text-gray-500" />
+              Required Columns ({REQUIRED_COLUMNS.length})
+            </div>
+            {showCols ? <ChevronUp size={15} className="text-gray-500" /> : <ChevronDown size={15} className="text-gray-500" />}
+          </button>
+          {showCols && (
+            <div className="border-t border-gray-800 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-800/60">
+                    <th className="px-3 py-2 text-left text-gray-500 font-medium">Col</th>
+                    <th className="px-3 py-2 text-left text-gray-500 font-medium">Column Name</th>
+                    <th className="px-3 py-2 text-left text-gray-500 font-medium">Required</th>
+                    <th className="px-3 py-2 text-left text-gray-500 font-medium">Note</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800">
+                  {REQUIRED_COLUMNS.map((c) => (
+                    <tr key={c.idx}>
+                      <td className="px-3 py-2 text-gray-500">{c.idx}</td>
+                      <td className="px-3 py-2 text-gray-200 font-medium">{c.name}</td>
+                      <td className="px-3 py-2">
+                        {c.required ? <span className="text-red-400 font-semibold">Yes</span> : <span className="text-gray-600">No</span>}
+                      </td>
+                      <td className="px-3 py-2 text-gray-500">{c.note || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
 
         <div
           onClick={() => inputRef.current?.click()}
