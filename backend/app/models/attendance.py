@@ -31,16 +31,41 @@ class AttendanceRecord(Base):
     # any weekday. Excluded from the attendance-rate plan/actual the same
     # way a weekend is. Always False for Intercom/Talenta-sourced rows.
     is_day_off         = Column(Boolean, default=False, nullable=False)
+    # Single leave/BT code for this day (SL/AL/ALAB/ML/EM/UL/ULBB/H/EL/HD/BT).
+    # The master field for attendance-rate scoring AND the leave-quota
+    # reports — both read this column, there is no separate leave table.
+    leave_code         = Column(String(20))
+    # Who/what last wrote this row: intercom | talenta | talenta-leave |
+    # plant | manual. Purely informational (e.g. a "manually edited" badge
+    # in the UI) — a later upload is always free to overwrite a manual edit,
+    # there's no lock.
+    source             = Column(String(20))
 
     upload_batch_id    = Column(String(50), index=True)
     uploaded_at        = Column(DateTime, default=datetime.utcnow)
 
 
+class AttendanceRecordAuditLog(Base):
+    """Field-level change log for manual edits to AttendanceRecord — lets HR
+    trace who corrected what and why. Only written by the manual-edit
+    endpoint, not by bulk Excel uploads (those already have upload_batch_id
+    + AttendanceUploadLog for traceability)."""
+    __tablename__ = "attendance_record_audit_log"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    employee_id     = Column(String(20), index=True, nullable=False)
+    attendance_date = Column(Date, index=True, nullable=False)
+    field           = Column(String(50), nullable=False)
+    old_value       = Column(String(300))
+    new_value       = Column(String(300))
+    changed_by      = Column(String(100))
+    changed_at      = Column(DateTime, default=datetime.utcnow)
+    reason          = Column(Text)
+
+
 class AttendanceLeaveEvent(Base):
-    """Leave / business-trip days — sourced from the Talenta export. Used to
-    reclassify a day that would otherwise look "absent" in AttendanceRecord:
-    approved leave (SL/AL/ML/EM/UL/...) is excluded from the attendance-rate
-    denominator entirely, and Business Trip (BT) counts as present."""
+    """Legacy — superseded by AttendanceRecord.leave_code. Kept only so
+    historical rows remain queryable; no longer written to."""
     __tablename__ = "attendance_leave_events"
     __table_args__ = (
         UniqueConstraint("employee_id", "attendance_date", name="uq_leave_event_emp_date"),

@@ -3494,6 +3494,309 @@ function EmployeeDetailPanel({ headers, apiBase }) {
   );
 }
 
+// ── Manual data correction ─────────────────────────────────────────────────────
+// Browses AttendanceRecord (the same master table every upload writes to)
+// and lets HR fix a wrong value or add a day that was never covered by any
+// upload at all. A later Excel upload for the same employee+date can still
+// overwrite whatever is set here — there's no lock — but every manual change
+// is logged and viewable via "History" in the edit modal.
+function AttendanceCorrectionSection({ departments }) {
+  const [filters, setFilters] = useState({ employee_id: "", department: "", date_from: "", date_to: "" });
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState({ records: [], total: 0, pages: 1 });
+  const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [sortBy, setSortBy] = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const p = { page, page_size: 25 };
+      if (filters.employee_id) p.employee_id = filters.employee_id;
+      if (filters.department)  p.department = filters.department;
+      if (filters.date_from)   p.date_from = filters.date_from;
+      if (filters.date_to)     p.date_to = filters.date_to;
+      const res = await hrApi.getAttendance(p);
+      setData(res);
+    } catch (_) {}
+    finally { setLoading(false); }
+  }, [page, filters]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const handleFilter = (k, v) => { setFilters(p => ({ ...p, [k]: v })); setPage(1); };
+
+  const sourceBadge = (source) => (
+    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+      source === "manual" ? "bg-amber-500/15 text-amber-400" : "bg-gray-700/50 text-gray-400"
+    }`}>
+      {source || "—"}
+    </span>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2 items-end">
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Employee ID</label>
+          <input value={filters.employee_id} onChange={e => handleFilter("employee_id", e.target.value)}
+            placeholder="e.g. P24019"
+            className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5 w-32" />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Department</label>
+          <select value={filters.department} onChange={e => handleFilter("department", e.target.value)}
+            className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5">
+            <option value="">All</option>
+            {departments.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">From</label>
+          <input type="date" value={filters.date_from} onChange={e => handleFilter("date_from", e.target.value)}
+            className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5" />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">To</label>
+          <input type="date" value={filters.date_to} onChange={e => handleFilter("date_to", e.target.value)}
+            className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5" />
+        </div>
+        {loading && <Loader2 size={14} className="animate-spin text-gray-500" />}
+        <div className="flex-1" />
+        <button onClick={() => setEditing({ employee_id: "", attendance_date: "", _isNew: true })}
+          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white">
+          <Plus size={13} /> Manual Entry
+        </button>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-gray-800">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-gray-800/60">
+              {[["Date","attendance_date"],["Employee ID","employee_id"],["Name","employee_name"],["Department","department"],["Check In","actual_checkin"],["Check Out","actual_checkout"],["Status","attendance_status"],["Leave","leave_code"],["Source","source"]].map(([h, field]) => (
+                <SortableTH key={h} label={h} field={field} sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              ))}
+              <th></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800">
+            {loading ? (
+              <tr><td colSpan={10} className="py-10 text-center"><Loader2 size={14} className="animate-spin inline mr-2 text-gray-500" />Loading...</td></tr>
+            ) : data.records.length === 0 ? (
+              <tr><td colSpan={10} className="py-10 text-center text-xs text-gray-600">No records match these filters.</td></tr>
+            ) : sortRows(data.records, sortBy, sortDir, []).map((r) => (
+              <tr key={r.id} className="hover:bg-gray-800/40 transition-colors">
+                <td className="px-3 py-2 text-gray-300 whitespace-nowrap">{r.attendance_date}</td>
+                <td className="px-3 py-2 font-mono text-gray-500">{r.employee_id}</td>
+                <td className="px-3 py-2 text-gray-200 whitespace-nowrap">{r.employee_name}</td>
+                <td className="px-3 py-2 text-gray-400">{r.department || "—"}</td>
+                <td className="px-3 py-2 text-gray-400">{r.actual_checkin || "—"}</td>
+                <td className="px-3 py-2 text-gray-400">{r.actual_checkout || "—"}</td>
+                <td className="px-3 py-2 text-gray-400">{r.attendance_status || "—"}</td>
+                <td className="px-3 py-2 text-gray-400">{r.leave_code || "—"}</td>
+                <td className="px-3 py-2">{sourceBadge(r.source)}</td>
+                <td className="px-3 py-2">
+                  <button onClick={() => setEditing(r)} title="Edit"
+                    className="text-gray-500 hover:text-blue-400">
+                    <Pencil size={13} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {data.pages > 1 && (
+        <div className="flex items-center justify-between text-xs text-gray-500">
+          <span>{data.total} records · page {page} of {data.pages}</span>
+          <div className="flex gap-1">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+              className="px-2 py-1 rounded bg-gray-800 disabled:opacity-40">Prev</button>
+            <button onClick={() => setPage(p => Math.min(data.pages, p + 1))} disabled={page === data.pages}
+              className="px-2 py-1 rounded bg-gray-800 disabled:opacity-40">Next</button>
+          </div>
+        </div>
+      )}
+
+      {editing && (
+        <AttendanceEditModal
+          record={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); fetchData(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function AttendanceEditModal({ record, onClose, onSaved }) {
+  const isNew = !!record._isNew;
+  const [employeeId, setEmployeeId] = useState(record.employee_id || "");
+  const [attDate, setAttDate] = useState(record.attendance_date || "");
+  const [form, setForm] = useState({
+    attendance_status: record.attendance_status || "",
+    actual_checkin:    record.actual_checkin || "",
+    actual_checkout:   record.actual_checkout || "",
+    leave_code:        record.leave_code || "",
+    is_day_off:        !!record.is_day_off,
+    notes:             record.notes || "",
+    reason:            "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState("");
+  const [history, setHistory] = useState([]);
+  const [showHistory, setShowHistory] = useState(false);
+
+  useEffect(() => {
+    if (isNew) return;
+    hrApi.getAttendanceDayHistory(employeeId, attDate).then(setHistory).catch(() => {});
+  }, []); // eslint-disable-line
+
+  const handleSave = async () => {
+    if (!employeeId || !attDate) { setError("Employee ID and Date are required"); return; }
+    setSaving(true); setError("");
+    try {
+      const body = {};
+      if (form.attendance_status !== (record.attendance_status || "")) body.attendance_status = form.attendance_status || null;
+      if (form.actual_checkin    !== (record.actual_checkin || ""))    body.actual_checkin    = form.actual_checkin || null;
+      if (form.actual_checkout   !== (record.actual_checkout || ""))   body.actual_checkout   = form.actual_checkout || null;
+      if (form.leave_code        !== (record.leave_code || ""))        body.leave_code        = form.leave_code || null;
+      if (form.is_day_off        !== !!record.is_day_off)              body.is_day_off        = form.is_day_off;
+      if (form.notes             !== (record.notes || ""))             body.notes             = form.notes || null;
+      if (form.reason) body.reason = form.reason;
+
+      if (Object.keys(body).filter(k => k !== "reason").length === 0) {
+        setError("No changes to save");
+        setSaving(false);
+        return;
+      }
+      await hrApi.editAttendanceDay(employeeId, attDate, body);
+      onSaved();
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}
+      onClick={onClose}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: "#111827", borderRadius: 16, padding: 20, width: 420, maxHeight: "85vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.4)" }}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold text-gray-200">{isNew ? "Manual Entry" : "Edit Attendance Day"}</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300"><X size={16} /></button>
+        </div>
+
+        <div className="space-y-3">
+          {isNew ? (
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Employee ID</label>
+                <input value={employeeId} onChange={e => setEmployeeId(e.target.value)}
+                  className="w-full text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Date</label>
+                <input type="date" value={attDate} onChange={e => setAttDate(e.target.value)}
+                  className="w-full text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5" />
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs text-gray-400">{record.employee_name} ({employeeId}) — {attDate}</div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Attendance Status</label>
+              <select value={form.attendance_status} onChange={e => setForm(f => ({ ...f, attendance_status: e.target.value }))}
+                className="w-full text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5">
+                <option value="">—</option>
+                <option value="W">W — Worked</option>
+                <option value="L">L — Late</option>
+                <option value="E">E — Early leave</option>
+                <option value="LE">LE — Late+Early</option>
+                <option value="A">A — Absent</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Leave Code</label>
+              <select value={form.leave_code} onChange={e => setForm(f => ({ ...f, leave_code: e.target.value }))}
+                className="w-full text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5">
+                <option value="">—</option>
+                {LEAVE_CODES.map(c => <option key={c.code} value={c.code}>{c.code} — {c.label}</option>)}
+                <option value="H">H — Holiday</option>
+                <option value="EL">EL — Event Leave</option>
+                <option value="HD">HD — Half Day Leave</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Check In</label>
+              <input value={form.actual_checkin} onChange={e => setForm(f => ({ ...f, actual_checkin: e.target.value }))}
+                placeholder="HH:MM" className="w-full text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Check Out</label>
+              <input value={form.actual_checkout} onChange={e => setForm(f => ({ ...f, actual_checkout: e.target.value }))}
+                placeholder="HH:MM" className="w-full text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5" />
+            </div>
+          </div>
+
+          <label className="flex items-center gap-2 text-xs text-gray-400">
+            <input type="checkbox" checked={form.is_day_off} onChange={e => setForm(f => ({ ...f, is_day_off: e.target.checked }))} />
+            Scheduled rest day (excluded from attendance rate)
+          </label>
+
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Notes</label>
+            <input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              className="w-full text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5" />
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Reason for this edit (optional, logged in history)</label>
+            <input value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))}
+              placeholder='e.g. "Surat izin sakit menyusul"'
+              className="w-full text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5" />
+          </div>
+
+          {error && <div className="text-xs text-red-400">{error}</div>}
+
+          <div className="flex items-center justify-between pt-1">
+            <button onClick={handleSave} disabled={saving}
+              className="text-xs font-semibold px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50">
+              {saving ? "Saving..." : "Save"}
+            </button>
+            {!isNew && (
+              <button onClick={() => setShowHistory(v => !v)}
+                className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300">
+                <History size={13} /> History ({history.length})
+              </button>
+            )}
+          </div>
+
+          {showHistory && (
+            <div className="mt-1 border-t border-gray-800 pt-2 space-y-1.5 max-h-40 overflow-y-auto">
+              {history.length === 0 ? (
+                <p className="text-xs text-gray-600">No manual edits yet</p>
+              ) : history.map(h => (
+                <div key={h.id} className="text-[11px] text-gray-500">
+                  <span className="text-gray-300 font-semibold">{h.field}</span>: {h.old_value ?? "—"} → {h.new_value ?? "—"}
+                  <div className="text-gray-600">{h.changed_by} · {h.changed_at?.replace("T", " ").slice(0, 16)}{h.reason ? ` · "${h.reason}"` : ""}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Target vs Achievement (Attendance Ratio formula) ──────────────────────────
 // Target (Man-Days) = Total Employees x Effective Working Days
 // Achievement         = man-days hadir aktual
@@ -3636,7 +3939,7 @@ function AttendanceRateSection() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        {[["summary", "Summary"], ["today", "Attendance Today"], ["detail", "Detail"], ["leaveData", "Attendance Leave"], ["calendar", "Working Calendar"], ["upload", "Upload"]].map(([id, label]) => (
+        {[["summary", "Summary"], ["today", "Attendance Today"], ["detail", "Detail"], ["leaveData", "Attendance Leave"], ["correction", "Data Correction"], ["calendar", "Working Calendar"], ["upload", "Upload"]].map(([id, label]) => (
           <button key={id} onClick={() => setActiveTab(id)}
             style={{
               padding: "8px 20px", borderRadius: 10, border: "none", fontSize: 12, fontWeight: 700,
@@ -3772,6 +4075,11 @@ function AttendanceRateSection() {
       {/* ── Leave (moved from the former standalone Leave tab) ── */}
       {activeTab === "leaveData" && (
         <LeaveDataSection />
+      )}
+
+      {/* ── Manual data correction ── */}
+      {activeTab === "correction" && (
+        <AttendanceCorrectionSection departments={departments} />
       )}
 
       {/* All uploads (attendance + leave) consolidated in one place */}
@@ -4667,7 +4975,7 @@ function LeaveDataSection() {
   const { token } = useAuthStore();
   const [data, setData] = useState({ data: [], total: 0, pages: 1 });
   const [summary, setSummary] = useState(null);
-  const [orgs, setOrgs] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [selectedEmp, setSelectedEmp] = useState(null);
@@ -4678,7 +4986,7 @@ function LeaveDataSection() {
     year: new Date().getFullYear(),
     month: new Date().getMonth() + 1,
     leave_code: "",
-    organization: "",
+    department: "",
     search: "",
   });
 
@@ -4686,11 +4994,11 @@ function LeaveDataSection() {
     setLoading(true);
     try {
       const p = { page, page_size: 25 };
-      if (filters.year)         p.year = filters.year;
-      if (filters.month)        p.month = filters.month;
-      if (filters.leave_code)   p.leave_code = filters.leave_code;
-      if (filters.organization) p.organization = filters.organization;
-      if (filters.search)       p.search = filters.search;
+      if (filters.year)       p.year = filters.year;
+      if (filters.month)      p.month = filters.month;
+      if (filters.leave_code) p.leave_code = filters.leave_code;
+      if (filters.department) p.department = filters.department;
+      if (filters.search)     p.search = filters.search;
       const res = await hrApi.getLeaveData(p);
       setData(res);
     } catch (_) {}
@@ -4708,7 +5016,7 @@ function LeaveDataSection() {
   }, [filters.year, filters.month]);
 
   useEffect(() => {
-    hrApi.getLeaveOrgs().then(setOrgs).catch(() => {});
+    hrApi.getLeaveDepartments().then(setDepartments).catch(() => {});
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -4825,11 +5133,11 @@ function LeaveDataSection() {
           </select>
         </div>
         <div>
-          <label className="text-xs text-gray-500 block mb-1">Organization</label>
-          <select value={filters.organization} onChange={e => handleFilter("organization", e.target.value)}
+          <label className="text-xs text-gray-500 block mb-1">Department</label>
+          <select value={filters.department} onChange={e => handleFilter("department", e.target.value)}
             className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5">
             <option value="">All</option>
-            {orgs.map(o => <option key={o} value={o}>{o}</option>)}
+            {departments.map(d => <option key={d} value={d}>{d}</option>)}
           </select>
         </div>
         <div>
@@ -4845,16 +5153,16 @@ function LeaveDataSection() {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-800/60">
-              {[["Employee ID","employee_id"],["Name","employee_name"],["Organization","organization"],["Position","job_position"],["Date","leave_date"],["Leave Code","leave_code"],["Leave Type","leave_type"]].map(([h, field]) => (
+              {[["Employee ID","employee_id"],["Name","employee_name"],["Department","department"],["Date","leave_date"],["Leave Code","leave_code"],["Leave Type","leave_type"]].map(([h, field]) => (
                 <SortableTH key={h} label={h} field={field} sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800">
             {loading ? (
-              <tr><td colSpan={7} className="py-10 text-center"><Loader2 size={14} className="animate-spin inline mr-2 text-gray-500" />Loading...</td></tr>
+              <tr><td colSpan={6} className="py-10 text-center"><Loader2 size={14} className="animate-spin inline mr-2 text-gray-500" />Loading...</td></tr>
             ) : data.data.length === 0 ? (
-              <tr><td colSpan={7} className="py-10 text-center text-xs text-gray-600">
+              <tr><td colSpan={6} className="py-10 text-center text-xs text-gray-600">
                 No leave data. Upload Talenta Excel in the Leave Upload tab.
               </td></tr>
             ) : sortRows(data.data, sortBy, sortDir, []).map((r, i) => (
@@ -4862,8 +5170,7 @@ function LeaveDataSection() {
                 className="hover:bg-gray-800/40 transition-colors" style={{ cursor: "pointer" }}>
                 <td className="px-3 py-2 text-xs font-mono text-gray-500">{r.employee_id}</td>
                 <td className="px-3 py-2 text-sm font-medium text-gray-200 whitespace-nowrap">{r.employee_name}</td>
-                <td className="px-3 py-2 text-xs text-gray-400">{r.organization || "—"}</td>
-                <td className="px-3 py-2 text-xs text-gray-400 max-w-[180px] truncate" title={r.job_position}>{r.job_position || "—"}</td>
+                <td className="px-3 py-2 text-xs text-gray-400">{r.department || "—"}</td>
                 <td className="px-3 py-2 text-xs text-gray-300 whitespace-nowrap">{r.leave_date}</td>
                 <td className="px-3 py-2">{codeBadge(r.leave_code)}</td>
                 <td className="px-3 py-2 text-xs text-gray-400">{r.leave_type}</td>

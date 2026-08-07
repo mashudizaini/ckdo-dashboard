@@ -2,7 +2,12 @@
 HR Leave Router
 Route prefix: /api/v1/dashboard/hr/leave
 
-Source: AttendanceLeave Excel (revised format)
+Source: Talenta "revised format" Excel (8 columns) — same leave codes as the
+Attendance Talenta upload (hr_attendance.py), just a different column
+layout/export. Upserts `leave_code` directly onto `AttendanceRecord`
+(source="talenta-leave") — the same master table every other
+attendance/leave report reads from. There is no separate leave table; see
+hr_attendance.py's module docstring for the full picture.
   Col 0: Employee ID
   Col 1: Full Name
   Col 2: Date
@@ -18,12 +23,12 @@ from typing import Optional
 
 import openpyxl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
-from sqlalchemy import select, func, and_, text
+from sqlalchemy import select, update, func, and_, extract
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import require_role, CurrentUser, Roles
-from app.models.leave import LeaveRecord, LeaveUploadLog
+from app.models.attendance import AttendanceRecord, AttendanceUploadLog
 
 router = APIRouter()
 
@@ -41,8 +46,6 @@ LEAVE_CODE_MAP = {
 COL_EMP_ID   = 0
 COL_NAME     = 1
 COL_DATE     = 2
-COL_SHIFT    = 3
-COL_ATT_CODE = 6
 COL_TIMEOFF  = 7
 
 
@@ -98,15 +101,10 @@ async def upload_leave(
         if not emp_id or not leave_dt:
             continue
         records.append({
-            "employee_id": emp_id,
-            "employee_name": _to_str(row[COL_NAME]),
-            "organization": _to_str(row[COL_SHIFT]) if len(row) > COL_SHIFT else None,
-            "job_position": None,
-            "leave_date": leave_dt,
-            "leave_code": timeoff_code,
-            "leave_type": LEAVE_CODE_MAP.get(timeoff_code, timeoff_code),
-            "upload_batch_id": batch_id,
-            "uploaded_at": datetime.utcnow(),
+            "employee_id":     emp_id,
+            "employee_name":   _to_str(row[COL_NAME]),
+            "attendance_date": leave_dt,
+            "leave_code":      timeoff_code,
         })
 
     wb.close()
@@ -114,41 +112,41 @@ async def upload_leave(
     if not records:
         raise HTTPException(status_code=422, detail="No leave data found in file (column Time Off Code is empty)")
 
-    inserted = 0
-    updated = 0
+    from app.models.employee import Employee
+    emp_dept_q = await db.execute(select(Employee.user_id, Employee.department))
+    emp_dept_map = {r[0]: r[1] for r in emp_dept_q.fetchall() if r[1]}
 
+    ar_keys_result = await db.execute(select(AttendanceRecord.employee_id, AttendanceRecord.attendance_date))
+    existing_keys = {(r[0], r[1]) for r in ar_keys_result.fetchall()}
+
+    now = datetime.utcnow()
+    inserted = updated = 0
     for rec in records:
-        existing = await db.execute(
-            select(LeaveRecord.id).where(
-                LeaveRecord.employee_id == rec["employee_id"],
-                LeaveRecord.leave_date == rec["leave_date"],
-            )
-        )
-        if existing.scalar():
+        key = (rec["employee_id"], rec["attendance_date"])
+        if key in existing_keys:
             await db.execute(
-                text("""
-                    UPDATE leave_records
-                    SET employee_name = :employee_name, organization = :organization,
-                        job_position = :job_position, leave_code = :leave_code,
-                        leave_type = :leave_type, upload_batch_id = :upload_batch_id,
-                        uploaded_at = :uploaded_at
-                    WHERE employee_id = :employee_id AND leave_date = :leave_date
-                """),
-                rec,
+                update(AttendanceRecord)
+                .where(AttendanceRecord.employee_id == key[0])
+                .where(AttendanceRecord.attendance_date == key[1])
+                .values(leave_code=rec["leave_code"], source="talenta-leave",
+                        upload_batch_id=batch_id, uploaded_at=now)
             )
             updated += 1
         else:
-            db.add(LeaveRecord(**rec))
+            db.add(AttendanceRecord(
+                employee_id=rec["employee_id"], employee_name=rec["employee_name"],
+                department=emp_dept_map.get(rec["employee_id"]),
+                attendance_date=rec["attendance_date"], week_day=rec["attendance_date"].strftime("%A"),
+                leave_code=rec["leave_code"], source="talenta-leave",
+                upload_batch_id=batch_id, uploaded_at=now,
+            ))
+            existing_keys.add(key)
             inserted += 1
 
-    log = LeaveUploadLog(
-        batch_id=batch_id,
-        filename=file.filename,
-        total_rows=len(records),
-        inserted=inserted,
-        updated=updated,
-        uploaded_by=user.username,
-        notes=notes,
+    log = AttendanceUploadLog(
+        batch_id=batch_id, source="talenta-leave", filename=file.filename,
+        total_rows=len(records), inserted=inserted, updated=updated, skipped=0,
+        uploaded_by=user.username, notes=notes or None,
     )
     db.add(log)
 
@@ -166,7 +164,12 @@ async def get_upload_history(
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.HR)),
 ):
-    stmt = select(LeaveUploadLog).order_by(LeaveUploadLog.uploaded_at.desc()).limit(20)
+    stmt = (
+        select(AttendanceUploadLog)
+        .where(AttendanceUploadLog.source == "talenta-leave")
+        .order_by(AttendanceUploadLog.uploaded_at.desc())
+        .limit(20)
+    )
     result = await db.execute(stmt)
     logs = result.scalars().all()
     return [
@@ -189,37 +192,37 @@ async def get_leave_data(
     month: Optional[int] = Query(None),
     year: Optional[int] = Query(None),
     leave_code: Optional[str] = Query(None),
-    organization: Optional[str] = Query(None),
+    department: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.HR)),
 ):
-    conditions = []
+    conditions = [AttendanceRecord.leave_code.isnot(None)]
     if month:
-        conditions.append(func.extract("month", LeaveRecord.leave_date) == month)
+        conditions.append(extract("month", AttendanceRecord.attendance_date) == month)
     if year:
-        conditions.append(func.extract("year", LeaveRecord.leave_date) == year)
+        conditions.append(extract("year", AttendanceRecord.attendance_date) == year)
     if leave_code:
-        conditions.append(LeaveRecord.leave_code == leave_code)
-    if organization:
-        conditions.append(LeaveRecord.organization == organization)
+        conditions.append(AttendanceRecord.leave_code == leave_code)
+    if department:
+        conditions.append(AttendanceRecord.department == department)
     if search:
         pat = f"%{search}%"
         conditions.append(
-            LeaveRecord.employee_name.ilike(pat) | LeaveRecord.employee_id.ilike(pat)
+            AttendanceRecord.employee_name.ilike(pat) | AttendanceRecord.employee_id.ilike(pat)
         )
 
-    where = and_(*conditions) if conditions else True
+    where = and_(*conditions)
 
-    count_stmt = select(func.count()).select_from(LeaveRecord).where(where)
+    count_stmt = select(func.count()).select_from(AttendanceRecord).where(where)
     total = (await db.execute(count_stmt)).scalar() or 0
 
     stmt = (
-        select(LeaveRecord)
+        select(AttendanceRecord)
         .where(where)
-        .order_by(LeaveRecord.leave_date.desc(), LeaveRecord.employee_name)
+        .order_by(AttendanceRecord.attendance_date.desc(), AttendanceRecord.employee_name)
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
@@ -232,13 +235,12 @@ async def get_leave_data(
         "pages": max(1, (total + page_size - 1) // page_size),
         "data": [
             {
-                "employee_id": r.employee_id,
+                "employee_id":   r.employee_id,
                 "employee_name": r.employee_name,
-                "organization": r.organization,
-                "job_position": r.job_position,
-                "leave_date": r.leave_date.isoformat() if r.leave_date else None,
-                "leave_code": r.leave_code,
-                "leave_type": r.leave_type,
+                "department":    r.department,
+                "leave_date":    r.attendance_date.isoformat() if r.attendance_date else None,
+                "leave_code":    r.leave_code,
+                "leave_type":    LEAVE_CODE_MAP.get(r.leave_code, r.leave_code),
             }
             for r in rows
         ],
@@ -252,18 +254,18 @@ async def get_leave_summary(
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.HR)),
 ):
-    conditions = []
+    conditions = [AttendanceRecord.leave_code.isnot(None)]
     if year:
-        conditions.append(func.extract("year", LeaveRecord.leave_date) == year)
+        conditions.append(extract("year", AttendanceRecord.attendance_date) == year)
     if month:
-        conditions.append(func.extract("month", LeaveRecord.leave_date) == month)
+        conditions.append(extract("month", AttendanceRecord.attendance_date) == month)
 
-    where = and_(*conditions) if conditions else True
+    where = and_(*conditions)
 
     stmt = (
-        select(LeaveRecord.leave_code, func.count().label("count"))
+        select(AttendanceRecord.leave_code, func.count().label("count"))
         .where(where)
-        .group_by(LeaveRecord.leave_code)
+        .group_by(AttendanceRecord.leave_code)
         .order_by(func.count().desc())
     )
     result = await db.execute(stmt)
@@ -278,16 +280,17 @@ async def get_leave_summary(
     }
 
 
-@router.get("/organizations")
-async def get_leave_organizations(
+@router.get("/departments")
+async def get_leave_departments(
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.HR)),
 ):
     stmt = (
-        select(LeaveRecord.organization)
-        .where(LeaveRecord.organization.isnot(None))
+        select(AttendanceRecord.department)
+        .where(AttendanceRecord.leave_code.isnot(None))
+        .where(AttendanceRecord.department.isnot(None))
         .distinct()
-        .order_by(LeaveRecord.organization)
+        .order_by(AttendanceRecord.department)
     )
     result = await db.execute(stmt)
     return [r[0] for r in result.all()]
@@ -310,20 +313,20 @@ async def get_employee_leave_detail(
 
     yr = year or datetime.utcnow().year
 
-    from sqlalchemy import extract
     al_count_result = await db.execute(
-        select(func.count()).select_from(LeaveRecord).where(
-            LeaveRecord.employee_id == employee_id,
-            LeaveRecord.leave_code.in_(["AL", "ALAB"]),
-            extract("year", LeaveRecord.leave_date) == yr,
+        select(func.count()).select_from(AttendanceRecord).where(
+            AttendanceRecord.employee_id == employee_id,
+            AttendanceRecord.leave_code.in_(["AL", "ALAB"]),
+            extract("year", AttendanceRecord.attendance_date) == yr,
         )
     )
     al_taken = al_count_result.scalar() or 0
 
     history_result = await db.execute(
-        select(LeaveRecord)
-        .where(LeaveRecord.employee_id == employee_id)
-        .order_by(LeaveRecord.leave_date.desc())
+        select(AttendanceRecord)
+        .where(AttendanceRecord.employee_id == employee_id)
+        .where(AttendanceRecord.leave_code.isnot(None))
+        .order_by(AttendanceRecord.attendance_date.desc())
         .limit(20)
     )
     history = history_result.scalars().all()
@@ -341,7 +344,11 @@ async def get_employee_leave_detail(
         "annual_leave_remaining": max(ANNUAL_LEAVE_QUOTA - al_taken, 0),
         "year": yr,
         "history": [
-            {"leave_date": h.leave_date.isoformat(), "leave_code": h.leave_code, "leave_type": h.leave_type}
+            {
+                "leave_date": h.attendance_date.isoformat(),
+                "leave_code": h.leave_code,
+                "leave_type": LEAVE_CODE_MAP.get(h.leave_code, h.leave_code),
+            }
             for h in history
         ],
     }

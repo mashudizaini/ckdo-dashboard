@@ -25,12 +25,13 @@ from typing import Optional
 
 import openpyxl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
+from pydantic import BaseModel
 from sqlalchemy import select, update, func, case, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import require_role, CurrentUser, Roles
-from app.models.attendance import AttendanceRecord, AttendanceLeaveEvent, AttendanceUploadLog
+from app.models.attendance import AttendanceRecord, AttendanceRecordAuditLog, AttendanceUploadLog
 
 router = APIRouter()
 
@@ -55,20 +56,14 @@ LEAVE_LABELS = {
 IS_WEEKDAY = AttendanceRecord.week_day.notin_(WEEKENDS)
 
 
-# ── Shared attendance-rate scoring (Intercom + Talenta combined) ──────────────
+# ── Shared attendance-rate scoring (single table, no join needed) ─────────────
 
 def _is_leave_code():
-    return or_(
-        AttendanceLeaveEvent.attendance_code.in_(LEAVE_CODES),
-        AttendanceLeaveEvent.time_off_code.in_(LEAVE_CODES),
-    )
+    return AttendanceRecord.leave_code.in_(LEAVE_CODES)
 
 
 def _is_bt_code():
-    return or_(
-        AttendanceLeaveEvent.attendance_code == BT_CODE,
-        AttendanceLeaveEvent.time_off_code == BT_CODE,
-    )
+    return AttendanceRecord.leave_code == BT_CODE
 
 
 def _is_present_intercom():
@@ -98,18 +93,6 @@ def _actual_expr():
         (and_(IS_WEEKDAY, _is_bt_code()), 1),
         (and_(IS_WEEKDAY, _is_present_intercom()), 1),
         else_=0,
-    )
-
-
-def _with_leave_join(q):
-    """LEFT JOIN AttendanceRecord (the query's base table) to AttendanceLeaveEvent
-    on employee_id + date — required before using _plan_expr()/_actual_expr()."""
-    return q.outerjoin(
-        AttendanceLeaveEvent,
-        and_(
-            AttendanceLeaveEvent.employee_id == AttendanceRecord.employee_id,
-            AttendanceLeaveEvent.attendance_date == AttendanceRecord.attendance_date,
-        ),
     )
 
 
@@ -207,6 +190,7 @@ def _parse_intercom_row(row: tuple, batch_id: str) -> Optional[dict]:
         "actual_checkin":     _to_str(row[COL_ACTUAL_IN]) if len(row) > COL_ACTUAL_IN else None,
         "actual_checkout":    _to_str(row[COL_ACTUAL_OUT])if len(row) > COL_ACTUAL_OUT else None,
         "attendance_status":  _to_str(row[COL_STATUS])    if len(row) > COL_STATUS    else None,
+        "source":             "intercom",
         "upload_batch_id":    batch_id,
         "uploaded_at":        datetime.utcnow(),
     }
@@ -320,7 +304,8 @@ def _parse_talenta_row(row: tuple, batch_id: str) -> Optional[dict]:
 
     attendance_code = _to_str(row[TCOL_ATT_CODE]) if len(row) > TCOL_ATT_CODE else None
     time_off_code   = _to_str(row[TCOL_TIMEOFF])  if len(row) > TCOL_TIMEOFF  else None
-    if not attendance_code and not time_off_code:
+    leave_code = attendance_code or time_off_code
+    if not leave_code:
         return None  # regular working day — nothing relevant to attendance-ratio scoring
 
     return {
@@ -328,8 +313,8 @@ def _parse_talenta_row(row: tuple, batch_id: str) -> Optional[dict]:
         "employee_name":   _to_str(row[TCOL_NAME]) if len(row) > TCOL_NAME else None,
         "department":      _to_str(row[TCOL_DEPT]) if len(row) > TCOL_DEPT else None,
         "attendance_date": att_date,
-        "attendance_code": attendance_code,
-        "time_off_code":   time_off_code,
+        "leave_code":      leave_code,
+        "source":          "talenta",
         "upload_batch_id": batch_id,
         "uploaded_at":     datetime.utcnow(),
     }
@@ -383,45 +368,28 @@ async def upload_attendance_talenta(
         if data["employee_id"] in emp_dept_map:
             data["department"] = emp_dept_map[data["employee_id"]]
 
-    keys_result = await db.execute(select(AttendanceLeaveEvent.employee_id, AttendanceLeaveEvent.attendance_date))
-    existing_keys = {(r[0], r[1]) for r in keys_result.fetchall()}
-
-    # Every leave/BT day needs a base AttendanceRecord row to hang off of — if
-    # Intercom never covered that date for this employee (e.g. they were on
-    # leave the whole time and never had a badge scan), the day would
-    # otherwise be invisible to every report query, which is built around
-    # AttendanceRecord as the base table.
+    # Same table as every other source now — if Intercom never covered this
+    # date for this employee (e.g. they were on leave the whole time and
+    # never had a badge scan), the row is created here instead of updated.
     ar_keys_result = await db.execute(select(AttendanceRecord.employee_id, AttendanceRecord.attendance_date))
-    ar_keys = {(r[0], r[1]) for r in ar_keys_result.fetchall()}
+    existing_keys = {(r[0], r[1]) for r in ar_keys_result.fetchall()}
 
-    inserted = updated = stub_created = 0
+    inserted = updated = 0
     for data in rows_parsed:
         key = (data["employee_id"], data["attendance_date"])
         if key in existing_keys:
             await db.execute(
-                update(AttendanceLeaveEvent)
-                .where(AttendanceLeaveEvent.employee_id == key[0])
-                .where(AttendanceLeaveEvent.attendance_date == key[1])
+                update(AttendanceRecord)
+                .where(AttendanceRecord.employee_id == key[0])
+                .where(AttendanceRecord.attendance_date == key[1])
                 .values(**data)
             )
             updated += 1
         else:
-            db.add(AttendanceLeaveEvent(**data))
-            inserted += 1
-
-        if key not in ar_keys:
             d = data["attendance_date"]
-            db.add(AttendanceRecord(
-                employee_id=data["employee_id"],
-                employee_name=data["employee_name"],
-                department=data["department"],
-                attendance_date=d,
-                week_day=d.strftime("%A"),
-                upload_batch_id=data["upload_batch_id"],
-                uploaded_at=data["uploaded_at"],
-            ))
-            ar_keys.add(key)
-            stub_created += 1
+            db.add(AttendanceRecord(**data, week_day=d.strftime("%A")))
+            existing_keys.add(key)
+            inserted += 1
 
     await db.flush()
 
@@ -434,8 +402,7 @@ async def upload_attendance_talenta(
 
     return {
         "batch_id": batch_id, "filename": file.filename, "source": "talenta",
-        "total_rows": len(rows_parsed), "inserted": inserted, "updated": updated,
-        "skipped": 0, "stub_days_created": stub_created,
+        "total_rows": len(rows_parsed), "inserted": inserted, "updated": updated, "skipped": 0,
         "message": f"Upload successful: {inserted} new leave/BT records, {updated} updated.",
     }
 
@@ -514,8 +481,7 @@ def _is_off_marker(val) -> bool:
     return isinstance(val, str) and val.strip().upper() == "OFF"
 
 
-def _parse_plant_row(row: tuple, batch_id: str) -> Optional[tuple]:
-    """Returns (attendance_record_dict, leave_event_dict_or_None), or None to skip."""
+def _parse_plant_row(row: tuple, batch_id: str) -> Optional[dict]:
     if len(row) <= PCOL_ID:
         return None
     employee_id = _to_str(row[PCOL_ID])
@@ -567,24 +533,13 @@ def _parse_plant_row(row: tuple, batch_id: str) -> Optional[tuple]:
         "attendance_status":  attendance_status,
         "notes":              f"Plant remark: {remark}" if remark else None,
         "is_day_off":         is_day_off,
+        "leave_code":         remark_code,
+        "source":             "plant",
         "upload_batch_id":    batch_id,
         "uploaded_at":        datetime.utcnow(),
     }
 
-    leave_data = None
-    if remark_code:
-        leave_data = {
-            "employee_id":     employee_id,
-            "employee_name":   ar_data["employee_name"],
-            "department":      ar_data["department"],
-            "attendance_date": att_date,
-            "attendance_code": remark_code,
-            "time_off_code":   None,
-            "upload_batch_id": batch_id,
-            "uploaded_at":     datetime.utcnow(),
-        }
-
-    return ar_data, leave_data
+    return ar_data
 
 
 @router.post("/upload-plant")
@@ -595,10 +550,9 @@ async def upload_attendance_plant(
     user:  CurrentUser   = Depends(require_role(Roles.HR)),
 ):
     """Upload the Plant attendance workbook (one sheet per month, all sheets
-    read and merged). Unlike Intercom/Talenta, each row carries both the
-    physical check-in/out AND the leave/BT remark at once, so this writes to
-    both AttendanceRecord and AttendanceLeaveEvent from the same row.
-    UPSERT by employee_id + attendance_date."""
+    read and merged). Each row carries both the physical check-in/out AND
+    the leave/BT remark at once, written to AttendanceRecord in a single
+    upsert. UPSERT by employee_id + attendance_date."""
     if not file.filename.endswith((".xlsx", ".xlsm")):
         raise HTTPException(status_code=400, detail="File must be .xlsx or .xlsm format")
 
@@ -614,37 +568,33 @@ async def upload_attendance_plant(
                    f"File > Save As > .xlsx to normalize the file, then re-upload.",
         )
 
-    parsed = [_parse_plant_row(row, batch_id) for row in data_rows]
-    parsed = [p for p in parsed if p is not None]
+    rows_parsed = [_parse_plant_row(row, batch_id) for row in data_rows]
+    rows_parsed = [r for r in rows_parsed if r is not None]
 
-    if not parsed:
+    if not rows_parsed:
         raise HTTPException(
             status_code=422,
             detail="No attendance rows found. Make sure the file matches the Plant "
                    "export template (title row 1, header row 2, data from row 3).",
         )
 
-    ar_rows    = [p[0] for p in parsed]
-    leave_rows = [p[1] for p in parsed if p[1] is not None]
+    leave_rows = sum(1 for r in rows_parsed if r["leave_code"])
 
     # Same department normalization as Intercom/Talenta.
     from app.models.employee import Employee
     emp_dept_q = await db.execute(select(Employee.user_id, Employee.department))
     emp_dept_map = {r[0]: r[1] for r in emp_dept_q.fetchall() if r[1]}
-    for data in ar_rows:
-        if data["employee_id"] in emp_dept_map:
-            data["department"] = emp_dept_map[data["employee_id"]]
-    for data in leave_rows:
+    for data in rows_parsed:
         if data["employee_id"] in emp_dept_map:
             data["department"] = emp_dept_map[data["employee_id"]]
 
     ar_keys_result = await db.execute(select(AttendanceRecord.employee_id, AttendanceRecord.attendance_date))
-    existing_ar_keys = {(r[0], r[1]) for r in ar_keys_result.fetchall()}
+    existing_keys = {(r[0], r[1]) for r in ar_keys_result.fetchall()}
 
     inserted = updated = 0
-    for data in ar_rows:
+    for data in rows_parsed:
         key = (data["employee_id"], data["attendance_date"])
-        if key in existing_ar_keys:
+        if key in existing_keys:
             await db.execute(
                 update(AttendanceRecord)
                 .where(AttendanceRecord.employee_id == key[0])
@@ -654,43 +604,24 @@ async def upload_attendance_plant(
             updated += 1
         else:
             db.add(AttendanceRecord(**data))
-            existing_ar_keys.add(key)
+            existing_keys.add(key)
             inserted += 1
-
-    leave_keys_result = await db.execute(select(AttendanceLeaveEvent.employee_id, AttendanceLeaveEvent.attendance_date))
-    existing_leave_keys = {(r[0], r[1]) for r in leave_keys_result.fetchall()}
-
-    leave_inserted = leave_updated = 0
-    for data in leave_rows:
-        key = (data["employee_id"], data["attendance_date"])
-        if key in existing_leave_keys:
-            await db.execute(
-                update(AttendanceLeaveEvent)
-                .where(AttendanceLeaveEvent.employee_id == key[0])
-                .where(AttendanceLeaveEvent.attendance_date == key[1])
-                .values(**data)
-            )
-            leave_updated += 1
-        else:
-            db.add(AttendanceLeaveEvent(**data))
-            existing_leave_keys.add(key)
-            leave_inserted += 1
 
     await db.flush()
 
     log = AttendanceUploadLog(
         batch_id=batch_id, source="plant", filename=file.filename,
-        total_rows=len(ar_rows), inserted=inserted, updated=updated, skipped=0,
+        total_rows=len(rows_parsed), inserted=inserted, updated=updated, skipped=0,
         uploaded_by=user.username or "unknown", notes=notes or None,
     )
     db.add(log)
 
     return {
         "batch_id": batch_id, "filename": file.filename, "source": "plant",
-        "total_rows": len(ar_rows), "inserted": inserted, "updated": updated, "skipped": 0,
-        "leave_rows": len(leave_rows), "leave_inserted": leave_inserted, "leave_updated": leave_updated,
+        "total_rows": len(rows_parsed), "inserted": inserted, "updated": updated, "skipped": 0,
+        "leave_rows": leave_rows,
         "message": f"Upload successful: {inserted} new attendance records, {updated} updated "
-                   f"(including {len(leave_rows)} leave/BT days).",
+                   f"(including {leave_rows} leave/BT days).",
     }
 
 
@@ -778,6 +709,9 @@ async def list_attendance(
             "actual_checkout":    r.actual_checkout,
             "attendance_status":  r.attendance_status,
             "notes":              r.notes,
+            "leave_code":         r.leave_code,
+            "is_day_off":         r.is_day_off,
+            "source":             r.source,
         }
 
     return {
@@ -787,6 +721,128 @@ async def list_attendance(
         "pages":     (total + page_size - 1) // page_size,
         "records":   [_rec(r) for r in records],
     }
+
+
+# ── Manual data correction ─────────────────────────────────────────────────────
+# Every source above (Intercom/Talenta/Plant) upserts into AttendanceRecord;
+# this lets HR do the same thing by hand — fixing a wrong value, or creating
+# a day that was never covered by any upload at all (e.g. a manual leave
+# entry). A later Excel upload for the same employee+date is still free to
+# overwrite whatever is set here — there's no lock — but every manual change
+# is logged to AttendanceRecordAuditLog so the correction is traceable even
+# after it's superseded.
+
+class AttendanceEditRequest(BaseModel):
+    attendance_status: Optional[str] = None
+    actual_checkin:    Optional[str] = None
+    actual_checkout:   Optional[str] = None
+    leave_code:        Optional[str] = None
+    is_day_off:        Optional[bool] = None
+    notes:             Optional[str] = None
+    reason:            Optional[str] = None  # why this edit was made — logged, not stored on the row
+
+
+@router.patch("/{employee_id}/{attendance_date}")
+async def edit_attendance_day(
+    employee_id:     str,
+    attendance_date: str,
+    body:            AttendanceEditRequest,
+    db:              AsyncSession = Depends(get_db),
+    user:            CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Upsert one employee's attendance/leave day. Diffs every changed field
+    against a field-level audit log, mirroring update_employee() in
+    hr_employees.py."""
+    att_date = _to_date(attendance_date)
+    if att_date is None:
+        raise HTTPException(status_code=400, detail="attendance_date must be in YYYY-MM-DD format")
+
+    updates = body.model_dump(exclude={"reason"}, exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    target = await db.scalar(
+        select(AttendanceRecord)
+        .where(AttendanceRecord.employee_id == employee_id)
+        .where(AttendanceRecord.attendance_date == att_date)
+    )
+
+    if target is None:
+        from app.models.employee import Employee
+        emp = await db.scalar(select(Employee).where(Employee.user_id == employee_id))
+        if not emp:
+            raise HTTPException(status_code=404, detail=f"Employee {employee_id} not found in Employee master")
+        target = AttendanceRecord(
+            employee_id=employee_id, employee_name=emp.full_name, department=emp.department,
+            attendance_date=att_date, week_day=att_date.strftime("%A"),
+            source="manual", uploaded_at=datetime.utcnow(),
+        )
+        db.add(target)
+        for field, value in updates.items():
+            setattr(target, field, value)
+            db.add(AttendanceRecordAuditLog(
+                employee_id=employee_id, attendance_date=att_date, field=field,
+                old_value=None, new_value=str(value) if value is not None else None,
+                changed_by=user.username, reason=body.reason or None,
+            ))
+    else:
+        for field, value in updates.items():
+            old_val = getattr(target, field)
+            if (old_val if old_val is not None else None) != value:
+                db.add(AttendanceRecordAuditLog(
+                    employee_id=employee_id, attendance_date=att_date, field=field,
+                    old_value=str(old_val) if old_val is not None else None,
+                    new_value=str(value) if value is not None else None,
+                    changed_by=user.username, reason=body.reason or None,
+                ))
+                setattr(target, field, value)
+        target.source = "manual"
+
+    await db.flush()
+    return {
+        "employee_id":       employee_id,
+        "attendance_date":   str(att_date),
+        "attendance_status": target.attendance_status,
+        "actual_checkin":    target.actual_checkin,
+        "actual_checkout":   target.actual_checkout,
+        "leave_code":        target.leave_code,
+        "is_day_off":        target.is_day_off,
+        "notes":             target.notes,
+        "source":            target.source,
+    }
+
+
+@router.get("/{employee_id}/{attendance_date}/history")
+async def get_attendance_day_history(
+    employee_id:     str,
+    attendance_date: str,
+    db:              AsyncSession = Depends(get_db),
+    user:            CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Field-level manual-edit history for one employee's day, most recent first."""
+    att_date = _to_date(attendance_date)
+    if att_date is None:
+        raise HTTPException(status_code=400, detail="attendance_date must be in YYYY-MM-DD format")
+
+    result = await db.execute(
+        select(AttendanceRecordAuditLog)
+        .where(AttendanceRecordAuditLog.employee_id == employee_id)
+        .where(AttendanceRecordAuditLog.attendance_date == att_date)
+        .order_by(AttendanceRecordAuditLog.changed_at.desc())
+    )
+    rows = result.scalars().all()
+    return [
+        {
+            "id":         r.id,
+            "field":      r.field,
+            "old_value":  r.old_value,
+            "new_value":  r.new_value,
+            "changed_by": r.changed_by,
+            "changed_at": r.changed_at.isoformat() if r.changed_at else None,
+            "reason":     r.reason,
+        }
+        for r in rows
+    ]
 
 
 # ── Kehadiran hari ini (per department) ───────────────────────────────────────
@@ -826,13 +882,11 @@ async def get_today_attendance(
                     "is_today": False, "has_data": False, "summary": {}, "data": []}
         actual_date = latest
 
-    q = _with_leave_join(
-        select(
-            AttendanceRecord.department,
-            func.sum(_plan_expr()).label("total"),
-            func.sum(_actual_expr()).label("hadir"),
-        ).where(AttendanceRecord.attendance_date == actual_date)
-    )
+    q = select(
+        AttendanceRecord.department,
+        func.sum(_plan_expr()).label("total"),
+        func.sum(_actual_expr()).label("hadir"),
+    ).where(AttendanceRecord.attendance_date == actual_date)
     result = await db.execute(q.group_by(AttendanceRecord.department).order_by(AttendanceRecord.department))
     rows = result.fetchall()
 
@@ -899,13 +953,11 @@ async def get_monthly_attendance_rate(
     """Attendance rate per bulan."""
     from sqlalchemy import extract
 
-    q = _with_leave_join(
-        select(
-            extract("year",  AttendanceRecord.attendance_date).label("year"),
-            extract("month", AttendanceRecord.attendance_date).label("month"),
-            func.sum(_plan_expr()).label("working"),
-            func.sum(_actual_expr()).label("hadir"),
-        )
+    q = select(
+        extract("year",  AttendanceRecord.attendance_date).label("year"),
+        extract("month", AttendanceRecord.attendance_date).label("month"),
+        func.sum(_plan_expr()).label("working"),
+        func.sum(_actual_expr()).label("hadir"),
     )
     if department:
         q = q.where(AttendanceRecord.department == department)
@@ -1007,11 +1059,9 @@ async def get_target_vs_achievement(
 
     # 3) Achievement — man-days hadir aktual per bulan (Intercom + Talenta combined)
     achievement_q = await db.execute(
-        _with_leave_join(
-            select(
-                extract("month", AttendanceRecord.attendance_date).label("month"),
-                func.sum(_actual_expr()).label("achievement"),
-            )
+        select(
+            extract("month", AttendanceRecord.attendance_date).label("month"),
+            func.sum(_actual_expr()).label("achievement"),
         )
         .where(extract("year", AttendanceRecord.attendance_date) == yr)
         .group_by(extract("month", AttendanceRecord.attendance_date))
@@ -1058,12 +1108,10 @@ async def get_dept_summary(
     from sqlalchemy import extract
     from app.models.employee import Employee
 
-    q = _with_leave_join(
-        select(
-            AttendanceRecord.department,
-            func.sum(_plan_expr()).label("plan"),
-            func.sum(_actual_expr()).label("actual"),
-        )
+    q = select(
+        AttendanceRecord.department,
+        func.sum(_plan_expr()).label("plan"),
+        func.sum(_actual_expr()).label("actual"),
     )
     if department:
         q = q.where(AttendanceRecord.department == department)
@@ -1124,9 +1172,7 @@ async def get_today_employees(
         if latest:
             q_date = latest
 
-    q = _with_leave_join(
-        select(AttendanceRecord, AttendanceLeaveEvent.attendance_code, AttendanceLeaveEvent.time_off_code)
-    ).where(AttendanceRecord.attendance_date == q_date).where(IS_WEEKDAY)
+    q = select(AttendanceRecord).where(AttendanceRecord.attendance_date == q_date).where(IS_WEEKDAY)
 
     if filter == "hadir":
         q = q.where(or_(_is_bt_code(), _is_present_intercom())).where(~_is_leave_code())
@@ -1135,12 +1181,11 @@ async def get_today_employees(
 
     q = q.order_by(AttendanceRecord.department, AttendanceRecord.employee_name)
     result = await db.execute(q)
-    rows = result.all()
+    rows = result.scalars().all()
 
-    def _reason(rec, acode, tcode):
-        code = acode or tcode
-        if code:
-            return LEAVE_LABELS.get(code, code)
+    def _reason(rec):
+        if rec.leave_code:
+            return LEAVE_LABELS.get(rec.leave_code, rec.leave_code)
         return rec.notes
 
     return {
@@ -1148,12 +1193,12 @@ async def get_today_employees(
         "filter":    filter,
         "employees": [
             {
-                "id":         r[0].employee_id,
-                "name":       r[0].employee_name,
-                "department": r[0].department,
-                "checkin":    r[0].actual_checkin,
-                "checkout":   r[0].actual_checkout,
-                "notes":      _reason(r[0], r[1], r[2]),
+                "id":         r.employee_id,
+                "name":       r.employee_name,
+                "department": r.department,
+                "checkin":    r.actual_checkin,
+                "checkout":   r.actual_checkout,
+                "notes":      _reason(r),
             }
             for r in rows
         ],
@@ -1175,13 +1220,10 @@ async def get_whos_off(
         return {"date": None, "data": []}
 
     result = await db.execute(
-        _with_leave_join(
-            select(
-                AttendanceRecord.employee_name,
-                AttendanceRecord.department,
-                AttendanceLeaveEvent.attendance_code,
-                AttendanceLeaveEvent.time_off_code,
-            )
+        select(
+            AttendanceRecord.employee_name,
+            AttendanceRecord.department,
+            AttendanceRecord.leave_code,
         )
         .where(AttendanceRecord.attendance_date == latest)
         .where(IS_WEEKDAY)
@@ -1191,8 +1233,7 @@ async def get_whos_off(
     )
     rows = result.fetchall()
     data = []
-    for name, dept, acode, tcode in rows:
-        code = acode or tcode
+    for name, dept, code in rows:
         data.append({
             "name": name or "—",
             "department": dept or "—",
@@ -1216,12 +1257,10 @@ async def get_workforce_stats(
         return round(a / p * 100) if p > 0 else 0
 
     gender_q = await db.execute(
-        _with_leave_join(
-            select(
-                Employee.sex,
-                func.sum(_plan_expr()).label("plan"),
-                func.sum(_actual_expr()).label("actual"),
-            )
+        select(
+            Employee.sex,
+            func.sum(_plan_expr()).label("plan"),
+            func.sum(_actual_expr()).label("actual"),
         )
         .join(Employee, AttendanceRecord.employee_id == Employee.user_id)
         .where(Employee.sex.isnot(None))
@@ -1230,12 +1269,10 @@ async def get_workforce_stats(
     gender_rows = gender_q.fetchall()
 
     loc_q = await db.execute(
-        _with_leave_join(
-            select(
-                Employee.work_placement,
-                func.sum(_plan_expr()).label("plan"),
-                func.sum(_actual_expr()).label("actual"),
-            )
+        select(
+            Employee.work_placement,
+            func.sum(_plan_expr()).label("plan"),
+            func.sum(_actual_expr()).label("actual"),
         )
         .join(Employee, AttendanceRecord.employee_id == Employee.user_id)
         .where(Employee.work_placement.isnot(None))
@@ -1271,14 +1308,12 @@ async def get_dept_team_summary(
     from collections import defaultdict
 
     result = await db.execute(
-        _with_leave_join(
-            select(
-                AttendanceRecord.department,
-                Employee.team,
-                func.count(func.distinct(AttendanceRecord.employee_id)).label("employees"),
-                func.sum(_plan_expr()).label("plan"),
-                func.sum(_actual_expr()).label("actual"),
-            )
+        select(
+            AttendanceRecord.department,
+            Employee.team,
+            func.count(func.distinct(AttendanceRecord.employee_id)).label("employees"),
+            func.sum(_plan_expr()).label("plan"),
+            func.sum(_actual_expr()).label("actual"),
         )
         .join(Employee, AttendanceRecord.employee_id == Employee.user_id, isouter=True)
         .group_by(AttendanceRecord.department, Employee.team)
@@ -1360,13 +1395,11 @@ async def get_employee_detail(
     emp   = emp_q.scalar_one_or_none()
 
     monthly_q = await db.execute(
-        _with_leave_join(
-            select(
-                extract("year",  AttendanceRecord.attendance_date).label("year"),
-                extract("month", AttendanceRecord.attendance_date).label("month"),
-                func.sum(_plan_expr()).label("plan"),
-                func.sum(_actual_expr()).label("actual"),
-            )
+        select(
+            extract("year",  AttendanceRecord.attendance_date).label("year"),
+            extract("month", AttendanceRecord.attendance_date).label("month"),
+            func.sum(_plan_expr()).label("plan"),
+            func.sum(_actual_expr()).label("actual"),
         )
         .where(AttendanceRecord.employee_id == employee_id)
         .group_by(
@@ -1383,7 +1416,7 @@ async def get_employee_detail(
     # Only genuinely unexplained absences — not on leave, not on business
     # trip, not present per Intercom.
     absence_q = await db.execute(
-        _with_leave_join(select(AttendanceRecord))
+        select(AttendanceRecord)
         .where(AttendanceRecord.employee_id == employee_id)
         .where(IS_WEEKDAY)
         .where(~_is_leave_code())

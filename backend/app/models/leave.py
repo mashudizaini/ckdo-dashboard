@@ -4,6 +4,9 @@ from app.database import Base
 
 
 class LeaveRecord(Base):
+    """Legacy — superseded by AttendanceRecord.leave_code (see
+    models/attendance.py). Kept only so historical rows remain queryable;
+    hr_leave.py no longer reads or writes this table."""
     __tablename__ = "leave_records"
     __table_args__ = (
         UniqueConstraint("employee_id", "leave_date", name="uq_leave_emp_date"),
