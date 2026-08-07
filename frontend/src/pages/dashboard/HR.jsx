@@ -5363,6 +5363,14 @@ function LeaveDataSection() {
 
 // ── Annual leave report (Jan-Dec matrix per employee) ──────────────────────────
 const ANNUAL_REPORT_PAGE_SIZE = 8;
+// Preferred column order for whatever codes actually show up in the data —
+// any code outside this list still gets a column, just sorted after these.
+const LEAVE_CODE_ORDER = ["AL", "ALAB", "SL", "UL", "ULBB", "EM", "ML", "EL", "HD", "H", "BT"];
+const LEAVE_CODE_LABELS = {
+  SL: "Sick Leave", AL: "Annual Leave", ALAB: "Annual Leave", ML: "Maternity Leave",
+  EM: "Employee Marriage", UL: "Unpaid Leave", ULBB: "Unpaid Leave", BT: "Business Trip",
+  H: "Holiday", EL: "Event Leave", HD: "Half Day Leave",
+};
 
 function AnnualLeaveReportSection() {
   const curYear = new Date().getFullYear();
@@ -5415,6 +5423,20 @@ function AnnualLeaveReportSection() {
   const pageCount = Math.max(1, Math.ceil(rows.length / ANNUAL_REPORT_PAGE_SIZE));
   const pageRows = rows.slice((page - 1) * ANNUAL_REPORT_PAGE_SIZE, page * ANNUAL_REPORT_PAGE_SIZE);
 
+  // Column set = every leave code that actually occurs anywhere in this
+  // year's data, sorted by LEAVE_CODE_ORDER — same set repeated under every
+  // month header so Total always equals the sum of the visible columns.
+  const codesPresent = new Set();
+  (data?.employees || []).forEach(e => e.months.forEach(m => Object.keys(m.by_code).forEach(c => codesPresent.add(c))));
+  const codes = [...codesPresent].sort((a, b) => {
+    const ia = LEAVE_CODE_ORDER.indexOf(a), ib = LEAVE_CODE_ORDER.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
+  const totalCols = 2 + MONTHS.length * Math.max(codes.length, 1) + 1;
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2 items-end">
@@ -5448,24 +5470,41 @@ function AnnualLeaveReportSection() {
         <table className="text-xs border-collapse w-full">
           <thead>
             <tr>
-              <th className="px-3 py-2 text-left text-gray-500 bg-gray-800/60 sticky left-0 top-0 cursor-pointer z-10" onClick={() => handleSort("employee_name")}>
+              <th rowSpan={2} className="px-3 py-2 text-left text-gray-500 bg-gray-800/60 sticky left-0 top-0 cursor-pointer z-20" onClick={() => handleSort("employee_name")}>
                 Employee {sortBy === "employee_name" && (sortDir === "asc" ? "▲" : "▼")}
               </th>
-              <th className="px-2 py-2 text-left text-gray-500 bg-gray-800/60 sticky top-0">Department</th>
-              {MONTHS.map(m => <th key={m} className="px-2 py-2 text-center text-gray-500 bg-gray-800/60 font-medium sticky top-0 min-w-[90px]">{m}</th>)}
-              <th className="px-3 py-2 text-center text-gray-300 bg-gray-800/60 font-bold cursor-pointer sticky top-0" onClick={() => handleSort("total")}>
+              <th rowSpan={2} className="px-2 py-2 text-left text-gray-500 bg-gray-800/60 sticky top-0 z-10">Department</th>
+              {MONTHS.map(m => (
+                <th key={m} colSpan={Math.max(codes.length, 1)}
+                  className="px-2 py-1.5 text-center text-gray-300 bg-gray-800/80 font-bold border-l border-gray-700 sticky top-0 z-10">
+                  {m.toUpperCase()}
+                </th>
+              ))}
+              <th rowSpan={2} className="px-3 py-2 text-center text-gray-300 bg-gray-800/60 font-bold cursor-pointer sticky top-0 z-10" onClick={() => handleSort("total")}>
                 Total {sortBy === "total" && (sortDir === "asc" ? "▲" : "▼")}
               </th>
+            </tr>
+            <tr>
+              {MONTHS.map(m => (
+                codes.length === 0
+                  ? <th key={m} className="px-2 py-1 text-center text-gray-600 bg-gray-800/40 border-l border-gray-700 sticky top-[29px] z-10">–</th>
+                  : codes.map((c, i) => (
+                      <th key={`${m}-${c}`} title={LEAVE_CODE_LABELS[c] || c}
+                        className={`px-1.5 py-1 text-center text-gray-500 bg-gray-800/40 font-medium sticky top-[29px] z-10 ${i === 0 ? "border-l border-gray-700" : ""}`}>
+                        {c}
+                      </th>
+                    ))
+              ))}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={15} className="py-10 text-center"><Loader2 size={14} className="animate-spin inline mr-2 text-gray-500" />Loading...</td></tr>
+              <tr><td colSpan={totalCols} className="py-10 text-center"><Loader2 size={14} className="animate-spin inline mr-2 text-gray-500" />Loading...</td></tr>
             ) : pageRows.length === 0 ? (
-              <tr><td colSpan={15} className="py-10 text-center text-gray-600">No employees match these filters.</td></tr>
+              <tr><td colSpan={totalCols} className="py-10 text-center text-gray-600">No employees match these filters.</td></tr>
             ) : pageRows.map(emp => (
               <tr key={emp.employee_id} className="border-t border-gray-800 hover:bg-gray-800/30">
-                <td className="px-3 py-2 whitespace-nowrap bg-gray-900 sticky left-0">
+                <td className="px-3 py-2 whitespace-nowrap bg-gray-900 sticky left-0 z-10">
                   <button onClick={() => setAddingFor(emp)} title="Click to add a leave entry"
                     className="text-gray-200 font-medium hover:text-blue-400 hover:underline text-left">
                     {emp.employee_name || emp.employee_id}
@@ -5474,22 +5513,18 @@ function AnnualLeaveReportSection() {
                 </td>
                 <td className="px-2 py-2 text-gray-400 align-top">{emp.department || "—"}</td>
                 {emp.months.map(m => (
-                  <td key={m.month} className="px-1 py-2 text-center align-top">
-                    {m.total > 0 ? (
-                      <>
-                        <div className="text-amber-300 font-bold">{m.total}</div>
-                        <div className="text-[9px] text-gray-500 leading-tight">
-                          {Object.entries(m.by_code).map(([k, v]) => (
-                            <div key={k}>{k}: {v}</div>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <span className="text-gray-700">–</span>
-                    )}
-                  </td>
+                  codes.length === 0
+                    ? <td key={m.month} className="px-2 py-2 text-center text-gray-700 border-l border-gray-800">–</td>
+                    : codes.map((c, i) => {
+                        const v = m.by_code[c] || 0;
+                        return (
+                          <td key={`${m.month}-${c}`} className={`px-1 py-2 text-center ${i === 0 ? "border-l border-gray-800" : ""}`}>
+                            <span className={v > 0 ? "text-amber-300 font-semibold" : "text-gray-700"}>{v > 0 ? v : "–"}</span>
+                          </td>
+                        );
+                      })
                 ))}
-                <td className="px-3 py-2 text-center font-bold text-gray-100 bg-gray-800/30 align-top">{emp.total}</td>
+                <td className="px-3 py-2 text-center font-bold text-gray-100 bg-gray-800/30">{emp.total}</td>
               </tr>
             ))}
           </tbody>
