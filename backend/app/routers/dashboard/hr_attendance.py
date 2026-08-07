@@ -943,6 +943,103 @@ async def get_attendance_departments(
     return sorted(names)
 
 
+@router.get("/coverage")
+async def get_attendance_coverage(
+    years: int = Query(10, ge=1, le=30),
+    db:    AsyncSession = Depends(get_db),
+    user:  CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Year x month grid of how much attendance data exists, so HR can spot
+    months nobody ever uploaded. A month only counts as a "gap" if it falls
+    inside the range that already has data somewhere — before the first
+    ever upload isn't a gap, it's just outside the system's operating
+    history."""
+    from sqlalchemy import extract
+
+    per_source_result = await db.execute(
+        select(
+            extract("year",  AttendanceRecord.attendance_date).label("year"),
+            extract("month", AttendanceRecord.attendance_date).label("month"),
+            AttendanceRecord.source,
+            func.count().label("total"),
+        )
+        .group_by(
+            extract("year",  AttendanceRecord.attendance_date),
+            extract("month", AttendanceRecord.attendance_date),
+            AttendanceRecord.source,
+        )
+    )
+    per_month_result = await db.execute(
+        select(
+            extract("year",  AttendanceRecord.attendance_date).label("year"),
+            extract("month", AttendanceRecord.attendance_date).label("month"),
+            func.count(func.distinct(AttendanceRecord.employee_id)).label("employees"),
+        )
+        .group_by(
+            extract("year",  AttendanceRecord.attendance_date),
+            extract("month", AttendanceRecord.attendance_date),
+        )
+    )
+
+    by_ym = {}
+    for yr, mo, source, total in per_source_result.fetchall():
+        key = (int(yr), int(mo))
+        cell = by_ym.setdefault(key, {"total": 0, "employees": 0, "by_source": {}})
+        cell["total"] += int(total)
+        cell["by_source"][source or "unknown"] = int(total)
+    for yr, mo, employees in per_month_result.fetchall():
+        key = (int(yr), int(mo))
+        by_ym.setdefault(key, {"total": 0, "employees": 0, "by_source": {}})["employees"] = int(employees)
+
+    covered_ym = sorted(k for k, v in by_ym.items() if v["total"] > 0)
+    observed_from = covered_ym[0] if covered_ym else None
+    observed_to   = covered_ym[-1] if covered_ym else None
+
+    today  = date.today()
+    cur_ym = (today.year, today.month)
+    year_list = list(range(today.year - years + 1, today.year + 1))
+    MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+
+    grid = []
+    for yr in year_list:
+        for mo in range(1, 13):
+            ym = (yr, mo)
+            cell = by_ym.get(ym, {"total": 0, "employees": 0, "by_source": {}})
+            if cell["total"] > 0:
+                status = "data"
+            elif observed_from and observed_from <= ym <= observed_to and ym <= cur_ym:
+                status = "gap"
+            else:
+                status = "outside"
+            grid.append({
+                "year": yr, "month": mo, "period": f"{MONTHS[mo-1]} {yr}",
+                "total": cell["total"], "employees": cell["employees"],
+                "by_source": cell["by_source"], "status": status,
+            })
+
+    log_result = await db.execute(
+        select(AttendanceUploadLog).order_by(AttendanceUploadLog.uploaded_at.desc())
+    )
+    last_upload_by_source = {}
+    for log in log_result.scalars().all():
+        if log.source not in last_upload_by_source:
+            last_upload_by_source[log.source] = {
+                "uploaded_at": log.uploaded_at.isoformat() if log.uploaded_at else None,
+                "filename":    log.filename,
+                "batch_id":    log.batch_id,
+            }
+
+    return {
+        "years": year_list,
+        "grid":  grid,
+        "last_upload_by_source": last_upload_by_source,
+        "observed_range": {
+            "from": f"{observed_from[0]}-{observed_from[1]:02d}" if observed_from else None,
+            "to":   f"{observed_to[0]}-{observed_to[1]:02d}"     if observed_to   else None,
+        },
+    }
+
+
 @router.get("/monthly-rate")
 async def get_monthly_attendance_rate(
     department: Optional[str] = Query(None),

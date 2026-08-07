@@ -51,6 +51,7 @@ export const hrApi = {
   getAttendance: (params) => api.get("/dashboard/hr/attendance", { params }),
   editAttendanceDay: (employeeId, date, body) => api.patch(`/dashboard/hr/attendance/${employeeId}/${date}`, body),
   getAttendanceDayHistory: (employeeId, date) => api.get(`/dashboard/hr/attendance/${employeeId}/${date}/history`),
+  getAttendanceCoverage: (years) => api.get("/dashboard/hr/attendance/coverage", { params: { years } }),
   uploadLeave:     (form) => api.post("/dashboard/hr/leave/upload", form, { headers: { "Content-Type": undefined } }),
   getLeaveHistory: ()     => api.get("/dashboard/hr/leave/history"),
   getLeaveData:    (p)    => api.get("/dashboard/hr/leave/data", { params: p }),
