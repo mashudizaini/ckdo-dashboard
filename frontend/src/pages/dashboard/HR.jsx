@@ -3634,6 +3634,7 @@ function AttendanceCorrectionSection({ departments }) {
 
 function AttendanceEditModal({ record, onClose, onSaved }) {
   const isNew = !!record._isNew;
+  const knownEmployee = isNew && !!record.employee_id;
   const [employeeId, setEmployeeId] = useState(record.employee_id || "");
   const [attDate, setAttDate] = useState(record.attendance_date || "");
   const [form, setForm] = useState({
@@ -3688,12 +3689,20 @@ function AttendanceEditModal({ record, onClose, onSaved }) {
       <div onClick={e => e.stopPropagation()}
         style={{ background: "#111827", borderRadius: 16, padding: 20, width: 420, maxHeight: "85vh", overflowY: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.4)" }}>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-bold text-gray-200">{isNew ? "Manual Entry" : "Edit Attendance Day"}</h3>
+          <h3 className="text-sm font-bold text-gray-200">
+            {knownEmployee ? `Add Leave — ${record.employee_name || employeeId}` : isNew ? "Manual Entry" : "Edit Attendance Day"}
+          </h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300"><X size={16} /></button>
         </div>
 
         <div className="space-y-3">
-          {isNew ? (
+          {knownEmployee ? (
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Date</label>
+              <input type="date" value={attDate} onChange={e => setAttDate(e.target.value)}
+                className="w-full text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5" />
+            </div>
+          ) : isNew ? (
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-xs text-gray-500 block mb-1">Employee ID</label>
@@ -3809,6 +3818,7 @@ const COVERAGE_SOURCES = [
 function AttendanceCoverageSection() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [selectedSource, setSelectedSource] = useState(null); // null = all sources combined
 
   useEffect(() => {
     setLoading(true);
@@ -3832,15 +3842,32 @@ function AttendanceCoverageSection() {
     return "bg-gray-800/40 text-gray-700 border border-gray-800";
   };
 
+  const selectedLabel = selectedSource
+    ? (COVERAGE_SOURCES.find(s => s.key === selectedSource)?.label || selectedSource)
+    : "All Sources";
+
   return (
     <div className="space-y-4">
-      {/* Last upload per source */}
+      {/* Last upload per source — click a card to filter the grid below by that source */}
       <div className="flex flex-wrap gap-2">
+        <button onClick={() => setSelectedSource(null)}
+          className={`rounded-lg border px-3 py-2 text-xs text-left min-w-[100px] transition-colors ${
+            selectedSource === null
+              ? "border-blue-500/50 bg-blue-500/10"
+              : "border-gray-800 bg-gray-900 hover:border-gray-700"
+          }`}>
+          <div className={`font-semibold ${selectedSource === null ? "text-blue-300" : "text-gray-300"}`}>All Sources</div>
+          <div className="text-gray-600 mt-0.5">Combined view</div>
+        </button>
         {COVERAGE_SOURCES.map(s => {
           const info = data.last_upload_by_source[s.key];
+          const isActive = selectedSource === s.key;
           return (
-            <div key={s.key} className="rounded-lg border border-gray-800 bg-gray-900 px-3 py-2 text-xs min-w-[140px]">
-              <div className="font-semibold text-gray-300">{s.label}</div>
+            <button key={s.key} onClick={() => setSelectedSource(cur => cur === s.key ? null : s.key)}
+              className={`rounded-lg border px-3 py-2 text-xs text-left min-w-[140px] transition-colors ${
+                isActive ? "border-blue-500/50 bg-blue-500/10" : "border-gray-800 bg-gray-900 hover:border-gray-700"
+              }`}>
+              <div className={`font-semibold ${isActive ? "text-blue-300" : "text-gray-300"}`}>{s.label}</div>
               {info ? (
                 <div className="text-gray-500 mt-0.5">
                   {info.uploaded_at?.replace("T", " ").slice(0, 16)}
@@ -3849,10 +3876,12 @@ function AttendanceCoverageSection() {
               ) : (
                 <div className="text-gray-600 mt-0.5">Never uploaded</div>
               )}
-            </div>
+            </button>
           );
         })}
       </div>
+
+      <p className="text-xs text-gray-500">Showing: <span className="text-gray-300 font-semibold">{selectedLabel}</span></p>
 
       {/* Heatmap grid */}
       <div className="overflow-x-auto rounded-lg border border-gray-800">
@@ -3870,17 +3899,19 @@ function AttendanceCoverageSection() {
                 {MONTHS.map((_, i) => {
                   const mo = i + 1;
                   const cell = gridByYm[`${yr}-${mo}`];
+                  const value = selectedSource ? (cell?.by_source?.[selectedSource] || 0) : (cell?.total || 0);
+                  const status = !cell || cell.status === "outside" ? "outside" : (value > 0 ? "data" : "gap");
                   const sourceLines = cell && cell.total > 0
                     ? Object.entries(cell.by_source).map(([k, v]) => `${k}: ${v}`).join("\n")
                     : "";
-                  const tooltip = cell?.total > 0
-                    ? `${cell.total} rows, ${cell.employees} employees\n${sourceLines}`
-                    : cell?.status === "gap" ? "No data uploaded" : "";
+                  const tooltip = selectedSource
+                    ? (value > 0 ? `${selectedLabel}: ${value} rows` : status === "gap" ? `${selectedLabel}: no data` : "")
+                    : cell?.total > 0 ? `${cell.total} rows, ${cell.employees} employees\n${sourceLines}` : status === "gap" ? "No data uploaded" : "";
                   return (
                     <td key={mo} className="p-1">
                       <div title={tooltip}
-                        className={`w-16 h-9 rounded flex items-center justify-center font-semibold ${cellStyle(cell?.status || "outside")}`}>
-                        {cell?.total > 0 ? cell.total : (cell?.status === "gap" ? "—" : "")}
+                        className={`w-16 h-9 rounded flex items-center justify-center font-semibold ${cellStyle(status)}`}>
+                        {value > 0 ? value : (status === "gap" ? "—" : "")}
                       </div>
                     </td>
                   );
@@ -5331,6 +5362,8 @@ function LeaveDataSection() {
 }
 
 // ── Annual leave report (Jan-Dec matrix per employee) ──────────────────────────
+const ANNUAL_REPORT_PAGE_SIZE = 8;
+
 function AnnualLeaveReportSection() {
   const curYear = new Date().getFullYear();
   const [year, setYear] = useState(curYear);
@@ -5341,19 +5374,24 @@ function AnnualLeaveReportSection() {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("employee_name");
   const [sortDir, setSortDir] = useState("asc");
+  const [page, setPage] = useState(1);
+  const [addingFor, setAddingFor] = useState(null);
   const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
 
   useEffect(() => {
     hrApi.getLeaveDepartments().then(setDepartments).catch(() => {});
   }, []);
 
-  useEffect(() => {
+  const fetchReport = useCallback(() => {
     setLoading(true);
     hrApi.getAnnualLeaveReport(year)
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
   }, [year]);
+
+  useEffect(() => { fetchReport(); }, [fetchReport]);
+  useEffect(() => { setPage(1); }, [department, search, year]);
 
   const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
@@ -5373,6 +5411,9 @@ function AnnualLeaveReportSection() {
         return (a.employee_name || "").localeCompare(b.employee_name || "") * dir;
       })
     : filtered;
+
+  const pageCount = Math.max(1, Math.ceil(rows.length / ANNUAL_REPORT_PAGE_SIZE));
+  const pageRows = rows.slice((page - 1) * ANNUAL_REPORT_PAGE_SIZE, page * ANNUAL_REPORT_PAGE_SIZE);
 
   return (
     <div className="space-y-4">
@@ -5403,16 +5444,16 @@ function AnnualLeaveReportSection() {
         <span className="text-xs text-gray-600">{rows.length} employees</span>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-gray-800">
-        <table className="text-xs border-collapse">
+      <div className="overflow-x-auto overflow-y-auto max-h-[560px] rounded-lg border border-gray-800">
+        <table className="text-xs border-collapse w-full">
           <thead>
             <tr>
-              <th className="px-3 py-2 text-left text-gray-500 bg-gray-800/60 sticky left-0 cursor-pointer" onClick={() => handleSort("employee_name")}>
+              <th className="px-3 py-2 text-left text-gray-500 bg-gray-800/60 sticky left-0 top-0 cursor-pointer z-10" onClick={() => handleSort("employee_name")}>
                 Employee {sortBy === "employee_name" && (sortDir === "asc" ? "▲" : "▼")}
               </th>
-              <th className="px-2 py-2 text-left text-gray-500 bg-gray-800/60">Department</th>
-              {MONTHS.map(m => <th key={m} className="px-2 py-2 text-center text-gray-500 bg-gray-800/60 font-medium">{m}</th>)}
-              <th className="px-3 py-2 text-center text-gray-300 bg-gray-800/60 font-bold cursor-pointer" onClick={() => handleSort("total")}>
+              <th className="px-2 py-2 text-left text-gray-500 bg-gray-800/60 sticky top-0">Department</th>
+              {MONTHS.map(m => <th key={m} className="px-2 py-2 text-center text-gray-500 bg-gray-800/60 font-medium sticky top-0 min-w-[90px]">{m}</th>)}
+              <th className="px-3 py-2 text-center text-gray-300 bg-gray-800/60 font-bold cursor-pointer sticky top-0" onClick={() => handleSort("total")}>
                 Total {sortBy === "total" && (sortDir === "asc" ? "▲" : "▼")}
               </th>
             </tr>
@@ -5420,33 +5461,60 @@ function AnnualLeaveReportSection() {
           <tbody>
             {loading ? (
               <tr><td colSpan={15} className="py-10 text-center"><Loader2 size={14} className="animate-spin inline mr-2 text-gray-500" />Loading...</td></tr>
-            ) : rows.length === 0 ? (
+            ) : pageRows.length === 0 ? (
               <tr><td colSpan={15} className="py-10 text-center text-gray-600">No employees match these filters.</td></tr>
-            ) : rows.map(emp => (
+            ) : pageRows.map(emp => (
               <tr key={emp.employee_id} className="border-t border-gray-800 hover:bg-gray-800/30">
-                <td className="px-3 py-2 text-gray-200 font-medium whitespace-nowrap bg-gray-900 sticky left-0">
-                  {emp.employee_name || emp.employee_id}
+                <td className="px-3 py-2 whitespace-nowrap bg-gray-900 sticky left-0">
+                  <button onClick={() => setAddingFor(emp)} title="Click to add a leave entry"
+                    className="text-gray-200 font-medium hover:text-blue-400 hover:underline text-left">
+                    {emp.employee_name || emp.employee_id}
+                  </button>
                   <div className="text-[10px] text-gray-600 font-mono">{emp.employee_id}</div>
                 </td>
-                <td className="px-2 py-2 text-gray-400">{emp.department || "—"}</td>
-                {emp.months.map(m => {
-                  const tooltip = m.total > 0
-                    ? Object.entries(m.by_code).map(([k, v]) => `${k}: ${v}`).join("\n")
-                    : "";
-                  return (
-                    <td key={m.month} className="px-1 py-2 text-center" title={tooltip}>
-                      <span className={m.total > 0 ? "text-amber-300 font-semibold" : "text-gray-700"}>
-                        {m.total > 0 ? m.total : "–"}
-                      </span>
-                    </td>
-                  );
-                })}
-                <td className="px-3 py-2 text-center font-bold text-gray-100 bg-gray-800/30">{emp.total}</td>
+                <td className="px-2 py-2 text-gray-400 align-top">{emp.department || "—"}</td>
+                {emp.months.map(m => (
+                  <td key={m.month} className="px-1 py-2 text-center align-top">
+                    {m.total > 0 ? (
+                      <>
+                        <div className="text-amber-300 font-bold">{m.total}</div>
+                        <div className="text-[9px] text-gray-500 leading-tight">
+                          {Object.entries(m.by_code).map(([k, v]) => (
+                            <div key={k}>{k}: {v}</div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-gray-700">–</span>
+                    )}
+                  </td>
+                ))}
+                <td className="px-3 py-2 text-center font-bold text-gray-100 bg-gray-800/30 align-top">{emp.total}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {pageCount > 1 && (
+        <div className="flex items-center justify-between text-xs text-gray-500">
+          <span>{rows.length} employees · page {page} of {pageCount}</span>
+          <div className="flex gap-1">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+              className="px-2 py-1 rounded bg-gray-800 disabled:opacity-40">Prev</button>
+            <button onClick={() => setPage(p => Math.min(pageCount, p + 1))} disabled={page === pageCount}
+              className="px-2 py-1 rounded bg-gray-800 disabled:opacity-40">Next</button>
+          </div>
+        </div>
+      )}
+
+      {addingFor && (
+        <AttendanceEditModal
+          record={{ employee_id: addingFor.employee_id, employee_name: addingFor.employee_name, attendance_date: "", _isNew: true }}
+          onClose={() => setAddingFor(null)}
+          onSaved={() => { setAddingFor(null); fetchReport(); }}
+        />
+      )}
     </div>
   );
 }
