@@ -15,6 +15,7 @@ import {
   GitBranch, History as HistoryIcon, FileBarChart, Settings2, RefreshCw,
   Loader2, CheckCircle2, XCircle, AlertTriangle, Play, Pause, Square,
   Trash2, Plus, Key, ShieldCheck, ChevronDown, ChevronUp, Server as ServerIcon,
+  Folder, File as FileIcon, ChevronRight, Home, Cloud, FolderSync,
 } from "lucide-react";
 import { ebsBackupApi } from "@/api/ebsBackup";
 
@@ -64,7 +65,7 @@ export default function EbsBackupRecovery() {
       </div>
 
       {tab === "overview" && <OverviewTab />}
-      {tab === "disk-space" && <DiskSpaceTab />}
+      {tab === "disk-space" && <DiskSpaceTab servers={servers} />}
       {tab === "db-backup" && <DbBackupTab servers={servers} />}
       {tab === "app-backup" && <AppBackupTab servers={servers} />}
       {tab === "restore" && <RestoreTab servers={servers} />}
@@ -250,9 +251,186 @@ function OverviewTab() {
 
 /* ─── Disk Space ──────────────────────────────────── */
 
-function DiskSpaceTab() {
+function CapacityBar({ usage }) {
+  if (!usage) return null;
+  if (!usage.connected) {
+    return <p style={{ fontSize: 11.5, color: "#dc2626" }}>Not connected: {usage.error}</p>;
+  }
+  const pct = usage.total_bytes > 0 ? Math.min(100, (usage.used_bytes / usage.total_bytes) * 100) : 0;
+  const color = pct > 90 ? "#dc2626" : pct > 75 ? "#d97706" : "#16a34a";
+  return (
+    <div>
+      <div className="flex items-center justify-between" style={{ fontSize: 12, marginBottom: 5 }}>
+        <span style={{ color: "#64748b" }}>
+          <strong style={{ color: "#0f172a" }}>{fmtBytes(usage.used_bytes)}</strong> / {fmtBytes(usage.total_bytes)}
+        </span>
+        <span style={{ color: "#64748b" }}>{fmtBytes(usage.available_bytes)} free</span>
+      </div>
+      <div style={{ height: 6, borderRadius: 4, background: "#f1f5f9", overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${pct}%`, background: color }} />
+      </div>
+    </div>
+  );
+}
+
+/** Browse individual backed-up files on a MinIO bucket or Synology share —
+ * breadcrumb folder navigation, size + last-modified per file, multi-select
+ * delete. Ported from the standalone ebs-backup-dashboard's
+ * TabDiskSpace.jsx StorageBrowser, reskinned to this file's flat-white style. */
+function StorageBrowser({ server, kind }) {
+  const [currentKey, setCurrentKey] = useState(""); // MinIO: prefix ending in "/" or "". Synology: relative path, no leading slash.
+  const [items, setItems] = useState([]);
+  const [usage, setUsage] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState(new Set());
+  const [deleting, setDeleting] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setSelected(new Set());
+    try {
+      const res = kind === "minio"
+        ? await ebsBackupApi.minioList(server.id, currentKey)
+        : await ebsBackupApi.synologyList(server.id, currentKey);
+      setItems(res.items || []);
+    } catch (e) {
+      alert("Error listing: " + (e?.detail || e?.message || e));
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [kind, server.id, currentKey]);
+
+  const loadUsage = useCallback(async () => {
+    try {
+      setUsage(kind === "minio" ? await ebsBackupApi.minioUsage(server.id) : await ebsBackupApi.synologyUsage(server.id));
+    } catch (e) {
+      setUsage({ connected: false, error: e?.detail || e?.message || String(e) });
+    }
+  }, [kind, server.id]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadUsage(); }, [loadUsage]);
+
+  const itemKey = (item) => (kind === "minio" ? item.key : (currentKey ? `${currentKey}/${item.name}` : item.name));
+
+  const openFolder = (item) => {
+    if (kind === "minio") setCurrentKey(item.key);
+    else setCurrentKey(currentKey ? `${currentKey}/${item.name}` : item.name);
+  };
+
+  const breadcrumbs = currentKey.split("/").filter(Boolean);
+  const goToCrumb = (idx) => {
+    const parts = breadcrumbs.slice(0, idx + 1);
+    setCurrentKey(kind === "minio" ? parts.join("/") + "/" : parts.join("/"));
+  };
+
+  const toggleSelect = (key) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+  const toggleSelectAll = () => {
+    setSelected(selected.size === items.length ? new Set() : new Set(items.map(itemKey)));
+  };
+
+  const selectedSize = items.filter((i) => selected.has(itemKey(i))).reduce((sum, i) => sum + (i.size_bytes || 0), 0);
+  const selectedHasFolders = items.some((i) => selected.has(itemKey(i)) && i.is_dir);
+
+  const deleteSelected = async () => {
+    const count = selected.size;
+    const warn = selectedHasFolders
+      ? `Delete ${count} item(s), including whole folders (all files inside will be removed too)?\n\nThis cannot be undone.`
+      : `Delete ${count} file(s) (${fmtBytes(selectedSize)})?\n\nThis cannot be undone.`;
+    if (!confirm(warn)) return;
+    setDeleting(true);
+    try {
+      if (kind === "minio") await ebsBackupApi.minioDelete(server.id, [...selected]);
+      else await ebsBackupApi.synologyDelete(server.id, [...selected]);
+      await load();
+      await loadUsage();
+    } catch (e) {
+      alert("Delete failed: " + (e?.detail || e?.message || e));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const Icon = kind === "minio" ? Cloud : FolderSync;
+
+  return (
+    <div className="rounded-xl p-4" style={{ border: "1px solid rgba(0,0,0,0.06)" }}>
+      <div className="flex items-center justify-between mb-3 pb-3" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+        <div className="flex items-center gap-2.5">
+          <Icon size={16} style={{ color: kind === "minio" ? "#c026d3" : "#16a34a" }} />
+          <div>
+            <p style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{server.name}</p>
+            <p style={{ fontSize: 10.5, color: "#94a3b8" }}>{server.host}{kind === "minio" ? ` · ${server.bucket}` : ` · ${server.share_path}`}</p>
+          </div>
+        </div>
+        <Btn size="sm" icon={loading ? Loader2 : RefreshCw} onClick={() => { load(); loadUsage(); }} disabled={loading}>Refresh</Btn>
+      </div>
+
+      <div className="mb-3"><CapacityBar usage={usage} /></div>
+
+      <div className="flex items-center gap-1 flex-wrap mb-2" style={{ fontSize: 11 }}>
+        <button onClick={() => setCurrentKey("")} className="flex items-center gap-1" style={{ color: "#64748b" }}>
+          <Home size={11} /> root
+        </button>
+        {breadcrumbs.map((b, i) => (
+          <span key={i} className="flex items-center gap-1">
+            <ChevronRight size={11} style={{ color: "#cbd5e1" }} />
+            <button onClick={() => goToCrumb(i)} style={{ color: "#64748b" }}>{b}</button>
+          </span>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between mb-2">
+        <label className="flex items-center gap-2" style={{ fontSize: 11, color: "#64748b" }}>
+          <input type="checkbox" checked={items.length > 0 && selected.size === items.length} onChange={toggleSelectAll} />
+          Select all
+        </label>
+        {selected.size > 0 && (
+          <Btn size="sm" variant="danger" icon={Trash2} disabled={deleting} onClick={deleteSelected}>
+            {deleting ? "Deleting…" : `Delete ${selected.size} selected (${fmtBytes(selectedSize)})`}
+          </Btn>
+        )}
+      </div>
+
+      <div className="rounded-lg" style={{ border: "1px solid rgba(0,0,0,0.06)", maxHeight: 340, overflowY: "auto" }}>
+        {loading && <p style={{ fontSize: 11, color: "#94a3b8", textAlign: "center", padding: 14 }}>Loading…</p>}
+        {!loading && items.length === 0 && <p style={{ fontSize: 11, color: "#94a3b8", textAlign: "center", padding: 14 }}>Empty folder</p>}
+        {!loading && items.map((item) => {
+          const key = itemKey(item);
+          return (
+            <div key={key} className="flex items-center gap-2.5 px-3 py-2" style={{ borderTop: "1px solid rgba(0,0,0,0.04)", fontSize: 12 }}>
+              <input type="checkbox" checked={selected.has(key)} onChange={() => toggleSelect(key)} />
+              {item.is_dir ? <Folder size={13} style={{ color: "#d97706" }} /> : <FileIcon size={13} style={{ color: "#94a3b8" }} />}
+              {item.is_dir ? (
+                <button onClick={() => openFolder(item)} className="truncate flex-1 text-left" style={{ color: "#0f172a" }}>{item.name}/</button>
+              ) : (
+                <span className="truncate flex-1" style={{ color: "#334155" }}>{item.name}</span>
+              )}
+              {!item.is_dir && <span style={{ color: "#94a3b8", fontSize: 11, flexShrink: 0 }}>{fmtBytes(item.size_bytes)}</span>}
+              {(item.last_modified || item.modified) && (
+                <span style={{ color: "#cbd5e1", fontSize: 10.5, flexShrink: 0 }}>{fmtDate(item.last_modified || item.modified)}</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DiskSpaceTab({ servers = [] }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  const minioServers = servers.filter((s) => s.role === "minio" && s.enabled);
+  const synologyServers = servers.filter((s) => s.role === "synology" && s.enabled);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -262,34 +440,45 @@ function DiskSpaceTab() {
   useEffect(() => { refresh(); }, [refresh]);
 
   return (
-    <Panel title="Disk Space — DB & App Servers" action={<Btn icon={loading ? Loader2 : RefreshCw} onClick={refresh}>Refresh</Btn>}>
-      {!data?.results?.length ? <Empty>No servers registered yet (add one in Setup).</Empty> : (
-        <div className="space-y-4">
-          {data.results.map((r, i) => (
-            <div key={i} className="rounded-xl p-4" style={{ border: "1px solid rgba(0,0,0,0.06)" }}>
-              <div className="flex items-center justify-between mb-2">
-                <p style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{r.server} <span style={{ fontWeight: 500, color: "#94a3b8" }}>({r.host}, {r.role})</span></p>
-              </div>
-              {r.error ? <p style={{ fontSize: 11.5, color: "#dc2626" }}>{r.error}</p> : (
-                <div className="space-y-2">
-                  {r.mounts.map((m, j) => (
-                    <div key={j}>
-                      <div className="flex justify-between" style={{ fontSize: 11, color: "#64748b", marginBottom: 3 }}>
-                        <span>{m.mount_point}</span>
-                        <span>{m.used_gb}GB / {m.size_gb}GB ({m.use_percent}%)</span>
-                      </div>
-                      <div style={{ height: 6, borderRadius: 4, background: "#f1f5f9", overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${m.use_percent}%`, background: m.use_percent > 90 ? "#dc2626" : m.use_percent > 75 ? "#d97706" : "#2563eb" }} />
-                      </div>
-                    </div>
-                  ))}
+    <>
+      <Panel title="Disk Space — DB & App Servers" action={<Btn icon={loading ? Loader2 : RefreshCw} onClick={refresh}>Refresh</Btn>}>
+        {!data?.results?.length ? <Empty>No servers registered yet (add one in Setup).</Empty> : (
+          <div className="space-y-4">
+            {data.results.map((r, i) => (
+              <div key={i} className="rounded-xl p-4" style={{ border: "1px solid rgba(0,0,0,0.06)" }}>
+                <div className="flex items-center justify-between mb-2">
+                  <p style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{r.server} <span style={{ fontWeight: 500, color: "#94a3b8" }}>({r.host}, {r.role})</span></p>
                 </div>
-              )}
-            </div>
-          ))}
-        </div>
+                {r.error ? <p style={{ fontSize: 11.5, color: "#dc2626" }}>{r.error}</p> : (
+                  <div className="space-y-2">
+                    {r.mounts.map((m, j) => (
+                      <div key={j}>
+                        <div className="flex justify-between" style={{ fontSize: 11, color: "#64748b", marginBottom: 3 }}>
+                          <span>{m.mount_point}</span>
+                          <span>{m.used_gb}GB / {m.size_gb}GB ({m.use_percent}%)</span>
+                        </div>
+                        <div style={{ height: 6, borderRadius: 4, background: "#f1f5f9", overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${m.use_percent}%`, background: m.use_percent > 90 ? "#dc2626" : m.use_percent > 75 ? "#d97706" : "#2563eb" }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Panel>
+
+      {(minioServers.length > 0 || synologyServers.length > 0) && (
+        <Panel title="Remote Storage Browser" subtitle="Browse backed-up files on MinIO/Synology, with size and last-modified — select and delete old copies without leaving the dashboard.">
+          <div className="space-y-4">
+            {minioServers.map((s) => <StorageBrowser key={s.id} server={s} kind="minio" />)}
+            {synologyServers.map((s) => <StorageBrowser key={s.id} server={s} kind="synology" />)}
+          </div>
+        </Panel>
       )}
-    </Panel>
+    </>
   );
 }
 
@@ -431,6 +620,43 @@ function JobDetail({ jobId, onChanged }) {
 
 /* ─── DB Backup ───────────────────────────────────── */
 
+function PreflightDestinationCard({ label, info, sizeToFit }) {
+  if (!info) {
+    return (
+      <div className="rounded-lg p-3" style={{ background: "#f8fafc", border: "1px solid rgba(0,0,0,0.06)" }}>
+        <p style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8" }}>{label}</p>
+        <p style={{ fontSize: 10.5, color: "#cbd5e1", marginTop: 2 }}>Not configured</p>
+      </div>
+    );
+  }
+  const fits = info.connected && sizeToFit != null && info.available_bytes != null ? info.available_bytes > sizeToFit : null;
+  return (
+    <div className="rounded-lg p-3" style={{ background: info.connected ? "#f8fafc" : "rgba(220,38,38,0.05)", border: `1px solid ${info.connected ? "rgba(0,0,0,0.06)" : "rgba(220,38,38,0.2)"}` }}>
+      <div className="flex items-center justify-between">
+        <p style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>{label}</p>
+        {info.connected ? (
+          <span className="flex items-center gap-1" style={{ fontSize: 10.5, color: "#16a34a" }}><CheckCircle2 size={11} /> Connected</span>
+        ) : (
+          <span className="flex items-center gap-1" style={{ fontSize: 10.5, color: "#dc2626" }}><XCircle size={11} /> {info.error || "Unreachable"}</span>
+        )}
+      </div>
+      {info.connected && (
+        <>
+          <p style={{ fontSize: 10.5, color: "#64748b", marginTop: 6 }}>{fmtBytes(info.available_bytes)} free of {fmtBytes(info.total_bytes)}</p>
+          <div style={{ height: 5, borderRadius: 3, background: "#e2e8f0", overflow: "hidden", marginTop: 4 }}>
+            <div style={{ height: "100%", width: `${info.total_bytes > 0 ? Math.min(100, (info.used_bytes / info.total_bytes) * 100) : 0}%`, background: "#2563eb" }} />
+          </div>
+          {fits !== null && (
+            <p style={{ fontSize: 10.5, fontWeight: 700, marginTop: 6, color: fits ? "#16a34a" : "#dc2626" }}>
+              {fits ? "✓ Enough space for estimated backup size" : "✗ May not fit estimated backup size"}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function DbBackupTab({ servers }) {
   const dbServers = servers.filter((s) => s.role === "db");
   const minioServers = servers.filter((s) => s.role === "minio");
@@ -451,6 +677,20 @@ function DbBackupTab({ servers }) {
   const [confirmText, setConfirmText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [refreshSignal, setRefreshSignal] = useState(0);
+  const [preflight, setPreflight] = useState(null);
+  const [preflightBusy, setPreflightBusy] = useState(false);
+
+  const runPreflight = async () => {
+    if (!serverId) return alert("Select a DB server first");
+    setPreflightBusy(true);
+    try {
+      setPreflight(await ebsBackupApi.onlinePreflight(serverId));
+    } catch (e) {
+      alert(e?.detail || "Preflight check failed");
+    } finally {
+      setPreflightBusy(false);
+    }
+  };
 
   const submit = async () => {
     if (!serverId) return alert("Select a DB server first");
@@ -562,6 +802,34 @@ function DbBackupTab({ servers }) {
                   {synologyServers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </Field>
+            )}
+          </div>
+        )}
+
+        {["online_full", "online_incremental"].includes(jobType) && (
+          <div className="mb-4 pt-4" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
+            <div className="flex items-center justify-between mb-2">
+              <p style={{ fontSize: 12.5, fontWeight: 700, color: "#0f172a" }}>Pre-flight: check destination space</p>
+              <Btn size="sm" icon={preflightBusy ? Loader2 : RefreshCw} disabled={preflightBusy || !serverId} onClick={runPreflight}>
+                {preflightBusy ? "Checking…" : "Check Destinations"}
+              </Btn>
+            </div>
+            {!preflight ? (
+              <p style={{ fontSize: 11.5, color: "#94a3b8" }}>
+                Estimates the current DB size and checks free space on staging, MinIO, and Synology — so you know before
+                triggering whether the destination server can actually fit this backup.
+              </p>
+            ) : (
+              <>
+                <p style={{ fontSize: 11.5, color: "#64748b", marginBottom: 8 }}>
+                  Estimated backup size (current DB data, uncompressed): <strong style={{ color: "#0f172a" }}>{fmtBytes(preflight.db_size_estimate_bytes)}</strong>
+                </p>
+                <div className="grid grid-cols-3 gap-3">
+                  <PreflightDestinationCard label="Local Staging" info={preflight.staging} sizeToFit={preflight.db_size_estimate_bytes} />
+                  <PreflightDestinationCard label={preflight.minio?.name || "MinIO"} info={preflight.minio} sizeToFit={preflight.db_size_estimate_bytes} />
+                  <PreflightDestinationCard label={preflight.synology?.name || "Synology"} info={preflight.synology} sizeToFit={preflight.db_size_estimate_bytes} />
+                </div>
+              </>
             )}
           </div>
         )}
