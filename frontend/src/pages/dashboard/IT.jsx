@@ -7,6 +7,7 @@ import {
   Cpu, TrendingUp, List, Lightbulb, Terminal,
   Table2, Layers, Hash, Code2, Key, Link2, Trash2, Search,
   ChevronLeft, ChevronRight, Play, History,
+  ShieldCheck,
 } from "lucide-react";
 import {
   AreaChart, Area,
@@ -15,6 +16,7 @@ import {
 } from "recharts";
 import { itApi } from "@/api/dashboard";
 import EbsBackupRecovery from "@/pages/dashboard/it/EbsBackupRecovery";
+import VpnAccessMonitoring from "@/pages/dashboard/it/VpnAccessMonitoring";
 
 /* ─── Tab definitions ─────────────────────────────── */
 
@@ -24,6 +26,7 @@ const TABS = [
   { id: "disk-usage",        icon: HardDrive,     color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Oracle Storage Monitoring"        },
   { id: "db-browser",        icon: Database,      color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Postgre DB Browser"  },
   { id: "ebs-backup-recovery", icon: RefreshCw,   color: "text-red-400",    bg: "bg-red-500/10",    activeBorder: "border-red-500/40",    label: "Oracle EBS Backup Recovery" },
+  { id: "vpn-monitoring",    icon: ShieldCheck,   color: "text-teal-400",  bg: "bg-teal-500/10",   activeBorder: "border-teal-500/40",   label: "VPN Access Monitoring" },
 ];
 
 /* ─── Main Page ───────────────────────────────────── */
@@ -50,6 +53,7 @@ export default function ITDashboard() {
       {activeId === "disk-usage"        && <DiskUsageSection />}
       {activeId === "db-browser"        && <DatabaseBrowserSection />}
       {activeId === "ebs-backup-recovery" && <EbsBackupRecovery />}
+      {activeId === "vpn-monitoring"      && <VpnAccessMonitoring />}
     </div>
   );
 }

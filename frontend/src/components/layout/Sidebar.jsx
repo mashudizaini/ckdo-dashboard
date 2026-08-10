@@ -19,6 +19,7 @@ const NAV_ITEMS = [
     { label: "Oracle Storage Monitoring", path: "/dashboard/it/disk-usage" },
     { label: "Postgre DB Browser", path: "/dashboard/it/db-browser" },
     { label: "Oracle EBS Backup Recovery", path: "/dashboard/it/ebs-backup-recovery" },
+    { label: "VPN Access Monitoring", path: "/dashboard/it/vpn-monitoring" },
   ] },
   { label: "HRGA", path: "/dashboard/hr", icon: Users, roles: ["hr_staff"], children: [
     { label: "Employee Data", path: "/dashboard/hr/employees" },

@@ -41,6 +41,16 @@ export const itApi = {
   getDbAuditLog:  (limit)                => api.get("/dashboard/it/db-browser/audit-log", { params: { limit } }),
 };
 
+export const vpnApi = {
+  listGateways:    ()          => api.get("/dashboard/it/vpn-monitor/gateways"),
+  upsertGateway:   (body)      => api.post("/dashboard/it/vpn-monitor/gateways", body),
+  deleteGateway:   (id)        => api.delete(`/dashboard/it/vpn-monitor/gateways/${id}`),
+  upsertCredential:(id, body)  => api.post(`/dashboard/it/vpn-monitor/gateways/${id}/credential`, body),
+  checkNow:        (id)        => api.post(`/dashboard/it/vpn-monitor/gateways/${id}/check`),
+  getHistory:      (id, hours) => api.get(`/dashboard/it/vpn-monitor/gateways/${id}/history`, { params: { hours } }),
+  getSessions:     (id)        => api.get(`/dashboard/it/vpn-monitor/gateways/${id}/sessions`),
+};
+
 export const hrApi = {
   getSummary: () => api.get("/dashboard/hr/summary"),
   getEmployees: (params) => api.get("/dashboard/hr/employees", { params }),
