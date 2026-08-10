@@ -28,7 +28,7 @@ const CONFIG = {
     uploadPath: "/upload",
     logSource: "intercom",
     example: "Attendance JUN-2026-Intercom.xlsx",
-    guidance: "Daily physical check-in/out log from the Intercom access-control system. Header in row 1, data starts at row 2. Existing records are updated based on Employee ID + date.",
+    guidance: "Daily physical check-in/out log from the Intercom access-control system. Header in row 1, data from row 2. Existing rows are matched and updated by Employee ID + date.",
     icon: CalendarCheck,
     columns: [
       { idx: 0,  name: "Name", required: false },
@@ -58,7 +58,7 @@ const CONFIG = {
     uploadPath: "/upload-talenta",
     logSource: "talenta",
     example: "Attendance MAY-JUN-2026 Talenta.xlsx",
-    guidance: "Leave and business-trip days from Talenta. Only rows with an Attendance Code or Time Off Code are stored — these explain days an employee wasn't physically checked in (leave is excluded from the attendance rate entirely; Business Trip counts as present).",
+    guidance: "Leave and business-trip days from Talenta. Only rows with an Attendance Code or Time Off Code are kept — leave is excluded from the attendance rate, Business Trip counts as present.",
     icon: Briefcase,
     columns: [
       { idx: 0,  name: "Employee ID", required: true },
@@ -86,7 +86,7 @@ const CONFIG = {
     uploadPath: "/upload-plant",
     logSource: "plant",
     example: "Attendance Plant 2026.xlsx",
-    guidance: "Combined physical check-in/out AND leave/BT log for plant employees. Title in row 1, header in row 2, data from row 3. The workbook has one sheet per month (JAN–DEC) — every sheet is read and merged automatically, so upload the whole file at once. \"OFF\" in On Duty (or Remark = RDO) marks a scheduled shift rest day, excluded from the attendance rate like a weekend. Remark text (Annual/Sick/Unpaid Leave, Business Trip, Event Leave, Half Day Leave, Collective Leave) is mapped to the same leave codes Talenta uses; Late Attend and Back To Home Early set the attendance status instead; Overtime is informational only.",
+    guidance: "Combined check-in/out and leave/BT log for plant employees — one workbook, one sheet per month, every sheet is read and merged. Remark text maps to leave codes; see Required Columns below for details.",
     icon: Factory,
     columns: [
       { idx: 0,  name: "NO", required: false, note: "ignored" },
@@ -116,7 +116,7 @@ const CONFIG = {
     logSource: "office",
     example: "Attendance 1-22 July 2025.xls",
     accept: ".xlsx,.xls",
-    guidance: "Combined physical check-in/out AND leave log for non-Plant/office staff. No Department/Team column at all — department always comes from the Employee master. Columns are matched by header text (case-insensitive), not fixed position, so every worksheet in the file is read even if one sheet has a slightly different layout (e.g. a per-employee addendum sheet). Legacy .xls files are supported. Remark text (Annual/Sick/Unpaid/Maternity Leave, BT, half day / after lunch / before lunch variants, Replacement Day Off) is mapped to leave codes; unrecognized remarks are kept as a note only and don't affect attendance status.",
+    guidance: "Combined check-in/out and leave log for office/non-Plant staff — no Department column, so department always comes from the Employee master. Legacy .xls files are supported.",
     icon: Building2,
     columns: [
       { idx: "No.", name: "Employee ID", required: true },

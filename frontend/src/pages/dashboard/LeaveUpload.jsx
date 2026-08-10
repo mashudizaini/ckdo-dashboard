@@ -1,5 +1,17 @@
+/**
+ * LeaveUpload.jsx
+ * Leave/time-off upload from Talenta's "revised format" export — a
+ * different column layout than Attendance Talenta (AttendanceUpload.jsx,
+ * kind="talenta"). Styled to match that same card family (icon+title
+ * header, accent guidance banner, drag-and-drop zone, required-columns
+ * table, upload history) so all 5 upload cards in this tab read as one set.
+ */
 import { useState, useRef, useEffect } from "react";
-import { Upload, Loader2, CheckCircle, X, FileText, FileSpreadsheet, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  Upload, FileSpreadsheet, CheckCircle2, XCircle, Loader2, RefreshCw,
+  Clock, ChevronDown, ChevronUp, CalendarCheck, FilePlus, RotateCcw,
+  AlertCircle, Palmtree,
+} from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { SortableTH, toggleSort, sortRows } from "@/components/SortableTH";
 
@@ -16,210 +28,298 @@ const REQUIRED_COLUMNS = [
   { idx: 7, name: "Time Off Code", required: true, note: "row skipped if empty" },
 ];
 
+const ACCENT = {
+  text: "text-blue-300", banner: "border-blue-500/20 bg-blue-500/5",
+  dragActive: "border-blue-500 bg-blue-500/10", focus: "focus:border-blue-500",
+  button: "bg-blue-600 hover:bg-blue-500",
+};
+
 export default function LeaveUpload() {
-  const [file, setFile] = useState(null);
-  const [notes, setNotes] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState("");
-  const [history, setHistory] = useState([]);
-  const [showCols, setShowCols] = useState(false);
+  const [file,        setFile]        = useState(null);
+  const [dragging,    setDragging]    = useState(false);
+  const [notes,       setNotes]       = useState("");
+  const [uploading,   setUploading]   = useState(false);
+  const [result,      setResult]      = useState(null);
+  const [error,       setError]       = useState(null);
+  const [logs,        setLogs]        = useState([]);
+  const [showLogs,    setShowLogs]    = useState(false);
+  const [showCols,    setShowCols]    = useState(false);
+  const [loadingLogs, setLoadingLogs] = useState(false);
   const [sortBy,  setSortBy]  = useState(null);
   const [sortDir, setSortDir] = useState("asc");
   const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
   const inputRef = useRef(null);
-
   const { token } = useAuthStore();
+
   const headers = { Authorization: `Bearer ${token}` };
 
-  const fetchHistory = async () => {
+  const loadLogs = async () => {
+    setLoadingLogs(true);
     try {
       const res = await fetch(`${API}/history`, { headers });
-      if (res.ok) setHistory(await res.json());
+      if (res.ok) setLogs(await res.json());
     } catch (_) {}
+    finally { setLoadingLogs(false); }
   };
 
-  useEffect(() => { fetchHistory(); }, []);
+  useEffect(() => { loadLogs(); }, []); // eslint-disable-line
 
-  const handleFile = (e) => {
-    const f = e.target.files?.[0];
+  const onFileSelect = (f) => {
     if (!f) return;
-    if (!f.name.match(/\.(xlsx|xlsm)$/i)) {
-      setError("File must be .xlsx or .xlsm format");
-      return;
+    if (!f.name.endsWith(".xlsx") && !f.name.endsWith(".xlsm")) {
+      setError("File must be .xlsx or .xlsm format"); return;
     }
-    setFile(f);
-    setError("");
-    setResult(null);
+    setFile(f); setError(null); setResult(null);
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault(); setDragging(false);
+    onFileSelect(e.dataTransfer.files[0]);
   };
 
   const handleUpload = async () => {
     if (!file) return;
-    setUploading(true);
-    setError("");
-    setResult(null);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      if (notes.trim()) fd.append("notes", notes.trim());
+    setUploading(true); setError(null); setResult(null);
 
-      const res = await fetch(`${API}/upload`, {
-        method: "POST",
-        headers,
-        body: fd,
-      });
+    const fd = new FormData();
+    fd.append("file", file);
+    if (notes.trim()) fd.append("notes", notes.trim());
+
+    try {
+      const res = await fetch(`${API}/upload`, { method: "POST", headers, body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
       setResult(data);
-      setFile(null);
-      setNotes("");
+      setFile(null); setNotes("");
       if (inputRef.current) inputRef.current.value = "";
-      fetchHistory();
+      await loadLogs();
     } catch (e) {
-      setError(e?.message || "Upload failed");
+      setError(e.message);
     } finally {
       setUploading(false);
     }
   };
 
+  const fmtDate = (iso) => {
+    if (!iso) return "—";
+    try { return new Date(iso).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }); }
+    catch (_) { return iso; }
+  };
+
+  const fileSizeKB = file ? (file.size / 1024).toFixed(1) : 0;
+
   return (
     <div className="space-y-5">
-      <div>
-        <p className="text-sm font-medium text-gray-300 mb-1">
-          Upload Talenta Attendance Excel file (leave/time-off data)
-        </p>
-        <p className="text-xs text-gray-500 mb-3">
-          System reads column "Time Off Code" to extract leave records (SL, AL, EM, UL, ML, BT).
-        </p>
 
-        <div className="rounded-xl border border-gray-800 bg-gray-900 mb-3">
-          <button
-            onClick={() => setShowCols((v) => !v)}
-            className="flex w-full items-center justify-between px-4 py-2.5 text-sm font-medium text-gray-300 hover:text-white transition-colors"
-          >
-            <div className="flex items-center gap-2">
-              <FileSpreadsheet size={14} className="text-gray-500" />
-              Required Columns ({REQUIRED_COLUMNS.length})
-            </div>
-            {showCols ? <ChevronUp size={15} className="text-gray-500" /> : <ChevronDown size={15} className="text-gray-500" />}
-          </button>
-          {showCols && (
-            <div className="border-t border-gray-800 overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-gray-800/60">
-                    <th className="px-3 py-2 text-left text-gray-500 font-medium">Col</th>
-                    <th className="px-3 py-2 text-left text-gray-500 font-medium">Column Name</th>
-                    <th className="px-3 py-2 text-left text-gray-500 font-medium">Required</th>
-                    <th className="px-3 py-2 text-left text-gray-500 font-medium">Note</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-800">
-                  {REQUIRED_COLUMNS.map((c) => (
-                    <tr key={c.idx}>
-                      <td className="px-3 py-2 text-gray-500">{c.idx}</td>
-                      <td className="px-3 py-2 text-gray-200 font-medium">{c.name}</td>
-                      <td className="px-3 py-2">
-                        {c.required ? <span className="text-red-400 font-semibold">Yes</span> : <span className="text-gray-600">No</span>}
-                      </td>
-                      <td className="px-3 py-2 text-gray-500">{c.note || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      <h3 className={`flex items-center gap-2 text-sm font-semibold ${ACCENT.text}`}>
+        <Palmtree size={15} /> Leave Talenta
+      </h3>
 
-        <div
-          onClick={() => inputRef.current?.click()}
-          className="rounded-xl border-2 border-dashed border-gray-700 hover:border-blue-500/40 p-6 text-center cursor-pointer transition-colors"
+      {/* ── Guidance ────────────────────────────────────────────────────────── */}
+      <div className={`flex gap-3 rounded-xl border px-4 py-3 text-sm ${ACCENT.banner} ${ACCENT.text}`}>
+        <AlertCircle size={15} className="mt-0.5 shrink-0" />
+        <span>
+          Leave and time-off records from Talenta's revised export format — a different column layout than
+          Attendance Talenta. Only rows with a Time Off Code are kept. Example file: <strong>DATA LEAVE.xlsx</strong>.
+        </span>
+      </div>
+
+      {/* ── Required columns ───────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900">
+        <button
+          onClick={() => setShowCols((v) => !v)}
+          className="flex w-full items-center justify-between px-5 py-3 text-sm font-medium text-gray-300 hover:text-white transition-colors"
         >
-          <input ref={inputRef} type="file" accept=".xlsx,.xlsm" onChange={handleFile} className="hidden" />
-          {file ? (
-            <div className="flex items-center justify-center gap-2 text-sm text-gray-300">
-              <FileText size={16} className="text-blue-400" />
-              <span className="font-medium">{file.name}</span>
-              <span className="text-gray-500">({(file.size / 1024).toFixed(0)} KB)</span>
+          <div className="flex items-center gap-2">
+            <FileSpreadsheet size={14} className="text-gray-500" />
+            Required Columns ({REQUIRED_COLUMNS.length})
+          </div>
+          {showCols ? <ChevronUp size={15} className="text-gray-500" /> : <ChevronDown size={15} className="text-gray-500" />}
+        </button>
+        {showCols && (
+          <div className="border-t border-gray-800 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-800/50">
+                  <th className="px-3 py-2 text-left text-gray-500 font-medium">Col</th>
+                  <th className="px-3 py-2 text-left text-gray-500 font-medium">Column Name</th>
+                  <th className="px-3 py-2 text-left text-gray-500 font-medium">Required</th>
+                  <th className="px-3 py-2 text-left text-gray-500 font-medium">Note</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800">
+                {REQUIRED_COLUMNS.map((c) => (
+                  <tr key={c.idx}>
+                    <td className="px-3 py-2 text-gray-500">{c.idx}</td>
+                    <td className="px-3 py-2 text-gray-200 font-medium">{c.name}</td>
+                    <td className="px-3 py-2">
+                      {c.required ? <span className="text-red-400 font-semibold">Yes</span> : <span className="text-gray-600">No</span>}
+                    </td>
+                    <td className="px-3 py-2 text-gray-500">{c.note || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Drop zone ───────────────────────────────────────────────────────── */}
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        onClick={() => inputRef.current?.click()}
+        className={`relative flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed py-8 cursor-pointer transition-all select-none
+          ${dragging
+            ? ACCENT.dragActive
+            : file
+            ? "border-green-500/50 bg-green-500/5"
+            : "border-gray-700 bg-gray-900 hover:border-gray-600 hover:bg-gray-800/50"}`}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".xlsx,.xlsm"
+          className="hidden"
+          onChange={(e) => onFileSelect(e.target.files[0])}
+        />
+
+        {file ? (
+          <>
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-green-500/15">
+              <FileSpreadsheet size={24} className="text-green-400" />
             </div>
-          ) : (
-            <>
-              <Upload size={24} className="mx-auto mb-2 text-gray-600" />
-              <p className="text-sm text-gray-400">Drag & drop Excel file here</p>
-              <p className="text-xs text-gray-600">or click to select file (.xlsx / .xlsm)</p>
-            </>
-          )}
-        </div>
+            <div className="text-center">
+              <p className="text-sm font-semibold text-green-300">{file.name}</p>
+              <p className="text-xs text-gray-500 mt-1">{fileSizeKB} KB — click to change file</p>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gray-800">
+              <Upload size={22} className="text-gray-500" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-gray-300">Drag & drop Excel file here</p>
+              <p className="text-xs text-gray-600 mt-1">or click to select file (.xlsx / .xlsm)</p>
+            </div>
+          </>
+        )}
       </div>
 
+      {/* ── Notes ───────────────────────────────────────────────────────────── */}
       <div>
-        <label className="text-xs text-gray-500 mb-1 block">Upload notes (optional)</label>
-        <input value={notes} onChange={e => setNotes(e.target.value)}
-          className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-500"
-          placeholder='e.g. "Leave data May-Jun 2026"' />
+        <label className="mb-1.5 block text-xs font-medium text-gray-500">
+          Upload notes <span className="text-gray-700">(optional — e.g. "Leave data June 2026")</span>
+        </label>
+        <input
+          type="text"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Upload description..."
+          className={`w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none transition-colors ${ACCENT.focus}`}
+        />
       </div>
 
-      <button onClick={handleUpload} disabled={!file || uploading}
-        className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-2 text-sm font-semibold text-white transition-colors">
-        {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-        {uploading ? "Uploading..." : "Upload & Process"}
+      {/* ── Upload button ───────────────────────────────────────────────────── */}
+      <button
+        onClick={handleUpload}
+        disabled={!file || uploading}
+        className={`flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-all
+          ${!file || uploading
+            ? "cursor-not-allowed bg-gray-700 opacity-50"
+            : `${ACCENT.button} active:scale-95`}`}
+      >
+        {uploading
+          ? <><Loader2 size={15} className="animate-spin" /> Uploading...</>
+          : <><Upload size={15} /> Upload & Save to Database</>}
       </button>
 
+      {/* ── Error ───────────────────────────────────────────────────────────── */}
       {error && (
-        <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
-          <X size={14} /> {error}
+        <div className="flex gap-3 rounded-xl border border-red-500/30 bg-red-500/8 px-4 py-3 text-sm text-red-300">
+          <XCircle size={15} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
         </div>
       )}
 
+      {/* ── Result ──────────────────────────────────────────────────────────── */}
       {result && (
-        <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4">
-          <div className="flex items-center gap-2 text-green-400 text-sm font-semibold mb-3">
-            <CheckCircle size={14} /> Upload successful
+        <div className="rounded-xl border border-green-500/30 bg-green-500/5 p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <CheckCircle2 size={18} className="text-green-400" />
+            <span className="text-sm font-semibold text-green-300">Upload successful</span>
           </div>
           <div className="grid grid-cols-3 gap-3">
             {[
-              { label: "Total Read", value: result.total_rows },
-              { label: "New Records", value: result.inserted },
-              { label: "Updated", value: result.updated },
-            ].map(c => (
-              <div key={c.label} className="bg-gray-800/50 rounded-lg p-3 text-center">
-                <p className="text-lg font-bold text-gray-200">{c.value}</p>
-                <p className="text-xs text-gray-500">{c.label}</p>
+              { icon: CalendarCheck, color: "text-blue-400",  bg: "bg-blue-500/10",  label: "Total Read",  val: result.total_rows },
+              { icon: FilePlus,      color: "text-green-400", bg: "bg-green-500/10", label: "New Records", val: result.inserted },
+              { icon: RotateCcw,     color: "text-amber-400", bg: "bg-amber-500/10", label: "Updated",     val: result.updated },
+            ].map(({ icon: Ic, color, bg, label, val }) => (
+              <div key={label} className="rounded-lg border border-white/5 bg-white/3 p-3 text-center">
+                <div className={`mx-auto mb-1.5 flex h-7 w-7 items-center justify-center rounded-lg ${bg}`}>
+                  <Ic size={14} className={color} />
+                </div>
+                <div className={`text-xl font-bold ${color}`}>{val}</div>
+                <div className="text-xs text-gray-500 mt-0.5">{label}</div>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* Upload History */}
-      <div>
-        <h4 className="text-sm font-semibold text-gray-300 mb-2">Upload History</h4>
-        {history.length === 0 ? (
-          <p className="text-xs text-gray-600 py-4 text-center">No upload history yet</p>
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-gray-800">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-gray-800/60">
-                  {[["Upload Time", "uploaded_at"], ["File", "filename"], ["Total", "total_rows"], ["New", "inserted"], ["Update", "updated"], ["By", "uploaded_by"], ["Notes", "notes"]].map(([label, field]) => (
-                    <SortableTH key={label} label={label} field={field} sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800">
-                {sortRows(history, sortBy, sortDir, ["total_rows", "inserted", "updated"]).map(h => (
-                  <tr key={h.batch_id} className="hover:bg-gray-800/40">
-                    <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{h.uploaded_at?.replace("T", " ").slice(0, 19)}</td>
-                    <td className="px-3 py-2 text-gray-300 max-w-[200px] truncate">{h.filename}</td>
-                    <td className="px-3 py-2 text-gray-300 font-medium">{h.total_rows}</td>
-                    <td className="px-3 py-2 text-green-400">{h.inserted}</td>
-                    <td className="px-3 py-2 text-blue-400">{h.updated}</td>
-                    <td className="px-3 py-2 text-gray-500">{h.uploaded_by}</td>
-                    <td className="px-3 py-2 text-gray-500 max-w-[200px] truncate">{h.notes || "—"}</td>
+      {/* ── Upload history ──────────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900">
+        <button
+          onClick={() => { setShowLogs((v) => !v); if (!showLogs) loadLogs(); }}
+          className="flex w-full items-center justify-between px-5 py-3.5 text-sm font-medium text-gray-300 hover:text-white transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <Clock size={14} className="text-gray-500" />
+            Upload History
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => { e.stopPropagation(); loadLogs(); }}
+              className="rounded-md p-1 text-gray-600 hover:text-gray-400 hover:bg-gray-800"
+              title="Refresh"
+            >
+              <RefreshCw size={12} className={loadingLogs ? "animate-spin" : ""} />
+            </button>
+            {showLogs ? <ChevronUp size={15} className="text-gray-500" /> : <ChevronDown size={15} className="text-gray-500" />}
+          </div>
+        </button>
+
+        {showLogs && (
+          <div className="border-t border-gray-800 overflow-x-auto">
+            {logs.length === 0 ? (
+              <p className="px-5 py-6 text-center text-xs text-gray-600">No upload history yet</p>
+            ) : (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-gray-800/50">
+                    {[["Upload Time", "uploaded_at"], ["File", "filename"], ["Total", "total_rows"], ["New", "inserted"], ["Update", "updated"], ["By", "uploaded_by"], ["Notes", "notes"]].map(([h, field]) => (
+                      <SortableTH key={h} label={h} field={field} sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-gray-800">
+                  {sortRows(logs, sortBy, sortDir, ["total_rows", "inserted", "updated"]).map((l) => (
+                    <tr key={l.batch_id} className="hover:bg-gray-800/30 transition-colors">
+                      <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap">{fmtDate(l.uploaded_at)}</td>
+                      <td className="px-3 py-2.5 text-gray-300 max-w-[160px] truncate">{l.filename}</td>
+                      <td className="px-3 py-2.5 text-gray-400 text-center">{l.total_rows}</td>
+                      <td className="px-3 py-2.5 text-green-400 font-semibold text-center">{l.inserted}</td>
+                      <td className="px-3 py-2.5 text-amber-400 font-semibold text-center">{l.updated}</td>
+                      <td className="px-3 py-2.5 text-gray-500 whitespace-nowrap">{l.uploaded_by}</td>
+                      <td className="px-3 py-2.5 text-gray-600 max-w-[140px] truncate">{l.notes || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
       </div>
