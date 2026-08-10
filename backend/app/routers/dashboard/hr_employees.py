@@ -1390,7 +1390,17 @@ async def get_summary_by_month(
         return min(date(target_year, m, monthrange(target_year, m)[1]), today)
 
     def by_month_for(dept_filter=None, division_filter=None, team_filter=None):
-        return {m: active_count(snapshot_for(m), dept_filter, division_filter, team_filter) for m in months}
+        result = {}
+        for m in months:
+            # A month that hasn't started yet has no headcount to report —
+            # without this check, snapshot_for(m) silently clamped to
+            # `today`, so every future month repeated the current month's
+            # headcount instead of showing "not reached yet".
+            if (target_year, m) > (today.year, today.month):
+                result[m] = None
+            else:
+                result[m] = active_count(snapshot_for(m), dept_filter, division_filter, team_filter)
+        return result
 
     rows = []
     for label in DEPT_GROUPS:

@@ -29,17 +29,20 @@ DEPARTMENT_ORDER = {
     "Board of Commissioners": 0,
     "Board of Directors": 1,
     "Sales & Marketing": 2,
-    "Strategy Development": 3,
+    "Strategy & Development": 3,
     "Plant": 4,
     "Administration": 5,
 }
 
-# The source "Daftar Karyawan" Excel template still uses the Indonesian terms
-# for these two — translated on import so the chart stays in English even
+# The source "Daftar Karyawan" Excel template still uses "Strategy
+# Development" (no ampersand) and the Indonesian terms below — translated
+# on import so the chart stays consistent with the canonical department
+# names used everywhere else (Employee/Attendance modules) even
 # after a future re-import.
 _DEPARTMENT_TRANSLATIONS = {
     "Dewan Komisaris": "Board of Commissioners",
     "Direksi": "Board of Directors",
+    "Strategy Development": "Strategy & Development",
 }
 
 

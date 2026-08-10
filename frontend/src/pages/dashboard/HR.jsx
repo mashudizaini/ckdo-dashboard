@@ -2486,16 +2486,20 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
                     )}
                     {label}
                   </td>
-                  {d.months.map((m) => (
-                    <td
-                      key={m}
-                      onClick={() => onDrillDown && onDrillDown(row.department, row.division, row.team, m, year)}
-                      className={`${TD} ${level === 0 ? "text-gray-200" : "text-gray-400"} ${onDrillDown ? "cursor-pointer hover:bg-indigo-500/20 hover:text-indigo-300" : ""}`}
-                      title={onDrillDown ? `View the ${row.by_month[m] ?? 0} employee(s) behind this number` : undefined}
-                    >
-                      {row.by_month[m] ?? "—"}
-                    </td>
-                  ))}
+                  {d.months.map((m) => {
+                    const val = row.by_month[m];
+                    const clickable = onDrillDown && val != null;
+                    return (
+                      <td
+                        key={m}
+                        onClick={clickable ? () => onDrillDown(row.department, row.division, row.team, m, year) : undefined}
+                        className={`${TD} ${level === 0 ? "text-gray-200" : "text-gray-400"} ${clickable ? "cursor-pointer hover:bg-indigo-500/20 hover:text-indigo-300" : ""}`}
+                        title={clickable ? `View the ${val} employee(s) behind this number` : val == null ? "Month not reached yet" : undefined}
+                      >
+                        {val ?? "—"}
+                      </td>
+                    );
+                  })}
                 </tr>
                 );
               })}

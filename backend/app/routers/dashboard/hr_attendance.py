@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import require_role, CurrentUser, Roles
+from app.services.department_taxonomy import normalize_department
 from app.models.attendance import AttendanceRecord, AttendanceRecordAuditLog, AttendanceUploadLog
 
 router = APIRouter()
@@ -243,6 +244,10 @@ async def upload_attendance(
     for data in rows_parsed:
         if data["employee_id"] in emp_dept_map:
             data["department"] = emp_dept_map[data["employee_id"]]
+        else:
+            normalized = normalize_department(data["department"])
+            if normalized:
+                data["department"] = normalized
 
     keys_result = await db.execute(select(AttendanceRecord.employee_id, AttendanceRecord.attendance_date))
     existing_keys = {(r[0], r[1]) for r in keys_result.fetchall()}
@@ -367,6 +372,10 @@ async def upload_attendance_talenta(
     for data in rows_parsed:
         if data["employee_id"] in emp_dept_map:
             data["department"] = emp_dept_map[data["employee_id"]]
+        else:
+            normalized = normalize_department(data["department"])
+            if normalized:
+                data["department"] = normalized
 
     # Same table as every other source now — if Intercom never covered this
     # date for this employee (e.g. they were on leave the whole time and
@@ -587,6 +596,10 @@ async def upload_attendance_plant(
     for data in rows_parsed:
         if data["employee_id"] in emp_dept_map:
             data["department"] = emp_dept_map[data["employee_id"]]
+        else:
+            normalized = normalize_department(data["department"])
+            if normalized:
+                data["department"] = normalized
 
     ar_keys_result = await db.execute(select(AttendanceRecord.employee_id, AttendanceRecord.attendance_date))
     existing_keys = {(r[0], r[1]) for r in ar_keys_result.fetchall()}
