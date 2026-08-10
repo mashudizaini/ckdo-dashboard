@@ -2,7 +2,7 @@
 HR Attendance Router
 Route prefix : /api/v1/dashboard/hr/attendance
 
-Three upload sources, combined for every report/graph below:
+Four upload sources, combined for every report/graph below:
   - Intercom (POST /upload)         — daily physical check-in/out log
                                        (e.g. "Attendance JUN-2026-Intercom.xlsx")
   - Talenta  (POST /upload-talenta) — leave & business-trip days
@@ -10,6 +10,9 @@ Three upload sources, combined for every report/graph below:
   - Plant    (POST /upload-plant)   — combined physical + leave log for plant
                                        employees, one workbook with a sheet per
                                        month (e.g. "Attendance Plant 2026.xlsx")
+  - Office   (POST /upload-office)  — combined physical + leave log for
+                                       non-Plant/office staff, no department
+                                       column (e.g. "Attendance 1-22 July 2025.xls")
 
 Combination rule for every attendance-rate calculation below: a Business Trip
 (BT) day counts as present (worked off-site); a leave day
@@ -635,6 +638,259 @@ async def upload_attendance_plant(
         "leave_rows": leave_rows,
         "message": f"Upload successful: {inserted} new attendance records, {updated} updated "
                    f"(including {leave_rows} leave/BT days).",
+    }
+
+
+# ── Office upload: combined attendance + leave, no department/team column ──────
+# Real export layout: title/header vary slightly per sheet — every sheet in
+# the workbook is read and its own header row 1 is used to locate columns
+# (real files have shown both an 9-10 column layout with a "Timetable"
+# column, and an 8-column layout without it, e.g. a per-employee addendum
+# sheet). Data from row 2. Columns identified by header text (case-
+# insensitive), not fixed position:
+#   No. | Name | Date | [Timetable] | On duty | Off duty | Clock In | Clock Out | Remarks
+# No Department/Team column at all — department always comes from the
+# Employee master (this source never has a raw value to fall back to).
+# Remarks are free-text English phrases, not short codes — mapped below.
+# Real files seen so far are legacy .xls, which openpyxl cannot open at
+# all, so python-calamine is used directly (not as a last-resort fallback
+# like the other upload endpoints).
+OFFICE_REMARK_EXACT = {
+    "ANNUAL LEAVE": "AL",
+    "SICK LEAVE":   "SL",
+    "UNPAID LEAVE": "UL",
+    "MATERNITY LEAVE": "ML",
+    "BT": "BT",
+}
+
+
+def _office_remark_code(remark_upper: Optional[str]):
+    """Returns (leave_code_or_None, is_day_off)."""
+    if not remark_upper:
+        return None, False
+    if "HALF DAY" in remark_upper or "AFTER LUNCH" in remark_upper or "BEFORE LUNCH" in remark_upper:
+        return "HD", False
+    if remark_upper == "REPLACEMENT DAY OFF":
+        return None, True
+    return OFFICE_REMARK_EXACT.get(remark_upper), False
+
+
+def _office_find_col(header: list, name: str) -> Optional[int]:
+    name = name.lower()
+    for i, h in enumerate(header):
+        if h == name:
+            return i
+    return None
+
+
+def _read_office_rows(contents: bytes) -> list:
+    """Returns a list of (row, col_map) pairs — col_map is per-sheet since
+    real files have shown sheets with different column layouts."""
+    from python_calamine import CalamineWorkbook
+    wb = CalamineWorkbook.from_filelike(io.BytesIO(contents))
+    rows = []
+    for name in wb.sheet_names:
+        sheet_rows = wb.get_sheet_by_name(name).to_python()
+        if not sheet_rows:
+            continue
+        header = [str(h).strip().lower() if h is not None else "" for h in sheet_rows[0]]
+        col = {
+            "id":          _office_find_col(header, "no."),
+            "name":        _office_find_col(header, "name"),
+            "date":        _office_find_col(header, "date"),
+            "period":      _office_find_col(header, "timetable"),
+            "sched_in":    _office_find_col(header, "on duty"),
+            "sched_out":   _office_find_col(header, "off duty"),
+            "actual_in":   _office_find_col(header, "clock in"),
+            "actual_out":  _office_find_col(header, "clock out"),
+            "remark":      _office_find_col(header, "remarks"),
+        }
+        if col["id"] is None or col["date"] is None:
+            continue  # not a recognizable data sheet
+        for row in sheet_rows[1:]:
+            rows.append((row, col))
+    return rows
+
+
+def _to_office_date(val) -> Optional[date]:
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, date):
+        return val
+    if isinstance(val, (int, float)):
+        # Excel serial date (1899-12-30 epoch, incl. Excel's leap-year bug)
+        try:
+            return date(1899, 12, 30) + timedelta(days=int(val))
+        except (ValueError, OverflowError):
+            return None
+    s = str(val).strip()
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _to_office_time_str(val) -> Optional[str]:
+    if val is None:
+        return None
+    if isinstance(val, time):
+        return val.strftime("%H:%M")
+    if isinstance(val, datetime):
+        return val.time().strftime("%H:%M")
+    s = str(val).strip()
+    if not s or s.upper() == "OFF":
+        return None
+    return s
+
+
+def _parse_office_row(row: tuple, col: dict, batch_id: str) -> Optional[dict]:
+    def get(key):
+        idx = col.get(key)
+        return row[idx] if idx is not None and idx < len(row) else None
+
+    employee_id = _to_str(get("id"))
+    if not employee_id:
+        return None
+
+    att_date = _to_office_date(get("date"))
+    if att_date is None:
+        return None
+
+    remark = _to_str(get("remark"))
+    remark_upper = remark.upper() if remark else None
+    leave_code, is_day_off = _office_remark_code(remark_upper)
+
+    actual_checkin  = _to_office_time_str(get("actual_in"))
+    actual_checkout = _to_office_time_str(get("actual_out"))
+
+    if is_day_off or leave_code:
+        attendance_status = None
+    elif not actual_checkin and not actual_checkout and not remark:
+        attendance_status = "A"
+    else:
+        attendance_status = None
+
+    notes = f"Office remark: {remark}" if (remark and not leave_code and not is_day_off) else None
+
+    return {
+        "employee_id":        employee_id,
+        "employee_name":      _to_str(get("name")),
+        "department":         None,
+        "team":               None,
+        "attendance_date":    att_date,
+        "week_day":           att_date.strftime("%A"),
+        "time_period":        _to_str(get("period")),
+        "scheduled_checkin":  _to_office_time_str(get("sched_in")),
+        "scheduled_checkout": _to_office_time_str(get("sched_out")),
+        "actual_checkin":     actual_checkin,
+        "actual_checkout":    actual_checkout,
+        "attendance_status":  attendance_status,
+        "notes":              notes,
+        "is_day_off":         is_day_off,
+        "leave_code":         leave_code,
+        "source":             "office",
+        "upload_batch_id":    batch_id,
+        "uploaded_at":        datetime.utcnow(),
+    }
+
+
+@router.post("/upload-office")
+async def upload_attendance_office(
+    file:  UploadFile    = File(...),
+    notes: str           = Form(""),
+    db:    AsyncSession  = Depends(get_db),
+    user:  CurrentUser   = Depends(require_role(Roles.HR)),
+):
+    """Upload the Office attendance export (no Department/Team column —
+    department always comes from the Employee master). UPSERT by
+    employee_id + attendance_date."""
+    if not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="File must be .xlsx or .xls format")
+
+    contents = await file.read()
+    batch_id = f"off_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+
+    try:
+        data_rows = _read_office_rows(contents)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid Excel file: {e}. Try opening it in Excel and doing "
+                   f"File > Save As > .xlsx to normalize the file, then re-upload.",
+        )
+
+    rows_parsed = []
+    skipped_no_id = 0
+    skipped_names = set()
+    for row, col in data_rows:
+        parsed = _parse_office_row(row, col, batch_id)
+        if parsed is None:
+            skipped_no_id += 1
+            id_idx = col.get("id")
+            has_id = id_idx is not None and id_idx < len(row) and _to_str(row[id_idx])
+            if not has_id:
+                name_idx = col.get("name")
+                if name_idx is not None and name_idx < len(row):
+                    nm = _to_str(row[name_idx])
+                    if nm:
+                        skipped_names.add(nm)
+        else:
+            rows_parsed.append(parsed)
+
+    if not rows_parsed:
+        raise HTTPException(
+            status_code=422,
+            detail="No attendance rows found. Make sure the file matches the Office "
+                   "export template (header row 1, data from row 2, Employee ID in the 'No.' column).",
+        )
+
+    # This source has no department/team column at all — always from the
+    # Employee master, no raw fallback to normalize.
+    from app.models.employee import Employee
+    emp_dept_q = await db.execute(select(Employee.user_id, Employee.department))
+    emp_dept_map = {r[0]: r[1] for r in emp_dept_q.fetchall() if r[1]}
+    for data in rows_parsed:
+        if data["employee_id"] in emp_dept_map:
+            data["department"] = emp_dept_map[data["employee_id"]]
+
+    ar_keys_result = await db.execute(select(AttendanceRecord.employee_id, AttendanceRecord.attendance_date))
+    existing_keys = {(r[0], r[1]) for r in ar_keys_result.fetchall()}
+
+    inserted = updated = 0
+    for data in rows_parsed:
+        key = (data["employee_id"], data["attendance_date"])
+        if key in existing_keys:
+            await db.execute(
+                update(AttendanceRecord)
+                .where(AttendanceRecord.employee_id == key[0])
+                .where(AttendanceRecord.attendance_date == key[1])
+                .values(**data)
+            )
+            updated += 1
+        else:
+            db.add(AttendanceRecord(**data))
+            existing_keys.add(key)
+            inserted += 1
+
+    await db.flush()
+
+    log = AttendanceUploadLog(
+        batch_id=batch_id, source="office", filename=file.filename,
+        total_rows=len(rows_parsed), inserted=inserted, updated=updated, skipped=skipped_no_id,
+        uploaded_by=user.username or "unknown", notes=notes or None,
+    )
+    db.add(log)
+
+    skip_note = f", {skipped_no_id} row(s) skipped (missing Employee ID)" if skipped_no_id else ""
+    return {
+        "batch_id": batch_id, "filename": file.filename, "source": "office",
+        "total_rows": len(rows_parsed), "inserted": inserted, "updated": updated, "skipped": skipped_no_id,
+        "skipped_names": sorted(skipped_names),
+        "message": f"Upload successful: {inserted} new records, {updated} updated{skip_note}.",
     }
 
 

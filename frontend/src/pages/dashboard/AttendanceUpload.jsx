@@ -1,19 +1,21 @@
 /**
  * AttendanceUpload.jsx
- * Three upload sources, all feeding the same Attendance Ratio reports:
+ * Four upload sources, all feeding the same Attendance Ratio reports:
  *   - Intercom (kind="intercom") — daily physical check-in/out log
  *     e.g. "Attendance JUN-2026-Intercom.xlsx"
  *   - Talenta  (kind="talenta")  — leave & business-trip days
  *     e.g. "Attendance MAY-JUN-2026 Talenta.xlsx"
  *   - Plant    (kind="plant")    — combined physical + leave log for plant
  *     employees, one workbook with a sheet per month, e.g. "Attendance Plant 2026.xlsx"
+ *   - Office   (kind="office")   — combined physical + leave log for
+ *     non-Plant/office staff, no department column, e.g. "Attendance 1-22 July 2025.xls"
  */
 
 import { useState, useRef, useEffect } from "react";
 import {
   Upload, FileSpreadsheet, CheckCircle2, XCircle,
   Loader2, RefreshCw, Clock, ChevronDown, ChevronUp,
-  CalendarCheck, FilePlus, RotateCcw, AlertCircle, Briefcase, Factory
+  CalendarCheck, FilePlus, RotateCcw, AlertCircle, Briefcase, Factory, Building2
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { SortableTH, toggleSort, sortRows } from "@/components/SortableTH";
@@ -108,6 +110,31 @@ const CONFIG = {
       button: "bg-amber-600 hover:bg-amber-500",
     },
   },
+  office: {
+    title: "Attendance Office",
+    uploadPath: "/upload-office",
+    logSource: "office",
+    example: "Attendance 1-22 July 2025.xls",
+    accept: ".xlsx,.xls",
+    guidance: "Combined physical check-in/out AND leave log for non-Plant/office staff. No Department/Team column at all — department always comes from the Employee master. Columns are matched by header text (case-insensitive), not fixed position, so every worksheet in the file is read even if one sheet has a slightly different layout (e.g. a per-employee addendum sheet). Legacy .xls files are supported. Remark text (Annual/Sick/Unpaid/Maternity Leave, BT, half day / after lunch / before lunch variants, Replacement Day Off) is mapped to leave codes; unrecognized remarks are kept as a note only and don't affect attendance status.",
+    icon: Building2,
+    columns: [
+      { idx: "No.", name: "Employee ID", required: true },
+      { idx: "Name", name: "Employee Name", required: false },
+      { idx: "Date", name: "Date", required: true, note: "DD/MM/YYYY or Excel date" },
+      { idx: "Timetable", name: "Shift group", required: false, note: "optional — not every sheet has this column" },
+      { idx: "On duty", name: "Scheduled check-in", required: false },
+      { idx: "Off duty", name: "Scheduled check-out", required: false },
+      { idx: "Clock In", name: "Actual check-in", required: false, note: "\"OFF\" or blank = not recorded" },
+      { idx: "Clock Out", name: "Actual check-out", required: false, note: "\"OFF\" or blank = not recorded" },
+      { idx: "Remarks", name: "Remarks", required: false, note: "leave/BT text, or \"Replacement Day Off\" for a scheduled rest day; anything else kept as a note only" },
+    ],
+    accent: {
+      text: "text-rose-300", banner: "border-rose-500/20 bg-rose-500/5",
+      dragActive: "border-rose-500 bg-rose-500/10", focus: "focus:border-rose-500",
+      button: "bg-rose-600 hover:bg-rose-500",
+    },
+  },
 };
 
 export default function AttendanceUpload({ kind = "intercom" }) {
@@ -142,10 +169,11 @@ export default function AttendanceUpload({ kind = "intercom" }) {
 
   useEffect(() => { loadLogs(); }, []); // eslint-disable-line
 
+  const acceptExts = (cfg.accept || ".xlsx,.xlsm").split(",");
   const onFileSelect = (f) => {
     if (!f) return;
-    if (!f.name.endsWith(".xlsx") && !f.name.endsWith(".xlsm")) {
-      setError("File must be .xlsx or .xlsm format"); return;
+    if (!acceptExts.some((ext) => f.name.endsWith(ext))) {
+      setError(`File must be ${acceptExts.join(" or ")} format`); return;
     }
     setFile(f); setError(null); setResult(null);
   };
@@ -265,7 +293,7 @@ export default function AttendanceUpload({ kind = "intercom" }) {
         <input
           ref={inputRef}
           type="file"
-          accept=".xlsx,.xlsm"
+          accept={cfg.accept || ".xlsx,.xlsm"}
           className="hidden"
           onChange={(e) => onFileSelect(e.target.files[0])}
         />
@@ -351,6 +379,15 @@ export default function AttendanceUpload({ kind = "intercom" }) {
               </div>
             ))}
           </div>
+          {result.skipped_names?.length > 0 && (
+            <div className="mt-3 flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">
+              <AlertCircle size={14} className="mt-0.5 shrink-0" />
+              <span>
+                Skipped {result.skipped_names.length} employee(s) with no ID in the file — fix the source file
+                or add manually via Data Correction: <strong>{result.skipped_names.join(", ")}</strong>
+              </span>
+            </div>
+          )}
           <p className="text-xs text-gray-600 mt-3">Batch ID: {result.batch_id}</p>
         </div>
       )}

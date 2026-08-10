@@ -3816,6 +3816,7 @@ const COVERAGE_SOURCES = [
   { key: "talenta",       label: "Talenta (Attendance)" },
   { key: "talenta-leave", label: "Talenta (Leave)" },
   { key: "plant",         label: "Plant" },
+  { key: "office",        label: "Office" },
   { key: "manual",        label: "Manual" },
 ];
 
@@ -4240,6 +4241,7 @@ function AttendanceRateSection() {
           <AttendanceUpload kind="intercom" />
           <AttendanceUpload kind="talenta" />
           <AttendanceUpload kind="plant" />
+          <AttendanceUpload kind="office" />
           <LeaveUpload />
         </div>
       )}
