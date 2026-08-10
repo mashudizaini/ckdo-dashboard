@@ -291,7 +291,7 @@ def disk_space(db: Session = Depends(get_db)):
     results = []
     servers = db.query(Server).filter(Server.enabled == True).all()  # noqa: E712
     for s in servers:
-        if s.role not in ("db", "app"):
+        if s.role not in ("db", "app", "dev"):
             continue
         cred = db.query(Credential).filter(
             Credential.server_id == s.id,
@@ -393,6 +393,31 @@ def test_connection(payload: TestConnectionIn, db: Session = Depends(get_db)):
     s = db.query(Server).filter(Server.id == payload.server_id).first()
     if not s:
         raise HTTPException(404, "Server not found")
+
+    # MinIO has no SSH daemon — it's an S3-compatible HTTP API, so it needs
+    # its own client-based check instead of the generic SSH probe below.
+    # (Using ssh_from_server here is exactly what produced "Error reading
+    # SSH protocol banner": Paramiko tried an SSH handshake against MinIO's
+    # HTTP port and got an HTTP response back instead of an SSH banner.)
+    if s.role == "minio":
+        if not s.endpoint_url or not s.bucket:
+            return {"ok": False, "error": "MinIO server is missing endpoint_url/bucket — set it in Setup tab"}
+        cred = db.query(Credential).filter(
+            Credential.server_id == s.id, Credential.cred_type == "minio",
+        ).first()
+        if not cred:
+            return {"ok": False, "error": "No MinIO credential configured for this server (credential type must be 'MinIO', not SSH)"}
+        try:
+            client = _minio_client(s, cred)
+            exists = client.bucket_exists(s.bucket)
+            return {
+                "ok": True,
+                "output": f"Connected to {s.endpoint_url} — bucket '{s.bucket}' {'exists' if exists else 'does NOT exist yet'}",
+                "error": None,
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     cred = db.query(Credential).filter(
         Credential.server_id == s.id,
         Credential.cred_type.in_(["ssh_password", "ssh_key"]),
