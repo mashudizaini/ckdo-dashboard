@@ -5467,6 +5467,15 @@ function AnnualLeaveReportSection() {
             placeholder="Name / ID..."
             className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5 w-36" />
         </div>
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">&nbsp;</label>
+          <button onClick={fetchReport} disabled={loading}
+            title="Hitung ulang laporan dari data attendance/leave terbaru"
+            className="flex items-center gap-1.5 text-xs rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 px-2 py-1.5">
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+            Reprocess
+          </button>
+        </div>
         {loading && <Loader2 size={14} className="animate-spin text-gray-500" />}
         <div className="flex-1" />
         <span className="text-xs text-gray-600">{rows.length} employees</span>
