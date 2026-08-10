@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import require_role, CurrentUser, Roles
 from app.models.attendance import AttendanceRecord, AttendanceUploadLog
+from app.services.department_taxonomy import clean_department_list
 
 router = APIRouter()
 
@@ -290,10 +291,9 @@ async def get_leave_departments(
         .where(AttendanceRecord.leave_code.isnot(None))
         .where(AttendanceRecord.department.isnot(None))
         .distinct()
-        .order_by(AttendanceRecord.department)
     )
     result = await db.execute(stmt)
-    return [r[0] for r in result.all()]
+    return clean_department_list(r[0] for r in result.all())
 
 
 ANNUAL_LEAVE_QUOTA = 12

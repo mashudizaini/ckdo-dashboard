@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import require_role, get_current_user, CurrentUser, Roles
 from app.models.employee import Employee, EmployeeUploadLog, EmployeeHistory
+from app.services.department_taxonomy import clean_department_list
 
 router = APIRouter()
 
@@ -1283,19 +1284,6 @@ def _group_department(raw: Optional[str]) -> Optional[str]:
     return _DEPT_GROUP_MAP.get(raw.strip().upper())
 
 
-def _dept_display_labels(raw_values) -> dict:
-    """UPPER(dept) -> best display label — prefers a mixed-case variant
-    ("Plant") over an all-caps one ("PLANT") when both exist."""
-    groups: dict = {}
-    for v in raw_values:
-        groups.setdefault(v.upper(), []).append(v)
-    display = {}
-    for key, variants in groups.items():
-        non_caps = [v for v in variants if v != v.upper()]
-        display[key] = non_caps[0] if non_caps else variants[0]
-    return display
-
-
 @router.get("/summary/by-year")
 async def get_summary_by_year(
     db:   AsyncSession = Depends(get_db),
@@ -1486,14 +1474,13 @@ async def get_departments(
     dari pergeseran kolom di file Excel asal) — nilai yang bukan nama (murni
     angka) disaring dari daftar filter, meski tetap tersimpan apa adanya di
     record karyawan itu sendiri. Case-duplicates ("Plant" / "PLANT") juga
-    digabung ke satu nama tampilan (lihat _dept_display_labels) — filter
+    digabung ke satu nama tampilan (lihat clean_department_list) — filter
     department di list/export sudah case-insensitive, jadi memilih "Plant"
     tetap menangkap baris "PLANT" juga."""
     result = await db.execute(
         select(Employee.department).distinct()
     )
-    raw = [r[0] for r in result.fetchall() if r[0] and not r[0].strip().isdigit()]
-    return sorted(_dept_display_labels(raw).values())
+    return clean_department_list(r[0] for r in result.fetchall())
 
 
 @router.get("/teams")

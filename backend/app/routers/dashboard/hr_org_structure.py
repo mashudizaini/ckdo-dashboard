@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import require_role, CurrentUser, Roles
 from app.models.org_structure import OrgStructureNode, OrgStructureUploadLog
+from app.services.department_taxonomy import clean_department_list
 
 router = APIRouter()
 
@@ -128,7 +129,7 @@ async def get_departments(
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
     result = await db.execute(select(OrgStructureNode.department).distinct())
-    depts = [r[0] for r in result.fetchall() if r[0]]
+    depts = clean_department_list(r[0] for r in result.fetchall())
     return sorted(depts, key=lambda d: (DEPARTMENT_ORDER.get(d, 99), d))
 
 

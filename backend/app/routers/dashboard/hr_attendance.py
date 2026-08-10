@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import require_role, CurrentUser, Roles
-from app.services.department_taxonomy import normalize_department
+from app.services.department_taxonomy import normalize_department, clean_department_list
 from app.models.attendance import AttendanceRecord, AttendanceRecordAuditLog, AttendanceUploadLog
 
 router = APIRouter()
@@ -1199,7 +1199,10 @@ async def get_attendance_departments(
     """All departments that exist — union of the Employee master list and
     whatever department names show up in uploaded attendance records, so the
     filter always covers every department even if attendance hasn't been
-    uploaded for all of them yet."""
+    uploaded for all of them yet. Cleaned via clean_department_list: drops
+    numeric-junk values (e.g. '15' from a known Excel column-shift bug still
+    pending manual HR correction on a couple of Employee rows) and collapses
+    case-only duplicates ("Plant" / "PLANT") to one display label."""
     from app.models.employee import Employee
 
     emp_result = await db.execute(
@@ -1209,7 +1212,7 @@ async def get_attendance_departments(
         select(AttendanceRecord.department).where(AttendanceRecord.department.isnot(None)).distinct()
     )
     names = {r[0] for r in emp_result.all() if r[0]} | {r[0] for r in att_result.all() if r[0]}
-    return sorted(names)
+    return clean_department_list(names)
 
 
 @router.get("/coverage")
