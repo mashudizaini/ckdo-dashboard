@@ -121,6 +121,141 @@ function MsgBanner({ msg, onClose }) {
 const selCls = "text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-3 py-1.5 focus:outline-none focus:border-cyan-500";
 const uploadBtnCls = "flex items-center gap-2 px-4 py-2.5 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60";
 
+/* ─── Required-columns table + upload history (Data Upload tab) ─────────── */
+
+function RequiredColumnsTable({ columns }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-2 rounded-lg border border-gray-800 bg-gray-950/40">
+      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold text-gray-300">
+        <span className="flex items-center gap-1.5"><FileSpreadsheet size={12} /> Kolom yang dibutuhkan ({columns.length})</span>
+        {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+      </button>
+      {open && (
+        <div className="border-t border-gray-800 overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="bg-gray-800/60 text-gray-500">
+                <th className="px-2 py-1.5 text-left">Kolom</th>
+                <th className="px-2 py-1.5 text-left">Nama</th>
+                <th className="px-2 py-1.5 text-left">Wajib</th>
+                <th className="px-2 py-1.5 text-left">Catatan</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800">
+              {columns.map((c, i) => (
+                <tr key={i}>
+                  <td className="px-2 py-1.5 text-gray-500 font-mono whitespace-nowrap">{c.idx}</td>
+                  <td className="px-2 py-1.5 text-gray-200 font-medium whitespace-nowrap">{c.name}</td>
+                  <td className="px-2 py-1.5">
+                    {c.required ? <span className="text-red-400 font-semibold">Ya</span> : <span className="text-gray-600">Tidak</span>}
+                  </td>
+                  <td className="px-2 py-1.5 text-gray-500">{c.note || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Sales BP has no fixed column layout (it scans for a month-name header
+ * row, then rows labeled by segment) — so it gets a format-description
+ * panel instead of a fixed idx/name table. */
+function RequiredFormatNote({ children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-2 rounded-lg border border-gray-800 bg-gray-950/40">
+      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold text-gray-300">
+        <span className="flex items-center gap-1.5"><FileSpreadsheet size={12} /> Format file yang dibutuhkan</span>
+        {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+      </button>
+      {open && <div className="border-t border-gray-800 px-3 py-2.5 text-[11px] text-gray-400 space-y-2">{children}</div>}
+    </div>
+  );
+}
+
+function fmtLogDate(iso) {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }); } catch (_) { return iso; }
+}
+
+function UploadHistoryTable({ uploadType, refreshKey }) {
+  const [open, setOpen] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try { setLogs(await eisApi.getUploadLogs(uploadType, 10)); } catch (_) {} finally { setLoading(false); }
+  };
+
+  useEffect(() => { if (open) load(); }, [open, refreshKey]); // eslint-disable-line
+
+  return (
+    <div className="mt-2 rounded-lg border border-gray-800 bg-gray-950/40">
+      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold text-gray-300">
+        <span className="flex items-center gap-1.5"><Clock size={12} /> Riwayat Upload</span>
+        {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+      </button>
+      {open && (
+        <div className="border-t border-gray-800 overflow-x-auto">
+          {loading ? (
+            <div className="py-4 text-center text-xs text-gray-600"><Loader2 size={13} className="animate-spin inline" /></div>
+          ) : logs.length === 0 ? (
+            <div className="py-4 text-center text-xs text-gray-600">Belum ada riwayat upload.</div>
+          ) : (
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr className="bg-gray-800/60 text-gray-500">
+                  <th className="px-2 py-1.5 text-left">Waktu</th>
+                  <th className="px-2 py-1.5 text-left">File</th>
+                  <th className="px-2 py-1.5 text-left">Tahun</th>
+                  <th className="px-2 py-1.5 text-left">Baris</th>
+                  <th className="px-2 py-1.5 text-left">Status</th>
+                  <th className="px-2 py-1.5 text-left">Oleh</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800">
+                {logs.map((l) => (
+                  <tr key={l.id}>
+                    <td className="px-2 py-1.5 text-gray-400 whitespace-nowrap">{fmtLogDate(l.uploaded_at)}</td>
+                    <td className="px-2 py-1.5 text-gray-300 max-w-[160px] truncate" title={l.filename}>{l.filename || "—"}</td>
+                    <td className="px-2 py-1.5 text-gray-400">{l.fiscal_year ?? "—"}</td>
+                    <td className="px-2 py-1.5 text-gray-400">{l.rows_loaded ?? "—"}</td>
+                    <td className="px-2 py-1.5">
+                      {l.status === "success"
+                        ? <span className="text-emerald-400 font-semibold">Sukses</span>
+                        : <span className="text-red-400 font-semibold" title={l.error_message}>Gagal</span>}
+                    </td>
+                    <td className="px-2 py-1.5 text-gray-500">{l.uploaded_by || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const OVERTIME_COLUMNS = [
+  { idx: "B", name: "Label baris", required: true, note: 'Satu baris berisi teks "Overtime Hour", satu baris lain "Working Hour" (dicari di antara baris 1–10)' },
+  { idx: "C–N", name: "Jan–Dec", required: true, note: "12 nilai jam bulanan untuk masing-masing baris label" },
+];
+
+const COGS_COLUMNS = [
+  { idx: "B", name: "No", required: true, note: "Nomor urut, harus angka — baris tanpa angka di kolom ini dilewati" },
+  { idx: "C", name: "Market", required: false, note: 'Public/Private/CMO/Export/Service Agreement/Accounting — default "Public" kalau kosong' },
+  { idx: "E", name: "Products", required: true, note: 'Nama produk pendek, mis. "Carboplatin 150 mg" — suffix kekuatan dihapus otomatis untuk digabung per produk' },
+  { idx: "I", name: "Price IDR", required: false, note: "Harga per unit (rupiah) — dipakai hitung Net Sales" },
+  { idx: "J–U", name: "COGS Quantity Jan–Dec", required: true, note: "12 kolom qty bulanan" },
+  { idx: "W–AH", name: "COGS Amount Jan–Dec", required: true, note: "12 kolom nilai COGS bulanan, dalam JUTA IDR" },
+];
+
 /* ─── Tab: Summary ──────────────────────────────────────────────── */
 function EisSummaryTab({ year, period }) {
   const [kpi, setKpi] = useState(null);
@@ -1019,18 +1154,21 @@ function EisDataUploadTab({ year: sharedYear }) {
   const [otLoading, setOtLoading] = useState(true);
   const [otUploading, setOtUploading] = useState(false);
   const [otMsg, setOtMsg] = useState(null);
+  const [otLogsKey, setOtLogsKey] = useState(0);
   const otFileRef = useRef(null);
 
   const [cogs, setCogs] = useState([]);
   const [cogsLoading, setCogsLoading] = useState(true);
   const [cogsUploading, setCogsUploading] = useState(false);
   const [cogsMsg, setCogsMsg] = useState(null);
+  const [cogsLogsKey, setCogsLogsKey] = useState(0);
   const cogsFileRef = useRef(null);
 
   const [salesBP, setSalesBP] = useState([]);
   const [bpLoading, setBpLoading] = useState(true);
   const [bpUploading, setBpUploading] = useState(false);
   const [bpMsg, setBpMsg] = useState(null);
+  const [bpLogsKey, setBpLogsKey] = useState(0);
   const bpFileRef = useRef(null);
 
   const loadOvertime = async () => { setOtLoading(true); try { setOvertime((await eisApi.getOvertimeData(selectedYear)).data || []); } catch (e) { console.error(e); } setOtLoading(false); };
@@ -1049,7 +1187,8 @@ function EisDataUploadTab({ year: sharedYear }) {
       const res = await eisApi.uploadOvertimeData(selectedYear, fd);
       setOvertime(res.data || []);
       setOtMsg({ type: "ok", text: res.message });
-    } catch (err) { setOtMsg({ type: "err", text: "Gagal: " + (err?.response?.data?.detail || err?.detail || err.message) }); }
+      setOtLogsKey((k) => k + 1);
+    } catch (err) { setOtMsg({ type: "err", text: "Gagal: " + (err?.response?.data?.detail || err?.detail || err.message) }); setOtLogsKey((k) => k + 1); }
     setOtUploading(false); e.target.value = "";
   };
 
@@ -1062,7 +1201,8 @@ function EisDataUploadTab({ year: sharedYear }) {
       await loadCogs();
       const skipped = res.skipped?.length > 0 ? ` (tidak cocok: ${res.skipped.join(", ")})` : "";
       setCogsMsg({ type: "ok", text: res.message + skipped });
-    } catch (err) { setCogsMsg({ type: "err", text: "Gagal: " + (err?.response?.data?.detail || err?.detail || err.message) }); }
+      setCogsLogsKey((k) => k + 1);
+    } catch (err) { setCogsMsg({ type: "err", text: "Gagal: " + (err?.response?.data?.detail || err?.detail || err.message) }); setCogsLogsKey((k) => k + 1); }
     setCogsUploading(false); e.target.value = "";
   };
 
@@ -1075,7 +1215,8 @@ function EisDataUploadTab({ year: sharedYear }) {
       await loadSalesBP();
       const note = res.detected_year && res.detected_year !== selectedYear ? ` (tahun di file: ${res.detected_year})` : "";
       setBpMsg({ type: "ok", text: res.message + note });
-    } catch (err) { setBpMsg({ type: "err", text: "Gagal: " + (err?.response?.data?.detail || err?.detail || err.message) }); }
+      setBpLogsKey((k) => k + 1);
+    } catch (err) { setBpMsg({ type: "err", text: "Gagal: " + (err?.response?.data?.detail || err?.detail || err.message) }); setBpLogsKey((k) => k + 1); }
     setBpUploading(false); e.target.value = "";
   };
 
@@ -1101,6 +1242,8 @@ function EisDataUploadTab({ year: sharedYear }) {
           </div>
         }>
         <MsgBanner msg={otMsg} onClose={() => setOtMsg(null)} />
+        <RequiredColumnsTable columns={OVERTIME_COLUMNS} />
+        <UploadHistoryTable uploadType="overtime" refreshKey={otLogsKey} />
       </ChartCard>
 
       <ChartCard title="Upload Data Business Plan Sales" subtitle="Header bulan (Jan–Dec) + baris segmen (Total/Local/CMO/Export), nilai dalam juta IDR. Referensi: DATA BP.xlsx"
@@ -1114,6 +1257,21 @@ function EisDataUploadTab({ year: sharedYear }) {
           </div>
         }>
         <MsgBanner msg={bpMsg} onClose={() => setBpMsg(null)} />
+        <RequiredFormatNote>
+          <p>File harus punya <strong className="text-gray-300">1 baris header berisi nama bulan</strong> (Jan–Dec, minimal 6 dari 12 bulan terdeteksi) di kolom manapun, diikuti baris-baris berisi label segmen di salah satu dari 6 kolom pertama:</p>
+          <p><strong className="text-gray-300">Total</strong> / <strong className="text-gray-300">Local</strong> (atau "Lokal") / <strong className="text-gray-300">CMO</strong> / <strong className="text-gray-300">Export</strong> (atau "Ekspor") — bisa juga "Grand Total", "Jumlah", "Total Local", dst.</p>
+          <p>Nilai di bawah kolom bulan yang cocok dibaca sebagai angka. <strong className="text-gray-300">Nilai dalam juta IDR.</strong></p>
+          <div className="mt-1 rounded border border-gray-800 overflow-hidden">
+            <table className="w-full text-[10.5px]">
+              <thead><tr className="bg-gray-800/60 text-gray-500"><th className="px-2 py-1 text-left">—</th><th className="px-2 py-1 text-right">Jan</th><th className="px-2 py-1 text-right">Feb</th><th className="px-2 py-1 text-right">...</th><th className="px-2 py-1 text-right">Dec</th></tr></thead>
+              <tbody className="text-gray-500">
+                <tr><td className="px-2 py-1">Total</td><td className="px-2 py-1 text-right">800</td><td className="px-2 py-1 text-right">900</td><td className="px-2 py-1 text-right">...</td><td className="px-2 py-1 text-right">880</td></tr>
+                <tr><td className="px-2 py-1">Local</td><td className="px-2 py-1 text-right">500</td><td className="px-2 py-1 text-right">600</td><td className="px-2 py-1 text-right">...</td><td className="px-2 py-1 text-right">550</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </RequiredFormatNote>
+        <UploadHistoryTable uploadType="sales-bp" refreshKey={bpLogsKey} />
       </ChartCard>
 
       {!bpLoading && salesBP.length > 0 && (
@@ -1143,7 +1301,7 @@ function EisDataUploadTab({ year: sharedYear }) {
         </ChartCard>
       )}
 
-      <ChartCard title="Upload Data COGS" subtitle="Kolom B = Nama Produk, Kolom C = COGS (IDR). Net Sales otomatis dari Oracle OE (etl_cogs). Referensi: cogs_data.xlsx"
+      <ChartCard title="Upload Data COGS" subtitle={'Format "COGS Data New.xlsx": baris 3 header, baris 4 nama bulan, baris 5+ data produk (lihat detail kolom di bawah)'}
         right={
           <div className="flex items-center gap-2 shrink-0">
             <YearSelector />
@@ -1154,6 +1312,8 @@ function EisDataUploadTab({ year: sharedYear }) {
           </div>
         }>
         <MsgBanner msg={cogsMsg} onClose={() => setCogsMsg(null)} />
+        <RequiredColumnsTable columns={COGS_COLUMNS} />
+        <UploadHistoryTable uploadType="cogs" refreshKey={cogsLogsKey} />
       </ChartCard>
 
       <ChartCard title={`COGS Ratio by Product — ${selectedYear}`}

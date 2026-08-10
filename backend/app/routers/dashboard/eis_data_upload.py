@@ -1,14 +1,35 @@
 import io
 import re
 import logging
+from typing import Optional
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
-from app.eis_database import get_eis_db as get_db
+from app.eis_database import get_eis_db as get_db, EisAsyncSessionLocal
 from app.dependencies import get_current_user
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+async def _log_upload(
+    upload_type: str, filename: Optional[str], fiscal_year: Optional[int],
+    rows_loaded: int, status: str, error_message: Optional[str], uploaded_by: Optional[str],
+):
+    """Writes to eis.upload_log on its own short-lived session — independent
+    of the calling endpoint's transaction, so the log entry survives even
+    when the upload itself failed and rolled back (same reasoning as the
+    DB Browser's audit log)."""
+    async with EisAsyncSessionLocal() as log_db:
+        await log_db.execute(text("""
+            INSERT INTO eis.upload_log
+                (upload_type, filename, fiscal_year, rows_loaded, status, error_message, uploaded_by)
+            VALUES (:t, :f, :y, :r, :s, :e, :u)
+        """), {
+            "t": upload_type, "f": filename, "y": fiscal_year, "r": rows_loaded,
+            "s": status, "e": error_message, "u": uploaded_by,
+        })
+        await log_db.commit()
 
 MONTH_NAMES = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -93,31 +114,43 @@ async def upload_overtime(
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=422, detail="File harus .xlsx atau .xls")
 
+    uploaded_by = user.full_name or user.username or "upload"
     content = await file.read()
-    months = _parse_overtime_excel(content)
 
-    loaded = 0
-    for m in months:
-        # Find period_id
-        res = await db.execute(
-            text("SELECT id FROM eis.dim_period WHERE fiscal_year=:y AND period_num=:p"),
-            {"y": year, "p": m["period_num"]},
-        )
-        row = res.fetchone()
-        if not row:
-            continue
-        period_id = row[0]
+    try:
+        months = _parse_overtime_excel(content)
 
-        await db.execute(text("""
-            INSERT INTO eis.fact_overtime (period_id, overtime_hours, working_hours)
-            VALUES (:pid, :ot, :wk)
-            ON CONFLICT (period_id) DO UPDATE SET
-                overtime_hours = EXCLUDED.overtime_hours,
-                working_hours  = EXCLUDED.working_hours
-        """), {"pid": period_id, "ot": m["overtime_hours"], "wk": m["working_hours"]})
-        loaded += 1
+        loaded = 0
+        for m in months:
+            # Find period_id
+            res = await db.execute(
+                text("SELECT id FROM eis.dim_period WHERE fiscal_year=:y AND period_num=:p"),
+                {"y": year, "p": m["period_num"]},
+            )
+            row = res.fetchone()
+            if not row:
+                continue
+            period_id = row[0]
 
-    await db.commit()
+            await db.execute(text("""
+                INSERT INTO eis.fact_overtime (period_id, overtime_hours, working_hours)
+                VALUES (:pid, :ot, :wk)
+                ON CONFLICT (period_id) DO UPDATE SET
+                    overtime_hours = EXCLUDED.overtime_hours,
+                    working_hours  = EXCLUDED.working_hours
+            """), {"pid": period_id, "ot": m["overtime_hours"], "wk": m["working_hours"]})
+            loaded += 1
+
+        await db.commit()
+    except HTTPException as e:
+        await _log_upload("overtime", file.filename, year, 0, "failed", str(e.detail), uploaded_by)
+        raise
+    except Exception as e:
+        logger.exception("[upload_overtime] failed")
+        await _log_upload("overtime", file.filename, year, 0, "failed", str(e), uploaded_by)
+        raise HTTPException(status_code=500, detail=f"Upload gagal: {e}")
+
+    await _log_upload("overtime", file.filename, year, loaded, "success", None, uploaded_by)
     return {
         "message": f"Berhasil upload {loaded} bulan overtime untuk tahun {year}",
         "year": year,
@@ -330,91 +363,102 @@ async def upload_cogs(
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=422, detail="File harus .xlsx atau .xls")
 
+    uploaded_by = user.full_name or user.username or "upload"
     content = await file.read()
-    records = _parse_cogs_new_excel(content)
 
-    # Build period_id lookup for the target year
-    periods_res = await db.execute(
-        text("SELECT period_num, id FROM eis.dim_period WHERE fiscal_year=:y ORDER BY period_num"),
-        {"y": year},
-    )
-    period_map = {r[0]: r[1] for r in periods_res.fetchall()}
+    try:
+        records = _parse_cogs_new_excel(content)
 
-    if not period_map:
-        raise HTTPException(status_code=422, detail=f"Tidak ada data periode untuk tahun {year}")
-
-    loaded_products = 0
-    loaded_cogs = 0
-    skipped = []
-    results = []
-
-    for rec in records:
-        # Upsert dim_product
-        await db.execute(text("""
-            INSERT INTO eis.dim_product (product_code, product_name, business_type, market)
-            VALUES (:code, :name, :biz, :mkt)
-            ON CONFLICT (product_code) DO UPDATE SET
-                product_name  = EXCLUDED.product_name,
-                business_type = EXCLUDED.business_type,
-                market        = EXCLUDED.market
-        """), {
-            "code": rec["product_code"],
-            "name": rec["display_name"],
-            "biz":  rec["biz_type"],
-            "mkt":  rec["market"],
-        })
-
-        prod_res = await db.execute(
-            text("SELECT id FROM eis.dim_product WHERE product_code = :code"),
-            {"code": rec["product_code"]},
+        # Build period_id lookup for the target year
+        periods_res = await db.execute(
+            text("SELECT period_num, id FROM eis.dim_period WHERE fiscal_year=:y ORDER BY period_num"),
+            {"y": year},
         )
-        product_id = prod_res.fetchone()[0]
-        loaded_products += 1
+        period_map = {r[0]: r[1] for r in periods_res.fetchall()}
 
-        month_loaded = 0
-        for month_idx, (qty, cogs_amt) in enumerate(zip(rec["qty"], rec["cogs_amt"])):
-            if qty == 0 and cogs_amt == 0:
-                continue
+        if not period_map:
+            raise HTTPException(status_code=422, detail=f"Tidak ada data periode untuk tahun {year}")
 
-            month_num = month_idx + 1
-            period_id = period_map.get(month_num)
-            if not period_id:
-                continue
+        loaded_products = 0
+        loaded_cogs = 0
+        skipped = []
+        results = []
 
-            # sales_amount = Price IDR × Qty ÷ 1,000,000 (juta IDR)
-            sales_amt = round(rec["price_idr"] * qty / 1_000_000, 4)
-            ebit_amt  = round(sales_amt - cogs_amt, 4)
-
+        for rec in records:
+            # Upsert dim_product
             await db.execute(text("""
-                INSERT INTO eis.fact_cogs
-                    (period_id, product_id, sales_amount, cogs_total, ebit_amount)
-                VALUES (:pid, :prod_id, :sales, :cogs, :ebit)
-                ON CONFLICT (period_id, product_id) DO UPDATE SET
-                    sales_amount = EXCLUDED.sales_amount,
-                    cogs_total   = EXCLUDED.cogs_total,
-                    ebit_amount  = EXCLUDED.ebit_amount
+                INSERT INTO eis.dim_product (product_code, product_name, business_type, market)
+                VALUES (:code, :name, :biz, :mkt)
+                ON CONFLICT (product_code) DO UPDATE SET
+                    product_name  = EXCLUDED.product_name,
+                    business_type = EXCLUDED.business_type,
+                    market        = EXCLUDED.market
             """), {
-                "pid":     period_id,
-                "prod_id": product_id,
-                "sales":   sales_amt,
-                "cogs":    round(cogs_amt, 4),
-                "ebit":    ebit_amt,
+                "code": rec["product_code"],
+                "name": rec["display_name"],
+                "biz":  rec["biz_type"],
+                "mkt":  rec["market"],
             })
-            month_loaded += 1
-            loaded_cogs += 1
 
-        results.append({
-            "product_code":  rec["product_code"],
-            "product_name":  rec["display_name"],
-            "market":        rec["market"],
-            "months_loaded": month_loaded,
-        })
-        if month_loaded == 0:
-            skipped.append(rec["product_code"])
+            prod_res = await db.execute(
+                text("SELECT id FROM eis.dim_product WHERE product_code = :code"),
+                {"code": rec["product_code"]},
+            )
+            product_id = prod_res.fetchone()[0]
+            loaded_products += 1
 
-    await db.commit()
-    logger.info(f"[upload_cogs] {loaded_products} products, {loaded_cogs} cogs rows for {year}")
+            month_loaded = 0
+            for month_idx, (qty, cogs_amt) in enumerate(zip(rec["qty"], rec["cogs_amt"])):
+                if qty == 0 and cogs_amt == 0:
+                    continue
 
+                month_num = month_idx + 1
+                period_id = period_map.get(month_num)
+                if not period_id:
+                    continue
+
+                # sales_amount = Price IDR × Qty ÷ 1,000,000 (juta IDR)
+                sales_amt = round(rec["price_idr"] * qty / 1_000_000, 4)
+                ebit_amt  = round(sales_amt - cogs_amt, 4)
+
+                await db.execute(text("""
+                    INSERT INTO eis.fact_cogs
+                        (period_id, product_id, sales_amount, cogs_total, ebit_amount)
+                    VALUES (:pid, :prod_id, :sales, :cogs, :ebit)
+                    ON CONFLICT (period_id, product_id) DO UPDATE SET
+                        sales_amount = EXCLUDED.sales_amount,
+                        cogs_total   = EXCLUDED.cogs_total,
+                        ebit_amount  = EXCLUDED.ebit_amount
+                """), {
+                    "pid":     period_id,
+                    "prod_id": product_id,
+                    "sales":   sales_amt,
+                    "cogs":    round(cogs_amt, 4),
+                    "ebit":    ebit_amt,
+                })
+                month_loaded += 1
+                loaded_cogs += 1
+
+            results.append({
+                "product_code":  rec["product_code"],
+                "product_name":  rec["display_name"],
+                "market":        rec["market"],
+                "months_loaded": month_loaded,
+            })
+            if month_loaded == 0:
+                skipped.append(rec["product_code"])
+
+        await db.commit()
+        logger.info(f"[upload_cogs] {loaded_products} products, {loaded_cogs} cogs rows for {year}")
+    except HTTPException as e:
+        await _log_upload("cogs", file.filename, year, 0, "failed", str(e.detail), uploaded_by)
+        raise
+    except Exception as e:
+        logger.exception("[upload_cogs] failed")
+        await _log_upload("cogs", file.filename, year, 0, "failed", str(e), uploaded_by)
+        raise HTTPException(status_code=500, detail=f"Upload gagal: {e}")
+
+    await _log_upload("cogs", file.filename, year, loaded_cogs, "success", None, uploaded_by)
     return {
         "message": f"Berhasil upload {loaded_products} produk ({loaded_cogs} baris COGS) untuk tahun {year}",
         "year":    year,
@@ -601,82 +645,92 @@ async def upload_sales_bp(
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=422, detail="File harus .xlsx atau .xls")
 
+    uploaded_by = user.full_name or user.username or "upload"
     content = await file.read()
-    parsed   = _parse_sales_bp_excel(content)
-    segments = parsed['segments']
 
-    created_by = user.full_name or user.username or 'upload'
-    loaded_bp     = 0
-    updated_sales = 0
+    try:
+        parsed   = _parse_sales_bp_excel(content)
+        segments = parsed['segments']
 
-    for category, monthly_vals in segments.items():
-        # ── Upsert business_plan ────────────────────────────────────
-        # Hapus dulu karena UNIQUE constraint tidak bisa pakai ON CONFLICT
-        # dengan sub_category IS NULL (NULL != NULL di Postgres).
-        await db.execute(text("""
-            DELETE FROM eis.business_plan
-            WHERE fiscal_year = :year
-              AND plan_type   = 'Sales'
-              AND category    = :cat
-              AND sub_category IS NULL
-        """), {"year": year, "cat": category})
+        loaded_bp     = 0
+        updated_sales = 0
 
-        m = monthly_vals
-        await db.execute(text("""
-            INSERT INTO eis.business_plan
-                (fiscal_year, plan_type, category, sub_category,
-                 jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, "dec",
-                 created_by, updated_at)
-            VALUES
-                (:year, 'Sales', :cat, NULL,
-                 :m0,:m1,:m2,:m3,:m4,:m5,:m6,:m7,:m8,:m9,:m10,:m11,
-                 :created_by, NOW())
-        """), {
-            "year": year, "cat": category, "created_by": created_by,
-            "m0": m[0],  "m1": m[1],  "m2": m[2],  "m3": m[3],
-            "m4": m[4],  "m5": m[5],  "m6": m[6],  "m7": m[7],
-            "m8": m[8],  "m9": m[9],  "m10": m[10], "m11": m[11],
-        })
-        loaded_bp += 1
+        for category, monthly_vals in segments.items():
+            # ── Upsert business_plan ────────────────────────────────────
+            # Hapus dulu karena UNIQUE constraint tidak bisa pakai ON CONFLICT
+            # dengan sub_category IS NULL (NULL != NULL di Postgres).
+            await db.execute(text("""
+                DELETE FROM eis.business_plan
+                WHERE fiscal_year = :year
+                  AND plan_type   = 'Sales'
+                  AND category    = :cat
+                  AND sub_category IS NULL
+            """), {"year": year, "cat": category})
 
-        # ── Update fact_sales.bp_amount langsung ────────────────────
-        if category in ('Local', 'CMO', 'Export'):
-            for month_idx, bp_val in enumerate(monthly_vals):
-                period_res = await db.execute(
-                    text("SELECT id FROM eis.dim_period WHERE fiscal_year=:y AND period_num=:p"),
-                    {"y": year, "p": month_idx + 1},
-                )
-                period_row = period_res.fetchone()
-                if not period_row:
-                    continue
-                period_id = period_row[0]
+            m = monthly_vals
+            await db.execute(text("""
+                INSERT INTO eis.business_plan
+                    (fiscal_year, plan_type, category, sub_category,
+                     jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, "dec",
+                     created_by, updated_at)
+                VALUES
+                    (:year, 'Sales', :cat, NULL,
+                     :m0,:m1,:m2,:m3,:m4,:m5,:m6,:m7,:m8,:m9,:m10,:m11,
+                     :created_by, NOW())
+            """), {
+                "year": year, "cat": category, "created_by": uploaded_by,
+                "m0": m[0],  "m1": m[1],  "m2": m[2],  "m3": m[3],
+                "m4": m[4],  "m5": m[5],  "m6": m[6],  "m7": m[7],
+                "m8": m[8],  "m9": m[9],  "m10": m[10], "m11": m[11],
+            })
+            loaded_bp += 1
 
-                # Coba UPDATE dulu
-                upd = await db.execute(text("""
-                    UPDATE eis.fact_sales
-                       SET bp_amount  = :bp,
-                           updated_at = NOW()
-                     WHERE period_id    = :pid
-                       AND business_type = :biz
-                       AND market       = 'All'
-                       AND product_id IS NULL
-                """), {"bp": round(bp_val, 2), "pid": period_id, "biz": category})
+            # ── Update fact_sales.bp_amount langsung ────────────────────
+            if category in ('Local', 'CMO', 'Export'):
+                for month_idx, bp_val in enumerate(monthly_vals):
+                    period_res = await db.execute(
+                        text("SELECT id FROM eis.dim_period WHERE fiscal_year=:y AND period_num=:p"),
+                        {"y": year, "p": month_idx + 1},
+                    )
+                    period_row = period_res.fetchone()
+                    if not period_row:
+                        continue
+                    period_id = period_row[0]
 
-                if upd.rowcount == 0:
-                    # Belum ada baris ETL → insert baru
-                    await db.execute(text("""
-                        INSERT INTO eis.fact_sales
-                            (period_id, product_id, business_type, market, bp_amount, actual_amount)
-                        VALUES (:pid, NULL, :biz, 'All', :bp, 0)
-                    """), {"pid": period_id, "biz": category, "bp": round(bp_val, 2)})
+                    # Coba UPDATE dulu
+                    upd = await db.execute(text("""
+                        UPDATE eis.fact_sales
+                           SET bp_amount  = :bp,
+                               updated_at = NOW()
+                         WHERE period_id    = :pid
+                           AND business_type = :biz
+                           AND market       = 'All'
+                           AND product_id IS NULL
+                    """), {"bp": round(bp_val, 2), "pid": period_id, "biz": category})
 
-                updated_sales += 1
+                    if upd.rowcount == 0:
+                        # Belum ada baris ETL → insert baru
+                        await db.execute(text("""
+                            INSERT INTO eis.fact_sales
+                                (period_id, product_id, business_type, market, bp_amount, actual_amount)
+                            VALUES (:pid, NULL, :biz, 'All', :bp, 0)
+                        """), {"pid": period_id, "biz": category, "bp": round(bp_val, 2)})
 
-    await db.commit()
-    logger.info(
-        f"[upload_sales_bp] {loaded_bp} segments, {updated_sales} fact_sales rows, year={year}"
-    )
+                    updated_sales += 1
 
+        await db.commit()
+        logger.info(
+            f"[upload_sales_bp] {loaded_bp} segments, {updated_sales} fact_sales rows, year={year}"
+        )
+    except HTTPException as e:
+        await _log_upload("sales-bp", file.filename, year, 0, "failed", str(e.detail), uploaded_by)
+        raise
+    except Exception as e:
+        logger.exception("[upload_sales_bp] failed")
+        await _log_upload("sales-bp", file.filename, year, 0, "failed", str(e), uploaded_by)
+        raise HTTPException(status_code=500, detail=f"Upload gagal: {e}")
+
+    await _log_upload("sales-bp", file.filename, year, loaded_bp, "success", None, uploaded_by)
     return {
         "message": (
             f"Berhasil upload Business Plan: {loaded_bp} segmen, "
@@ -688,3 +742,29 @@ async def upload_sales_bp(
         "detected_year":      parsed.get("detected_year"),
         "data": {cat: vals for cat, vals in segments.items()},
     }
+
+
+# ══════════════════════════════════════════════════════════════
+# Upload history — shared by all three upload types above
+# ══════════════════════════════════════════════════════════════
+
+@router.get("/upload-logs")
+async def get_upload_logs(
+    upload_type: Optional[str] = Query(None, description="overtime | cogs | sales-bp"),
+    limit: int = Query(20, le=100),
+    db: AsyncSession = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    q = """
+        SELECT id, upload_type, filename, fiscal_year, rows_loaded, status,
+               error_message, uploaded_by, uploaded_at
+        FROM eis.upload_log
+    """
+    params = {"lim": limit}
+    if upload_type:
+        q += " WHERE upload_type = :t"
+        params["t"] = upload_type
+    q += " ORDER BY uploaded_at DESC LIMIT :lim"
+
+    result = await db.execute(text(q), params)
+    return [dict(r) for r in result.mappings().all()]
