@@ -83,9 +83,11 @@ class SalesPlanService:
     async def import_excel(self, db: AsyncSession, file_bytes: bytes, plan_year: int, username: str) -> dict:
         """Parse an uploaded Excel matching the "(S1) Sales plan_Value.xlsx"
         template — meta at A6/C6 (Type), A8/C8 (Area), A10/C10 (Department),
-        A12/C12+D12 (Team Code/Name); two-row header at 14-15 (No, Product,
-        Jan-Dec, Total Value, Total Unit, Price); data from row 16. Same
-        layout the existing seed script (seed_sales_plan.py) already reads."""
+        A12/C12+D12 (Team Code/Name); two-row header at 14-15 (No, Country,
+        Product, Jan-Dec, Total Value, Total Unit, Price); data from row 16.
+        Country sits between No and Product (col B), shifting every column
+        after it one to the right versus the original template — Product is
+        now col C, Jan-Dec E-P, Total Value Q, Total Unit R, Price S."""
         import io
         from openpyxl import load_workbook
 
@@ -112,20 +114,21 @@ class SalesPlanService:
             except (TypeError, ValueError):
                 return 0
 
-        headers = ["No", "Product", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        headers = ["No", "Country", "Product", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total Value", "Total Unit", "Price (Rp)"]
         rows = []
         for r in range(16, ws.max_row + 1):
             no = ws.cell(row=r, column=1).value
-            product = ws.cell(row=r, column=2).value
+            country = ws.cell(row=r, column=2).value
+            product = ws.cell(row=r, column=3).value
             if no is None or product is None:
                 continue
-            months = [_num(ws.cell(row=r, column=c).value) for c in range(4, 16)]  # D-O
-            total_value = _num(ws.cell(row=r, column=16).value)
-            total_unit  = _num(ws.cell(row=r, column=17).value)
-            price       = ws.cell(row=r, column=18).value
+            months = [_num(ws.cell(row=r, column=c).value) for c in range(5, 17)]  # E-P
+            total_value = _num(ws.cell(row=r, column=17).value)
+            total_unit  = _num(ws.cell(row=r, column=18).value)
+            price       = ws.cell(row=r, column=19).value
             price       = price if isinstance(price, (int, float)) else ""
-            rows.append([no, str(product), *months, total_value, total_unit, price])
+            rows.append([no, str(country or ""), str(product), *months, total_value, total_unit, price])
 
         if not rows:
             return {"success": False, "error": "No data rows found starting at row 16 — file doesn't match the expected template"}
@@ -178,14 +181,16 @@ class SalesPlanService:
                 # double-count every product.
                 continue
             for row in content.get("rows", []):
-                if len(row) < 17:
+                if len(row) < 18:
                     continue
-                product = row[1]
-                amounts = [v if isinstance(v, (int, float)) else 0 for v in row[2:14]]
-                price = row[16] if isinstance(row[16], (int, float)) else 0
+                country = row[1]
+                product = row[2]
+                amounts = [v if isinstance(v, (int, float)) else 0 for v in row[3:15]]
+                price = row[17] if isinstance(row[17], (int, float)) else 0
                 lines.append({
                     "market": market,
                     "customer": customer,
+                    "country": str(country or ""),
                     "product": str(product or ""),
                     "amounts": amounts,
                     "price": price,

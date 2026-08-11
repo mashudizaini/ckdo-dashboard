@@ -75,11 +75,13 @@ async def _pac_monthly_business_plan(db: AsyncSession, year: int) -> tuple[list[
     for bucket in groups.values():
         rows = bucket["total"] if bucket["total"] is not None else [r for seg in bucket["segments"] for r in seg]
         for row in rows:
-            if len(row) < 14:
+            # Row shape: [no, country, product, jan..dec, total_value, total_unit, price] (18 items) —
+            # months start at index 3, not 2, since a "Country" column was added before "Product".
+            if len(row) < 15:
                 continue
             has_data = True
             for i in range(12):
-                v = row[2 + i]
+                v = row[3 + i]
                 if isinstance(v, (int, float)):
                     monthly[i] += v
     return [round(v / 1_000_000, 3) for v in monthly], has_data
