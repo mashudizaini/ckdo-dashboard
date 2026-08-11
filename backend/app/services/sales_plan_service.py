@@ -58,8 +58,22 @@ class SalesPlanService:
                 SalesPlan.team_code  == payload.get("team_code", ""),
                 SalesPlan.plan_type  == payload.get("plan_type", "value"),
             )
+            # A team can submit more than one plan under the same
+            # department/team_code (e.g. Business Development's CMO and
+            # Service Agreement plans both use team_code 62) — distinguished
+            # by [ Type ]/[ Area ] meta, not by team_code. Only apply this
+            # extra match when the incoming content actually carries a meta
+            # dict (Excel import always does; the manual "New Plan" form
+            # doesn't set one at all) so manual entries keep matching purely
+            # on year/department/team_code/plan_type as before.
+            meta = (payload.get("content") or {}).get("meta")
+            if meta and "type" in meta:
+                q = q.where(
+                    SalesPlan.content["meta"]["type"].astext == str(meta.get("type") or ""),
+                    SalesPlan.content["meta"]["area"].astext == str(meta.get("area") or ""),
+                )
             result = await db.execute(q)
-            row = result.scalar_one_or_none()
+            row = result.scalars().first()
         if row:
             row.content   = payload.get("content", row.content)
             row.status    = payload.get("status",  row.status)
@@ -82,12 +96,28 @@ class SalesPlanService:
 
     async def import_excel(self, db: AsyncSession, file_bytes: bytes, plan_year: int, username: str) -> dict:
         """Parse an uploaded Excel matching the "(S1) Sales plan_Value.xlsx"
-        template — meta at A6/C6 (Type), A8/C8 (Area), A10/C10 (Department),
-        A12/C12+D12 (Team Code/Name); two-row header at 14-15 (No, Country,
-        Product, Jan-Dec, Total Value, Total Unit, Price); data from row 16.
-        Country sits between No and Product (col B), shifting every column
-        after it one to the right versus the original template — Product is
-        now col C, Jan-Dec E-P, Total Value Q, Total Unit R, Price S."""
+        template family — sheet-agnostic, like every other PAC Simulation
+        upload: any worksheet whose A1 is "[ S1 ]" is read as one plan (one
+        sheet = one plan), everything else (e.g. an "Index_Team Code"
+        reference sheet some exports carry as sheet 1) is skipped. Blindly
+        reading wb.worksheets[0] used to be this file's behavior and broke
+        on any workbook where the first sheet isn't the data sheet — it
+        would silently parse a lookup table as sales figures and 500 trying
+        to save a numeric Team Code as the text `department` column.
+
+        Two header layouts exist in the wild, detected per-sheet from
+        row 14 col B:
+          - "Local" layout (col B is anything other than "Country"):
+            No, Product, Jan-Dec (D-O), Total Value (P), Total Unit (Q),
+            Price (R) — one currency.
+          - "Export/CMO" layout (col B == "Country"):
+            No, Country, Customer, Product, Jan-Dec (E-P), Total Value (Q),
+            Total Unit (R), Price USD (S), Price IDR (T) — used when each
+            product line ships to a different country/customer and is
+            priced in USD converted to IDR.
+        Both normalize to the same stored row shape: [no, country, customer,
+        product, jan..dec, total_value, total_unit, price_usd, price_idr]
+        (20 items) — Local rows carry "" for country/customer/price_usd."""
         import io
         from openpyxl import load_workbook
 
@@ -95,15 +125,6 @@ class SalesPlanService:
             wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
         except Exception as e:
             return {"success": False, "error": f"Could not read Excel file: {e}"}
-
-        ws = wb.worksheets[0]
-        meta = {
-            "type":       ws.cell(row=6,  column=3).value or "",
-            "area":       ws.cell(row=8,  column=3).value or "",
-            "department": ws.cell(row=10, column=3).value or "",
-            "team_code":  ws.cell(row=12, column=3).value or "",
-            "team_name":  str(ws.cell(row=12, column=4).value or "").lstrip("/ ").strip(),
-        }
 
         def _num(v):
             # Blank template cells sometimes hold a stray placeholder like
@@ -114,39 +135,75 @@ class SalesPlanService:
             except (TypeError, ValueError):
                 return 0
 
-        headers = ["No", "Country", "Product", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total Value", "Total Unit", "Price (Rp)"]
-        rows = []
-        for r in range(16, ws.max_row + 1):
-            no = ws.cell(row=r, column=1).value
-            country = ws.cell(row=r, column=2).value
-            product = ws.cell(row=r, column=3).value
-            if no is None or product is None:
+        headers = ["No", "Country", "Customer", "Product", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total Value", "Total Unit", "Price (USD)", "Price (IDR)"]
+
+        imported = []
+        for ws in wb.worksheets:
+            if str(ws.cell(row=1, column=1).value or "").strip() != "[ S1 ]":
                 continue
-            months = [_num(ws.cell(row=r, column=c).value) for c in range(5, 17)]  # E-P
-            total_value = _num(ws.cell(row=r, column=17).value)
-            total_unit  = _num(ws.cell(row=r, column=18).value)
-            price       = ws.cell(row=r, column=19).value
-            price       = price if isinstance(price, (int, float)) else ""
-            rows.append([no, str(country or ""), str(product), *months, total_value, total_unit, price])
 
-        if not rows:
-            return {"success": False, "error": "No data rows found starting at row 16 — file doesn't match the expected template"}
+            meta = {
+                "type":       ws.cell(row=6,  column=3).value or "",
+                "area":       ws.cell(row=8,  column=3).value or "",
+                "department": ws.cell(row=10, column=3).value or "",
+                "team_code":  ws.cell(row=12, column=3).value or "",
+                "team_name":  str(ws.cell(row=12, column=4).value or "").lstrip("/ ").strip(),
+            }
 
-        content = {"headers": headers, "rows": rows, "meta": meta}
-        payload = {
-            "plan_year":  plan_year,
-            "department": meta["department"],
-            "team_code":  str(meta["team_code"]),
-            "team_name":  meta["team_name"],
-            "plan_type":  "value",
-            "content":    content,
-            "status":     "draft",
-        }
-        result = await self.upsert_sales_plan(db, payload, username)
-        if result["success"]:
-            result["rows_imported"] = len(rows)
-        return result
+            is_export_layout = str(ws.cell(row=14, column=2).value or "").strip() == "Country"
+
+            rows = []
+            for r in range(16, ws.max_row + 1):
+                no = ws.cell(row=r, column=1).value
+                if is_export_layout:
+                    country  = ws.cell(row=r, column=2).value
+                    customer = ws.cell(row=r, column=3).value
+                    product  = ws.cell(row=r, column=4).value
+                    if no is None or product is None:
+                        continue
+                    months = [_num(ws.cell(row=r, column=c).value) for c in range(5, 17)]  # E-P
+                    total_value = _num(ws.cell(row=r, column=17).value)
+                    total_unit  = _num(ws.cell(row=r, column=18).value)
+                    price_usd   = ws.cell(row=r, column=19).value
+                    price_usd   = price_usd if isinstance(price_usd, (int, float)) else ""
+                    price_idr   = ws.cell(row=r, column=20).value
+                    price_idr   = price_idr if isinstance(price_idr, (int, float)) else ""
+                    rows.append([no, str(country or ""), str(customer or ""), str(product),
+                                 *months, total_value, total_unit, price_usd, price_idr])
+                else:
+                    product = ws.cell(row=r, column=2).value
+                    if no is None or product is None:
+                        continue
+                    months = [_num(ws.cell(row=r, column=c).value) for c in range(4, 16)]  # D-O
+                    total_value = _num(ws.cell(row=r, column=16).value)
+                    total_unit  = _num(ws.cell(row=r, column=17).value)
+                    price       = ws.cell(row=r, column=18).value
+                    price       = price if isinstance(price, (int, float)) else ""
+                    rows.append([no, "", "", str(product), *months, total_value, total_unit, "", price])
+
+            if not rows:
+                continue
+
+            content = {"headers": headers, "rows": rows, "meta": meta}
+            payload = {
+                "plan_year":  plan_year,
+                "department": meta["department"],
+                "team_code":  str(meta["team_code"]),
+                "team_name":  meta["team_name"],
+                "plan_type":  "value",
+                "content":    content,
+                "status":     "draft",
+            }
+            result = await self.upsert_sales_plan(db, payload, username)
+            if result["success"]:
+                imported.append({"sheet": ws.title, "rows": len(rows), "id": result["data"]["id"]})
+
+        if not imported:
+            return {"success": False, "error": "No recognizable data sheets found — none of the sheets in this "
+                                                 "file match the Sales Plan template layout (expected '[ S1 ]' "
+                                                 "in cell A1 of each data sheet)."}
+        return {"success": True, "imported": imported, "rows_imported": sum(x["rows"] for x in imported)}
 
     async def get_gross_sales_report_data(self, db: AsyncSession, plan_year: int) -> dict:
         """Flatten every Sales Plan (Value) product row for the given year
@@ -181,16 +238,21 @@ class SalesPlanService:
                 # double-count every product.
                 continue
             for row in content.get("rows", []):
-                if len(row) < 18:
+                if len(row) < 20:
                     continue
                 country = row[1]
-                product = row[2]
-                amounts = [v if isinstance(v, (int, float)) else 0 for v in row[3:15]]
-                price = row[17] if isinstance(row[17], (int, float)) else 0
+                customer_name = row[2]
+                product = row[3]
+                amounts = [v if isinstance(v, (int, float)) else 0 for v in row[4:16]]
+                # Price (IDR) is what the report deals in (Rp) — Price (USD)
+                # is only meaningful alongside an exchange rate, out of scope
+                # for this report.
+                price = row[19] if isinstance(row[19], (int, float)) else 0
                 lines.append({
                     "market": market,
                     "customer": customer,
                     "country": str(country or ""),
+                    "customer_name": str(customer_name or ""),
                     "product": str(product or ""),
                     "amounts": amounts,
                     "price": price,

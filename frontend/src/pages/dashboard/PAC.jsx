@@ -2985,8 +2985,8 @@ const SIM_COLUMNS = {
   },
 
   sales_plan: {
-    example: "(S1) Sales plan_Value.xlsx",
-    signature: null,
+    example: "(S1) Sales plan_Value.xlsx / (S1) Sales plan_Value_CMO&Export.xlsx",
+    signature: { cell: "A1", value: "[ S1 ]", note: "checked per sheet — a workbook can hold multiple data sheets (e.g. one per Type: CMO/Export/Service Agreement), each imported as its own plan. Sheets that aren't a data sheet (e.g. an \"Index_Team Code\" reference sheet some exports include as sheet 1) are skipped automatically." },
     metaFields: [
       { cell: "C6",  name: "Type" },
       { cell: "C8",  name: "Area" },
@@ -2996,22 +2996,37 @@ const SIM_COLUMNS = {
     ],
     sections: [
       {
-        label: "Product grid",
+        label: "Product grid — \"Local\" layout (row 14 col B is anything other than \"Country\")",
         startRow: 16,
         columns: [
           { col: "A",     name: "No", required: true },
+          { col: "B",     name: "Product", required: true },
+          { col: "C",     name: "(skipped, not read)", required: false },
+          { col: "D – O", name: "Jan – Dec Sales Value (Rp)", required: false, note: "12 columns — this is Amount, not quantity" },
+          { col: "P",     name: "Total Value", required: false },
+          { col: "Q",     name: "Total Unit", required: false },
+          { col: "R",     name: "Price (Rp)", required: false },
+        ],
+      },
+      {
+        label: "Product grid — \"Export/CMO\" layout (row 14 col B == \"Country\")",
+        startRow: 16,
+        note: "used when each product line ships to a different country/customer, priced in USD",
+        columns: [
+          { col: "A",     name: "No", required: true },
           { col: "B",     name: "Country", required: false },
-          { col: "C",     name: "Product", required: true },
-          { col: "D",     name: "(skipped, not read)", required: false },
+          { col: "C",     name: "Customer", required: false },
+          { col: "D",     name: "Product", required: true },
           { col: "E – P", name: "Jan – Dec Sales Value (Rp)", required: false, note: "12 columns — this is Amount, not quantity" },
           { col: "Q",     name: "Total Value", required: false },
           { col: "R",     name: "Total Unit", required: false },
-          { col: "S",     name: "Price (Rp)", required: false },
+          { col: "S",     name: "Price (USD)", required: false },
+          { col: "T",     name: "Price (IDR)", required: false },
         ],
       },
     ],
     notes: [
-      "No sheet-marker check on this upload — it always reads the FIRST sheet in the workbook, regardless of its name.",
+      "The layout is auto-detected per sheet from row 14 column B — no separate upload option needed for each variant.",
       "A row whose [ Type ] meta (cell C6) is left blank is treated as a pre-aggregated \"Total\" rollup rather than a real market/customer line.",
     ],
   },
@@ -4926,12 +4941,12 @@ function OpexPlanPanel({ year }) {
 /* ══ Sales Plan Panel ══════════════════════════════════════════════════════════ */
 
 const DEFAULT_SALES_PLAN_CONTENT = {
-  headers: ["No", "Country", "Product / Description", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total Value", "Total Unit", "Price (Rp)"],
+  headers: ["No", "Country", "Customer", "Product / Description", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total Value", "Total Unit", "Price (USD)", "Price (IDR)"],
   rows: [
-    ["1", "Indonesia", "Product A", 100, 120, 110, 130, 140, 150, 160, 170, 180, 190, 200, 210, 1960, 12, 50000],
-    ["2", "Indonesia", "Product B", 200, 210, 220, 230, 240, 250, 260, 270, 280, 290, 300, 310, 3060, 15, 75000],
-    ["3", "Indonesia", "Product C", 150, 160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 260, 2460, 10, 60000],
+    ["1", "", "", "Product A", 100, 120, 110, 130, 140, 150, 160, 170, 180, 190, 200, 210, 1960, 12, "", 50000],
+    ["2", "", "", "Product B", 200, 210, 220, 230, 240, 250, 260, 270, 280, 290, 300, 310, 3060, 15, "", 75000],
+    ["3", "", "", "Product C", 150, 160, 170, 180, 190, 200, 210, 220, 230, 240, 250, 260, 2460, 10, "", 60000],
   ],
 };
 
@@ -5033,13 +5048,13 @@ function SalesPlanPanel({ year }) {
     setForm(prev => {
       const newRows = [...(prev.content.rows || [])];
       newRows[rowIdx] = [...newRows[rowIdx]];
-      if (colIdx === 0 || colIdx === 1 || colIdx === 2) {
+      if (colIdx === 0 || colIdx === 1 || colIdx === 2 || colIdx === 3) {
         newRows[rowIdx][colIdx] = val;
       } else {
         newRows[rowIdx][colIdx] = Number(val) || 0;
       }
-      const total = newRows[rowIdx].slice(3, 15).reduce((a, b) => a + (Number(b) || 0), 0);
-      newRows[rowIdx][15] = total;
+      const total = newRows[rowIdx].slice(4, 16).reduce((a, b) => a + (Number(b) || 0), 0);
+      newRows[rowIdx][16] = total;
       return { ...prev, content: { ...prev.content, rows: newRows } };
     });
   };
@@ -5048,7 +5063,7 @@ function SalesPlanPanel({ year }) {
     setForm(prev => {
       const newRows = [...(prev.content.rows || [])];
       const no = newRows.length + 1;
-      newRows.push([String(no), "", "New Product", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+      newRows.push([String(no), "", "", "New Product", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
       return { ...prev, content: { ...prev.content, rows: newRows } };
     });
   };
@@ -5093,7 +5108,8 @@ function SalesPlanPanel({ year }) {
     try {
       const res = await pacApi.uploadSalesPlanExcel(file, year);
       if (res.success) {
-        alert(`Import successful: ${res.rows_imported} product rows (${res.data?.department} / ${res.data?.team_name}).`);
+        const summary = (res.imported || []).map(x => `${x.sheet} (${x.rows} rows)`).join(", ");
+        alert(`Import successful: ${res.rows_imported} product rows total — ${summary}`);
         await loadPlans();
       } else {
         alert(res.error || "Import failed");
@@ -5238,7 +5254,7 @@ function SalesPlanPanel({ year }) {
                     <thead>
                       <tr className="bg-gray-800/80">
                         {(selectedPlan.content.headers || DEFAULT_SALES_PLAN_CONTENT.headers).map((h, ci) => (
-                          <th key={ci} className={`sticky top-0 z-10 bg-gray-800 px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${ci >= 3 && ci <= 14 ? 'text-center w-16' : ci === 15 || ci === 16 ? 'text-right w-20' : ''}`}>{h}</th>
+                          <th key={ci} className={`sticky top-0 z-10 bg-gray-800 px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${ci >= 4 && ci <= 15 ? 'text-center w-16' : ci === 16 || ci === 17 ? 'text-right w-20' : ''}`}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -5248,12 +5264,14 @@ function SalesPlanPanel({ year }) {
                           <td className="px-2 py-1.5 border border-gray-700 text-center w-8">{row[0]}</td>
                           <td className="px-2 py-1.5 border border-gray-700">{row[1]}</td>
                           <td className="px-2 py-1.5 border border-gray-700">{row[2]}</td>
-                          {row.slice(3, 15).map((val, ci) => (
+                          <td className="px-2 py-1.5 border border-gray-700">{row[3]}</td>
+                          {row.slice(4, 16).map((val, ci) => (
                             <td key={ci} className="px-2 py-1.5 border border-gray-700 text-right font-mono">{Number(val || 0).toLocaleString()}</td>
                           ))}
-                          <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-violet-400">{Number(row[15] || 0).toLocaleString()}</td>
-                          <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-sky-400">{Number(row[16] || 0).toLocaleString()}</td>
-                          <td className="px-2 py-1.5 border border-gray-700 text-right font-mono text-xs text-gray-400">{row[17] ? Number(row[17]).toLocaleString() : '-'}</td>
+                          <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-violet-400">{Number(row[16] || 0).toLocaleString()}</td>
+                          <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-sky-400">{Number(row[17] || 0).toLocaleString()}</td>
+                          <td className="px-2 py-1.5 border border-gray-700 text-right font-mono text-xs text-gray-400">{row[18] ? Number(row[18]).toLocaleString() : '-'}</td>
+                          <td className="px-2 py-1.5 border border-gray-700 text-right font-mono text-xs text-gray-400">{row[19] ? Number(row[19]).toLocaleString() : '-'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -5295,7 +5313,7 @@ function SalesPlanPanel({ year }) {
                 <thead>
                   <tr className="bg-gray-800/80">
                     {(form.content.headers || DEFAULT_SALES_PLAN_CONTENT.headers).map((h, ci) => (
-                      <th key={ci} className={`sticky top-0 z-10 bg-gray-800 px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${ci >= 3 && ci <= 14 ? 'text-center w-16' : ci === 15 || ci === 16 ? 'text-right w-20' : ''}`}>{h}</th>
+                      <th key={ci} className={`sticky top-0 z-10 bg-gray-800 px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${ci >= 4 && ci <= 15 ? 'text-center w-16' : ci === 16 || ci === 17 ? 'text-right w-20' : ''}`}>{h}</th>
                     ))}
                     <th className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-center border border-gray-700 w-10"></th>
                   </tr>
@@ -5308,16 +5326,24 @@ function SalesPlanPanel({ year }) {
                         <input className={`${INP} !text-xs`} value={row[1]} onChange={e => updateCell(ri, 1, e.target.value)} placeholder="Country" />
                       </td>
                       <td className="px-2 py-1.5 border border-gray-700">
-                        <input className={`${INP} !text-xs`} value={row[2]} onChange={e => updateCell(ri, 2, e.target.value)} />
+                        <input className={`${INP} !text-xs`} value={row[2]} onChange={e => updateCell(ri, 2, e.target.value)} placeholder="Customer" />
                       </td>
-                      {row.slice(3, 15).map((val, ci) => (
+                      <td className="px-2 py-1.5 border border-gray-700">
+                        <input className={`${INP} !text-xs`} value={row[3]} onChange={e => updateCell(ri, 3, e.target.value)} />
+                      </td>
+                      {row.slice(4, 16).map((val, ci) => (
                         <td key={ci} className="px-2 py-1.5 border border-gray-700">
-                          <input type="number" className={`${INP} !text-center !text-xs font-mono`} value={val} onChange={e => updateCell(ri, ci + 3, e.target.value)} />
+                          <input type="number" className={`${INP} !text-center !text-xs font-mono`} value={val} onChange={e => updateCell(ri, ci + 4, e.target.value)} />
                         </td>
                       ))}
-                      <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-violet-400">{Number(row[15] || 0).toLocaleString()}</td>
-                      <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-sky-400">{Number(row[16] || 0).toLocaleString()}</td>
-                      <td className="px-2 py-1.5 border border-gray-700 text-right font-mono text-xs text-gray-400">{row[17] ? Number(row[17]).toLocaleString() : '-'}</td>
+                      <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-violet-400">{Number(row[16] || 0).toLocaleString()}</td>
+                      <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-sky-400">{Number(row[17] || 0).toLocaleString()}</td>
+                      <td className="px-2 py-1.5 border border-gray-700">
+                        <input type="number" className={`${INP} !text-right !text-xs font-mono`} value={row[18]} onChange={e => updateCell(ri, 18, e.target.value)} placeholder="USD" />
+                      </td>
+                      <td className="px-2 py-1.5 border border-gray-700">
+                        <input type="number" className={`${INP} !text-right !text-xs font-mono`} value={row[19]} onChange={e => updateCell(ri, 19, e.target.value)} placeholder="IDR" />
+                      </td>
                       <td className="px-2 py-1.5 border border-gray-700 text-center">
                         <button onClick={() => removeRow(ri)} className={BTN_SM("red")}><Trash2 size={9} /></button>
                       </td>
@@ -5326,13 +5352,13 @@ function SalesPlanPanel({ year }) {
                 </tbody>
                 <tfoot>
                   <tr className="bg-gray-800/60">
-                    <td colSpan={3} className="px-2 py-1.5 border border-gray-700 text-xs font-bold text-gray-300">GRAND TOTAL</td>
-                    {[3,4,5,6,7,8,9,10,11,12,13,14].map(ci => (
+                    <td colSpan={4} className="px-2 py-1.5 border border-gray-700 text-xs font-bold text-gray-300">GRAND TOTAL</td>
+                    {[4,5,6,7,8,9,10,11,12,13,14,15].map(ci => (
                       <td key={ci} className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-gray-200">{grandTotal(ci).toLocaleString()}</td>
                     ))}
-                    <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-violet-400">{grandTotal(15).toLocaleString()}</td>
-                    <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-sky-400">{grandTotal(16).toLocaleString()}</td>
-                    <td></td>
+                    <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-violet-400">{grandTotal(16).toLocaleString()}</td>
+                    <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-sky-400">{grandTotal(17).toLocaleString()}</td>
+                    <td colSpan={3}></td>
                   </tr>
                 </tfoot>
               </table>
