@@ -176,6 +176,7 @@ export const eisApi = {
   getEtlJobData:  (jobName, year, month) => api.get(`${EIS}/etl/job-data/${jobName}`, { params: { year, month: month || undefined } }),
 
   // Daily Sales
+  getDailySalesYears: ()           => api.get(`${EIS}/daily-sales/years`),
   getDailySales:    (year)         => api.get(`${EIS}/daily-sales/data`, { params: { year } }),
   uploadDailySales: (formData, year) => api.post(`${EIS}/daily-sales/upload`, formData, { params: { year }, headers: { "Content-Type": "multipart/form-data" } }),
   deleteDailySales: (year)         => api.delete(`${EIS}/daily-sales/data`, { params: { year } }),

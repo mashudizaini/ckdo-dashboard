@@ -1665,6 +1665,26 @@ export default function EISDashboard() {
     }
   }, []); // eslint-disable-line
 
+  // Daily Sales only has data for years someone has actually uploaded —
+  // unlike every other EIS tab (backed by live DB queries), so the shared
+  // Year selector switches to that real list while this tab is active
+  // instead of the generic rolling-5-year window, which used to offer
+  // years with nothing to show.
+  const [dailySalesYears, setDailySalesYears] = useState(null);
+  useEffect(() => {
+    if (tab !== "daily-sales") return;
+    let cancelled = false;
+    eisApi.getDailySalesYears().then((ys) => { if (!cancelled) setDailySalesYears(ys); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [tab]);
+
+  const yearOptions = tab === "daily-sales" && dailySalesYears?.length ? dailySalesYears : YEARS;
+  useEffect(() => {
+    if (tab === "daily-sales" && dailySalesYears?.length && !dailySalesYears.includes(year)) {
+      setYear(dailySalesYears[0]);
+    }
+  }, [tab, dailySalesYears]); // eslint-disable-line
+
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -1673,7 +1693,7 @@ export default function EISDashboard() {
         </h1>
         <div className="flex items-center gap-2">
           <select value={year} onChange={(e) => setYear(Number(e.target.value))} className={selCls}>
-            {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+            {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
           <select value={period} onChange={(e) => setPeriod(Number(e.target.value))} className={selCls}>
             {MONTHS_SHORT.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}

@@ -198,6 +198,15 @@ def _parse_excel(content: bytes, filename: str = "") -> dict:
     }
 
 
+@router.get("/years")
+async def get_daily_sales_years(user = Depends(get_current_user)):
+    """Years that actually have uploaded Daily Sales data, newest first —
+    lets the Year filter only offer years worth picking instead of a fixed
+    rolling 5-year window that includes years nobody has uploaded yet."""
+    store = _load_store()
+    return sorted((int(y) for y in store.keys()), reverse=True)
+
+
 @router.get("/data")
 async def get_daily_sales(
     year: int = Query(..., description="Fiscal year to display"),
