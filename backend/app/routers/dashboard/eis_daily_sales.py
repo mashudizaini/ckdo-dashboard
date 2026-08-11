@@ -3,8 +3,13 @@ import io
 import re
 import datetime
 from pathlib import Path
+from typing import Optional
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_current_user
+from app.database import get_db
+from app.models.sales_plan import SalesPlan
 
 router = APIRouter()
 
@@ -33,6 +38,116 @@ def _load_store() -> dict:
             except Exception:
                 continue
     return {}
+
+
+async def _pac_monthly_business_plan(db: AsyncSession, year: int) -> tuple[list[float], bool]:
+    """Company-wide Sales Business Plan per month (Jan-Dec, in Million IDR)
+    from the PAC dashboard's Sales Plan module — the same figures PAC uses
+    for its own Gross Sales Report, now the single source of truth for the
+    Daily Sales BP card too (previously a manually-typed cell in the Daily
+    Sales Excel's "Daily Sales Performance" sheet, which the currently-used
+    upload templates don't even have, leaving it permanently blank).
+
+    Each PAC team stores its plan as one pre-aggregated "Total" document
+    (content.meta.area == "Total", meta.type blank) plus one document per
+    market/customer segment that sums up to that Total — group by
+    (department, team_code) and prefer each team's own Total doc so a team
+    is counted exactly once; fall back to summing its segment docs only if
+    it never submitted a Total rollup, so that team isn't dropped entirely."""
+    result = await db.execute(
+        select(SalesPlan).where(SalesPlan.plan_year == year, SalesPlan.plan_type == "value")
+    )
+    groups: dict = {}
+    for plan in result.scalars().all():
+        content = plan.content or {}
+        meta = content.get("meta", {})
+        is_total = meta.get("area") == "Total" and not meta.get("type")
+        key = (plan.department, plan.team_code)
+        bucket = groups.setdefault(key, {"total": None, "segments": []})
+        rows = content.get("rows", [])
+        if is_total:
+            bucket["total"] = rows
+        else:
+            bucket["segments"].append(rows)
+
+    monthly = [0.0] * 12
+    has_data = False
+    for bucket in groups.values():
+        rows = bucket["total"] if bucket["total"] is not None else [r for seg in bucket["segments"] for r in seg]
+        for row in rows:
+            if len(row) < 14:
+                continue
+            has_data = True
+            for i in range(12):
+                v = row[2 + i]
+                if isinstance(v, (int, float)):
+                    monthly[i] += v
+    return [round(v / 1_000_000, 3) for v in monthly], has_data
+
+
+def _month_progress(rows: list, month: str) -> tuple[float, int]:
+    """(last_acc, wd_actual_count) for one month out of the Daily Sales
+    Chart sheet's WD rows — how much has been sold so far, and how many
+    working days that covers."""
+    last_acc, wd_actual = 0.0, 0
+    for row in rows:
+        cell = row.get(month) or {}
+        if cell.get("acc") is not None:
+            wd_actual += 1
+            last_acc = cell["acc"]
+    return last_acc, wd_actual
+
+
+def _expectation_closing(last_acc: float, wd_actual: int, wd_total: int) -> float:
+    """Run-rate projection: (Acc so far / WD elapsed) x WD in the whole
+    month. Floored at last_acc so a month can never appear to be closing
+    *below* what's already been sold."""
+    if wd_actual == 0:
+        return 0.0
+    if wd_total == 0:
+        return round(last_acc, 3)
+    return round(max(last_acc, last_acc / wd_actual * wd_total), 3)
+
+
+def _daily_sales_kpi_by_month(rows: list) -> dict:
+    """Actual-to-date and run-rate-projected closing for every month, from
+    the Daily Sales WD rows alone. The projection's "total WD this month
+    will have" can't come from the sheet's own Target column — that turns
+    out to be filled in lockstep with Acc/Sales (row by row, as each day
+    is entered), not pre-filled for the whole month, so it always equals
+    "days reported so far" and can't tell a projection apart from a plain
+    actual-to-date total. An HR Working Calendar (Mon-Fri minus holidays)
+    was tried instead and rejected: every closed month runs 3-4 WD *higher*
+    than that calendar (e.g. Dec 2025: 25 WD rows vs. 23 Mon-Fri days that
+    month) — evidently Daily Sales' own WD scheme isn't a plain weekday
+    count (most likely some Saturdays count as working days), and it's
+    consistent enough that plain office attendance doesn't apply here.
+    So instead: a month with data is either "closed" (not the most recent
+    one with data) — its own WD count already IS its total, no projection
+    needed — or the single "in progress" month (the most recent with any
+    data), which borrows the average WD count of this year's already-closed
+    months as its estimated total, tracking whatever this sheet's real
+    scheme is instead of guessing at it."""
+    progress = {m: _month_progress(rows, m) for m in MONTHS}
+    months_with_data = [m for m in MONTHS if progress[m][1] > 0]
+    current_month = months_with_data[-1] if months_with_data else None
+    closed_months = months_with_data[:-1]
+    avg_wd_closed = (
+        round(sum(progress[m][1] for m in closed_months) / len(closed_months))
+        if closed_months else None
+    )
+
+    result = {}
+    for m in MONTHS:
+        last_acc, wd_actual = progress[m]
+        if wd_actual == 0:
+            wd_total = 0
+        elif m == current_month and avg_wd_closed is not None:
+            wd_total = avg_wd_closed
+        else:
+            wd_total = wd_actual
+        result[m] = {"last_acc": last_acc, "expectation_closing": _expectation_closing(last_acc, wd_actual, wd_total)}
+    return result
 
 
 def _save_store(store: dict):
@@ -205,6 +320,47 @@ async def get_daily_sales_years(user = Depends(get_current_user)):
     rolling 5-year window that includes years nobody has uploaded yet."""
     store = _load_store()
     return sorted((int(y) for y in store.keys()), reverse=True)
+
+
+@router.get("/kpi")
+async def get_daily_sales_kpi(
+    year: int = Query(..., description="Fiscal year"),
+    month: Optional[str] = Query(None, description="Lowercase month key (e.g. 'december') for a Monthly view; omit for Yearly"),
+    db: AsyncSession = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    """Business Plan / Expectation Closing / Achievement for one card,
+    Yearly (month omitted) or Monthly (month given). Business Plan comes
+    from PAC's Sales Plan; Expectation Closing and Achievement are derived
+    from the Daily Sales WD data already uploaded — see
+    _pac_monthly_business_plan / _expectation_closing docstrings for the
+    exact formulas."""
+    if month is not None and month not in MONTHS:
+        raise HTTPException(status_code=422, detail=f"Invalid month '{month}'. Expected one of {MONTHS}.")
+
+    monthly_bp, has_pac_data = await _pac_monthly_business_plan(db, year)
+
+    store = _load_store()
+    entry = store.get(str(year))
+    rows = entry.get("rows", []) if entry else []
+    kpi_by_month = _daily_sales_kpi_by_month(rows)
+
+    months_to_use = [month] if month else MONTHS
+    total_bp = sum(monthly_bp[i] for i, m in enumerate(MONTHS) if m in months_to_use)
+    total_actual = sum(kpi_by_month[m]["last_acc"] for m in months_to_use)
+    total_expectation = sum(kpi_by_month[m]["expectation_closing"] for m in months_to_use)
+
+    achievement_pct = round(total_actual / total_bp * 100, 2) if total_bp > 0 else 0.0
+
+    return {
+        "year": year,
+        "month": month,
+        "business_plan": round(total_bp, 3),
+        "expectation_closing": round(total_expectation, 3),
+        "achievement_pct": achievement_pct,
+        "has_pac_data": has_pac_data,
+        "has_daily_sales_data": entry is not None,
+    }
 
 
 @router.get("/data")

@@ -975,6 +975,11 @@ function EisDailySalesTab({ year }) {
   const [uploading, setUploading] = useState(false);
   const [msg, setMsg] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState("december");
+  // Business Plan / Expectation Closing / Achievement cards: Yearly sums
+  // all 12 months, Monthly follows whatever month is selected below (same
+  // selector the WD chart already uses) — see getDailySalesKpi.
+  const [kpiView, setKpiView] = useState("yearly");
+  const [kpi, setKpi] = useState(null);
   // Upload target year — defaults to the page's shared Year selector but is
   // independently adjustable, same convention as the Data Upload tab's
   // uploaders. Required on every upload so the file is stored under the
@@ -1002,6 +1007,14 @@ function EisDailySalesTab({ year }) {
   };
 
   useEffect(() => { load(year); }, [year]); // eslint-disable-line
+
+  useEffect(() => {
+    let cancelled = false;
+    eisApi.getDailySalesKpi(year, kpiView === "monthly" ? selectedMonth : null)
+      .then((k) => { if (!cancelled) setKpi(k); })
+      .catch(() => { if (!cancelled) setKpi(null); });
+    return () => { cancelled = true; };
+  }, [year, kpiView, selectedMonth]);
 
   const handleUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -1035,7 +1048,7 @@ function EisDailySalesTab({ year }) {
   if (loading) return <Loading />;
   const rows = data?.rows || [];
   const monthTargets = data?.month_targets || {};
-  const achPct = data?.achievement_pct || 0;
+  const achPct = kpi?.achievement_pct || 0;
   const achColor = achPct >= 100 ? "text-emerald-400" : achPct >= 80 ? "text-amber-400" : "text-red-400";
   const chartData = rows.filter((r) => r[selectedMonth]?.acc != null).map((r) => ({ wd: r.wd, acc: r[selectedMonth].acc, sales: r[selectedMonth].sales }));
   const monthTarget = monthTargets[selectedMonth] || 0;
@@ -1063,16 +1076,35 @@ function EisDailySalesTab({ year }) {
         <MsgBanner msg={msg} onClose={() => setMsg(null)} />
       </ChartCard>
 
-      <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">Daily Sales Performance — {year} ({data?.month || "no data yet"})</h2>
+      <div className="flex items-center justify-between px-1 flex-wrap gap-2">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+          Daily Sales Performance — {year} ({data?.month || "no data yet"})
+          {kpiView === "monthly" && ` · ${MONTHS_FULL_ID.find((m) => m.key === selectedMonth)?.label || selectedMonth}`}
+        </h2>
+        <div className="flex rounded-lg border border-gray-700 overflow-hidden text-xs">
+          {["yearly", "monthly"].map((v) => (
+            <button key={v} onClick={() => setKpiView(v)}
+              className={`px-3 py-1.5 capitalize ${kpiView === v ? "bg-cyan-600 text-white" : "bg-gray-800 text-gray-400 hover:bg-gray-700"}`}>
+              {v}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {kpi && !kpi.has_pac_data && (
+        <div className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+          PAC dashboard belum punya data Business Plan (Sales Plan) untuk tahun {year} — kartu Business Plan &amp; Achievement di bawah akan 0 sampai data itu diupload di PAC.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <EisKpiCard title="Business Plan" value={`${fmtN(data?.business_plan, 2)} M`} icon={Target} color="cyan" />
-        <EisKpiCard title="Expectation Closing" value={`${fmtN(data?.expectation_closing, 2)} M`} icon={TrendingUp} color="amber" />
+        <EisKpiCard title={`Business Plan${kpiView === "monthly" ? " (Month)" : " (Year)"}`} value={`${fmtN(kpi?.business_plan, 2)} M`} icon={Target} color="cyan" />
+        <EisKpiCard title={`Expectation Closing${kpiView === "monthly" ? " (Month)" : " (Year)"}`} value={`${fmtN(kpi?.expectation_closing, 2)} M`} icon={TrendingUp} color="amber" />
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg border border-emerald-500/30 bg-emerald-500/10 flex items-center justify-center"><CheckCircle2 size={17} className="text-emerald-400" /></div>
             <div>
-              <div className="text-[11px] text-gray-500 font-medium">Achievement</div>
+              <div className="text-[11px] text-gray-500 font-medium">Achievement{kpiView === "monthly" ? " (Month)" : " (Year)"}</div>
               <div className={`text-xl font-bold ${achColor}`}>{fmtN(achPct, 2)}%</div>
             </div>
           </div>

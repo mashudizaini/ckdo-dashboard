@@ -177,6 +177,7 @@ export const eisApi = {
 
   // Daily Sales
   getDailySalesYears: ()           => api.get(`${EIS}/daily-sales/years`),
+  getDailySalesKpi: (year, month)  => api.get(`${EIS}/daily-sales/kpi`, { params: { year, month: month || undefined } }),
   getDailySales:    (year)         => api.get(`${EIS}/daily-sales/data`, { params: { year } }),
   uploadDailySales: (formData, year) => api.post(`${EIS}/daily-sales/upload`, formData, { params: { year }, headers: { "Content-Type": "multipart/form-data" } }),
   deleteDailySales: (year)         => api.delete(`${EIS}/daily-sales/data`, { params: { year } }),
