@@ -3,8 +3,8 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   Banknote, ExternalLink, RefreshCw, Filter, X,
   Download, Loader2, TrendingUp, TrendingDown, Minus,
-  BookOpen, Plus, Trash2, Save, Printer, ChevronDown, ChevronRight,
-  CheckCircle, Clock, Edit3, FileText, Globe, Upload, AlertCircle, Calendar, BookOpenCheck, Sparkles, Settings, Users, Factory, Wallet, KeyRound,
+  BookOpen, Plus, Trash2, Save, Printer, ChevronDown, ChevronUp, ChevronRight,
+  CheckCircle, Clock, Edit3, FileText, FileSpreadsheet, Globe, Upload, AlertCircle, Calendar, BookOpenCheck, Sparkles, Settings, Users, Factory, Wallet, KeyRound,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line,
@@ -2834,6 +2834,344 @@ function OutlookPanel({ year }) {
   );
 }
 
+/* ─── Section: Simulation — Required Columns reference ───────────────────────
+   Every Simulation Data upload parses a fixed-cell-position Excel template
+   (not a plain header-row table), so users can't tell what a file needs just
+   by looking at column headers — this documents the exact cell/column each
+   importer reads, mirroring the "Required Columns" reference already used
+   for HRGA uploads (see AttendanceUpload.jsx). */
+function SimColumnsReference({ cfg }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900 mb-4">
+      <button onClick={() => setOpen(v => !v)}
+        className="flex w-full items-center justify-between px-5 py-3 text-sm font-medium text-gray-300 hover:text-white transition-colors">
+        <div className="flex items-center gap-2">
+          <FileSpreadsheet size={14} className="text-gray-500" />
+          Required Columns / Template Format
+        </div>
+        {open ? <ChevronUp size={15} className="text-gray-500" /> : <ChevronDown size={15} className="text-gray-500" />}
+      </button>
+      {open && (
+        <div className="border-t border-gray-800 px-5 py-4 space-y-4">
+          <div className="flex gap-3 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">
+            <AlertCircle size={14} className="mt-0.5 shrink-0" />
+            <span>
+              Reference file: <strong>{cfg.example}</strong>.{" "}
+              {cfg.signature
+                ? <>Sheet is recognized by cell <strong>{cfg.signature.cell}</strong> containing <strong>"{cfg.signature.value}"</strong>{cfg.signature.note ? ` — ${cfg.signature.note}` : ""}.</>
+                : <>This upload has <strong>no signature marker</strong> — it always reads the first sheet in the workbook, whatever it's named.</>}
+            </span>
+          </div>
+
+          {cfg.metaFields?.length > 0 && (
+            <div>
+              <div className="text-xs text-gray-500 font-medium mb-1.5">Meta Fields (fixed cell position)</div>
+              <div className="overflow-x-auto rounded-lg border border-gray-800">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-800/50">
+                      <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Cell</th>
+                      <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Field</th>
+                      <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Note</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800">
+                    {cfg.metaFields.map((f, i) => (
+                      <tr key={i}>
+                        <td className="px-3 py-1.5 font-mono text-cyan-400">{f.cell}</td>
+                        <td className="px-3 py-1.5 text-gray-200 font-medium">{f.name}</td>
+                        <td className="px-3 py-1.5 text-gray-500">{f.note || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {cfg.sections.map((sec, si) => (
+            <div key={si}>
+              <div className="text-xs text-gray-500 font-medium mb-1.5">
+                {sec.label}{sec.startRow ? ` — data starts row ${sec.startRow}` : ""}
+                {sec.note && <span className="font-normal text-gray-600"> ({sec.note})</span>}
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-gray-800">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-800/50">
+                      <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Col</th>
+                      <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Field</th>
+                      <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Required</th>
+                      <th className="px-3 py-1.5 text-left text-gray-500 font-medium">Note</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800">
+                    {sec.columns.map((c, i) => (
+                      <tr key={i}>
+                        <td className="px-3 py-1.5 font-mono text-cyan-400 whitespace-nowrap">{c.col}</td>
+                        <td className="px-3 py-1.5 text-gray-200 font-medium">{c.name}</td>
+                        <td className="px-3 py-1.5">
+                          {c.required === true && <span className="text-red-400 font-semibold">Yes</span>}
+                          {c.required === "either" && <span className="text-amber-400 font-semibold">One of</span>}
+                          {!c.required && <span className="text-gray-600">No</span>}
+                        </td>
+                        <td className="px-3 py-1.5 text-gray-500">{c.note || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+
+          {cfg.notes?.length > 0 && (
+            <ul className="list-disc list-inside space-y-1 text-xs text-gray-500">
+              {cfg.notes.map((n, i) => <li key={i}>{n}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const SIM_COLUMNS = {
+  data_collection: {
+    example: "(P1-M) Purchase plan_Material.xlsx",
+    signature: { cell: "A1", value: "[ P1 ]", note: "checked per sheet — a workbook can hold multiple data sheets (Summary/Local/CMO/Export), each imported as its own plan" },
+    metaFields: [
+      { cell: "D6",  name: "Type" },
+      { cell: "D9",  name: "Department" },
+      { cell: "D11", name: "Team Code" },
+      { cell: "E11", name: "Team Name" },
+      { cell: "X12", name: "Exchange Rate" },
+    ],
+    sections: [
+      {
+        label: "Item grid — Order row",
+        startRow: 15,
+        columns: [
+          { col: "A",     name: "No", required: true },
+          { col: "B",     name: "Type", required: false },
+          { col: "C",     name: "Item Code No", required: false },
+          { col: "D",     name: "Item Code Name", required: true },
+          { col: "E",     name: "UOM", required: false },
+          { col: "F",     name: "MOQ", required: false },
+          { col: "G",     name: "Stock", required: false },
+          { col: "H",     name: "QTY Needed", required: false },
+          { col: "I",     name: "Final QTY to Order", required: false },
+          { col: "J",     name: "(spacer, not read)", required: false },
+          { col: "K – V", name: "Jan – Dec Order Quantity", required: false, note: "12 columns" },
+          { col: "W",     name: "(not read)", required: false, note: "template may show a 1H subtotal here — ignored by the importer" },
+          { col: "X",     name: "Order Total", required: false },
+          { col: "Y",     name: "Unit Price (Orig)", required: false },
+          { col: "Z",     name: "Unit Price (IDR)", required: false },
+          { col: "AA",    name: "Total Price (Rp)", required: false },
+        ],
+      },
+      {
+        label: "Received row (the row directly below each Order row)",
+        columns: [
+          { col: "K – V", name: "Jan – Dec Received Quantity", required: false, note: "12 columns" },
+          { col: "X",     name: "Received Total", required: false },
+        ],
+      },
+    ],
+    notes: [
+      "A row counts as the Received row only if its own No (A) AND Item Code Name (D) are BOTH blank — it's identified purely by position, not a label. If either is filled, it's read as a brand-new item instead of a pair.",
+      "Columns J, W, Y, Z, AA are not read at all on the Received row even if the template shows values there.",
+    ],
+  },
+
+  sales_plan: {
+    example: "(S1) Sales plan_Value.xlsx",
+    signature: null,
+    metaFields: [
+      { cell: "C6",  name: "Type" },
+      { cell: "C8",  name: "Area" },
+      { cell: "C10", name: "Department" },
+      { cell: "C12", name: "Team Code" },
+      { cell: "D12", name: "Team Name" },
+    ],
+    sections: [
+      {
+        label: "Product grid",
+        startRow: 16,
+        columns: [
+          { col: "A",     name: "No", required: true },
+          { col: "B",     name: "Product", required: true },
+          { col: "C",     name: "(skipped, not read)", required: false },
+          { col: "D – O", name: "Jan – Dec Sales Value (Rp)", required: false, note: "12 columns — this is Amount, not quantity" },
+          { col: "P",     name: "Total Value", required: false },
+          { col: "Q",     name: "Total Unit", required: false },
+          { col: "R",     name: "Price (Rp)", required: false },
+        ],
+      },
+    ],
+    notes: [
+      "No sheet-marker check on this upload — it always reads the FIRST sheet in the workbook, regardless of its name.",
+      "A row whose [ Type ] meta (cell C6) is left blank is treated as a pre-aggregated \"Total\" rollup rather than a real market/customer line.",
+    ],
+  },
+
+  personnel_plan: {
+    example: "Personal plan template.xlsx",
+    signature: { cell: "A1", value: "[ H1 ]", note: "checked across all worksheets" },
+    metaFields: [
+      { cell: "C6", name: "Type" },
+      { cell: "C9", name: "Department" },
+    ],
+    sections: [
+      {
+        label: "Block A — Headcount by Level",
+        note: "header row located by searching column A for the text \"Level\"; data starts 3 rows below it",
+        columns: [
+          { col: "A", name: "Level", required: true },
+          { col: "C", name: "Prev. Year — Permanent", required: false },
+          { col: "D", name: "Prev. Year — Temporary", required: false },
+          { col: "E", name: "Prev. Year — Total", required: false },
+          { col: "F", name: "Curr. Year — Permanent", required: false },
+          { col: "G", name: "Curr. Year — Temporary", required: false },
+          { col: "H", name: "Curr. Year — Total", required: false },
+          { col: "I", name: "Increase — Permanent", required: false },
+          { col: "J", name: "Increase — Temporary", required: false },
+          { col: "K", name: "Increase — Total", required: false },
+          { col: "L", name: "Notes", required: false },
+        ],
+      },
+      {
+        label: "Block B — Recruitment Schedule (Permanent)",
+        note: "located by searching for its section title, then the nearest \"Level\" header below it; data starts 2 rows below that header",
+        columns: [
+          { col: "A",     name: "Level", required: true },
+          { col: "C – N", name: "Jan – Dec Recruitment Headcount", required: false, note: "12 columns" },
+          { col: "O",     name: "Total", required: false },
+        ],
+      },
+      {
+        label: "Block C — Recruitment Schedule (Temporary)",
+        note: "same layout as Block B, located below it",
+        columns: [
+          { col: "A",     name: "Level", required: true },
+          { col: "C – N", name: "Jan – Dec Recruitment Headcount", required: false, note: "12 columns" },
+          { col: "O",     name: "Total", required: false },
+        ],
+      },
+    ],
+    notes: [
+      "Row positions can shift — each block's header is found by searching for its label text, not a fixed row number — but the columns within a block are always fixed as listed above.",
+      "A row with column A exactly \"Total\" ends that block and is captured as the block's total rather than a data row.",
+      "Import fails only if all three blocks come back completely empty.",
+    ],
+  },
+
+  manufacture_plan: {
+    example: "manufacture plan template.xlsx",
+    signature: { cell: "A1", value: "[ M1 ]", note: "checked across all worksheets" },
+    metaFields: [
+      { cell: "C6",  name: "Type" },
+      { cell: "C9",  name: "Department" },
+      { cell: "C11", name: "Team Code" },
+      { cell: "D11", name: "Team Name" },
+      { cell: "G13", name: "Plan Year" },
+    ],
+    sections: [
+      {
+        label: "Item grid",
+        startRow: 15,
+        columns: [
+          { col: "A",     name: "No", required: true },
+          { col: "B",     name: "Customer", required: false },
+          { col: "C",     name: "Item Code", required: false },
+          { col: "D",     name: "Item Name", required: true },
+          { col: "E",     name: "Batch Size (Vial)", required: false },
+          { col: "F",     name: "Yield (%)", required: false },
+          { col: "G – R", name: "Jan – Dec Production Plan", required: false, note: "12 columns, batch quantity" },
+          { col: "S",     name: "Total Batch", required: false },
+          { col: "T",     name: "Total Qty (Before Yield)", required: false },
+          { col: "U",     name: "Total Qty (After Yield)", required: false },
+          { col: "V",     name: "Sales Quantity", required: false },
+          { col: "W",     name: "Coverage", required: false },
+        ],
+      },
+    ],
+    notes: [
+      "Row scan stops when column A is blank or its text equals \"Total\".",
+    ],
+  },
+
+  investment_plan: {
+    example: "investment plan template.xlsx",
+    signature: { cell: "A1", value: "[ I1 ]", note: "checked across all worksheets" },
+    metaFields: [
+      { cell: "C6",  name: "Type" },
+      { cell: "C9",  name: "Department" },
+      { cell: "C11", name: "Team Code", note: "single combined field in this template, e.g. \"All\"" },
+      { cell: "I13", name: "Plan Year" },
+    ],
+    sections: [
+      {
+        label: "Item grid",
+        startRow: 15,
+        columns: [
+          { col: "A",     name: "No", required: false },
+          { col: "B",     name: "Clarification", required: true },
+          { col: "C",     name: "Priority", required: false },
+          { col: "D",     name: "Item", required: false },
+          { col: "E",     name: "Purpose", required: false },
+          { col: "F",     name: "Picture", required: false },
+          { col: "G",     name: "QTY", required: false },
+          { col: "H",     name: "Lifetime (Year)", required: false },
+          { col: "I – T", name: "Jan – Dec Investment Amount", required: false, note: "12 columns" },
+          { col: "U",     name: "Total", required: false },
+          { col: "V",     name: "Notes (Replacement/Additional)", required: false },
+        ],
+      },
+    ],
+    notes: [
+      "Team Name is not read from this template at all — always stored blank.",
+      "Row scan stops when column A equals \"Total\". A row is skipped (scan continues) if Clarification (B) is blank.",
+    ],
+  },
+
+  opex_plan: {
+    example: "(O1) OPEX Plan_Summary_Department.xlsx",
+    signature: { cell: "A1", value: "[ O1 ]", note: "checked per sheet — a workbook can hold multiple department/team sheets" },
+    metaFields: [
+      { cell: "C6",  name: "Type" },
+      { cell: "C9",  name: "Department" },
+      { cell: "C11", name: "Team Code" },
+      { cell: "D11", name: "Team Name" },
+    ],
+    sections: [
+      {
+        label: "Item grid",
+        startRow: 15,
+        columns: [
+          { col: "A",     name: "No", required: false, note: "merged-cell group header — carried forward onto continuation rows" },
+          { col: "B",     name: "Managerial Account No", required: false, note: "carried forward" },
+          { col: "C",     name: "Managerial Account Name", required: false, note: "carried forward" },
+          { col: "D",     name: "Chart of Account No", required: "either" },
+          { col: "E",     name: "Chart of Account Name", required: "either" },
+          { col: "F",     name: "Controll/Uncontrolled", required: false },
+          { col: "G",     name: "Sales & Mkt Allocation", required: false },
+          { col: "H",     name: "Strategy Development Allocation", required: false },
+          { col: "I",     name: "Plant Allocation", required: false },
+          { col: "J",     name: "Admin Allocation", required: false },
+          { col: "K – V", name: "Jan – Dec OPEX Budget", required: false, note: "12 columns" },
+          { col: "W",     name: "Total", required: false },
+        ],
+      },
+    ],
+    notes: [
+      "A row requires at least one of Chart of Account No (D) or Chart of Account Name (E) filled — rows with both blank are skipped.",
+      "No / Managerial Account No / Managerial Account Name (A-C) follow the template's merged cells — only need to be filled on a group's first row, the importer carries them onto the rows below.",
+      "Row scan stops at a row whose No (A) equals \"Total\".",
+    ],
+  },
+};
+
 /* ─── Section: Simulation ──────────────────────────── */
 const SIM_SUBTABS = [
   { id: "data_collection",  label: "Purchase Plan",     icon: FileText },
@@ -3073,6 +3411,7 @@ function PurchasePlanPanel({ year }) {
         </div>
       </div>
       <div className="p-5">
+        <SimColumnsReference cfg={SIM_COLUMNS.data_collection} />
         {loading ? (
           <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>
         ) : !showForm ? (
@@ -3446,6 +3785,7 @@ function PersonnelPlanPanel({ year }) {
         </div>
       </div>
       <div className="p-5 space-y-5">
+        <SimColumnsReference cfg={SIM_COLUMNS.personnel_plan} />
         {loading ? (
           <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>
         ) : !showForm ? (
@@ -3847,6 +4187,7 @@ function ManufacturePlanPanel({ year }) {
         </div>
       </div>
       <div className="p-5">
+        <SimColumnsReference cfg={SIM_COLUMNS.manufacture_plan} />
         {loading ? (
           <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>
         ) : !showForm ? (
@@ -4150,6 +4491,7 @@ function InvestmentPlanPanel({ year }) {
         </div>
       </div>
       <div className="p-5">
+        <SimColumnsReference cfg={SIM_COLUMNS.investment_plan} />
         {loading ? (
           <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>
         ) : !showForm ? (
@@ -4455,6 +4797,7 @@ function OpexPlanPanel({ year }) {
         </div>
       </div>
       <div className="p-5">
+        <SimColumnsReference cfg={SIM_COLUMNS.opex_plan} />
         {loading ? (
           <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>
         ) : !showForm ? (
@@ -4853,6 +5196,7 @@ function SalesPlanPanel({ year }) {
         </div>
       </div>
       <div className="p-5">
+        <SimColumnsReference cfg={SIM_COLUMNS.sales_plan} />
         {!showForm ? (
           <>
             <div className="mb-4 flex items-end gap-3">

@@ -111,23 +111,31 @@ def _expectation_closing(last_acc: float, wd_actual: int, wd_total: int) -> floa
 
 def _daily_sales_kpi_by_month(rows: list) -> dict:
     """Actual-to-date and run-rate-projected closing for every month, from
-    the Daily Sales WD rows alone. The projection's "total WD this month
-    will have" can't come from the sheet's own Target column — that turns
-    out to be filled in lockstep with Acc/Sales (row by row, as each day
-    is entered), not pre-filled for the whole month, so it always equals
-    "days reported so far" and can't tell a projection apart from a plain
-    actual-to-date total. An HR Working Calendar (Mon-Fri minus holidays)
-    was tried instead and rejected: every closed month runs 3-4 WD *higher*
-    than that calendar (e.g. Dec 2025: 25 WD rows vs. 23 Mon-Fri days that
-    month) — evidently Daily Sales' own WD scheme isn't a plain weekday
-    count (most likely some Saturdays count as working days), and it's
-    consistent enough that plain office attendance doesn't apply here.
-    So instead: a month with data is either "closed" (not the most recent
-    one with data) — its own WD count already IS its total, no projection
-    needed — or the single "in progress" month (the most recent with any
-    data), which borrows the average WD count of this year's already-closed
-    months as its estimated total, tracking whatever this sheet's real
-    scheme is instead of guessing at it."""
+    the Daily Sales WD rows alone, each tagged with a status so the
+    frontend can color real vs. estimated figures differently:
+      - "actual": a closed month (not the most recent one with data) — its
+        own WD count already IS its total, no projection needed.
+      - "projected": the single "in progress" month (the most recent one
+        with any data) — run-rate projected using the average WD count of
+        this year's already-closed months as its estimated total. Can't use
+        the sheet's own Target column for that estimate — it turns out to
+        be filled in lockstep with Acc/Sales (row by row, as each day is
+        entered), not pre-filled for the whole month, so it always equals
+        "days reported so far". An HR Working Calendar (Mon-Fri minus
+        holidays) was tried instead and rejected too: every closed month
+        runs 3-4 WD *higher* than that calendar (e.g. Dec 2025: 25 WD rows
+        vs. 23 Mon-Fri days that month) — evidently Daily Sales' own WD
+        scheme isn't a plain weekday count (most likely some Saturdays
+        count as working days), so plain office attendance doesn't apply.
+      - "carried_forward": a month with no data yet, chronologically after
+        the in-progress month (e.g. picking "August" when data only goes
+        through July) — shows the running year-to-date total through the
+        last real month instead of a bare, alarming-looking 0.
+      - "no_data": no month this year has any data at all yet.
+    wd_total is also returned per month (0 for carried_forward/no_data) so
+    callers that need to project individual WD rows — not just the
+    month-end total — can reuse the same "how many WD will this month have"
+    estimate (see _project_current_month_rows)."""
     progress = {m: _month_progress(rows, m) for m in MONTHS}
     months_with_data = [m for m in MONTHS if progress[m][1] > 0]
     current_month = months_with_data[-1] if months_with_data else None
@@ -138,16 +146,54 @@ def _daily_sales_kpi_by_month(rows: list) -> dict:
     )
 
     result = {}
+    ytd_running = 0.0
     for m in MONTHS:
         last_acc, wd_actual = progress[m]
-        if wd_actual == 0:
-            wd_total = 0
-        elif m == current_month and avg_wd_closed is not None:
-            wd_total = avg_wd_closed
+        if wd_actual > 0:
+            if m == current_month and avg_wd_closed is not None:
+                wd_total, status = avg_wd_closed, "projected"
+            else:
+                wd_total, status = wd_actual, "actual"
+            exp = _expectation_closing(last_acc, wd_actual, wd_total)
+            ytd_running += exp
+            result[m] = {"last_acc": last_acc, "wd_actual": wd_actual, "wd_total": wd_total, "expectation_closing": exp, "status": status}
+        elif current_month is not None:
+            result[m] = {"last_acc": 0.0, "wd_actual": 0, "wd_total": 0, "expectation_closing": round(ytd_running, 3), "status": "carried_forward"}
         else:
-            wd_total = wd_actual
-        result[m] = {"last_acc": last_acc, "expectation_closing": _expectation_closing(last_acc, wd_actual, wd_total)}
+            result[m] = {"last_acc": 0.0, "wd_actual": 0, "wd_total": 0, "expectation_closing": 0.0, "status": "no_data"}
     return result
+
+
+def _project_current_month_rows(rows: list, kpi_by_month: dict) -> None:
+    """Mutates `rows` in place: for the single "projected" (in-progress)
+    month, fills its Acc/Sales past the last real WD with a straight-line
+    projection toward that month's run-rate expectation_closing, tagged
+    `projected: True` so the frontend can render them in a visibly
+    different color from real data — the Daily Sales Detail table
+    otherwise just leaves those cells blank until the real upload
+    catches up, which reads as missing/broken rather than "not yet due"."""
+    current_month = next((m for m, info in kpi_by_month.items() if info["status"] == "projected"), None)
+    if current_month is None:
+        return
+    info = kpi_by_month[current_month]
+    wd_actual, wd_total = info["wd_actual"], info["wd_total"]
+    if wd_total <= wd_actual:
+        return
+    remaining = wd_total - wd_actual
+    increment = (info["expectation_closing"] - info["last_acc"]) / remaining
+    for row in rows:
+        wd = row.get("wd")
+        if wd is None or not (wd_actual < wd <= wd_total):
+            continue
+        cell = row.get(current_month) or {}
+        if cell.get("acc") is not None:
+            continue
+        row[current_month] = {
+            "target": cell.get("target"),
+            "acc": round(info["last_acc"] + increment * (wd - wd_actual), 3),
+            "sales": round(increment, 3),
+            "projected": True,
+        }
 
 
 def _save_store(store: dict):
@@ -348,7 +394,19 @@ async def get_daily_sales_kpi(
     months_to_use = [month] if month else MONTHS
     total_bp = sum(monthly_bp[i] for i, m in enumerate(MONTHS) if m in months_to_use)
     total_actual = sum(kpi_by_month[m]["last_acc"] for m in months_to_use)
-    total_expectation = sum(kpi_by_month[m]["expectation_closing"] for m in months_to_use)
+
+    if month:
+        # Monthly: show this one month's own figure, carry-forward fallback included.
+        total_expectation = kpi_by_month[month]["expectation_closing"]
+        expectation_status = kpi_by_month[month]["status"]
+    else:
+        # Yearly: sum only real contributions (actual/projected) — a
+        # carried_forward month repeats the same YTD figure as a display
+        # fallback for its own card, so summing it into the year total
+        # would double-count months already counted individually.
+        counted = [kpi_by_month[m] for m in months_to_use if kpi_by_month[m]["status"] in ("actual", "projected")]
+        total_expectation = sum(c["expectation_closing"] for c in counted)
+        expectation_status = "projected" if any(c["status"] == "projected" for c in counted) else ("actual" if counted else "no_data")
 
     achievement_pct = round(total_actual / total_bp * 100, 2) if total_bp > 0 else 0.0
 
@@ -357,6 +415,7 @@ async def get_daily_sales_kpi(
         "month": month,
         "business_plan": round(total_bp, 3),
         "expectation_closing": round(total_expectation, 3),
+        "expectation_status": expectation_status,
         "achievement_pct": achievement_pct,
         "has_pac_data": has_pac_data,
         "has_daily_sales_data": entry is not None,
@@ -372,6 +431,8 @@ async def get_daily_sales(
     entry = store.get(str(year))
     if entry is None:
         return {"data": None}
+    rows = entry.get("rows", [])
+    _project_current_month_rows(rows, _daily_sales_kpi_by_month(rows))
     return {"data": {**entry, "year": year}}
 
 

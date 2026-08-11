@@ -107,13 +107,21 @@ function EisKpiCard({ title, value, unit, target, icon: Icon, color = "cyan" }) 
   );
 }
 
+const EXPECTATION_STATUS_CFG = {
+  actual:          { valueColor: "text-gray-100",  badge: null },
+  projected:       { valueColor: "text-purple-400", badge: "Proyeksi" },
+  carried_forward: { valueColor: "text-gray-400 italic", badge: "YTD s/d bulan lalu" },
+  no_data:         { valueColor: "text-gray-700",  badge: null },
+};
+
 function DailySalesKpiColumn({ label, kpi }) {
   const achPct = kpi?.achievement_pct || 0;
   const achColor = achPct >= 100 ? "text-emerald-400" : achPct >= 80 ? "text-amber-400" : "text-red-400";
+  const expCfg = EXPECTATION_STATUS_CFG[kpi?.expectation_status] || EXPECTATION_STATUS_CFG.actual;
   const rows = [
-    { title: "Business Plan", value: `${fmtN(kpi?.business_plan, 2)} M`, icon: Target, color: "cyan", valueColor: "text-gray-100" },
-    { title: "Expectation Closing", value: `${fmtN(kpi?.expectation_closing, 2)} M`, icon: TrendingUp, color: "amber", valueColor: "text-gray-100" },
-    { title: "Achievement", value: `${fmtN(achPct, 2)}%`, icon: CheckCircle2, color: "emerald", valueColor: achColor },
+    { title: "Business Plan", value: `${fmtN(kpi?.business_plan, 2)} M`, icon: Target, color: "cyan", valueColor: "text-gray-100", badge: null },
+    { title: "Expectation Closing", value: `${fmtN(kpi?.expectation_closing, 2)} M`, icon: TrendingUp, color: "amber", valueColor: expCfg.valueColor, badge: expCfg.badge },
+    { title: "Achievement", value: `${fmtN(achPct, 2)}%`, icon: CheckCircle2, color: "emerald", valueColor: achColor, badge: null },
   ];
   const colorMap = {
     cyan: "border-cyan-500/30 bg-cyan-500/10 text-cyan-400",
@@ -123,12 +131,15 @@ function DailySalesKpiColumn({ label, kpi }) {
   return (
     <div className="space-y-3">
       <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">{label}</h3>
-      {rows.map(({ title, value, icon: Icon, color, valueColor }) => (
+      {rows.map(({ title, value, icon: Icon, color, valueColor, badge }) => (
         <div key={title} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
           <div className="flex items-center gap-3">
             <div className={`w-9 h-9 rounded-lg border flex items-center justify-center shrink-0 ${colorMap[color]}`}><Icon size={17} /></div>
             <div>
-              <div className="text-xs text-gray-500 font-medium">{title}</div>
+              <div className="text-xs text-gray-500 font-medium flex items-center gap-1.5">
+                {title}
+                {badge && <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-400 normal-case">{badge}</span>}
+              </div>
               <div className={`text-xl font-bold ${valueColor}`}>{value}</div>
             </div>
           </div>
@@ -1144,7 +1155,7 @@ function EisDailySalesTab({ year }) {
         </ResponsiveContainer>
       </ChartCard>
 
-      <ChartCard title="Daily Sales Detail per Working Day" subtitle="in Million IDR · Acc = Accumulated, Sales = Daily" className="overflow-x-auto">
+      <ChartCard title="Daily Sales Detail per Working Day" subtitle="in Million IDR · Acc = Accumulated, Sales = Daily · angka ungu miring = proyeksi run-rate (belum ada data asli)" className="overflow-x-auto">
         <table className="text-[11px] border-collapse" style={{ minWidth: "1100px", width: "100%" }}>
           <thead>
             <tr className="bg-gray-950 text-gray-200">
@@ -1173,10 +1184,15 @@ function EisDailySalesTab({ year }) {
                 {MONTHS_FULL_ID.map((m) => {
                   const cell = row[m.key] || {};
                   const overTarget = cell.acc != null && monthTargets[m.key] && cell.acc >= monthTargets[m.key];
+                  const title = cell.projected ? "Projected — belum ada data asli, dihitung dari run-rate bulan berjalan" : undefined;
                   return (
                     <Fragment key={m.key}>
-                      <td className={`px-1.5 py-1.5 text-right font-mono border-l border-gray-800/60 ${cell.acc == null ? "text-gray-700" : overTarget ? "text-emerald-400 font-semibold" : "text-gray-300"}`}>{fmtInt(cell.acc)}</td>
-                      <td className={`px-1.5 py-1.5 text-right font-mono ${cell.sales == null ? "text-gray-700" : cell.sales < 0 ? "text-red-400" : "text-gray-500"}`}>{fmtInt(cell.sales)}</td>
+                      <td title={title} className={`px-1.5 py-1.5 text-right font-mono border-l border-gray-800/60 ${
+                        cell.acc == null ? "text-gray-700" : cell.projected ? "text-purple-400 italic" : overTarget ? "text-emerald-400 font-semibold" : "text-gray-300"
+                      }`}>{fmtInt(cell.acc)}</td>
+                      <td title={title} className={`px-1.5 py-1.5 text-right font-mono ${
+                        cell.sales == null ? "text-gray-700" : cell.projected ? "text-purple-400/70 italic" : cell.sales < 0 ? "text-red-400" : "text-gray-500"
+                      }`}>{fmtInt(cell.sales)}</td>
                     </Fragment>
                   );
                 })}
