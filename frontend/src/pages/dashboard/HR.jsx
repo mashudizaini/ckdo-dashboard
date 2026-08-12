@@ -55,6 +55,73 @@ const EMPLOYMENT_STATUS_BADGE = {
   "Resign": "bg-red-500/15 text-red-400 border-red-500/30",
 };
 
+// ── Every field on the Employee record, one column each — shared by the
+// Employee List tab AND the Summary drill-down modal so both always show
+// exactly the same data, in the same order (used to drift out of sync when
+// each screen kept its own column list) ──────────────────────────────────
+const _fmtEmpDate = (v) => v
+  ? new Date(v).toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })
+  : "—";
+const _empBadge = (val, map) => val
+  ? <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${map[val] || "bg-gray-700 text-gray-400 border-gray-600"}`}>{val}</span>
+  : "—";
+const _empTruncated = (val) => (
+  <span className="block max-w-[220px] truncate" title={val || ""}>{val || "—"}</span>
+);
+
+function getEmployeeFullCols(employeeNames) {
+  return [
+    { label: "Photo",            field: "__photo",           align: "center", noSort: true,
+      render: (e) => <EmployeePhotoThumb userId={e.user_id} hasPhoto={e.has_photo} size={28} /> },
+    { label: "NIK",              field: "user_id",          mono: true, bold: true },
+    { label: "Name",             field: "full_name",        bold: true },
+    { label: "Gender",           field: "sex",               align: "center",
+      render: (e) => e.sex === "M" ? <span className="text-blue-400 font-semibold">M</span> : e.sex === "F" ? <span className="text-pink-400 font-semibold">F</span> : "—" },
+    { label: "Place of Birth",   field: "place_of_birth" },
+    { label: "Date of Birth",    field: "date_of_birth",     render: (e) => _fmtEmpDate(e.date_of_birth) },
+    { label: "Religion",         field: "religion" },
+    { label: "Blood Type",       field: "blood_type",        align: "center" },
+    { label: "Marital",          field: "marital_status" },
+    { label: "Level",            field: "level" },
+    { label: "Department",       field: "department" },
+    { label: "Division",         field: "division" },
+    { label: "Team",             field: "team" },
+    { label: "Position",         field: "job_title",         render: (e) => _empTruncated(e.job_title) },
+    { label: "Supervisor",       field: "supervisor_id",
+      render: (e) => e.supervisor_id ? (employeeNames.find(n => n.user_id === e.supervisor_id)?.full_name || e.supervisor_id) : "—" },
+    { label: "Placement",        field: "work_placement" },
+    { label: "Status",           field: "status",            render: (e) => _empBadge(e.status, STATUS_BADGE) },
+    { label: "Employment",       field: "employment_status", render: (e) => _empBadge(e.employment_status, EMPLOYMENT_STATUS_BADGE) },
+    { label: "Grade",            field: "employee_grade",    align: "center", mono: true },
+    { label: "Join Date",        field: "date_of_joining",   render: (e) => _fmtEmpDate(e.date_of_joining) },
+    { label: "PKWT Ke",          field: "pkwt_ke" },
+    { label: "Starting PKWT",    field: "starting_pkwt",     render: (e) => _fmtEmpDate(e.starting_pkwt) },
+    { label: "End PKWT",         field: "end_pkwt",
+      render: (e) => e.end_pkwt
+        ? <span className={new Date(e.end_pkwt) < new Date() ? "text-red-400" : "text-amber-400"}>{_fmtEmpDate(e.end_pkwt)}</span>
+        : <span className="text-gray-700">—</span> },
+    { label: "Permanent Date",   field: "permanent_date",    render: (e) => _fmtEmpDate(e.permanent_date) },
+    { label: "Resign Date",      field: "resign_date",       render: (e) => e.employment_status === "Active" ? "—" : _fmtEmpDate(e.resign_date) },
+    { label: "Resign Reason",    field: "resign_reason",     render: (e) => _empTruncated(e.resign_reason) },
+    { label: "Retire Date",      field: "retire_date",       render: (e) => _fmtEmpDate(e.retire_date) },
+    { label: "Education",        field: "education_degree" },
+    { label: "School",           field: "education_school" },
+    { label: "Major",            field: "education_major" },
+    { label: "Work Experience",  field: "working_experience_years", align: "center" },
+    { label: "Previous Company", field: "previous_company",  render: (e) => _empTruncated(e.previous_company) },
+    { label: "Phone",            field: "phone_number",      mono: true },
+    { label: "Emergency Phone",  field: "emergency_phone",   mono: true },
+    { label: "Company Email",    field: "company_email" },
+    { label: "Personal Email",   field: "personal_email" },
+    { label: "Address",          field: "address",           render: (e) => _empTruncated(e.address) },
+    { label: "BPJS Health",      field: "no_bpjs_health",    mono: true },
+    { label: "BPJS Employee",    field: "no_bpjs_employee",  mono: true },
+    { label: "NPWP",             field: "npwp_number",       mono: true },
+    { label: "Bank Account (BCA)", field: "bank_account_bca", mono: true },
+    { label: "Bank Account Name", field: "bank_account_name" },
+  ];
+}
+
 const NEU_TAB = {
   bg: "#f1f5f9",
   out: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
@@ -209,7 +276,7 @@ function EmployeeTable() {
   const [teams,       setTeams]         = useState([]);
   const [joinYears,   setJoinYears]     = useState([]);
   const [summary,    setSummary]    = useState(null);
-  const [sortBy,     setSortBy]     = useState("full_name");
+  const [sortBy,     setSortBy]     = useState("date_of_joining");
   const [sortDir,    setSortDir]    = useState("asc");
   const [showExportPicker, setShowExportPicker] = useState(false);
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
@@ -391,14 +458,21 @@ function EmployeeTable() {
         </div>
       )}
 
-      {/* Toolbar — search + Filters popup + actions */}
+      {/* Toolbar — Refresh + search + Filters popup + actions */}
       <div className="flex flex-wrap items-end gap-2">
-        <div className="relative flex-1 min-w-[220px]">
+        <button
+          onClick={() => { fetchEmployees(); fetchSummary(); }}
+          className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-semibold text-gray-400 hover:border-gray-600 hover:text-gray-200 transition-colors"
+        >
+          <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Refresh
+        </button>
+
+        <div className="relative w-48">
           <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Search</label>
           <Search size={13} className="absolute left-2.5 top-[30px] text-gray-500" />
           <input
             type="text"
-            placeholder="Search name / NIK / position..."
+            placeholder="Name / NIK / position..."
             value={search}
             onChange={(e) => handleSearch(e.target.value)}
             className="w-full rounded-lg border border-gray-700 bg-gray-900 pl-8 pr-3 py-2 text-xs text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500 transition-colors"
@@ -421,8 +495,8 @@ function EmployeeTable() {
           {showFiltersPanel && (
             <>
               <div onClick={() => setShowFiltersPanel(false)} className="fixed inset-0 z-20" />
-              <div className="absolute left-0 top-full mt-2 z-30 w-[560px] rounded-xl border border-gray-700 bg-gray-900 shadow-2xl p-4">
-                <div className="grid grid-cols-3 gap-3">
+              <div className="absolute left-0 top-full mt-2 z-30 w-64 rounded-xl border border-gray-700 bg-gray-900 shadow-2xl p-4">
+                <div className="flex flex-col gap-3">
                   <div>
                     <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Department</label>
                     <select
@@ -521,13 +595,6 @@ function EmployeeTable() {
           <Upload size={13} /> {showUploadPanel ? "Hide Upload Employee" : "Upload Employee"}
         </button>
 
-        <button
-          onClick={() => { fetchEmployees(); fetchSummary(); }}
-          className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-semibold text-gray-400 hover:border-gray-600 hover:text-gray-200 transition-colors"
-        >
-          <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Refresh
-        </button>
-
         <div className="relative">
           <button
             onClick={() => setShowExportPicker(v => !v)}
@@ -578,66 +645,7 @@ function EmployeeTable() {
 
       {/* Tabel — every field on the Employee record gets its own column */}
       {(() => {
-        const fmtDate = (v) => v
-          ? new Date(v).toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" })
-          : "—";
-        const badge = (val, map) => val
-          ? <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${map[val] || "bg-gray-700 text-gray-400 border-gray-600"}`}>{val}</span>
-          : "—";
-        const truncated = (val) => (
-          <span className="block max-w-[220px] truncate" title={val || ""}>{val || "—"}</span>
-        );
-
-        const COLS = [
-          { label: "Photo",            field: "__photo",           align: "center", noSort: true,
-            render: (e) => <EmployeePhotoThumb userId={e.user_id} hasPhoto={e.has_photo} size={28} /> },
-          { label: "NIK",              field: "user_id",          mono: true, bold: true },
-          { label: "Name",             field: "full_name",        bold: true },
-          { label: "Gender",           field: "sex",               align: "center",
-            render: (e) => e.sex === "M" ? <span className="text-blue-400 font-semibold">M</span> : e.sex === "F" ? <span className="text-pink-400 font-semibold">F</span> : "—" },
-          { label: "Place of Birth",   field: "place_of_birth" },
-          { label: "Date of Birth",    field: "date_of_birth",     render: (e) => fmtDate(e.date_of_birth) },
-          { label: "Religion",         field: "religion" },
-          { label: "Blood Type",       field: "blood_type",        align: "center" },
-          { label: "Marital",          field: "marital_status" },
-          { label: "Level",            field: "level" },
-          { label: "Department",       field: "department" },
-          { label: "Division",         field: "division" },
-          { label: "Team",             field: "team" },
-          { label: "Position",         field: "job_title",         render: (e) => truncated(e.job_title) },
-          { label: "Supervisor",       field: "supervisor_id",
-            render: (e) => e.supervisor_id ? (employeeNames.find(n => n.user_id === e.supervisor_id)?.full_name || e.supervisor_id) : "—" },
-          { label: "Placement",        field: "work_placement" },
-          { label: "Status",           field: "status",            render: (e) => badge(e.status, STATUS_BADGE) },
-          { label: "Employment",       field: "employment_status", render: (e) => badge(e.employment_status, EMPLOYMENT_STATUS_BADGE) },
-          { label: "Grade",            field: "employee_grade",    align: "center", mono: true },
-          { label: "Join Date",        field: "date_of_joining",   render: (e) => fmtDate(e.date_of_joining) },
-          { label: "PKWT Ke",          field: "pkwt_ke" },
-          { label: "Starting PKWT",    field: "starting_pkwt",     render: (e) => fmtDate(e.starting_pkwt) },
-          { label: "End PKWT",         field: "end_pkwt",
-            render: (e) => e.end_pkwt
-              ? <span className={new Date(e.end_pkwt) < new Date() ? "text-red-400" : "text-amber-400"}>{fmtDate(e.end_pkwt)}</span>
-              : <span className="text-gray-700">—</span> },
-          { label: "Permanent Date",   field: "permanent_date",    render: (e) => fmtDate(e.permanent_date) },
-          { label: "Resign Date",      field: "resign_date",       render: (e) => e.employment_status === "Active" ? "—" : fmtDate(e.resign_date) },
-          { label: "Resign Reason",    field: "resign_reason",     render: (e) => truncated(e.resign_reason) },
-          { label: "Retire Date",      field: "retire_date",       render: (e) => fmtDate(e.retire_date) },
-          { label: "Education",        field: "education_degree" },
-          { label: "School",           field: "education_school" },
-          { label: "Major",            field: "education_major" },
-          { label: "Work Experience",  field: "working_experience_years", align: "center" },
-          { label: "Previous Company", field: "previous_company",  render: (e) => truncated(e.previous_company) },
-          { label: "Phone",            field: "phone_number",      mono: true },
-          { label: "Emergency Phone",  field: "emergency_phone",   mono: true },
-          { label: "Company Email",    field: "company_email" },
-          { label: "Personal Email",   field: "personal_email" },
-          { label: "Address",          field: "address",           render: (e) => truncated(e.address) },
-          { label: "BPJS Health",      field: "no_bpjs_health",    mono: true },
-          { label: "BPJS Employee",    field: "no_bpjs_employee",  mono: true },
-          { label: "NPWP",             field: "npwp_number",       mono: true },
-          { label: "Bank Account (BCA)", field: "bank_account_bca", mono: true },
-          { label: "Bank Account Name", field: "bank_account_name" },
-        ];
+        const COLS = getEmployeeFullCols(employeeNames);
 
         return (
           <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 480 }}>
@@ -1965,23 +1973,6 @@ function SummaryHBarList({ items, max }) {
   );
 }
 
-// ── Employee Summary — data (KPI + breakdown), tanpa chart ─────────────────────
-const SUMMARY_COLS = [
-  { label: "NIK",               field: "user_id",          mono: true },
-  { label: "Name",              field: "full_name",        bold: true },
-  { label: "Sex",               field: "sex",               align: "center",
-    render: (e) => e.sex === "M" ? <span className="text-blue-400 font-semibold">M</span> : e.sex === "F" ? <span className="text-pink-400 font-semibold">F</span> : "—" },
-  { label: "Department",        field: "department" },
-  { label: "Position",          field: "job_title" },
-  { label: "Education",         field: "education_degree" },
-  { label: "Marital Status",    field: "marital_status" },
-  { label: "Employment Status", field: "employment_status", render: (e) => e.employment_status
-      ? <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${EMPLOYMENT_STATUS_BADGE[e.employment_status] || "bg-gray-700 text-gray-400 border-gray-600"}`}>{e.employment_status}</span>
-      : "—" },
-  { label: "Join Date",         field: "date_of_joining",
-    render: (e) => e.date_of_joining ? new Date(e.date_of_joining).toLocaleDateString("en-US", { day: "2-digit", month: "short", year: "numeric" }) : "—" },
-];
-
 function EmployeeSummarySection() {
   const [drillYear, setDrillYear] = useState(null); // null = Yearly Summary; a year = Monthly Summary for that year
   const [listModal, setListModal] = useState(null); // drill-down filter payload, or null
@@ -2024,6 +2015,7 @@ function EmployeeListModal({ initialFilters, onClose }) {
   const [data, setData] = useState({ employees: [], total: 0, pages: 1 });
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState(initialFilters?.department || "");
   const [divisionFilter, setDivisionFilter] = useState(initialFilters?.division || "");
   const [educationFilter, setEducationFilter] = useState("");
@@ -2040,11 +2032,12 @@ function EmployeeListModal({ initialFilters, onClose }) {
   const [teams, setTeams] = useState([]);
   const [maritalStatuses, setMaritalStatuses] = useState([]);
   const [joinYears, setJoinYears] = useState([]);
-  const [sortBy, setSortBy] = useState("full_name");
+  const [sortBy, setSortBy] = useState("date_of_joining");
   const [sortDir, setSortDir] = useState("asc");
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [employeeNames, setEmployeeNames] = useState([]);
   const [exporting, setExporting] = useState(false);
+  const [showFiltersPanel, setShowFiltersPanel] = useState(false);
 
   const PAGE_SIZE = 8;
 
@@ -2069,6 +2062,7 @@ function EmployeeListModal({ initialFilters, onClose }) {
     } catch (_) {}
   }, []); // eslint-disable-line
 
+  const handleSearch = (v) => { setSearch(v); setPage(1); };
   const handleDeptFilter = (v) => { setDeptFilter(v); setDivisionFilter(""); setTeamFilter(""); fetchTeams(v); setPage(1); };
 
   const fetchEmployeeNames = useCallback(async () => {
@@ -2076,6 +2070,7 @@ function EmployeeListModal({ initialFilters, onClose }) {
   }, []); // eslint-disable-line
 
   const summaryParams = useCallback(() => ({
+    ...(search ? { search } : {}),
     ...(deptFilter ? { department: deptFilter } : {}),
     ...(divisionFilter ? { division: divisionFilter } : {}),
     ...(educationFilter ? { education: educationFilter } : {}),
@@ -2086,7 +2081,7 @@ function EmployeeListModal({ initialFilters, onClose }) {
     ...(sexFilter ? { sex: sexFilter } : {}),
     ...(asOfMonth ? { snapshot_month: asOfMonth } : {}),
     ...(asOfYear  ? { snapshot_year: asOfYear }   : {}),
-  }), [deptFilter, divisionFilter, educationFilter, levelFilter, teamFilter, employmentStatusFilter, maritalFilter, sexFilter, asOfMonth, asOfYear]);
+  }), [search, deptFilter, divisionFilter, educationFilter, levelFilter, teamFilter, employmentStatusFilter, maritalFilter, sexFilter, asOfMonth, asOfYear]);
 
   const fetchEmployees = useCallback(async () => {
     setLoading(true);
@@ -2104,7 +2099,7 @@ function EmployeeListModal({ initialFilters, onClose }) {
   const handleExport = async () => {
     setExporting(true);
     try {
-      const fields = SUMMARY_COLS.map(c => c.field).join(",");
+      const fields = EMPLOYEE_COLS.map(c => c.key).join(",");
       const params = new URLSearchParams({ sort_by: sortBy, sort_dir: sortDir, fields, ...summaryParams() });
       const res = await fetch(`${API}/export?${params}`, { headers });
       if (!res.ok) throw new Error("Export failed");
@@ -2134,18 +2129,20 @@ function EmployeeListModal({ initialFilters, onClose }) {
   };
 
   const filterSelect = (label, value, onChange, options) => (
-    <div className="w-32">
-      <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">{label}</label>
+    <div>
+      <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">{label}</label>
       <select
         value={value}
         onChange={(e) => { onChange(e.target.value); setPage(1); }}
-        className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+        className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
       >
         <option value="">All</option>
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
     </div>
   );
+
+  const COLS = getEmployeeFullCols(employeeNames);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
@@ -2176,83 +2173,127 @@ function EmployeeListModal({ initialFilters, onClose }) {
           </button>
         </div>
 
-        {/* Filter bar */}
+        {/* Toolbar — Refresh + search + Filters popup, same layout as the Employee List tab */}
         <div className="flex flex-wrap items-end gap-2">
-          {filterSelect("Department", deptFilter, handleDeptFilter, departments)}
-          {filterSelect("Team", teamFilter, (v) => { setTeamFilter(v); setPage(1); }, teams)}
-          {filterSelect("Education", educationFilter, setEducationFilter, educations)}
-          {filterSelect("Level", levelFilter, setLevelFilter, levels)}
-          <div className="w-32">
-            <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">Employee Status</label>
-            <select
-              value={employmentStatusFilter}
-              onChange={(e) => { setEmploymentStatusFilter(e.target.value); setPage(1); }}
-              className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
-            >
-              <option value="">All</option>
-              <option value="Active">ACTIVE</option>
-              <option value="Resign">INACTIVE</option>
-            </select>
+          <button
+            onClick={fetchEmployees}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-semibold text-gray-400 hover:border-gray-600 hover:text-gray-200 transition-colors"
+          >
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Refresh
+          </button>
+
+          <div className="relative w-48">
+            <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Search</label>
+            <Search size={13} className="absolute left-2.5 top-[30px] text-gray-500" />
+            <input
+              type="text"
+              placeholder="Name / NIK / position..."
+              value={search}
+              onChange={(e) => handleSearch(e.target.value)}
+              className="w-full rounded-lg border border-gray-700 bg-gray-900 pl-8 pr-3 py-2 text-xs text-gray-200 placeholder-gray-600 outline-none focus:border-indigo-500 transition-colors"
+            />
+            {search && (
+              <button onClick={() => handleSearch("")} className="absolute right-2 top-[30px] text-gray-600 hover:text-gray-400">
+                <X size={13} />
+              </button>
+            )}
           </div>
-          {filterSelect("Marital Status", maritalFilter, setMaritalFilter, maritalStatuses)}
-          <div className="w-32">
-            <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">Sex</label>
-            <select
-              value={sexFilter}
-              onChange={(e) => { setSexFilter(e.target.value); setPage(1); }}
-              className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+
+          <div className="relative">
+            <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">&nbsp;</label>
+            <button
+              onClick={() => setShowFiltersPanel(v => !v)}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-semibold text-gray-300 hover:border-indigo-500 hover:text-white transition-colors"
             >
-              <option value="">All</option>
-              <option value="M">Male</option>
-              <option value="F">Female</option>
-            </select>
-          </div>
-          <div className="w-32" title="Shows employees active as of the end of the selected Month/Year (joined on/before, not yet resigned)">
-            <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">As of (Mo)</label>
-            <select
-              value={asOfMonth}
-              onChange={(e) => { setAsOfMonth(e.target.value); setPage(1); }}
-              className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
-            >
-              <option value="">All</option>
-              {MONTHS_ID.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-            </select>
-          </div>
-          <div className="w-32" title="Shows employees active as of the end of the selected Month/Year (joined on/before, not yet resigned)">
-            <label className="mb-1 block text-[10px] font-medium text-gray-500 truncate">As of (Yr)</label>
-            <select
-              value={asOfYear}
-              onChange={(e) => { setAsOfYear(e.target.value); setPage(1); }}
-              className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
-            >
-              <option value="">All</option>
-              {joinYears.map((y) => <option key={y} value={y}>{y}</option>)}
-            </select>
+              <SlidersHorizontal size={13} /> Filters
+            </button>
+            {showFiltersPanel && (
+              <>
+                <div onClick={() => setShowFiltersPanel(false)} className="fixed inset-0 z-20" />
+                <div className="absolute left-0 top-full mt-2 z-30 w-64 rounded-xl border border-gray-700 bg-gray-900 shadow-2xl p-4">
+                  <div className="flex flex-col gap-3">
+                    {filterSelect("Department", deptFilter, handleDeptFilter, departments)}
+                    {filterSelect("Team", teamFilter, (v) => { setTeamFilter(v); setPage(1); }, teams)}
+                    {filterSelect("Education", educationFilter, setEducationFilter, educations)}
+                    {filterSelect("Level", levelFilter, setLevelFilter, levels)}
+                    <div>
+                      <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Employment State</label>
+                      <select
+                        value={employmentStatusFilter}
+                        onChange={(e) => { setEmploymentStatusFilter(e.target.value); setPage(1); }}
+                        className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+                      >
+                        <option value="">All</option>
+                        <option value="Active">Active</option>
+                        <option value="Resign">Inactive</option>
+                      </select>
+                    </div>
+                    {filterSelect("Marital Status", maritalFilter, setMaritalFilter, maritalStatuses)}
+                    <div>
+                      <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Sex</label>
+                      <select
+                        value={sexFilter}
+                        onChange={(e) => { setSexFilter(e.target.value); setPage(1); }}
+                        className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+                      >
+                        <option value="">All</option>
+                        <option value="M">Male</option>
+                        <option value="F">Female</option>
+                      </select>
+                    </div>
+                    <div title="Shows employees active as of the end of the selected Month/Year (joined on/before, not yet resigned)">
+                      <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">As of (Month)</label>
+                      <select
+                        value={asOfMonth}
+                        onChange={(e) => { setAsOfMonth(e.target.value); setPage(1); }}
+                        className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+                      >
+                        <option value="">All</option>
+                        {MONTHS_ID.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                      </select>
+                    </div>
+                    <div title="Shows employees active as of the end of the selected Month/Year (joined on/before, not yet resigned)">
+                      <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">As of (Year)</label>
+                      <select
+                        value={asOfYear}
+                        onChange={(e) => { setAsOfYear(e.target.value); setPage(1); }}
+                        className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+                      >
+                        <option value="">All</option>
+                        {joinYears.map((y) => <option key={y} value={y}>{y}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
-        {/* Table */}
-        <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 360 }}>
-          <table className="w-full text-sm" style={{ minWidth: 1160 }}>
+        {/* Table — every field on the Employee record, same columns as the Employee List tab */}
+        <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 480 }}>
+          <table className="w-full text-sm" style={{ minWidth: 4200 }}>
             <thead className="sticky top-0 z-10">
               <tr className="bg-gray-800">
-                {SUMMARY_COLS.map(({ label, field }) => {
-                  const active = sortBy === field;
+                {COLS.map(({ label, field, noSort }) => {
+                  const active = !noSort && sortBy === field;
                   return (
                     <th
                       key={field}
-                      onClick={() => handleSort(field)}
-                      className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap cursor-pointer select-none group"
+                      onClick={() => !noSort && handleSort(field)}
+                      className={`px-3 py-2.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap select-none group ${noSort ? "" : "cursor-pointer"}`}
                       style={{ color: active ? "#a5b4fc" : "#6b7280", textAlign: "center" }}
                     >
-                      <span className="inline-flex items-center gap-1 justify-center">
-                        {label}
-                        <span className={`transition-opacity ${active ? "opacity-100" : "opacity-0 group-hover:opacity-50"}`}>
-                          {active
-                            ? (sortDir === "asc" ? <ChevronUp size={11} className="text-indigo-400" /> : <ChevronDown size={11} className="text-indigo-400" />)
-                            : <ArrowUpDown size={10} />}
+                      {noSort ? label : (
+                        <span className="inline-flex items-center gap-1 justify-center">
+                          {label}
+                          <span className={`transition-opacity ${active ? "opacity-100" : "opacity-0 group-hover:opacity-50"}`}>
+                            {active
+                              ? (sortDir === "asc" ? <ChevronUp size={11} className="text-indigo-400" /> : <ChevronDown size={11} className="text-indigo-400" />)
+                              : <ArrowUpDown size={10} />}
+                          </span>
                         </span>
-                      </span>
+                      )}
                     </th>
                   );
                 })}
@@ -2260,12 +2301,12 @@ function EmployeeListModal({ initialFilters, onClose }) {
             </thead>
             <tbody className="divide-y divide-gray-800">
               {loading ? (
-                <tr><td colSpan={SUMMARY_COLS.length} className="py-12 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></td></tr>
+                <tr><td colSpan={COLS.length} className="py-12 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></td></tr>
               ) : data.employees.length === 0 ? (
-                <tr><td colSpan={SUMMARY_COLS.length} className="py-12 text-center text-xs text-gray-600">No employees matching filter</td></tr>
+                <tr><td colSpan={COLS.length} className="py-12 text-center text-xs text-gray-600">No employees matching filter</td></tr>
               ) : data.employees.map((e) => (
                 <tr key={e.user_id} onClick={() => setSelectedEmployee(e)} className="hover:bg-gray-800/40 transition-colors cursor-pointer">
-                  {SUMMARY_COLS.map(({ field, mono, bold, align, render }) => (
+                  {COLS.map(({ field, mono, bold, align, render }) => (
                     <td
                       key={field}
                       className={`px-3 py-2.5 whitespace-nowrap text-xs ${mono ? "font-mono" : ""} ${bold ? "font-medium text-gray-200" : "text-gray-500"}`}
