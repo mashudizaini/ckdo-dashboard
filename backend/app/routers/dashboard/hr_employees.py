@@ -846,30 +846,57 @@ async def list_employees(
 
 
 # ── Excel export — styled to match HR's reference template ────────────────────
-# (key, label, width) — same 18 fields/order as the frontend's export picker
-# (EMPLOYEE_COLS in HR.jsx), plus the column widths from the reference file
-# employee_data_2026-07-23_output_template_excel.xlsx.
+# (key, label, width) — mirrors every column shown on-screen in the Employee
+# List (getEmployeeFullCols in HR.jsx, minus the Photo column which has no
+# exportable value), so "Download Excel" always matches what's currently
+# displayed in the table.
 _EXPORT_COLUMNS = [
     ("user_id",           "NIK",               10),
     ("full_name",         "Name",              32),
+    ("sex",                "Gender",           10),
+    ("place_of_birth",     "Place of Birth",   20),
+    ("date_of_birth",      "Date of Birth",    14),
+    ("religion",           "Religion",         14),
+    ("blood_type",         "Blood Type",       10),
+    ("marital_status",     "Marital",          10),
     ("level",              "Level",            18),
     ("department",         "Department",       20),
     ("division",           "Division",         14),
     ("team",               "Team",             10),
     ("job_title",          "Position",         32),
+    ("supervisor_id",      "Supervisor",       14),
     ("work_placement",     "Placement",        16),
     ("status",             "Status",           12),
     ("employment_status",  "Employment Status", 18),
-    ("sex",                "Gender",           10),
     ("employee_grade",     "Grade",            10),
-    ("education_degree",   "Education",        40),
-    ("marital_status",     "Marital",          10),
     ("date_of_joining",    "Join Date",        14),
-    ("resign_date",        "Resign Date",      14),
+    ("pkwt_ke",            "PKWT Ke",          10),
+    ("starting_pkwt",      "Starting PKWT",    14),
     ("end_pkwt",           "End PKWT",         14),
+    ("permanent_date",     "Permanent Date",   14),
+    ("resign_date",        "Resign Date",      14),
+    ("resign_reason",      "Resign Reason",    30),
+    ("retire_date",        "Retire Date",      14),
+    ("education_degree",   "Education",        40),
+    ("education_school",   "School",           30),
+    ("education_major",    "Major",            24),
+    ("working_experience_years", "Work Experience", 16),
+    ("previous_company",   "Previous Company", 26),
     ("phone_number",       "Phone",            16),
+    ("emergency_phone",    "Emergency Phone",  16),
+    ("company_email",      "Company Email",    28),
+    ("personal_email",     "Personal Email",   28),
+    ("address",            "Address",          40),
+    ("no_bpjs_health",     "BPJS Health",      18),
+    ("no_bpjs_employee",   "BPJS Employee",    18),
+    ("npwp_number",        "NPWP",             18),
+    ("bank_account_bca",   "Bank Account (BCA)", 16),
+    ("bank_account_name",  "Bank Account Name", 24),
 ]
-_EXPORT_DATE_KEYS = {"date_of_joining", "resign_date", "end_pkwt"}
+_EXPORT_DATE_KEYS = {
+    "date_of_joining", "resign_date", "end_pkwt",
+    "date_of_birth", "starting_pkwt", "permanent_date", "retire_date",
+}
 
 
 def _export_cell_value(e: Employee, key: str):

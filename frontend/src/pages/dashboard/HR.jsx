@@ -22,28 +22,6 @@ const BUDGET_API = "/api/v1/dashboard/hr/budget";
 
 const MONTHS_ID = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-// ── Employee List Excel export — field list shown in the download picker ──
-const EMPLOYEE_COLS = [
-  { key: "user_id",          label: "NIK" },
-  { key: "full_name",        label: "Name" },
-  { key: "level",            label: "Level" },
-  { key: "department",       label: "Department" },
-  { key: "division",         label: "Division" },
-  { key: "team",             label: "Team" },
-  { key: "job_title",        label: "Position" },
-  { key: "work_placement",   label: "Placement" },
-  { key: "status",           label: "Status" },
-  { key: "employment_status", label: "Employment Status" },
-  { key: "sex",              label: "Gender" },
-  { key: "employee_grade",   label: "Grade" },
-  { key: "education_degree", label: "Education" },
-  { key: "marital_status",   label: "Marital" },
-  { key: "date_of_joining",  label: "Join Date" },
-  { key: "resign_date",      label: "Resign Date" },
-  { key: "end_pkwt",         label: "End PKWT" },
-  { key: "phone_number",     label: "Phone" },
-];
-
 const STATUS_BADGE = {
   "Permanent": "bg-green-500/15 text-green-400 border-green-500/30",
   "Contract":  "bg-amber-500/15 text-amber-400 border-amber-500/30",
@@ -121,6 +99,13 @@ function getEmployeeFullCols(employeeNames) {
     { label: "Bank Account Name", field: "bank_account_name" },
   ];
 }
+
+// ── Employee List Excel export — field list shown in the download picker.
+// Derived from getEmployeeFullCols() (minus the Photo column, which has no
+// exportable value) so the export always matches what's on screen. ───────
+const EMPLOYEE_COLS = getEmployeeFullCols(null)
+  .filter(c => c.field !== "__photo")
+  .map(c => ({ key: c.field, label: c.label }));
 
 const NEU_TAB = {
   bg: "#f1f5f9",
@@ -581,6 +566,8 @@ function EmployeeTable() {
           )}
         </div>
 
+        <div className="flex-1" />
+
         <button
           onClick={() => setAddingEmployee(true)}
           className="flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-2 text-xs font-semibold text-white transition-colors"
@@ -613,7 +600,7 @@ function EmployeeTable() {
                     <button onClick={() => setAllExportFields(false)} className="text-[10px] text-gray-500 hover:text-gray-400">None</button>
                   </div>
                 </div>
-                <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
+                <div className="max-h-80 overflow-y-auto space-y-1 pr-1">
                   {EMPLOYEE_COLS.map(c => (
                     <label key={c.key} className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer hover:text-white px-1 py-0.5 rounded">
                       <input type="checkbox" checked={!!exportFields[c.key]} onChange={() => toggleExportField(c.key)}
