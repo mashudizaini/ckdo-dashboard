@@ -137,12 +137,13 @@ async def get_budget_summary(
 @router.get("/account/{account_code}")
 async def get_account_detail(
     account_code: str,
-    dept: str          = Query(...),
-    year: int          = Query(...),
-    user: CurrentUser  = Depends(require_role(Roles.HR)),
+    dept:  str           = Query(...),
+    year:  int           = Query(...),
+    month: Optional[int] = Query(None, description="Tampilkan periode Jan s.d. bulan ini saja — samakan dengan filter bulan di ringkasan"),
+    user:  CurrentUser   = Depends(require_role(Roles.HR)),
 ):
-    """Rincian per bulan + item AP Invoice untuk 1 akun dalam 1 department."""
-    return await BudgetService().get_account_detail(dept, account_code, year)
+    """Rincian per periode (Period Balances YTDE) untuk 1 akun dalam 1 department."""
+    return await BudgetService().get_account_detail(dept, account_code, year, month)
 
 
 # ── GET /export ───────────────────────────────────────────────────────────────

@@ -2,27 +2,39 @@
 Budget Monitoring Service
 ─────────────────────────────────────────
 Query langsung ke Oracle EBS 12.2.8 — pola identik dengan ITService & PurchasingService.
+Layout & rumus meniru persis Oracle EBS "Funds Available Inquiry" /
+"Period Balances (YTDE)" drilldown — supaya angkanya selalu bisa dicocokkan
+langsung dengan yang dilihat user di Oracle client.
 
 COA Structure CKD Otto:
   segment3 = CKDO_GL_COA_DEPARTMENT  → department (parameter, tidak di-hardcode)
   segment4 = natural account           → kode akun
 
-Sumber data:
-  GL_BALANCES (actual_flag='B')            → budget per akun per periode (PTD — Period-To-Date,
-                                              cocok dengan Oracle "Budget Balances" drilldown)
-  GL_BALANCES (actual_flag='A')            → actual per akun per periode, pola sama dengan budget
+Sumber data (semua dari GL_BALANCES, per akun per periode/bulan):
+  actual_flag='B'  → Budget
+  actual_flag='E'  → Encumbrance
+  actual_flag='A'  → Actual (SEMUA sumber posting: AP Invoice, payroll, jurnal manual, dll)
 
-Ringkasan akun (get_summary): jika parameter month diisi → PTD bulan itu saja;
-jika kosong (All Months) → dijumlah satu tahun penuh.
-  GL_BALANCES (actual_flag='E')            → encumbrance per akun per periode
-  GL_JE_LINES/GL_JE_HEADERS (je_category   → budget reclass (di-net-kan debit−credit,
-    IN ('RECLASS','BUDGET'))                 lihat catatan di _query_reclass_gl)
-  AP_EXPENSE_REPORT_LINES +                → klaim expense report HRGA per bulan
-  AP_EXPENSE_REPORT_HEADERS_V                (detail kertas kerja per akun, bukan AP Invoice)
+Rumus (sama di get_summary & get_account_detail):
+  Funds Available = Budget − Encumbrance − Actual
 
-Rumus (ringkasan akun):        Remain = Budget − Actual
-Rumus (kertas kerja per bulan): Remain = Available + Reclass − Total Actual
-                                 dengan Available = Budget − Encumbrance
+get_summary: parameter `month` = Year-To-Date SAMPAI DENGAN bulan itu (Oracle
+"Year To Date Extended"), bukan Period-To-Date bulan itu saja; kosong = satu
+tahun penuh. Parameter `account` opsional untuk filter ke satu akun.
+
+get_account_detail: pecahan per periode (satu baris per bulan, dipotong s.d.
+parameter `month` kalau diisi) dari rumus yang sama, meniru Oracle "Period
+Balances (YTDE)". AP_EXPENSE_REPORT_LINES + PO_REQUISITION_LINES_ALL
+(_query_expense_report_items / _query_purchase_requisition_items) disertakan
+per periode sebagai daftar transaksi pendukung Actual (klik untuk lihat) —
+untuk transparansi sumber saja, BUKAN komponen rumus Funds Available (Actual
+GL sudah mencakup lebih banyak sumber daripada dua tabel itu).
+
+_query_reclass_gl (GL_JE_LINES kategori RECLASS/BUDGET, workaround data-entry
+CKD Otto) tidak lagi dipakai di rumus manapun — Oracle sendiri tidak
+menampilkan reclass di Funds Available Inquiry / Period Balances, jadi
+memasukkannya justru bikin angka kita menyimpang dari Oracle. Method-nya
+dibiarkan (tidak dihapus) untuk referensi/kebutuhan lain di masa depan.
 """
 import asyncio
 from app.database import get_oracle_connection
@@ -185,25 +197,32 @@ class BudgetService:
 
     # ── Detail per akun per bulan ─────────────────────────────────────────────
 
-    async def get_account_detail(self, dept: str, account_code: str, year: int) -> dict:
+    async def get_account_detail(self, dept: str, account_code: str, year: int, month: int = None) -> dict:
         """
-        Rincian per bulan untuk 1 akun, format kertas kerja HRGA:
-        - budget       dari GL_BALANCES (actual_flag='B')
-        - encumbrance  dari GL_BALANCES (actual_flag='E')
-        - available    = budget − encumbrance (belum dikurangi actual bulan ini —
-          sama seperti "Funds Available" di Oracle Funds Available Inquiry)
-        - reclass      dari GL_JE_LINES/GL_JE_HEADERS kategori 'RECLASS'/'BUDGET',
-          di-net-kan (debit − credit) karena proses import reclass sebelumnya
-          menghasilkan baris debit DAN credit untuk akun yang sama (kesalahan
-          prosedur import, bukan reclass ganda)
-        - items + total_actual dari AP_EXPENSE_REPORT_LINES + AP_EXPENSE_REPORT_HEADERS_V
-          (klaim expense report HRGA — meal, petty cash, dll), BUKAN AP Invoice.
-          Baris Purchase Requisition (PO_REQUISITION_LINES_ALL, belum di-invoice)
-          ikut ditampilkan di daftar transaksi yang sama untuk visibilitas
-          komitmen belanja, ditandai field "source" — TIDAK dijumlahkan ke
-          total_actual/remain (PR belum posting ke GL sebagai actual; nilainya
-          sudah tercermin di Encumbrance).
-        - remain       = available + reclass − total_actual
+        Rincian per periode untuk 1 akun — SAMA PERSIS dengan Oracle EBS
+        "Period Balances (YTDE)" drilldown (per-period Budget/Encumbrance/
+        Actual/Funds Available, bukan kertas kerja custom):
+        - budget           dari GL_BALANCES (actual_flag='B'), PTD per bulan
+        - encumbrance      dari GL_BALANCES (actual_flag='E'), PTD per bulan
+        - actual           dari GL_BALANCES (actual_flag='A'), PTD per bulan —
+          SAMA dengan yang dipakai get_summary, mencakup SEMUA sumber posting
+          (AP Invoice, payroll, jurnal manual, dll). Versi sebelumnya salah
+          pakai total klaim Expense Report saja di sini, yang cuma subset dari
+          actual GL sesungguhnya — itu sebabnya angkanya tidak cocok dengan
+          Oracle "Period Balances" (Expense Report tidak mencakup AP Invoice/
+          payroll/jurnal lain yang juga membentuk actual_flag='A').
+        - funds_available  = budget − encumbrance − actual (persis rumus
+          Oracle, dihitung per periode — bukan budget − encumbrance saja)
+        - `month` (opsional) = tampilkan periode Januari s.d. bulan itu saja,
+          bukan satu tahun penuh — cocok dengan filter "sampai dengan" di
+          get_summary, supaya rincian yang dibuka tidak melebihi filter Actual
+          yang sedang dilihat user.
+
+        Expense Report + Purchase Requisition tetap disertakan per periode
+        sebagai `items` (transaksi pendukung, ditandai `source`) untuk
+        transparansi apa yang membentuk Actual — TAPI jumlahnya TIDAK selalu
+        sama dengan `actual` (GL actual mencakup AP Invoice/payroll juga,
+        Expense Report+PR cuma sebagian sumbernya).
         """
         budget_rows = await asyncio.to_thread(
             self._query_budget, dept, year, month=None, account_code=account_code
@@ -217,11 +236,10 @@ class BudgetService:
         encumbrance_map = {int(r["month"]): int(r.get("encumbrance_amount") or 0)
                             for r in encumbrance_rows}
 
-        reclass_rows = await asyncio.to_thread(
-            self._query_reclass_gl, dept, year, month=None, account_code=account_code
+        actual_rows = await asyncio.to_thread(
+            self._query_actual_gl, dept, year, month=None, account_code=account_code
         )
-        reclass_map  = {int(r["month"]): int(r.get("reclass_amount") or 0) for r in reclass_rows}
-        reclass_note = {int(r["month"]): (r.get("note") or "") for r in reclass_rows}
+        actual_map = {int(r["month"]): int(r.get("actual_amount") or 0) for r in actual_rows}
 
         expense_items = await asyncio.to_thread(
             self._query_expense_report_items, dept, year, month=None, account_code=account_code
@@ -241,32 +259,21 @@ class BudgetService:
         MONTH_NAMES = ["Jan","Feb","Mar","Apr","Mei","Jun",
                        "Jul","Agu","Sep","Okt","Nov","Des"]
 
-        all_months = sorted(set(
-            list(budget_map.keys()) + list(encumbrance_map.keys())
-            + list(reclass_map.keys()) + list(items_by_month.keys())
-        ))
+        last_month = month if month else 12
         monthly = []
-        for m in all_months:
-            budget       = budget_map.get(m, 0)
-            encumbrance  = encumbrance_map.get(m, 0)
-            available    = budget - encumbrance
-            reclass      = reclass_map.get(m, 0)
-            month_items  = sorted(items_by_month.get(m, []), key=lambda i: i.get("expense_date") or "")
-            # Only Expense Report items are real GL actual — PR lines are
-            # shown alongside for visibility but excluded from this sum, or
-            # committed-but-unbilled PR spend would double up with Encumbrance.
-            total_actual = sum(int(i.get("amount") or 0) for i in month_items if i["source"] == "Expense Report")
-            remain       = available + reclass - total_actual
+        for m in range(1, last_month + 1):
+            budget          = budget_map.get(m, 0)
+            encumbrance     = encumbrance_map.get(m, 0)
+            actual          = actual_map.get(m, 0)
+            funds_available = budget - encumbrance - actual
+            month_items     = sorted(items_by_month.get(m, []), key=lambda i: i.get("expense_date") or "")
             monthly.append({
-                "month":        m,
-                "month_name":   MONTH_NAMES[m - 1],
-                "budget":       budget,
-                "encumbrance":  encumbrance,
-                "available":    available,
-                "reclass":      reclass,
-                "note":         reclass_note.get(m, ""),
-                "total_actual": total_actual,
-                "remain":       remain,
+                "month":           m,
+                "month_name":      MONTH_NAMES[m - 1],
+                "budget":          budget,
+                "encumbrance":     encumbrance,
+                "actual":          actual,
+                "funds_available": funds_available,
                 "items": [
                     {
                         "description": i.get("description") or "",
@@ -279,7 +286,15 @@ class BudgetService:
                 ],
             })
 
-        return {"dept": dept, "account_code": account_code, "year": year, "monthly": monthly}
+        totals = {
+            "budget":          sum(mm["budget"] for mm in monthly),
+            "encumbrance":     sum(mm["encumbrance"] for mm in monthly),
+            "actual":          sum(mm["actual"] for mm in monthly),
+            "funds_available": sum(mm["funds_available"] for mm in monthly),
+        }
+
+        return {"dept": dept, "account_code": account_code, "year": year, "month": month,
+                "monthly": monthly, "totals": totals}
 
     # ── Private: Budget dari GL ───────────────────────────────────────────────
 

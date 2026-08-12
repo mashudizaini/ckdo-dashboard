@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { toPng } from "html-to-image";
 import {
@@ -4796,11 +4796,13 @@ function GLBudgetSection() {
   useEffect(() => { load(); }, [load]); // eslint-disable-line
 
   const loadDetail = async (code) => {
-    const key = `${dept}_${code}_${year}`;
+    const key = `${dept}_${code}_${year}_${month || "all"}`;
     if (accountDetail[key]) return;
     try {
+      const params = new URLSearchParams({ dept, year });
+      if (month) params.set("month", month);
       const res = await fetch(
-        `${BUDGET_API}/account/${encodeURIComponent(code)}?dept=${encodeURIComponent(dept)}&year=${year}`,
+        `${BUDGET_API}/account/${encodeURIComponent(code)}?${params}`,
         { headers: hdrs }
       );
       if (res.ok) {
@@ -4936,7 +4938,7 @@ function GLBudgetSection() {
 
           {accounts.map((acc) => {
             const isExp    = expandedCode === acc.account_code;
-            const detail   = accountDetail[`${dept}_${acc.account_code}_${year}`];
+            const detail   = accountDetail[`${dept}_${acc.account_code}_${year}_${month || "all"}`];
             const remainOk = acc.funds_available >= 0;
 
             return (
@@ -4974,18 +4976,14 @@ function GLBudgetSection() {
                       <div className="flex items-center justify-between py-4 px-2">
                         <p className="text-xs text-red-400">{detail.error}</p>
                         <button
-                          onClick={() => { setAccountDetail(prev => { const n = { ...prev }; delete n[`${dept}_${acc.account_code}_${year}`]; return n; }); loadDetail(acc.account_code); }}
+                          onClick={() => { setAccountDetail(prev => { const n = { ...prev }; delete n[`${dept}_${acc.account_code}_${year}_${month || "all"}`]; return n; }); loadDetail(acc.account_code); }}
                           className="text-xs text-gray-400 hover:text-gray-200 underline"
                         >Retry</button>
                       </div>
                     ) : detail.monthly.length === 0 ? (
                       <p className="text-xs text-gray-600 text-center py-4">No monthly data for this account.</p>
                     ) : (
-                      <div className="space-y-4">
-                        {detail.monthly.map((m) => (
-                          <BudgetMonthTable key={m.month} m={m} fmtRp={fmtRp} accName={acc.account_name} />
-                        ))}
-                      </div>
+                      <BudgetPeriodBalances detail={detail} fmtRp={fmtRp} accName={acc.account_name} />
                     )}
                   </div>
                 )}
@@ -5381,100 +5379,129 @@ function InitiativeFormModal({ editing, setEditing, onSave, onClose, saving, err
   );
 }
 
-/* Kertas kerja per bulan — Budget/Encumbrance/Reclass dari GL, item expense dari
-   Expense Report HRGA. Layout meniru format kertas kerja HRGA:
-   [Bulan] Budget | Actual Expense (list + total) | Available | Reclass | Remain | Note */
-function BudgetMonthTable({ m, fmtRp, accName }) {
-  const remainOk  = m.remain >= 0;
-  const spanRows  = m.items.length + 1; // baris item + 1 baris total
-  const monthName = m.month_name || MONTHS_ID[m.month - 1];
-  const [sortBy,  setSortBy]  = useState(null);
-  const [sortDir, setSortDir] = useState("asc");
-  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
-  const sortedItems = sortRows(m.items, sortBy, sortDir, ["amount"]);
-  const thSort = (label, field, extraStyle = {}) => (
-    <th onClick={() => handleSort(field)} className="px-3 py-2 font-semibold" style={{ ...extraStyle, cursor: "pointer", userSelect: "none", color: sortBy === field ? "#818cf8" : undefined }}>
-      {label} {sortBy === field && (sortDir === "asc" ? "▲" : "▼")}
-    </th>
-  );
+/* Rincian per periode untuk 1 akun — layout sama persis dengan Oracle EBS
+   "Period Balances (YTDE)": Period | Budget | Encumbrance | Actual | Funds
+   Available, satu baris per bulan (dipotong sampai bulan filter YTD kalau
+   ada), plus baris TOTAL. Klik satu baris untuk lihat transaksi Expense
+   Report + Purchase Requisition yang membentuk Actual bulan itu. */
+function BudgetPeriodBalances({ detail, fmtRp, accName }) {
+  const [expandedMonth, setExpandedMonth] = useState(null);
+  const { monthly, totals } = detail;
 
   return (
     <div className="rounded-lg border border-gray-800 overflow-hidden text-xs">
-      <div className="bg-gray-800 px-3 py-1.5">
-        <span className="font-bold text-gray-200">{monthName}</span>
-        <span className="text-gray-600 ml-2">{accName}</span>
+      <div className="bg-gray-800 px-3 py-1.5 flex items-center justify-between flex-wrap gap-1">
+        <div>
+          <span className="font-bold text-gray-200">Period Balances (YTDE)</span>
+          <span className="text-gray-600 ml-2">{accName}</span>
+        </div>
+        <span className="text-gray-600">Klik baris untuk lihat transaksi Expense Report &amp; Purchase Requisition</span>
       </div>
 
       <table className="w-full">
         <thead>
           <tr className="bg-gray-800/40 text-gray-500 uppercase tracking-wider text-xs">
-            <th className="px-3 py-2 text-right font-semibold" style={{width:"11%"}}>{monthName} Budget</th>
-            <th className="px-3 py-2 text-left font-semibold" style={{width:"10%"}}>Source</th>
-            {thSort("Transaction", "description", { textAlign: "left", width: "24%" })}
-            {thSort("Amount", "amount", { textAlign: "right", width: "11%" })}
-            <th className="px-3 py-2 text-right font-semibold" style={{width:"11%"}}>Available</th>
-            <th className="px-3 py-2 text-right font-semibold" style={{width:"11%"}}>Reclass</th>
-            <th className="px-3 py-2 text-right font-semibold" style={{width:"11%"}}>Remain</th>
-            <th className="px-3 py-2 text-left font-semibold">Note</th>
+            <th className="px-3 py-2 text-left font-semibold">Period</th>
+            <th className="px-3 py-2 text-right font-semibold">Budget</th>
+            <th className="px-3 py-2 text-right font-semibold">Encumbrance</th>
+            <th className="px-3 py-2 text-right font-semibold">Actual</th>
+            <th className="px-3 py-2 text-right font-semibold">Funds Available</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-800/60">
-          {m.items.length === 0 ? (
-            <tr>
-              <td className="px-3 py-2 text-right text-blue-600 font-semibold align-top">{fmtRp(m.budget)}</td>
-              <td colSpan={3} className="px-3 py-3 text-gray-700 italic">No Expense Report / Purchase Requisition data for this period.</td>
-              <td className="px-3 py-2 text-right text-gray-300 align-top">{fmtRp(m.available)}</td>
-              <td className="px-3 py-2 text-right text-gray-300 align-top">{fmtRp(m.reclass)}</td>
-              <td className={`px-3 py-2 text-right font-bold align-top ${remainOk ? "text-green-400" : "text-red-400"}`}>{fmtRp(m.remain)}</td>
-              <td className="px-3 py-2 text-gray-500 align-top">{m.note || "—"}</td>
-            </tr>
-          ) : (
-            <>
-              {sortedItems.map((item, idx) => (
-                <tr key={idx} className="hover:bg-gray-800/20 transition-colors">
-                  {idx === 0 && (
-                    <td className="px-3 py-2 text-right text-blue-600 font-semibold align-top" rowSpan={spanRows}>
-                      {fmtRp(m.budget)}
-                    </td>
-                  )}
-                  <td className="px-3 py-2">
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap ${
-                      item.source === "Purchase Requisition" ? "bg-amber-500/15 text-amber-400" : "bg-violet-500/15 text-violet-400"
-                    }`}>
-                      {item.source === "Purchase Requisition" ? "PR" : "Expense Report"}
-                    </span>
+          {monthly.map((m) => {
+            const isExp = expandedMonth === m.month;
+            const faOk  = m.funds_available >= 0;
+            return (
+              <Fragment key={m.month}>
+                <tr
+                  className="hover:bg-gray-800/20 transition-colors cursor-pointer"
+                  onClick={() => setExpandedMonth(isExp ? null : m.month)}
+                >
+                  <td className="px-3 py-2 text-gray-300 font-medium flex items-center gap-1.5">
+                    <ChevronDown size={11} className={`text-gray-600 shrink-0 transition-transform ${isExp ? "rotate-180" : ""}`} />
+                    {m.month_name}-{String(detail.year).slice(-2)}
                   </td>
-                  <td className="px-3 py-2 text-gray-300">{item.description}</td>
-                  <td className="px-3 py-2 text-right text-gray-300 tabular-nums">
-                    {(item.amount || 0).toLocaleString("id-ID")}
-                  </td>
-                  {idx === 0 && (
-                    <>
-                      <td className="px-3 py-2 text-right text-gray-300 align-top" rowSpan={spanRows}>{fmtRp(m.available)}</td>
-                      <td className="px-3 py-2 text-right text-gray-300 align-top" rowSpan={spanRows}>{fmtRp(m.reclass)}</td>
-                      <td className={`px-3 py-2 text-right font-bold align-top ${remainOk ? "text-green-400" : "text-red-400"}`} rowSpan={spanRows}>
-                        {fmtRp(m.remain)}
-                      </td>
-                      <td className="px-3 py-2 text-gray-500 align-top" rowSpan={spanRows}>{m.note || "—"}</td>
-                    </>
-                  )}
+                  <td className="px-3 py-2 text-right text-blue-400 tabular-nums">{fmtRp(m.budget)}</td>
+                  <td className="px-3 py-2 text-right text-amber-400 tabular-nums">{fmtRp(m.encumbrance)}</td>
+                  <td className="px-3 py-2 text-right text-violet-400 tabular-nums underline decoration-dotted underline-offset-4">{fmtRp(m.actual)}</td>
+                  <td className={`px-3 py-2 text-right font-semibold tabular-nums ${faOk ? "text-green-400" : "text-red-400"}`}>{fmtRp(m.funds_available)}</td>
                 </tr>
-              ))}
-
-              {/* Baris total actual — hanya Expense Report (posting GL asli);
-                  Purchase Requisition ditampilkan di atas untuk visibilitas
-                  komitmen belanja tapi tidak dijumlahkan (belum posting GL,
-                  sudah tercermin di kolom Encumbrance). */}
-              <tr className="bg-gray-800/40 font-semibold">
-                <td colSpan={3} className="px-3 py-2 text-right text-gray-400 uppercase tracking-wider">Total Actual (Expense Report)</td>
-                <td className="px-3 py-2 text-right text-violet-700 tabular-nums">
-                  {m.total_actual.toLocaleString("id-ID")}
-                </td>
-              </tr>
-            </>
-          )}
+                {isExp && (
+                  <tr>
+                    <td colSpan={5} className="p-0">
+                      <BudgetTransactionList items={m.items} monthName={`${m.month_name}-${String(detail.year).slice(-2)}`} />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
         </tbody>
+        <tfoot>
+          <tr className="bg-gray-800/60 font-bold">
+            <td className="px-3 py-2 text-gray-300">TOTAL</td>
+            <td className="px-3 py-2 text-right text-blue-400 tabular-nums">{fmtRp(totals.budget)}</td>
+            <td className="px-3 py-2 text-right text-amber-400 tabular-nums">{fmtRp(totals.encumbrance)}</td>
+            <td className="px-3 py-2 text-right text-violet-400 tabular-nums">{fmtRp(totals.actual)}</td>
+            <td className={`px-3 py-2 text-right tabular-nums ${totals.funds_available >= 0 ? "text-green-400" : "text-red-400"}`}>{fmtRp(totals.funds_available)}</td>
+          </tr>
+        </tfoot>
       </table>
+    </div>
+  );
+}
+
+/* Transaksi Expense Report + Purchase Requisition pendukung Actual satu
+   periode — untuk transparansi sumber saja; jumlahnya tidak selalu persis
+   sama dengan kolom Actual (Actual GL juga mencakup AP Invoice/payroll/dll
+   yang tidak tercakup di dua sumber ini). */
+function BudgetTransactionList({ items, monthName }) {
+  const [sortBy,  setSortBy]  = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
+  const sortedItems = sortRows(items, sortBy, sortDir, ["amount"]);
+  const thSort = (label, field, extraStyle = {}) => (
+    <th onClick={() => handleSort(field)} className="px-3 py-1.5 font-semibold" style={{ ...extraStyle, cursor: "pointer", userSelect: "none", color: sortBy === field ? "#818cf8" : undefined }}>
+      {label} {sortBy === field && (sortDir === "asc" ? "▲" : "▼")}
+    </th>
+  );
+
+  return (
+    <div className="bg-gray-950 border-t border-b border-gray-800/60 px-3 py-2">
+      <p className="text-[10px] text-gray-600 uppercase tracking-wider mb-1.5">
+        Transaksi {monthName} — bukan penjumlah langsung ke Actual GL, ditampilkan untuk transparansi sumber
+      </p>
+      {items.length === 0 ? (
+        <p className="text-gray-700 italic py-2">No Expense Report / Purchase Requisition data for this period.</p>
+      ) : (
+        <table className="w-full">
+          <thead>
+            <tr className="text-gray-500 uppercase tracking-wider text-[10px]">
+              <th className="px-3 py-1.5 text-left font-semibold" style={{ width: "14%" }}>Source</th>
+              {thSort("Transaction", "description", { textAlign: "left", width: "42%" })}
+              {thSort("Amount", "amount", { textAlign: "right", width: "16%" })}
+              <th className="px-3 py-1.5 text-left font-semibold">Date / Ref</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800/40">
+            {sortedItems.map((item, idx) => (
+              <tr key={idx} className="hover:bg-gray-800/20">
+                <td className="px-3 py-1.5">
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap ${
+                    item.source === "Purchase Requisition" ? "bg-amber-500/15 text-amber-400" : "bg-violet-500/15 text-violet-400"
+                  }`}>
+                    {item.source === "Purchase Requisition" ? "PR" : "Expense Report"}
+                  </span>
+                </td>
+                <td className="px-3 py-1.5 text-gray-300">{item.description}</td>
+                <td className="px-3 py-1.5 text-right text-gray-300 tabular-nums">{(item.amount || 0).toLocaleString("id-ID")}</td>
+                <td className="px-3 py-1.5 text-gray-500">{item.date || "—"}{item.report_num ? ` · ${item.report_num}` : ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
