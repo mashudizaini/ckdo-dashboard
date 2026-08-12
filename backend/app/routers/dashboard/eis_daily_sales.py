@@ -5,11 +5,10 @@ import datetime
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import get_current_user
 from app.database import get_db
-from app.models.sales_plan import SalesPlan
+from app.services.pac_sales_plan_bp import pac_monthly_business_plan
 
 router = APIRouter()
 
@@ -38,53 +37,6 @@ def _load_store() -> dict:
             except Exception:
                 continue
     return {}
-
-
-async def _pac_monthly_business_plan(db: AsyncSession, year: int) -> tuple[list[float], bool]:
-    """Company-wide Sales Business Plan per month (Jan-Dec, in Million IDR)
-    from the PAC dashboard's Sales Plan module — the same figures PAC uses
-    for its own Gross Sales Report, now the single source of truth for the
-    Daily Sales BP card too (previously a manually-typed cell in the Daily
-    Sales Excel's "Daily Sales Performance" sheet, which the currently-used
-    upload templates don't even have, leaving it permanently blank).
-
-    Each PAC team stores its plan as one pre-aggregated "Total" document
-    (content.meta.area == "Total", meta.type blank) plus one document per
-    market/customer segment that sums up to that Total — group by
-    (department, team_code) and prefer each team's own Total doc so a team
-    is counted exactly once; fall back to summing its segment docs only if
-    it never submitted a Total rollup, so that team isn't dropped entirely."""
-    result = await db.execute(
-        select(SalesPlan).where(SalesPlan.plan_year == year, SalesPlan.plan_type == "value")
-    )
-    groups: dict = {}
-    for plan in result.scalars().all():
-        content = plan.content or {}
-        meta = content.get("meta", {})
-        is_total = meta.get("area") == "Total" and not meta.get("type")
-        key = (plan.department, plan.team_code)
-        bucket = groups.setdefault(key, {"total": None, "segments": []})
-        rows = content.get("rows", [])
-        if is_total:
-            bucket["total"] = rows
-        else:
-            bucket["segments"].append(rows)
-
-    monthly = [0.0] * 12
-    has_data = False
-    for bucket in groups.values():
-        rows = bucket["total"] if bucket["total"] is not None else [r for seg in bucket["segments"] for r in seg]
-        for row in rows:
-            # Row shape: [no, country, customer, product, jan..dec, total_value,
-            # total_unit, price_usd, price_idr] (20 items) — months start at index 4.
-            if len(row) < 16:
-                continue
-            has_data = True
-            for i in range(12):
-                v = row[4 + i]
-                if isinstance(v, (int, float)):
-                    monthly[i] += v
-    return [round(v / 1_000_000, 3) for v in monthly], has_data
 
 
 def _month_progress(rows: list, month: str) -> tuple[float, int]:
@@ -381,12 +333,12 @@ async def get_daily_sales_kpi(
     Yearly (month omitted) or Monthly (month given). Business Plan comes
     from PAC's Sales Plan; Expectation Closing and Achievement are derived
     from the Daily Sales WD data already uploaded — see
-    _pac_monthly_business_plan / _expectation_closing docstrings for the
+    pac_monthly_business_plan / _expectation_closing docstrings for the
     exact formulas."""
     if month is not None and month not in MONTHS:
         raise HTTPException(status_code=422, detail=f"Invalid month '{month}'. Expected one of {MONTHS}.")
 
-    monthly_bp, has_pac_data = await _pac_monthly_business_plan(db, year)
+    monthly_bp, has_pac_data = await pac_monthly_business_plan(db, year)
 
     store = _load_store()
     entry = store.get(str(year))

@@ -4728,6 +4728,23 @@ function WorkingCalendarPanel() {
 const HR_DEPT_CODE = "14";
 
 function BudgetMonitoringSection() {
+  const [sub, setSub] = useState("gl");
+  return (
+    <div>
+      <SubTabs
+        tabs={[
+          { id: "gl",          label: "GL Budget (Oracle)" },
+          { id: "initiatives", label: "Department Initiatives" },
+        ]}
+        active={sub} onChange={setSub}
+      />
+      {sub === "gl"          && <GLBudgetSection />}
+      {sub === "initiatives" && <DepartmentInitiativesSection />}
+    </div>
+  );
+}
+
+function GLBudgetSection() {
   const { token } = useAuthStore();
   const hdrs = { Authorization: `Bearer ${token}` };
   const curYear = new Date().getFullYear();
@@ -4950,6 +4967,389 @@ function BudgetMonitoringSection() {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Department Initiatives ──────────────────────────────────────────────────
+// User-entered project/initiative tracker — independent of the Oracle-synced
+// GL Budget section above. Each initiative carries its own monthly budget
+// vs actual (Jan-Dec) and a manually-set status; the "Initiative Status"
+// donut counts initiatives per status, the "Budget v. Actual" bar chart
+// sums every initiative's monthly figures for the selected year.
+const INITIATIVES_API = "/api/v1/dashboard/hr/budget/initiatives";
+const INIT_STATUS_CFG = {
+  on_track:         { label: "On Track",                 color: "#34d399" },
+  behind_schedule:  { label: "Slightly Behind Schedule",  color: "#f59e0b" },
+  revised_schedule: { label: "Revised Schedule",          color: "#60a5fa" },
+};
+const INIT_MONTHS_ID = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+const INIT_EMPTY_FORM = (year) => ({
+  id: null, year, name: "", status: "on_track", percent_complete: 0,
+  monthly_budget: Array(12).fill(0), monthly_actual: Array(12).fill(0), notes: "",
+});
+
+function DepartmentInitiativesSection() {
+  const { token } = useAuthStore();
+  const hdrs = { Authorization: `Bearer ${token}` };
+  const curYear = new Date().getFullYear();
+
+  const [year,     setYear]     = useState(curYear);
+  const [years,    setYears]    = useState([curYear]);
+  const [data,     setData]     = useState(null);
+  const [loading,  setLoading]  = useState(false);
+  const [RC,       setRC]       = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editing,  setEditing]  = useState(null);
+  const [saving,   setSaving]   = useState(false);
+  const [errMsg,   setErrMsg]   = useState(null);
+
+  useEffect(() => { import("recharts").then((mod) => setRC(mod)).catch(() => {}); }, []);
+
+  const loadYears = useCallback(async () => {
+    try {
+      const res = await fetch(`${INITIATIVES_API}/years`, { headers: hdrs });
+      if (res.ok) {
+        const ys = await res.json();
+        if (ys.length) setYears(ys);
+      }
+    } catch (_) {}
+  }, []); // eslint-disable-line
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${INITIATIVES_API}?year=${year}`, { headers: hdrs });
+      if (res.ok) setData(await res.json());
+    } catch (_) {}
+    setLoading(false);
+  }, [year]); // eslint-disable-line
+
+  useEffect(() => { loadYears(); }, [loadYears]);
+  useEffect(() => { load(); }, [load]);
+
+  const fmtRp = (v) => {
+    if (v === undefined || v === null) return "Rp 0";
+    return (v < 0 ? "-Rp " : "Rp ") + Math.abs(Math.round(v)).toLocaleString("id-ID");
+  };
+
+  const openCreate = () => { setEditing(INIT_EMPTY_FORM(year)); setErrMsg(null); setShowForm(true); };
+  const openEdit = (it) => { setEditing({ ...it }); setErrMsg(null); setShowForm(true); };
+  const closeForm = () => { setShowForm(false); setEditing(null); };
+
+  const save = async () => {
+    if (!editing.name.trim()) { setErrMsg("Nama initiative wajib diisi."); return; }
+    setSaving(true); setErrMsg(null);
+    try {
+      const method = editing.id ? "PUT" : "POST";
+      const url = editing.id ? `${INITIATIVES_API}/${editing.id}` : INITIATIVES_API;
+      const res = await fetch(url, {
+        method,
+        headers: { ...hdrs, "Content-Type": "application/json" },
+        body: JSON.stringify(editing),
+      });
+      if (res.ok) {
+        closeForm();
+        await load();
+        await loadYears();
+      } else {
+        const b = await res.json().catch(() => null);
+        setErrMsg(b?.detail ? JSON.stringify(b.detail) : `Gagal menyimpan (HTTP ${res.status})`);
+      }
+    } catch (e) {
+      setErrMsg(e?.message || "Network error");
+    }
+    setSaving(false);
+  };
+
+  const remove = async (id) => {
+    if (!window.confirm("Hapus initiative ini?")) return;
+    try {
+      const res = await fetch(`${INITIATIVES_API}/${id}`, { method: "DELETE", headers: hdrs });
+      if (res.ok) await load();
+    } catch (_) {}
+  };
+
+  const initiatives   = data?.initiatives || [];
+  const statusSummary = data?.status_summary || {};
+  const monthlyTotals = data?.monthly_totals || { budget: Array(12).fill(0), actual: Array(12).fill(0) };
+
+  const donutData = Object.entries(statusSummary)
+    .filter(([, n]) => n > 0)
+    .map(([k, n]) => ({ key: k, name: INIT_STATUS_CFG[k]?.label || k, value: n }));
+  const barData = INIT_MONTHS_ID.map((m, i) => ({
+    month: m, Budget: monthlyTotals.budget[i] || 0, Actual: monthlyTotals.actual[i] || 0,
+  }));
+
+  const tickStyle = { fill: "#cbd5e1", fontSize: 10 };
+  const tooltipStyle = {
+    contentStyle: { borderRadius: 8, fontSize: 11 },
+    labelStyle: { color: "#1e293b", fontWeight: 600 },
+    itemStyle: { color: "#334155" },
+    cursor: { fill: "rgba(0,0,0,0.04)" },
+  };
+  const renderPieLabel = ({ cx, cy, midAngle, outerRadius, percent, name }) => {
+    const RADIAN = Math.PI / 180;
+    const radius = outerRadius + 16;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    return (
+      <text x={x} y={y} fill="#f1f5f9" fontSize={10} fontWeight={600} textAnchor={x > cx ? "start" : "end"} dominantBaseline="central">
+        {`${name} ${(percent * 100).toFixed(0)}%`}
+      </text>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* ── Controls ── */}
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={year}
+          onChange={e => setYear(+e.target.value)}
+          className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
+        >
+          {years.map(y => <option key={y} value={y}>{y}</option>)}
+          {!years.includes(curYear) && <option value={curYear}>{curYear}</option>}
+        </select>
+        <div className="flex-1" />
+        <button
+          onClick={openCreate}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-xs text-white transition-colors"
+        >
+          <Plus size={12} /> Add Initiative
+        </button>
+      </div>
+
+      {loading && !data && <div className="flex justify-center py-16"><Loader2 size={22} className="animate-spin text-gray-600" /></div>}
+
+      {!loading && data && (
+        <>
+          {/* ── Charts ── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <SummaryChartCard title="Initiative Status">
+              {!RC ? (
+                <div className="py-10 text-center text-xs text-gray-500">Loading chart…</div>
+              ) : donutData.length === 0 ? (
+                <div className="py-10 text-center text-xs text-gray-600">Belum ada initiative untuk tahun {year}.</div>
+              ) : (
+                <RC.ResponsiveContainer width="100%" height={220}>
+                  <RC.PieChart>
+                    <RC.Pie data={donutData} cx="50%" cy="50%" innerRadius={48} outerRadius={80} dataKey="value" nameKey="name" label={renderPieLabel} labelLine={false}>
+                      {donutData.map((d, i) => <RC.Cell key={i} fill={INIT_STATUS_CFG[d.key]?.color || "#94a3b8"} />)}
+                    </RC.Pie>
+                    <RC.Tooltip {...tooltipStyle} />
+                    <RC.Legend wrapperStyle={{ fontSize: 11, color: "#f1f5f9" }} />
+                  </RC.PieChart>
+                </RC.ResponsiveContainer>
+              )}
+            </SummaryChartCard>
+
+            <SummaryChartCard title={`Budget v. Actual — Monthly Total Budget (${year})`}>
+              {!RC ? (
+                <div className="py-10 text-center text-xs text-gray-500">Loading chart…</div>
+              ) : (
+                <RC.ResponsiveContainer width="100%" height={220}>
+                  <RC.BarChart data={barData} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
+                    <RC.XAxis dataKey="month" tick={tickStyle} />
+                    <RC.YAxis tick={tickStyle} tickFormatter={(v) => v >= 1e6 ? `${(v / 1e6).toFixed(0)}jt` : v} />
+                    <RC.Tooltip {...tooltipStyle} formatter={(v) => fmtRp(v)} />
+                    <RC.Legend wrapperStyle={{ fontSize: 11, color: "#f1f5f9" }} />
+                    <RC.Bar dataKey="Budget" fill="#64748b" radius={[3, 3, 0, 0]} />
+                    <RC.Bar dataKey="Actual" fill="#facc15" radius={[3, 3, 0, 0]} />
+                  </RC.BarChart>
+                </RC.ResponsiveContainer>
+              )}
+            </SummaryChartCard>
+          </div>
+
+          {/* ── Initiatives table ── */}
+          <div className="rounded-lg border border-gray-800 overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-800/60 text-gray-400">
+                  <th className="px-3 py-2 text-left">Initiative</th>
+                  <th className="px-3 py-2 text-left">Status</th>
+                  <th className="px-3 py-2 text-right">Budget</th>
+                  <th className="px-3 py-2 text-right">Actual</th>
+                  <th className="px-3 py-2 text-right w-32">Percent Complete</th>
+                  <th className="px-3 py-2 text-center w-16">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800">
+                {initiatives.length === 0 ? (
+                  <tr><td colSpan={6} className="px-3 py-10 text-center text-gray-600">Belum ada initiative untuk tahun {year}. Klik "Add Initiative" untuk membuat.</td></tr>
+                ) : initiatives.map(it => (
+                  <tr key={it.id} className="hover:bg-gray-800/30">
+                    <td className="px-3 py-2 text-gray-200 font-medium">{it.name}</td>
+                    <td className="px-3 py-2">
+                      <span
+                        className="px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap"
+                        style={{ background: `${INIT_STATUS_CFG[it.status]?.color || "#94a3b8"}22`, color: INIT_STATUS_CFG[it.status]?.color || "#94a3b8" }}
+                      >
+                        {INIT_STATUS_CFG[it.status]?.label || it.status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-gray-300">{fmtRp(it.budget)}</td>
+                    <td className="px-3 py-2 text-right font-mono text-gray-300">{fmtRp(it.actual)}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center justify-end gap-2">
+                        <div className="w-16 h-1.5 bg-gray-800 rounded-full overflow-hidden shrink-0">
+                          <div className="h-full bg-emerald-500" style={{ width: `${Math.min(it.percent_complete, 100)}%` }} />
+                        </div>
+                        <span className="text-gray-400 w-9 text-right shrink-0">{it.percent_complete}%</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center justify-center gap-2">
+                        <button onClick={() => openEdit(it)} className="text-gray-500 hover:text-gray-200" title="Edit"><Pencil size={13} /></button>
+                        <button onClick={() => remove(it.id)} className="text-gray-500 hover:text-red-400" title="Hapus"><Trash2 size={13} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {showForm && editing && (
+        <InitiativeFormModal
+          editing={editing} setEditing={setEditing}
+          onSave={save} onClose={closeForm}
+          saving={saving} errMsg={errMsg}
+        />
+      )}
+    </div>
+  );
+}
+
+function InitiativeFormModal({ editing, setEditing, onSave, onClose, saving, errMsg }) {
+  const setMonthly = (field, idx, val) => {
+    const arr = [...editing[field]];
+    arr[idx] = Number(val) || 0;
+    setEditing({ ...editing, [field]: arr });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div
+        className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-gray-200">{editing.id ? "Edit Initiative" : "Add Initiative"}</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-200"><X size={16} /></button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {errMsg && (
+            <div className="rounded-lg px-3 py-2 text-xs bg-red-500/10 text-red-400 border border-red-500/20">{errMsg}</div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Initiative Name</label>
+              <input
+                value={editing.name}
+                onChange={e => setEditing({ ...editing, name: e.target.value })}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
+                placeholder="e.g. Redesign Employee Satisfaction Survey"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Year</label>
+              <input
+                type="number"
+                value={editing.year}
+                onChange={e => setEditing({ ...editing, year: Number(e.target.value) })}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Status</label>
+              <select
+                value={editing.status}
+                onChange={e => setEditing({ ...editing, status: e.target.value })}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
+              >
+                {Object.entries(INIT_STATUS_CFG).map(([k, cfg]) => <option key={k} value={k}>{cfg.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Percent Complete ({editing.percent_complete}%)</label>
+              <input
+                type="range" min={0} max={100} step={5}
+                value={editing.percent_complete}
+                onChange={e => setEditing({ ...editing, percent_complete: Number(e.target.value) })}
+                className="w-full"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">Notes</label>
+            <textarea
+              value={editing.notes}
+              onChange={e => setEditing({ ...editing, notes: e.target.value })}
+              rows={2}
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500 resize-none"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-500 mb-1.5 block">Monthly Budget vs Actual</label>
+            <div className="overflow-x-auto rounded-lg border border-gray-800">
+              <table className="w-full text-xs border-collapse" style={{ minWidth: 640 }}>
+                <thead>
+                  <tr className="bg-gray-800/60 text-gray-400">
+                    <th className="px-2 py-1.5 text-left w-16"></th>
+                    {INIT_MONTHS_ID.map(m => <th key={m} className="px-1.5 py-1.5 text-center font-medium">{m}</th>)}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800">
+                  <tr>
+                    <td className="px-2 py-1 text-gray-400 font-medium">Budget</td>
+                    {editing.monthly_budget.map((v, i) => (
+                      <td key={i} className="px-1 py-1">
+                        <input
+                          type="number" value={v}
+                          onChange={e => setMonthly("monthly_budget", i, e.target.value)}
+                          className="w-16 rounded border border-gray-700 bg-gray-800 px-1 py-1 text-[11px] text-gray-200 text-right outline-none focus:border-blue-500"
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="px-2 py-1 text-gray-400 font-medium">Actual</td>
+                    {editing.monthly_actual.map((v, i) => (
+                      <td key={i} className="px-1 py-1">
+                        <input
+                          type="number" value={v}
+                          onChange={e => setMonthly("monthly_actual", i, e.target.value)}
+                          className="w-16 rounded border border-gray-700 bg-gray-800 px-1 py-1 text-[11px] text-gray-200 text-right outline-none focus:border-blue-500"
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div className="px-5 py-3 border-t border-gray-800 flex items-center justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1.5 rounded-lg border border-gray-700 text-xs text-gray-400 hover:text-gray-200 transition-colors">Cancel</button>
+          <button
+            onClick={onSave} disabled={saving}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-xs text-white disabled:opacity-50 transition-colors"
+          >
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+            {editing.id ? "Save Changes" : "Create Initiative"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

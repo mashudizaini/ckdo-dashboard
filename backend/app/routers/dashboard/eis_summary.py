@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from app.eis_database import get_eis_db as get_db
+from app.database import get_db as get_main_db
 from app.dependencies import get_current_user
+from app.services.pac_sales_plan_bp import pac_monthly_business_plan
 
 router = APIRouter()
 
@@ -90,9 +92,17 @@ async def get_kpi_cards(
     year: int = Query(2025),
     period: int = Query(11),
     db: AsyncSession = Depends(get_db),
+    main_db: AsyncSession = Depends(get_main_db),
     user = Depends(get_current_user),
 ):
-    """KPI summary cards for the landing page."""
+    """KPI summary cards for the landing page. Sales Achievement's Business
+    Plan prefers PAC's Sales Plan (Simulation Data) when it has data for
+    the requested year — eis.fact_sales.bp_amount is 0 for every 2026
+    period (whatever normally populates it hasn't run for 2026 yet) while
+    PAC already has real 2026 figures; falls back to eis.fact_sales.bp_amount
+    for years PAC has no Sales Plan for yet (e.g. 2025), so this doesn't
+    regress years that already worked. Actual always comes from
+    eis.fact_sales — PAC's Sales Plan is a plan, it has no actuals."""
     sales_q = text("""
         SELECT SUM(bp_amount) as bp_total, SUM(actual_amount) as actual_total
         FROM eis.fact_sales s
@@ -101,6 +111,8 @@ async def get_kpi_cards(
     """)
     sales = await db.execute(sales_q, {"year": year, "period": period})
     sales_row = sales.mappings().first()
+
+    pac_bp_monthly, has_pac_data = await pac_monthly_business_plan(main_db, year)
 
     prod_q = text("""
         SELECT SUM(batch_size) as total_batch_size, SUM(yield_qty) as total_yield,
@@ -122,8 +134,11 @@ async def get_kpi_cards(
     fin = await db.execute(fin_q, {"year": year, "period": period})
     fin_row = fin.mappings().first()
 
-    bp_total = float(sales_row["bp_total"] or 0) if sales_row else 0
     actual_total = float(sales_row["actual_total"] or 0) if sales_row else 0
+    if has_pac_data:
+        bp_total = sum(pac_bp_monthly[:period])
+    else:
+        bp_total = float(sales_row["bp_total"] or 0) if sales_row else 0
 
     return {
         "data": {
