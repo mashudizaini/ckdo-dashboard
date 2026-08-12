@@ -1753,6 +1753,7 @@ async def search_employees(
 @router.get("/employee/{employee_id}/detail")
 async def get_employee_detail(
     employee_id: str,
+    year:        Optional[int] = Query(None, description="Batasi chart bulanan + absence ke 1 tahun ini saja; kosong = semua tahun"),
     db:          AsyncSession = Depends(get_db),
     user:        CurrentUser  = Depends(require_role(Roles.HR)),
 ):
@@ -1771,6 +1772,7 @@ async def get_employee_detail(
             func.sum(_actual_expr()).label("actual"),
         )
         .where(AttendanceRecord.employee_id == employee_id)
+        .where(True if year is None else extract("year", AttendanceRecord.attendance_date) == year)
         .group_by(
             extract("year",  AttendanceRecord.attendance_date),
             extract("month", AttendanceRecord.attendance_date),
@@ -1791,6 +1793,7 @@ async def get_employee_detail(
         .where(~_is_leave_code())
         .where(~_is_bt_code())
         .where(~_is_present_intercom())
+        .where(True if year is None else extract("year", AttendanceRecord.attendance_date) == year)
         .order_by(AttendanceRecord.attendance_date.desc())
         .limit(30)
     )

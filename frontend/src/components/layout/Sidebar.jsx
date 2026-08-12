@@ -24,6 +24,7 @@ const NAV_ITEMS = [
   { label: "HRGA", path: "/dashboard/hr", icon: Users, roles: ["hr_staff"], children: [
     { label: "Employee Data", path: "/dashboard/hr/employees" },
     { label: "Attendance Rate", path: "/dashboard/hr/attendance" },
+    { label: "Working Calendar", path: "/dashboard/hr/workingcalendar" },
     { label: "To Do List", path: "/dashboard/hr/todo" },
     { label: "E-Recruitment", path: "/dashboard/hr/cv" },
     { label: "Budget Monitoring", path: "/dashboard/hr/budget" },

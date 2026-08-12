@@ -169,7 +169,7 @@ function EmployeePhotoThumb({ userId, hasPhoto, size = 32 }) {
   );
 }
 
-const HR_TABS = ["employees", "attendance", "todo", "cv", "budget", "emagazine"];
+const HR_TABS = ["employees", "attendance", "workingcalendar", "todo", "cv", "budget", "emagazine"];
 
 export default function HRDashboard() {
   const navigate = useNavigate();
@@ -212,6 +212,13 @@ export default function HRDashboard() {
       {activeSection === "attendance" && (
         <SectionCard>
           <AttendanceRateSection />
+        </SectionCard>
+      )}
+
+      {/* ── Working Calendar (moved out of Attendance Rate into its own section) ── */}
+      {activeSection === "workingcalendar" && (
+        <SectionCard>
+          <WorkingCalendarPanel />
         </SectionCard>
       )}
 
@@ -3424,9 +3431,12 @@ function MiniBarChart({ data }) {
 }
 
 function EmployeeDetailPanel({ headers, apiBase }) {
+  const curYear = new Date().getFullYear();
   const [query,   setQuery]   = useState("");
   const [results, setResults] = useState([]);
   const [detail,  setDetail]  = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [year,    setYear]    = useState(curYear);
   const [loading, setLoading] = useState(false);
   const [absSortBy,  setAbsSortBy]  = useState(null);
   const [absSortDir, setAbsSortDir] = useState("asc");
@@ -3440,13 +3450,18 @@ function EmployeeDetailPanel({ headers, apiBase }) {
     } catch (_) {}
   };
 
-  const loadDetail = async (emp) => {
-    setResults([]); setQuery(emp.name || emp.id); setLoading(true);
+  const loadDetail = async (emp, forYear) => {
+    setResults([]); setQuery(emp.name || emp.id); setSelected(emp); setLoading(true);
     try {
-      const res = await fetch(`${apiBase}/employee/${emp.id}/detail`, { headers });
+      const res = await fetch(`${apiBase}/employee/${emp.id}/detail?year=${forYear ?? year}`, { headers });
       if (res.ok) setDetail(await res.json());
     } catch (_) {}
     setLoading(false);
+  };
+
+  const handleYearChange = (y) => {
+    setYear(y);
+    if (selected) loadDetail(selected, y);
   };
 
   const fmtDate = (iso) => {
@@ -3494,6 +3509,14 @@ function EmployeeDetailPanel({ headers, apiBase }) {
               ))}
             </div>
           )}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Year</label>
+          <select value={year} onChange={e => handleYearChange(Number(e.target.value))}
+            style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#1e293b", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)", cursor: "pointer", outline: "none" }}>
+            {[curYear, curYear - 1, curYear - 2, curYear - 3].map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
         </div>
 
         {loading && <div style={{ display: "flex", justifyContent: "center", padding: "32px 0" }}><Loader2 size={18} className="animate-spin" style={{ color: "#94a3b8" }} /></div>}
@@ -3552,10 +3575,17 @@ function EmployeeDetailPanel({ headers, apiBase }) {
         )}
       </div>
 
-      {/* Right: monthly chart */}
+      {/* Right: monthly chart — always scoped to the selected Year */}
       <div>
         {detail?.monthly?.length > 0
-          ? <MiniBarChart data={detail.monthly} />
+          ? (
+            <>
+              <p style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                Year {year} Monthly Rate
+              </p>
+              <MiniBarChart data={detail.monthly} />
+            </>
+          )
           : (
             <div style={{
               display: "flex", alignItems: "center", justifyContent: "center", height: 200,
@@ -4155,7 +4185,7 @@ function AttendanceRateSection() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        {[["summary", "Summary"], ["today", "Attendance Today"], ["detail", "Detail"], ["leaveData", "Attendance Leave"], ["annualReport", "Annual Leave Report"], ["correction", "Data Correction"], ["coverage", "Data Coverage"], ["calendar", "Working Calendar"], ["upload", "Upload"]].map(([id, label]) => (
+        {[["summary", "Summary"], ["today", "Attendance Today"], ["detail", "Detail"], ["leaveData", "Attendance Leave"], ["annualReport", "Annual Leave Report"], ["correction", "Data Correction"], ["coverage", "Data Coverage"], ["upload", "Upload"]].map(([id, label]) => (
           <button key={id} onClick={() => setActiveTab(id)}
             style={{
               padding: "8px 20px", borderRadius: 10, border: "none", fontSize: 12, fontWeight: 700,
@@ -4281,11 +4311,6 @@ function AttendanceRateSection() {
 
       {activeTab === "detail" && (
         <EmployeeDetailPanel headers={headers} apiBase={ATT_API} />
-      )}
-
-      {/* ── Upload ── */}
-      {activeTab === "calendar" && (
-        <WorkingCalendarPanel />
       )}
 
       {/* ── Leave (moved from the former standalone Leave tab) ── */}
