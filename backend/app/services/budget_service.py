@@ -30,6 +30,30 @@ per periode sebagai daftar transaksi pendukung Actual (klik untuk lihat) —
 untuk transparansi sumber saja, BUKAN komponen rumus Funds Available (Actual
 GL sudah mencakup lebih banyak sumber daripada dua tabel itu).
 
+CATATAN PENTING — kenapa angka Budget/Encumbrance kadang beda dari layar
+Oracle live: dikonfirmasi langsung ke Oracle PROD (2026-08-12, akun 611311)
+bahwa GL_BALANCES('B') HANYA mengakumulasi jurnal budget yang statusnya
+POSTED ('P') — sementara layar Oracle "Funds Available Inquiry"/"Period
+Balances" milik CKD Otto ikut menghitung jurnal budget yang masih UNPOSTED
+('U') kalau ada (mis. akun 611311 periode MAR-26: GL_BALANCES('B') = Rp
+1.609.651, tapi ada 2 baris jurnal "CJE: Budget..." berstatus U senilai
+netto +Rp 530.122 yang TIDAK ikut GL_BALANCES — begitu ditambahkan
+manual, hasilnya persis Rp 2.139.773, cocok dengan layar Oracle).
+Masalahnya: draft/jurnal unposted TIDAK SELALU berarti "pending, belum
+sempat diposting" — ditemukan juga kasus draft unposted yang ternyata
+DUPLIKAT dari jurnal yang sudah diposting terpisah (akun sama, periode
+JUL-26: 2 baris unposted identik yang sudah "digantikan" oleh 1 baris
+posted senilai sama) — kalau ikut dijumlah at-face-value, hasilnya malah
+salah (kehitung 3x). Karena tidak ada cara pasti membedakan "draft yang
+masih perlu diposting" dari "draft basi yang sudah digantikan" hanya dari
+data historis, get_summary/get_account_detail TETAP pakai GL_BALANCES
+(posted-only) sebagai angka utama — ini sudah tervalidasi benar untuk
+mayoritas periode (Apr/May/Jun/Jul/Aug akun 611311 semuanya cocok persis
+dengan Oracle) — dan MENAMBAHKAN indikator "ada N jurnal belum posting,
+belum tercermin di angka ini" (lihat _query_unposted_budget_encumbrance)
+supaya penggunanya tahu kapan harus mengecek langsung ke Oracle, alih-alih
+diam-diam menampilkan angka yang belum tentu benar.
+
 _query_reclass_gl (GL_JE_LINES kategori RECLASS/BUDGET, workaround data-entry
 CKD Otto) tidak lagi dipakai di rumus manapun — Oracle sendiri tidak
 menampilkan reclass di Funds Available Inquiry / Period Balances, jadi
@@ -141,6 +165,13 @@ class BudgetService:
         budget_rows      = await asyncio.to_thread(self._query_budget, dept, year, month, account_code)
         actual_map       = await asyncio.to_thread(self._query_actual_summary, dept, year, month, account_code)
         encumbrance_map  = await asyncio.to_thread(self._query_encumbrance_summary, dept, year, month, account_code)
+        unposted_rows    = await asyncio.to_thread(self._query_unposted_budget_encumbrance, dept, year, month, account_code)
+        unposted_map: dict[str, dict] = {}
+        for r in unposted_rows:
+            code = str(r["account_code"])
+            entry = unposted_map.setdefault(code, {"amount": 0, "lines": 0})
+            entry["amount"] += int(r.get("unposted_amount") or 0)
+            entry["lines"]  += int(r.get("line_count") or 0)
 
         # _query_budget always groups by (year, month, account) — it returns ONE
         # ROW PER MONTH per account, even when the WHERE clause lets several
@@ -170,13 +201,16 @@ class BudgetService:
             total_budget      += budget
             total_encumbrance += encumbrance
             total_actual      += actual
+            unposted = unposted_map.get(code, {"amount": 0, "lines": 0})
             accounts.append({
-                "account_code":    code,
-                "account_name":    info["account_name"],
-                "budget":          budget,
-                "encumbrance":     encumbrance,
-                "actual":          actual,
-                "funds_available": funds_available,
+                "account_code":       code,
+                "account_name":       info["account_name"],
+                "budget":             budget,
+                "encumbrance":        encumbrance,
+                "actual":             actual,
+                "funds_available":    funds_available,
+                "unposted_pending":   unposted["amount"],
+                "unposted_lines":     unposted["lines"],
             })
 
         accounts.sort(key=lambda a: a["account_code"])
@@ -191,6 +225,7 @@ class BudgetService:
                 "total_encumbrance":     total_encumbrance,
                 "total_actual":          total_actual,
                 "total_funds_available": total_budget - total_encumbrance - total_actual,
+                "total_unposted_lines":  sum(a["unposted_lines"] for a in accounts),
             },
             "accounts": accounts,
         }
@@ -241,6 +276,16 @@ class BudgetService:
         )
         actual_map = {int(r["month"]): int(r.get("actual_amount") or 0) for r in actual_rows}
 
+        unposted_rows = await asyncio.to_thread(
+            self._query_unposted_budget_encumbrance, dept, year, month=None, account_code=account_code
+        )
+        unposted_map: dict[int, dict] = {}
+        for r in unposted_rows:
+            m = int(r["month"])
+            entry = unposted_map.setdefault(m, {"amount": 0, "lines": 0})
+            entry["amount"] += int(r.get("unposted_amount") or 0)
+            entry["lines"]  += int(r.get("line_count") or 0)
+
         expense_items = await asyncio.to_thread(
             self._query_expense_report_items, dept, year, month=None, account_code=account_code
         )
@@ -267,13 +312,16 @@ class BudgetService:
             actual          = actual_map.get(m, 0)
             funds_available = budget - encumbrance - actual
             month_items     = sorted(items_by_month.get(m, []), key=lambda i: i.get("expense_date") or "")
+            unposted        = unposted_map.get(m, {"amount": 0, "lines": 0})
             monthly.append({
-                "month":           m,
-                "month_name":      MONTH_NAMES[m - 1],
-                "budget":          budget,
-                "encumbrance":     encumbrance,
-                "actual":          actual,
-                "funds_available": funds_available,
+                "month":            m,
+                "month_name":       MONTH_NAMES[m - 1],
+                "budget":           budget,
+                "encumbrance":      encumbrance,
+                "actual":           actual,
+                "funds_available":  funds_available,
+                "unposted_pending": unposted["amount"],
+                "unposted_lines":   unposted["lines"],
                 "items": [
                     {
                         "description": i.get("description") or "",
@@ -422,6 +470,54 @@ class BudgetService:
                 AND gp.period_set_name      = gl.period_set_name
             WHERE gb.actual_flag            = 'E'
               AND gb.currency_code          = gl.currency_code
+              AND  gcc.segment3 = :dept
+              AND EXTRACT(YEAR FROM gp.start_date)  = :year
+              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) <= :month)
+              AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
+            GROUP BY
+                EXTRACT(YEAR  FROM gp.start_date),
+                EXTRACT(MONTH FROM gp.start_date),
+                gcc.{ACCOUNT_COL}
+            ORDER BY month, account_code
+        """
+        return self._query(sql, {
+            "dept": dept, "year": year,
+            "month": month, "account": account_code,
+        })
+
+    # ── Private: Jurnal Budget/Encumbrance yang BELUM di-post ─────────────────
+    # GL_BALANCES cuma refleksi jurnal yang statusnya POSTED ('P') — kalau ada
+    # jurnal budget/encumbrance yang masih 'U' (Unposted) di Oracle, dia TIDAK
+    # ikut GL_BALANCES sampai benar-benar diposting, padahal layar Oracle
+    # "Funds Available Inquiry" kadang sudah menghitungnya. Query ini CUMA
+    # untuk mendeteksi & memberi tanda "ada N baris belum posting senilai Rp X
+    # yang belum tercermin di atas" — sengaja TIDAK dipakai untuk mengoreksi
+    # angka Budget/Encumbrance utama, karena draft unposted kadang adalah
+    # duplikat basi yang sudah digantikan jurnal lain yang sudah posting
+    # (ditemukan langsung di data CKD Otto — lihat catatan di docstring modul)
+    # — menjumlahkannya begitu saja bisa salah, bukan cuma "kurang lengkap".
+
+    def _query_unposted_budget_encumbrance(self, dept: str, year: int,
+                                            month: int = None, account_code: str = None) -> list[dict]:
+        sql = f"""
+            SELECT
+                EXTRACT(YEAR  FROM gp.start_date)              AS year,
+                EXTRACT(MONTH FROM gp.start_date)              AS month,
+                gcc.{ACCOUNT_COL}                              AS account_code,
+                SUM(NVL(gjl.accounted_dr, 0) - NVL(gjl.accounted_cr, 0)) AS unposted_amount,
+                COUNT(*)                                       AS line_count
+            FROM gl_je_lines gjl
+            JOIN gl_je_headers gjh
+                ON  gjh.je_header_id        = gjl.je_header_id
+            JOIN gl_ledgers gl
+                ON  gl.ledger_id            = gjh.ledger_id
+            JOIN gl_code_combinations gcc
+                ON  gcc.code_combination_id = gjl.code_combination_id
+            JOIN gl_periods gp
+                ON  gp.period_name          = gjl.period_name
+                AND gp.period_set_name      = gl.period_set_name
+            WHERE gjh.actual_flag IN ('B', 'E')
+              AND gjh.status              != 'P'
               AND  gcc.segment3 = :dept
               AND EXTRACT(YEAR FROM gp.start_date)  = :year
               AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) <= :month)
