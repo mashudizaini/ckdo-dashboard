@@ -1261,17 +1261,27 @@ def _normalize_dept(raw: Optional[str]) -> str:
 # Supervisor, Staff) -> matches Strategy & Development's existing
 # Business Development / Regulatory Affairs teams; "Validation" (Validation
 # Supervisor) -> matches Plant > Quality Management > Validation team.
+# NOTE: a later one-time migration rewrote Employee.department directly to
+# the canonical labels below, so most rows now match themselves; the legacy
+# misfiled-value keys are kept only for any stragglers. Bug found 2026-08-12:
+# the map's Strategy & Development key was "STRATEGY DEVELOPMENT" (no "&"),
+# so after that migration every "Strategy & Development" row's uppercased
+# value ("STRATEGY & DEVELOPMENT") no longer matched any key and silently
+# dropped out of every DEPT_GROUPS-based query (Summary headcount, drill-down
+# filters) — always add a canonical-label self-mapping key here, don't rely
+# solely on the misfiled-value aliases.
 DEPT_GROUPS = ["Administration", "Sales & Marketing", "Strategy & Development", "Plant"]
 
 _DEPT_GROUP_MAP = {
-    "ADMINISTRATION":        "Administration",
-    "DIRECTOR":              "Administration",
-    "SALES & MARKETING":     "Sales & Marketing",
-    "MKT & BD":              "Sales & Marketing",
-    "STRATEGY DEVELOPMENT":  "Strategy & Development",
-    "RA & BD":               "Strategy & Development",
-    "PLANT":                 "Plant",
-    "VALIDATION":            "Plant",
+    "ADMINISTRATION":         "Administration",
+    "DIRECTOR":               "Administration",
+    "SALES & MARKETING":      "Sales & Marketing",
+    "MKT & BD":               "Sales & Marketing",
+    "STRATEGY DEVELOPMENT":   "Strategy & Development",
+    "STRATEGY & DEVELOPMENT": "Strategy & Development",
+    "RA & BD":                "Strategy & Development",
+    "PLANT":                  "Plant",
+    "VALIDATION":             "Plant",
 }
 
 
