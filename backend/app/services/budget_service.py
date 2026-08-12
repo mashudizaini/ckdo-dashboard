@@ -104,23 +104,31 @@ class BudgetService:
 
     # ── Ringkasan per akun ────────────────────────────────────────────────────
 
-    async def get_summary(self, dept: str, year: int, month: int = None) -> dict:
+    async def get_summary(self, dept: str, year: int, month: int = None, account_code: str = None) -> dict:
         """
-        Ringkasan budget vs realisasi per akun untuk satu department.
-        Budget  : GL_BALANCES (actual_flag='B')
-        Actual  : GL_BALANCES (actual_flag='A')
-        Remain  : Budget − Actual
+        Ringkasan budget vs realisasi per akun untuk satu department — layout
+        & rumus sama dengan Oracle EBS "Funds Available Inquiry" (Amount Type
+        "Year To Date Extended"):
+        Budget      : GL_BALANCES (actual_flag='B')
+        Encumbrance : GL_BALANCES (actual_flag='E')
+        Actual      : GL_BALANCES (actual_flag='A')
+        Funds Available : Budget − Encumbrance − Actual
 
         Tergantung parameter `month`:
-        - `month` diisi  → PTD (Period-To-Date) untuk bulan itu SAJA, cocok
-          dengan Oracle "Budget Balances" drilldown (Master Balance per periode).
-        - `month` kosong (All Months) → total SATU TAHUN penuh (Jan-Des dijumlah).
-        _query_budget/_query_actual_gl selalu GROUP BY per bulan, jadi baris
-        per-bulan di-sum per akun di sini sebelum dijadikan daftar akun —
-        kalau tidak, tiap bulan akan muncul sebagai "akun" terpisah.
+        - `month` diisi  → Year-To-Date SAMPAI DENGAN bulan itu (mis. month=3
+          → Januari-Maret dijumlah), sama seperti Oracle "Year To Date
+          Extended". BUKAN Period-To-Date bulan itu saja.
+        - `month` kosong (All Months) → total SATU TAHUN penuh (Jan-Des).
+        `account_code` diisi → hanya akun itu; kosong → semua akun department.
+
+        _query_budget/_query_actual_gl/_query_encumbrance_gl selalu GROUP BY
+        per bulan, jadi baris per-bulan di-sum per akun di sini sebelum
+        dijadikan daftar akun — kalau tidak, tiap bulan akan muncul sebagai
+        "akun" terpisah.
         """
-        budget_rows = await asyncio.to_thread(self._query_budget, dept, year, month)
-        actual_map  = await asyncio.to_thread(self._query_actual_summary, dept, year, month)
+        budget_rows      = await asyncio.to_thread(self._query_budget, dept, year, month, account_code)
+        actual_map       = await asyncio.to_thread(self._query_actual_summary, dept, year, month, account_code)
+        encumbrance_map  = await asyncio.to_thread(self._query_encumbrance_summary, dept, year, month, account_code)
 
         # _query_budget always groups by (year, month, account) — it returns ONE
         # ROW PER MONTH per account, even when the WHERE clause lets several
@@ -135,46 +143,42 @@ class BudgetService:
             entry = budget_by_account.setdefault(code, {"account_name": name, "budget": 0})
             entry["budget"] += amt
 
-        total_budget = 0
-        total_actual = 0
-        accounts     = []
+        total_budget      = 0
+        total_encumbrance = 0
+        total_actual      = 0
+        accounts          = []
 
-        for code, info in budget_by_account.items():
-            budget = info["budget"]
-            actual = actual_map.get(code, 0)
-            remain = budget - actual
-            total_budget += budget
-            total_actual += actual
+        all_codes = set(budget_by_account) | set(actual_map) | set(encumbrance_map)
+        for code in all_codes:
+            info        = budget_by_account.get(code, {"account_name": code, "budget": 0})
+            budget      = info["budget"]
+            encumbrance = encumbrance_map.get(code, 0)
+            actual      = actual_map.get(code, 0)
+            funds_available = budget - encumbrance - actual
+            total_budget      += budget
+            total_encumbrance += encumbrance
+            total_actual      += actual
             accounts.append({
-                "account_code": code,
-                "account_name": info["account_name"],
-                "budget": budget,
-                "actual": actual,
-                "remain": remain,
+                "account_code":    code,
+                "account_name":    info["account_name"],
+                "budget":          budget,
+                "encumbrance":     encumbrance,
+                "actual":          actual,
+                "funds_available": funds_available,
             })
-
-        # Akun yang ada realisasi tapi belum ada di budget lines
-        for code, actual in actual_map.items():
-            if not any(a["account_code"] == code for a in accounts):
-                total_actual += actual
-                accounts.append({
-                    "account_code": code,
-                    "account_name": code,
-                    "budget": 0,
-                    "actual": actual,
-                    "remain": -actual,
-                })
 
         accounts.sort(key=lambda a: a["account_code"])
 
         return {
-            "dept":  dept,
-            "year":  year,
-            "month": month,
+            "dept":    dept,
+            "year":    year,
+            "month":   month,
+            "account": account_code,
             "summary": {
-                "total_budget": total_budget,
-                "total_actual": total_actual,
-                "total_remain": total_budget - total_actual,
+                "total_budget":          total_budget,
+                "total_encumbrance":     total_encumbrance,
+                "total_actual":          total_actual,
+                "total_funds_available": total_budget - total_encumbrance - total_actual,
             },
             "accounts": accounts,
         }
@@ -193,7 +197,12 @@ class BudgetService:
           menghasilkan baris debit DAN credit untuk akun yang sama (kesalahan
           prosedur import, bukan reclass ganda)
         - items + total_actual dari AP_EXPENSE_REPORT_LINES + AP_EXPENSE_REPORT_HEADERS_V
-          (klaim expense report HRGA — meal, petty cash, dll), BUKAN AP Invoice
+          (klaim expense report HRGA — meal, petty cash, dll), BUKAN AP Invoice.
+          Baris Purchase Requisition (PO_REQUISITION_LINES_ALL, belum di-invoice)
+          ikut ditampilkan di daftar transaksi yang sama untuk visibilitas
+          komitmen belanja, ditandai field "source" — TIDAK dijumlahkan ke
+          total_actual/remain (PR belum posting ke GL sebagai actual; nilainya
+          sudah tercermin di Encumbrance).
         - remain       = available + reclass − total_actual
         """
         budget_rows = await asyncio.to_thread(
@@ -214,14 +223,20 @@ class BudgetService:
         reclass_map  = {int(r["month"]): int(r.get("reclass_amount") or 0) for r in reclass_rows}
         reclass_note = {int(r["month"]): (r.get("note") or "") for r in reclass_rows}
 
-        items_all = await asyncio.to_thread(
+        expense_items = await asyncio.to_thread(
             self._query_expense_report_items, dept, year, month=None, account_code=account_code
+        )
+        pr_items = await asyncio.to_thread(
+            self._query_purchase_requisition_items, dept, year, month=None, account_code=account_code
         )
 
         items_by_month: dict[int, list] = {}
-        for item in items_all:
+        for item in expense_items:
             m = int(item["month"])
-            items_by_month.setdefault(m, []).append(item)
+            items_by_month.setdefault(m, []).append({**item, "source": "Expense Report"})
+        for item in pr_items:
+            m = int(item["month"])
+            items_by_month.setdefault(m, []).append({**item, "source": "Purchase Requisition"})
 
         MONTH_NAMES = ["Jan","Feb","Mar","Apr","Mei","Jun",
                        "Jul","Agu","Sep","Okt","Nov","Des"]
@@ -236,8 +251,11 @@ class BudgetService:
             encumbrance  = encumbrance_map.get(m, 0)
             available    = budget - encumbrance
             reclass      = reclass_map.get(m, 0)
-            month_items  = items_by_month.get(m, [])
-            total_actual = sum(int(i.get("amount") or 0) for i in month_items)
+            month_items  = sorted(items_by_month.get(m, []), key=lambda i: i.get("expense_date") or "")
+            # Only Expense Report items are real GL actual — PR lines are
+            # shown alongside for visibility but excluded from this sum, or
+            # committed-but-unbilled PR spend would double up with Encumbrance.
+            total_actual = sum(int(i.get("amount") or 0) for i in month_items if i["source"] == "Expense Report")
             remain       = available + reclass - total_actual
             monthly.append({
                 "month":        m,
@@ -255,6 +273,7 @@ class BudgetService:
                         "amount":      int(i.get("amount") or 0),
                         "date":        i.get("expense_date"),
                         "report_num":  i.get("report_num"),
+                        "source":      i["source"],
                     }
                     for i in month_items
                 ],
@@ -295,7 +314,7 @@ class BudgetService:
               AND gb.currency_code          = gl.currency_code
               AND  gcc.segment3 = :dept
               AND EXTRACT(YEAR FROM gp.start_date)  = :year
-              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) = :month)
+              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) <= :month)
               AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
             GROUP BY
                 EXTRACT(YEAR  FROM gp.start_date),
@@ -314,12 +333,23 @@ class BudgetService:
     # bukan hanya AP Invoice seperti versi sebelumnya.
 
     def _query_actual_summary(self, dept: str, year: int,
-                               month: int = None) -> dict[str, int]:
-        rows = self._query_actual_gl(dept, year, month=month)
+                               month: int = None, account_code: str = None) -> dict[str, int]:
+        rows = self._query_actual_gl(dept, year, month=month, account_code=account_code)
         totals: dict[str, int] = {}
         for r in rows:
             code = str(r["account_code"])
             totals[code] = totals.get(code, 0) + int(r.get("actual_amount") or 0)
+        return totals
+
+    # ── Private: Encumbrance summary (per akun) dari GL_BALANCES ──────────────
+
+    def _query_encumbrance_summary(self, dept: str, year: int,
+                                    month: int = None, account_code: str = None) -> dict[str, int]:
+        rows = self._query_encumbrance_gl(dept, year, month=month, account_code=account_code)
+        totals: dict[str, int] = {}
+        for r in rows:
+            code = str(r["account_code"])
+            totals[code] = totals.get(code, 0) + int(r.get("encumbrance_amount") or 0)
         return totals
 
     # ── Private: Actual dari GL — per bulan, per akun ─────────────────────────
@@ -344,7 +374,7 @@ class BudgetService:
               AND gb.currency_code          = gl.currency_code
               AND  gcc.segment3 = :dept
               AND EXTRACT(YEAR FROM gp.start_date)  = :year
-              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) = :month)
+              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) <= :month)
               AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
             GROUP BY
                 EXTRACT(YEAR  FROM gp.start_date),
@@ -379,7 +409,7 @@ class BudgetService:
               AND gb.currency_code          = gl.currency_code
               AND  gcc.segment3 = :dept
               AND EXTRACT(YEAR FROM gp.start_date)  = :year
-              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) = :month)
+              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) <= :month)
               AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
             GROUP BY
                 EXTRACT(YEAR  FROM gp.start_date),
@@ -422,7 +452,7 @@ class BudgetService:
             WHERE UPPER(gjh.je_category) IN ('RECLASS', 'BUDGET')
               AND  gcc.segment3 = :dept
               AND EXTRACT(YEAR FROM gp.start_date)  = :year
-              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) = :month)
+              AND (:month   IS NULL OR EXTRACT(MONTH FROM gp.start_date) <= :month)
               AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
             GROUP BY
                 EXTRACT(YEAR  FROM gp.start_date),
@@ -458,6 +488,44 @@ class BudgetService:
               AND (:month   IS NULL OR EXTRACT(MONTH FROM aerl.start_expense_date) = :month)
               AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
             ORDER BY aerl.start_expense_date, aerh.report_header_id, aerl.report_line_id
+        """
+        return self._query(sql, {
+            "dept": dept, "year": year,
+            "month": month, "account": account_code,
+        })
+
+    # ── Private: Purchase Requisition lines (belum di-invoice) ────────────────
+    # NOTE: belum diverifikasi terhadap Oracle live — PO_REQ_DISTRIBUTIONS_ALL
+    # adalah tabel standar EBS untuk distribusi akun GL sebuah baris PR, tapi
+    # nama kolom persisnya (code_combination_id) belum dicek langsung di
+    # instance CKD Otto. Kalau query ini error, laporkan pesan error Oracle-nya
+    # supaya kolom/tabel bisa disesuaikan.
+
+    def _query_purchase_requisition_items(self, dept: str, year: int,
+                                           month: int = None, account_code: str = None) -> list[dict]:
+        sql = f"""
+            SELECT
+                EXTRACT(YEAR  FROM prl.creation_date)          AS year,
+                EXTRACT(MONTH FROM prl.creation_date)          AS month,
+                gcc.{ACCOUNT_COL}                              AS account_code,
+                prl.item_description                           AS description,
+                NVL(prl.quantity, 0) * NVL(prl.unit_price, 0)  AS amount,
+                TO_CHAR(prl.creation_date, 'YYYY-MM-DD')        AS expense_date,
+                prh.segment1                                    AS report_num
+            FROM po_requisition_lines_all prl
+            JOIN po_requisition_headers_all prh
+                ON  prh.requisition_header_id = prl.requisition_header_id
+            JOIN po_req_distributions_all prd
+                ON  prd.requisition_line_id   = prl.requisition_line_id
+            JOIN gl_code_combinations gcc
+                ON  gcc.code_combination_id   = prd.code_combination_id
+            WHERE NVL(prl.cancel_flag, 'N')   = 'N'
+              AND prh.authorization_status   NOT IN ('CANCELLED', 'REJECTED')
+              AND gcc.{DEPT_COL}              = :dept
+              AND EXTRACT(YEAR  FROM prl.creation_date) = :year
+              AND (:month   IS NULL OR EXTRACT(MONTH FROM prl.creation_date) = :month)
+              AND (:account IS NULL OR gcc.{ACCOUNT_COL} = :account)
+            ORDER BY prl.creation_date, prh.requisition_header_id, prl.line_num
         """
         return self._query(sql, {
             "dept": dept, "year": year,

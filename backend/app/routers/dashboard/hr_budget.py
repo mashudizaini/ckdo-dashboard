@@ -122,13 +122,14 @@ async def get_available_years(
 
 @router.get("")
 async def get_budget_summary(
-    dept:  str           = Query(...),
-    year:  int           = Query(...),
-    month: Optional[int] = Query(None),
-    user:  CurrentUser   = Depends(require_role(Roles.HR)),
+    dept:    str           = Query(...),
+    year:    int           = Query(...),
+    month:   Optional[int] = Query(None, description="Year-To-Date sampai bulan ini (mis. 3 = Jan-Mar); kosong = satu tahun penuh"),
+    account: Optional[str] = Query(None, description="Kode akun (segment4) — kosong = semua akun department"),
+    user:    CurrentUser   = Depends(require_role(Roles.HR)),
 ):
-    """Ringkasan budget vs realisasi per akun untuk dept + tahun (opsional bulan)."""
-    return await BudgetService().get_summary(dept, year, month)
+    """Ringkasan budget vs realisasi per akun untuk dept + tahun (opsional bulan YTD + akun)."""
+    return await BudgetService().get_summary(dept, year, month, account)
 
 
 # ── GET /account/{code} ───────────────────────────────────────────────────────
@@ -148,21 +149,22 @@ async def get_account_detail(
 
 @router.get("/export")
 async def export_budget(
-    dept:  str           = Query(...),
-    year:  int           = Query(...),
-    month: Optional[int] = Query(None),
-    user:  CurrentUser   = Depends(require_role(Roles.HR)),
+    dept:    str           = Query(...),
+    year:    int           = Query(...),
+    month:   Optional[int] = Query(None),
+    account: Optional[str] = Query(None),
+    user:    CurrentUser   = Depends(require_role(Roles.HR)),
 ):
-    """Export ringkasan Budget vs Realisasi ke Excel."""
-    result = await BudgetService().get_summary(dept, year, month)
+    """Export ringkasan Budget vs Realisasi ke Excel — layout sama dengan Oracle Funds Available Inquiry."""
+    result = await BudgetService().get_summary(dept, year, month, account)
     accounts = result.get("accounts", [])
     summary  = result.get("summary", {})
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = f"Budget {dept}"
-    ws.append(["Department", "Tahun", "Filter Bulan", "Kode Akun", "Nama Akun",
-               "Budget (Rp)", "Realisasi GL (Rp)", "Sisa (Rp)"])
+    ws.append(["Department", "Tahun", "Filter Bulan (s.d.)", "Kode Akun", "Nama Akun",
+               "Budget (Rp)", "Encumbrance (Rp)", "Actual (Rp)", "Funds Available (Rp)"])
 
     for acc in accounts:
         ws.append([
@@ -171,14 +173,16 @@ async def export_budget(
             acc["account_code"],
             acc["account_name"],
             acc["budget"],
+            acc["encumbrance"],
             acc["actual"],
-            acc["remain"],
+            acc["funds_available"],
         ])
 
     ws.append(["", "", "", "", "TOTAL",
                summary.get("total_budget", 0),
+               summary.get("total_encumbrance", 0),
                summary.get("total_actual", 0),
-               summary.get("total_remain", 0)])
+               summary.get("total_funds_available", 0)])
 
     buf = io.BytesIO()
     wb.save(buf)

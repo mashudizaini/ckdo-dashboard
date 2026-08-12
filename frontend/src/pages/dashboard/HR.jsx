@@ -4752,6 +4752,8 @@ function GLBudgetSection() {
 
   const [year,          setYear]          = useState(curYear);
   const [month,         setMonth]         = useState(new Date().getMonth() + 1);
+  const [account,       setAccount]       = useState("");
+  const [accountInput,  setAccountInput]  = useState("");
   const [years,         setYears]         = useState([curYear, curYear - 1]);
   const [data,          setData]          = useState(null);
   const [loading,       setLoading]       = useState(false);
@@ -4775,11 +4777,20 @@ function GLBudgetSection() {
     try {
       const params = new URLSearchParams({ dept, year });
       if (month) params.set("month", month);
+      if (account) params.set("account", account);
       const res = await fetch(`${BUDGET_API}?${params}`, { headers: hdrs });
       if (res.ok) setData(await res.json());
     } catch (_) {}
     setLoading(false);
-  }, [year, month]); // eslint-disable-line
+  }, [year, month, account]); // eslint-disable-line
+
+  // Debounce the account code text field so every keystroke doesn't fire a
+  // new Oracle query — matches the pattern of typing a code directly like
+  // Oracle's own Funds Available Inquiry "Account" field.
+  useEffect(() => {
+    const t = setTimeout(() => setAccount(accountInput.trim()), 400);
+    return () => clearTimeout(t);
+  }, [accountInput]);
 
   useEffect(() => { loadYears(); }, [loadYears]);
   useEffect(() => { load(); }, [load]); // eslint-disable-line
@@ -4816,8 +4827,8 @@ function GLBudgetSection() {
   };
 
   const summary  = data?.summary;
-  // Sembunyikan akun yang budget dan actual-nya sama-sama 0 (tidak ada aktivitas)
-  const accounts = (data?.accounts || []).filter(a => a.budget !== 0 || a.actual !== 0);
+  // Sembunyikan akun yang budget, encumbrance, dan actual-nya semua 0 (tidak ada aktivitas)
+  const accounts = (data?.accounts || []).filter(a => a.budget !== 0 || a.encumbrance !== 0 || a.actual !== 0);
 
   return (
     <div className="space-y-4">
@@ -4837,11 +4848,20 @@ function GLBudgetSection() {
         <select
           value={month}
           onChange={e => setMonth(+e.target.value)}
+          title="Year-To-Date sampai bulan ini (mis. Maret = Jan-Mar dijumlah)"
           className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
         >
-          <option value={0}>All Months</option>
-          {MONTHS_ID.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+          <option value={0}>All Months (Jan-Des)</option>
+          {MONTHS_ID.map((m, i) => <option key={i + 1} value={i + 1}>s.d. {m}</option>)}
         </select>
+
+        <input
+          value={accountInput}
+          onChange={e => setAccountInput(e.target.value)}
+          placeholder="Account code..."
+          title="Filter per kode akun (segment4) — kosongkan untuk semua akun"
+          className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500 w-40"
+        />
 
         <button
           onClick={load}
@@ -4856,6 +4876,7 @@ function GLBudgetSection() {
           onClick={() => {
             const p = new URLSearchParams({ dept, year });
             if (month) p.set("month", month);
+            if (account) p.set("account", account);
             window.open(`${BUDGET_API}/export?${p}`, "_blank");
           }}
           disabled={!data}
@@ -4886,16 +4907,17 @@ function GLBudgetSection() {
         </div>
       )}
 
-      {/* ── Summary cards ── */}
+      {/* ── Summary cards (layout Oracle Funds Available Inquiry) ── */}
       {!loading && summary && accounts.length > 0 && (
-        <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
-          <BudgetSummaryCard label="Total Budget (GL)"    value={fmtRp(summary.total_budget)} color="text-blue-400"  bg="bg-blue-500/10  border-blue-500/20" />
-          <BudgetSummaryCard label="Total Actual (GL)" value={fmtRp(summary.total_actual)} color="text-violet-400" bg="bg-violet-500/10 border-violet-500/20" />
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          <BudgetSummaryCard label="Budget"      value={fmtRp(summary.total_budget)}      color="text-blue-400"   bg="bg-blue-500/10   border-blue-500/20" />
+          <BudgetSummaryCard label="Encumbrance" value={fmtRp(summary.total_encumbrance)} color="text-amber-400"  bg="bg-amber-500/10  border-amber-500/20" />
+          <BudgetSummaryCard label="Actual"      value={fmtRp(summary.total_actual)}      color="text-violet-400" bg="bg-violet-500/10 border-violet-500/20" />
           <BudgetSummaryCard
-            label="Remaining (Budget − Actual)"
-            value={fmtRp(summary.total_remain)}
-            color={summary.total_remain >= 0 ? "text-green-400" : "text-red-400"}
-            bg={summary.total_remain >= 0 ? "bg-green-500/10 border-green-500/20" : "bg-red-500/10 border-red-500/20"}
+            label="Funds Available"
+            value={fmtRp(summary.total_funds_available)}
+            color={summary.total_funds_available >= 0 ? "text-green-400" : "text-red-400"}
+            bg={summary.total_funds_available >= 0 ? "bg-green-500/10 border-green-500/20" : "bg-red-500/10 border-red-500/20"}
           />
         </div>
       )}
@@ -4905,36 +4927,41 @@ function GLBudgetSection() {
         <div className="rounded-lg border border-gray-800 overflow-hidden">
           {/* Header */}
           <div className="bg-gray-800/60 grid grid-cols-12 px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            <div className="col-span-5">Account</div>
-            <div className="col-span-3 text-right">Budget (GL)</div>
-            <div className="col-span-2 text-right">Actual (GL)</div>
-            <div className="col-span-2 text-right">Remaining</div>
+            <div className="col-span-4">Account</div>
+            <div className="col-span-2 text-right">Budget</div>
+            <div className="col-span-2 text-right">Encumbrance</div>
+            <div className="col-span-2 text-right" title="Klik baris untuk lihat transaksi Expense Report &amp; Purchase Requisition">Actual</div>
+            <div className="col-span-2 text-right">Funds Available</div>
           </div>
 
           {accounts.map((acc) => {
             const isExp    = expandedCode === acc.account_code;
             const detail   = accountDetail[`${dept}_${acc.account_code}_${year}`];
-            const remainOk = acc.remain >= 0;
+            const remainOk = acc.funds_available >= 0;
 
             return (
               <div key={acc.account_code} className="border-t border-gray-800">
 
-                {/* Summary row */}
+                {/* Summary row — klik di mana saja termasuk kolom Actual akan
+                    membuka rincian transaksi (Expense Report + Purchase Requisition) */}
                 <button
                   className={`w-full grid grid-cols-12 px-4 py-3 text-xs text-left transition-colors hover:bg-gray-800/40 ${isExp ? "bg-gray-800/30" : ""}`}
                   onClick={() => handleExpand(acc.account_code)}
                 >
-                  <div className="col-span-5 flex items-center gap-2">
+                  <div className="col-span-4 flex items-center gap-2">
                     <ChevronDown size={12} className={`text-gray-600 shrink-0 transition-transform ${isExp ? "rotate-180" : ""}`} />
                     <div>
                       <div className="font-medium text-gray-200 leading-tight">{acc.account_name}</div>
                       <div className="text-gray-600">{acc.account_code}</div>
                     </div>
                   </div>
-                  <div className="col-span-3 text-right text-blue-600 font-semibold">{fmtRp(acc.budget)}</div>
-                  <div className="col-span-2 text-right text-violet-600 font-semibold">{fmtRp(acc.actual)}</div>
+                  <div className="col-span-2 text-right text-blue-400 font-semibold">{fmtRp(acc.budget)}</div>
+                  <div className="col-span-2 text-right text-amber-400 font-semibold">{fmtRp(acc.encumbrance)}</div>
+                  <div className="col-span-2 text-right text-violet-400 font-semibold underline decoration-dotted underline-offset-4" title="Klik untuk lihat transaksi">
+                    {fmtRp(acc.actual)}
+                  </div>
                   <div className={`col-span-2 text-right font-semibold ${remainOk ? "text-green-400" : "text-red-400"}`}>
-                    {fmtRp(acc.remain)}
+                    {fmtRp(acc.funds_available)}
                   </div>
                 </button>
 
@@ -5381,12 +5408,13 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
       <table className="w-full">
         <thead>
           <tr className="bg-gray-800/40 text-gray-500 uppercase tracking-wider text-xs">
-            <th className="px-3 py-2 text-right font-semibold" style={{width:"12%"}}>{monthName} Budget</th>
-            {thSort("Actual Expense", "description", { textAlign: "left", width: "28%" })}
-            {thSort("Amount", "amount", { textAlign: "right", width: "12%" })}
-            <th className="px-3 py-2 text-right font-semibold" style={{width:"12%"}}>Available</th>
-            <th className="px-3 py-2 text-right font-semibold" style={{width:"12%"}}>Reclass</th>
-            <th className="px-3 py-2 text-right font-semibold" style={{width:"12%"}}>Remain</th>
+            <th className="px-3 py-2 text-right font-semibold" style={{width:"11%"}}>{monthName} Budget</th>
+            <th className="px-3 py-2 text-left font-semibold" style={{width:"10%"}}>Source</th>
+            {thSort("Transaction", "description", { textAlign: "left", width: "24%" })}
+            {thSort("Amount", "amount", { textAlign: "right", width: "11%" })}
+            <th className="px-3 py-2 text-right font-semibold" style={{width:"11%"}}>Available</th>
+            <th className="px-3 py-2 text-right font-semibold" style={{width:"11%"}}>Reclass</th>
+            <th className="px-3 py-2 text-right font-semibold" style={{width:"11%"}}>Remain</th>
             <th className="px-3 py-2 text-left font-semibold">Note</th>
           </tr>
         </thead>
@@ -5394,7 +5422,7 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
           {m.items.length === 0 ? (
             <tr>
               <td className="px-3 py-2 text-right text-blue-600 font-semibold align-top">{fmtRp(m.budget)}</td>
-              <td colSpan={2} className="px-3 py-3 text-gray-700 italic">No Expense Report data for this period.</td>
+              <td colSpan={3} className="px-3 py-3 text-gray-700 italic">No Expense Report / Purchase Requisition data for this period.</td>
               <td className="px-3 py-2 text-right text-gray-300 align-top">{fmtRp(m.available)}</td>
               <td className="px-3 py-2 text-right text-gray-300 align-top">{fmtRp(m.reclass)}</td>
               <td className={`px-3 py-2 text-right font-bold align-top ${remainOk ? "text-green-400" : "text-red-400"}`}>{fmtRp(m.remain)}</td>
@@ -5409,6 +5437,13 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
                       {fmtRp(m.budget)}
                     </td>
                   )}
+                  <td className="px-3 py-2">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap ${
+                      item.source === "Purchase Requisition" ? "bg-amber-500/15 text-amber-400" : "bg-violet-500/15 text-violet-400"
+                    }`}>
+                      {item.source === "Purchase Requisition" ? "PR" : "Expense Report"}
+                    </span>
+                  </td>
                   <td className="px-3 py-2 text-gray-300">{item.description}</td>
                   <td className="px-3 py-2 text-right text-gray-300 tabular-nums">
                     {(item.amount || 0).toLocaleString("id-ID")}
@@ -5426,9 +5461,12 @@ function BudgetMonthTable({ m, fmtRp, accName }) {
                 </tr>
               ))}
 
-              {/* Baris total actual expense */}
+              {/* Baris total actual — hanya Expense Report (posting GL asli);
+                  Purchase Requisition ditampilkan di atas untuk visibilitas
+                  komitmen belanja tapi tidak dijumlahkan (belum posting GL,
+                  sudah tercermin di kolom Encumbrance). */}
               <tr className="bg-gray-800/40 font-semibold">
-                <td colSpan={2} className="px-3 py-2 text-right text-gray-400 uppercase tracking-wider">Total Actual</td>
+                <td colSpan={3} className="px-3 py-2 text-right text-gray-400 uppercase tracking-wider">Total Actual (Expense Report)</td>
                 <td className="px-3 py-2 text-right text-violet-700 tabular-nums">
                   {m.total_actual.toLocaleString("id-ID")}
                 </td>
