@@ -1285,6 +1285,12 @@ _DEPT_GROUP_MAP = {
 }
 
 
+def _team_sort_key(team: str):
+    """Sort key for team rows within a department: "General Manager" always
+    leads (the department head), everything else alphabetical after it."""
+    return (0, "") if team == "General Manager" else (1, team)
+
+
 def _group_department(raw: Optional[str]) -> Optional[str]:
     """Raw Employee.department value -> one of the 4 canonical DEPT_GROUPS,
     or None to exclude (blank/numeric-corrupted rows — same exclusion
@@ -1345,7 +1351,19 @@ async def get_summary_by_year(
         rows.append({"department": label, "division": None, "team": None, "by_year": by_year_for(label)})
 
         divisions_in_dept = sorted({v for d, v, _t, _j, _r in emps if d == label and v})
-        teams_direct = sorted({t for d, v, t, _j, _r in emps if d == label and not v and t})
+        teams_direct = sorted({t for d, v, t, _j, _r in emps if d == label and not v and t}, key=_team_sort_key)
+
+        # General Manager leads the whole department (row #1 after the
+        # department total) even when the department also has divisions
+        # (e.g. Plant) — without this, it would otherwise land at the very
+        # bottom since teams_direct is normally rendered after every
+        # division block.
+        if teams_direct and teams_direct[0] == "General Manager":
+            rows.append({
+                "department": label, "division": None, "team": "General Manager",
+                "by_year": by_year_for(label, None, "General Manager"),
+            })
+            teams_direct = teams_direct[1:]
 
         for division in divisions_in_dept:
             rows.append({
@@ -1355,7 +1373,7 @@ async def get_summary_by_year(
             teams_in_division = sorted({
                 t for d, v, t, _j, _r in emps
                 if d == label and v == division and t
-            })
+            }, key=_team_sort_key)
             for team in teams_in_division:
                 rows.append({
                     "department": label, "division": division, "team": team,
@@ -1435,7 +1453,19 @@ async def get_summary_by_month(
         rows.append({"department": label, "division": None, "team": None, "by_month": by_month_for(label)})
 
         divisions_in_dept = sorted({v for d, v, _t, _j, _r in emps if d == label and v})
-        teams_direct = sorted({t for d, v, t, _j, _r in emps if d == label and not v and t})
+        teams_direct = sorted({t for d, v, t, _j, _r in emps if d == label and not v and t}, key=_team_sort_key)
+
+        # General Manager leads the whole department (row #1 after the
+        # department total) even when the department also has divisions
+        # (e.g. Plant) — without this, it would otherwise land at the very
+        # bottom since teams_direct is normally rendered after every
+        # division block.
+        if teams_direct and teams_direct[0] == "General Manager":
+            rows.append({
+                "department": label, "division": None, "team": "General Manager",
+                "by_month": by_month_for(label, None, "General Manager"),
+            })
+            teams_direct = teams_direct[1:]
 
         for division in divisions_in_dept:
             rows.append({
@@ -1445,7 +1475,7 @@ async def get_summary_by_month(
             teams_in_division = sorted({
                 t for d, v, t, _j, _r in emps
                 if d == label and v == division and t
-            })
+            }, key=_team_sort_key)
             for team in teams_in_division:
                 rows.append({
                     "department": label, "division": division, "team": team,
