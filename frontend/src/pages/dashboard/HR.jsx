@@ -6,7 +6,7 @@ import {
   Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck,
   Wallet, Download, ChevronDown, ChevronUp, ListChecks, FileSearch, BookOpen, Trash2,
   QrCode, Plus, Minus, ArrowUpDown, Pencil, ZoomIn, ZoomOut, Maximize2, Minimize2, Network,
-  SlidersHorizontal, User, Camera, History, FileText, Sparkles, CheckCircle2, AlertTriangle,
+  SlidersHorizontal, User, Camera, History, FileText, Sparkles, CheckCircle2,
 } from "lucide-react";
 import EmployeeUpload from "./EmployeeUpload";
 import AttendanceUpload from "./AttendanceUpload";
@@ -4953,16 +4953,7 @@ function GLBudgetSection() {
                   <div className="col-span-4 flex items-center gap-2">
                     <ChevronDown size={12} className={`text-gray-600 shrink-0 transition-transform ${isExp ? "rotate-180" : ""}`} />
                     <div>
-                      <div className="font-medium text-gray-200 leading-tight flex items-center gap-1.5">
-                        {acc.account_name}
-                        {acc.unposted_lines > 0 && (
-                          <AlertTriangle
-                            size={11}
-                            className="text-amber-400 shrink-0"
-                            title={`${acc.unposted_lines} jurnal budget/encumbrance belum posting (netto ${fmtRp(acc.unposted_pending)}) belum tercermin di angka ini — cek langsung ke Oracle`}
-                          />
-                        )}
-                      </div>
+                      <div className="font-medium text-gray-200 leading-tight">{acc.account_name}</div>
                       <div className="text-gray-600">{acc.account_code}</div>
                     </div>
                   </div>
@@ -5430,13 +5421,6 @@ function BudgetPeriodBalances({ detail, fmtRp, accName }) {
                   <td className="px-3 py-2 text-gray-300 font-medium flex items-center gap-1.5">
                     <ChevronDown size={11} className={`text-gray-600 shrink-0 transition-transform ${isExp ? "rotate-180" : ""}`} />
                     {m.month_name}-{String(detail.year).slice(-2)}
-                    {m.unposted_lines > 0 && (
-                      <AlertTriangle
-                        size={11}
-                        className="text-amber-400 shrink-0"
-                        title={`${m.unposted_lines} jurnal budget/encumbrance belum posting (netto ${fmtRp(m.unposted_pending)}) belum tercermin di angka bulan ini — cek langsung ke Oracle`}
-                      />
-                    )}
                   </td>
                   <td className="px-3 py-2 text-right text-blue-400 tabular-nums">{fmtRp(m.budget)}</td>
                   <td className="px-3 py-2 text-right text-amber-400 tabular-nums">{fmtRp(m.encumbrance)}</td>
