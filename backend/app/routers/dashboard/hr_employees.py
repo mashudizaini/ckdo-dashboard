@@ -1289,46 +1289,76 @@ async def get_summary_by_year(
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Headcount by department (grouped into the 4 canonical DEPT_GROUPS),
-    Beginning/Ending per year — same "active as of a date" windowing used
-    by /turnover-summary and /monthly-summary."""
+    """Headcount by department (grouped into the 4 canonical DEPT_GROUPS) >
+    division > team, Beginning/Ending per year — same "active as of a date"
+    windowing used by /turnover-summary and /monthly-summary. Division/team
+    rows mirror /summary/by-month's tree (only some departments have them)."""
     rows_q = await db.execute(
-        select(Employee.department, Employee.date_of_joining, Employee.resign_date)
+        select(Employee.department, Employee.division, Employee.team,
+               Employee.date_of_joining, Employee.resign_date)
         .where(Employee.date_of_joining.isnot(None))
     )
-    emps = [(_group_department(d), j, r) for d, j, r in rows_q.fetchall()]
-    emps = [(d, j, r) for d, j, r in emps if d is not None]
+    emps = [
+        (_group_department(d), (v or "").strip() or None, (t or "").strip() or None, j, r)
+        for d, v, t, j, r in rows_q.fetchall()
+    ]
+    emps = [(d, v, t, j, r) for d, v, t, j, r in emps if d is not None]
 
     today = date.today()
-    year_from = min((j.year for _d, j, _r in emps), default=today.year)
+    year_from = min((j.year for _d, _v, _t, j, _r in emps), default=today.year)
     years = list(range(year_from, today.year + 1))
 
     departments = DEPT_GROUPS
 
-    def active_count(snapshot, dept_filter=None):
+    def active_count(snapshot, dept_filter=None, division_filter=None, team_filter=None):
         return sum(
-            1 for d, j, r in emps
+            1 for d, v, t, j, r in emps
             if j <= snapshot and (r is None or r >= snapshot)
             and (dept_filter is None or d == dept_filter)
+            and (division_filter is None or v == division_filter)
+            and (team_filter is None or t == team_filter)
         )
 
-    rows = []
-    for label in DEPT_GROUPS:
-        by_year = {}
+    def by_year_for(dept_filter=None, division_filter=None, team_filter=None):
+        result = {}
         for y in years:
             beg_snapshot = date(y, 1, 1)
             end_snapshot = min(date(y, 12, 31), today)
-            by_year[y] = {
-                "beginning": active_count(beg_snapshot, label),
-                "ending":    active_count(end_snapshot, label),
+            result[y] = {
+                "beginning": active_count(beg_snapshot, dept_filter, division_filter, team_filter),
+                "ending":    active_count(end_snapshot, dept_filter, division_filter, team_filter),
             }
-        rows.append({"department": label, "by_year": by_year})
+        return result
 
-    total = {}
-    for y in years:
-        beg_snapshot = date(y, 1, 1)
-        end_snapshot = min(date(y, 12, 31), today)
-        total[y] = {"beginning": active_count(beg_snapshot), "ending": active_count(end_snapshot)}
+    rows = []
+    for label in DEPT_GROUPS:
+        rows.append({"department": label, "division": None, "team": None, "by_year": by_year_for(label)})
+
+        divisions_in_dept = sorted({v for d, v, _t, _j, _r in emps if d == label and v})
+        teams_direct = sorted({t for d, v, t, _j, _r in emps if d == label and not v and t})
+
+        for division in divisions_in_dept:
+            rows.append({
+                "department": label, "division": division, "team": None,
+                "by_year": by_year_for(label, division),
+            })
+            teams_in_division = sorted({
+                t for d, v, t, _j, _r in emps
+                if d == label and v == division and t
+            })
+            for team in teams_in_division:
+                rows.append({
+                    "department": label, "division": division, "team": team,
+                    "by_year": by_year_for(label, division, team),
+                })
+
+        for team in teams_direct:
+            rows.append({
+                "department": label, "division": None, "team": team,
+                "by_year": by_year_for(label, None, team),
+            })
+
+    total = by_year_for()
 
     growth = {}
     for i, y in enumerate(years):

@@ -2322,6 +2322,8 @@ function EmployeeYearSummaryTable({ onYearClick }) {
   const headers = { Authorization: `Bearer ${token}` };
   const [d, setD] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [collapsedDepts, setCollapsedDepts] = useState(() => new Set());
+  const [collapsedDivisions, setCollapsedDivisions] = useState(() => new Set());
 
   useEffect(() => {
     setLoading(true);
@@ -2331,6 +2333,21 @@ function EmployeeYearSummaryTable({ onYearClick }) {
       .finally(() => setLoading(false));
   }, []); // eslint-disable-line
 
+  const toggleSet = (setFn) => (key) => setFn((prev) => {
+    const next = new Set(prev);
+    next.has(key) ? next.delete(key) : next.add(key);
+    return next;
+  });
+  const toggleDept = toggleSet(setCollapsedDepts);
+  const toggleDivision = toggleSet(setCollapsedDivisions);
+  const divKey = (dept, division) => `${dept}::${division}`;
+
+  const visibleRows = d ? d.rows.filter((row) => {
+    if (collapsedDepts.has(row.department)) return row.division == null && row.team == null;
+    if (row.division && row.team && collapsedDivisions.has(divKey(row.department, row.division))) return false;
+    return true;
+  }) : [];
+
   if (loading) return <div className="py-16 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></div>;
   if (!d) return <div className="py-16 text-center text-xs text-gray-600">Failed to load</div>;
 
@@ -2339,12 +2356,12 @@ function EmployeeYearSummaryTable({ onYearClick }) {
 
   return (
     <div className="space-y-2">
-      <p className="text-[10px] text-gray-600">Click a year to view its monthly breakdown by department / division / team</p>
+      <p className="text-[10px] text-gray-600">Click + to expand a department's teams · click a year to view its monthly breakdown</p>
       <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 480 }}>
-      <table className="text-sm" style={{ minWidth: 200 + d.years.length * 140 }}>
+      <table className="text-sm" style={{ minWidth: 220 + d.years.length * 140 }}>
         <thead className="sticky top-0 z-10 bg-gray-800">
           <tr>
-            <th className={`${TH} text-left sticky left-0 bg-gray-800 z-20`} rowSpan={2}>Department</th>
+            <th className={`${TH} text-left sticky left-0 bg-gray-800 z-20`} rowSpan={2}>Department / Division / Team</th>
             {d.years.map((y) => (
               <th
                 key={y}
@@ -2365,15 +2382,43 @@ function EmployeeYearSummaryTable({ onYearClick }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-800">
-          {d.rows.map((row) => (
-            <tr key={row.department} className="hover:bg-gray-800/30">
-              <td className="px-2.5 py-2 text-xs text-gray-300 whitespace-nowrap sticky left-0 bg-gray-900">{row.department}</td>
+          {visibleRows.map((row) => {
+            const level = row.team ? 2 : row.division ? 1 : 0;
+            const hasChildren = level === 0
+              ? d.rows.some((r) => r.department === row.department && (r.division || r.team))
+              : level === 1
+                ? d.rows.some((r) => r.department === row.department && r.division === row.division && r.team)
+                : false;
+            const toggleKey = level === 0 ? row.department : divKey(row.department, row.division);
+            const isOpen = hasChildren && !(level === 0 ? collapsedDepts : collapsedDivisions).has(toggleKey);
+            const label = row.team || row.division || row.department;
+            const pad = level === 0 ? "" : level === 1 ? "pl-6" : "pl-9";
+            const rowClass = level === 0 ? "bg-gray-800/30 font-semibold" : level === 1 ? "bg-gray-900/40 font-medium hover:bg-gray-800/30" : "hover:bg-gray-800/30";
+            return (
+            <tr key={`${row.department}-${row.division || ""}-${row.team || ""}`} className={rowClass}>
+              <td
+                onClick={hasChildren ? () => (level === 0 ? toggleDept(toggleKey) : toggleDivision(toggleKey)) : undefined}
+                className={`px-2.5 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${level === 2 ? "text-gray-400 bg-gray-900" : level === 1 ? "text-gray-300 bg-gray-900/40" : "text-gray-200 bg-gray-800/30"} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
+                title={hasChildren && level === 0 ? (isOpen ? "Collapse team list" : "Expand team list") : undefined}
+              >
+                {hasChildren && (
+                  level === 0
+                    ? (isOpen
+                        ? <Minus size={11} className="inline mr-1 -mt-0.5 text-indigo-400" />
+                        : <Plus size={11} className="inline mr-1 -mt-0.5 text-indigo-400" />)
+                    : (isOpen
+                        ? <ChevronDown size={11} className="inline mr-1 -mt-0.5" />
+                        : <ChevronRight size={11} className="inline mr-1 -mt-0.5" />)
+                )}
+                {label}
+              </td>
               {d.years.map((y) => ([
-                <td key={`${y}-b`} className={`${TD} text-gray-500`}>{row.by_year[y]?.beginning ?? "—"}</td>,
-                <td key={`${y}-e`} className={`${TD} text-gray-300`}>{row.by_year[y]?.ending ?? "—"}</td>,
+                <td key={`${y}-b`} className={`${TD} ${level === 0 ? "text-gray-500" : "text-gray-500"}`}>{row.by_year[y]?.beginning ?? "—"}</td>,
+                <td key={`${y}-e`} className={`${TD} ${level === 0 ? "text-gray-300" : "text-gray-400"}`}>{row.by_year[y]?.ending ?? "—"}</td>,
               ]))}
             </tr>
-          ))}
+            );
+          })}
           <tr className="bg-gray-800/60 font-bold">
             <td className="px-2.5 py-2 text-xs text-gray-200 whitespace-nowrap sticky left-0 bg-gray-800/60">TOTAL</td>
             {d.years.map((y) => ([
