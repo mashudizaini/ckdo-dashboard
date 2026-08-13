@@ -37,10 +37,12 @@ settings = get_settings()
 
 OLLAMA_MOM_TIMEOUT_SECONDS = 120.0
 
-# Generous margin — ~17x realtime measured on the ai-engine GPU means a 2h
-# meeting takes ~7 minutes to transcribe, but a large upload + network hop
-# deserves headroom over the bare compute time.
-TRANSCRIBE_TIMEOUT_SECONDS = 1800.0
+# Generous margin — ~17x realtime measured on the ai-engine GPU means even a
+# 5h meeting (the longest meetings are expected to run) takes under 20
+# minutes to transcribe, but a large upload + network hop deserves headroom
+# over the bare compute time. nginx's proxy_*_timeout (nginx.dev.conf) is
+# set to clear this with its own margin — raise both together.
+TRANSCRIBE_TIMEOUT_SECONDS = 3600.0
 
 MOM_PROMPT_TEMPLATE = """Analisis transkrip rapat berikut dan buatkan ringkasan terstruktur dalam format JSON.
 
