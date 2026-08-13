@@ -393,6 +393,15 @@ export default function MeetingNotes() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const downloadTranscript = () => {
+    if (!transcript?.text) return;
+    const blob = new Blob([transcript.text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `${(title || "Transcript").replace(/\s+/g, "_")}.txt`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // ── MOM editing helpers (immutable updates) ──
   const updateMom = (updater) => setMom((prev) => updater(structuredClone(prev)));
 
@@ -740,6 +749,9 @@ export default function MeetingNotes() {
                     <button onClick={copyTranscript} className="flex items-center gap-1 text-gray-400 hover:text-gray-200">
                       <Copy size={12} />{copied ? "Copied!" : "Copy"}
                     </button>
+                    <button onClick={downloadTranscript} className="flex items-center gap-1 text-gray-400 hover:text-gray-200">
+                      <Download size={12} />Download .txt
+                    </button>
                   </div>
                 )}
               </div>
@@ -839,6 +851,22 @@ export default function MeetingNotes() {
               {saveMomMsg && (
                 <div className={`text-xs rounded-md px-3 py-2 ${saveMomMsg.type === "error" ? "bg-red-500/10 border border-red-500/30 text-red-400" : "bg-green-500/10 border border-green-500/30 text-green-400"}`}>
                   {saveMomMsg.text}
+                </div>
+              )}
+
+              {!mom.departments?.length && (
+                <div className="flex items-start gap-2.5 rounded-lg border border-amber-600/40 bg-amber-500/10 px-4 py-3">
+                  <AlertTriangle size={16} className="text-amber-400 shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-200 leading-relaxed">
+                    <p className="font-semibold mb-1">AI found no meeting content to summarize</p>
+                    <p>
+                      The generated MOM has zero departments/topics — downloading now would produce a .docx with
+                      just the letterhead and no discussion content. This usually means the transcript doesn't
+                      contain identifiable meeting discussion (e.g. it's casual conversation, too short, or the
+                      wrong recording). Go back to the <button onClick={() => setStep("transcript")} className="underline hover:text-amber-100">Transcript</button> tab
+                      to check what was actually transcribed, or add a department manually below.
+                    </p>
+                  </div>
                 </div>
               )}
 
