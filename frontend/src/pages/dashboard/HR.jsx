@@ -1273,74 +1273,76 @@ function OrgNode({ node, expanded, toggle, matchIds, onNodeClick, visibleIds }) 
 
   return (
     <li>
-      <div
-        onClick={() => !isPlaceholder && onNodeClick(node)}
-        style={{
-          width: 168, borderRadius: 6, overflow: "hidden",
-          cursor: isPlaceholder ? "default" : "pointer",
-          background: "#fff",
-          border: `1.5px solid ${isMatch ? color : "#c4cddb"}`,
-          boxShadow: isMatch ? `0 0 0 2px ${color}55` : "2px 3px 6px rgba(30,41,59,0.12)",
-          position: "relative",
-        }}
-      >
-        {isPlaceholder ? (
-          <div style={{ padding: "8px 10px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <UserCheck size={12} color="#64748b" />
-              <span style={{ fontSize: 11.5, fontWeight: 800, color: "#64748b" }}>{node.full_name}</span>
-            </div>
-            <div style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, marginTop: 2 }}>{node.children.length} branch{node.children.length !== 1 ? "es" : ""}</div>
-          </div>
-        ) : (
-          <>
-            {groupLabel && (
-              <div style={{
-                background: color, color: "#fff", fontSize: 9.5, fontWeight: 800,
-                padding: "4px 10px", textAlign: "center", textTransform: "uppercase", letterSpacing: "0.02em",
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              }} title={groupLabel}>
-                {groupLabel}
-              </div>
-            )}
-            <div style={{ padding: "7px 10px 9px", textAlign: "center" }}>
-              <div style={{
-                fontSize: 10, fontWeight: 700, color: "#475569", textDecoration: "underline",
-                textDecorationColor: color, textUnderlineOffset: 2,
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              }} title={node.position || ""}>
-                {node.position || "—"}
-              </div>
-              <div style={{
-                fontSize: 12, fontWeight: 700, color: "#1e293b", marginTop: 3,
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-              }} title={node.full_name}>
-                {node.full_name || "—"}
-              </div>
-              {hasChildren && (
-                <div style={{ fontSize: 8.5, fontWeight: 700, color: "#94a3b8", marginTop: 2 }}>
-                  {node.children.length} direct report{node.children.length !== 1 ? "s" : ""}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {hasChildren && (
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {hasChildren ? (
           <button
             onClick={(e) => { e.stopPropagation(); toggle(node.id); }}
             title={isOpen ? "Collapse" : "Expand"}
             style={{
-              position: "absolute", bottom: -10, left: "50%", transform: "translateX(-50%)",
-              width: 20, height: 20, borderRadius: "50%", border: "2px solid #fff",
+              flexShrink: 0, width: 20, height: 20, borderRadius: "50%", border: "none",
               background: color, color: "#fff", cursor: "pointer", display: "flex",
-              alignItems: "center", justifyContent: "center", boxShadow: "2px 2px 5px rgba(0,0,0,0.2)",
-              zIndex: 2, padding: 0,
+              alignItems: "center", justifyContent: "center", boxShadow: "1px 2px 4px rgba(0,0,0,0.18)",
+              padding: 0,
             }}
           >
-            {isOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+            {isOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
           </button>
+        ) : (
+          <span style={{ flexShrink: 0, width: 20, height: 20 }} />
         )}
+
+        <div
+          onClick={() => !isPlaceholder && onNodeClick(node)}
+          style={{
+            width: 190, borderRadius: 6, overflow: "hidden",
+            cursor: isPlaceholder ? "default" : "pointer",
+            background: "#fff",
+            border: `1.5px solid ${isMatch ? color : "#c4cddb"}`,
+            boxShadow: isMatch ? `0 0 0 2px ${color}55` : "2px 3px 6px rgba(30,41,59,0.12)",
+          }}
+        >
+          {isPlaceholder ? (
+            <div style={{ padding: "8px 10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <UserCheck size={12} color="#64748b" />
+                <span style={{ fontSize: 11.5, fontWeight: 800, color: "#64748b" }}>{node.full_name}</span>
+              </div>
+              <div style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, marginTop: 2 }}>{node.children.length} branch{node.children.length !== 1 ? "es" : ""}</div>
+            </div>
+          ) : (
+            <>
+              {groupLabel && (
+                <div style={{
+                  background: color, color: "#fff", fontSize: 9.5, fontWeight: 800,
+                  padding: "4px 10px", textAlign: "center", textTransform: "uppercase", letterSpacing: "0.02em",
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                }} title={groupLabel}>
+                  {groupLabel}
+                </div>
+              )}
+              <div style={{ padding: "7px 10px 9px", textAlign: "center" }}>
+                <div style={{
+                  fontSize: 10, fontWeight: 700, color: "#475569", textDecoration: "underline",
+                  textDecorationColor: color, textUnderlineOffset: 2,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                }} title={node.position || ""}>
+                  {node.position || "—"}
+                </div>
+                <div style={{
+                  fontSize: 12, fontWeight: 700, color: "#1e293b", marginTop: 3,
+                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                }} title={node.full_name}>
+                  {node.full_name || "—"}
+                </div>
+                {hasChildren && (
+                  <div style={{ fontSize: 8.5, fontWeight: 700, color: "#94a3b8", marginTop: 2 }}>
+                    {node.children.length} direct report{node.children.length !== 1 ? "s" : ""}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {hasChildren && isOpen && (
@@ -1371,11 +1373,19 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError]       = useState("");
   const [lov, setLov]           = useState([]);
+  const [positionLov, setPositionLov] = useState([]);
+  const [departmentLov, setDepartmentLov] = useState([]);
+  const [divisionLov, setDivisionLov] = useState([]);
+  const [subTeamLov, setSubTeamLov] = useState([]);
   const [supQuery, setSupQuery] = useState("");
   const [supOpen, setSupOpen]   = useState(false);
 
   useEffect(() => {
     hrApi.getOrgStructureLov().then((r) => setLov(r || [])).catch(() => {});
+    hrApi.getOrgStructurePositions().then((r) => setPositionLov(r || [])).catch(() => {});
+    hrApi.getOrgStructureDepts().then((r) => setDepartmentLov(r || [])).catch(() => {});
+    hrApi.getOrgStructureDivisions().then((r) => setDivisionLov(r || [])).catch(() => {});
+    hrApi.getOrgStructureSubTeams().then((r) => setSubTeamLov(r || [])).catch(() => {});
   }, []);
 
   const supervisorName = lov.find((n) => n.id === form.supervisor_id)?.full_name;
@@ -1413,8 +1423,15 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
       <input
         value={form[key]}
         onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+        list={extra?.lov ? `${key}-lov` : undefined}
+        placeholder={extra?.lov ? "Pick or type new..." : undefined}
         style={{ width: "100%", fontSize: 12.5, fontWeight: 600, padding: "8px 10px", borderRadius: 8, border: "none", background: "#fff", color: "#1e293b", outline: "none", marginTop: 2 }}
       />
+      {extra?.lov && (
+        <datalist id={`${key}-lov`}>
+          {extra.lov.map((v) => <option key={v} value={v} />)}
+        </datalist>
+      )}
     </div>
   );
 
@@ -1429,10 +1446,10 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
         <div className="p-6 space-y-3">
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 12px" }}>
             {field("full_name", "Full Name *", { full: true })}
-            {field("position", "Position")}
-            {field("department", "Department")}
-            {field("division", "Division")}
-            {field("sub_team", "Sub-team / Region")}
+            {field("position", "Position", { lov: positionLov })}
+            {field("department", "Department", { lov: departmentLov })}
+            {field("division", "Division", { lov: divisionLov })}
+            {field("sub_team", "Sub-team / Region", { lov: subTeamLov })}
             <div>
               <label style={{ fontSize: 10, fontWeight: 700, color: "#64748b" }}>Join Date</label>
               <input type="date" value={form.join_date || ""} onChange={(e) => setForm({ ...form, join_date: e.target.value })}
@@ -1706,7 +1723,7 @@ function OrgChartView() {
             No one found matching "{search}".
           </p>
         ) : (
-          <div ref={chartRef} style={{ transform: `scale(${zoom})`, transformOrigin: "top center", display: "inline-block", minWidth: "100%", background: "#dfe5ed" }}>
+          <div ref={chartRef} style={{ transform: `scale(${zoom})`, transformOrigin: "top left", display: "inline-block", minWidth: "100%", background: "#dfe5ed", padding: "0 20px 20px 4px" }}>
             <ul className="org-tree">
               <OrgNode node={root} expanded={expanded} toggle={toggle} matchIds={matchIds} onNodeClick={setSelectedNode} visibleIds={visibleIds} />
             </ul>

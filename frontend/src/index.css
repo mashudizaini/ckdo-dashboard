@@ -278,56 +278,45 @@ tbody td {
   font-weight: 500 !important;
 }
 
-/* ── HR Organization Chart — pure-CSS connector tree ──
+/* ── HR Organization Chart — pure-CSS connector tree (vertical/indented) ──
    React inline styles can't target ::before/::after, so the connector lines
-   (the horizontal/vertical bars joining a node to its children) live here.
-   Classic two-stage connector: a vertical trunk drops from the parent
-   (drawn by the children <ul>'s own ::before), then a horizontal bar spreads
-   sideways to each child's x-position (drawn by each <li>'s ::before/::after,
-   which meet at the child's own center) — always flowing strictly downward,
-   matching the reference org chart's layout. */
+   live here. Each generation of children stacks vertically (indented to the
+   right of its parent) instead of fanning out horizontally — a continuous
+   vertical line runs down the left edge of each <ul> (drawn per-<li> via
+   ::before so it can stop cleanly after the last child), with a short
+   horizontal tick (::after) branching off to each node. */
 .org-tree, .org-tree ul {
-  padding-top: 22px;
-  position: relative;
-  display: flex;
-  justify-content: center;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.org-tree ul {
+  margin-left: 9px;
+  padding-left: 26px;
 }
 .org-tree li {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  list-style: none;
   position: relative;
-  padding: 22px 12px 0 12px;
+  padding-top: 14px;
 }
 .org-tree > li { padding-top: 0; }
-.org-tree li::before,
-.org-tree li::after {
+.org-tree ul > li::before {
   content: '';
   position: absolute;
+  left: -26px;
   top: 0;
-  right: 50%;
-  width: 50%;
-  height: 22px;
-  border-top: 2px solid #7c8db5;
+  width: 2px;
+  height: 100%;
+  background: #7c8db5;
 }
-.org-tree li::after { right: auto; left: 50%; border-left: 2px solid #7c8db5; }
-.org-tree li:only-child::before,
-.org-tree li:only-child::after { display: none; }
-.org-tree li:only-child { padding-top: 0; }
-.org-tree li:first-child::before { border: none; }
-.org-tree li:last-child::after { border: none; }
-.org-tree li:last-child::before { border-right: 2px solid #7c8db5; border-radius: 0 6px 0 0; }
-.org-tree li:first-child::after { border-radius: 6px 0 0 0; }
-.org-tree > li::before, .org-tree > li::after { display: none; }
-.org-tree ul::before {
+.org-tree ul > li:last-child::before { height: 28px; }
+.org-tree ul > li::after {
   content: '';
   position: absolute;
-  top: 0;
-  left: 50%;
-  border-left: 2px solid #7c8db5;
-  width: 0;
-  height: 22px;
+  left: -26px;
+  top: 28px;
+  width: 26px;
+  height: 2px;
+  background: #7c8db5;
 }
 /* ── Input/select — flat, bordered ── */
 input, select, textarea {

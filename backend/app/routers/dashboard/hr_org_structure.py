@@ -133,6 +133,40 @@ async def get_departments(
     return sorted(depts, key=lambda d: (DEPARTMENT_ORDER.get(d, 99), d))
 
 
+# ── LOV for the Add/Edit Position form's free-text fields — every distinct
+# value already in use, so HR picks from existing values instead of
+# retyping variants that then fragment the chart (the exact "Strategy
+# Development" vs "Strategy & Development" class of bug fixed 2026-08-12
+# for Employee.department/team). Reuses clean_department_list's generic
+# blank/digit-junk filter + case-dedup, not just for department names. ────
+
+@router.get("/positions")
+async def get_positions(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    result = await db.execute(select(OrgStructureNode.position).distinct())
+    return clean_department_list(r[0] for r in result.fetchall())
+
+
+@router.get("/divisions")
+async def get_divisions(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    result = await db.execute(select(OrgStructureNode.division).distinct())
+    return clean_department_list(r[0] for r in result.fetchall())
+
+
+@router.get("/sub-teams")
+async def get_sub_teams(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    result = await db.execute(select(OrgStructureNode.sub_team).distinct())
+    return clean_department_list(r[0] for r in result.fetchall())
+
+
 @router.get("/tree")
 async def get_tree(
     db:   AsyncSession = Depends(get_db),
