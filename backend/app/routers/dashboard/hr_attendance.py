@@ -77,6 +77,21 @@ def _is_present_intercom():
     )
 
 
+def _not(expr):
+    """NULL-safe negation for use in a WHERE clause. Plain `~expr` is safe
+    inside case()/and_() (an unmatched case branch or AND just falls
+    through), but SQL's three-valued logic means `~expr` stays NULL — not
+    TRUE — whenever expr itself is NULL (e.g. leave_code IS NULL, which is
+    true for the vast majority of rows since most days aren't a leave day),
+    and `WHERE NULL` silently drops the row instead of keeping it. Found
+    2026-08-13: every `~_is_leave_code()`/`~_is_bt_code()`/
+    `~_is_present_intercom()` used directly in a .where() was affected,
+    which is why the "unexplained absence" list, the Attendance Today
+    Present/Absent employee filters, and Who's Off were all returning far
+    fewer rows than the Plan/Actual chart implied (or none at all)."""
+    return ~func.coalesce(expr, False)
+
+
 def _plan_expr():
     """1 if this is a required working day (weekday, not a Plant shift rest
     day, not on excluded leave)."""
@@ -1562,9 +1577,9 @@ async def get_today_employees(
     q = select(AttendanceRecord).where(AttendanceRecord.attendance_date == q_date).where(IS_WEEKDAY)
 
     if filter == "hadir":
-        q = q.where(or_(_is_bt_code(), _is_present_intercom())).where(~_is_leave_code())
+        q = q.where(or_(_is_bt_code(), _is_present_intercom())).where(_not(_is_leave_code()))
     elif filter == "absen":
-        q = q.where(~_is_leave_code()).where(~_is_bt_code()).where(~_is_present_intercom())
+        q = q.where(_not(_is_leave_code())).where(_not(_is_bt_code())).where(_not(_is_present_intercom()))
 
     q = q.order_by(AttendanceRecord.department, AttendanceRecord.employee_name)
     result = await db.execute(q)
@@ -1614,7 +1629,7 @@ async def get_whos_off(
         )
         .where(AttendanceRecord.attendance_date == latest)
         .where(IS_WEEKDAY)
-        .where(or_(~_is_present_intercom(), _is_leave_code(), _is_bt_code()))
+        .where(or_(_not(_is_present_intercom()), _is_leave_code(), _is_bt_code()))
         .order_by(AttendanceRecord.employee_name)
         .limit(15)
     )
@@ -1836,9 +1851,9 @@ async def get_employee_detail(
         select(AttendanceRecord)
         .where(AttendanceRecord.employee_id == employee_id)
         .where(IS_WEEKDAY)
-        .where(~_is_leave_code())
-        .where(~_is_bt_code())
-        .where(~_is_present_intercom())
+        .where(_not(_is_leave_code()))
+        .where(_not(_is_bt_code()))
+        .where(_not(_is_present_intercom()))
         .where(True if year is None else extract("year", AttendanceRecord.attendance_date) == year)
         .order_by(AttendanceRecord.attendance_date.desc())
         .limit(30)

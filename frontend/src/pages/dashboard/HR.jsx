@@ -3140,6 +3140,13 @@ function AttendanceTodaySection() {
   const handleEmpSort  = (f) => { const r = toggleSort(empSortBy, empSortDir, f);   setEmpSortBy(r.sortBy);  setEmpSortDir(r.sortDir); };
   const handleDeptSort = (f) => { const r = toggleSort(deptSortBy, deptSortDir, f); setDeptSortBy(r.sortBy); setDeptSortDir(r.sortDir); };
 
+  // Employee lookup — search for one person and see just their status for
+  // the selected date, independent of the Total/Present/Absent card drill-down.
+  const [empQuery,        setEmpQuery]        = useState("");
+  const [empSearchResults, setEmpSearchResults] = useState([]);
+  const [empLookup,        setEmpLookup]        = useState(null);
+  const [loadingLookup,    setLoadingLookup]     = useState(false);
+
   const fetchData = async (targetDate = selectedDate) => {
     setLoading(true);
     try {
@@ -3153,8 +3160,35 @@ function AttendanceTodaySection() {
   const handleDateChange = (v) => {
     setSelectedDate(v);
     setActiveFilter(null); setEmployees([]);
+    setEmpQuery(""); setEmpSearchResults([]); setEmpLookup(null);
     fetchData(v);
   };
+
+  const doEmpSearch = async (q) => {
+    setEmpQuery(q);
+    if (q.length < 2) { setEmpSearchResults([]); return; }
+    try {
+      const res = await fetch(`${ATT_API}/search-employees?q=${encodeURIComponent(q)}`, { headers });
+      if (res.ok) setEmpSearchResults(await res.json());
+    } catch (_) {}
+  };
+
+  const selectEmpLookup = async (emp) => {
+    setEmpSearchResults([]); setEmpQuery(emp.name || emp.id); setLoadingLookup(true);
+    try {
+      const params = new URLSearchParams({ filter: "all" });
+      if (data?.actual_date) params.append("target_date", data.actual_date);
+      const res = await fetch(`${ATT_API}/today/employees?${params}`, { headers });
+      if (res.ok) {
+        const r = await res.json();
+        const found = (r.employees || []).find((e) => e.id === emp.id);
+        setEmpLookup(found || { id: emp.id, name: emp.name, department: emp.department, checkin: null, checkout: null, notes: "No record for this date" });
+      }
+    } catch (_) {}
+    setLoadingLookup(false);
+  };
+
+  const clearEmpLookup = () => { setEmpQuery(""); setEmpSearchResults([]); setEmpLookup(null); };
 
   const fetchTeamData = async (y = teamYear) => {
     setLoadingTeam(true);
@@ -3235,10 +3269,60 @@ function AttendanceTodaySection() {
                 </button>
               )}
             </div>
-            <button onClick={() => fetchData()} className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
-              <RefreshCw size={11} className={loading ? "animate-spin" : ""} /> Refresh
-            </button>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
+                <input
+                  value={empQuery}
+                  onChange={(e) => doEmpSearch(e.target.value)}
+                  placeholder="Find employee..."
+                  className="w-48 rounded-lg border border-gray-700 bg-gray-900 pl-7 pr-2.5 py-1.5 text-xs text-gray-200 placeholder-gray-600 outline-none focus:border-green-500 transition-colors"
+                />
+                {empQuery && (
+                  <button onClick={clearEmpLookup} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400">
+                    <X size={12} />
+                  </button>
+                )}
+                {empSearchResults.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 z-20 mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-700 bg-gray-900 shadow-2xl">
+                    {empSearchResults.map((r) => (
+                      <button key={r.id} onClick={() => selectEmpLookup(r)}
+                        className="block w-full px-3 py-1.5 text-left text-xs hover:bg-gray-800 transition-colors">
+                        <div className="font-medium text-gray-200">{r.name}</div>
+                        <div className="text-gray-500">{r.id} · {r.department || "—"}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button onClick={() => fetchData()} className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+                <RefreshCw size={11} className={loading ? "animate-spin" : ""} /> Refresh
+              </button>
+            </div>
           </div>
+
+          {(loadingLookup || empLookup) && (
+            <div className="rounded-lg border border-green-800/40 bg-green-900/10 px-4 py-3">
+              {loadingLookup ? (
+                <div className="flex justify-center"><Loader2 size={14} className="animate-spin text-gray-600" /></div>
+              ) : (
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <div className="text-sm font-semibold text-gray-200">{empLookup.name || empLookup.id}</div>
+                    <div className="text-xs text-gray-500">{empLookup.id} · {empLookup.department || "—"}</div>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs">
+                    <span>Check-In: <span className={`font-mono font-semibold ${empLookup.checkin ? "text-green-400" : "text-red-400"}`}>{empLookup.checkin || "—"}</span></span>
+                    <span>Check-Out: <span className="font-mono text-gray-400">{empLookup.checkout || "—"}</span></span>
+                    <span>Notes: <span className="text-gray-400">{empLookup.notes || "—"}</span></span>
+                  </div>
+                  <button onClick={clearEmpLookup} className="text-gray-600 hover:text-gray-400">
+                    <X size={13} />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {loading && <div className="flex justify-center py-16"><Loader2 size={20} className="animate-spin text-gray-600" /></div>}
           {noData && (
@@ -3587,7 +3671,8 @@ function MiniBarChart({ data }) {
 
 function EmployeeDetailPanel({ headers, apiBase }) {
   const curYear = new Date().getFullYear();
-  const [query,   setQuery]   = useState("");
+  const { user } = useAuthStore();
+  const [query,   setQuery]   = useState(user?.fullName || "");
   const [results, setResults] = useState([]);
   const [detail,  setDetail]  = useState(null);
   const [selected, setSelected] = useState(null);
@@ -3613,6 +3698,21 @@ function EmployeeDetailPanel({ headers, apiBase }) {
     } catch (_) {}
     setLoading(false);
   };
+
+  // Default the search to the logged-in HR user's own name so Detail opens
+  // with something useful already loaded, instead of an empty prompt.
+  useEffect(() => {
+    if (!user?.fullName) return;
+    (async () => {
+      try {
+        const res = await fetch(`${apiBase}/search-employees?q=${encodeURIComponent(user.fullName)}`, { headers });
+        if (res.ok) {
+          const matches = await res.json();
+          if (matches.length > 0) loadDetail(matches[0]);
+        }
+      } catch (_) {}
+    })();
+  }, []); // eslint-disable-line
 
   const handleYearChange = (y) => {
     setYear(y);
