@@ -1687,14 +1687,16 @@ async def get_workforce_stats(
 
 @router.get("/dept-team-summary")
 async def get_dept_team_summary(
+    year: Optional[int] = Query(None, description="Batasi ke 1 tahun ini saja — sama seperti filter tahun di Summary/monthly-rate; kosong = semua tahun (Plan besar menumpuk lintas tahun, bikin rate Late/Sick/Leave kelihatan 0% padahal ada datanya)"),
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
     """Rekap Plan vs Actual per department dan team (join dengan tabel employees)."""
     from app.models.employee import Employee
     from collections import defaultdict
+    from sqlalchemy import extract
 
-    result = await db.execute(
+    query = (
         select(
             AttendanceRecord.department,
             Employee.team,
@@ -1706,9 +1708,12 @@ async def get_dept_team_summary(
             func.sum(_annual_leave_expr()).label("leave"),
         )
         .join(Employee, AttendanceRecord.employee_id == Employee.user_id, isouter=True)
-        .group_by(AttendanceRecord.department, Employee.team)
-        .order_by(AttendanceRecord.department, Employee.team)
     )
+    if year:
+        query = query.where(extract("year", AttendanceRecord.attendance_date) == year)
+    query = query.group_by(AttendanceRecord.department, Employee.team).order_by(AttendanceRecord.department, Employee.team)
+
+    result = await db.execute(query)
     rows = result.fetchall()
 
     def _rate(n, plan):

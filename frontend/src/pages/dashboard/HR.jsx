@@ -3122,10 +3122,12 @@ function AttendanceTodaySection() {
   const headers   = { Authorization: `Bearer ${token}` };
   const ATT_API   = "/api/v1/dashboard/hr/attendance";
 
+  const curYear = new Date().getFullYear();
   const [data,        setData]        = useState(null);
   const [loading,     setLoading]     = useState(false);
   const [innerTab,    setInnerTab]    = useState("today");
   const [teamData,    setTeamData]    = useState(null);
+  const [teamYear,    setTeamYear]    = useState(curYear);
   const [loadingTeam,  setLoadingTeam]  = useState(false);
   const [activeFilter, setActiveFilter] = useState(null);
   const [employees,    setEmployees]    = useState([]);
@@ -3154,19 +3156,23 @@ function AttendanceTodaySection() {
     fetchData(v);
   };
 
-  const fetchTeamData = async () => {
-    if (teamData) return;
+  const fetchTeamData = async (y = teamYear) => {
     setLoadingTeam(true);
     try {
-      const res = await fetch(`${ATT_API}/dept-team-summary`, { headers });
+      const res = await fetch(`${ATT_API}/dept-team-summary?year=${y}`, { headers });
       if (res.ok) setTeamData(await res.json());
     } catch (_) {}
     finally { setLoadingTeam(false); }
   };
 
+  const handleTeamYearChange = (y) => {
+    setTeamYear(y);
+    fetchTeamData(y);
+  };
+
   const switchTab = (tab) => {
     setInnerTab(tab);
-    if (tab === "team") fetchTeamData();
+    if (tab === "team" && !teamData) fetchTeamData();
   };
 
   const fetchEmployees = async (filter, targetDate) => {
@@ -3386,11 +3392,17 @@ function AttendanceTodaySection() {
       {innerTab === "team" && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-xs text-gray-500">Attendance summary per department & team (all available data)</p>
-            <button onClick={() => { setTeamData(null); fetchTeamData(); }}
-              className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
-              <RefreshCw size={11} className={loadingTeam ? "animate-spin" : ""} /> Refresh
-            </button>
+            <p className="text-xs text-gray-500">Attendance summary per department & team — Year {teamYear}</p>
+            <div className="flex items-center gap-2">
+              <select value={teamYear} onChange={(e) => handleTeamYearChange(Number(e.target.value))}
+                className="rounded-lg border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-xs text-gray-300 outline-none focus:border-green-500 cursor-pointer">
+                {[curYear, curYear - 1, curYear - 2].map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+              <button onClick={() => fetchTeamData()}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+                <RefreshCw size={11} className={loadingTeam ? "animate-spin" : ""} /> Refresh
+              </button>
+            </div>
           </div>
           {loadingTeam && <div className="flex justify-center py-16"><Loader2 size={20} className="animate-spin text-gray-600" /></div>}
           {!loadingTeam && teamData && <DeptTeamTable data={teamData} />}
