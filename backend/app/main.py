@@ -94,8 +94,15 @@ async def lifespan(app: FastAPI):
     from app.services import vpn_monitor_scheduler
     vpn_monitor_scheduler.start()
 
+    # HikCentral attendance poller — 15-minute pull of today's door events
+    # into AttendanceRecord (source="hikcentral"). No-ops until
+    # hikcentral_base_url/app_key/app_secret are set in .env.
+    from app.services import hikcentral_scheduler
+    hikcentral_scheduler.start()
+
     yield
 
+    hikcentral_scheduler.stop()
     vpn_monitor_scheduler.stop()
     ebs_backup_scheduler.stop()
     logger.info("Shutting down CKDO Dashboard API")

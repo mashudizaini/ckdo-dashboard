@@ -34,6 +34,16 @@ class Settings(BaseSettings):
     talenta_api_key: str = ""
     talenta_api_url: str = "https://api.talenta.co"
 
+    # HikCentral OpenAPI (Artemis) — attendance event poller for the office's
+    # Hikvision DS-K1T342MFWX face-recognition terminals, aggregated behind
+    # HikCentral rather than talked to per-device. base_url is HikCentral's
+    # own host (reachable over the office LAN/VPN from this server), not the
+    # individual terminal IPs. AppKey/AppSecret come from HikCentral's
+    # System > Open Platform > add a third-party integration application.
+    hikcentral_base_url: str = ""
+    hikcentral_app_key: str = ""
+    hikcentral_app_secret: str = ""
+
     # Anthropic — kept as the opt-in "Premium" provider for CV Screening / JD
     # Generator / AP Invoice OCR / Meeting Notes MOM generation. Each of these
     # defaults to the on-premise Ollama engine below ("Standard") and only

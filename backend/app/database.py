@@ -1,7 +1,8 @@
 import os
 import oracledb
+from sqlalchemy import create_engine
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from app.config import get_settings
 import structlog
 
@@ -30,6 +31,14 @@ AsyncSessionLocal = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
 )
+
+# Sync engine on the same main DB — for APScheduler background jobs, which
+# run in a plain thread (not the asyncio event loop) and follow the sync
+# SessionLocal pattern already used by vpn_monitor_scheduler.py /
+# ebs_backup/scheduler.py (those poll their own dedicated DBs; this is the
+# equivalent for jobs that need to write to the main DB, e.g. AttendanceRecord).
+sync_engine = create_engine(settings.database_url, pool_size=5, max_overflow=10)
+SessionLocal = sessionmaker(bind=sync_engine)
 
 
 class Base(DeclarativeBase):
