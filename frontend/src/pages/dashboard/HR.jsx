@@ -1260,7 +1260,73 @@ function orgCollectIds(node, set) {
   node.children?.forEach((c) => orgCollectIds(c, set));
 }
 
-function OrgNode({ node, expanded, toggle, matchIds, onNodeClick, visibleIds }) {
+// General Manager level and above (root, Board/President Director, General
+// Managers, and each GM's direct team leads) stays in the original
+// horizontal fan-out layout — proportional and print-friendly at the top,
+// where sibling counts stay small. Anything below that (actual team/staff
+// listings, which can run to dozens of siblings) renders as a vertical
+// indented tree instead, which scales far better than fanning out sideways.
+const GM_TIER_RE = /general manager|president director|\bdirector\b|board of/i;
+const isGmTierOrAbove = (position) => GM_TIER_RE.test((position || "").trim());
+
+function OrgCard({ node, isPlaceholder, color, isMatch, groupLabel, onNodeClick, hasChildren, width }) {
+  return (
+    <div
+      onClick={() => !isPlaceholder && onNodeClick(node)}
+      style={{
+        width, borderRadius: 6, overflow: "hidden",
+        cursor: isPlaceholder ? "default" : "pointer",
+        background: "#fff",
+        border: `1.5px solid ${isMatch ? color : "#c4cddb"}`,
+        boxShadow: isMatch ? `0 0 0 2px ${color}55` : "2px 3px 6px rgba(30,41,59,0.12)",
+      }}
+    >
+      {isPlaceholder ? (
+        <div style={{ padding: "8px 10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <UserCheck size={12} color="#64748b" />
+            <span style={{ fontSize: 11.5, fontWeight: 800, color: "#64748b" }}>{node.full_name}</span>
+          </div>
+          <div style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, marginTop: 2 }}>{node.children.length} branch{node.children.length !== 1 ? "es" : ""}</div>
+        </div>
+      ) : (
+        <>
+          {groupLabel && (
+            <div style={{
+              background: color, color: "#fff", fontSize: 9.5, fontWeight: 800,
+              padding: "4px 10px", textAlign: "center", textTransform: "uppercase", letterSpacing: "0.02em",
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }} title={groupLabel}>
+              {groupLabel}
+            </div>
+          )}
+          <div style={{ padding: "7px 10px 9px", textAlign: "center" }}>
+            <div style={{
+              fontSize: 10, fontWeight: 700, color: "#475569", textDecoration: "underline",
+              textDecorationColor: color, textUnderlineOffset: 2,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }} title={node.position || ""}>
+              {node.position || "—"}
+            </div>
+            <div style={{
+              fontSize: 12, fontWeight: 700, color: "#1e293b", marginTop: 3,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }} title={node.full_name}>
+              {node.full_name || "—"}
+            </div>
+            {hasChildren && (
+              <div style={{ fontSize: 8.5, fontWeight: 700, color: "#94a3b8", marginTop: 2 }}>
+                {node.children.length} direct report{node.children.length !== 1 ? "s" : ""}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function OrgNode({ node, mode, expanded, toggle, matchIds, onNodeClick, visibleIds }) {
   if (visibleIds && !visibleIds.has(node.id)) return null;
 
   const hasChildren = !!node.children?.length;
@@ -1268,8 +1334,43 @@ function OrgNode({ node, expanded, toggle, matchIds, onNodeClick, visibleIds }) 
   const isMatch = matchIds.has(node.id);
   const isPlaceholder = node.id === null;
   const color = isPlaceholder ? "#94a3b8" : orgDeptColor(node.department);
-
   const groupLabel = node.sub_team || node.division || node.department || "";
+  // Placeholder ("N branches") nodes have no real position, so just carry
+  // the parent's own mode forward instead of falling through to "vertical".
+  const childMode = isPlaceholder ? mode : (isGmTierOrAbove(node.position) ? "h" : "v");
+  const childList = hasChildren && isOpen && (
+    <ul className={childMode === "h" ? "org-tree-h" : "org-tree"}>
+      {node.children.map((c) => (
+        <OrgNode key={c.id} node={c} mode={childMode} expanded={expanded} toggle={toggle} matchIds={matchIds} onNodeClick={onNodeClick} visibleIds={visibleIds} />
+      ))}
+    </ul>
+  );
+
+  if (mode === "h") {
+    return (
+      <li>
+        <div style={{ position: "relative" }}>
+          <OrgCard node={node} isPlaceholder={isPlaceholder} color={color} isMatch={isMatch} groupLabel={groupLabel} onNodeClick={onNodeClick} hasChildren={hasChildren} width={168} />
+          {hasChildren && (
+            <button
+              onClick={(e) => { e.stopPropagation(); toggle(node.id); }}
+              title={isOpen ? "Collapse" : "Expand"}
+              style={{
+                position: "absolute", bottom: -10, left: "50%", transform: "translateX(-50%)",
+                width: 20, height: 20, borderRadius: "50%", border: "2px solid #fff",
+                background: color, color: "#fff", cursor: "pointer", display: "flex",
+                alignItems: "center", justifyContent: "center", boxShadow: "2px 2px 5px rgba(0,0,0,0.2)",
+                zIndex: 2, padding: 0,
+              }}
+            >
+              {isOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+            </button>
+          )}
+        </div>
+        {childList}
+      </li>
+    );
+  }
 
   return (
     <li>
@@ -1291,67 +1392,10 @@ function OrgNode({ node, expanded, toggle, matchIds, onNodeClick, visibleIds }) 
           <span style={{ flexShrink: 0, width: 20, height: 20 }} />
         )}
 
-        <div
-          onClick={() => !isPlaceholder && onNodeClick(node)}
-          style={{
-            width: 190, borderRadius: 6, overflow: "hidden",
-            cursor: isPlaceholder ? "default" : "pointer",
-            background: "#fff",
-            border: `1.5px solid ${isMatch ? color : "#c4cddb"}`,
-            boxShadow: isMatch ? `0 0 0 2px ${color}55` : "2px 3px 6px rgba(30,41,59,0.12)",
-          }}
-        >
-          {isPlaceholder ? (
-            <div style={{ padding: "8px 10px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <UserCheck size={12} color="#64748b" />
-                <span style={{ fontSize: 11.5, fontWeight: 800, color: "#64748b" }}>{node.full_name}</span>
-              </div>
-              <div style={{ fontSize: 9.5, color: "#94a3b8", fontWeight: 600, marginTop: 2 }}>{node.children.length} branch{node.children.length !== 1 ? "es" : ""}</div>
-            </div>
-          ) : (
-            <>
-              {groupLabel && (
-                <div style={{
-                  background: color, color: "#fff", fontSize: 9.5, fontWeight: 800,
-                  padding: "4px 10px", textAlign: "center", textTransform: "uppercase", letterSpacing: "0.02em",
-                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                }} title={groupLabel}>
-                  {groupLabel}
-                </div>
-              )}
-              <div style={{ padding: "7px 10px 9px", textAlign: "center" }}>
-                <div style={{
-                  fontSize: 10, fontWeight: 700, color: "#475569", textDecoration: "underline",
-                  textDecorationColor: color, textUnderlineOffset: 2,
-                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                }} title={node.position || ""}>
-                  {node.position || "—"}
-                </div>
-                <div style={{
-                  fontSize: 12, fontWeight: 700, color: "#1e293b", marginTop: 3,
-                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                }} title={node.full_name}>
-                  {node.full_name || "—"}
-                </div>
-                {hasChildren && (
-                  <div style={{ fontSize: 8.5, fontWeight: 700, color: "#94a3b8", marginTop: 2 }}>
-                    {node.children.length} direct report{node.children.length !== 1 ? "s" : ""}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </div>
+        <OrgCard node={node} isPlaceholder={isPlaceholder} color={color} isMatch={isMatch} groupLabel={groupLabel} onNodeClick={onNodeClick} hasChildren={hasChildren} width={190} />
       </div>
 
-      {hasChildren && isOpen && (
-        <ul>
-          {node.children.map((c) => (
-            <OrgNode key={c.id} node={c} expanded={expanded} toggle={toggle} matchIds={matchIds} onNodeClick={onNodeClick} visibleIds={visibleIds} />
-          ))}
-        </ul>
-      )}
+      {childList}
     </li>
   );
 }
@@ -1379,6 +1423,7 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
   const [subTeamLov, setSubTeamLov] = useState([]);
   const [supQuery, setSupQuery] = useState("");
   const [supOpen, setSupOpen]   = useState(false);
+  const [customFields, setCustomFields] = useState(() => new Set());
 
   useEffect(() => {
     hrApi.getOrgStructureLov().then((r) => setLov(r || [])).catch(() => {});
@@ -1423,17 +1468,63 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
       <input
         value={form[key]}
         onChange={(e) => setForm({ ...form, [key]: e.target.value })}
-        list={extra?.lov ? `${key}-lov` : undefined}
-        placeholder={extra?.lov ? "Pick or type new..." : undefined}
         style={{ width: "100%", fontSize: 12.5, fontWeight: 600, padding: "8px 10px", borderRadius: 8, border: "none", background: "#fff", color: "#1e293b", outline: "none", marginTop: 2 }}
       />
-      {extra?.lov && (
-        <datalist id={`${key}-lov`}>
-          {extra.lov.map((v) => <option key={v} value={v} />)}
-        </datalist>
-      )}
     </div>
   );
+
+  // ── LOV dropdown for position/department/division/sub_team — a plain
+  // <select> (not <datalist>, whose "type first, then see suggestions"
+  // behavior isn't discoverable enough — HR expects a clickable list like
+  // every other LOV in this app). allowCustom fields fall back to a free-
+  // text input, via "+ Type new value..." or automatically when the saved
+  // value isn't in the list (e.g. an older record) so nothing gets silently
+  // blanked out. Department has no escape hatch — it's a small fixed
+  // taxonomy and free-typing it is exactly what caused it to fragment
+  // before (see department_taxonomy memory). ─────────────────────────────
+  const NEW_VALUE = "__new__";
+  const selectField = (key, label, options, extra) => {
+    const isCustom = customFields.has(key) || (form[key] && options.length > 0 && !options.includes(form[key]));
+    return (
+      <div key={key} style={extra?.full ? { gridColumn: "1 / -1" } : undefined}>
+        <label style={{ fontSize: 10, fontWeight: 700, color: "#64748b" }}>{label}</label>
+        {isCustom ? (
+          <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
+            <input
+              value={form[key]}
+              onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+              placeholder="Type value..."
+              style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, padding: "8px 10px", borderRadius: 8, border: "none", background: "#fff", color: "#1e293b", outline: "none" }}
+            />
+            {options.length > 0 && (
+              <button type="button" title="Pick from list instead"
+                onClick={() => { setCustomFields((p) => { const n = new Set(p); n.delete(key); return n; }); setForm({ ...form, [key]: "" }); }}
+                style={{ padding: "0 10px", borderRadius: 8, border: "none", background: "#e2e8f0", color: "#475569", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+                List
+              </button>
+            )}
+          </div>
+        ) : (
+          <select
+            value={form[key] || ""}
+            onChange={(e) => {
+              if (e.target.value === NEW_VALUE) {
+                setCustomFields((p) => new Set(p).add(key));
+                setForm({ ...form, [key]: "" });
+              } else {
+                setForm({ ...form, [key]: e.target.value });
+              }
+            }}
+            style={{ width: "100%", fontSize: 12.5, fontWeight: 600, padding: "8px 10px", borderRadius: 8, border: "none", background: "#fff", color: "#1e293b", outline: "none", marginTop: 2, cursor: "pointer" }}
+          >
+            <option value="">— Select —</option>
+            {options.map((o) => <option key={o} value={o}>{o}</option>)}
+            {extra?.allowCustom && <option value={NEW_VALUE}>+ Type new value...</option>}
+          </select>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,0.6)" }} onClick={onClose}>
@@ -1446,10 +1537,10 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
         <div className="p-6 space-y-3">
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 12px" }}>
             {field("full_name", "Full Name *", { full: true })}
-            {field("position", "Position", { lov: positionLov })}
-            {field("department", "Department", { lov: departmentLov })}
-            {field("division", "Division", { lov: divisionLov })}
-            {field("sub_team", "Sub-team / Region", { lov: subTeamLov })}
+            {selectField("position", "Position", positionLov, { allowCustom: true })}
+            {selectField("department", "Department", departmentLov)}
+            {selectField("division", "Division", divisionLov, { allowCustom: true })}
+            {selectField("sub_team", "Sub-team / Region", subTeamLov, { allowCustom: true })}
             <div>
               <label style={{ fontSize: 10, fontWeight: 700, color: "#64748b" }}>Join Date</label>
               <input type="date" value={form.join_date || ""} onChange={(e) => setForm({ ...form, join_date: e.target.value })}
@@ -1723,9 +1814,9 @@ function OrgChartView() {
             No one found matching "{search}".
           </p>
         ) : (
-          <div ref={chartRef} style={{ transform: `scale(${zoom})`, transformOrigin: "top left", display: "inline-block", minWidth: "100%", background: "#dfe5ed", padding: "0 20px 20px 4px" }}>
-            <ul className="org-tree">
-              <OrgNode node={root} expanded={expanded} toggle={toggle} matchIds={matchIds} onNodeClick={setSelectedNode} visibleIds={visibleIds} />
+          <div ref={chartRef} style={{ transform: `scale(${zoom})`, transformOrigin: "top center", display: "inline-block", minWidth: "100%", background: "#dfe5ed" }}>
+            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              <OrgNode node={root} mode="h" expanded={expanded} toggle={toggle} matchIds={matchIds} onNodeClick={setSelectedNode} visibleIds={visibleIds} />
             </ul>
           </div>
         )}

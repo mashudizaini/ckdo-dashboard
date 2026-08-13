@@ -278,28 +278,35 @@ tbody td {
   font-weight: 500 !important;
 }
 
-/* ── HR Organization Chart — pure-CSS connector tree (vertical/indented) ──
+/* ── HR Organization Chart — pure-CSS connector tree, two modes ──
    React inline styles can't target ::before/::after, so the connector lines
-   live here. Each generation of children stacks vertically (indented to the
-   right of its parent) instead of fanning out horizontally — a continuous
-   vertical line runs down the left edge of each <ul> (drawn per-<li> via
-   ::before so it can stop cleanly after the last child), with a short
-   horizontal tick (::after) branching off to each node. */
-.org-tree, .org-tree ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.org-tree ul {
+   live here. The chart mixes both modes in one tree: the class is applied
+   directly on each <ul> (not on an ancestor wrapper) so a mode never leaks
+   into a differently-classed nested <ul> — all selectors below use the `>`
+   direct-child combinator for exactly that reason.
+
+   .org-tree   — vertical/indented (team/staff levels, below General
+                 Manager): a continuous vertical line runs down the left
+                 edge (drawn per-<li> via ::before so it can stop cleanly
+                 after the last child), with a short horizontal tick
+                 (::after) branching off to each node. Scales to many
+                 siblings without growing wide.
+   .org-tree-h — horizontal fan-out (General Manager level and above: root,
+                 Board/President Director, General Managers, and each GM's
+                 direct team leads) — the original layout, kept here for
+                 print-friendliness and a proportional look at the top of
+                 the chart, where sibling counts stay small. */
+.org-tree, .org-tree-h { list-style: none; margin: 0; padding: 0; }
+
+.org-tree {
   margin-left: 9px;
   padding-left: 26px;
 }
-.org-tree li {
+.org-tree > li {
   position: relative;
   padding-top: 14px;
 }
-.org-tree > li { padding-top: 0; }
-.org-tree ul > li::before {
+.org-tree > li::before {
   content: '';
   position: absolute;
   left: -26px;
@@ -308,8 +315,8 @@ tbody td {
   height: 100%;
   background: #7c8db5;
 }
-.org-tree ul > li:last-child::before { height: 28px; }
-.org-tree ul > li::after {
+.org-tree > li:last-child::before { height: 28px; }
+.org-tree > li::after {
   content: '';
   position: absolute;
   left: -26px;
@@ -317,6 +324,47 @@ tbody td {
   width: 26px;
   height: 2px;
   background: #7c8db5;
+}
+
+.org-tree-h {
+  padding-top: 22px;
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+.org-tree-h > li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  padding: 22px 12px 0 12px;
+}
+.org-tree-h > li::before,
+.org-tree-h > li::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 50%;
+  width: 50%;
+  height: 22px;
+  border-top: 2px solid #7c8db5;
+}
+.org-tree-h > li::after { right: auto; left: 50%; border-left: 2px solid #7c8db5; }
+.org-tree-h > li:only-child::before,
+.org-tree-h > li:only-child::after { display: none; }
+.org-tree-h > li:only-child { padding-top: 0; }
+.org-tree-h > li:first-child::before { border: none; }
+.org-tree-h > li:last-child::after { border: none; }
+.org-tree-h > li:last-child::before { border-right: 2px solid #7c8db5; border-radius: 0 6px 0 0; }
+.org-tree-h > li:first-child::after { border-radius: 6px 0 0 0; }
+.org-tree-h::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  border-left: 2px solid #7c8db5;
+  width: 0;
+  height: 22px;
 }
 /* ── Input/select — flat, bordered ── */
 input, select, textarea {
