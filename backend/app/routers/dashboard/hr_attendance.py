@@ -100,6 +100,24 @@ def _actual_expr():
     )
 
 
+def _late_expr():
+    """1 if this weekday was a late arrival (Plant's "LATE ATTEND" ->
+    attendance_status="L" — still counted present in _actual_expr, this is
+    a separate tardiness tally on top of that)."""
+    return case((and_(IS_WEEKDAY, AttendanceRecord.attendance_status == "L"), 1), else_=0)
+
+
+def _sick_expr():
+    """1 if this weekday was Sick Leave (leave_code="SL")."""
+    return case((and_(IS_WEEKDAY, AttendanceRecord.leave_code == "SL"), 1), else_=0)
+
+
+def _annual_leave_expr():
+    """1 if this weekday was Annual Leave (leave_code="AL"/"ALAB" — both mean
+    the same "Annual Leave", ALAB is Talenta's own-account variant)."""
+    return case((and_(IS_WEEKDAY, AttendanceRecord.leave_code.in_(("AL", "ALAB"))), 1), else_=0)
+
+
 def _read_data_rows(contents: bytes) -> list:
     """Read every data row (from row 2 onward, values only) from an
     .xlsx/.xlsm file's first worksheet. Tries openpyxl first (normal, then
@@ -1683,6 +1701,9 @@ async def get_dept_team_summary(
             func.count(func.distinct(AttendanceRecord.employee_id)).label("employees"),
             func.sum(_plan_expr()).label("plan"),
             func.sum(_actual_expr()).label("actual"),
+            func.sum(_late_expr()).label("late"),
+            func.sum(_sick_expr()).label("sick"),
+            func.sum(_annual_leave_expr()).label("leave"),
         )
         .join(Employee, AttendanceRecord.employee_id == Employee.user_id, isouter=True)
         .group_by(AttendanceRecord.department, Employee.team)
@@ -1690,38 +1711,58 @@ async def get_dept_team_summary(
     )
     rows = result.fetchall()
 
+    def _rate(n, plan):
+        return round(n / plan * 100) if plan > 0 else 0
+
     depts: dict = defaultdict(list)
     for r in rows:
         dept   = r[0] or "—"
         team   = r[1] or "—"
         plan   = int(r[3] or 0)
         actual = int(r[4] or 0)
+        late   = int(r[5] or 0)
+        sick   = int(r[6] or 0)
+        leave  = int(r[7] or 0)
         if plan == 0 and actual == 0:
             continue
         depts[dept].append({
-            "team":      team,
-            "employees": int(r[2] or 0),
-            "plan":      plan,
-            "actual":    actual,
-            "rate":      round(actual / plan * 100) if plan > 0 else 0,
+            "team":       team,
+            "employees":  int(r[2] or 0),
+            "plan":       plan,
+            "actual":     actual,
+            "rate":       _rate(actual, plan),
+            "late":       late,
+            "late_rate":  _rate(late, plan),
+            "sick":       sick,
+            "sick_rate":  _rate(sick, plan),
+            "leave":      leave,
+            "leave_rate": _rate(leave, plan),
         })
 
     result_list = []
-    grand = {"employees": 0, "plan": 0, "actual": 0}
+    grand = {"employees": 0, "plan": 0, "actual": 0, "late": 0, "sick": 0, "leave": 0}
 
     for dept, teams in depts.items():
         tot = {
             "employees": sum(t["employees"] for t in teams),
             "plan":      sum(t["plan"]      for t in teams),
             "actual":    sum(t["actual"]    for t in teams),
+            "late":      sum(t["late"]      for t in teams),
+            "sick":      sum(t["sick"]      for t in teams),
+            "leave":     sum(t["leave"]     for t in teams),
         }
-        tot["rate"] = round(tot["actual"] / tot["plan"] * 100) if tot["plan"] > 0 else 0
+        tot["rate"]       = _rate(tot["actual"], tot["plan"])
+        tot["late_rate"]  = _rate(tot["late"],   tot["plan"])
+        tot["sick_rate"]  = _rate(tot["sick"],   tot["plan"])
+        tot["leave_rate"] = _rate(tot["leave"],  tot["plan"])
         result_list.append({"department": dept, "teams": teams, "total": tot})
-        grand["employees"] += tot["employees"]
-        grand["plan"]      += tot["plan"]
-        grand["actual"]    += tot["actual"]
+        for k in ("employees", "plan", "actual", "late", "sick", "leave"):
+            grand[k] += tot[k]
 
-    grand["rate"] = round(grand["actual"] / grand["plan"] * 100) if grand["plan"] > 0 else 0
+    grand["rate"]       = _rate(grand["actual"], grand["plan"])
+    grand["late_rate"]  = _rate(grand["late"],   grand["plan"])
+    grand["sick_rate"]  = _rate(grand["sick"],   grand["plan"])
+    grand["leave_rate"] = _rate(grand["leave"],  grand["plan"])
     return {"departments": result_list, "grand_total": grand}
 
 

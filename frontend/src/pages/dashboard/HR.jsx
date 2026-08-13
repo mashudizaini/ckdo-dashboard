@@ -3019,8 +3019,13 @@ function DeptTeamTable({ data }) {
     const r = toggleSort(sortBy, sortDir, field);
     setSortBy(r.sortBy); setSortDir(r.sortDir);
   };
-  const NUMERIC = ["employees", "plan", "actual", "rate"];
+  const NUMERIC = ["employees", "plan", "actual", "rate", "late", "late_rate", "sick", "sick_rate", "leave", "leave_rate"];
   const thCls = "px-3 py-2.5 text-center font-semibold text-gray-500 uppercase tracking-wider border border-gray-700";
+  // Late/Sick/Leave are all "lower is better" — unlike the attendance Rate
+  // column, so the color thresholds run the opposite direction.
+  const badRateColor = (r) => r <= 5 ? "text-green-400" : r <= 15 ? "text-amber-400" : "text-red-400";
+  const badRateColorTot = (r) => r <= 5 ? "text-green-300" : r <= 15 ? "text-amber-300" : "text-red-300";
+  const badRateColorGrand = (r) => r <= 5 ? "text-green-200" : r <= 15 ? "text-amber-200" : "text-red-200";
 
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-800">
@@ -3033,6 +3038,9 @@ function DeptTeamTable({ data }) {
             <SortableTH label="Plan"        field="plan"      sortBy={sortBy} sortDir={sortDir} onSort={handleSort} align="center" className={thCls} />
             <SortableTH label="Act"         field="actual"    sortBy={sortBy} sortDir={sortDir} onSort={handleSort} align="center" className={thCls} />
             <SortableTH label="%"           field="rate"      sortBy={sortBy} sortDir={sortDir} onSort={handleSort} align="center" className={thCls} />
+            <SortableTH label="Late"        field="late_rate"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} align="center" className={thCls} />
+            <SortableTH label="Sick"        field="sick_rate"  sortBy={sortBy} sortDir={sortDir} onSort={handleSort} align="center" className={thCls} />
+            <SortableTH label="Leave"       field="leave_rate" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} align="center" className={thCls} />
           </tr>
         </thead>
         <tbody>
@@ -3054,6 +3062,15 @@ function DeptTeamTable({ data }) {
                 <td className={`px-3 py-2 text-center font-semibold border border-gray-700 ${team.rate >= 95 ? "text-green-400" : team.rate >= 80 ? "text-amber-400" : "text-red-400"}`}>
                   {team.rate}%
                 </td>
+                <td className={`px-3 py-2 text-center border border-gray-700 ${badRateColor(team.late_rate)}`}>
+                  {team.late} <span className="text-gray-600">({team.late_rate}%)</span>
+                </td>
+                <td className={`px-3 py-2 text-center border border-gray-700 ${badRateColor(team.sick_rate)}`}>
+                  {team.sick} <span className="text-gray-600">({team.sick_rate}%)</span>
+                </td>
+                <td className={`px-3 py-2 text-center border border-gray-700 ${badRateColor(team.leave_rate)}`}>
+                  {team.leave} <span className="text-gray-600">({team.leave_rate}%)</span>
+                </td>
               </tr>
             )),
             <tr key={`${dept.department}-total`} className="bg-gray-800/50">
@@ -3064,6 +3081,15 @@ function DeptTeamTable({ data }) {
               <td className={`px-3 py-2 text-center font-bold border border-gray-600 ${dept.total.rate >= 95 ? "text-green-300" : dept.total.rate >= 80 ? "text-amber-300" : "text-red-300"}`}>
                 {dept.total.rate}%
               </td>
+              <td className={`px-3 py-2 text-center font-bold border border-gray-600 ${badRateColorTot(dept.total.late_rate)}`}>
+                {dept.total.late} <span className="text-gray-500">({dept.total.late_rate}%)</span>
+              </td>
+              <td className={`px-3 py-2 text-center font-bold border border-gray-600 ${badRateColorTot(dept.total.sick_rate)}`}>
+                {dept.total.sick} <span className="text-gray-500">({dept.total.sick_rate}%)</span>
+              </td>
+              <td className={`px-3 py-2 text-center font-bold border border-gray-600 ${badRateColorTot(dept.total.leave_rate)}`}>
+                {dept.total.leave} <span className="text-gray-500">({dept.total.leave_rate}%)</span>
+              </td>
             </tr>,
           ])}
           <tr className="bg-gray-700/60">
@@ -3073,6 +3099,15 @@ function DeptTeamTable({ data }) {
             <td className="px-3 py-2.5 text-center font-bold text-orange-200 border border-gray-600">{grand_total.actual}</td>
             <td className={`px-3 py-2.5 text-center font-bold border border-gray-600 ${grand_total.rate >= 95 ? "text-green-200" : grand_total.rate >= 80 ? "text-amber-200" : "text-red-200"}`}>
               {grand_total.rate}%
+            </td>
+            <td className={`px-3 py-2.5 text-center font-bold border border-gray-600 ${badRateColorGrand(grand_total.late_rate)}`}>
+              {grand_total.late} <span className="text-gray-400">({grand_total.late_rate}%)</span>
+            </td>
+            <td className={`px-3 py-2.5 text-center font-bold border border-gray-600 ${badRateColorGrand(grand_total.sick_rate)}`}>
+              {grand_total.sick} <span className="text-gray-400">({grand_total.sick_rate}%)</span>
+            </td>
+            <td className={`px-3 py-2.5 text-center font-bold border border-gray-600 ${badRateColorGrand(grand_total.leave_rate)}`}>
+              {grand_total.leave} <span className="text-gray-400">({grand_total.leave_rate}%)</span>
             </td>
           </tr>
         </tbody>
