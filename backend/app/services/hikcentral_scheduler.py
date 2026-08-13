@@ -83,20 +83,24 @@ def _fetch_today_events(client: HikCentralClient, today: date) -> list[dict]:
     return events
 
 
-def _tick():
-    settings = get_settings()
-    if not (settings.hikcentral_base_url and settings.hikcentral_app_key and settings.hikcentral_app_secret):
-        return  # not configured yet — silently idle rather than log-spam every 15 minutes
+def is_configured() -> bool:
+    s = get_settings()
+    return bool(s.hikcentral_base_url and s.hikcentral_app_key and s.hikcentral_app_secret)
+
+
+def run_sync(uploaded_by: str = "scheduler") -> dict:
+    """Core sync — fetches today's door events and upserts AttendanceRecord.
+    Returns a result dict; raises HikCentralError if the API call itself
+    fails (caller decides how to surface that — the scheduler tick logs and
+    swallows it, the manual "Sync Now" endpoint lets it become a 502)."""
+    if not is_configured():
+        raise HikCentralError("HikCentral not configured — set hikcentral_base_url / hikcentral_app_key / hikcentral_app_secret")
 
     db = SessionLocal()
     try:
         client = HikCentralClient()
         today = date.today()
-        try:
-            events = _fetch_today_events(client, today)
-        except HikCentralError:
-            logger.exception("HikCentral poll failed")
-            return
+        events = _fetch_today_events(client, today)
 
         # Group by employee_id, keep earliest event as check-in and latest as check-out.
         by_employee: dict[str, list[datetime]] = defaultdict(list)
@@ -111,7 +115,7 @@ def _tick():
                 names[str(emp_id)] = evt["personName"]
 
         if not by_employee:
-            return
+            return {"events": len(events), "employees": 0, "inserted": 0, "updated": 0, "date": today.isoformat()}
 
         from app.models.employee import Employee
         emp_dept_map = {
@@ -166,17 +170,54 @@ def _tick():
                 inserted += 1
 
         db.add(AttendanceUploadLog(
-            batch_id=batch_id, source="hikcentral", filename="(HikCentral OpenAPI poll)",
+            batch_id=batch_id, source="hikcentral", filename="(HikCentral OpenAPI sync)",
             total_rows=len(by_employee), inserted=inserted, updated=updated, skipped=0,
-            uploaded_by="scheduler", notes=f"{len(events)} raw events for {today.isoformat()}",
+            uploaded_by=uploaded_by, notes=f"{len(events)} raw events for {today.isoformat()}",
         ))
         db.commit()
-        logger.info("HikCentral poll: %d events -> %d inserted, %d updated", len(events), inserted, updated)
+        logger.info("HikCentral sync: %d events -> %d inserted, %d updated", len(events), inserted, updated)
+        return {"events": len(events), "employees": len(by_employee), "inserted": inserted, "updated": updated, "date": today.isoformat()}
     except Exception:
-        logger.exception("HikCentral poll tick failed")
         db.rollback()
+        raise
     finally:
         db.close()
+
+
+def get_last_sync() -> dict | None:
+    db = SessionLocal()
+    try:
+        row = (
+            db.execute(
+                select(AttendanceUploadLog)
+                .where(AttendanceUploadLog.source == "hikcentral")
+                .order_by(AttendanceUploadLog.uploaded_at.desc())
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+        if not row:
+            return None
+        return {
+            "batch_id": row.batch_id, "total_rows": row.total_rows,
+            "inserted": row.inserted, "updated": row.updated,
+            "notes": row.notes, "uploaded_by": row.uploaded_by,
+            "uploaded_at": row.uploaded_at.isoformat() if row.uploaded_at else None,
+        }
+    finally:
+        db.close()
+
+
+def _tick():
+    if not is_configured():
+        return  # not configured yet — silently idle rather than log-spam every 15 minutes
+    try:
+        run_sync(uploaded_by="scheduler")
+    except HikCentralError:
+        logger.exception("HikCentral poll failed")
+    except Exception:
+        logger.exception("HikCentral poll tick failed")
 
 
 def start():

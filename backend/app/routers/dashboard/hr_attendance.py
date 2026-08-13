@@ -957,6 +957,32 @@ async def get_upload_logs(
     ]
 
 
+# ── HikCentral integration (Hikvision DS-K1T342MFWX, via HikCentral OpenAPI) ───
+# Live poller (app/services/hikcentral_scheduler.py) already runs every 15
+# minutes; these two endpoints back the status card + manual "Sync Now"
+# button in the Upload tab. run_sync()/get_last_sync() are sync functions
+# (same sync SessionLocal the APScheduler job uses) — plain `def` here so
+# FastAPI runs them in its threadpool instead of blocking the event loop.
+
+@router.get("/hikcentral/status")
+def get_hikcentral_status(user: CurrentUser = Depends(require_role(Roles.HR))):
+    from app.services import hikcentral_scheduler as hik
+    return {
+        "configured": hik.is_configured(),
+        "last_sync": hik.get_last_sync(),
+    }
+
+
+@router.post("/hikcentral/sync-now")
+def trigger_hikcentral_sync(user: CurrentUser = Depends(require_role(Roles.HR))):
+    from app.services import hikcentral_scheduler as hik
+    from app.services.hikcentral_client import HikCentralError
+    try:
+        return hik.run_sync(uploaded_by=user.username or "manual")
+    except HikCentralError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 # ── List attendance records ────────────────────────────────────────────────────
 
 @router.get("")
