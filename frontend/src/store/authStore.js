@@ -152,6 +152,15 @@ export const useAuthStore = create((set, get) => ({
     set({ isAuthenticated: false, user: null, token: null, roles: [] });
   },
 
+  // Explicit "this counts as activity too" for pages with a long
+  // unattended-but-legitimately-busy operation (e.g. Meeting Notes recording
+  // a 1-2h meeting, or waiting on transcription) — without this, such a page
+  // hits the idle timeout above and gets logged out mid-operation even
+  // though nothing is actually idle. Deliberately separate from the
+  // token-refresh loop (which does NOT call this) so genuine tab-left-open
+  // idleness is still caught everywhere else.
+  keepAlive: () => { markActivity(); },
+
   hasRole: (role) => {
     const { roles } = get();
     return roles.includes(role) || roles.includes("admin");

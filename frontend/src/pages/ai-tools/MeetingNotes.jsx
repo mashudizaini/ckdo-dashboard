@@ -4,6 +4,7 @@ import {
   AlertTriangle, CheckCircle2, Plus, Trash2, ExternalLink, Save as SaveIcon,
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
+import * as recoveryDb from "./meetingRecordingRecovery";
 
 function fmtElapsed(sec) {
   const m = Math.floor(sec / 60).toString().padStart(2, "0");
@@ -96,6 +97,13 @@ export default function MeetingNotes() {
   const audioChunksRef = useRef([]);
   const streamRef = useRef(null);
   const timerRef = useRef(null);
+  const recordingSessionIdRef = useRef(null);
+
+  // A recording found in IndexedDB left over from an interrupted previous
+  // attempt (crash, closed tab, forced logout mid-meeting) — offered for
+  // recovery instead of silently lost. { sessionId, startedAt, meta, chunkCount } | null
+  const [recoverableSession, setRecoverableSession] = useState(null);
+  const [recovering, setRecovering] = useState(false);
 
   // Microphone device selection — lets the user pick the right input instead
   // of silently relying on whatever the OS/browser treats as "default",
@@ -188,6 +196,24 @@ export default function MeetingNotes() {
     };
   }, []);
 
+  // On mount, check for a recording left behind by an interrupted previous
+  // session (see meetingRecordingRecovery.js) and offer to recover it.
+  useEffect(() => {
+    recoveryDb.findRecoverableSession().then((s) => { if (s) setRecoverableSession(s); });
+  }, []);
+
+  // Keep the app's idle-timeout from logging the user out mid-meeting: it
+  // deliberately only counts mouse/keyboard/scroll/touch as activity (see
+  // authStore.js), which a hands-off recording or a long unattended
+  // transcription/MOM wait will never produce. Ping it periodically for as
+  // long as any of those are actually in progress.
+  useEffect(() => {
+    if (!(recording || transcribing || generating)) return;
+    useAuthStore.getState().keepAlive();
+    const id = setInterval(() => useAuthStore.getState().keepAlive(), 60000);
+    return () => clearInterval(id);
+  }, [recording, transcribing, generating]);
+
   useEffect(() => {
     if (tab === "history") fetchHistory();
   }, [tab]); // eslint-disable-line
@@ -251,7 +277,15 @@ export default function MeetingNotes() {
       const mimeType = pickMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       audioChunksRef.current = [];
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+      const sessionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      recordingSessionIdRef.current = sessionId;
+      recoveryDb.startSession(sessionId, { mimeType: recorder.mimeType || mimeType || "audio/webm", title });
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+          recoveryDb.saveChunk(sessionId, e.data);
+        }
+      };
       recorder.onstop = () => {
         const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" });
         const ext = (recorder.mimeType || "audio/webm").includes("mp4") ? "m4a" : "webm";
@@ -264,9 +298,17 @@ export default function MeetingNotes() {
         stopLevelMeter();
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
+        // Reached a clean stop with the audio safely handed off to
+        // component state — the IndexedDB backup has served its purpose.
+        recoveryDb.clearSession(sessionId);
+        recordingSessionIdRef.current = null;
       };
       mediaRecorderRef.current = recorder;
-      recorder.start();
+      // 30s timeslice — without it, MediaRecorder never fires
+      // ondataavailable until .stop() is called, so a 1-2h recording would
+      // sit unbacked-up in the browser's own internal buffer the whole
+      // time no matter what we do here.
+      recorder.start(30000);
       setRecording(true);
       setRecordingSeconds(0);
       timerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
@@ -283,6 +325,35 @@ export default function MeetingNotes() {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     mediaRecorderRef.current?.stop();
     setRecording(false);
+  };
+
+  const handleRecoverSession = async () => {
+    if (!recoverableSession) return;
+    setRecovering(true);
+    try {
+      const chunks = await recoveryDb.getChunks(recoverableSession.sessionId);
+      if (!chunks.length) throw new Error("No audio data found in the backup");
+      const mimeType = recoverableSession.meta?.mimeType || "audio/webm";
+      const blob = new Blob(chunks, { type: mimeType });
+      const ext = mimeType.includes("mp4") ? "m4a" : "webm";
+      const filename = `recovered-${recoverableSession.sessionId}.${ext}`;
+      const recoveredFile = new File([blob], filename, { type: mimeType });
+      setFile(recoveredFile);
+      setRecordedBlobInfo({ blob, filename });
+      resetResults();
+      await recoveryDb.clearSession(recoverableSession.sessionId);
+      setRecoverableSession(null);
+    } catch (e) {
+      setRecordError({ message: `Failed to recover the backed-up recording: ${e.message || e}` });
+    } finally {
+      setRecovering(false);
+    }
+  };
+
+  const handleDiscardRecoverableSession = async () => {
+    if (!recoverableSession) return;
+    await recoveryDb.clearSession(recoverableSession.sessionId);
+    setRecoverableSession(null);
   };
 
   const handleSaveRecordingLocally = () => {
@@ -485,6 +556,30 @@ export default function MeetingNotes() {
           <div className="flex-1 min-w-0 space-y-4">
           {step === "setup" && (
             <>
+          {recoverableSession && (
+            <div className="flex items-start gap-3 rounded-xl border border-amber-600/40 bg-amber-500/10 p-4">
+              <AlertTriangle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-amber-200">Unfinished recording found</p>
+                <p className="text-xs text-amber-200/80 mt-1 leading-relaxed">
+                  A recording from {new Date(recoverableSession.startedAt).toLocaleString("id-ID")} ({recoverableSession.chunkCount} saved chunk{recoverableSession.chunkCount === 1 ? "" : "s"})
+                  was never finished — likely an interrupted session (closed tab, logout, crash). The audio captured
+                  so far is still backed up and can be recovered.
+                </p>
+                <div className="flex items-center gap-2 mt-3">
+                  <button onClick={handleRecoverSession} disabled={recovering}
+                    className="flex items-center gap-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 transition-colors">
+                    {recovering ? <Loader2 size={12} className="animate-spin" /> : null}
+                    {recovering ? "Recovering…" : "Recover this recording"}
+                  </button>
+                  <button onClick={handleDiscardRecoverableSession} disabled={recovering}
+                    className="text-xs text-amber-200/70 hover:text-amber-100 px-2 py-1.5 transition-colors">
+                    Discard
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {/* Info form */}
           <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
             <h3 className="text-sm font-semibold text-gray-200 mb-4">Meeting Information</h3>
