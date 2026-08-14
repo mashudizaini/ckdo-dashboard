@@ -16,7 +16,6 @@ Endpoints:
   PUT    /recordings/{id}/mom          — Save user-edited MOM JSON back onto the recording
   GET    /recordings/{id}/mom/docx     — Render the (possibly edited) MOM as a .docx download
 """
-import asyncio
 import os
 from datetime import datetime
 import httpx
@@ -195,8 +194,11 @@ async def delete_recording(
     return {"message": "Deleted"}
 
 
+_MOM_PROVIDERS = ("onprem", "anthropic", "gemini", "deepseek")
+
+
 class GenerateMomRequest(BaseModel):
-    provider: str = "onprem"  # "onprem" (default, local Ollama) or "anthropic" (Claude)
+    provider: str = "onprem"  # "onprem" (default, local Ollama), "anthropic" (Claude), "gemini", or "deepseek"
     date: str = ""
     time: str = ""
     venue: str = ""
@@ -211,15 +213,15 @@ async def generate_mom(
     db: AsyncSession = Depends(get_db),
 ):
     """Transcript -> structured Minutes of Meeting (departments/topics/discussion_points/action_plans)."""
-    if body.provider not in ("onprem", "anthropic"):
-        raise HTTPException(400, 'Invalid provider — use "onprem" or "anthropic"')
+    if body.provider not in _MOM_PROVIDERS:
+        raise HTTPException(400, f'Invalid provider — use one of {", ".join(_MOM_PROVIDERS)}')
     rec = await _get_recording_or_404(db, recording_id)
     if not (rec.transcript or "").strip():
         raise HTTPException(400, "Recording ini belum punya transcript")
 
     try:
-        mom_json = await asyncio.to_thread(
-            MeetingNotesService().generate_mom, rec.transcript, rec.meeting_title or "", rec.participants or "", body.provider
+        mom_json = await MeetingNotesService().generate_mom(
+            rec.transcript, rec.meeting_title or "", rec.participants or "", body.provider
         )
     except Exception as e:
         logger.error("mom_generation_error", error=str(e), provider=body.provider)

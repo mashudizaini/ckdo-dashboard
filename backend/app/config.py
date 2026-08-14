@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-flash-latest"
 
+    # DeepSeek API — opt-in provider for Meeting Notes MOM generation
+    # (alongside onprem/anthropic/gemini). OpenAI-compatible chat-completions
+    # endpoint, called via raw httpx like gemini_service.py rather than
+    # adding the `openai` SDK as a new dependency for one endpoint.
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-chat"
+
     # Field-level encryption for secrets stored at rest in Postgres —
     # currently only per-user Gemini API keys (see crypto.py). Distinct from
     # any auth secret; generate once per environment with

@@ -23,6 +23,13 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+const MOM_PROVIDER_LABELS = {
+  onprem: "the on-premise model",
+  anthropic: "Claude",
+  gemini: "Gemini",
+  deepseek: "DeepSeek",
+};
+
 // Meeting info + participant defaults mirror the company's actual recurring
 // weekly MOM template (sumber/4. MOM Admin Jul 24, 2026.pdf) so the form
 // isn't blank for a meeting that happens every week with mostly the same
@@ -887,6 +894,8 @@ export default function MeetingNotes() {
                 className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs font-medium text-gray-300 outline-none focus:border-blue-500 cursor-pointer">
                 <option value="onprem">Standard (On-Premise)</option>
                 <option value="anthropic">Claude</option>
+                <option value="gemini">Gemini</option>
+                <option value="deepseek">DeepSeek</option>
               </select>
             </div>
 
@@ -894,7 +903,7 @@ export default function MeetingNotes() {
               <div className="mt-3 rounded-lg border border-blue-500/40 bg-blue-950/50 px-4 py-3">
                 <div className="flex items-center gap-2.5">
                   <Loader2 size={18} className="animate-spin text-blue-300 shrink-0" />
-                  <span className="text-sm font-semibold text-blue-200">Generating Minutes of Meeting with {momProvider === "anthropic" ? "Claude" : "the on-premise model"}…</span>
+                  <span className="text-sm font-semibold text-blue-200">Generating Minutes of Meeting with {MOM_PROVIDER_LABELS[momProvider] || "the on-premise model"}…</span>
                 </div>
                 <div className="mt-2.5 h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
                   <div className="h-full w-1/3 rounded-full bg-blue-400 animate-pulse" />

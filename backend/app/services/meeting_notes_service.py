@@ -10,9 +10,13 @@ meeting itself. See app/config.py's whisper_api_url comment. Transcription
 itself has no Claude alternative — the Anthropic API has no audio input
 capability — so it always runs on-premise regardless of provider choice.
 
-MOM generation is dual-provider like CV Screening / JD Generator / AP
-Invoice OCR: "onprem" (default, local Ollama qwen2.5 — free) or "anthropic"
-(opt-in, Claude — see app/config.py's anthropic_api_key comment).
+MOM generation supports 4 providers: "onprem" (default, local Ollama
+qwen2.5 — free), "anthropic" (Claude), "gemini" (reuses gemini_service.py),
+or "deepseek" (raw REST, OpenAI-compatible endpoint — see
+app/config.py's deepseek_api_key comment). All four return the same
+{"departments": [...]} JSON shape from the same MOM_PROMPT_TEMPLATE, so
+quality differences are purely down to the underlying model, not the
+instructions given to it.
 
 MOM schema (departments -> topics -> discussion_points + action_plans) and
 the rendered DOCX layout match the company's previous meeting-notes tool
@@ -30,12 +34,17 @@ from docx.enum.text import WD_TAB_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from app.config import get_settings
+from app.services import gemini_service
 import structlog
 
 logger = structlog.get_logger()
 settings = get_settings()
 
 OLLAMA_MOM_TIMEOUT_SECONDS = 120.0
+CLOUD_MOM_TIMEOUT_SECONDS = 180.0
+# Cloud providers can run genuinely long, detailed MOMs — this is a JSON
+# structure with many departments/topics/points, not a short chat reply.
+MOM_MAX_OUTPUT_TOKENS = 8192
 
 # Generous margin — ~17x realtime measured on the ai-engine GPU means even a
 # 5h meeting (the longest meetings are expected to run) takes under 20
@@ -53,9 +62,10 @@ MOM_PROMPT_TEMPLATE = """Analisis transkrip rapat berikut dan buatkan ringkasan 
 
 ATURAN:
 - Organisasikan berdasarkan departemen/topik utama yang benar-benar dibahas dalam transkrip (misal: HRGA, IT, Purchasing, Accounting & Tax, Planning & Coordination, dst — jangan mengarang departemen yang tidak disebut). Tulis nama departemen dengan kapitalisasi wajar (akronim seperti HRGA/IT/PAC dalam huruf besar, nama lain dalam Title Case) — jangan menuliskan semua nama departemen dalam huruf besar semua.
+- TANGKAP DETAIL SELENGKAP MUNGKIN. Jangan meringkas satu topik yang dibahas panjang jadi satu kalimat umum — pecah jadi beberapa discussion_points terpisah. Kalau transkrip menyebut angka, nama orang/vendor/klien, alasan/latar belakang, atau rincian teknis, sertakan itu apa adanya di discussion_points, bukan cuma judul topiknya secara umum.
 - Setiap topik punya discussion_points (poin pembahasan) dan action_plans (rencana tindakan untuk minggu berikutnya). Untuk action_plans, sertakan PIC dan deadline jika disebutkan, format: "tindakan - oleh Nama (deadline)". Kalau tidak ada rencana tindakan untuk topik itu, kembalikan array kosong.
 - Setiap poin di discussion_points/action_plans sebaiknya diawali label singkat dalam **bold** (mis. "**Recruitment**: ...", "**Annual MCU**: ...") kalau poin itu membahas sub-topik/item yang jelas — ini mengikuti gaya laporan MOM resmi perusahaan.
-- Gunakan bahasa formal, abaikan basa-basi/obrolan yang tidak substantif.
+- Gunakan bahasa formal, abaikan basa-basi/obrolan yang benar-benar tidak substantif (candaan, sapaan) — tapi JANGAN buang detail substantif hanya demi keringkasan.
 - SELALU tulis seluruh isi JSON (nama departemen, judul topik, discussion_points, action_plans) dalam BAHASA INGGRIS, apa pun bahasa transkripnya — kalau transkrip berbahasa Indonesia, terjemahkan ke Bahasa Inggris profesional untuk laporan ini.
 - Jangan mengarang informasi yang tidak ada di transkrip.
 
@@ -116,8 +126,9 @@ class MeetingNotesService:
             resp.raise_for_status()
             return resp.json()
 
-    def generate_mom(self, transcript: str, meeting_title: str = "", participants: str = "", provider: str = "onprem") -> dict:
-        """Transcript -> {"departments": [...]}. provider: "onprem" (default, local Ollama) or "anthropic" (Claude)."""
+    async def generate_mom(self, transcript: str, meeting_title: str = "", participants: str = "", provider: str = "onprem") -> dict:
+        """Transcript -> {"departments": [...]}. provider: "onprem" (default,
+        local Ollama), "anthropic" (Claude), "gemini", or "deepseek"."""
         meta_lines = []
         if meeting_title:
             meta_lines.append(f"Judul rapat: {meeting_title}")
@@ -128,21 +139,40 @@ class MeetingNotesService:
         prompt = MOM_PROMPT_TEMPLATE.format(meta=meta, transcript=transcript)
 
         if provider == "anthropic":
-            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-            response = client.messages.create(
-                model="claude-opus-4-8",
-                max_tokens=4000,
+            client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+            response = await client.messages.create(
+                model="claude-opus-5",
+                max_tokens=MOM_MAX_OUTPUT_TOKENS,
                 messages=[{"role": "user", "content": prompt}],
             )
             raw = response.content[0].text.strip()
+        elif provider == "gemini":
+            raw = (await gemini_service.generate(
+                system_prompt="You produce structured meeting minutes. Respond with valid JSON only, no commentary.",
+                contents=[{"role": "user", "parts": [{"text": prompt}]}],
+            )).strip()
+        elif provider == "deepseek":
+            async with httpx.AsyncClient(timeout=CLOUD_MOM_TIMEOUT_SECONDS) as client:
+                resp = await client.post(
+                    "https://api.deepseek.com/chat/completions",
+                    headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
+                    json={
+                        "model": settings.deepseek_model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": MOM_MAX_OUTPUT_TOKENS,
+                        "stream": False,
+                    },
+                )
+                resp.raise_for_status()
+                raw = resp.json()["choices"][0]["message"]["content"].strip()
         else:
-            resp = httpx.post(
-                f"{settings.ollama_api_url.rstrip('/')}/api/chat",
-                json={"model": settings.ollama_chat_model, "messages": [{"role": "user", "content": prompt}], "stream": False},
-                timeout=OLLAMA_MOM_TIMEOUT_SECONDS,
-            )
-            resp.raise_for_status()
-            raw = resp.json()["message"]["content"].strip()
+            async with httpx.AsyncClient(timeout=OLLAMA_MOM_TIMEOUT_SECONDS) as client:
+                resp = await client.post(
+                    f"{settings.ollama_api_url.rstrip('/')}/api/chat",
+                    json={"model": settings.ollama_chat_model, "messages": [{"role": "user", "content": prompt}], "stream": False},
+                )
+                resp.raise_for_status()
+                raw = resp.json()["message"]["content"].strip()
 
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
