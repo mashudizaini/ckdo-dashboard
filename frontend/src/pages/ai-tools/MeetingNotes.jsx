@@ -23,6 +23,21 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function ordinal(n) {
+  const suffixes = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]);
+}
+
+// Matches the company MOM template's date style ("Friday, July 24th, 2026") —
+// used to default the Date field to today instead of a stale hardcoded date.
+function todayFormatted() {
+  const d = new Date();
+  const weekday = d.toLocaleDateString("en-US", { weekday: "long" });
+  const month = d.toLocaleDateString("en-US", { month: "long" });
+  return `${weekday}, ${month} ${ordinal(d.getDate())}, ${d.getFullYear()}`;
+}
+
 const MOM_PROVIDER_LABELS = {
   onprem: "the on-premise model",
   anthropic: "Claude",
@@ -56,12 +71,12 @@ export default function MeetingNotes() {
   // scrolling page, so each stage (record, transcript, MOM) fits its own
   // shorter pane. Auto-advances on successful transcribe/generate, but the
   // user can always click back to an earlier step.
-  const [step, setStep] = useState("setup"); // "setup" | "transcript" | "mom"
+  const [step, setStep] = useState("setup"); // "info" | "setup" | "transcript" | "mom"
 
   // Meeting info
   const [title, setTitle] = useState("Administration Weekly Meeting");
-  const [date, setDate] = useState("Friday, July 24th, 2026");
-  const [time, setTime] = useState("10.30 AM – 11.45 AM");
+  const [date, setDate] = useState(() => todayFormatted());
+  const [time, setTime] = useState("10.00 AM – 11.45 AM");
   const [venue, setVenue] = useState("Tezobel Room - HQ Office");
   const [agenda, setAgenda] = useState("Administration Weekly Activities - Review and Follow-up Issues");
 
@@ -221,9 +236,11 @@ export default function MeetingNotes() {
     return () => clearInterval(id);
   }, [recording, transcribing, generating]);
 
-  useEffect(() => {
-    if (tab === "history") fetchHistory();
-  }, [tab]); // eslint-disable-line
+  // Fetched once on mount (not just when the History tab is opened) — the
+  // compact "Recent Recordings" list on the Record & Upload step needs it
+  // too, so users can jump back into a recent recording without leaving
+  // the main view.
+  useEffect(() => { fetchHistory(); }, []); // eslint-disable-line
 
   const fetchHistory = async () => {
     setHistoryLoading(true);
@@ -534,7 +551,8 @@ export default function MeetingNotes() {
               so each stage gets its own shorter pane (like Otter/Fireflies). */}
           <div className="w-60 shrink-0 rounded-xl border border-gray-800 bg-gray-900 p-2 sticky top-6 space-y-1">
             {[
-              { id: "setup", label: "Setup & Record", hint: "Meeting info, participants, audio" },
+              { id: "info", label: "Meeting Info", hint: "Title, date, venue, participants" },
+              { id: "setup", label: "Record & Upload", hint: "Live recording or file upload" },
               { id: "transcript", label: "Transcript", hint: "Review the transcribed text" },
               { id: "mom", label: "Minutes of Meeting", hint: "Review, edit & download" },
             ].map((s, idx) => {
@@ -561,33 +579,8 @@ export default function MeetingNotes() {
 
           {/* Step content */}
           <div className="flex-1 min-w-0 space-y-4">
-          {step === "setup" && (
+          {step === "info" && (
             <>
-          {recoverableSession && (
-            <div className="flex items-start gap-3 rounded-xl border border-amber-600/40 bg-amber-500/10 p-4">
-              <AlertTriangle size={18} className="text-amber-400 shrink-0 mt-0.5" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-amber-200">Unfinished recording found</p>
-                <p className="text-xs text-amber-200/80 mt-1 leading-relaxed">
-                  A recording from {new Date(recoverableSession.startedAt).toLocaleString("id-ID")} ({recoverableSession.chunkCount} saved chunk{recoverableSession.chunkCount === 1 ? "" : "s"})
-                  was never finished — likely an interrupted session (closed tab, logout, crash). The audio captured
-                  so far is still backed up and can be recovered.
-                </p>
-                <div className="flex items-center gap-2 mt-3">
-                  <button onClick={handleRecoverSession} disabled={recovering}
-                    className="flex items-center gap-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 transition-colors">
-                    {recovering ? <Loader2 size={12} className="animate-spin" /> : null}
-                    {recovering ? "Recovering…" : "Recover this recording"}
-                  </button>
-                  <button onClick={handleDiscardRecoverableSession} disabled={recovering}
-                    className="text-xs text-amber-200/70 hover:text-amber-100 px-2 py-1.5 transition-colors">
-                    Discard
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-          {/* Info form */}
           <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
             <h3 className="text-sm font-semibold text-gray-200 mb-4">Meeting Information</h3>
             <div className="grid grid-cols-2 gap-4">
@@ -606,7 +599,7 @@ export default function MeetingNotes() {
               <div>
                 <label className="block text-xs text-gray-500 mb-1.5">Time</label>
                 <input type="text" value={time} onChange={(e) => setTime(e.target.value)}
-                  placeholder="e.g. 10.30 AM – 11.45 AM"
+                  placeholder="e.g. 10.00 AM – 11.45 AM"
                   className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 transition-colors" />
               </div>
               <div>
@@ -615,7 +608,7 @@ export default function MeetingNotes() {
                   placeholder="e.g. Meeting Room A"
                   className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 transition-colors" />
               </div>
-              <div>
+              <div className="col-span-2">
                 <label className="block text-xs text-gray-500 mb-1.5">Agenda</label>
                 <input type="text" value={agenda} onChange={(e) => setAgenda(e.target.value)}
                   placeholder="e.g. Weekly Coordination"
@@ -644,7 +637,35 @@ export default function MeetingNotes() {
               ))}
             </div>
           </div>
+            </>
+          )}
 
+          {step === "setup" && (
+            <>
+          {recoverableSession && (
+            <div className="flex items-start gap-3 rounded-xl border border-amber-600/40 bg-amber-500/10 p-4">
+              <AlertTriangle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-amber-200">Unfinished recording found</p>
+                <p className="text-xs text-amber-200/80 mt-1 leading-relaxed">
+                  A recording from {new Date(recoverableSession.startedAt).toLocaleString("id-ID")} ({recoverableSession.chunkCount} saved chunk{recoverableSession.chunkCount === 1 ? "" : "s"})
+                  was never finished — likely an interrupted session (closed tab, logout, crash). The audio captured
+                  so far is still backed up and can be recovered.
+                </p>
+                <div className="flex items-center gap-2 mt-3">
+                  <button onClick={handleRecoverSession} disabled={recovering}
+                    className="flex items-center gap-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 transition-colors">
+                    {recovering ? <Loader2 size={12} className="animate-spin" /> : null}
+                    {recovering ? "Recovering…" : "Recover this recording"}
+                  </button>
+                  <button onClick={handleDiscardRecoverableSession} disabled={recovering}
+                    className="text-xs text-amber-200/70 hover:text-amber-100 px-2 py-1.5 transition-colors">
+                    Discard
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {/* Record / Upload */}
           <div className="grid grid-cols-2 gap-4">
             <div className="rounded-xl border border-gray-800 bg-gray-900 p-5 text-center">
@@ -812,6 +833,45 @@ export default function MeetingNotes() {
               </div>
             )}
           </div>
+
+          {/* Recent Recordings — compact, 5 rows visible then scroll, so
+              users can jump back into a recent recording without leaving
+              this view. Full detail (filters, delete, MOM/audio download)
+              still lives in the History tab. */}
+          <div className="rounded-xl border border-gray-800 bg-gray-900">
+            <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-200">Recent Recordings</h3>
+              <button onClick={() => setTab("history")} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">View all</button>
+            </div>
+            {historyLoading ? (
+              <div className="flex justify-center py-6"><Loader2 size={16} className="animate-spin text-gray-600" /></div>
+            ) : history.length === 0 ? (
+              <div className="px-4 py-6 text-center text-xs text-gray-600">Belum ada recording.</div>
+            ) : (
+              <div className="divide-y divide-gray-800 overflow-y-auto" style={{ maxHeight: 5 * 52 }}>
+                {history.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-gray-800/40 transition-colors">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-gray-200 truncate">{item.meeting_title || "(Tanpa judul)"}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] text-gray-500">{fmtDate(item.created_at)}</span>
+                        <span className={`text-[9px] font-semibold rounded-full px-1.5 py-0.5 ${
+                          item.source === "recorded" ? "bg-red-500/10 text-red-400" : "bg-blue-500/10 text-blue-400"
+                        }`}>
+                          {item.source === "recorded" ? "Recorded" : "Uploaded"}
+                        </span>
+                        {item.has_mom && <span className="text-[9px] font-semibold rounded-full px-1.5 py-0.5 bg-green-500/10 text-green-400">MOM ready</span>}
+                      </div>
+                    </div>
+                    <button onClick={() => window.open(`/ai/meeting-notes/view/${item.id}`, "_blank")}
+                      className="shrink-0 text-gray-500 hover:text-gray-200 transition-colors" title="Open transcript">
+                      <ExternalLink size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
             </>
           )}
 
@@ -824,7 +884,7 @@ export default function MeetingNotes() {
               <p className="text-xs text-gray-600 mb-4">Record or upload audio and transcribe it first.</p>
               <button onClick={() => setStep("setup")}
                 className="rounded-lg border border-blue-600 text-blue-400 hover:bg-blue-600/10 text-sm font-medium px-4 py-2 transition-colors">
-                Go to Setup & Record
+                Go to Record & Upload
               </button>
             </div>
           ) : (
