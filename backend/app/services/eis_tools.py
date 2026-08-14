@@ -137,6 +137,22 @@ EIS_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_employee_directory",
+            "description": "Cari daftar karyawan (nama, posisi, department, team, tanggal masuk, status) — untuk pertanyaan 'siapa saja di tim X' atau cari data karyawan tertentu, bukan sekadar jumlah headcount.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "department": {"type": "string", "description": "Opsional. Salah satu dari: Administration, Sales & Marketing, Strategy & Development, Plant"},
+                    "team": {"type": "string", "description": "Opsional. Nama tim, contoh IT, HRGA, Purchasing, Accounting"},
+                    "full_name": {"type": "string", "description": "Opsional. Cari berdasarkan nama (partial match)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_employee_headcount",
             "description": "Ambil data headcount karyawan (aktual vs plan, kumulatif resign) per grup departemen untuk satu periode.",
             "parameters": {
@@ -319,6 +335,26 @@ def get_purchasing_performance(period: str, material_type: str = None) -> list[d
     )
 
 
+def get_employee_directory(department: str = None, team: str = None, full_name: str = None) -> list[dict]:
+    return _query(
+        """
+        SELECT employee_number, full_name, department, team, position_title,
+               hire_date, employment_status
+        FROM eis.dim_employee
+        WHERE (%(department)s IS NULL OR department = %(department)s)
+          AND (%(team_like)s IS NULL OR team ILIKE %(team_like)s)
+          AND (%(name_like)s IS NULL OR full_name ILIKE %(name_like)s)
+        ORDER BY department, team, full_name
+        LIMIT 100
+        """,
+        {
+            "department": department,
+            "team_like": f"%{team}%" if team else None,
+            "name_like": f"%{full_name}%" if full_name else None,
+        },
+    )
+
+
 def get_employee_headcount(period: str, dept_group: str = None) -> list[dict]:
     fy, pnum = _parse_period(period)
     return _query(
@@ -344,6 +380,7 @@ _DISPATCH = {
     "get_inventory_summary": get_inventory_summary,
     "get_employee_headcount": get_employee_headcount,
     "get_purchasing_performance": get_purchasing_performance,
+    "get_employee_directory": get_employee_directory,
 }
 
 

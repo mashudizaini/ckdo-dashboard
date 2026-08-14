@@ -172,14 +172,18 @@ async def get_job_data(
             WHERE per.fiscal_year = :year {period_filter}
             ORDER BY per.period_num
         """,
-        "etl_employee": f"""
-            SELECT per.period_name, per.period_num, e.dept_group,
-                   e.headcount, e.plan_headcount,
-                   e.resigned_cumulative
-            FROM eis.fact_employee e
-            JOIN eis.dim_period per ON e.period_id = per.id
-            WHERE per.fiscal_year = :year {period_filter}
-            ORDER BY per.period_num, e.dept_group
+        # Not period-filtered like the others — dim_employee is a current
+        # snapshot roster (upserted every run), not a period-keyed fact
+        # table, so year/month here are ignored. This is deliberately the
+        # "complete employee information" view (one row per employee) rather
+        # than the aggregated headcount-by-department trend, since that's
+        # what's actually useful to eyeball for a data-quality check.
+        "etl_employee": """
+            SELECT employee_number, full_name, department, team, position_title,
+                   hire_date, employment_status
+            FROM eis.dim_employee
+            ORDER BY COALESCE(department, 'zzz'), COALESCE(team, 'zzz'), full_name
+            LIMIT 300
         """,
         "etl_ar_ap": f"""
             SELECT per.period_name, per.period_num,
@@ -259,8 +263,8 @@ _JOB_META = {
                         "oracle_tables": ["gme_batch_header", "gme_material_details", "wip_discrete_jobs"],
                         "destination_table": "eis.fact_production"},
     "etl_employee":   {"frequency": "Weekly", "schedule": "Mon 02:00 AM", "source": "Oracle HR",
-                        "oracle_tables": ["per_all_people_f", "per_all_assignments_f", "hr_all_organization_units"],
-                        "destination_table": "eis.fact_employee"},
+                        "oracle_tables": ["per_all_people_f", "per_all_assignments_f", "hr_all_positions_f"],
+                        "destination_table": "eis.fact_employee, eis.dim_employee"},
     "etl_financial":  {"frequency": "Daily",  "schedule": "04:00 AM WIB", "source": "Oracle GL",
                         "oracle_tables": ["gl_balances", "gl_code_combinations"],
                         "destination_table": "eis.fact_financial"},

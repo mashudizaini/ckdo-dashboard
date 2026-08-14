@@ -94,3 +94,37 @@ async def ensure_purchasing_table():
             "CREATE INDEX IF NOT EXISTS idx_fact_purchasing_period "
             "ON eis.fact_purchasing (period_id)"
         ))
+
+
+async def ensure_employee_dim_table():
+    """Create eis.dim_employee if missing — a current-snapshot employee
+    roster (one row per employee, upserted on every etl_employee run), not
+    a period-keyed fact table like fact_employee. department/team here are
+    backfilled from the main app's own employees table (ckdo_dashboard DB,
+    NIK-matched) rather than derived from Oracle HR — Oracle's own org
+    hierarchy carries no usable department/team info in this instance (every
+    employee's hr_all_organization_units row is the same single top-level
+    "CKDO BG" business group), so re-deriving it from Oracle would mean
+    guessing from free-text position titles instead of reusing the
+    already-correct, already-migrated classification the rest of the app
+    relies on (see app/services/department_taxonomy.py)."""
+    from sqlalchemy import text
+    async with eis_async_engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eis.dim_employee (
+                id                 SERIAL PRIMARY KEY,
+                employee_number    VARCHAR(30) NOT NULL UNIQUE,
+                full_name          VARCHAR(200),
+                sex                VARCHAR(10),
+                position_title     VARCHAR(200),
+                department         VARCHAR(50),
+                team               VARCHAR(100),
+                hire_date          DATE,
+                employment_status  VARCHAR(20),
+                updated_at         TIMESTAMPTZ DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_dim_employee_department "
+            "ON eis.dim_employee (department)"
+        ))
