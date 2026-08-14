@@ -38,6 +38,35 @@ function todayFormatted() {
   return `${weekday}, ${month} ${ordinal(d.getDate())}, ${d.getFullYear()}`;
 }
 
+// Conservative middle-of-the-road estimate for the progress bar — real
+// observed speed on this deployment ranges ~8x (a very long 82min meeting)
+// to ~15-22x (shorter recordings) realtime, all GPU float16 + VAD-filtered
+// faster-whisper large-v3. 10x under-promises a little on purpose so the
+// bar rarely finishes "later than expected".
+const ASSUMED_REALTIME_MULTIPLIER = 10;
+
+// Reads an audio file's duration client-side (no upload needed) via a
+// throwaway <audio> element — used to seed the estimated progress bar for
+// an uploaded file (a live recording already tracks its own elapsed
+// seconds directly).
+function getAudioDurationSeconds(file) {
+  return new Promise((resolve) => {
+    try {
+      const audio = document.createElement("audio");
+      audio.preload = "metadata";
+      audio.onloadedmetadata = () => {
+        const d = isFinite(audio.duration) ? audio.duration : null;
+        URL.revokeObjectURL(audio.src);
+        resolve(d);
+      };
+      audio.onerror = () => resolve(null);
+      audio.src = URL.createObjectURL(file);
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
 const MOM_PROVIDER_LABELS = {
   onprem: "the on-premise model",
   anthropic: "Claude",
@@ -99,6 +128,17 @@ export default function MeetingNotes() {
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeError, setTranscribeError] = useState(null);
   const [transcript, setTranscript] = useState(null); // { id, text, segments, language, audio_duration_seconds, processing_time_seconds }
+  // "" = auto-detect (mixed-language meetings), "id"/"en" = pin one language,
+  // skipping Whisper's language-detection pass for a small speed gain.
+  const [transcribeLanguage, setTranscribeLanguage] = useState("");
+  // Estimated (not truly live — faster-whisper returns one final result with
+  // no mid-transcription progress signal) percentage + ETA, derived from the
+  // audio's own duration and this deployment's observed realtime-multiplier
+  // (see ASSUMED_REALTIME_MULTIPLIER below). Caps at 95% until the request
+  // actually completes, then jumps to 100 — never claims "done" early.
+  const [transcribeProgress, setTranscribeProgress] = useState(null); // { pct, etaSeconds } | null
+  const transcribeTimerRef = useRef(null);
+  const [loadingRecording, setLoadingRecording] = useState(false);
 
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState(null);
@@ -391,21 +431,42 @@ export default function MeetingNotes() {
   const handleTranscribe = async () => {
     if (!file) return;
     setTranscribing(true); setTranscribeError(null); setTranscript(null); setMom(null);
+    setTranscribeProgress({ pct: 0, etaSeconds: null });
+
+    // Seed the estimate from the audio's own duration — a live recording
+    // already knows its elapsed seconds; an uploaded file needs its
+    // duration read out client-side first (no upload required for that).
+    const durationSec = recordedBlobInfo ? recordingSeconds : await getAudioDurationSeconds(file);
+    const estimatedTotal = durationSec ? Math.max(10, durationSec / ASSUMED_REALTIME_MULTIPLIER) : null;
+    const startedAt = Date.now();
+    if (estimatedTotal) {
+      transcribeTimerRef.current = setInterval(() => {
+        const elapsed = (Date.now() - startedAt) / 1000;
+        setTranscribeProgress({
+          pct: Math.min(95, Math.round((elapsed / estimatedTotal) * 100)),
+          etaSeconds: Math.max(0, Math.round(estimatedTotal - elapsed)),
+        });
+      }, 1000);
+    }
+
     try {
       const fd = new FormData();
       fd.append("file", file);
       fd.append("source", recordedBlobInfo ? "recorded" : "uploaded");
       fd.append("meeting_title", title);
       fd.append("participants", participants);
+      if (transcribeLanguage) fd.append("language", transcribeLanguage);
       const res = await fetch("/api/v1/ai/meeting-notes/transcribe", { method: "POST", headers, body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.detail || "Transcription failed");
+      setTranscribeProgress({ pct: 100, etaSeconds: 0 });
       setTranscript(data);
       setStep("transcript");
       fetchHistory();
     } catch (e) {
       setTranscribeError(e.message || String(e));
     } finally {
+      if (transcribeTimerRef.current) { clearInterval(transcribeTimerRef.current); transcribeTimerRef.current = null; }
       setTranscribing(false);
     }
   };
@@ -479,6 +540,38 @@ export default function MeetingNotes() {
       await fetch(`/api/v1/ai/meeting-notes/recordings/${recordingId}`, { method: "DELETE", headers });
       fetchHistory();
     } catch (_) {}
+  };
+
+  // Pulls a past recording's saved transcript (and MOM, if any) back into
+  // the wizard so it can be re-run through generate-mom with a different
+  // provider — no re-transcription needed, the audio is never re-uploaded.
+  const handleLoadRecording = async (recordingId) => {
+    setLoadingRecording(true);
+    try {
+      const res = await fetch(`/api/v1/ai/meeting-notes/recordings/${recordingId}`, { headers });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail || "Gagal memuat recording");
+      setTranscript({
+        id: data.id,
+        text: data.transcript,
+        language: data.transcript_language,
+        audio_duration_seconds: data.audio_duration_seconds,
+        processing_time_seconds: data.processing_time_seconds,
+      });
+      setTitle(data.meeting_title || title);
+      setParticipants(data.participants || "");
+      if (data.mom_meta?.date) setDate(data.mom_meta.date);
+      if (data.mom_meta?.time) setTime(data.mom_meta.time);
+      if (data.mom_meta?.venue) setVenue(data.mom_meta.venue);
+      if (data.mom_meta?.agenda) setAgenda(data.mom_meta.agenda);
+      setMom(data.mom_json || null);
+      setTab("new");
+      setStep("transcript");
+    } catch (e) {
+      setTranscribeError(e.message || String(e));
+    } finally {
+      setLoadingRecording(false);
+    }
   };
 
   const copyTranscript = () => {
@@ -809,6 +902,15 @@ export default function MeetingNotes() {
             <p className="text-xs text-gray-500 mb-4">
               Runs on the on-premise GPU (Claude has no audio support). You'll move to the Transcript step automatically once it's done.
             </p>
+            <div className="flex items-center gap-3 mb-4">
+              <label className="text-xs text-gray-500 shrink-0">Meeting language</label>
+              <select value={transcribeLanguage} onChange={(e) => setTranscribeLanguage(e.target.value)} disabled={transcribing}
+                className="rounded-md border border-gray-700 bg-gray-800 text-gray-200 text-xs px-2.5 py-1.5 focus:outline-none focus:border-purple-500 disabled:opacity-50">
+                <option value="">Auto-detect (mixed / both)</option>
+                <option value="id">Bahasa Indonesia</option>
+                <option value="en">English</option>
+              </select>
+            </div>
             <button onClick={handleTranscribe} disabled={!file || transcribing}
               className="flex items-center gap-2 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium px-4 py-2 transition-colors">
               {transcribing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
@@ -822,7 +924,18 @@ export default function MeetingNotes() {
                   <span className="text-sm font-semibold text-purple-200">Transcribing audio via GPU Whisper… please wait, this tab will update automatically.</span>
                 </div>
                 <div className="mt-2.5 h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
-                  <div className="h-full w-1/3 rounded-full bg-purple-400 animate-pulse" />
+                  <div className="h-full rounded-full bg-purple-400 transition-all duration-1000 ease-linear"
+                    style={{ width: `${transcribeProgress?.pct ?? 0}%` }} />
+                </div>
+                <div className="mt-1.5 flex items-center justify-between text-[11px] text-purple-300/80">
+                  <span>{transcribeProgress?.pct ?? 0}%</span>
+                  <span>
+                    {transcribeProgress?.etaSeconds != null
+                      ? transcribeProgress.etaSeconds > 0
+                        ? `Est. ${fmtElapsed(transcribeProgress.etaSeconds)} remaining`
+                        : "Almost done…"
+                      : "Estimating…"}
+                  </span>
                 </div>
               </div>
             )}
@@ -863,10 +976,22 @@ export default function MeetingNotes() {
                         {item.has_mom && <span className="text-[9px] font-semibold rounded-full px-1.5 py-0.5 bg-green-500/10 text-green-400">MOM ready</span>}
                       </div>
                     </div>
-                    <button onClick={() => window.open(`/ai/meeting-notes/view/${item.id}`, "_blank")}
-                      className="shrink-0 text-gray-500 hover:text-gray-200 transition-colors" title="Open transcript">
-                      <ExternalLink size={13} />
-                    </button>
+                    <div className="shrink-0 flex items-center gap-2">
+                      {item.status !== "error" && (
+                        <button onClick={() => handleLoadRecording(item.id)} disabled={loadingRecording}
+                          className="text-gray-500 hover:text-purple-400 transition-colors disabled:opacity-50" title="Reprocess (regenerate MOM with a different model)">
+                          <Sparkles size={13} />
+                        </button>
+                      )}
+                      <button onClick={() => window.open(`/ai/meeting-notes/view/${item.id}`, "_blank")}
+                        className="text-gray-500 hover:text-gray-200 transition-colors" title="Open transcript">
+                        <ExternalLink size={13} />
+                      </button>
+                      <button onClick={() => handleDeleteRecording(item.id)}
+                        className="text-gray-500 hover:text-red-400 transition-colors" title="Delete recording">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1143,6 +1268,13 @@ export default function MeetingNotes() {
                       className="flex items-center gap-1 rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
                       <ExternalLink size={12} />Transcript
                     </button>
+                    {item.status !== "error" && (
+                      <button onClick={() => handleLoadRecording(item.id)} disabled={loadingRecording}
+                        title="Reprocess (regenerate MOM with a different model)"
+                        className="flex items-center gap-1 rounded-md border border-purple-700/50 bg-purple-500/10 px-2.5 py-1.5 text-xs text-purple-300 hover:bg-purple-500/20 transition-colors disabled:opacity-50">
+                        <Sparkles size={12} />Reprocess
+                      </button>
+                    )}
                     <button onClick={() => handleDownloadAudio(item.id)}
                       className="flex items-center gap-1 rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
                       <Download size={12} />Audio
