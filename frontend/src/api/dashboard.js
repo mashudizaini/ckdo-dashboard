@@ -51,6 +51,15 @@ export const vpnApi = {
   getSessions:     (id)        => api.get(`/dashboard/it/vpn-monitor/gateways/${id}/sessions`),
 };
 
+export const hikcentralApi = {
+  getConfig:     ()      => api.get("/dashboard/it/hikcentral/config"),
+  saveConfig:    (body)  => api.post("/dashboard/it/hikcentral/config", body),
+  testConnection:()      => api.post("/dashboard/it/hikcentral/config/test"),
+  getSyncStatus: ()      => api.get("/dashboard/it/hikcentral/sync/status"),
+  syncNow:       ()      => api.post("/dashboard/it/hikcentral/sync/now"),
+  getSyncHistory:(limit) => api.get("/dashboard/it/hikcentral/sync/history", { params: { limit } }),
+};
+
 export const hrApi = {
   getSummary: () => api.get("/dashboard/hr/summary"),
   getEmployees: (params) => api.get("/dashboard/hr/employees", { params }),

@@ -31,11 +31,13 @@ import app.models.financial_statement_upload  # noqa: F401
 import app.models.document_conversion_job  # noqa: F401
 from app.models.ebs_backup import init_ebs_db
 from app.models.vpn_monitor import init_vpn_db
+from app.models.hikcentral import init_hikcentral_db
 
 # ── Dashboard Routers ──
 from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement
 from app.routers.dashboard import ebs_backup
 from app.routers.dashboard import vpn_monitor
+from app.routers.dashboard import it_hikcentral
 from app.routers.dashboard import (
     eis_summary, eis_performance, eis_production, eis_expansion, eis_administration,
     eis_business_plan, eis_daily_sales, eis_data_upload, eis_etl_admin,
@@ -94,9 +96,11 @@ async def lifespan(app: FastAPI):
     from app.services import vpn_monitor_scheduler
     vpn_monitor_scheduler.start()
 
-    # HikCentral attendance poller — 15-minute pull of today's door events
-    # into AttendanceRecord (source="hikcentral"). No-ops until
-    # hikcentral_base_url/app_key/app_secret are set in .env.
+    # HikCentral Integration — dedicated sync table (hikcentral_config,
+    # editable from the IT dashboard tab) + 15-minute pull of today's door
+    # events into AttendanceRecord (source="hikcentral"). No-ops until
+    # configured (DB row or hikcentral_* .env vars).
+    init_hikcentral_db()
     from app.services import hikcentral_scheduler
     hikcentral_scheduler.start()
 
@@ -184,6 +188,11 @@ app.include_router(
 app.include_router(
     vpn_monitor.router, prefix=f"{API_PREFIX}/dashboard/it/vpn-monitor",
     tags=["Dashboard - IT - VPN Monitoring"],
+    dependencies=[Depends(require_role(Roles.IT))],
+)
+app.include_router(
+    it_hikcentral.router, prefix=f"{API_PREFIX}/dashboard/it/hikcentral",
+    tags=["Dashboard - IT - HikCentral Integration"],
     dependencies=[Depends(require_role(Roles.IT))],
 )
 app.include_router(hr.router,         prefix=f"{API_PREFIX}/dashboard/hr",         tags=["Dashboard - HR"])

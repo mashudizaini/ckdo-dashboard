@@ -34,6 +34,7 @@ from sqlalchemy import select, update
 from app.database import SessionLocal
 from app.config import get_settings
 from app.models.attendance import AttendanceRecord, AttendanceUploadLog
+from app.models.hikcentral import HikCentralSessionLocal, resolve_effective_config
 from app.services.hikcentral_client import HikCentralClient, HikCentralError
 
 logger = logging.getLogger("hikcentral.scheduler")
@@ -83,9 +84,20 @@ def _fetch_today_events(client: HikCentralClient, today: date) -> list[dict]:
     return events
 
 
+def _get_effective_config() -> dict:
+    """Config editable from the IT dashboard's HikCentral tab (hikcentral_config
+    table) overrides the .env defaults — resolved fresh on every call so a
+    UI-saved change takes effect on the very next tick, no restart needed."""
+    cfg_db = HikCentralSessionLocal()
+    try:
+        return resolve_effective_config(cfg_db)
+    finally:
+        cfg_db.close()
+
+
 def is_configured() -> bool:
-    s = get_settings()
-    return bool(s.hikcentral_base_url and s.hikcentral_app_key and s.hikcentral_app_secret)
+    cfg = _get_effective_config()
+    return bool(cfg["base_url"] and cfg["app_key"] and cfg["app_secret"])
 
 
 def run_sync(uploaded_by: str = "scheduler") -> dict:
@@ -93,12 +105,13 @@ def run_sync(uploaded_by: str = "scheduler") -> dict:
     Returns a result dict; raises HikCentralError if the API call itself
     fails (caller decides how to surface that — the scheduler tick logs and
     swallows it, the manual "Sync Now" endpoint lets it become a 502)."""
-    if not is_configured():
-        raise HikCentralError("HikCentral not configured — set hikcentral_base_url / hikcentral_app_key / hikcentral_app_secret")
+    cfg = _get_effective_config()
+    if not (cfg["base_url"] and cfg["app_key"] and cfg["app_secret"]):
+        raise HikCentralError("HikCentral not configured — set it in IT Dashboard > HikCentral Integration, or hikcentral_base_url / hikcentral_app_key / hikcentral_app_secret (.env)")
 
     db = SessionLocal()
     try:
-        client = HikCentralClient()
+        client = HikCentralClient(base_url=cfg["base_url"], app_key=cfg["app_key"], app_secret=cfg["app_secret"])
         today = date.today()
         events = _fetch_today_events(client, today)
 
