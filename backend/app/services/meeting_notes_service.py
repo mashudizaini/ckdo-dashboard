@@ -203,7 +203,18 @@ class MeetingNotesService:
             async with httpx.AsyncClient(timeout=OLLAMA_MOM_TIMEOUT_SECONDS) as client:
                 resp = await client.post(
                     f"{settings.ollama_api_url.rstrip('/')}/api/chat",
-                    json={"model": settings.ollama_chat_model, "messages": [{"role": "user", "content": prompt}], "stream": False},
+                    json={
+                        "model": settings.ollama_chat_model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "stream": False,
+                        # Ollama's default temperature (~0.8) is tuned for open-ended
+                        # chat, not structured extraction — for a task like "pull the
+                        # exact points out of this transcript" that randomness mostly
+                        # shows up as inconsistency/invention rather than useful
+                        # variety. Low temperature + constrained top_p keep the smaller
+                        # on-prem model closer to the transcript's actual content.
+                        "options": {"temperature": 0.15, "top_p": 0.9},
+                    },
                 )
                 resp.raise_for_status()
                 raw = resp.json()["message"]["content"].strip()
