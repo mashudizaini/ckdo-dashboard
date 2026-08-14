@@ -1188,3 +1188,114 @@ def etl_budget(year: int = None, month: int = None):
         pg.close()
 
     return {"status": "success", "records": records}
+
+
+@celery_app.task(name="app.tasks.etl_tasks.etl_po")
+def etl_po(year: int = None, month: int = None):
+    """Extract monthly PO value/count from Oracle PO → fact_purchasing.
+
+    Mirrors the Purchasing dashboard's live Monthly Spend report
+    (purchasing_service.py get_monthly_spend) — same core join
+    (po_headers_all/po_lines_all/po_line_locations_all), same STANDARD/
+    BLANKET/CONTRACT + not-cancelled scoping, and the same
+    CKDO_MTRL_TYPE_DIRECT_INDIRECT lookup for material_type classification
+    and gl_daily_rates (Corporate) currency conversion to IDR — kept
+    consistent so the two never quietly disagree on what counts as a PO.
+    Unlike that live/on-demand report, this aggregates once per (period,
+    material_type) into the EIS warehouse for fast executive trend display
+    alongside Sales/COGS/Budget, instead of hitting Oracle on every request.
+
+    material_type: 'Direct' / 'Indirect' / 'Unclassified' (no lookup match).
+    """
+    year = year or datetime.now().year
+    pg = _get_pg()
+    job_id = _log_start(pg, "etl_po", year, month)
+    records = 0
+    try:
+        ora = get_oracle_connection()
+        cur_ora = ora.cursor()
+
+        from datetime import date as _date
+        if month:
+            d_from = _date(year, month, 1)
+            d_to   = _date(year + 1, 1, 1) if month == 12 else _date(year, month + 1, 1)
+        else:
+            d_from = _date(year, 1, 1)
+            d_to   = _date(year + 1, 1, 1)
+
+        cur_ora.execute("""
+            SELECT
+                EXTRACT(YEAR  FROM poh.creation_date)  AS ora_year,
+                EXTRACT(MONTH FROM poh.creation_date)  AS ora_month,
+                NVL(lv_mt.tag, 'Unclassified')          AS material_type,
+                COUNT(DISTINCT poh.po_header_id)        AS po_count,
+                SUM(pol.quantity * pol.unit_price *
+                    CASE WHEN poh.currency_code = 'IDR' THEN 1
+                         ELSE COALESCE((
+                             SELECT gdr.conversion_rate FROM gl_daily_rates gdr
+                             WHERE gdr.from_currency = poh.currency_code
+                               AND gdr.to_currency = 'IDR'
+                               AND gdr.conversion_type = 'Corporate'
+                               AND gdr.conversion_date = (
+                                   SELECT MAX(gdr2.conversion_date) FROM gl_daily_rates gdr2
+                                   WHERE gdr2.from_currency = poh.currency_code
+                                     AND gdr2.to_currency = 'IDR'
+                                     AND gdr2.conversion_type = 'Corporate'
+                                     AND gdr2.conversion_date <= TRUNC(poh.creation_date)
+                               )
+                         ), 1) END
+                )                                        AS po_value_idr
+            FROM po_headers_all poh
+            JOIN po_lines_all pol           ON pol.po_header_id = poh.po_header_id
+            JOIN po_line_locations_all poll ON poll.po_line_id  = pol.po_line_id
+            LEFT JOIN mtl_system_items_b msi ON msi.inventory_item_id = pol.item_id
+                                             AND msi.organization_id   = poll.ship_to_organization_id
+            LEFT JOIN fnd_lookup_values_vl lv_mt
+                                             ON lv_mt.lookup_code         = msi.item_type
+                                            AND lv_mt.view_application_id = 700
+                                            AND lv_mt.lookup_type         = 'CKDO_MTRL_TYPE_DIRECT_INDIRECT'
+            WHERE poh.type_lookup_code IN ('STANDARD','BLANKET','CONTRACT')
+              AND poh.authorization_status NOT IN ('CANCELLED','INCOMPLETE')
+              AND NVL(pol.cancel_flag,'N') = 'N'
+              AND poh.creation_date >= :date_from
+              AND poh.creation_date <  :date_to
+            GROUP BY EXTRACT(YEAR FROM poh.creation_date),
+                     EXTRACT(MONTH FROM poh.creation_date),
+                     NVL(lv_mt.tag, 'Unclassified')
+        """, {"date_from": d_from, "date_to": d_to})
+
+        rows = cur_ora.fetchall()
+        records = len(rows)
+        logger.info(f"[etl_po] Extracted {records} rows from Oracle PO (year={year}, month={month})")
+        ora.close()
+
+        cur_pg = pg.cursor()
+        loaded = 0
+        for ora_year, ora_month, material_type, po_count, po_value in rows:
+            period_id = _get_period_id(cur_pg, int(ora_year), int(ora_month))
+            if not period_id:
+                logger.warning(f"[etl_po] No dim_period for {int(ora_year)}/{int(ora_month)}")
+                continue
+            cur_pg.execute(
+                """INSERT INTO eis.fact_purchasing (period_id, material_type, po_count, po_value)
+                       VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (period_id, material_type) DO UPDATE SET
+                       po_count = EXCLUDED.po_count,
+                       po_value = EXCLUDED.po_value""",
+                (period_id, material_type, int(po_count or 0), float(po_value or 0)),
+            )
+            loaded += 1
+
+        pg.commit()
+        logger.info(f"[etl_po] Loaded {loaded} rows into fact_purchasing")
+
+        _log_end(pg, job_id, "success", records)
+
+    except Exception as e:
+        logger.error(f"[etl_po] Failed: {e}")
+        _log_end(pg, job_id, "failed", records, str(e))
+        raise
+    finally:
+        pg.close()
+
+    return {"status": "success", "records": records}

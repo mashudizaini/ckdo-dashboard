@@ -55,7 +55,7 @@ async def trigger_etl(job_name: str, params: TriggerParams):
     from app.tasks.celery_app import celery_app
     valid_jobs = [
         "etl_sales", "etl_cogs", "etl_production", "etl_financial",
-        "etl_employee", "etl_inventory", "etl_ar_ap", "etl_budget",
+        "etl_employee", "etl_inventory", "etl_ar_ap", "etl_budget", "etl_po",
     ]
     if job_name not in valid_jobs:
         raise HTTPException(status_code=400, detail=f"Unknown job. Valid: {valid_jobs}")
@@ -216,6 +216,15 @@ async def get_job_data(
             WHERE per.fiscal_year = :year {period_filter}
             ORDER BY per.period_num, b.dept_group
         """,
+        "etl_po": f"""
+            SELECT per.period_name, per.period_num, p.material_type,
+                   p.po_count,
+                   ROUND(p.po_value::numeric, 2) AS po_value
+            FROM eis.fact_purchasing p
+            JOIN eis.dim_period per ON p.period_id = per.id
+            WHERE per.fiscal_year = :year {period_filter}
+            ORDER BY per.period_num, p.material_type
+        """,
     }
 
     sql = queries.get(job_name)
@@ -258,6 +267,9 @@ _JOB_META = {
     "etl_budget":     {"frequency": "Daily",  "schedule": "04:30 AM WIB", "source": "Oracle GL (OPEX)",
                         "oracle_tables": ["gl_balances", "gl_code_combinations"],
                         "destination_table": "eis.fact_budget"},
+    "etl_po":         {"frequency": "Daily",  "schedule": "05:00 AM WIB", "source": "Oracle PO (Purchase Order)",
+                        "oracle_tables": ["po_headers_all", "po_lines_all", "po_line_locations_all"],
+                        "destination_table": "eis.fact_purchasing"},
 }
 
 

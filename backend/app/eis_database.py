@@ -68,3 +68,29 @@ async def ensure_upload_log_table():
             "CREATE INDEX IF NOT EXISTS ix_eis_upload_log_type_date "
             "ON eis.upload_log (upload_type, uploaded_at DESC)"
         ))
+
+
+async def ensure_purchasing_table():
+    """Create eis.fact_purchasing if missing — same self-provisioning
+    reasoning as ensure_upload_log_table(): the eis schema's other fact_*
+    tables were bootstrapped externally, but this one has no such
+    precedent, so the app creates it on its own. Schema mirrors
+    fact_budget's shape (period_id + one grouping dimension), populated by
+    app.tasks.eis_etl_tasks.etl_po."""
+    from sqlalchemy import text
+    async with eis_async_engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eis.fact_purchasing (
+                id             SERIAL PRIMARY KEY,
+                period_id      INTEGER NOT NULL REFERENCES eis.dim_period(id),
+                material_type  VARCHAR(30) NOT NULL,
+                po_count       INTEGER DEFAULT 0,
+                po_value       NUMERIC(18,2) DEFAULT 0,
+                created_at     TIMESTAMPTZ DEFAULT now(),
+                UNIQUE (period_id, material_type)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_purchasing_period "
+            "ON eis.fact_purchasing (period_id)"
+        ))

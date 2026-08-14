@@ -122,6 +122,21 @@ EIS_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_purchasing_performance",
+            "description": "Ambil data trend Purchase Order (jumlah PO dan nilai PO dalam IDR) per tipe material (Direct/Indirect) untuk satu periode.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "period": {"type": "string", "description": "Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                    "material_type": {"type": "string", "description": "Opsional. Salah satu dari: Direct, Indirect, Unclassified"},
+                },
+                "required": ["period"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_employee_headcount",
             "description": "Ambil data headcount karyawan (aktual vs plan, kumulatif resign) per grup departemen untuk satu periode.",
             "parameters": {
@@ -288,6 +303,22 @@ def get_inventory_summary(period: str) -> list[dict]:
     )
 
 
+def get_purchasing_performance(period: str, material_type: str = None) -> list[dict]:
+    fy, pnum = _parse_period(period)
+    return _query(
+        """
+        SELECT per.period_name, per.fiscal_year, p.material_type,
+               p.po_count, p.po_value
+        FROM eis.fact_purchasing p
+        JOIN eis.dim_period per ON per.id = p.period_id
+        WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
+          AND (%(material_type)s IS NULL OR p.material_type = %(material_type)s)
+        ORDER BY p.material_type
+        """,
+        {"fy": fy, "pnum": pnum, "material_type": material_type},
+    )
+
+
 def get_employee_headcount(period: str, dept_group: str = None) -> list[dict]:
     fy, pnum = _parse_period(period)
     return _query(
@@ -312,6 +343,7 @@ _DISPATCH = {
     "get_ar_ap_summary": get_ar_ap_summary,
     "get_inventory_summary": get_inventory_summary,
     "get_employee_headcount": get_employee_headcount,
+    "get_purchasing_performance": get_purchasing_performance,
 }
 
 
