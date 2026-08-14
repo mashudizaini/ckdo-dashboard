@@ -800,34 +800,41 @@ def etl_production(year: int = None, month: int = None):
 
 @celery_app.task(name="app.tasks.etl_tasks.etl_employee")
 def etl_employee(year: int = None, month: int = None):
-    """Extract employee headcount trend AND a complete current-roster
-    snapshot from Oracle HR → fact_employee + dim_employee.
+    """Mirror the main app's own `employees` table (ckdo_dashboard DB,
+    Excel-uploaded via Employee Data) into a complete employee roster
+    (dim_employee) AND a monthly headcount trend (fact_employee) — NOT
+    Oracle HR, despite this task living alongside the Oracle-sourced ETL
+    jobs.
 
-    department/team are backfilled from the main app's `employees` table
-    (NIK-matched via employee_number), NOT derived from Oracle HR — Oracle's
-    own org hierarchy carries no usable department info here (every active
-    employee's hr_all_organization_units row is the very same single
-    top-level "CKDO BG" business group; position titles are free text like
-    "IT MANAGER" / "ADMINISTRATION PRODUCTION" with no normalized
-    department field to key off). Re-parsing that free text would mean
-    re-guessing a classification the app already gets right elsewhere —
-    see department_taxonomy.py and hr_employees.py's DEPT_GROUPS.
-    Administration / Sales & Marketing / Strategy & Development / Plant are
-    the only 4 real departments; IT, HRGA, Purchasing etc. are TEAMS within
-    Administration, not departments themselves — this previously produced
-    wrong data because the old Oracle-org-keyword mapping below silently
-    put every employee in one catch-all bucket (Oracle's org field never
-    actually varies).
+    Oracle EBS was the original source here, but was dropped: its own org
+    hierarchy carries no usable department/division/team info in this
+    instance (every active employee's hr_all_organization_units row is the
+    exact same single top-level "CKDO BG" business group, and position
+    titles are free text like "IT MANAGER" with nothing structured to key
+    off). employees is already the company's real, actively-maintained HR
+    source of truth — used everywhere else in the app (Attendance, Leave,
+    Org Chart, Employee List) — with the classification already correct
+    (Administration / Sales & Marketing / Strategy & Development / Plant
+    are the 4 real departments; IT, HRGA, Purchasing etc. are TEAMS within
+    Administration, not departments — see department_taxonomy.py). Mirroring
+    it here is simpler and strictly more complete than re-deriving a worse
+    copy from Oracle (division, for one, doesn't exist in Oracle's side at
+    all).
 
-    fact_employee (period-keyed): headcount trend for the EIS executive
-    dashboard, now grouped by canonical department instead of the old
-    Oracle-org guess.
+    fact_employee (period-keyed): active-employee count per department for
+    a given month, computed from date_of_joining/resign_date — "active on
+    snap_date" = joined by snap_date AND (never resigned, or resigned
+    after snap_date). Same limitation as any headcount-from-current-data
+    approach: an employee's department reflects where they are NOW, not
+    necessarily where they were in a past month, since employees carries
+    no per-month history — accepted the same way hr_attendance.py's own
+    department backfill already does.
     dim_employee (current snapshot, upserted every run regardless of the
-    year/month params below): one row per employee — position/hire
-    date/status from Oracle, department/team backfilled from the employees
-    table — the "complete employee information" roster.
+    year/month params below): one row per employee, mirrored 1:1 — the
+    "complete employee information" roster.
     """
     import calendar as _cal
+    from datetime import date as _date
     from app.database import SessionLocal as MainSessionLocal
     from app.models.employee import Employee
 
@@ -837,116 +844,75 @@ def etl_employee(year: int = None, month: int = None):
     records = 0
 
     try:
-        # ── Employee master lookup (NIK -> department/team) — one query,
-        # reused for both the roster snapshot and the headcount trend below.
         main_db = MainSessionLocal()
         try:
-            emp_master = {
-                e.user_id: (e.department, e.team, e.full_name)
-                for e in main_db.query(Employee.user_id, Employee.department, Employee.team, Employee.full_name)
-            }
+            emp_rows = [
+                (
+                    e.user_id, e.full_name, e.sex, e.job_title,
+                    e.department, e.division, e.team,
+                    e.date_of_joining, e.resign_date, e.employment_status,
+                )
+                for e in main_db.query(
+                    Employee.user_id, Employee.full_name, Employee.sex, Employee.job_title,
+                    Employee.department, Employee.division, Employee.team,
+                    Employee.date_of_joining, Employee.resign_date, Employee.employment_status,
+                )
+            ]
         finally:
             main_db.close()
 
-        ora = get_oracle_connection()
-        cur_ora = ora.cursor()
+        records = len(emp_rows)
+        logger.info(f"[etl_employee] {records} employees from the employees table")
+
         cur_pg = pg.cursor()
 
         # ── Complete employee roster snapshot → dim_employee ─────────
-        # Always current (SYSDATE), independent of the year/month params
-        # used for the historical headcount trend below.
-        cur_ora.execute("""
-            SELECT
-                papf.employee_number,
-                papf.full_name,
-                papf.sex,
-                papf.original_date_of_hire,
-                papf.current_employee_flag,
-                hapf.name AS position_title
-            FROM per_all_people_f papf
-            JOIN per_all_assignments_f paaf ON papf.person_id = paaf.person_id
-            LEFT JOIN hr_all_positions_f hapf
-                   ON paaf.position_id = hapf.position_id
-                  AND SYSDATE BETWEEN hapf.effective_start_date AND hapf.effective_end_date
-            WHERE SYSDATE BETWEEN papf.effective_start_date AND papf.effective_end_date
-              AND SYSDATE BETWEEN paaf.effective_start_date AND paaf.effective_end_date
-              AND paaf.assignment_type = 'E'
-              AND paaf.primary_flag = 'Y'
-        """)
-        roster_rows = cur_ora.fetchall()
-        logger.info(f"[etl_employee] {len(roster_rows)} active employees from Oracle HR")
-
         roster_loaded = 0
-        for emp_num, full_name, sex, hire_date, active_flag, position_title in roster_rows:
-            dept, team, master_name = emp_master.get(str(emp_num), (None, None, None))
+        for (user_id, full_name, sex, job_title, department, division, team,
+             joined, resigned, emp_status) in emp_rows:
             cur_pg.execute(
                 """INSERT INTO eis.dim_employee
                        (employee_number, full_name, sex, position_title,
-                        department, team, hire_date, employment_status, updated_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
+                        department, division, team, hire_date, employment_status, updated_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                    ON CONFLICT (employee_number) DO UPDATE SET
                        full_name         = EXCLUDED.full_name,
                        sex               = EXCLUDED.sex,
                        position_title    = EXCLUDED.position_title,
                        department        = EXCLUDED.department,
+                       division          = EXCLUDED.division,
                        team              = EXCLUDED.team,
                        hire_date         = EXCLUDED.hire_date,
                        employment_status = EXCLUDED.employment_status,
                        updated_at        = now()""",
-                (
-                    str(emp_num), master_name or full_name, sex, position_title,
-                    dept, team, hire_date,
-                    "Active" if active_flag == 'Y' else "Inactive",
-                ),
+                (user_id, full_name, sex, job_title, department, division, team,
+                 joined, emp_status),
             )
             roster_loaded += 1
         pg.commit()
         logger.info(f"[etl_employee] Upserted {roster_loaded} rows into dim_employee")
-        records += roster_loaded
 
         # ── Monthly headcount trend → fact_employee ───────────────────
         months_to_process = [month] if month else list(range(1, 13))
         trend_loaded = 0
 
         for m in months_to_process:
-            # End-of-month snapshot: NLS-independent YYYY-MM-DD format
             last_day = _cal.monthrange(year, m)[1]
-            snap_date = f"{year}-{m:02d}-{last_day:02d}"
-
-            cur_ora.execute("""
-                SELECT papf.employee_number
-                FROM per_all_people_f     papf
-                JOIN per_all_assignments_f paaf
-                    ON papf.person_id = paaf.person_id
-                WHERE TO_DATE(:snap, 'YYYY-MM-DD')
-                          BETWEEN papf.effective_start_date AND papf.effective_end_date
-                  AND TO_DATE(:snap, 'YYYY-MM-DD')
-                          BETWEEN paaf.effective_start_date AND paaf.effective_end_date
-                  AND paaf.assignment_type = 'E'
-                  AND paaf.primary_flag    = 'Y'
-            """, {"snap": snap_date})
-
-            emp_numbers = [str(r[0]) for r in cur_ora.fetchall()]
-            records += len(emp_numbers)
-            logger.info(f"[etl_employee] {year}/{m:02d} snapshot {snap_date}: {len(emp_numbers)} active employees")
-
-            if not emp_numbers:
-                logger.warning(f"[etl_employee] No HR data for {snap_date} — skipping period {m}")
-                continue
+            snap_date = _date(year, m, last_day)
 
             period_id = _get_period_id(cur_pg, year, m)
             if not period_id:
                 logger.warning(f"[etl_employee] No dim_period for {year}/{m}")
                 continue
 
-            # department comes from the CURRENT employee master — no
-            # historical department-per-month data exists anywhere, an
-            # accepted approximation (same one hr_attendance.py's upload
-            # backfill already makes, for the same reason).
             dept_totals: dict = defaultdict(int)
-            for emp_num in emp_numbers:
-                dept, _team, _name = emp_master.get(emp_num, (None, None, None))
-                dept_totals[dept or "Unclassified"] += 1
+            for (_uid, _name, _sex, _job, department, _div, _team,
+                 joined, resigned, _status) in emp_rows:
+                if not joined or joined > snap_date:
+                    continue
+                if resigned and resigned <= snap_date:
+                    continue
+                dept_totals[department or "Unclassified"] += 1
 
             for department, headcount in dept_totals.items():
                 cur_pg.execute(

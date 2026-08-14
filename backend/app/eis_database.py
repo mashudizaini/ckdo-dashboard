@@ -98,16 +98,16 @@ async def ensure_purchasing_table():
 
 async def ensure_employee_dim_table():
     """Create eis.dim_employee if missing — a current-snapshot employee
-    roster (one row per employee, upserted on every etl_employee run), not
-    a period-keyed fact table like fact_employee. department/team here are
-    backfilled from the main app's own employees table (ckdo_dashboard DB,
-    NIK-matched) rather than derived from Oracle HR — Oracle's own org
-    hierarchy carries no usable department/team info in this instance (every
-    employee's hr_all_organization_units row is the same single top-level
-    "CKDO BG" business group), so re-deriving it from Oracle would mean
-    guessing from free-text position titles instead of reusing the
-    already-correct, already-migrated classification the rest of the app
-    relies on (see app/services/department_taxonomy.py)."""
+    roster (one row per employee, mirrored 1:1 from the main app's own
+    employees table on every etl_employee run), not a period-keyed fact
+    table like fact_employee. Sourced from employees (ckdo_dashboard DB,
+    Excel-uploaded via Employee Data) rather than Oracle HR — Oracle's own
+    org hierarchy carries no usable department/division/team info in this
+    instance (every employee's hr_all_organization_units row is the same
+    single top-level "CKDO BG" business group, and position titles are
+    free text with nothing structured to key off), whereas employees
+    already has the correct, already-migrated classification the rest of
+    the app relies on (see app/services/department_taxonomy.py)."""
     from sqlalchemy import text
     async with eis_async_engine.begin() as conn:
         await conn.execute(text("""
@@ -118,12 +118,19 @@ async def ensure_employee_dim_table():
                 sex                VARCHAR(10),
                 position_title     VARCHAR(200),
                 department         VARCHAR(50),
+                division           VARCHAR(100),
                 team               VARCHAR(100),
                 hire_date          DATE,
                 employment_status  VARCHAR(20),
                 updated_at         TIMESTAMPTZ DEFAULT now()
             )
         """))
+        # Pre-existing deployments (created before `division` was added)
+        # need this backfilled explicitly — CREATE TABLE IF NOT EXISTS is a
+        # no-op once the table already exists.
+        await conn.execute(text(
+            "ALTER TABLE eis.dim_employee ADD COLUMN IF NOT EXISTS division VARCHAR(100)"
+        ))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_dim_employee_department "
             "ON eis.dim_employee (department)"

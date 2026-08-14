@@ -179,7 +179,7 @@ async def get_job_data(
         # than the aggregated headcount-by-department trend, since that's
         # what's actually useful to eyeball for a data-quality check.
         "etl_employee": """
-            SELECT employee_number, full_name, department, team, position_title,
+            SELECT employee_number, full_name, department, division, team, position_title,
                    hire_date, employment_status
             FROM eis.dim_employee
             ORDER BY COALESCE(department, 'zzz'), COALESCE(team, 'zzz'), full_name
@@ -240,38 +240,51 @@ async def get_job_data(
     return {"data": rows, "columns": list(rows[0].keys()) if rows else []}
 
 
-# Oracle EBS source tables + Postgres (eis schema) destination table, one
-# entry per job — curated by hand against eis_etl_tasks.py rather than
-# regex-scraped from the SQL (date-arithmetic expressions like
-# `EXTRACT(... FROM x.due_date)` look like false-positive "FROM table"
-# matches to a naive scanner). The /source endpoint below is the
-# always-accurate complement — read straight from the running code.
+# Source tables + Postgres (eis schema) destination table, one entry per
+# job — curated by hand against eis_etl_tasks.py rather than regex-scraped
+# from the SQL (date-arithmetic expressions like `EXTRACT(... FROM
+# x.due_date)` look like false-positive "FROM table" matches to a naive
+# scanner). The /source endpoint below is the always-accurate complement —
+# read straight from the running code. Every job pulls from Oracle EBS
+# except etl_employee (see source_system) — its "Oracle source" turned out
+# to carry no usable department/division/team data in this instance, so it
+# was switched to mirror the already-correct, already-migrated employees
+# table (Excel-uploaded via Employee Data) instead.
 _JOB_META = {
     "etl_sales":      {"frequency": "Daily",  "schedule": "02:00 AM WIB", "source": "Oracle OE (Sales Order)",
+                        "source_system": "Oracle EBS",
                         "oracle_tables": ["oe_order_headers_all", "oe_order_lines_all", "oe_transaction_types_tl"],
                         "destination_table": "eis.fact_sales"},
     "etl_cogs":       {"frequency": "Daily",  "schedule": "02:15 AM WIB", "source": "Oracle OE (Product & COGS)",
+                        "source_system": "Oracle EBS",
                         "oracle_tables": ["oe_order_headers_all", "oe_order_lines_all", "oe_transaction_types_tl"],
                         "destination_table": "eis.fact_cogs, eis.dim_product"},
     "etl_ar_ap":      {"frequency": "Daily",  "schedule": "02:30 AM WIB", "source": "Oracle AR/AP",
+                        "source_system": "Oracle EBS",
                         "oracle_tables": ["ar_payment_schedules_all", "ap_invoices_all", "ap_payment_schedules_all"],
                         "destination_table": "eis.fact_financial_ratio"},
     "etl_inventory":  {"frequency": "Daily",  "schedule": "03:00 AM WIB", "source": "Oracle INV",
+                        "source_system": "Oracle EBS",
                         "oracle_tables": ["mtl_onhand_quantities_detail", "cst_item_costs"],
                         "destination_table": "eis.fact_financial_ratio"},
     "etl_production": {"frequency": "Daily",  "schedule": "03:15 AM WIB", "source": "Oracle WIP / GME",
+                        "source_system": "Oracle EBS",
                         "oracle_tables": ["gme_batch_header", "gme_material_details", "wip_discrete_jobs"],
                         "destination_table": "eis.fact_production"},
-    "etl_employee":   {"frequency": "Weekly", "schedule": "Mon 02:00 AM", "source": "Oracle HR",
-                        "oracle_tables": ["per_all_people_f", "per_all_assignments_f", "hr_all_positions_f"],
+    "etl_employee":   {"frequency": "Weekly", "schedule": "Mon 02:00 AM", "source": "Employee Data (Excel upload)",
+                        "source_system": "PostgreSQL (ckdo_dashboard)",
+                        "oracle_tables": ["employees"],
                         "destination_table": "eis.fact_employee, eis.dim_employee"},
     "etl_financial":  {"frequency": "Daily",  "schedule": "04:00 AM WIB", "source": "Oracle GL",
+                        "source_system": "Oracle EBS",
                         "oracle_tables": ["gl_balances", "gl_code_combinations"],
                         "destination_table": "eis.fact_financial"},
     "etl_budget":     {"frequency": "Daily",  "schedule": "04:30 AM WIB", "source": "Oracle GL (OPEX)",
+                        "source_system": "Oracle EBS",
                         "oracle_tables": ["gl_balances", "gl_code_combinations"],
                         "destination_table": "eis.fact_budget"},
     "etl_po":         {"frequency": "Daily",  "schedule": "05:00 AM WIB", "source": "Oracle PO (Purchase Order)",
+                        "source_system": "Oracle EBS",
                         "oracle_tables": ["po_headers_all", "po_lines_all", "po_line_locations_all"],
                         "destination_table": "eis.fact_purchasing"},
 }

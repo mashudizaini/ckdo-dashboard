@@ -338,7 +338,7 @@ def get_purchasing_performance(period: str, material_type: str = None) -> list[d
 def get_employee_directory(department: str = None, team: str = None, full_name: str = None) -> list[dict]:
     return _query(
         """
-        SELECT employee_number, full_name, department, team, position_title,
+        SELECT employee_number, full_name, department, division, team, position_title,
                hire_date, employment_status
         FROM eis.dim_employee
         WHERE (%(department)s IS NULL OR department = %(department)s)

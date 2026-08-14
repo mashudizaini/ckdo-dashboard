@@ -246,7 +246,7 @@ export default function EtlAdmin() {
                 <div className="flex items-start gap-1.5">
                   <Table2 size={11} className="text-amber-400 mt-0.5 shrink-0" />
                   <div className="text-[10px] text-gray-500 leading-relaxed">
-                    <span className="text-gray-400 font-medium">Oracle:</span> <span className="font-mono">{(s.oracle_tables || []).join(", ")}</span>
+                    <span className="text-gray-400 font-medium">{s.source_system || "Oracle EBS"}:</span> <span className="font-mono">{(s.oracle_tables || []).join(", ")}</span>
                   </div>
                 </div>
                 <div className="flex items-start gap-1.5">
