@@ -21,6 +21,7 @@ const NAV_ITEMS = [
     { label: "Oracle EBS Backup Recovery", path: "/dashboard/it/ebs-backup-recovery" },
     { label: "VPN Access Monitoring", path: "/dashboard/it/vpn-monitoring" },
     { label: "HikCentral Integration", path: "/dashboard/it/hikcentral" },
+    { label: "ETL Admin", path: "/dashboard/it/etl-admin" },
   ] },
   { label: "HRGA", path: "/dashboard/hr", icon: Users, roles: ["hr_staff"], children: [
     { label: "Employee Data", path: "/dashboard/hr/employees" },
@@ -66,7 +67,6 @@ const EIS_ITEMS = [
     { label: "Business Plan", path: "/dashboard/eis/business-plan" },
     { label: "Daily Sales", path: "/dashboard/eis/daily-sales" },
     { label: "Data Upload", path: "/dashboard/eis/data-upload" },
-    { label: "ETL Admin", path: "/dashboard/eis/etl" },
   ] },
 ];
 

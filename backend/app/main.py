@@ -38,9 +38,10 @@ from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purcha
 from app.routers.dashboard import ebs_backup
 from app.routers.dashboard import vpn_monitor
 from app.routers.dashboard import it_hikcentral
+from app.routers.dashboard import it_etl_admin
 from app.routers.dashboard import (
     eis_summary, eis_performance, eis_production, eis_expansion, eis_administration,
-    eis_business_plan, eis_daily_sales, eis_data_upload, eis_etl_admin,
+    eis_business_plan, eis_daily_sales, eis_data_upload,
 )
 
 # ── Coretax Router ──
@@ -195,6 +196,11 @@ app.include_router(
     tags=["Dashboard - IT - HikCentral Integration"],
     dependencies=[Depends(require_role(Roles.IT))],
 )
+app.include_router(
+    it_etl_admin.router, prefix=f"{API_PREFIX}/dashboard/it/etl-admin",
+    tags=["Dashboard - IT - ETL Admin"],
+    dependencies=[Depends(require_role(Roles.IT))],
+)
 app.include_router(hr.router,         prefix=f"{API_PREFIX}/dashboard/hr",         tags=["Dashboard - HR"])
 app.include_router(pac.router,        prefix=f"{API_PREFIX}/dashboard/pac",        tags=["Dashboard - PAC"])
 app.include_router(accounting.router, prefix=f"{API_PREFIX}/dashboard/accounting", tags=["Dashboard - Accounting"])
@@ -216,7 +222,6 @@ app.include_router(eis_administration.router, prefix=f"{API_PREFIX}/dashboard/ei
 app.include_router(eis_business_plan.router,  prefix=f"{API_PREFIX}/dashboard/eis/bp",          tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
 app.include_router(eis_daily_sales.router,    prefix=f"{API_PREFIX}/dashboard/eis/daily-sales", tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
 app.include_router(eis_data_upload.router,    prefix=f"{API_PREFIX}/dashboard/eis/data-upload", tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
-app.include_router(eis_etl_admin.router,      prefix=f"{API_PREFIX}/dashboard/eis/etl",         tags=["Dashboard - EIS"])
 
 # AI Tools
 app.include_router(chatbot.router,       prefix=f"{API_PREFIX}/ai/chatbot",       tags=["AI - Chatbot"])

@@ -75,6 +75,65 @@ EIS_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_cogs_performance",
+            "description": "Ambil data sales, COGS, dan EBIT per produk untuk satu periode — untuk pertanyaan margin/profitabilitas per produk.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "period": {"type": "string", "description": "Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                    "product_code": {"type": "string", "description": "Opsional. Kode produk, contoh DOC01, PAC02"},
+                    "business_type": {"type": "string", "description": "Opsional. Salah satu dari: Local, Export, CMO"},
+                },
+                "required": ["period"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_ar_ap_summary",
+            "description": "Ambil ringkasan piutang (AR/DSO) dan hutang (AP/DPO) usaha, termasuk net working capital days, untuk satu periode.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "period": {"type": "string", "description": "Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                },
+                "required": ["period"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_inventory_summary",
+            "description": "Ambil ringkasan nilai persediaan (inventory) dan days inventory outstanding (DIO) untuk satu periode.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "period": {"type": "string", "description": "Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                },
+                "required": ["period"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_employee_headcount",
+            "description": "Ambil data headcount karyawan (aktual vs plan, kumulatif resign) per grup departemen untuk satu periode.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "period": {"type": "string", "description": "Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                    "dept_group": {"type": "string", "description": "Opsional. Grup departemen, contoh Plant Direct, SM, Admin"},
+                },
+                "required": ["period"],
+            },
+        },
+    },
 ]
 
 _PERIOD_RE = re.compile(r"^(\d{4})-(\d{1,2})$")
@@ -178,11 +237,81 @@ def get_financial_summary(period: str) -> list[dict]:
     )
 
 
+def get_cogs_performance(period: str, product_code: str = None, business_type: str = None) -> list[dict]:
+    fy, pnum = _parse_period(period)
+    return _query(
+        """
+        SELECT dp.product_code, dp.product_name, fc.business_type,
+               fc.sales_amount, fc.cogs_total, fc.ebit_amount,
+               CASE WHEN fc.sales_amount > 0
+                    THEN round((fc.ebit_amount / fc.sales_amount * 100)::numeric, 1)
+               END AS ebit_pct
+        FROM eis.fact_cogs fc
+        JOIN eis.dim_period per ON per.id = fc.period_id
+        JOIN eis.dim_product dp ON dp.id = fc.product_id
+        WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
+          AND (%(product_code)s IS NULL OR dp.product_code = %(product_code)s)
+          AND (%(business_type)s IS NULL OR fc.business_type = %(business_type)s)
+        ORDER BY fc.sales_amount DESC
+        """,
+        {"fy": fy, "pnum": pnum, "product_code": product_code, "business_type": business_type},
+    )
+
+
+def get_ar_ap_summary(period: str) -> list[dict]:
+    fy, pnum = _parse_period(period)
+    return _query(
+        """
+        SELECT per.period_name, per.fiscal_year,
+               r.dso_ar_avg, r.dso_days, r.dpo_ap_avg, r.dpo_days,
+               round((r.dso_days + COALESCE(r.dio_days,0) - r.dpo_days)::numeric, 1) AS nwc_days
+        FROM eis.fact_financial_ratio r
+        JOIN eis.dim_period per ON per.id = r.period_id
+        WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
+        """,
+        {"fy": fy, "pnum": pnum},
+    )
+
+
+def get_inventory_summary(period: str) -> list[dict]:
+    fy, pnum = _parse_period(period)
+    return _query(
+        """
+        SELECT per.period_name, per.fiscal_year,
+               r.dio_inv_avg, r.dio_cogs, r.dio_days
+        FROM eis.fact_financial_ratio r
+        JOIN eis.dim_period per ON per.id = r.period_id
+        WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
+          AND r.dio_days IS NOT NULL
+        """,
+        {"fy": fy, "pnum": pnum},
+    )
+
+
+def get_employee_headcount(period: str, dept_group: str = None) -> list[dict]:
+    fy, pnum = _parse_period(period)
+    return _query(
+        """
+        SELECT per.period_name, per.fiscal_year, e.dept_group,
+               e.headcount, e.plan_headcount, e.resigned_cumulative
+        FROM eis.fact_employee e
+        JOIN eis.dim_period per ON per.id = e.period_id
+        WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
+          AND (%(dept_group)s IS NULL OR e.dept_group = %(dept_group)s)
+        """,
+        {"fy": fy, "pnum": pnum, "dept_group": dept_group},
+    )
+
+
 _DISPATCH = {
     "get_sales_performance": get_sales_performance,
     "get_production_performance": get_production_performance,
     "get_budget_vs_actual": get_budget_vs_actual,
     "get_financial_summary": get_financial_summary,
+    "get_cogs_performance": get_cogs_performance,
+    "get_ar_ap_summary": get_ar_ap_summary,
+    "get_inventory_summary": get_inventory_summary,
+    "get_employee_headcount": get_employee_headcount,
 }
 
 

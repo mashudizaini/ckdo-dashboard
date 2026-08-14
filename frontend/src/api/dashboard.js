@@ -51,6 +51,15 @@ export const vpnApi = {
   getSessions:     (id)        => api.get(`/dashboard/it/vpn-monitor/gateways/${id}/sessions`),
 };
 
+export const etlAdminApi = {
+  getStatus:   ()               => api.get("/dashboard/it/etl-admin/status"),
+  trigger:     (jobName, params) => api.post(`/dashboard/it/etl-admin/trigger/${jobName}`, params),
+  stop:        (jobName)        => api.post(`/dashboard/it/etl-admin/stop/${jobName}`),
+  getSchedule: ()               => api.get("/dashboard/it/etl-admin/schedule"),
+  getJobData:  (jobName, year, month) => api.get(`/dashboard/it/etl-admin/job-data/${jobName}`, { params: { year, month: month || undefined } }),
+  getSource:   (jobName)        => api.get(`/dashboard/it/etl-admin/source/${jobName}`),
+};
+
 export const hikcentralApi = {
   getConfig:     ()      => api.get("/dashboard/it/hikcentral/config"),
   saveConfig:    (body)  => api.post("/dashboard/it/hikcentral/config", body),
@@ -179,13 +188,6 @@ export const eisApi = {
   saveBp:    (data)           => api.post(`${EIS}/bp/save`, data),
   deleteBp:  (id)             => api.delete(`${EIS}/bp/${id}`),
   getBpTypes: ()              => api.get(`${EIS}/bp/types`),
-
-  // ETL
-  getEtlStatus:   ()               => api.get(`${EIS}/etl/status`),
-  triggerEtl:     (jobName, params) => api.post(`${EIS}/etl/trigger/${jobName}`, params),
-  stopEtl:        (jobName)        => api.post(`${EIS}/etl/stop/${jobName}`),
-  getEtlSchedule: ()               => api.get(`${EIS}/etl/schedule`),
-  getEtlJobData:  (jobName, year, month) => api.get(`${EIS}/etl/job-data/${jobName}`, { params: { year, month: month || undefined } }),
 
   // Daily Sales
   getDailySalesYears: ()           => api.get(`${EIS}/daily-sales/years`),

@@ -1,10 +1,29 @@
+"""
+ETL Admin — IT dashboard control tab for the EIS data warehouse's Oracle EBS
+extraction jobs. Moved here from the EIS dashboard (was under "EIS > ETL
+Admin") since running/monitoring ETL jobs is an IT/ops concern, same
+reasoning as EBS Backup Recovery and VPN/HikCentral living here rather than
+under the business-facing dashboards.
+
+  GET  /status              — recent job run history (eis.etl_job_log)
+  POST /trigger/{job_name}   — manually run a job for a given year/month
+  POST /stop/{job_name}      — revoke a running job
+  GET  /job-data/{job_name}  — preview of imported rows (destination, eis.fact_*)
+  GET  /schedule             — job cadence + Oracle source / Postgres destination tables
+  GET  /source/{job_name}    — the job's actual Python/SQL extraction code
+                                (read live via inspect.getsource — always exactly
+                                what's really running, never a stale hand-copied
+                                summary)
+
+Role-gated at the router level in main.py (require_role(Roles.IT)).
+"""
+import inspect
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from typing import Optional
 from pydantic import BaseModel
 from app.eis_database import get_eis_db as get_db
-from app.dependencies import require_role, Roles
 
 router = APIRouter()
 
@@ -18,11 +37,7 @@ class TriggerParams(BaseModel):
 
 
 @router.get("/status")
-async def etl_status(
-    limit: int = Query(10),
-    db: AsyncSession = Depends(get_db),
-    user = Depends(require_role(Roles.IT)),
-):
+async def etl_status(limit: int = Query(10), db: AsyncSession = Depends(get_db)):
     q = text("""
         SELECT id, job_name, status, started_at, finished_at,
                records_processed, error_message, run_params,
@@ -36,11 +51,7 @@ async def etl_status(
 
 
 @router.post("/trigger/{job_name}")
-async def trigger_etl(
-    job_name: str,
-    params: TriggerParams,
-    user = Depends(require_role(Roles.IT)),
-):
+async def trigger_etl(job_name: str, params: TriggerParams):
     from app.tasks.celery_app import celery_app
     valid_jobs = [
         "etl_sales", "etl_cogs", "etl_production", "etl_financial",
@@ -58,11 +69,7 @@ async def trigger_etl(
 
 
 @router.post("/stop/{job_name}")
-async def stop_etl(
-    job_name: str,
-    db: AsyncSession = Depends(get_db),
-    user = Depends(require_role(Roles.IT)),
-):
+async def stop_etl(job_name: str, db: AsyncSession = Depends(get_db)):
     """Revoke the running Celery task and mark the log entry as stopped."""
     import asyncio
     from app.tasks.celery_app import celery_app
@@ -102,7 +109,6 @@ async def get_job_data(
     year: int = Query(...),
     month: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db),
-    user = Depends(require_role(Roles.IT)),
 ):
     """Return last imported rows from the fact table for the given job."""
     period_filter = "AND per.period_num = :month" if month else ""
@@ -221,17 +227,55 @@ async def get_job_data(
     return {"data": rows, "columns": list(rows[0].keys()) if rows else []}
 
 
+# Oracle EBS source tables + Postgres (eis schema) destination table, one
+# entry per job — curated by hand against eis_etl_tasks.py rather than
+# regex-scraped from the SQL (date-arithmetic expressions like
+# `EXTRACT(... FROM x.due_date)` look like false-positive "FROM table"
+# matches to a naive scanner). The /source endpoint below is the
+# always-accurate complement — read straight from the running code.
+_JOB_META = {
+    "etl_sales":      {"frequency": "Daily",  "schedule": "02:00 AM WIB", "source": "Oracle OE (Sales Order)",
+                        "oracle_tables": ["oe_order_headers_all", "oe_order_lines_all", "oe_transaction_types_tl"],
+                        "destination_table": "eis.fact_sales"},
+    "etl_cogs":       {"frequency": "Daily",  "schedule": "02:15 AM WIB", "source": "Oracle OE (Product & COGS)",
+                        "oracle_tables": ["oe_order_headers_all", "oe_order_lines_all", "oe_transaction_types_tl"],
+                        "destination_table": "eis.fact_cogs, eis.dim_product"},
+    "etl_ar_ap":      {"frequency": "Daily",  "schedule": "02:30 AM WIB", "source": "Oracle AR/AP",
+                        "oracle_tables": ["ar_payment_schedules_all", "ap_invoices_all", "ap_payment_schedules_all"],
+                        "destination_table": "eis.fact_financial_ratio"},
+    "etl_inventory":  {"frequency": "Daily",  "schedule": "03:00 AM WIB", "source": "Oracle INV",
+                        "oracle_tables": ["mtl_onhand_quantities_detail", "cst_item_costs"],
+                        "destination_table": "eis.fact_financial_ratio"},
+    "etl_production": {"frequency": "Daily",  "schedule": "03:15 AM WIB", "source": "Oracle WIP / GME",
+                        "oracle_tables": ["gme_batch_header", "gme_material_details", "wip_discrete_jobs"],
+                        "destination_table": "eis.fact_production"},
+    "etl_employee":   {"frequency": "Weekly", "schedule": "Mon 02:00 AM", "source": "Oracle HR",
+                        "oracle_tables": ["per_all_people_f", "per_all_assignments_f", "hr_all_organization_units"],
+                        "destination_table": "eis.fact_employee"},
+    "etl_financial":  {"frequency": "Daily",  "schedule": "04:00 AM WIB", "source": "Oracle GL",
+                        "oracle_tables": ["gl_balances", "gl_code_combinations"],
+                        "destination_table": "eis.fact_financial"},
+    "etl_budget":     {"frequency": "Daily",  "schedule": "04:30 AM WIB", "source": "Oracle GL (OPEX)",
+                        "oracle_tables": ["gl_balances", "gl_code_combinations"],
+                        "destination_table": "eis.fact_budget"},
+}
+
+
 @router.get("/schedule")
-async def etl_schedule(
-    user = Depends(require_role(Roles.IT)),
-):
-    return {"data": [
-        {"job": "etl_sales",      "frequency": "Daily",  "schedule": "02:00 AM WIB", "source": "Oracle OE (Sales Order)"},
-        {"job": "etl_cogs",       "frequency": "Daily",  "schedule": "02:15 AM WIB", "source": "Oracle OE (Product & COGS)"},
-        {"job": "etl_ar_ap",      "frequency": "Daily",  "schedule": "02:30 AM WIB", "source": "Oracle AR/AP"},
-        {"job": "etl_inventory",  "frequency": "Daily",  "schedule": "03:00 AM WIB", "source": "Oracle INV"},
-        {"job": "etl_production", "frequency": "Daily",  "schedule": "03:15 AM WIB", "source": "Oracle WIP"},
-        {"job": "etl_employee",   "frequency": "Weekly", "schedule": "Mon 02:00 AM", "source": "Oracle HR"},
-        {"job": "etl_financial",  "frequency": "Daily",  "schedule": "04:00 AM WIB", "source": "Oracle GL"},
-        {"job": "etl_budget",     "frequency": "Daily",  "schedule": "04:30 AM WIB", "source": "Oracle GL (OPEX)"},
-    ]}
+async def etl_schedule():
+    return {"data": [{"job": job, **meta} for job, meta in _JOB_META.items()]}
+
+
+@router.get("/source/{job_name}")
+async def get_etl_source(job_name: str):
+    """The job's real Oracle extraction code, read live from eis_etl_tasks.py
+    via inspect.getsource() — this is the single source of truth for "what
+    query/table is actually used", guaranteed to never drift out of sync
+    with what's really running (unlike a hand-maintained description)."""
+    if job_name not in _JOB_META:
+        raise HTTPException(400, f"Unknown job: {job_name}")
+    from app.tasks import eis_etl_tasks
+    fn = getattr(eis_etl_tasks, job_name, None)
+    if fn is None:
+        raise HTTPException(404, f"No source found for job: {job_name}")
+    return {"job": job_name, "source": inspect.getsource(fn)}

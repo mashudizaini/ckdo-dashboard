@@ -7,7 +7,7 @@ import {
   Cpu, TrendingUp, List, Lightbulb, Terminal,
   Table2, Layers, Hash, Code2, Key, Link2, Trash2, Search,
   ChevronLeft, ChevronRight, Play, History,
-  ShieldCheck, ScanFace,
+  ShieldCheck, ScanFace, Workflow,
 } from "lucide-react";
 import {
   AreaChart, Area,
@@ -18,6 +18,7 @@ import { itApi } from "@/api/dashboard";
 import EbsBackupRecovery from "@/pages/dashboard/it/EbsBackupRecovery";
 import VpnAccessMonitoring from "@/pages/dashboard/it/VpnAccessMonitoring";
 import HikCentralIntegration from "@/pages/dashboard/it/HikCentralIntegration";
+import EtlAdmin from "@/pages/dashboard/it/EtlAdmin";
 
 /* ─── Tab definitions ─────────────────────────────── */
 
@@ -29,6 +30,7 @@ const TABS = [
   { id: "ebs-backup-recovery", icon: RefreshCw,   color: "text-red-400",    bg: "bg-red-500/10",    activeBorder: "border-red-500/40",    label: "Oracle EBS Backup Recovery" },
   { id: "vpn-monitoring",    icon: ShieldCheck,   color: "text-teal-400",  bg: "bg-teal-500/10",   activeBorder: "border-teal-500/40",   label: "VPN Access Monitoring" },
   { id: "hikcentral",        icon: ScanFace,      color: "text-orange-400", bg: "bg-orange-500/10", activeBorder: "border-orange-500/40", label: "HikCentral Integration" },
+  { id: "etl-admin",         icon: Workflow,      color: "text-cyan-400",  bg: "bg-cyan-500/10",   activeBorder: "border-cyan-500/40",   label: "ETL Admin" },
 ];
 
 /* ─── Main Page ───────────────────────────────────── */
@@ -57,6 +59,7 @@ export default function ITDashboard() {
       {activeId === "ebs-backup-recovery" && <EbsBackupRecovery />}
       {activeId === "vpn-monitoring"      && <VpnAccessMonitoring />}
       {activeId === "hikcentral"          && <HikCentralIntegration />}
+      {activeId === "etl-admin"           && <EtlAdmin />}
     </div>
   );
 }
