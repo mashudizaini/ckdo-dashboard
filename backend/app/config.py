@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     # a separate VL model (validated: 100% accurate field extraction on a
     # test invoice in ~6s).
     ollama_vision_model: str = "qwen2.5vl:7b"
+    # Dedicated on-prem model for Meeting Notes' MOM generation — kept
+    # separate from ollama_chat_model (shared by the AI Chatbot/CV
+    # Screening/JD Generator) so tuning this one can't silently change
+    # those other features. qwen3:14b chosen over qwen2.5:14b-instruct
+    # after an empirical A/B (comparable quality/reliability once
+    # schema-constrained, newer model generation) — same ~9-10GB VRAM
+    # footprint, confirmed to fit alongside the always-resident Whisper
+    # model on the ai-engine GPU's 16GB budget.
+    ollama_mom_model: str = "qwen3:14b"
 
     # Whisper transcription — GPU service on the same "ai-engine" VM
     # (172.21.2.27:9500, faster-whisper large-v3, systemd unit whisper-server.service).

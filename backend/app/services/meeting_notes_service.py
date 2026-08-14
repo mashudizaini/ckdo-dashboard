@@ -10,8 +10,8 @@ meeting itself. See app/config.py's whisper_api_url comment. Transcription
 itself has no Claude alternative — the Anthropic API has no audio input
 capability — so it always runs on-premise regardless of provider choice.
 
-MOM generation supports 4 providers: "onprem" (default, local Ollama
-qwen2.5 — free), "anthropic" (Claude), "gemini" (reuses gemini_service.py),
+MOM generation supports 4 providers: "onprem" (default, local Ollama —
+see config.py's ollama_mom_model — free), "anthropic" (Claude), "gemini" (reuses gemini_service.py),
 or "deepseek" (raw REST, OpenAI-compatible endpoint — see
 app/config.py's deepseek_api_key comment). All four return the same
 {"departments": [...]} JSON shape from the same MOM_PROMPT_TEMPLATE, so
@@ -243,7 +243,7 @@ class MeetingNotesService:
                 resp = await client.post(
                     f"{settings.ollama_api_url.rstrip('/')}/api/chat",
                     json={
-                        "model": settings.ollama_chat_model,
+                        "model": settings.ollama_mom_model,
                         "messages": [{"role": "user", "content": prompt}],
                         "stream": False,
                         # Ollama's default temperature (~0.8) is tuned for open-ended
@@ -254,6 +254,11 @@ class MeetingNotesService:
                         # on-prem model closer to the transcript's actual content.
                         "options": {"temperature": 0.15, "top_p": 0.9},
                         "format": MOM_JSON_SCHEMA,
+                        # Harmless no-op for non-thinking models (confirmed empirically);
+                        # required for qwen3-class hybrid-thinking models so the chain-
+                        # of-thought preamble doesn't leak into `message.content` ahead
+                        # of the JSON.
+                        "think": False,
                     },
                 )
                 resp.raise_for_status()
