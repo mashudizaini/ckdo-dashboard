@@ -92,7 +92,6 @@ const DEFAULT_PARTICIPANTS = [
 ];
 
 export default function MeetingNotes() {
-  const [tab, setTab] = useState("new");
   const { token } = useAuthStore();
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -565,7 +564,6 @@ export default function MeetingNotes() {
       if (data.mom_meta?.venue) setVenue(data.mom_meta.venue);
       if (data.mom_meta?.agenda) setAgenda(data.mom_meta.agenda);
       setMom(data.mom_json || null);
-      setTab("new");
       setStep("transcript");
     } catch (e) {
       setTranscribeError(e.message || String(e));
@@ -619,27 +617,7 @@ export default function MeetingNotes() {
         <p className="text-gray-500 text-sm mt-1">Record or upload → GPU transcription → AI-generated, editable Minutes of Meeting</p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 rounded-lg bg-gray-900 border border-gray-800 p-1 w-fit">
-        {[
-          { id: "new",     label: "New Recording" },
-          { id: "history", label: "History" },
-        ].map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
-              tab === t.id ? "bg-blue-600 text-white" : "text-gray-400 hover:text-gray-200"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab: New Recording */}
-      {tab === "new" && (
-        <div className="flex items-start gap-5">
+      <div className="flex items-start gap-5">
           {/* Side tab rail — wizard steps instead of one long scrolling page,
               so each stage gets its own shorter pane (like Otter/Fireflies). */}
           <div className="w-60 shrink-0 rounded-xl border border-gray-800 bg-gray-900 p-2 sticky top-6 space-y-1">
@@ -648,6 +626,7 @@ export default function MeetingNotes() {
               { id: "setup", label: "Record & Upload", hint: "Live recording or file upload" },
               { id: "transcript", label: "Transcript", hint: "Review the transcribed text" },
               { id: "mom", label: "Minutes of Meeting", hint: "Review, edit & download" },
+              { id: "history", label: "History", hint: "All past recordings & MOM" },
             ].map((s, idx) => {
               const isActive = step === s.id;
               const isDone = (s.id === "setup" && !!transcript) || (s.id === "transcript" && !!mom);
@@ -759,8 +738,9 @@ export default function MeetingNotes() {
               </div>
             </div>
           )}
-          {/* Record / Upload */}
-          <div className="grid grid-cols-2 gap-4">
+          {/* Record & Upload (left) / Transcribe & Recent Recordings (right) */}
+          <div className="grid grid-cols-2 gap-4 items-start">
+          <div className="space-y-4">
             <div className="rounded-xl border border-gray-800 bg-gray-900 p-5 text-center">
               <div className={`flex h-16 w-16 items-center justify-center rounded-full mx-auto mb-3 border ${
                 recording ? "bg-red-500/20 border-red-500/50 animate-pulse" : "bg-red-500/10 border-red-500/30"
@@ -893,15 +873,13 @@ export default function MeetingNotes() {
             </div>
           </div>
 
+          <div className="space-y-4">
           {/* Transcribe */}
           <div className="rounded-xl border border-purple-500/30 bg-purple-500/5 p-5">
             <div className="flex items-center gap-3 mb-3">
               <Sparkles size={18} className="text-purple-400" />
               <h3 className="text-sm font-semibold text-gray-200">Transcribe Audio</h3>
             </div>
-            <p className="text-xs text-gray-500 mb-4">
-              Runs on the on-premise GPU (Claude has no audio support). You'll move to the Transcript step automatically once it's done.
-            </p>
             <div className="flex items-center gap-3 mb-4">
               <label className="text-xs text-gray-500 shrink-0">Meeting language</label>
               <select value={transcribeLanguage} onChange={(e) => setTranscribeLanguage(e.target.value)} disabled={transcribing}
@@ -950,11 +928,11 @@ export default function MeetingNotes() {
           {/* Recent Recordings — compact, 5 rows visible then scroll, so
               users can jump back into a recent recording without leaving
               this view. Full detail (filters, delete, MOM/audio download)
-              still lives in the History tab. */}
+              still lives in the History step. */}
           <div className="rounded-xl border border-gray-800 bg-gray-900">
             <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-200">Recent Recordings</h3>
-              <button onClick={() => setTab("history")} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">View all</button>
+              <button onClick={() => setStep("history")} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">View all</button>
             </div>
             {historyLoading ? (
               <div className="flex justify-center py-6"><Loader2 size={16} className="animate-spin text-gray-600" /></div>
@@ -996,6 +974,8 @@ export default function MeetingNotes() {
                 ))}
               </div>
             )}
+          </div>
+          </div>
           </div>
             </>
           )}
@@ -1212,12 +1192,8 @@ export default function MeetingNotes() {
           )}
             </>
           )}
-          </div>
-        </div>
-      )}
 
-      {/* Tab: History */}
-      {tab === "history" && (
+          {step === "history" && (
         <div className="rounded-xl border border-gray-800 bg-gray-900">
           <div className="px-5 py-4 border-b border-gray-800">
             <h3 className="text-sm font-semibold text-gray-200">Meeting Notes History</h3>
@@ -1295,7 +1271,9 @@ export default function MeetingNotes() {
             </div>
           )}
         </div>
-      )}
+          )}
+          </div>
+        </div>
     </div>
   );
 }

@@ -40,6 +40,19 @@ import structlog
 logger = structlog.get_logger()
 settings = get_settings()
 
+
+class MomProviderCreditError(Exception):
+    """Raised when a cloud MOM provider (Anthropic/Gemini/DeepSeek) rejects
+    the request because the account is out of credit/quota — a distinct,
+    actionable case the router surfaces as its own clear message instead of
+    a generic 500 with the provider's raw (often cryptic) error body."""
+
+
+def _is_credit_error(status_code: int, body: str) -> bool:
+    if status_code not in (400, 402, 403, 429):
+        return False
+    return bool(re.search(r"insufficient|credit balance|quota|resource_exhausted|payment required", body, re.I))
+
 OLLAMA_MOM_TIMEOUT_SECONDS = 120.0
 CLOUD_MOM_TIMEOUT_SECONDS = 180.0
 # Cloud providers can run genuinely long, detailed MOMs — this is a JSON
@@ -139,18 +152,34 @@ class MeetingNotesService:
         prompt = MOM_PROMPT_TEMPLATE.format(meta=meta, transcript=transcript)
 
         if provider == "anthropic":
-            client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-            response = await client.messages.create(
-                model="claude-opus-5",
-                max_tokens=MOM_MAX_OUTPUT_TOKENS,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            try:
+                client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+                response = await client.messages.create(
+                    model="claude-opus-5",
+                    max_tokens=MOM_MAX_OUTPUT_TOKENS,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+            except anthropic.APIStatusError as e:
+                if _is_credit_error(e.status_code, str(e)):
+                    raise MomProviderCreditError(
+                        "Saldo/kredit API Claude (Anthropic) tidak cukup. Silakan isi ulang di "
+                        "console.anthropic.com > Plans & Billing, atau pilih provider lain."
+                    ) from e
+                raise
             raw = response.content[0].text.strip()
         elif provider == "gemini":
-            raw = (await gemini_service.generate(
-                system_prompt="You produce structured meeting minutes. Respond with valid JSON only, no commentary.",
-                contents=[{"role": "user", "parts": [{"text": prompt}]}],
-            )).strip()
+            try:
+                raw = (await gemini_service.generate(
+                    system_prompt="You produce structured meeting minutes. Respond with valid JSON only, no commentary.",
+                    contents=[{"role": "user", "parts": [{"text": prompt}]}],
+                )).strip()
+            except httpx.HTTPStatusError as e:
+                if _is_credit_error(e.response.status_code, e.response.text):
+                    raise MomProviderCreditError(
+                        "Kuota/saldo API Gemini tidak cukup. Silakan cek kuota di Google AI Studio, "
+                        "atau pilih provider lain."
+                    ) from e
+                raise
         elif provider == "deepseek":
             async with httpx.AsyncClient(timeout=CLOUD_MOM_TIMEOUT_SECONDS) as client:
                 resp = await client.post(
@@ -163,6 +192,11 @@ class MeetingNotesService:
                         "stream": False,
                     },
                 )
+                if _is_credit_error(resp.status_code, resp.text):
+                    raise MomProviderCreditError(
+                        "Saldo API DeepSeek tidak cukup. Silakan top up di platform.deepseek.com, "
+                        "atau pilih provider lain."
+                    )
                 resp.raise_for_status()
                 raw = resp.json()["choices"][0]["message"]["content"].strip()
         else:

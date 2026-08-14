@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user, CurrentUser
 from app.models.meeting_recording import MeetingRecording
-from app.services.meeting_notes_service import MeetingNotesService
+from app.services.meeting_notes_service import MeetingNotesService, MomProviderCreditError
 import structlog
 
 logger = structlog.get_logger()
@@ -223,6 +223,9 @@ async def generate_mom(
         mom_json = await MeetingNotesService().generate_mom(
             rec.transcript, rec.meeting_title or "", rec.participants or "", body.provider
         )
+    except MomProviderCreditError as e:
+        logger.warning("mom_generation_credit_error", error=str(e), provider=body.provider)
+        raise HTTPException(402, str(e))
     except Exception as e:
         logger.error("mom_generation_error", error=str(e), provider=body.provider)
         raise HTTPException(500, f"MOM generation failed: {e}")
