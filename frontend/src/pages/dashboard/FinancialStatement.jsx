@@ -78,10 +78,9 @@ const FS_SUBTABS = [
 ];
 
 // Balance Sheet Detail is no longer a standalone tab — it's reached by
-// clicking an account group (ASSETS/LIABILITIES/EQUITY) inside Balance
-// Sheet. Kept as a constant so FsRow's click affordance and the group
-// dropdown share one source of truth for which labels are drill-able.
-const DRILLABLE_GROUPS = ["ASSETS", "LIABILITIES", "EQUITY"];
+// clicking an individual account line (e.g. CASH & CASH EQUIVALENTS)
+// inside Balance Sheet, which drills into that line's natural accounts
+// (still tagged with the group it belongs to, for the Oracle query).
 
 const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
 const MONTH_LABEL = { JAN:"Jan",FEB:"Feb",MAR:"Mar",APR:"Apr",MAY:"May",JUN:"Jun",JUL:"Jul",AUG:"Aug",SEP:"Sep",OCT:"Oct",NOV:"Nov",DEC:"Dec" };
@@ -177,7 +176,7 @@ function periodNameForMonthYear(periods, month, year) {
 // period -> absolute delta + %) | "cagr" (>1 prior periods spanning years ->
 // compound annual growth rate). Only BalanceSheetPanel passes this — every
 // other caller keeps its original 1-column-per-period layout.
-function FsTable({ columns, rows, checkDiff, growthMode = "none", onGroupClick }) {
+function FsTable({ columns, rows, checkDiff, growthMode = "none", onLineClick }) {
   const growthHeaders = growthMode === "diff" ? ["Growth", "Growth %"] : growthMode === "cagr" ? ["CAGR %"] : [];
   const allColumns = [...columns, ...growthHeaders];
   return (
@@ -190,7 +189,7 @@ function FsTable({ columns, rows, checkDiff, growthMode = "none", onGroupClick }
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, ri) => <FsRow key={ri} row={row} columnCount={allColumns.length} growthMode={growthMode} onGroupClick={onGroupClick} />)}
+          {rows.map((row, ri) => <FsRow key={ri} row={row} columnCount={allColumns.length} growthMode={growthMode} onLineClick={onLineClick} />)}
         </tbody>
       </table>
       {checkDiff && (
@@ -213,7 +212,7 @@ function growthColor(v) {
   return v > 0 ? "#16a34a" : v < 0 ? "#dc2626" : "#334155";
 }
 
-function FsRow({ row, columnCount = 0, growthMode = "none", onGroupClick }) {
+function FsRow({ row, columnCount = 0, growthMode = "none", onLineClick }) {
   const level = Math.min(row.level || 0, 2);
   // Header (section title) rows previously rendered zero <td> for the value
   // columns (row.values was undefined, so `(row.values||[]).map(...)` gave
@@ -222,26 +221,29 @@ function FsRow({ row, columnCount = 0, growthMode = "none", onGroupClick }) {
   // box under the period columns. Rendering the full columnCount of blank
   // cells here makes the row's background fill apply uniformly across it.
   if (row.type === "header") {
-    // Only the top-level ASSETS/LIABILITIES/EQUITY headers drill into
-    // Balance Sheet Detail — sub-headers like "CURRENT ASSETS" stay inert.
-    const clickable = !!onGroupClick && level === 0 && DRILLABLE_GROUPS.includes(row.label);
     return (
-      <tr
-        data-type="header"
-        onClick={clickable ? () => onGroupClick(row.label) : undefined}
-        style={clickable ? { cursor: "pointer" } : undefined}
-        title={clickable ? `View ${row.label.toLowerCase()} account detail` : undefined}
-      >
-        <td data-lvl={level}>{row.label}{clickable ? " →" : ""}</td>
+      <tr data-type="header">
+        <td data-lvl={level}>{row.label}</td>
         {Array.from({ length: columnCount }, (_, ci) => <td key={ci} />)}
       </tr>
     );
   }
   const values = row.values || [];
   const g = row.growth;
+  // Only individual account lines (CASH & CASH EQUIVALENTS, ACCOUNT
+  // RECEIVABLES, ...) drill into Balance Sheet Detail — TOTAL rows and
+  // section headers stay inert. `row.group` (ASSETS/LIABILITIES/EQUITY) is
+  // only set by BalanceSheetPanel's summary rows, so this is a no-op for
+  // every other FsTable caller (Profit or Loss, etc.).
+  const clickable = row.type === "line" && !!row.group && !!onLineClick;
   return (
-    <tr data-type={row.type}>
-      <td data-lvl={level}>{row.label}</td>
+    <tr
+      data-type={row.type}
+      onClick={clickable ? () => onLineClick(row.group, row.label) : undefined}
+      style={clickable ? { cursor: "pointer" } : undefined}
+      title={clickable ? `View ${row.label} account detail` : undefined}
+    >
+      <td data-lvl={level}>{row.label}{clickable ? " →" : ""}</td>
       {values.map((v, ci) => (
         <td key={ci} style={{ textAlign: "right", fontFamily: "monospace" }}>{fmtNum(v)}</td>
       ))}
@@ -523,9 +525,15 @@ function BalanceSheetPanel({ periods }) {
   // doubles as which group Balance Sheet Detail drills into.
   const [accountGroup, setAccountGroup] = useState("");
 
+  // Which summary line item (e.g. "CASH & CASH EQUIVALENTS") Balance Sheet
+  // Detail is narrowed to — set together with accountGroup when a line row
+  // is clicked. "" = show every account in accountGroup (or every account,
+  // if accountGroup is also "").
+  const [lineFilter, setLineFilter] = useState("");
+
   // "summary" = the normal Balance Sheet; "detail" = the natural-account
-  // drill-down, entered by clicking an ASSETS/LIABILITIES/EQUITY header
-  // (Balance Sheet Detail is no longer a separate tab).
+  // drill-down, entered by clicking an account line like CASH & CASH
+  // EQUIVALENTS (Balance Sheet Detail is no longer a separate tab).
   const [viewMode, setViewMode] = useState("summary");
 
   // Default (and re-default on source switch) — oracle uses the latest GL
@@ -661,9 +669,17 @@ function BalanceSheetPanel({ periods }) {
 
   const rows = useMemo(() => {
     if (!data) return [];
+    // While viewMode has already flipped to "detail" but the matching
+    // detail response hasn't landed yet, `data` is still the previous
+    // summary-shaped payload (no `.accounts`) — without this guard,
+    // `.forEach` on undefined threw and crashed the render, which is what
+    // showed up as the panel going blank right when a line was clicked.
     if (viewMode === "detail") {
+      if (!Array.isArray(data.accounts)) return [];
       const byType = { A: [], L: [], O: [] };
-      data.accounts.forEach(a => byType[a.account_type]?.push(a));
+      data.accounts
+        .filter(a => !lineFilter || a.line_item === lineFilter)
+        .forEach(a => byType[a.account_type]?.push(a));
       const toLines = (accs) => accs.map(a => withGrowth({ type: "line", level: 1, label: `${a.account_code} — ${a.account_desc || a.line_item}`, values: a.values }));
       return [
         ...(showAssets ? [{ type: "header", level: 0, label: "ASSETS" }, ...toLines(byType.A)] : []),
@@ -671,41 +687,44 @@ function BalanceSheetPanel({ periods }) {
         ...(showEquity ? [{ type: "header", level: 0, label: "EQUITY" }, ...toLines(byType.O)] : []),
       ];
     }
-    const lines = (arr) => arr.map(r => withGrowth({ type: "line", level: 2, label: r.label, values: r.values }));
+    // Each account line is tagged with its group (ASSETS/LIABILITIES/
+    // EQUITY) so clicking it can both narrow the Detail query to that
+    // group and filter to that specific line item.
+    const lines = (arr, group) => arr.map(r => withGrowth({ type: "line", level: 2, label: r.label, values: r.values, group }));
     return [
       ...(showAssets ? [
         { type: "header", level: 0, label: "ASSETS" },
         { type: "header", level: 1, label: "CURRENT ASSETS" },
-        ...lines(data.current_assets),
+        ...lines(data.current_assets, "ASSETS"),
         withGrowth({ type: "total", level: 1, label: "TOTAL CURRENT ASSETS", values: data.total_current_assets }),
         { type: "header", level: 1, label: "NON CURRENT ASSET" },
-        ...lines(data.noncurrent_assets),
+        ...lines(data.noncurrent_assets, "ASSETS"),
         withGrowth({ type: "total", level: 1, label: "TOTAL NON CURRENT ASSETS", values: data.total_noncurrent_assets }),
         withGrowth({ type: "total", level: 0, label: "TOTAL ASSETS", values: data.total_assets }),
       ] : []),
       ...(showLiabilities ? [
         { type: "header", level: 0, label: "LIABILITIES" },
         { type: "header", level: 1, label: "CURRENT LIABILITIES" },
-        ...lines(data.current_liabilities),
+        ...lines(data.current_liabilities, "LIABILITIES"),
         withGrowth({ type: "total", level: 1, label: "TOTAL CURRENT LIABILITIES", values: data.total_current_liabilities }),
         { type: "header", level: 1, label: "NONCURRENT LIABILITIES" },
-        ...lines(data.noncurrent_liabilities),
+        ...lines(data.noncurrent_liabilities, "LIABILITIES"),
         withGrowth({ type: "total", level: 1, label: "TOTAL NONCURRENT LIABILITIES", values: data.total_noncurrent_liabilities }),
         withGrowth({ type: "total", level: 0, label: "TOTAL  LIABILITIES", values: data.total_liabilities }),
       ] : []),
       ...(showEquity ? [
         { type: "header", level: 0, label: "EQUITY" },
-        ...data.equity.map(r => withGrowth({ type: "line", level: 1, label: r.label, values: r.values })),
+        ...lines(data.equity, "EQUITY").map(r => ({ ...r, level: 1 })),
         withGrowth({ type: "total", level: 0, label: "TOTAL  EQUITY", values: data.total_equity }),
       ] : []),
       ...(showAssets && showLiabilities && showEquity ? [
         withGrowth({ type: "total", level: 0, label: "TOTAL  LIABILITIES AND EQUITY", values: data.total_liabilities_and_equity }),
       ] : []),
     ];
-  }, [data, viewMode, withGrowth, showAssets, showLiabilities, showEquity]);
+  }, [data, viewMode, lineFilter, withGrowth, showAssets, showLiabilities, showEquity]);
 
-  const goToDetail = (groupLabel) => { setAccountGroup(groupLabel); setViewMode("detail"); };
-  const backToSummary = () => { setViewMode("summary"); setAccountGroup(""); };
+  const goToDetail = (group, lineLabel) => { setAccountGroup(group); setLineFilter(lineLabel); setViewMode("detail"); };
+  const backToSummary = () => { setViewMode("summary"); setAccountGroup(""); setLineFilter(""); };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -716,9 +735,19 @@ function BalanceSheetPanel({ periods }) {
         />
       )}
       {viewMode === "detail" && (
-        <button onClick={backToSummary} style={{ ...BTN, alignSelf: "flex-start" }}>
-          ← Back to Balance Sheet
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <button onClick={backToSummary} style={{ ...BTN, alignSelf: "flex-start" }}>
+            ← Back to Balance Sheet
+          </button>
+          {lineFilter && (
+            <span style={{ fontSize: 11, color: "#64748b" }}>
+              Filtered to <strong>{lineFilter}</strong> —{" "}
+              <button onClick={() => setLineFilter("")} style={{ border: "none", background: "none", color: "#2563eb", textDecoration: "underline", cursor: "pointer", fontSize: 11, padding: 0 }}>
+                show all {accountGroup.toLowerCase()}
+              </button>
+            </span>
+          )}
+        </div>
       )}
       <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
         <div>
@@ -750,7 +779,7 @@ function BalanceSheetPanel({ periods }) {
         {(source === "oracle" || viewMode === "detail") && (
           <div>
             <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Account Group</label>
-            <select style={SELECT} value={accountGroup} onChange={e => setAccountGroup(e.target.value)}
+            <select style={SELECT} value={accountGroup} onChange={e => { setAccountGroup(e.target.value); setLineFilter(""); }}
               title="Narrow the query to one section — faster, especially for a wide Period From/To range">
               <option value="">All</option>
               <option value="ASSETS">Assets</option>
@@ -808,7 +837,7 @@ function BalanceSheetPanel({ periods }) {
           columns={columnLabels} rows={rows}
           checkDiff={viewMode === "summary" && !accountGroup ? data.check_diff : null}
           growthMode={growthMode}
-          onGroupClick={viewMode === "summary" ? goToDetail : undefined}
+          onLineClick={viewMode === "summary" ? goToDetail : undefined}
         />
       ) : null}
     </div>
