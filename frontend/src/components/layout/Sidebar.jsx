@@ -48,7 +48,8 @@ const NAV_ITEMS = [
     { label: "Open PR", path: "/dashboard/purchasing/open-pr" },
     { label: "Purchase History", path: "/dashboard/purchasing/purchase-history" },
     { label: "PO Price Analysis", path: "/dashboard/purchasing/price-analysis" },
-    { label: "Monthly Spend", path: "/dashboard/purchasing/monthly-spend" },
+    // Temporarily hidden — not in active use yet, see Purchasing.jsx's TABS comment.
+    // { label: "Monthly Spend", path: "/dashboard/purchasing/monthly-spend" },
     { label: "Active Suppliers", path: "/dashboard/purchasing/active-suppliers" },
     { label: "Manufacturer Master", path: "/dashboard/purchasing/manufacturer-master" },
   ] },
