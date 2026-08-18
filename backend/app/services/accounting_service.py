@@ -415,6 +415,28 @@ class AccountingService:
             where_extra += " AND rct.trx_date <= TO_DATE(:date_to, 'YYYY-MM-DD')"
             params["date_to"] = date_to
 
+        # Corporate-rate IDR conversion, anchored to the transaction's own
+        # date (rct.trx_date) — same "as-of-transaction-date, most recent
+        # rate on/before that date" convention as purchasing_service.py's
+        # _RATE_CASE, so the app has one consistent rate-lookup philosophy
+        # rather than a different one per module.
+        rate_case = """
+            CASE WHEN rct.invoice_currency_code = 'IDR' THEN 1
+            ELSE COALESCE((
+                SELECT gdr.conversion_rate FROM apps.gl_daily_rates gdr
+                WHERE  gdr.from_currency   = rct.invoice_currency_code
+                  AND  gdr.to_currency     = 'IDR'
+                  AND  gdr.conversion_type = 'Corporate'
+                  AND  gdr.conversion_date = (
+                      SELECT MAX(gdr2.conversion_date) FROM apps.gl_daily_rates gdr2
+                      WHERE  gdr2.from_currency   = rct.invoice_currency_code
+                        AND  gdr2.to_currency     = 'IDR'
+                        AND  gdr2.conversion_type = 'Corporate'
+                        AND  gdr2.conversion_date <= TRUNC(rct.trx_date)
+                  )
+            ), 1) END
+        """
+
         sql = f"""
             SELECT
                 hp.party_name                                        AS customer_name,
@@ -425,6 +447,9 @@ class AccountingService:
                 ROUND(NVL(aps.amount_due_original,  0), 2)          AS original_amount,
                 ROUND(NVL(aps.amount_due_remaining, 0), 2)          AS remaining_amount,
                 rct.invoice_currency_code                            AS currency,
+                ({rate_case})                                        AS conversion_rate,
+                ROUND(NVL(aps.amount_due_original,  0) * ({rate_case}), 2) AS original_amount_idr,
+                ROUND(NVL(aps.amount_due_remaining, 0) * ({rate_case}), 2) AS remaining_amount_idr,
                 ROUND(TRUNC(SYSDATE) - aps.due_date, 0)             AS days_overdue,
                 rcttt.name                                           AS transaction_type,
                 aps.status,
@@ -443,7 +468,7 @@ class AccountingService:
                 ON  hp.party_id          = hca.party_id
             JOIN apps.hr_operating_units         hou
                 ON  hou.organization_id  = rct.org_id
-            WHERE aps.class IN ('INV', 'DM')
+            WHERE aps.class IN ('INV', 'DM', 'CM')
               {where_extra}
             ORDER BY
                 CASE WHEN aps.status = 'OP' THEN 0 ELSE 1 END,
@@ -459,20 +484,35 @@ class AccountingService:
                     k: (float(v) if hasattr(v, "__float__") and not isinstance(v, (int, float, str, type(None), bool)) else v)
                     for k, v in r.items()
                 })
-            # Summary aggregates
+            # Summary aggregates — now IDR-converted (total_remaining_idr /
+            # total_overdue_idr) since class='CM' (credit memos / sales
+            # returns) are included alongside INV/DM and some of those, plus
+            # a handful of invoices, aren't IDR — summing the native-
+            # currency remaining_amount as-is across mixed currencies (the
+            # old behavior) understated/overstated the total depending on
+            # which currencies happened to be outstanding. total_remaining/
+            # total_overdue (native-currency sum) are kept too, for
+            # backward compatibility with anything reading the old shape.
             open_rows   = [r for r in clean if r.get("status") == "OP"]
             overdue     = [r for r in open_rows if (r.get("days_overdue") or 0) > 0]
-            total_remaining = sum(r.get("remaining_amount", 0) for r in open_rows)
-            total_overdue   = sum(r.get("remaining_amount", 0) for r in overdue)
+            total_remaining     = sum(r.get("remaining_amount", 0) for r in open_rows)
+            total_overdue       = sum(r.get("remaining_amount", 0) for r in overdue)
+            total_remaining_idr = sum(r.get("remaining_amount_idr", 0) for r in open_rows)
+            total_overdue_idr   = sum(r.get("remaining_amount_idr", 0) for r in overdue)
+            returns_rows = [r for r in open_rows if r.get("class") == "CM"]
             return {
                 "success": True,
                 "count":   len(clean),
                 "limit":   limit,
                 "summary": {
-                    "open_invoice_count":  len(open_rows),
-                    "overdue_count":       len(overdue),
-                    "total_remaining":     round(total_remaining, 2),
-                    "total_overdue":       round(total_overdue, 2),
+                    "open_invoice_count":    len(open_rows),
+                    "overdue_count":         len(overdue),
+                    "total_remaining":       round(total_remaining, 2),
+                    "total_overdue":         round(total_overdue, 2),
+                    "total_remaining_idr":   round(total_remaining_idr, 2),
+                    "total_overdue_idr":     round(total_overdue_idr, 2),
+                    "returns_count":         len(returns_rows),
+                    "returns_remaining_idr": round(sum(r.get("remaining_amount_idr", 0) for r in returns_rows), 2),
                 },
                 "data": clean,
             }

@@ -60,7 +60,11 @@ async def get_ar_outstanding(
 ):
     """
     AR Outstanding from Oracle EBS — AR_PAYMENT_SCHEDULES_ALL + RA_CUSTOMER_TRX_ALL.
-    Class filter: INV + DM (invoices and debit memos only).
+    Class filter: INV + DM + CM (invoices, debit memos, and credit memos —
+    credit memos carry negative remaining amounts, netting against the
+    invoice total instead of being silently dropped). Each row also gets a
+    Corporate-rate IDR conversion (conversion_rate/original_amount_idr/
+    remaining_amount_idr), and the summary totals are IDR-converted.
     """
     return await AccountingService().get_ar_outstanding(
         customer_name, invoice_number, date_from, date_to, status, limit
