@@ -181,18 +181,28 @@ function FsTable({ columns, rows, checkDiff, growthMode = "none", onLineClick })
   const growthHeaders = growthMode === "diff" ? ["Growth", "Growth %"] : growthMode === "cagr" ? ["CAGR %"] : [];
   const allColumns = [...columns, ...growthHeaders];
   return (
-    <div style={{ overflowX: "auto", borderRadius: 12, boxShadow: NEU.shadowOutSm }}>
-      <table className="fs-table" style={{ width: "100%", fontSize: 12.5, minWidth: 480 + allColumns.length * 130 }}>
-        <thead>
-          <tr>
-            <th>ACCOUNT</th>
-            {allColumns.map((c, i) => <th key={i} style={{ whiteSpace: "nowrap" }}>{c}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, ri) => <FsRow key={ri} row={row} columnCount={allColumns.length} growthMode={growthMode} onLineClick={onLineClick} />)}
-        </tbody>
-      </table>
+    <div>
+      {/* .fs-table-scroll caps the table's own height and scrolls both
+          axes inside itself (index.css), instead of the old plain
+          overflow-x:auto div — on a tall table (Balance Sheet Detail,
+          Cash Flow) that left the horizontal scrollbar sitting below the
+          last row, reachable only after scrolling the whole page down
+          first. ACCOUNT (first column) and the header row are pinned via
+          position:sticky (also index.css) so they stay in view while
+          scrolling either direction, Excel-frozen-pane style. */}
+      <div className="fs-table-scroll" style={{ borderRadius: 12, boxShadow: NEU.shadowOutSm }}>
+        <table className="fs-table" style={{ width: "100%", fontSize: 12.5, minWidth: 480 + allColumns.length * 130 }}>
+          <thead>
+            <tr>
+              <th>ACCOUNT</th>
+              {allColumns.map((c, i) => <th key={i} style={{ whiteSpace: "nowrap" }}>{c}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, ri) => <FsRow key={ri} row={row} columnCount={allColumns.length} growthMode={growthMode} onLineClick={onLineClick} />)}
+          </tbody>
+        </table>
+      </div>
       {checkDiff && (
         <div style={{ padding: "8px 14px", fontSize: 11, color: Math.abs(checkDiff[checkDiff.length - 1]) > 1 ? "#dc2626" : "#16a34a" }}>
           Assets − (Liabilities + Equity) check: {checkDiff.map(d => fmtNum(d)).join(" / ")}
@@ -1062,7 +1072,7 @@ function ProfitLossPanel({ periods }) {
 function PlMonthlyTable({ rows, dateLast, dateThis }) {
   const columnCount = 4; // MTD/YTD x 2 years, fixed for this report
   return (
-    <div style={{ overflowX: "auto", borderRadius: 12, boxShadow: NEU.shadowOutSm }}>
+    <div className="fs-table-scroll" style={{ borderRadius: 12, boxShadow: NEU.shadowOutSm }}>
       <table className="fs-table pl-monthly-table" style={{ width: "100%", fontSize: 12.5, minWidth: 480 + columnCount * 130 }}>
         <thead>
           <tr>

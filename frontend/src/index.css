@@ -233,6 +233,43 @@ tbody td {
   letter-spacing: normal !important;
   text-align: center !important;
 }
+
+/* Bounded-height, both-axes scroll container — ACCOUNT (first column) and
+   the header row are pinned via position:sticky below, Excel Freeze Panes
+   style. Replaces a plain overflow-x:auto wrapper, whose horizontal
+   scrollbar sat below the table's last row — on a tall table (Balance
+   Sheet Detail, Cash Flow) that meant scrolling the whole page down just
+   to reach it. */
+.fs-table-scroll { max-height: 70vh; overflow: auto; }
+
+/* Sticky header needs its OWN opaque background rather than the
+   "transparent th over a colored tr" trick the plain (non-sticky) header
+   above relies on — position:sticky repositions each <th> independently
+   of its <tr>, which stays put and scrolls away normally, so without an
+   explicit background here the tbody rows show through the "frozen"
+   header as they scroll underneath it. Excludes pl-monthly-table: its
+   3-row grouped header would need a distinct top offset per row to stack
+   correctly, so it keeps the plain (non-frozen) header and only gets the
+   frozen first column below. */
+.fs-table:not(.pl-monthly-table) thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #1F4E78 !important;
+}
+.fs-table:not(.pl-monthly-table) thead th:first-child {
+  z-index: 2; /* corner cell — above both the sticky header row and the sticky column below */
+}
+
+/* Sticky first column (ACCOUNT) — every row type already sets its own
+   opaque per-td background below, so no extra background rule is needed
+   here, just the positioning. */
+.fs-table thead th:first-child,
+.fs-table tbody td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
 /* Profit or Loss Monthly's 3-row grouped header (ACCOUNT / AMOUNT / year
    dates / MTD-YTD) — black background with a white cell grid instead of
    the shared navy header, per the reference layout. Chained with
