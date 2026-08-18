@@ -129,8 +129,18 @@ def _call_ollama_vision(images: list[str]) -> dict:
             "messages": [{"role": "user", "content": page_note + EXTRACT_PROMPT, "images": images}],
             "stream": False,
             "format": "json",
+            # Ollama's default context window (4096 tokens) is too small for a
+            # multi-page invoice package — each page image alone can run into
+            # the thousands of tokens, so a 3-5 page PDF plus the extraction
+            # prompt easily exceeds it and Ollama returns 400. qwen2.5vl:7b
+            # supports up to 128k; 32768 gives comfortable headroom.
+            "options": {"num_ctx": 32768},
         })
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            raise httpx.HTTPStatusError(
+                f"{resp.status_code} {resp.reason_phrase} from Ollama: {resp.text[:500]}",
+                request=resp.request, response=resp,
+            )
         raw = resp.json()["message"]["content"].strip()
 
     raw = re.sub(r"^```(?:json)?\s*", "", raw)
