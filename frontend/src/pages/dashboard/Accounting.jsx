@@ -322,19 +322,21 @@ function APOutstandingPanel() {
 /* ─── AR Outstanding Panel ───────────────────────────────────────────────── */
 
 const AR_HEADERS = [
-  { key: "customer_name",    label: "Customer",        width: 200 },
-  { key: "account_number",   label: "Account #",       width: 100 },
-  { key: "invoice_number",   label: "Invoice No",      width: 120 },
-  { key: "transaction_type", label: "Type",            width: 60  },
-  { key: "invoice_date",     label: "Invoice Date",    width: 100 },
-  { key: "due_date",         label: "Due Date",        width: 100 },
-  { key: "currency",         label: "Cur",             width: 45  },
-  { key: "original_amount",  label: "Original Amt",    width: 120, num: true },
-  { key: "remaining_amount", label: "Remaining Amt",   width: 120, num: true },
-  { key: "days_overdue",     label: "Days Overdue",    width: 90,  num: true },
-  { key: "status",           label: "Status",          width: 60  },
-  { key: "operating_unit",   label: "OU",              width: 120 },
-  { key: "comments",         label: "Comments",        width: 160 },
+  { key: "customer_name",       label: "Customer",        width: 200 },
+  { key: "account_number",      label: "Account #",       width: 100 },
+  { key: "invoice_number",      label: "Invoice No",      width: 120 },
+  { key: "transaction_type",    label: "Type",            width: 70  },
+  { key: "invoice_date",        label: "Invoice Date",    width: 100 },
+  { key: "due_date",            label: "Due Date",        width: 100 },
+  { key: "currency",            label: "Cur",             width: 45  },
+  { key: "original_amount",     label: "Original Amt",    width: 120, num: true },
+  { key: "remaining_amount",    label: "Remaining Amt",   width: 120, num: true },
+  { key: "conversion_rate",     label: "Rate (Corp.)",    width: 90,  num: true },
+  { key: "remaining_amount_idr", label: "Remaining (IDR)", width: 130, num: true },
+  { key: "days_overdue",        label: "Days Overdue",    width: 90,  num: true },
+  { key: "status",              label: "Status",          width: 60  },
+  { key: "operating_unit",      label: "OU",              width: 120 },
+  { key: "comments",            label: "Comments",        width: 160 },
 ];
 
 function exportArCSV(rows) {
@@ -367,7 +369,7 @@ function AROutstandingPanel() {
   const [sort,           setSort]           = useState({ key: null, dir: "asc" });
 
   const AR_PAGE_SIZE = 10;
-  const AR_NUMERIC_KEYS = ["original_amount", "remaining_amount", "days_overdue"];
+  const AR_NUMERIC_KEYS = ["original_amount", "remaining_amount", "conversion_rate", "remaining_amount_idr", "days_overdue"];
 
   const loadData = useCallback(async () => {
     setLoading(true); setError(null);
@@ -497,13 +499,20 @@ function AROutstandingPanel() {
 
       {data && (
         <>
-          {/* Summary cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 14 }}>
+          {/* Summary cards — totals are Corporate-rate IDR conversions
+              (sm.total_remaining_idr/total_overdue_idr), not a raw sum of
+              remaining_amount across mixed currencies (that undercounted
+              open USD invoices at their bare numeric value, e.g. treating
+              $1 as Rp 1). Returns (CM) surfaces the unapplied credit
+              memos now included/netted into the total, instead of being
+              silently excluded. */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 14 }}>
             {[
               { label: "Open Invoices",     val: (sm?.open_invoice_count || 0).toLocaleString(),    color: "#f59e0b" },
               { label: "Overdue Count",      val: (sm?.overdue_count     || 0).toLocaleString(),    color: "#dc2626" },
-              { label: "Total Outstanding",  val: "Rp " + fmtNum(sm?.total_remaining || 0),         color: "#2563eb" },
-              { label: "Total Overdue",      val: "Rp " + fmtNum(sm?.total_overdue   || 0),         color: "#dc2626" },
+              { label: "Total Outstanding (IDR)", val: "Rp " + fmtNum(sm?.total_remaining_idr || 0), color: "#2563eb" },
+              { label: "Total Overdue (IDR)",     val: "Rp " + fmtNum(sm?.total_overdue_idr   || 0), color: "#dc2626" },
+              { label: "Returns (CM)",       val: `${sm?.returns_count || 0} · Rp ${fmtNum(sm?.returns_remaining_idr || 0)}`, color: "#7c3aed" },
             ].map(c => (
               <div key={c.label} style={{ background: NEU.bg, borderRadius: 12, padding: "10px 14px", boxShadow: NEU.shadowOutSm }}>
                 <p style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{c.label}</p>
@@ -525,7 +534,7 @@ function AROutstandingPanel() {
           {/* Table */}
           <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1400 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1620 }}>
                 <thead>
                   <tr style={{ background: "linear-gradient(135deg,#92400e,#78350f)" }}>
                     <th style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5 }}>#</th>
@@ -554,12 +563,20 @@ function AROutstandingPanel() {
                       <td style={{ ...TD, fontWeight: 700, color: "#1e293b", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.customer_name}>{r.customer_name}</td>
                       <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.account_number}</td>
                       <td style={{ ...TD, fontFamily: "monospace", fontWeight: 700, color: "#2563eb", whiteSpace: "nowrap" }}>{r.invoice_number}</td>
-                      <td style={{ ...TD, fontSize: 11 }}>{r.transaction_type}</td>
+                      <td style={{ ...TD, fontSize: 11 }}>
+                        {r.class === "CM" ? (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 20, fontSize: 9.5, fontWeight: 700, background: "rgba(124,58,237,0.12)", color: "#7c3aed" }} title={r.transaction_type}>
+                            ↩ Return
+                          </span>
+                        ) : r.transaction_type}
+                      </td>
                       <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.invoice_date}</td>
                       <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.due_date}</td>
                       <td style={{ ...TD, fontSize: 11, fontWeight: 600 }}>{r.currency}</td>
                       <td style={{ ...TD, textAlign: "right", fontFamily: "monospace" }}>{fmtNum(r.original_amount)}</td>
                       <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: r.remaining_amount > 0 ? "#dc2626" : "#16a34a" }}>{fmtNum(r.remaining_amount)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontSize: 11, color: "#64748b" }}>{fmtNum(r.conversion_rate)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: r.remaining_amount_idr > 0 ? "#dc2626" : "#16a34a" }}>{fmtNum(r.remaining_amount_idr)}</td>
                       <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", ...daysStyle(r.days_overdue) }}>
                         {r.days_overdue > 0 ? `+${r.days_overdue}d` : r.days_overdue === 0 ? "Today" : r.days_overdue < 0 ? `${Math.abs(r.days_overdue)}d left` : "—"}
                       </td>
