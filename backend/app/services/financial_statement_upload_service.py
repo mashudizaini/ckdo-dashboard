@@ -13,6 +13,7 @@ Sheet -> report_type:
   "Balance sheet"    -> balance_sheet
   "Profit or loss"   -> profit_loss       (annual, FY columns)
   "PL_monthly"       -> profit_loss_monthly (single MTD/YTD this-vs-last-year snapshot)
+  "Cashflow"         -> cash_flow         (annual, bare-year columns — see parse_cash_flow_excel)
 
 Label-matching notes (verified against the actual reference file — NOT
 assumed):
@@ -312,10 +313,106 @@ def parse_profit_loss_monthly_excel(content: bytes) -> dict:
     return data
 
 
+# ── Cash Flow ─────────────────────────────────────────────────────────────
+# Unlike the other 2 sheets, "Cashflow" has NO fixed/known line-item list to
+# validate against — every label (Operating/Investing/Financing subtotals,
+# and the many free-form line items under them) is carried through exactly
+# as found, in file order, with its indentation level preserved via which
+# column (B/C/D) the label sits in. There's also no live Oracle equivalent
+# for this report at all (a statutory cash flow isn't a direct GL_BALANCES
+# query — it's manually prepared/derived each period), so this is the only
+# source, permanently, not a transitional one.
+#
+# Row 6 headers are bare years (2015, not "FY 2015"). The current/in-
+# progress year is NOT a single column like the other 2 sheets — it's
+# broken into one column per posted month (row 8: Jan, Feb, ...), matching
+# how far the period has actually been closed. A single "annual" figure for
+# that year is synthesized per row: Beginning Balance takes the first
+# month's value, Ending Balance takes the last month's value, everything
+# else (Cash In/Out and every line item) sums across the posted months.
+
+_MONTH_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+
+
+def _is_month_label(v) -> bool:
+    return isinstance(v, str) and v.strip().upper()[:3] in _MONTH_ABBR
+
+
+def parse_cash_flow_excel(content: bytes) -> dict:
+    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+    ws = _sheet(wb, "Cashflow")
+
+    year_col: dict[int, int] = {}
+    month_cols: list[int] = []
+    for c in range(1, ws.max_column + 1):
+        yv = ws.cell(row=6, column=c).value
+        if isinstance(yv, (int, float)) and 2000 <= int(yv) <= 2100:
+            year_col[int(yv)] = c
+        if _is_month_label(ws.cell(row=8, column=c).value):
+            month_cols.append(c)
+    if not year_col:
+        raise ValueError("Year header not found in row 6 of the 'Cashflow' sheet.")
+
+    # The in-progress year is whichever row-6 year sits at/before the first
+    # month column (the sheet reuses that same column for both the year
+    # label and the first month's data).
+    partial_year = None
+    if month_cols:
+        candidates = [y for y, c in year_col.items() if c <= month_cols[0]]
+        if candidates:
+            partial_year = max(candidates)
+
+    years = sorted(year_col)
+
+    as_of_label = None
+    for r in range(1, 6):
+        v = ws.cell(row=r, column=1).value
+        if isinstance(v, str) and _MONTH_RE.search(v):
+            as_of_label = v.strip()
+            break
+
+    def row_values(row: int, label_upper: str) -> list[float]:
+        out = []
+        for y in years:
+            if y == partial_year and month_cols:
+                if "BEGINNING BALANCE" in label_upper:
+                    out.append(_num(ws.cell(row=row, column=month_cols[0]).value))
+                elif "ENDING BALANCE" in label_upper:
+                    out.append(_num(ws.cell(row=row, column=month_cols[-1]).value))
+                else:
+                    out.append(sum(_num(ws.cell(row=row, column=c).value) for c in month_cols))
+            else:
+                out.append(_num(ws.cell(row=row, column=year_col[y]).value))
+        return out
+
+    rows_out = []
+    for r in range(9, ws.max_row + 1):
+        label, level = None, None
+        for lvl, col in enumerate((2, 3, 4)):  # B=level0 (trunk), C=level1 (Operating/Investing/Financing), D=level2 (line items)
+            v = ws.cell(row=r, column=col).value
+            if isinstance(v, str) and v.strip():
+                label, level = re.sub(r"\s+", " ", v.strip()), lvl
+                break
+        if not label:
+            continue
+        values = row_values(r, label.upper())
+        if level == 2 and all(v == 0 for v in values):
+            continue  # thin/blank line item for this year range — same convention as _lines_between
+        rows_out.append({"label": label, "level": level, "type": "total" if level < 2 else "line", "values": values})
+
+    return {
+        "years": years,
+        "as_of_label": as_of_label,
+        "partial_year": partial_year,
+        "rows": rows_out,
+    }
+
+
 _PARSERS = {
     "balance_sheet": parse_balance_sheet_excel,
     "profit_loss": parse_profit_loss_excel,
     "profit_loss_monthly": parse_profit_loss_monthly_excel,
+    "cash_flow": parse_cash_flow_excel,
 }
 
 

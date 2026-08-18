@@ -17,6 +17,7 @@ Endpoints:
   GET  /profit-loss/export          — same, as .xlsx
   GET  /profit-loss-monthly         — MTD/YTD this year vs same period last year
   GET  /profit-loss-monthly/export  — same, as .xlsx
+  GET  /cash-flow                   — Cash Flow statement, Excel-only (no Oracle equivalent)
 """
 import io
 import json
@@ -51,7 +52,7 @@ async def get_periods(user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)
 
 @router.get("/upload-status")
 async def get_upload_status(
-    report_type: str = Query(..., pattern="^(balance_sheet|profit_loss|profit_loss_monthly)$"),
+    report_type: str = Query(..., pattern="^(balance_sheet|profit_loss|profit_loss_monthly|cash_flow)$"),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
@@ -78,15 +79,15 @@ async def get_upload_status(
 
 @router.post("/upload")
 async def upload_financial_statement_excel(
-    report_type: str = Query(..., pattern="^(balance_sheet|profit_loss|profit_loss_monthly)$"),
+    report_type: str = Query(..., pattern="^(balance_sheet|profit_loss|profit_loss_monthly|cash_flow)$"),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
-    """Upload the manual Excel report for one of the 3 supported report
+    """Upload the manual Excel report for one of the 4 supported report
     types — parses the matching sheet (Balance sheet / Profit or loss /
-    PL_monthly) and stores it, replacing any previous upload for that
-    report_type."""
+    PL_monthly / Cashflow) and stores it, replacing any previous upload for
+    that report_type."""
     content = await file.read()
     result = await FinancialStatementUploadService().save_upload(db, report_type, content, file.filename, user.username)
     if not result.get("success"):
@@ -169,6 +170,31 @@ async def _profit_loss_from_excel(db: AsyncSession, years_csv: str) -> dict:
     }
 
 
+async def _cash_flow_from_excel(db: AsyncSession, years_csv: str) -> dict:
+    upload = await FinancialStatementUploadService().get_upload(db, "cash_flow")
+    if not upload:
+        return {"success": False, "error": "No Excel data uploaded yet for Cash Flow."}
+    content = upload["content"]
+    all_years = content["years"]
+    years = [int(y.strip()) for y in years_csv.split(",") if y.strip().isdigit() and int(y.strip()) in all_years]
+    if not years:
+        return {"success": False, "error": "The requested year isn't in the uploaded Excel data."}
+    idx = [all_years.index(y) for y in years]
+
+    def col_label(y):
+        # The in-progress year's column is a partial-year figure (through
+        # whatever month was last posted), not a full Dec 31 close.
+        if y == content.get("partial_year") and content.get("as_of_label"):
+            return content["as_of_label"]
+        return str(y)
+
+    return {
+        "success": True,
+        "columns": [col_label(y) for y in years],
+        "rows": [{**r, "values": [r["values"][i] for i in idx]} for r in content["rows"]],
+    }
+
+
 async def _profit_loss_monthly_from_excel(db: AsyncSession) -> dict:
     upload = await FinancialStatementUploadService().get_upload(db, "profit_loss_monthly")
     if not upload:
@@ -242,6 +268,18 @@ async def get_profit_and_loss_monthly(
     return await FinancialStatementService().get_profit_and_loss_monthly(
         period_this, ytd_this_list, period_last, ytd_last_list
     )
+
+
+@router.get("/cash-flow")
+async def get_cash_flow(
+    years: str = Query(..., description="Comma-separated fiscal years"),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
+):
+    """Cash Flow statement — Excel-only. There's no live Oracle equivalent:
+    a statutory cash flow isn't a direct GL_BALANCES query, it's manually
+    prepared/derived from the other statements each period."""
+    return await _cash_flow_from_excel(db, years)
 
 
 # ── Excel exports — layout mirrors FS_CKD OTTO 2015-2026_sent.xlsx ────────────

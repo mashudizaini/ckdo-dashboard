@@ -345,8 +345,11 @@ export const financialStatementApi = {
         ? { source }
         : { source, period_this: periodThis, ytd_this: ytdThis.join(","), period_last: periodLast, ytd_last: ytdLast.join(",") },
     }),
+  // Excel-only — no live Oracle equivalent (a statutory cash flow isn't a
+  // direct GL_BALANCES query, it's manually derived each period).
+  getCashFlow: (years, signal) => api.get("/dashboard/accounting/financial-statement/cash-flow", { params: { years: years.join(",") }, signal }),
   // Excel upload source (transition from manual reporting to Oracle) —
-  // reportType: balance_sheet | profit_loss | profit_loss_monthly
+  // reportType: balance_sheet | profit_loss | profit_loss_monthly | cash_flow
   getUploadStatus: (reportType) => api.get("/dashboard/accounting/financial-statement/upload-status", { params: { report_type: reportType } }),
   uploadExcel: (reportType, file) => {
     const fd = new FormData();

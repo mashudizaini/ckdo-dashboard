@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { FileBarChart2, TrendingUp, CalendarDays, Loader2, RefreshCw, AlertTriangle, Download, Upload, Database, FileSpreadsheet, Square, Info, X } from "lucide-react";
+import { FileBarChart2, TrendingUp, CalendarDays, Wallet, Loader2, RefreshCw, AlertTriangle, Download, Upload, Database, FileSpreadsheet, Square, Info, X } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, ResponsiveContainer,
 } from "recharts";
@@ -75,6 +75,7 @@ const FS_SUBTABS = [
   { id: "balance-sheet",        label: "Balance Sheet",         icon: FileBarChart2 },
   { id: "profit-loss",          label: "Profit or Loss",        icon: TrendingUp },
   { id: "profit-loss-monthly",  label: "Profit or Loss Monthly", icon: CalendarDays },
+  { id: "cash-flow",            label: "Cash Flow",             icon: Wallet },
 ];
 
 // Balance Sheet Detail is no longer a standalone tab — it's reached by
@@ -338,6 +339,18 @@ const FS_FORMAT_GUIDE = {
     sections: [],
     totals: ["TOTAL NET SALES", "TOTAL COGS", "GROSS PROFIT", "TOTAL EXPENSES", "TOTAL OTHER INCOME (EXPENSE)", "PROFIT (LOSS) BEFORE INCOME TAX", "TOTAL INCOME TAX", "NET PROFIT (LOSS)", "OTHER COMPREHENSIVE INCOME (LOSS)", "TOTAL COMPREHENSIVE INCOME (LOSS) FOR THE YEAR"],
     totalsNote: "The TOTAL rows above must exist with exactly this name — different from the annual \"Profit or loss\" sheet (e.g. \"TOTAL INCOME TAX\", not \"TOTAL INCOME TAX BENEFIT (EXPENSE)\").",
+  },
+  cash_flow: {
+    sheetName: "Cashflow",
+    notes: [
+      "Row 6: one column per year, header as a bare year number (2022, not \"FY 2022\").",
+      "The most recent year may instead be split into one column per posted month, with the month name (Jan, Feb, ...) in row 8 of those columns — used for a year that's still in progress.",
+      "Column B holds the 5 trunk rows (Beginning Balance, Cash In, Cash Out, Net Cash Flow, Ending Balance). Column C holds the Operating/Investing/Financing subtotal under Cash In and Cash Out. Column D holds the free-form line items under each — all carried through exactly as found, in file order.",
+      "Every row is read from row 9 onward — no fixed row-name list to match against.",
+    ],
+    sections: [],
+    totals: ["Beginning Balance", "Cash In", "Cash Out", "Net Cash Flow", "Ending Balance"],
+    totalsNote: "These 5 rows (column B) and the Operating/Investing/Financing subtotal rows (column C) are treated as bold total rows — everything in column D is a plain line item.",
   },
 };
 
@@ -687,6 +700,11 @@ function BalanceSheetPanel({ periods }) {
         ...(showEquity ? [{ type: "header", level: 0, label: "EQUITY" }, ...toLines(byType.O)] : []),
       ];
     }
+    // Symmetric case: "← Back to Balance Sheet" flips viewMode to
+    // "summary" before the new summary response has landed, so `data` is
+    // still the detail-shaped payload (no `.current_assets`) for one
+    // render — same crash-to-blank-screen risk as above, mirrored.
+    if (!Array.isArray(data.current_assets)) return [];
     // Each account line is tagged with its group (ASSETS/LIABILITIES/
     // EQUITY) so clicking it can both narrow the Detail query to that
     // group and filter to that specific line item.
@@ -1219,6 +1237,98 @@ function ProfitLossMonthlyPanel({ periods }) {
   );
 }
 
+/* ── Cash Flow ─────────────────────────────────────────────────────────── */
+
+// Excel-only — no live Oracle equivalent exists (a statutory cash flow
+// isn't a direct GL_BALANCES query, it's manually derived from the other
+// statements each period), so unlike the other 3 panels there's no source
+// toggle logic to carry — FsSourceControl is used purely for its upload/
+// format-guide UI, with source hardcoded to "excel". The backend already
+// returns each row pre-leveled/typed (level 0/1/2, type total|line)
+// exactly as read from the sheet, so rows pass straight through to FsTable
+// with no client-side reshaping.
+function CashFlowPanel() {
+  const [excelStatus, setExcelStatus] = useState(null);
+  const pickerYears = excelStatus?.years || EMPTY_ARRAY;
+
+  const [fromYear, setFromYear] = useState("");
+  const [toYear, setToYear] = useState("");
+
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!pickerYears.length) return;
+    const latestYear = Math.max(...pickerYears);
+    if (!toYear || !pickerYears.includes(toYear)) setToYear(latestYear);
+    if (!fromYear || !pickerYears.includes(fromYear)) {
+      const prevYear = latestYear - 1;
+      setFromYear(pickerYears.includes(prevYear) ? prevYear : latestYear);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickerYears.join(",")]);
+
+  // Chronological, oldest → newest, left to right — by construction.
+  const selectedYears = useMemo(() => {
+    if (!fromYear || !toYear || fromYear > toYear) return [];
+    const ys = [];
+    for (let y = fromYear; y <= toYear; y++) if (pickerYears.includes(y)) ys.push(y);
+    return ys;
+  }, [fromYear, toYear, pickerYears]);
+
+  const load = useCallback(async () => {
+    if (!selectedYears.length) return;
+    setLoading(true); setError(null);
+    try {
+      const res = await financialStatementApi.getCashFlow(selectedYears);
+      if (res.success) setData(res); else setError(res.error || "Failed to load");
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.detail || String(e));
+    } finally { setLoading(false); }
+  }, [selectedYears]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const rows = useMemo(() => (data ? data.rows : []), [data]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <FsSourceControl
+        reportType="cash_flow" source="excel" setSource={() => {}}
+        onStatus={setExcelStatus} onUploaded={load}
+      />
+      <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period From</label>
+          <select style={SELECT} value={fromYear} onChange={e => setFromYear(e.target.value ? Number(e.target.value) : "")}>
+            {pickerYears.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period To</label>
+          <select style={SELECT} value={toYear} onChange={e => setToYear(e.target.value ? Number(e.target.value) : "")}>
+            {pickerYears.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <button onClick={load} disabled={loading} style={BTN}>
+          {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
+        </button>
+      </div>
+
+      {fromYear && toYear && fromYear > toYear ? (
+        <div style={{ padding: 16, fontSize: 12, color: "#dc2626" }}>Period From must not be after Period To.</div>
+      ) : loading && !data ? (
+        <div style={{ padding: 40, textAlign: "center", color: "#64748b" }}><Loader2 size={20} className="animate-spin" /></div>
+      ) : error ? (
+        <div style={{ padding: 16, color: "#dc2626", fontSize: 13 }}>{error}</div>
+      ) : data ? (
+        <FsTable columns={data.columns} rows={rows} />
+      ) : null}
+    </div>
+  );
+}
+
 /* ── Root ─────────────────────────────────────────────────────────────── */
 
 export default function FinancialStatement() {
@@ -1283,6 +1393,7 @@ export default function FinancialStatement() {
           {subTab === "balance-sheet"        && <BalanceSheetPanel periods={periods} />}
           {subTab === "profit-loss"          && <ProfitLossPanel periods={periods} />}
           {subTab === "profit-loss-monthly"  && <ProfitLossMonthlyPanel periods={periods} />}
+          {subTab === "cash-flow"            && <CashFlowPanel />}
         </>
       )}
     </div>
