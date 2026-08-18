@@ -65,9 +65,9 @@ async def get_ar_outstanding(
     invoice total instead of being silently dropped). Each row also gets a
     Corporate-rate IDR conversion (conversion_rate/original_amount_idr/
     remaining_amount_idr), and the summary totals are IDR-converted. The
-    conversion rate is priced as of date_to (falls back to today when
-    date_to is blank) — one shared "as of" date for every row, not each
-    row's own invoice date.
+    conversion rate is always priced as of today (standardized to match
+    ar-aging, which has no date filter to anchor to) regardless of
+    date_from/date_to — those only filter which invoices are included.
     """
     return await AccountingService().get_ar_outstanding(
         customer_name, invoice_number, date_from, date_to, status, limit
