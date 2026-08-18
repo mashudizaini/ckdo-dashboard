@@ -415,12 +415,16 @@ class AccountingService:
             where_extra += " AND rct.trx_date <= TO_DATE(:date_to, 'YYYY-MM-DD')"
             params["date_to"] = date_to
 
-        # Corporate-rate IDR conversion, anchored to the transaction's own
-        # date (rct.trx_date) — same "as-of-transaction-date, most recent
-        # rate on/before that date" convention as purchasing_service.py's
-        # _RATE_CASE, so the app has one consistent rate-lookup philosophy
-        # rather than a different one per module.
-        rate_case = """
+        # Corporate-rate IDR conversion, anchored to a single shared "as of"
+        # date for every row — the Invoice Date To filter when given,
+        # otherwise today — per explicit request, rather than each row's
+        # own trx_date (which would price older invoices at their original
+        # booking-date rate instead of the rate the user is evaluating
+        # outstanding exposure as of).
+        rate_date_expr = "TO_DATE(:rate_as_of, 'YYYY-MM-DD')" if date_to else "TRUNC(SYSDATE)"
+        if date_to:
+            params["rate_as_of"] = date_to
+        rate_case = f"""
             CASE WHEN rct.invoice_currency_code = 'IDR' THEN 1
             ELSE COALESCE((
                 SELECT gdr.conversion_rate FROM apps.gl_daily_rates gdr
@@ -432,7 +436,7 @@ class AccountingService:
                       WHERE  gdr2.from_currency   = rct.invoice_currency_code
                         AND  gdr2.to_currency     = 'IDR'
                         AND  gdr2.conversion_type = 'Corporate'
-                        AND  gdr2.conversion_date <= TRUNC(rct.trx_date)
+                        AND  gdr2.conversion_date <= {rate_date_expr}
                   )
             ), 1) END
         """

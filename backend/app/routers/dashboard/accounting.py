@@ -64,7 +64,10 @@ async def get_ar_outstanding(
     credit memos carry negative remaining amounts, netting against the
     invoice total instead of being silently dropped). Each row also gets a
     Corporate-rate IDR conversion (conversion_rate/original_amount_idr/
-    remaining_amount_idr), and the summary totals are IDR-converted.
+    remaining_amount_idr), and the summary totals are IDR-converted. The
+    conversion rate is priced as of date_to (falls back to today when
+    date_to is blank) — one shared "as of" date for every row, not each
+    row's own invoice date.
     """
     return await AccountingService().get_ar_outstanding(
         customer_name, invoice_number, date_from, date_to, status, limit
