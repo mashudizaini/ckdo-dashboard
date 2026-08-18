@@ -368,6 +368,13 @@ function BalanceSheetPanel({ periods, detail }) {
   const [error, setError] = useState(null);
   const [exporting, setExporting] = useState(false);
 
+  // Account Group — narrows the Oracle query to one section instead of
+  // always scanning Assets+Liabilities+Equity together, which is what made
+  // a wide Period From/To range (e.g. 2022-2026) slow enough to look stuck:
+  // each extra column was a full extra sequential Oracle round-trip just
+  // for the Equity section's retained-earnings figure. "" = All.
+  const [accountGroup, setAccountGroup] = useState("");
+
   // Default (and re-default on source switch) — oracle uses the latest GL
   // period; excel uses the newest year the uploaded file covers.
   useEffect(() => {
@@ -442,13 +449,13 @@ function BalanceSheetPanel({ periods, detail }) {
     setLoading(true); setError(null);
     try {
       const res = detail
-        ? await financialStatementApi.getBalanceSheetDetail(periodList)
-        : await financialStatementApi.getBalanceSheet(periodList, source);
+        ? await financialStatementApi.getBalanceSheetDetail(periodList, source === "oracle" ? accountGroup : "")
+        : await financialStatementApi.getBalanceSheet(periodList, source, source === "oracle" ? accountGroup : "");
       if (res.success) setData(res); else setError(res.error || "Failed to load");
     } catch (e) {
       setError(e?.response?.data?.detail || e?.detail || String(e));
     } finally { setLoading(false); }
-  }, [periodList, detail, source]);
+  }, [periodList, detail, source, accountGroup]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -472,6 +479,14 @@ function BalanceSheetPanel({ periods, detail }) {
     [growthMode, cagrYears],
   );
 
+  // When Account Group narrows the query, the backend zeroes out the
+  // sections it didn't fetch rather than omitting them (keeps the export
+  // builder's expected shape intact) — filter which blocks actually render
+  // here instead, using the same accountGroup the request was made with.
+  const showAssets = !accountGroup || accountGroup === "ASSETS";
+  const showLiabilities = !accountGroup || accountGroup === "LIABILITIES";
+  const showEquity = !accountGroup || accountGroup === "EQUITY";
+
   const rows = useMemo(() => {
     if (!data) return [];
     if (detail) {
@@ -479,35 +494,43 @@ function BalanceSheetPanel({ periods, detail }) {
       data.accounts.forEach(a => byType[a.account_type]?.push(a));
       const toLines = (accs) => accs.map(a => withGrowth({ type: "line", level: 1, label: `${a.account_code} — ${a.account_desc || a.line_item}`, values: a.values }));
       return [
-        { type: "header", level: 0, label: "ASSETS" }, ...toLines(byType.A),
-        { type: "header", level: 0, label: "LIABILITIES" }, ...toLines(byType.L),
-        { type: "header", level: 0, label: "EQUITY" }, ...toLines(byType.O),
+        ...(showAssets ? [{ type: "header", level: 0, label: "ASSETS" }, ...toLines(byType.A)] : []),
+        ...(showLiabilities ? [{ type: "header", level: 0, label: "LIABILITIES" }, ...toLines(byType.L)] : []),
+        ...(showEquity ? [{ type: "header", level: 0, label: "EQUITY" }, ...toLines(byType.O)] : []),
       ];
     }
     const lines = (arr) => arr.map(r => withGrowth({ type: "line", level: 2, label: r.label, values: r.values }));
     return [
-      { type: "header", level: 0, label: "ASSETS" },
-      { type: "header", level: 1, label: "CURRENT ASSETS" },
-      ...lines(data.current_assets),
-      withGrowth({ type: "total", level: 1, label: "TOTAL CURRENT ASSETS", values: data.total_current_assets }),
-      { type: "header", level: 1, label: "NON CURRENT ASSET" },
-      ...lines(data.noncurrent_assets),
-      withGrowth({ type: "total", level: 1, label: "TOTAL NON CURRENT ASSETS", values: data.total_noncurrent_assets }),
-      withGrowth({ type: "total", level: 0, label: "TOTAL ASSETS", values: data.total_assets }),
-      { type: "header", level: 0, label: "LIABILITIES" },
-      { type: "header", level: 1, label: "CURRENT LIABILITIES" },
-      ...lines(data.current_liabilities),
-      withGrowth({ type: "total", level: 1, label: "TOTAL CURRENT LIABILITIES", values: data.total_current_liabilities }),
-      { type: "header", level: 1, label: "NONCURRENT LIABILITIES" },
-      ...lines(data.noncurrent_liabilities),
-      withGrowth({ type: "total", level: 1, label: "TOTAL NONCURRENT LIABILITIES", values: data.total_noncurrent_liabilities }),
-      withGrowth({ type: "total", level: 0, label: "TOTAL  LIABILITIES", values: data.total_liabilities }),
-      { type: "header", level: 0, label: "EQUITY" },
-      ...data.equity.map(r => withGrowth({ type: "line", level: 1, label: r.label, values: r.values })),
-      withGrowth({ type: "total", level: 0, label: "TOTAL  EQUITY", values: data.total_equity }),
-      withGrowth({ type: "total", level: 0, label: "TOTAL  LIABILITIES AND EQUITY", values: data.total_liabilities_and_equity }),
+      ...(showAssets ? [
+        { type: "header", level: 0, label: "ASSETS" },
+        { type: "header", level: 1, label: "CURRENT ASSETS" },
+        ...lines(data.current_assets),
+        withGrowth({ type: "total", level: 1, label: "TOTAL CURRENT ASSETS", values: data.total_current_assets }),
+        { type: "header", level: 1, label: "NON CURRENT ASSET" },
+        ...lines(data.noncurrent_assets),
+        withGrowth({ type: "total", level: 1, label: "TOTAL NON CURRENT ASSETS", values: data.total_noncurrent_assets }),
+        withGrowth({ type: "total", level: 0, label: "TOTAL ASSETS", values: data.total_assets }),
+      ] : []),
+      ...(showLiabilities ? [
+        { type: "header", level: 0, label: "LIABILITIES" },
+        { type: "header", level: 1, label: "CURRENT LIABILITIES" },
+        ...lines(data.current_liabilities),
+        withGrowth({ type: "total", level: 1, label: "TOTAL CURRENT LIABILITIES", values: data.total_current_liabilities }),
+        { type: "header", level: 1, label: "NONCURRENT LIABILITIES" },
+        ...lines(data.noncurrent_liabilities),
+        withGrowth({ type: "total", level: 1, label: "TOTAL NONCURRENT LIABILITIES", values: data.total_noncurrent_liabilities }),
+        withGrowth({ type: "total", level: 0, label: "TOTAL  LIABILITIES", values: data.total_liabilities }),
+      ] : []),
+      ...(showEquity ? [
+        { type: "header", level: 0, label: "EQUITY" },
+        ...data.equity.map(r => withGrowth({ type: "line", level: 1, label: r.label, values: r.values })),
+        withGrowth({ type: "total", level: 0, label: "TOTAL  EQUITY", values: data.total_equity }),
+      ] : []),
+      ...(showAssets && showLiabilities && showEquity ? [
+        withGrowth({ type: "total", level: 0, label: "TOTAL  LIABILITIES AND EQUITY", values: data.total_liabilities_and_equity }),
+      ] : []),
     ];
-  }, [data, detail, withGrowth]);
+  }, [data, detail, withGrowth, showAssets, showLiabilities, showEquity]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -545,6 +568,18 @@ function BalanceSheetPanel({ periods, detail }) {
             {pickerYears.map(y => <option key={y} value={y}>{source === "oracle" ? `Dec ${y}` : y}</option>)}
           </select>
         </div>
+        {source === "oracle" && (
+          <div>
+            <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Account Group</label>
+            <select style={SELECT} value={accountGroup} onChange={e => setAccountGroup(e.target.value)}
+              title="Narrow the query to one section — faster, especially for a wide Period From/To range">
+              <option value="">All</option>
+              <option value="ASSETS">Assets</option>
+              <option value="LIABILITIES">Liabilities</option>
+              <option value="EQUITY">Equity</option>
+            </select>
+          </div>
+        )}
         <button onClick={load} disabled={loading} style={BTN}>
           {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
         </button>
@@ -570,7 +605,7 @@ function BalanceSheetPanel({ periods, detail }) {
       ) : error ? (
         <div style={{ padding: 16, color: "#dc2626", fontSize: 13 }}>{error}</div>
       ) : data ? (
-        <FsTable columns={columnLabels} rows={rows} checkDiff={!detail ? data.check_diff : null} growthMode={growthMode} />
+        <FsTable columns={columnLabels} rows={rows} checkDiff={!detail && !accountGroup ? data.check_diff : null} growthMode={growthMode} />
       ) : null}
     </div>
   );

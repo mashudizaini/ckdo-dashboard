@@ -183,6 +183,8 @@ async def _profit_loss_monthly_from_excel(db: AsyncSession) -> dict:
 async def get_balance_sheet(
     periods: str = Query(..., description="Comma-separated GL period names (oracle) or fiscal years (excel)"),
     source: str = Query("oracle", pattern="^(oracle|excel)$"),
+    account_group: Optional[str] = Query(None, pattern="^(ASSETS|LIABILITIES|EQUITY)$",
+                                          description="Narrow to one section — omit for All (Oracle source only)"),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
@@ -190,19 +192,21 @@ async def get_balance_sheet(
     if source == "excel":
         return await _balance_sheet_from_excel(db, periods)
     period_list = [p.strip() for p in periods.split(",") if p.strip()]
-    return await FinancialStatementService().get_balance_sheet(period_list)
+    return await FinancialStatementService().get_balance_sheet(period_list, account_group)
 
 
 @router.get("/balance-sheet-detail")
 async def get_balance_sheet_detail(
     periods: str = Query(..., description="Comma-separated GL period names"),
+    account_group: Optional[str] = Query(None, pattern="^(ASSETS|LIABILITIES|EQUITY)$",
+                                          description="Narrow to one section — omit for All"),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
     """Balance Sheet at natural-account granularity — drill-down view.
     Oracle-only: the manual Excel report has no natural-account detail to
     drill into, only the same bucketed line items the summary view shows."""
     period_list = [p.strip() for p in periods.split(",") if p.strip()]
-    return await FinancialStatementService().get_balance_sheet_detail(period_list)
+    return await FinancialStatementService().get_balance_sheet_detail(period_list, account_group)
 
 
 @router.get("/profit-loss")

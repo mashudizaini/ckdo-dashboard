@@ -39,6 +39,7 @@ that the client's finance team should confirm. Everything else validated
 to the cent.
 """
 import asyncio
+from typing import Optional
 from app.database import get_oracle_connection
 import structlog
 
@@ -312,9 +313,19 @@ class FinancialStatementService:
 
     # ── Balance Sheet ────────────────────────────────────────────────────
 
-    def _fetch_balances(self, period_names: list[str]) -> list[dict]:
+    # account_group query param -> Oracle account_type codes. "All"/None
+    # keeps the original ('A','L','O') scan; a specific group both shrinks
+    # the GL_BALANCES scan and (in get_balance_sheet below) skips the
+    # equity-only retained-earnings/OCI P&L lookup entirely when it isn't
+    # even going to be displayed.
+    _ACCOUNT_GROUP_TYPES = {"ASSETS": ("A",), "LIABILITIES": ("L",), "EQUITY": ("O",)}
+
+    def _fetch_balances(self, period_names: list[str], account_types: tuple = ("A", "L", "O")) -> list[dict]:
         placeholders = ",".join(f":p{i}" for i in range(len(period_names)))
         params = {f"p{i}": p for i, p in enumerate(period_names)}
+        type_placeholders = ",".join(f":t{i}" for i in range(len(account_types)))
+        for i, t in enumerate(account_types):
+            params[f"t{i}"] = t
         sql = f"""
             SELECT gb.period_name, gcc.segment4 AS account_code, ffvl.description AS account_desc,
                    gcc.account_type,
@@ -324,7 +335,7 @@ class FinancialStatementService:
             {ACCOUNT_DESC_JOIN}
             WHERE gb.period_name IN ({placeholders})
               AND {LEDGER_FILTER}
-              AND gcc.account_type IN ('A','L','O')
+              AND gcc.account_type IN ({type_placeholders})
             GROUP BY gb.period_name, gcc.segment4, ffvl.description, gcc.account_type
         """
         return self._query(sql, params)
@@ -341,11 +352,15 @@ class FinancialStatementService:
         oci = amt.get("OTHER COMPREHENSIVE INCOME", 0)
         return profit_after_tax, oci
 
-    async def get_balance_sheet(self, period_names: list[str]) -> dict:
+    async def get_balance_sheet(self, period_names: list[str], account_group: Optional[str] = None) -> dict:
         """Balance Sheet grouped into line items — one column per period
         in `period_names` (annual FY-end periods and/or current-year
-        monthly periods, matching the reference file's column layout)."""
-        rows = await asyncio.to_thread(self._fetch_balances, period_names)
+        monthly periods, matching the reference file's column layout).
+        account_group ("ASSETS"/"LIABILITIES"/"EQUITY", or None for all)
+        narrows both the GL_BALANCES scan and, when equity isn't requested,
+        skips the retained-earnings/OCI P&L lookup below entirely."""
+        account_types = self._ACCOUNT_GROUP_TYPES.get(account_group, ("A", "L", "O"))
+        rows = await asyncio.to_thread(self._fetch_balances, period_names, account_types)
 
         # per period_name -> {line_item: amount}
         cols: dict = {p: {} for p in period_names}
@@ -369,13 +384,30 @@ class FinancialStatementService:
         # off the P&L sheet's Profit After Tax / OCI for Jan-through-this-
         # period, rather than trusting a GL account that's still empty.
         # Mirror that here rather than showing a false 0 that breaks
-        # Assets = Liabilities + Equity.
-        lookup = await asyncio.to_thread(self._periods_lookup)
-        for p in period_names:
-            ytd = self._ytd_periods(p, lookup)
-            profit_after_tax, oci = await asyncio.to_thread(self._pl_after_tax_and_oci, ytd)
-            cols[p]["RETAINED EARNINGS - CURRENT YEAR"] = profit_after_tax
-            cols[p]["OTHER COMPREHENSIVE INCOME - CURRENT YEAR"] = oci
+        # Assets = Liabilities + Equity. Only needed when Equity is part of
+        # the requested account_group — skipped otherwise (no Assets/
+        # Liabilities-only view needs it, and it's the most expensive part
+        # of this endpoint: one extra Oracle round-trip per period).
+        if "O" in account_types:
+            lookup = await asyncio.to_thread(self._periods_lookup)
+            # Was a sequential `for p in period_names: await ...` loop — one
+            # fresh Oracle connection + query per period, one at a time. For
+            # a wide year range (e.g. 2022-2026 -> 5-6 columns) that meant
+            # 5-6 full round-trips back to back before anything came back,
+            # which is what made wide ranges look like they'd hung. Firing
+            # them concurrently instead turns that into ~1 round-trip's
+            # worth of wall-clock time.
+            ytd_lists = [self._ytd_periods(p, lookup) for p in period_names]
+            pl_results = await asyncio.gather(*[
+                asyncio.to_thread(self._pl_after_tax_and_oci, ytd) for ytd in ytd_lists
+            ])
+            for p, (profit_after_tax, oci) in zip(period_names, pl_results):
+                cols[p]["RETAINED EARNINGS - CURRENT YEAR"] = profit_after_tax
+                cols[p]["OTHER COMPREHENSIVE INCOME - CURRENT YEAR"] = oci
+        else:
+            for p in period_names:
+                cols[p]["RETAINED EARNINGS - CURRENT YEAR"] = 0
+                cols[p]["OTHER COMPREHENSIVE INCOME - CURRENT YEAR"] = 0
 
         def section(labels):
             return [{"label": l, "values": [cols[p].get(l, 0) for p in period_names]} for l in labels]
@@ -418,10 +450,11 @@ class FinancialStatementService:
             "unmapped_accounts": unmapped,
         }
 
-    async def get_balance_sheet_detail(self, period_names: list[str]) -> dict:
+    async def get_balance_sheet_detail(self, period_names: list[str], account_group: Optional[str] = None) -> dict:
         """Same balances as get_balance_sheet but at natural-account
         granularity (no line-item grouping) — a drill-down view."""
-        rows = await asyncio.to_thread(self._fetch_balances, period_names)
+        account_types = self._ACCOUNT_GROUP_TYPES.get(account_group, ("A", "L", "O"))
+        rows = await asyncio.to_thread(self._fetch_balances, period_names, account_types)
 
         accounts: dict = {}
         for r in rows:

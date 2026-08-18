@@ -332,8 +332,8 @@ export const accountingApi = {
 
 export const financialStatementApi = {
   getPeriods:  () => api.get("/dashboard/accounting/financial-statement/periods"),
-  getBalanceSheet:       (periods, source = "oracle") => api.get("/dashboard/accounting/financial-statement/balance-sheet", { params: { periods: periods.join(","), source } }),
-  getBalanceSheetDetail: (periods) => api.get("/dashboard/accounting/financial-statement/balance-sheet-detail", { params: { periods: periods.join(",") } }),
+  getBalanceSheet:       (periods, source = "oracle", accountGroup = "") => api.get("/dashboard/accounting/financial-statement/balance-sheet", { params: { periods: periods.join(","), source, account_group: accountGroup || undefined } }),
+  getBalanceSheetDetail: (periods, accountGroup = "") => api.get("/dashboard/accounting/financial-statement/balance-sheet-detail", { params: { periods: periods.join(","), account_group: accountGroup || undefined } }),
   getProfitLoss:         (columns, source = "oracle", years = []) => api.get("/dashboard/accounting/financial-statement/profit-loss", {
     params: source === "excel"
       ? { source, years: years.join(",") }
