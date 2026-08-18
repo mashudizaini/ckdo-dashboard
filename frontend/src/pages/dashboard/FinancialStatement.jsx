@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { FileBarChart2, Table2, TrendingUp, CalendarDays, Loader2, RefreshCw, AlertTriangle, Download, Upload, Database, FileSpreadsheet, Square } from "lucide-react";
+import { FileBarChart2, Table2, TrendingUp, CalendarDays, Loader2, RefreshCw, AlertTriangle, Download, Upload, Database, FileSpreadsheet, Square, Info, X } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, ResponsiveContainer,
 } from "recharts";
@@ -271,6 +271,96 @@ function computeGrowth(values, mode, cagrYears) {
    last uploaded for that report_type. reportType matches the backend's
    report_type enum: balance_sheet | profit_loss | profit_loss_monthly. */
 
+// Expected Excel format per report_type — kept in sync by hand against the
+// parser (financial_statement_upload_service.py), since that's the single
+// source of truth for what it actually reads. If the parser's row-label
+// matching ever changes, update this alongside it.
+const FS_FORMAT_GUIDE = {
+  balance_sheet: {
+    sheetName: "Balance sheet",
+    notes: [
+      "Baris 6: satu kolom per tahun, isi header \"FY 2022\", \"FY 2023\", dst.",
+      "Baris 1–5 (kolom A, opsional): tanggal snapshot tahun terbaru, misal \"June 30, 2026\" — kalau kosong, kolom terakhir ditampilkan sebagai \"Dec {tahun}\".",
+      "Baris 7 ke bawah: satu baris per akun — kolom pertama yang berisi teks jadi label baris, kolom-kolom tahun berisi angka.",
+      "Nama baris di bawah ini HARUS persis sama (tidak case-sensitive) agar otomatis masuk ke bagian yang benar — baris dengan nama lain tetap tersimpan tapi muncul sebagai \"unmapped\".",
+    ],
+    sections: [
+      { label: "CURRENT ASSETS", items: ["CASH & CASH EQUIVALENTS", "ACCOUNT RECEIVABLES", "INVENTORY", "PREPAIDS", "OTHER CURRENT ASSETS", "ACCRUED INCOME"] },
+      { label: "NON CURRENT ASSETS", items: ["PROPERTY, PLANT AND EQUIPMENT", "OTHER NON - CURRENT ASSETS", "INTANGIBLE ASSET"] },
+      { label: "CURRENT LIABILITIES", items: ["SHORT TERM BORROWINGS", "ACCOUNT PAYABLES", "TAX PAYABLES", "ACCRUED EXPENSES", "CURRENT PORTION OF LONG TERM BORROWINGS", "CURRENT LEASE LIABILITIES", "OTHER CURRENT LIABILITIES"] },
+      { label: "NON CURRENT LIABILITIES", items: ["LTB-LOANS", "ESTIMATED LIABILITIES FOR EMPLOYEES", "NON-CURRENT SALES RETURN ALLOWANCE", "LONG-TERM LEASE LIABILITIES"] },
+      { label: "EQUITY", items: ["CAPITAL STOCK", "RETAINED EARNINGS - PRIOR YEAR", "RETAINED EARNINGS - CURRENT YEAR", "OTHER COMPREHENSIVE INCOME - PRIOR YEAR", "OTHER COMPREHENSIVE INCOME - CURRENT YEAR"] },
+    ],
+    totals: ["TOTAL CURRENT ASSETS", "TOTAL NON CURRENT ASSETS", "TOTAL ASSETS", "TOTAL CURRENT LIABILITIES", "TOTAL NONCURRENT LIABILITIES", "TOTAL LIABILITIES", "TOTAL EQUITY", "TOTAL LIABILITIES AND EQUITY"],
+    totalsNote: "Baris TOTAL di atas wajib ada persis dengan nama ini — dipakai langsung sebagai nilai total (bukan dihitung ulang).",
+  },
+  profit_loss: {
+    sheetName: "Profit or loss",
+    notes: [
+      "Baris 6: satu kolom per tahun, isi header \"FY 2022\", \"FY 2023\", dst.",
+      "Baris-baris di antara header section dan baris TOTAL-nya bebas isinya (nama akun/pelanggan sesuai data perusahaan) — semua ikut terbawa apa adanya.",
+      "Baris section header berikut WAJIB ada persis: NET SALES, COGS, EXPENSES, OTHER INCOME / EXPENSES, INCOME TAX.",
+    ],
+    sections: [],
+    totals: ["TOTAL NET SALES", "TOTAL COGS", "GROSS PROFIT", "TOTAL EXPENSES", "TOTAL OTHER INCOME (EXPENSES)", "PROFIT (LOSS) BEFORE TAX", "TOTAL INCOME TAX BENEFIT (EXPENSE)", "PROFIT (LOSS) AFTER TAX", "OTHER COMPREHENSIVE INCOME", "TOTAL COMPREHENSIVE INCOME (LOSS) FOR THE YEAR"],
+    totalsNote: "Baris TOTAL di atas wajib ada persis dengan nama ini.",
+  },
+  profit_loss_monthly: {
+    sheetName: "PL_monthly",
+    notes: [
+      "Baris 7: 2 label tanggal berdampingan — tahun lalu lalu tahun ini, misal \"June 30, 2025\" lalu \"June 30, 2026\". Masing-masing diikuti 2 kolom (MTD, YTD).",
+      "Baris 8: sub-label MTD/YTD di 4 kolom yang sama.",
+      "Section header sama seperti sheet \"Profit or loss\" tahunan: NET SALES, COGS, EXPENSES, OTHER INCOME / EXPENSES, INCOME TAX.",
+      "Nama baris TOTAL BEDA dari sheet tahunan — perhatikan detail wording di bawah.",
+    ],
+    sections: [],
+    totals: ["TOTAL NET SALES", "TOTAL COGS", "GROSS PROFIT", "TOTAL EXPENSES", "TOTAL OTHER INCOME (EXPENSE)", "PROFIT (LOSS) BEFORE INCOME TAX", "TOTAL INCOME TAX", "NET PROFIT (LOSS)", "OTHER COMPREHENSIVE INCOME (LOSS)", "TOTAL COMPREHENSIVE INCOME (LOSS) FOR THE YEAR"],
+    totalsNote: "Baris TOTAL di atas wajib ada persis dengan nama ini — beda dari sheet \"Profit or loss\" tahunan (mis. \"TOTAL INCOME TAX\" bukan \"TOTAL INCOME TAX BENEFIT (EXPENSE)\").",
+  },
+};
+
+function FormatGuideModal({ reportType, onClose }) {
+  const guide = FS_FORMAT_GUIDE[reportType];
+  if (!guide) return null;
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(15,23,42,0.4)" }} onClick={onClose}>
+      <div style={{ width: "100%", maxWidth: 560, maxHeight: "85vh", overflow: "auto", borderRadius: 14, background: "#ffffff", boxShadow: "0 20px 40px rgba(15,23,42,0.2)" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+          <div>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Format Excel yang diharapkan</h3>
+            <p style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>Nama sheet: <code style={{ background: "#f1f5f9", padding: "1px 5px", borderRadius: 4 }}>{guide.sheetName}</code></p>
+          </div>
+          <button onClick={onClose} style={{ color: "#94a3b8", border: "none", background: "none", cursor: "pointer" }}><X size={18} /></button>
+        </div>
+        <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "#334155", lineHeight: 1.6 }}>
+            {guide.notes.map((n, i) => <li key={i}>{n}</li>)}
+          </ul>
+          {guide.sections.map(sec => (
+            <div key={sec.label}>
+              <p style={{ fontSize: 11, fontWeight: 700, color: "#1F4E78", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.3 }}>{sec.label}</p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {sec.items.map(it => (
+                  <span key={it} style={{ fontSize: 11, background: "#f1f5f9", color: "#334155", padding: "3px 8px", borderRadius: 6, fontFamily: "monospace" }}>{it}</span>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div>
+            <p style={{ fontSize: 11, fontWeight: 700, color: "#1F4E78", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.3 }}>Baris TOTAL (wajib)</p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {guide.totals.map(it => (
+                <span key={it} style={{ fontSize: 11, background: "#fef3c7", color: "#92400e", padding: "3px 8px", borderRadius: 6, fontFamily: "monospace" }}>{it}</span>
+              ))}
+            </div>
+            {guide.totalsNote && <p style={{ fontSize: 11, color: "#64748b", marginTop: 6 }}>{guide.totalsNote}</p>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function fmtUploadTs(iso) {
   if (!iso) return null;
   try {
@@ -284,6 +374,7 @@ function FsSourceControl({ reportType, source, setSource, onStatus, onUploaded }
   const [status, setStatus] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState(null);
+  const [showFormatGuide, setShowFormatGuide] = useState(false);
   const fileRef = useRef(null);
 
   const loadStatus = useCallback(async () => {
@@ -335,6 +426,10 @@ function FsSourceControl({ reportType, source, setSource, onStatus, onUploaded }
       <button onClick={() => fileRef.current?.click()} disabled={uploading} style={BTN}>
         {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Upload Excel
       </button>
+      <button onClick={() => setShowFormatGuide(true)} style={{ ...BTN, padding: "7px 9px" }} title="Lihat format Excel yang diharapkan">
+        <Info size={13} />
+      </button>
+      {showFormatGuide && <FormatGuideModal reportType={reportType} onClose={() => setShowFormatGuide(false)} />}
       {status ? (
         <span style={{ fontSize: 11, color: "#64748b" }}>
           Terakhir di-upload: {status.original_filename} · {status.uploaded_by} · {fmtUploadTs(status.uploaded_at)}
@@ -342,7 +437,11 @@ function FsSourceControl({ reportType, source, setSource, onStatus, onUploaded }
       ) : (
         <span style={{ fontSize: 11, color: "#94a3b8" }}>Belum ada data Excel yang di-upload</span>
       )}
-      {err && <span style={{ fontSize: 11, color: "#dc2626" }}>{err}</span>}
+      {err && (
+        <span style={{ fontSize: 11, color: "#dc2626" }}>
+          {err} — <button onClick={() => setShowFormatGuide(true)} style={{ border: "none", background: "none", color: "#dc2626", textDecoration: "underline", cursor: "pointer", fontSize: 11, padding: 0 }}>lihat format yang diharapkan</button>
+        </span>
+      )}
     </div>
   );
 }
