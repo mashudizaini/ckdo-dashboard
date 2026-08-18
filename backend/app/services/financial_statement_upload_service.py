@@ -70,7 +70,7 @@ def _sheet(wb, name: str):
     for s in wb.sheetnames:
         if s.strip().lower() == name.lower():
             return wb[s]
-    raise ValueError(f"Sheet '{name}' tidak ditemukan di file — sheet yang ada: {', '.join(wb.sheetnames)}")
+    raise ValueError(f"Sheet '{name}' not found in the file — available sheets: {', '.join(wb.sheetnames)}")
 
 
 def _row_label(ws, row: int, max_col: int = 6):
@@ -135,7 +135,7 @@ def parse_balance_sheet_excel(content: bytes) -> dict:
         if isinstance(v, str) and re.match(r"^FY\s*\d{4}$", v.strip(), re.I):
             year_cols[int(re.search(r"\d{4}", v).group())] = c
     if not year_cols:
-        raise ValueError("Header tahun (\"FY YYYY\") tidak ditemukan di baris 6 sheet 'Balance sheet'.")
+        raise ValueError("Year header (\"FY YYYY\") not found in row 6 of the 'Balance sheet' sheet.")
     years = sorted(year_cols)
     value_cols = [year_cols[y] for y in years]
 
@@ -212,7 +212,7 @@ def _parse_pl_sheet(ws, value_cols: list[int], totals: dict) -> dict:
     def find(label):
         r = _find_row(ws, label, max_row)
         if r is None:
-            raise ValueError(f"Baris '{label}' tidak ditemukan di sheet.")
+            raise ValueError(f"Row '{label}' not found in the sheet.")
         return r
 
     r_net_sales = find("NET SALES")
@@ -279,7 +279,7 @@ def parse_profit_loss_excel(content: bytes) -> dict:
         if isinstance(v, str) and re.match(r"^FY\s*\d{4}$", v.strip(), re.I):
             year_cols[int(re.search(r"\d{4}", v).group())] = c
     if not year_cols:
-        raise ValueError("Header tahun (\"FY YYYY\") tidak ditemukan di baris 6 sheet 'Profit or loss'.")
+        raise ValueError("Year header (\"FY YYYY\") not found in row 6 of the 'Profit or loss' sheet.")
     years = sorted(year_cols)
     value_cols = [year_cols[y] for y in years]
 
@@ -301,7 +301,7 @@ def parse_profit_loss_monthly_excel(content: bytes) -> dict:
     date_cells = [(c, ws.cell(row=7, column=c).value) for c in range(1, ws.max_column + 1)
                   if isinstance(ws.cell(row=7, column=c).value, str) and ws.cell(row=7, column=c).value.strip()]
     if len(date_cells) < 2:
-        raise ValueError("Header tanggal (baris 7) tidak ditemukan di sheet 'PL_monthly'.")
+        raise ValueError("Date header (row 7) not found in the 'PL_monthly' sheet.")
     (col_last, date_last), (col_this, date_this) = date_cells[0], date_cells[1]
     value_cols = [col_last, col_last + 1, col_this, col_this + 1]  # MTD Last, YTD Last, MTD This, YTD This
 
@@ -327,7 +327,7 @@ class FinancialStatementUploadService:
 
         parser = _PARSERS.get(report_type)
         if not parser:
-            return {"success": False, "error": f"Tipe laporan tidak dikenal: {report_type}"}
+            return {"success": False, "error": f"Unknown report type: {report_type}"}
         try:
             parsed = parser(content)
         except Exception as e:

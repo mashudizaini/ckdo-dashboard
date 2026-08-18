@@ -90,19 +90,19 @@ async def upload_financial_statement_excel(
     content = await file.read()
     result = await FinancialStatementUploadService().save_upload(db, report_type, content, file.filename, user.username)
     if not result.get("success"):
-        raise HTTPException(400, result.get("error") or "Gagal memproses file")
+        raise HTTPException(400, result.get("error") or "Failed to process the file")
     return {"success": True, "uploaded_at": result.get("uploaded_at")}
 
 
 async def _balance_sheet_from_excel(db: AsyncSession, periods_csv: str) -> dict:
     upload = await FinancialStatementUploadService().get_upload(db, "balance_sheet")
     if not upload:
-        return {"success": False, "error": "Belum ada data Excel yang di-upload untuk Balance Sheet."}
+        return {"success": False, "error": "No Excel data uploaded yet for Balance Sheet."}
     content = upload["content"]
     all_years = content["years"]
     years = [int(p.strip()) for p in periods_csv.split(",") if p.strip().isdigit() and int(p.strip()) in all_years]
     if not years:
-        return {"success": False, "error": "Tahun yang diminta tidak ada di data Excel yang di-upload."}
+        return {"success": False, "error": "The requested year isn't in the uploaded Excel data."}
     idx = [all_years.index(y) for y in years]
     latest_year = max(all_years)
 
@@ -140,12 +140,12 @@ async def _balance_sheet_from_excel(db: AsyncSession, periods_csv: str) -> dict:
 async def _profit_loss_from_excel(db: AsyncSession, years_csv: str) -> dict:
     upload = await FinancialStatementUploadService().get_upload(db, "profit_loss")
     if not upload:
-        return {"success": False, "error": "Belum ada data Excel yang di-upload untuk Profit or Loss."}
+        return {"success": False, "error": "No Excel data uploaded yet for Profit or Loss."}
     content = upload["content"]
     all_years = content["years"]
     years = [int(y.strip()) for y in years_csv.split(",") if y.strip().isdigit() and int(y.strip()) in all_years]
     if not years:
-        return {"success": False, "error": "Tahun yang diminta tidak ada di data Excel yang di-upload."}
+        return {"success": False, "error": "The requested year isn't in the uploaded Excel data."}
     idx = [all_years.index(y) for y in years]
 
     def pick(arr):
@@ -172,7 +172,7 @@ async def _profit_loss_from_excel(db: AsyncSession, years_csv: str) -> dict:
 async def _profit_loss_monthly_from_excel(db: AsyncSession) -> dict:
     upload = await FinancialStatementUploadService().get_upload(db, "profit_loss_monthly")
     if not upload:
-        return {"success": False, "error": "Belum ada data Excel yang di-upload untuk Profit or Loss Monthly."}
+        return {"success": False, "error": "No Excel data uploaded yet for Profit or Loss Monthly."}
     result = dict(upload["content"])
     result["success"] = True
     result.setdefault("unmapped_accounts", [])

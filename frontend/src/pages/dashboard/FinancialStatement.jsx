@@ -279,10 +279,10 @@ const FS_FORMAT_GUIDE = {
   balance_sheet: {
     sheetName: "Balance sheet",
     notes: [
-      "Baris 6: satu kolom per tahun, isi header \"FY 2022\", \"FY 2023\", dst.",
-      "Baris 1–5 (kolom A, opsional): tanggal snapshot tahun terbaru, misal \"June 30, 2026\" — kalau kosong, kolom terakhir ditampilkan sebagai \"Dec {tahun}\".",
-      "Baris 7 ke bawah: satu baris per akun — kolom pertama yang berisi teks jadi label baris, kolom-kolom tahun berisi angka.",
-      "Nama baris di bawah ini HARUS persis sama (tidak case-sensitive) agar otomatis masuk ke bagian yang benar — baris dengan nama lain tetap tersimpan tapi muncul sebagai \"unmapped\".",
+      "Row 6: one column per year, header \"FY 2022\", \"FY 2023\", etc.",
+      "Rows 1–5 (column A, optional): the latest year's snapshot date, e.g. \"June 30, 2026\" — if left blank, the last column is displayed as \"Dec {year}\".",
+      "Row 7 onward: one row per account — the first column containing text becomes the row label, the year columns hold numbers.",
+      "The row names below MUST match exactly (not case-sensitive) to be automatically placed in the right section — rows with any other name are still saved but shown as \"unmapped\".",
     ],
     sections: [
       { label: "CURRENT ASSETS", items: ["CASH & CASH EQUIVALENTS", "ACCOUNT RECEIVABLES", "INVENTORY", "PREPAIDS", "OTHER CURRENT ASSETS", "ACCRUED INCOME"] },
@@ -292,30 +292,30 @@ const FS_FORMAT_GUIDE = {
       { label: "EQUITY", items: ["CAPITAL STOCK", "RETAINED EARNINGS - PRIOR YEAR", "RETAINED EARNINGS - CURRENT YEAR", "OTHER COMPREHENSIVE INCOME - PRIOR YEAR", "OTHER COMPREHENSIVE INCOME - CURRENT YEAR"] },
     ],
     totals: ["TOTAL CURRENT ASSETS", "TOTAL NON CURRENT ASSETS", "TOTAL ASSETS", "TOTAL CURRENT LIABILITIES", "TOTAL NONCURRENT LIABILITIES", "TOTAL LIABILITIES", "TOTAL EQUITY", "TOTAL LIABILITIES AND EQUITY"],
-    totalsNote: "Baris TOTAL di atas wajib ada persis dengan nama ini — dipakai langsung sebagai nilai total (bukan dihitung ulang).",
+    totalsNote: "The TOTAL rows above must exist with exactly this name — used directly as the total value (not recomputed).",
   },
   profit_loss: {
     sheetName: "Profit or loss",
     notes: [
-      "Baris 6: satu kolom per tahun, isi header \"FY 2022\", \"FY 2023\", dst.",
-      "Baris-baris di antara header section dan baris TOTAL-nya bebas isinya (nama akun/pelanggan sesuai data perusahaan) — semua ikut terbawa apa adanya.",
-      "Baris section header berikut WAJIB ada persis: NET SALES, COGS, EXPENSES, OTHER INCOME / EXPENSES, INCOME TAX.",
+      "Row 6: one column per year, header \"FY 2022\", \"FY 2023\", etc.",
+      "The rows between a section header and its TOTAL row are free-form (account/customer names as the company's own data has them) — all of them are carried through as-is.",
+      "The following section header rows are REQUIRED, exactly as written: NET SALES, COGS, EXPENSES, OTHER INCOME / EXPENSES, INCOME TAX.",
     ],
     sections: [],
     totals: ["TOTAL NET SALES", "TOTAL COGS", "GROSS PROFIT", "TOTAL EXPENSES", "TOTAL OTHER INCOME (EXPENSES)", "PROFIT (LOSS) BEFORE TAX", "TOTAL INCOME TAX BENEFIT (EXPENSE)", "PROFIT (LOSS) AFTER TAX", "OTHER COMPREHENSIVE INCOME", "TOTAL COMPREHENSIVE INCOME (LOSS) FOR THE YEAR"],
-    totalsNote: "Baris TOTAL di atas wajib ada persis dengan nama ini.",
+    totalsNote: "The TOTAL rows above must exist with exactly this name.",
   },
   profit_loss_monthly: {
     sheetName: "PL_monthly",
     notes: [
-      "Baris 7: 2 label tanggal berdampingan — tahun lalu lalu tahun ini, misal \"June 30, 2025\" lalu \"June 30, 2026\". Masing-masing diikuti 2 kolom (MTD, YTD).",
-      "Baris 8: sub-label MTD/YTD di 4 kolom yang sama.",
-      "Section header sama seperti sheet \"Profit or loss\" tahunan: NET SALES, COGS, EXPENSES, OTHER INCOME / EXPENSES, INCOME TAX.",
-      "Nama baris TOTAL BEDA dari sheet tahunan — perhatikan detail wording di bawah.",
+      "Row 7: 2 adjacent date labels — last year then this year, e.g. \"June 30, 2025\" then \"June 30, 2026\". Each is followed by 2 columns (MTD, YTD).",
+      "Row 8: MTD/YTD sub-labels in those same 4 columns.",
+      "Same section headers as the annual \"Profit or loss\" sheet: NET SALES, COGS, EXPENSES, OTHER INCOME / EXPENSES, INCOME TAX.",
+      "The TOTAL row names are DIFFERENT from the annual sheet — see the exact wording below.",
     ],
     sections: [],
     totals: ["TOTAL NET SALES", "TOTAL COGS", "GROSS PROFIT", "TOTAL EXPENSES", "TOTAL OTHER INCOME (EXPENSE)", "PROFIT (LOSS) BEFORE INCOME TAX", "TOTAL INCOME TAX", "NET PROFIT (LOSS)", "OTHER COMPREHENSIVE INCOME (LOSS)", "TOTAL COMPREHENSIVE INCOME (LOSS) FOR THE YEAR"],
-    totalsNote: "Baris TOTAL di atas wajib ada persis dengan nama ini — beda dari sheet \"Profit or loss\" tahunan (mis. \"TOTAL INCOME TAX\" bukan \"TOTAL INCOME TAX BENEFIT (EXPENSE)\").",
+    totalsNote: "The TOTAL rows above must exist with exactly this name — different from the annual \"Profit or loss\" sheet (e.g. \"TOTAL INCOME TAX\", not \"TOTAL INCOME TAX BENEFIT (EXPENSE)\").",
   },
 };
 
@@ -327,8 +327,8 @@ function FormatGuideModal({ reportType, onClose }) {
       <div style={{ width: "100%", maxWidth: 560, maxHeight: "85vh", overflow: "auto", borderRadius: 14, background: "#ffffff", boxShadow: "0 20px 40px rgba(15,23,42,0.2)" }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
           <div>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Format Excel yang diharapkan</h3>
-            <p style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>Nama sheet: <code style={{ background: "#f1f5f9", padding: "1px 5px", borderRadius: 4 }}>{guide.sheetName}</code></p>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>Expected Excel Format</h3>
+            <p style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>Sheet name: <code style={{ background: "#f1f5f9", padding: "1px 5px", borderRadius: 4 }}>{guide.sheetName}</code></p>
           </div>
           <button onClick={onClose} style={{ color: "#94a3b8", border: "none", background: "none", cursor: "pointer" }}><X size={18} /></button>
         </div>
@@ -347,7 +347,7 @@ function FormatGuideModal({ reportType, onClose }) {
             </div>
           ))}
           <div>
-            <p style={{ fontSize: 11, fontWeight: 700, color: "#1F4E78", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.3 }}>Baris TOTAL (wajib)</p>
+            <p style={{ fontSize: 11, fontWeight: 700, color: "#1F4E78", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.3 }}>TOTAL rows (required)</p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {guide.totals.map(it => (
                 <span key={it} style={{ fontSize: 11, background: "#fef3c7", color: "#92400e", padding: "3px 8px", borderRadius: 6, fontFamily: "monospace" }}>{it}</span>
@@ -400,7 +400,7 @@ function FsSourceControl({ reportType, source, setSource, onStatus, onUploaded }
         await loadStatus();
         onUploaded?.();
       } else {
-        setErr(res.error || "Upload gagal");
+        setErr(res.error || "Upload failed");
       }
     } catch (e2) {
       setErr(e2?.response?.data?.detail || e2?.detail || String(e2));
@@ -426,20 +426,20 @@ function FsSourceControl({ reportType, source, setSource, onStatus, onUploaded }
       <button onClick={() => fileRef.current?.click()} disabled={uploading} style={BTN}>
         {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Upload Excel
       </button>
-      <button onClick={() => setShowFormatGuide(true)} style={{ ...BTN, padding: "7px 9px" }} title="Lihat format Excel yang diharapkan">
+      <button onClick={() => setShowFormatGuide(true)} style={{ ...BTN, padding: "7px 9px" }} title="View the expected Excel format">
         <Info size={13} />
       </button>
       {showFormatGuide && <FormatGuideModal reportType={reportType} onClose={() => setShowFormatGuide(false)} />}
       {status ? (
         <span style={{ fontSize: 11, color: "#64748b" }}>
-          Terakhir di-upload: {status.original_filename} · {status.uploaded_by} · {fmtUploadTs(status.uploaded_at)}
+          Last uploaded: {status.original_filename} · {status.uploaded_by} · {fmtUploadTs(status.uploaded_at)}
         </span>
       ) : (
-        <span style={{ fontSize: 11, color: "#94a3b8" }}>Belum ada data Excel yang di-upload</span>
+        <span style={{ fontSize: 11, color: "#94a3b8" }}>No Excel data uploaded yet</span>
       )}
       {err && (
         <span style={{ fontSize: 11, color: "#dc2626" }}>
-          {err} — <button onClick={() => setShowFormatGuide(true)} style={{ border: "none", background: "none", color: "#dc2626", textDecoration: "underline", cursor: "pointer", fontSize: 11, padding: 0 }}>lihat format yang diharapkan</button>
+          {err} — <button onClick={() => setShowFormatGuide(true)} style={{ border: "none", background: "none", color: "#dc2626", textDecoration: "underline", cursor: "pointer", fontSize: 11, padding: 0 }}>view expected format</button>
         </span>
       )}
     </div>
@@ -713,7 +713,7 @@ function BalanceSheetPanel({ periods, detail }) {
           </div>
         )}
         {loading ? (
-          <button onClick={stop} style={{ ...BTN, color: "#dc2626" }} title="Batalkan permintaan yang sedang berjalan">
+          <button onClick={stop} style={{ ...BTN, color: "#dc2626" }} title="Cancel the in-progress request">
             <Square size={13} /> Stop
           </button>
         ) : (
@@ -722,7 +722,7 @@ function BalanceSheetPanel({ periods, detail }) {
           </button>
         )}
         <button onClick={handleExport} disabled={exporting || !data || source === "excel"} style={BTN}
-          title={source === "excel" ? "Export Excel belum didukung untuk sumber data Excel" : undefined}>
+          title={source === "excel" ? "Excel export isn't supported for the Excel data source" : undefined}>
           {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download Excel
         </button>
         {data?.unmapped_accounts?.length > 0 && (
@@ -734,7 +734,7 @@ function BalanceSheetPanel({ periods, detail }) {
 
       {!loading && growthMode === "cagr" && columnLabels.length > 1 && (
         <div style={{ fontSize: 11, color: "#64748b" }}>
-          Membandingkan {rangePeriods.length} tahun ({columnLabels[0]} → {columnLabels[columnLabels.length - 1]}) — kolom growth memakai CAGR ({cagrYears} tahun).
+          Comparing {rangePeriods.length} years ({columnLabels[0]} → {columnLabels[columnLabels.length - 1]}) — the growth column uses CAGR ({cagrYears} years).
         </div>
       )}
 
@@ -746,7 +746,7 @@ function BalanceSheetPanel({ periods, detail }) {
         // still-old values is what reads as the screen "blinking").
         <div style={{ padding: 40, textAlign: "center", color: "#64748b" }}>
           <Loader2 size={20} className="animate-spin" />
-          <p style={{ fontSize: 12, marginTop: 10 }}>Memuat data dari Oracle EBS — bisa beberapa detik untuk rentang tahun yang lebar.</p>
+          <p style={{ fontSize: 12, marginTop: 10 }}>Loading data from Oracle EBS — may take a few seconds for a wide year range.</p>
         </div>
       ) : error ? (
         <div style={{ padding: 16, color: "#dc2626", fontSize: 13 }}>{error}</div>
@@ -939,7 +939,7 @@ function ProfitLossPanel({ periods }) {
           {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
         </button>
         <button onClick={handleExport} disabled={exporting || !data || source === "excel"} style={BTN}
-          title={source === "excel" ? "Export Excel belum didukung untuk sumber data Excel" : undefined}>
+          title={source === "excel" ? "Excel export isn't supported for the Excel data source" : undefined}>
           {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download Excel
         </button>
         {data?.unmapped_accounts?.length > 0 && (
@@ -1126,14 +1126,14 @@ function ProfitLossMonthlyPanel({ periods }) {
           </div>
         ) : (
           <span style={{ fontSize: 11, color: "#64748b" }}>
-            {excelStatus ? `Snapshot ter-upload: ${headerDates.last} vs ${headerDates.this}` : "Belum ada data Excel yang di-upload"}
+            {excelStatus ? `Uploaded snapshot: ${headerDates.last} vs ${headerDates.this}` : "No Excel data uploaded yet"}
           </span>
         )}
         <button onClick={load} disabled={loading} style={BTN}>
           {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
         </button>
         <button onClick={handleExport} disabled={exporting || !data || source === "excel"} style={BTN}
-          title={source === "excel" ? "Export Excel belum didukung untuk sumber data Excel" : undefined}>
+          title={source === "excel" ? "Excel export isn't supported for the Excel data source" : undefined}>
           {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download Excel
         </button>
       </div>
