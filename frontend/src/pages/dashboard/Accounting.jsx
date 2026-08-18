@@ -355,6 +355,7 @@ function exportArCSV(rows) {
 }
 
 function AROutstandingPanel() {
+  const [viewMode,       setViewMode]       = useState("list"); // "list" | "aging"
   const [customerName,   setCustomerName]   = useState("");
   const [invoiceNumber,  setInvoiceNumber]  = useState("");
   const [dateFrom,       setDateFrom]       = useState("");
@@ -447,7 +448,39 @@ function AROutstandingPanel() {
 
   const sm = data?.summary;
 
+  const viewToggleBtn = (mode, label) => (
+    <button
+      onClick={() => setViewMode(mode)}
+      style={{
+        padding: "7px 14px", border: "none", borderRadius: 9, cursor: "pointer",
+        fontSize: 12, fontWeight: 700,
+        background: viewMode === mode ? "#f59e0b" : NEU.bg,
+        color: viewMode === mode ? "#ffffff" : "#64748b",
+        boxShadow: viewMode === mode ? NEU.shadowOutSm : NEU.shadowIn,
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  if (viewMode === "aging") {
+    return (
+      <>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          {viewToggleBtn("list", "List")}
+          {viewToggleBtn("aging", "Aging by Customer")}
+        </div>
+        <ARAgingPanel />
+      </>
+    );
+  }
+
   return (
+    <>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {viewToggleBtn("list", "List")}
+        {viewToggleBtn("aging", "Aging by Customer")}
+      </div>
     <SectionCard>
       {/* Filter bar */}
       <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -603,6 +636,140 @@ function AROutstandingPanel() {
           <p style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>Default: Open invoices (INV + DM), up to 500 rows</p>
         </div>
       )}
+    </SectionCard>
+    </>
+  );
+}
+
+/* ─── AR Aging Panel ─────────────────────────────────────────────────────── */
+
+const AGING_BUCKETS = [
+  { key: "current_amt", label: "Current",   color: "#16a34a" },
+  { key: "d1_30",       label: "1-30",      color: "#eab308" },
+  { key: "d31_60",      label: "31-60",     color: "#f59e0b" },
+  { key: "d61_90",      label: "61-90",     color: "#ea580c" },
+  { key: "over_90",     label: "> 90 Days", color: "#dc2626" },
+];
+
+function fmtIdr(v) {
+  const n = Number(v) || 0;
+  const s = Math.abs(n).toLocaleString("id-ID", { maximumFractionDigits: 0 });
+  return n < 0 ? `(${s})` : s;
+}
+
+function ARAgingPanel() {
+  const [customerName, setCustomerName] = useState("");
+  const [data,          setData]         = useState(null);
+  const [loading,       setLoading]      = useState(false);
+  const [error,         setError]        = useState(null);
+
+  const INPUT = { padding: "7px 11px", borderRadius: 9, border: "none", fontSize: 12, background: NEU.bg, boxShadow: NEU.shadowIn, color: "#1e293b", outline: "none" };
+
+  const loadData = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const params = { limit: 500, ...(customerName && { customer_name: customerName }) };
+      const res = await accountingApi.getArAging(params);
+      if (res.success) setData(res);
+      else { setError(res.error || "Failed to load"); setData(null); }
+    } catch (e) {
+      setError(e?.response?.data?.detail || String(e)); setData(null);
+    } finally { setLoading(false); }
+  }, [customerName]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const totals = data?.totals;
+
+  return (
+    <SectionCard
+      title="AR Aging by Customer"
+      subtitle="Open items (Invoices + Debit Memos + Credit Memos/Returns, Corporate-rate IDR, priced as of today) — returns net into whichever bucket their own due date falls into."
+    >
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Customer</p>
+          <input value={customerName} onChange={e => setCustomerName(e.target.value)}
+            placeholder="Search customer…" style={{ ...INPUT, width: 220 }}
+            onKeyDown={e => e.key === "Enter" && loadData()} />
+        </div>
+        <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#f59e0b" onClick={loadData} disabled={loading} />
+      </div>
+
+      {error && (
+        <div style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 10, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", fontSize: 12, color: "#dc2626", display: "flex", gap: 8, alignItems: "center" }}>
+          <AlertTriangle size={14} /> {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}><Loader2 size={20} className="animate-spin" /></div>
+      ) : data ? (
+        <>
+          {/* Bucket summary cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 14 }}>
+            {AGING_BUCKETS.map(b => (
+              <div key={b.key} style={{ background: NEU.bg, borderRadius: 12, padding: "10px 14px", boxShadow: NEU.shadowOutSm }}>
+                <p style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{b.label}</p>
+                <p style={{ fontSize: 13, fontWeight: 800, color: b.color, fontFamily: "monospace" }}>Rp {fmtIdr(totals?.[b.key] || 0)}</p>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 960 }}>
+                <thead>
+                  <tr style={{ background: "linear-gradient(135deg,#92400e,#78350f)" }}>
+                    <th style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5 }}>Customer</th>
+                    {AGING_BUCKETS.map(b => (
+                      <th key={b.key} style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5, textAlign: "right" }}>{b.label}</th>
+                    ))}
+                    <th style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5, textAlign: "right" }}>Total</th>
+                    <th style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5, textAlign: "right" }}>Items</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.data.length === 0 ? (
+                    <tr>
+                      <td colSpan={AGING_BUCKETS.length + 3} style={{ padding: "40px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
+                        No open items found
+                      </td>
+                    </tr>
+                  ) : data.data.map((r, i) => (
+                    <tr key={r.customer_name + r.account_number}
+                      style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(245,158,11,0.08)"}
+                      onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f8fafc" : "#f1f5f9"}
+                    >
+                      <td style={{ ...TD, fontWeight: 700, color: "#1e293b" }}>{r.customer_name}</td>
+                      {AGING_BUCKETS.map(b => (
+                        <td key={b.key} style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: r[b.key] < 0 ? "#16a34a" : "#334155" }}>
+                          {fmtIdr(r[b.key])}
+                        </td>
+                      ))}
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#2563eb" }}>{fmtIdr(r.total_idr)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#94a3b8" }}>{r.item_count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                {data.data.length > 0 && (
+                  <tfoot>
+                    <tr style={{ background: "#D9E1F2" }}>
+                      <td style={{ ...TD, fontWeight: 800, color: "#1e293b" }}>TOTAL</td>
+                      {AGING_BUCKETS.map(b => (
+                        <td key={b.key} style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#1e293b" }}>{fmtIdr(totals?.[b.key])}</td>
+                      ))}
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#1e293b" }}>{fmtIdr(totals?.total_idr)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#1e293b" }}>{totals?.item_count}</td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+        </>
+      ) : null}
     </SectionCard>
   );
 }
