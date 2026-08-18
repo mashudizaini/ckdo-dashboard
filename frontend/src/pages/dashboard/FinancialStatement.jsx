@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { FileBarChart2, Table2, TrendingUp, CalendarDays, Loader2, RefreshCw, AlertTriangle, Download, Upload, Database, FileSpreadsheet } from "lucide-react";
+import { FileBarChart2, Table2, TrendingUp, CalendarDays, Loader2, RefreshCw, AlertTriangle, Download, Upload, Database, FileSpreadsheet, Square } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, ResponsiveContainer,
 } from "recharts";
@@ -10,6 +10,18 @@ import { financialStatementApi } from "@/api/dashboard";
 // (Loss) Before Tax / Total Comprehensive Income always map to these three
 // slots in this order.
 const CHART_COLORS = { grossProfit: "#2a78d6", pbt: "#eb6834", tci: "#1baf7a" };
+
+// A stable empty-array reference for `x || []`-style fallbacks used inside
+// useMemo/useCallback dependency arrays — `[]` written inline creates a
+// brand new array (new identity) on every render even when nothing
+// meaningful changed, which useMemo/useEffect treat as "changed" and
+// recompute/refire for. That's what caused BalanceSheetPanel's infinite
+// load loop (see excelYears below): every load() call's own re-render
+// produced a fresh empty array, which cascaded into rangePeriods ->
+// periodList -> load being considered "new" again, which fired another
+// load() before the previous one had even settled — read by users as the
+// Refresh spinner never stopping and the panel visibly flickering.
+const EMPTY_ARRAY = Object.freeze([]);
 
 const NEU = {
   bg:          "#f1f5f9",
@@ -347,7 +359,7 @@ function BalanceSheetPanel({ periods, detail }) {
   // and never renders the toggle.
   const [source, setSource] = useState("oracle");
   const [excelStatus, setExcelStatus] = useState(null);
-  const excelYears = excelStatus?.years || [];
+  const excelYears = excelStatus?.years || EMPTY_ARRAY;
   const pickerYears = source === "excel" ? excelYears : years;
 
   // Single Period — the report date (renamed from "As of Period"), split
@@ -444,20 +456,41 @@ function BalanceSheetPanel({ periods, detail }) {
     return first && last ? last.period_year - first.period_year : 0;
   }, [growthMode, rangePeriods, asOf, periods, source]);
 
+  // Tracks the in-flight request so a newer one can cancel a still-running
+  // older one — without this, a slow response arriving late (e.g. after
+  // the user already changed a filter and a second request went out) could
+  // overwrite fresher data or flip loading back off/on out of order, which
+  // is what the spinner "never settling" / the panel flickering looks like
+  // from the outside. Only the request that's still current when it
+  // resolves is allowed to touch loading/data state.
+  const abortRef = useRef(null);
+
   const load = useCallback(async () => {
     if (!periodList.length) return;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoading(true); setError(null);
     try {
       const res = detail
-        ? await financialStatementApi.getBalanceSheetDetail(periodList, source === "oracle" ? accountGroup : "")
-        : await financialStatementApi.getBalanceSheet(periodList, source, source === "oracle" ? accountGroup : "");
+        ? await financialStatementApi.getBalanceSheetDetail(periodList, source === "oracle" ? accountGroup : "", controller.signal)
+        : await financialStatementApi.getBalanceSheet(periodList, source, source === "oracle" ? accountGroup : "", controller.signal);
+      if (abortRef.current !== controller) return; // superseded — a newer request is already in charge
       if (res.success) setData(res); else setError(res.error || "Failed to load");
     } catch (e) {
+      if (e?.code === "ERR_CANCELED" || e?.name === "CanceledError") return; // aborted — not a real error
+      if (abortRef.current !== controller) return;
       setError(e?.response?.data?.detail || e?.detail || String(e));
-    } finally { setLoading(false); }
+    } finally {
+      if (abortRef.current === controller) { setLoading(false); abortRef.current = null; }
+    }
   }, [periodList, detail, source, accountGroup]);
 
+  const stop = useCallback(() => { abortRef.current?.abort(); setLoading(false); }, []);
+
   useEffect(() => { load(); }, [load]);
+  useEffect(() => () => abortRef.current?.abort(), []); // cancel any pending request on unmount
 
   // Backend supplies pre-formatted column labels for both sources (GL
   // period_display_label for oracle, "Dec YYYY" / the file's own as-of
@@ -580,9 +613,15 @@ function BalanceSheetPanel({ periods, detail }) {
             </select>
           </div>
         )}
-        <button onClick={load} disabled={loading} style={BTN}>
-          {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
-        </button>
+        {loading ? (
+          <button onClick={stop} style={{ ...BTN, color: "#dc2626" }} title="Batalkan permintaan yang sedang berjalan">
+            <Square size={13} /> Stop
+          </button>
+        ) : (
+          <button onClick={load} style={BTN}>
+            <RefreshCw size={13} /> Refresh
+          </button>
+        )}
         <button onClick={handleExport} disabled={exporting || !data || source === "excel"} style={BTN}
           title={source === "excel" ? "Export Excel belum didukung untuk sumber data Excel" : undefined}>
           {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download Excel
@@ -594,14 +633,22 @@ function BalanceSheetPanel({ periods, detail }) {
         )}
       </div>
 
-      {growthMode === "cagr" && columnLabels.length > 1 && (
+      {!loading && growthMode === "cagr" && columnLabels.length > 1 && (
         <div style={{ fontSize: 11, color: "#64748b" }}>
           Membandingkan {rangePeriods.length} tahun ({columnLabels[0]} → {columnLabels[columnLabels.length - 1]}) — kolom growth memakai CAGR ({cagrYears} tahun).
         </div>
       )}
 
-      {loading && !data ? (
-        <div style={{ padding: 40, textAlign: "center", color: "#64748b" }}><Loader2 size={20} className="animate-spin" /></div>
+      {loading ? (
+        // Shown for every load (not just the first one, before `data`
+        // exists) — the table only ever appears once a request finishes,
+        // instead of leaving a stale table on screen while new columns/
+        // filters are still loading underneath it (mismatched headers vs.
+        // still-old values is what reads as the screen "blinking").
+        <div style={{ padding: 40, textAlign: "center", color: "#64748b" }}>
+          <Loader2 size={20} className="animate-spin" />
+          <p style={{ fontSize: 12, marginTop: 10 }}>Memuat data dari Oracle EBS — bisa beberapa detik untuk rentang tahun yang lebar.</p>
+        </div>
       ) : error ? (
         <div style={{ padding: 16, color: "#dc2626", fontSize: 13 }}>{error}</div>
       ) : data ? (
@@ -660,7 +707,7 @@ function ProfitLossPanel({ periods }) {
   // uploaded Excel snapshot (the "Profit or loss" sheet).
   const [source, setSource] = useState("oracle");
   const [excelStatus, setExcelStatus] = useState(null);
-  const pickerYears = source === "excel" ? (excelStatus?.years || []) : years;
+  const pickerYears = source === "excel" ? (excelStatus?.years || EMPTY_ARRAY) : years;
 
   // Period — the current/reporting fiscal year (analogous to Balance
   // Sheet's Single Period, year-only since a P&L column is a whole fiscal
