@@ -324,6 +324,7 @@ export const accountingApi = {
   getSummary:              () => api.get("/dashboard/accounting/summary"),
   getApOutstanding:        (p) => api.get("/dashboard/accounting/ap-outstanding", { params: p }),
   getArOutstanding:        (p) => api.get("/dashboard/accounting/ar-outstanding", { params: p }),
+  getArAging:              (p) => api.get("/dashboard/accounting/ar-aging", { params: p }),
   getInventoryRmPm:        (p) => api.get("/dashboard/accounting/inventory-rm-pm", { params: p }),
   exportInventoryRmPm:     (p) => api.get("/dashboard/accounting/inventory-rm-pm/export", { params: p, responseType: "blob" }),
   getItemCostComponents:   (period) => api.get("/dashboard/accounting/item-cost-components", { params: { period } }),

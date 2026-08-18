@@ -74,6 +74,22 @@ async def get_ar_outstanding(
     )
 
 
+@router.get("/ar-aging")
+async def get_ar_aging(
+    customer_name: str = Query(None, description="Partial customer name filter"),
+    limit:         int = Query(500, ge=1, le=2000, description="Max customer rows"),
+    user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
+):
+    """
+    AR Aging — open items (INV + DM + CM, same class filter as
+    ar-outstanding) grouped by customer into 5 buckets: Current, 1-30,
+    31-60, 61-90, >90 days overdue. Corporate-rate IDR converted, priced
+    as of today. Credit memos/returns net into whichever bucket their own
+    due_date falls into.
+    """
+    return await AccountingService().get_ar_aging(customer_name, limit)
+
+
 # ── COGS / Inventory RM PM ───────────────────────────────────────────────────
 
 @router.get("/inventory-rm-pm")

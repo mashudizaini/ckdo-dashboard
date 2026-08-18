@@ -524,6 +524,94 @@ class AccountingService:
             logger.error("ar_outstanding_error", error=str(e))
             return {"success": False, "error": str(e), "data": []}
 
+    async def get_ar_aging(self, customer_name: str = None, limit: int = 500) -> dict:
+        """
+        AR Aging — open items grouped by customer into 5 buckets (Current,
+        1-30, 31-60, 61-90, >90 days overdue), Corporate-rate IDR converted
+        and summed. class='CM' (credit memos / returns) is included in the
+        same grouping, so an open return nets against whichever bucket its
+        own due_date falls into instead of being excluded — "dikurangin
+        sales return" per request, same reasoning as get_ar_outstanding.
+        Priced as of today (this is inherently a today's-exposure report,
+        unlike get_ar_outstanding's optional date_to anchor).
+        """
+        limit = min(max(limit, 1), 2000)
+        where_extra = ""
+        params: dict = {}
+        if customer_name:
+            where_extra += " AND UPPER(hp.party_name) LIKE UPPER(:cust)"
+            params["cust"] = f"%{customer_name}%"
+
+        rate_case = """
+            CASE WHEN rct.invoice_currency_code = 'IDR' THEN 1
+            ELSE COALESCE((
+                SELECT gdr.conversion_rate FROM apps.gl_daily_rates gdr
+                WHERE  gdr.from_currency   = rct.invoice_currency_code
+                  AND  gdr.to_currency     = 'IDR'
+                  AND  gdr.conversion_type = 'Corporate'
+                  AND  gdr.conversion_date = (
+                      SELECT MAX(gdr2.conversion_date) FROM apps.gl_daily_rates gdr2
+                      WHERE  gdr2.from_currency   = rct.invoice_currency_code
+                        AND  gdr2.to_currency     = 'IDR'
+                        AND  gdr2.conversion_type = 'Corporate'
+                        AND  gdr2.conversion_date <= TRUNC(SYSDATE)
+                  )
+            ), 1) END
+        """
+
+        sql = f"""
+            SELECT
+                customer_name, account_number,
+                ROUND(SUM(CASE WHEN days_overdue <= 0                THEN remaining_idr ELSE 0 END), 2) AS current_amt,
+                ROUND(SUM(CASE WHEN days_overdue BETWEEN 1  AND 30   THEN remaining_idr ELSE 0 END), 2) AS d1_30,
+                ROUND(SUM(CASE WHEN days_overdue BETWEEN 31 AND 60   THEN remaining_idr ELSE 0 END), 2) AS d31_60,
+                ROUND(SUM(CASE WHEN days_overdue BETWEEN 61 AND 90   THEN remaining_idr ELSE 0 END), 2) AS d61_90,
+                ROUND(SUM(CASE WHEN days_overdue > 90                THEN remaining_idr ELSE 0 END), 2) AS over_90,
+                ROUND(SUM(remaining_idr), 2)                                                             AS total_idr,
+                COUNT(*)                                                                                 AS item_count
+            FROM (
+                SELECT
+                    hp.party_name                                    AS customer_name,
+                    hca.account_number,
+                    (TRUNC(SYSDATE) - aps.due_date)                  AS days_overdue,
+                    NVL(aps.amount_due_remaining, 0) * ({rate_case}) AS remaining_idr
+                FROM apps.ar_payment_schedules_all  aps
+                JOIN apps.ra_customer_trx_all        rct
+                    ON  rct.customer_trx_id  = aps.customer_trx_id
+                JOIN apps.hz_cust_accounts           hca
+                    ON  hca.cust_account_id  = rct.bill_to_customer_id
+                JOIN apps.hz_parties                 hp
+                    ON  hp.party_id          = hca.party_id
+                WHERE aps.class IN ('INV', 'DM', 'CM')
+                  AND aps.status = 'OP'
+                  {where_extra}
+            )
+            GROUP BY customer_name, account_number
+            ORDER BY total_idr DESC
+            FETCH FIRST {limit} ROWS ONLY
+        """
+        try:
+            rows = await asyncio.to_thread(self._query, sql, params)
+            clean = []
+            for r in rows:
+                clean.append({
+                    k: (float(v) if hasattr(v, "__float__") and not isinstance(v, (int, float, str, type(None), bool)) else v)
+                    for k, v in r.items()
+                })
+            totals = {
+                "current_amt": round(sum(r.get("current_amt", 0) for r in clean), 2),
+                "d1_30":       round(sum(r.get("d1_30", 0) for r in clean), 2),
+                "d31_60":      round(sum(r.get("d31_60", 0) for r in clean), 2),
+                "d61_90":      round(sum(r.get("d61_90", 0) for r in clean), 2),
+                "over_90":     round(sum(r.get("over_90", 0) for r in clean), 2),
+                "total_idr":   round(sum(r.get("total_idr", 0) for r in clean), 2),
+                "item_count":  sum(r.get("item_count", 0) for r in clean),
+            }
+            return {"success": True, "count": len(clean), "data": clean, "totals": totals}
+        except Exception as e:
+            logger.error("ar_aging_error", error=str(e))
+            return {"success": False, "error": str(e), "data": []}
+
     # ── Item Cost Components ─────────────────────────────────────────────────
 
     async def get_item_cost_components(self, period: str) -> dict:
