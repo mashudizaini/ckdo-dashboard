@@ -12,6 +12,7 @@ import HRDashboard from "@/pages/dashboard/HR";
 import PACDashboard from "@/pages/dashboard/PAC";
 import AccountingDashboard from "@/pages/dashboard/Accounting";
 import PurchasingDashboard from "@/pages/dashboard/Purchasing";
+import GeneralDashboard from "@/pages/dashboard/General";
 import EISDashboard from "@/pages/dashboard/EIS";
 
 // AI Tools Pages
@@ -98,6 +99,17 @@ export default function App() {
           element={
             <ProtectedRoute roles={["purchasing_staff", "admin"]}>
               <PurchasingDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="general/*"
+          element={
+            // No roles — reachable by any authenticated user. Sub-modules
+            // (Budget Monitoring) apply their own finer-grained access
+            // control server-side instead of a Keycloak role gate.
+            <ProtectedRoute>
+              <GeneralDashboard />
             </ProtectedRoute>
           }
         />

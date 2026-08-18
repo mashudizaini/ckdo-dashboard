@@ -1,0 +1,18 @@
+"""
+General Dashboard Router
+Route prefix : /api/v1/dashboard/general
+
+Unlike HR/IT/PAC/etc., this section is intentionally NOT gated to a single
+Keycloak role at the router level — it's meant to be reachable by any
+authenticated user, with each sub-module applying its own finer-grained
+access control instead. Budget Monitoring, for example, restricts by the
+caller's own team (see general_budget.py / budget_access_service.py)
+rather than by role.
+"""
+from fastapi import APIRouter
+from app.routers.dashboard import general_budget
+
+router = APIRouter()
+
+# Sub-router: budget monitoring (moved here from HRGA — see general_budget.py)
+router.include_router(general_budget.router, prefix="/budget", tags=["Dashboard - General Budget"])

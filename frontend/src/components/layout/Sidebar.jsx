@@ -29,7 +29,6 @@ const NAV_ITEMS = [
     { label: "Working Calendar", path: "/dashboard/hr/workingcalendar" },
     { label: "To Do List", path: "/dashboard/hr/todo" },
     { label: "E-Recruitment", path: "/dashboard/hr/cv" },
-    { label: "Budget Monitoring", path: "/dashboard/hr/budget" },
     { label: "e-Magazine", path: "/dashboard/hr/emagazine" },
   ] },
   { label: "PAC", path: "/dashboard/pac", icon: Factory, roles: ["pac_staff"], children: [
@@ -52,6 +51,13 @@ const NAV_ITEMS = [
     { label: "Monthly Spend", path: "/dashboard/purchasing/monthly-spend" },
     { label: "Active Suppliers", path: "/dashboard/purchasing/active-suppliers" },
     { label: "Manufacturer Master", path: "/dashboard/purchasing/manufacturer-master" },
+  ] },
+  // No roles — reachable by any authenticated user (matches AI_ITEMS'
+  // convention below). Sub-modules apply their own access control instead
+  // of a Keycloak role gate — Budget Monitoring restricts by the caller's
+  // own team, resolved server-side.
+  { label: "General", path: "/dashboard/general", icon: LayoutGrid, roles: [], children: [
+    { label: "Budget Monitoring", path: "/dashboard/general/budget" },
   ] },
 ];
 

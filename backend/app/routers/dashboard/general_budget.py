@@ -1,10 +1,24 @@
 """
 Budget Monitoring Router
-Route prefix : /api/v1/dashboard/hr/budget
-Required role: hr_staff OR admin
+Route prefix : /api/v1/dashboard/general/budget
+Required role: any authenticated user
 
-Semua endpoint menerima parameter ?dept=<kode_dept>
-sehingga modul ini bisa dipakai untuk semua department, tidak hanya HRGA.
+Moved here from HRGA (was /dashboard/hr/budget) — this module has always
+accepted an arbitrary ?dept=<kode_dept>, so it was never really an HRGA-only
+concern (see budget_service.py's own docstring). Access is now controlled
+per-user instead of per-role: each caller can only query their own team's
+department code (resolved via budget_access_service.resolve_budget_access,
+which matches their login to an Employee row and looks up that team's
+Oracle dept_code) — except the IT team and a short list of exempted users
+(see EXEMPT_USERNAMES in budget_access_service.py), who can query any dept.
+
+  GET /my-access   — the caller's own access: {allowed_all, dept_code, dept_name}
+  GET /departments — full LOV (unrestricted — just codes/names, not financial data)
+  GET /years       — restricted to the caller's own dept unless allowed_all
+  GET ""           — restricted (budget summary)
+  GET /account/{code} — restricted (account drill-down)
+  GET /export      — restricted (Excel export)
+  GET /debug       — restricted (diagnostic query)
 """
 import io
 from typing import Optional
@@ -12,14 +26,35 @@ from typing import Optional
 import openpyxl
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_oracle_connection
-from app.dependencies import require_role, CurrentUser, Roles
+from app.database import get_oracle_connection, get_db
+from app.dependencies import get_current_user, CurrentUser
 from app.services.budget_service import BudgetService, DEPT_COL, ACCOUNT_COL
+from app.services.budget_access_service import resolve_budget_access
 import asyncio
 
 router = APIRouter()
 MONTH_NAMES = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"]
+
+
+async def _enforce_dept_access(user: CurrentUser, dept: str, db: AsyncSession) -> None:
+    access = await resolve_budget_access(user, db)
+    if access["allowed_all"]:
+        return
+    if not access["dept_code"] or dept != access["dept_code"]:
+        raise HTTPException(403, "You can only view budget for your own team.")
+
+
+# ── GET /my-access — the caller's own team/permission, for the frontend's
+#    Team selector (disabled + defaulted unless allowed_all) ────────────────
+
+@router.get("/my-access")
+async def get_my_access(
+    user: CurrentUser = Depends(get_current_user),
+    db:   AsyncSession = Depends(get_db),
+):
+    return await resolve_budget_access(user, db)
 
 
 # ── GET /debug — cek ketersediaan data di GL_BALANCES ────────────────────────
@@ -28,12 +63,15 @@ MONTH_NAMES = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov"
 async def debug_gl_balance(
     dept: str          = Query(...),
     year: int          = Query(...),
-    user: CurrentUser  = Depends(require_role(Roles.HR)),
+    user: CurrentUser  = Depends(get_current_user),
+    db:   AsyncSession = Depends(get_db),
 ):
     """
     Endpoint diagnostik — cek apa yang ada di GL_BALANCES untuk dept+year.
-    Akses: /api/v1/dashboard/hr/budget/debug?dept=10&year=2026
+    Akses: /api/v1/dashboard/general/budget/debug?dept=10&year=2026
     """
+    await _enforce_dept_access(user, dept, db)
+
     def _run():
         with get_oracle_connection() as conn:
             cur = conn.cursor()
@@ -99,9 +137,11 @@ async def debug_gl_balance(
 
 @router.get("/departments")
 async def get_departments(
-    user: CurrentUser = Depends(require_role(Roles.HR)),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    """Daftar department dari Oracle (CKDO_GL_COA_DEPARTMENT value set)."""
+    """Daftar department dari Oracle (CKDO_GL_COA_DEPARTMENT value set) —
+    unrestricted (codes/names only, no financial data) so a restricted
+    user's Team selector can still show their own department's name."""
     result = await BudgetService().get_departments()
     return result["data"] if result["success"] else []
 
@@ -111,9 +151,11 @@ async def get_departments(
 @router.get("/years")
 async def get_available_years(
     dept: str          = Query(..., description="Kode department, contoh: HRGA"),
-    user: CurrentUser  = Depends(require_role(Roles.HR)),
+    user: CurrentUser  = Depends(get_current_user),
+    db:   AsyncSession = Depends(get_db),
 ):
     """Daftar tahun yang ada data budget untuk department tertentu di Oracle GL."""
+    await _enforce_dept_access(user, dept, db)
     result = await BudgetService().get_available_years(dept)
     return result["data"] if result["success"] else []
 
@@ -126,9 +168,11 @@ async def get_budget_summary(
     year:    int           = Query(...),
     month:   Optional[int] = Query(None, description="Year-To-Date sampai bulan ini (mis. 3 = Jan-Mar); kosong = satu tahun penuh"),
     account: Optional[str] = Query(None, description="Kode akun (segment4) — kosong = semua akun department"),
-    user:    CurrentUser   = Depends(require_role(Roles.HR)),
+    user:    CurrentUser   = Depends(get_current_user),
+    db:      AsyncSession  = Depends(get_db),
 ):
     """Ringkasan budget vs realisasi per akun untuk dept + tahun (opsional bulan YTD + akun)."""
+    await _enforce_dept_access(user, dept, db)
     return await BudgetService().get_summary(dept, year, month, account)
 
 
@@ -140,9 +184,11 @@ async def get_account_detail(
     dept:  str           = Query(...),
     year:  int           = Query(...),
     month: Optional[int] = Query(None, description="Tampilkan periode Jan s.d. bulan ini saja — samakan dengan filter bulan di ringkasan"),
-    user:  CurrentUser   = Depends(require_role(Roles.HR)),
+    user:  CurrentUser   = Depends(get_current_user),
+    db:    AsyncSession  = Depends(get_db),
 ):
     """Rincian per periode (Period Balances YTDE) untuk 1 akun dalam 1 department."""
+    await _enforce_dept_access(user, dept, db)
     return await BudgetService().get_account_detail(dept, account_code, year, month)
 
 
@@ -154,9 +200,11 @@ async def export_budget(
     year:    int           = Query(...),
     month:   Optional[int] = Query(None),
     account: Optional[str] = Query(None),
-    user:    CurrentUser   = Depends(require_role(Roles.HR)),
+    user:    CurrentUser   = Depends(get_current_user),
+    db:      AsyncSession  = Depends(get_db),
 ):
     """Export ringkasan Budget vs Realisasi ke Excel — layout sama dengan Oracle Funds Available Inquiry."""
+    await _enforce_dept_access(user, dept, db)
     result = await BudgetService().get_summary(dept, year, month, account)
     accounts = result.get("accounts", [])
     summary  = result.get("summary", {})

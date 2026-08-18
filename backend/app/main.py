@@ -34,7 +34,7 @@ from app.models.vpn_monitor import init_vpn_db
 from app.models.hikcentral import init_hikcentral_db
 
 # ── Dashboard Routers ──
-from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement
+from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement, general
 from app.routers.dashboard import ebs_backup
 from app.routers.dashboard import vpn_monitor
 from app.routers.dashboard import it_hikcentral
@@ -209,6 +209,7 @@ app.include_router(accounting.router, prefix=f"{API_PREFIX}/dashboard/accounting
 app.include_router(ap_invoice.router,  prefix=f"{API_PREFIX}/dashboard/accounting/ap-invoice", tags=["Dashboard - AP Invoice"])
 app.include_router(financial_statement.router, prefix=f"{API_PREFIX}/dashboard/accounting/financial-statement", tags=["Dashboard - Financial Statement"])
 app.include_router(purchasing.router, prefix=f"{API_PREFIX}/dashboard/purchasing", tags=["Dashboard - Purchasing"])
+app.include_router(general.router,    prefix=f"{API_PREFIX}/dashboard/general",    tags=["Dashboard - General"])
 
 # EIS Dashboard — ported from the standalone eis-dashboard-v2 app.
 # Viewing/editing gated to management (+ admin, always implicitly allowed by
