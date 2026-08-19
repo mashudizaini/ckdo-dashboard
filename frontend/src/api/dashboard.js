@@ -342,18 +342,23 @@ export const financialStatementApi = {
       ? { source, years: years.join(",") }
       : { source, columns: JSON.stringify(columns) },
   }),
-  getProfitLossMonthly:  ({ periodThis, ytdThis, periodLast, ytdLast } = {}, source = "oracle") =>
+  getProfitLossMonthly:  ({ periodThis, ytdThis, periodLast, ytdLast, month, year } = {}, source = "oracle") =>
     api.get("/dashboard/accounting/financial-statement/profit-loss-monthly", {
       params: source === "excel"
-        ? { source }
+        ? { source, month: month || undefined, year: year || undefined }
         : { source, period_this: periodThis, ytd_this: ytdThis.join(","), period_last: periodLast, ytd_last: ytdLast.join(",") },
     }),
+  // profit_loss_monthly only — every stored (month, year) snapshot, newest
+  // first, unlike every other report_type which only ever has one upload.
+  getProfitLossMonthlySnapshots: () => api.get("/dashboard/accounting/financial-statement/profit-loss-monthly/snapshots"),
   // Excel-only — no live Oracle equivalent (a statutory cash flow isn't a
   // direct GL_BALANCES query, it's manually derived each period).
   getCashFlow: (years, signal) => api.get("/dashboard/accounting/financial-statement/cash-flow", { params: { years: years.join(",") }, signal }),
   // Excel upload source (transition from manual reporting to Oracle) —
-  // reportType: balance_sheet | profit_loss | profit_loss_monthly | cash_flow
-  getUploadStatus: (reportType) => api.get("/dashboard/accounting/financial-statement/upload-status", { params: { report_type: reportType } }),
+  // reportType: balance_sheet | profit_loss | profit_loss_monthly | cash_flow.
+  // month/year are profit_loss_monthly-only (which stored snapshot to show
+  // status for); ignored server-side for every other reportType.
+  getUploadStatus: (reportType, month, year) => api.get("/dashboard/accounting/financial-statement/upload-status", { params: { report_type: reportType, month: month || undefined, year: year || undefined } }),
   uploadExcel: (reportType, file) => {
     const fd = new FormData();
     fd.append("file", file);

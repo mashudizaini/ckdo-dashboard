@@ -439,22 +439,25 @@ function fmtUploadTs(iso) {
   } catch { return iso; }
 }
 
-function FsSourceControl({ reportType, source, setSource, onStatus, onUploaded }) {
+function FsSourceControl({ reportType, source, setSource, onStatus, onUploaded, month, year }) {
   const [status, setStatus] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState(null);
   const [showFormatGuide, setShowFormatGuide] = useState(false);
   const fileRef = useRef(null);
 
+  // month/year are profit_loss_monthly-only — which stored snapshot's
+  // upload metadata to show ("Last uploaded: ... for June 2026"). Every
+  // other reportType passes neither, and the backend ignores them anyway.
   const loadStatus = useCallback(async () => {
     try {
-      const res = await financialStatementApi.getUploadStatus(reportType);
+      const res = await financialStatementApi.getUploadStatus(reportType, month, year);
       const data = res.success ? res.data : null;
       setStatus(data);
       onStatus?.(data);
     } catch (e) { /* upload status is informational only */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportType]);
+  }, [reportType, month, year]);
 
   useEffect(() => { loadStatus(); }, [loadStatus]);
 
@@ -1209,13 +1212,15 @@ function ProfitLossMonthlyPanel({ periods }) {
   const latest = useMemo(() => latestActivePeriod(periods), [periods]);
 
   // Data source toggle — Oracle (live MTD/YTD this-vs-last-year query) vs
-  // the last uploaded Excel snapshot (the "PL_monthly" sheet). Excel mode
-  // has no Period selector: the uploaded file is a single fixed MTD/YTD
-  // comparison as of whatever date it was saved at, not a range to pick
-  // from — its own date_last/date_this drive the header instead of GL
-  // periods.
+  // an uploaded Excel snapshot (the "PL_monthly" sheet). Unlike the other
+  // 3 Excel-backed reports, profit_loss_monthly stores one snapshot PER
+  // MONTH (not just the single most-recent upload), so Excel mode gets
+  // its own Month+Year picker below, populated from whichever snapshots
+  // actually exist — not a blind 12-month list.
   const [source, setSource] = useState(SHOW_ORACLE_SOURCE ? "oracle" : "excel");
-  const [excelStatus, setExcelStatus] = useState(null);
+  const [snapshots, setSnapshots] = useState([]); // [{month, year, uploaded_at}], newest first
+  const [excelMonth, setExcelMonth] = useState("");
+  const [excelYear, setExcelYear] = useState("");
 
   const [period, setPeriod] = useState("");
   const [data, setData] = useState(null);
@@ -1224,6 +1229,25 @@ function ProfitLossMonthlyPanel({ periods }) {
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => { if (latest && !period) setPeriod(latest.period_name); }, [latest]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadSnapshots = useCallback(async () => {
+    try {
+      const res = await financialStatementApi.getProfitLossMonthlySnapshots();
+      const list = res.success ? (res.data || []) : [];
+      setSnapshots(list);
+      if (list.length) { setExcelMonth(list[0].month); setExcelYear(list[0].year); }
+    } catch (e) { /* snapshot list is informational — load() below still reports its own error */ }
+  }, []);
+
+  useEffect(() => { if (source === "excel") loadSnapshots(); }, [source, loadSnapshots]);
+
+  // Years/months actually available, for the two selects below — years
+  // sorted newest first, months for the selected year sorted Jan-Dec.
+  const excelYears = useMemo(() => [...new Set(snapshots.map(s => s.year))].sort((a, b) => b - a), [snapshots]);
+  const excelMonthsForYear = useMemo(
+    () => snapshots.filter(s => s.year === excelYear).map(s => s.month).sort((a, b) => a - b),
+    [snapshots, excelYear],
+  );
 
   const buildParams = useCallback(() => {
     const p = periods.find(x => x.period_name === period);
@@ -1239,7 +1263,7 @@ function ProfitLossMonthlyPanel({ periods }) {
     if (source === "excel") {
       setLoading(true); setError(null);
       try {
-        const res = await financialStatementApi.getProfitLossMonthly({}, "excel");
+        const res = await financialStatementApi.getProfitLossMonthly({ month: excelMonth, year: excelYear }, "excel");
         if (res.success) setData(res); else setError(res.error || "Failed to load");
       } catch (e) {
         setError(e?.response?.data?.detail || e?.detail || String(e));
@@ -1256,7 +1280,12 @@ function ProfitLossMonthlyPanel({ periods }) {
     } catch (e) {
       setError(e?.response?.data?.detail || e?.detail || String(e));
     } finally { setLoading(false); }
-  }, [period, buildParams, source]);
+  }, [period, buildParams, source, excelMonth, excelYear]);
+
+  // A fresh upload may add a new month — refresh the snapshot list (and
+  // jump to the newest one) instead of just reloading the still-selected
+  // month's data, so the new upload is actually reachable afterward.
+  const handleUploaded = useCallback(() => { loadSnapshots(); }, [loadSnapshots]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1317,7 +1346,8 @@ function ProfitLossMonthlyPanel({ periods }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <FsSourceControl
         reportType="profit_loss_monthly" source={source} setSource={setSource}
-        onStatus={setExcelStatus} onUploaded={load}
+        onUploaded={source === "excel" ? handleUploaded : load}
+        month={source === "excel" ? excelMonth : undefined} year={source === "excel" ? excelYear : undefined}
       />
       <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
         {source === "oracle" ? (
@@ -1329,10 +1359,31 @@ function ProfitLossMonthlyPanel({ periods }) {
               ))}
             </select>
           </div>
+        ) : snapshots.length ? (
+          <>
+            <div>
+              <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Year</label>
+              <select style={SELECT} value={excelYear} onChange={e => {
+                const y = Number(e.target.value);
+                setExcelYear(y);
+                const months = snapshots.filter(s => s.year === y).map(s => s.month);
+                if (!months.includes(excelMonth)) setExcelMonth(Math.max(...months));
+              }}>
+                {excelYears.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Month</label>
+              <select style={SELECT} value={excelMonth} onChange={e => setExcelMonth(Number(e.target.value))}>
+                {excelMonthsForYear.map(m => <option key={m} value={m}>{MONTH_LABEL[MONTHS[m - 1]] || MONTHS[m - 1]}</option>)}
+              </select>
+            </div>
+            <span style={{ fontSize: 11, color: "#64748b" }}>
+              {headerDates.last} vs {headerDates.this}
+            </span>
+          </>
         ) : (
-          <span style={{ fontSize: 11, color: "#64748b" }}>
-            {excelStatus ? `Uploaded snapshot: ${headerDates.last} vs ${headerDates.this}` : "No Excel data uploaded yet"}
-          </span>
+          <span style={{ fontSize: 11, color: "#94a3b8" }}>No Excel data uploaded yet</span>
         )}
         <button onClick={load} disabled={loading} style={BTN}>
           {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
