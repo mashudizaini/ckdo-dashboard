@@ -603,7 +603,7 @@ function AROutstandingPanel() {
   const [dateFrom,       setDateFrom]       = useState("");
   const [dateTo,         setDateTo]         = useState("");
   const [statusFilter,   setStatusFilter]   = useState("OP");
-  const [limit,          setLimit]          = useState(500);
+  const [limit,          setLimit]          = useState(100);
   const [asOfDate,       setAsOfDate]       = useState("");
   const [usdRate,        setUsdRate]        = useState("");
   const [rateInfo,       setRateInfo]       = useState(null); // { date, source }
@@ -612,10 +612,8 @@ function AROutstandingPanel() {
   const [loading,        setLoading]        = useState(false);
   const [error,          setError]          = useState(null);
   const [search,         setSearch]         = useState("");
-  const [page,           setPage]           = useState(1);
   const [sort,           setSort]           = useState({ key: null, dir: "asc" });
 
-  const AR_PAGE_SIZE = 10;
   const AR_NUMERIC_KEYS = ["original_amount", "remaining_amount", "conversion_rate", "remaining_amount_idr", "days_overdue"];
 
   const loadBiRate = useCallback(async () => {
@@ -650,7 +648,7 @@ function AROutstandingPanel() {
         ...(asOfDate      && { as_of_date:      asOfDate      }),
       };
       const res = await accountingApi.getArOutstanding(params);
-      if (res.success) { setData(res); setPage(1); }
+      if (res.success) { setData(res); }
       else { setError(res.error || "Failed to load"); setData(null); }
     } catch (e) {
       setError(e?.response?.data?.detail || String(e)); setData(null);
@@ -658,7 +656,6 @@ function AROutstandingPanel() {
   }, [customerName, invoiceNumber, dateFrom, dateTo, statusFilter, limit, usdRate, asOfDate]);
 
   const toggleSort = (key) => {
-    setPage(1);
     setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
   };
 
@@ -683,8 +680,6 @@ function AROutstandingPanel() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, search, sort]);
-
-  const pagedRows = rows.slice((page - 1) * AR_PAGE_SIZE, page * AR_PAGE_SIZE);
 
   const INPUT = { padding: "7px 11px", borderRadius: 9, border: "none", fontSize: 12, background: NEU.bg, boxShadow: NEU.shadowIn, color: "#1e293b", outline: "none" };
 
@@ -857,7 +852,7 @@ function AROutstandingPanel() {
         <>
           {/* Client-side search */}
           <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-            <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
+            <input value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Filter results by customer / invoice / account…"
               style={{ ...INPUT, width: 320 }} />
             <span style={{ fontSize: 11, color: "#94a3b8" }}>
@@ -865,7 +860,8 @@ function AROutstandingPanel() {
             </span>
           </div>
 
-          {/* Table */}
+          {/* Table — no pagination: all fetched rows (up to Limit) render
+              in one continuous table, page scrolls naturally. */}
           <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1620 }}>
@@ -879,21 +875,20 @@ function AROutstandingPanel() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pagedRows.length === 0 ? (
+                  {rows.length === 0 ? (
                     <tr>
                       <td colSpan={AR_HEADERS.length + 1} style={{ padding: "40px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
                         No records found
                       </td>
                     </tr>
-                  ) : pagedRows.map((r, i) => {
-                    const globalIndex = (page - 1) * AR_PAGE_SIZE + i;
+                  ) : rows.map((r, i) => {
                     return (
-                    <tr key={globalIndex}
+                    <tr key={i}
                       style={{ background: rowBg(r) || (i % 2 === 0 ? "#f8fafc" : "#f1f5f9") }}
                       onMouseEnter={e => e.currentTarget.style.background = "rgba(245,158,11,0.08)"}
                       onMouseLeave={e => e.currentTarget.style.background = rowBg(r) || (i % 2 === 0 ? "#f8fafc" : "#f1f5f9")}
                     >
-                      <td style={{ ...TD, color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>{globalIndex + 1}</td>
+                      <td style={{ ...TD, color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>{i + 1}</td>
                       <td style={{ ...TD, fontWeight: 700, color: "#1e293b", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.customer_name}>{r.customer_name}</td>
                       <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.account_number}</td>
                       <td style={{ ...TD, fontFamily: "monospace", fontWeight: 700, color: "#2563eb", whiteSpace: "nowrap" }}>{r.invoice_number}</td>
@@ -923,9 +918,6 @@ function AROutstandingPanel() {
                 </tbody>
               </table>
             </div>
-            {rows.length > 0 && (
-              <Pagination total={rows.length} page={page} onPage={setPage} pageSize={AR_PAGE_SIZE} />
-            )}
           </div>
         </>
       )}
