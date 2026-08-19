@@ -74,10 +74,18 @@ function fmtIdr(v) {
   return n < 0 ? `(${s})` : s;
 }
 
+// AP Outstanding number format: English (comma thousands, period decimal),
+// decimals shown only for non-IDR (foreign-currency native) amounts.
+function fmtNumAp(v, isIdr = true) {
+  if (v === null || v === undefined || v === "-") return "-";
+  const n = Number(v);
+  if (isNaN(n)) return v;
+  return n.toLocaleString("en-US", { minimumFractionDigits: isIdr ? 0 : 2, maximumFractionDigits: isIdr ? 0 : 2 });
+}
+
 /* ─── AP Outstanding Panel ───────────────────────────────────────────────── */
 
 const AP_HEADERS = [
-  { key: "operating_unit",       label: "Operating Unit",    width: 140 },
   { key: "supplier_name",        label: "Supplier",          width: 180 },
   { key: "transaction_type",     label: "Type",              width: 60  },
   { key: "transaction_number",   label: "Invoice No",        width: 130 },
@@ -115,9 +123,8 @@ function APOutstandingPanel() {
   const today = new Date().toISOString().slice(0, 10);
   const [asOfDate,       setAsOfDate]       = useState(today);
   const [supplierName,   setSupplierName]   = useState("");
-  const [ouFilter,       setOuFilter]       = useState("");
   const [payStatusFilter,setPayStatusFilter] = useState("ALL");
-  const [limit,          setLimit]          = useState(500);
+  const [limit,          setLimit]          = useState(100);
   const [usdRate,        setUsdRate]        = useState("");
   const [eurRate,        setEurRate]        = useState("");
   const [rateInfo,       setRateInfo]       = useState(null); // { date, source }
@@ -126,10 +133,8 @@ function APOutstandingPanel() {
   const [loading,        setLoading]        = useState(false);
   const [error,          setError]          = useState(null);
   const [search,         setSearch]         = useState("");
-  const [page,           setPage]           = useState(1);
   const [sort,           setSort]           = useState({ key: null, dir: "asc" });
 
-  const AP_PAGE_SIZE = 10;
   const AP_NUMERIC_KEYS = ["original_amount_idr", "remaining_amount_idr", "original_amount_orig", "remaining_amount_orig"];
 
   const loadBiRate = useCallback(async () => {
@@ -160,21 +165,19 @@ function APOutstandingPanel() {
         limit,
         ...(asOfDate      && { as_of_date:      asOfDate      }),
         ...(supplierName  && { supplier_name:   supplierName  }),
-        ...(ouFilter      && { operating_unit:  ouFilter      }),
         ...(payStatusFilter && payStatusFilter !== "ALL" && { payment_status: payStatusFilter }),
         ...(usdRate       && { usd_rate:        Number(usdRate) }),
         ...(eurRate       && { eur_rate:        Number(eurRate) }),
       };
       const res = await accountingApi.getApOutstanding(params);
-      if (res.success) { setData(res); setPage(1); }
+      if (res.success) { setData(res); }
       else { setError(res.error || "Failed to load"); setData(null); }
     } catch (e) {
       setError(e?.response?.data?.detail || String(e)); setData(null);
     } finally { setLoading(false); }
-  }, [asOfDate, supplierName, ouFilter, payStatusFilter, limit, usdRate, eurRate]);
+  }, [asOfDate, supplierName, payStatusFilter, limit, usdRate, eurRate]);
 
   const toggleSort = (key) => {
-    setPage(1);
     setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
   };
 
@@ -184,8 +187,7 @@ function APOutstandingPanel() {
     return (r.supplier_name        || "").toLowerCase().includes(q)
         || (r.transaction_number   || "").toLowerCase().includes(q)
         || (r.coa                  || "").toLowerCase().includes(q)
-        || (r.coa_descpt           || "").toLowerCase().includes(q)
-        || (r.operating_unit       || "").toLowerCase().includes(q);
+        || (r.coa_descpt           || "").toLowerCase().includes(q);
   }) ?? [];
 
   const rows = useMemo(() => {
@@ -200,8 +202,6 @@ function APOutstandingPanel() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, search, sort]);
-
-  const pagedRows = rows.slice((page - 1) * AP_PAGE_SIZE, page * AP_PAGE_SIZE);
 
   const INPUT = { padding: "7px 11px", borderRadius: 9, border: "none", fontSize: 12, background: NEU.bg, boxShadow: NEU.shadowIn, color: "#1e293b", outline: "none" };
 
@@ -273,12 +273,6 @@ function APOutstandingPanel() {
             onKeyDown={e => e.key === "Enter" && loadData()} />
         </div>
         <div>
-          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Operating Unit</p>
-          <input value={ouFilter} onChange={e => setOuFilter(e.target.value)}
-            placeholder="Filter OU…" style={{ ...INPUT, width: 150 }}
-            onKeyDown={e => e.key === "Enter" && loadData()} />
-        </div>
-        <div>
           <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Pay Status</p>
           <select value={payStatusFilter} onChange={e => setPayStatusFilter(e.target.value)} style={{ ...INPUT, width: 140, cursor: "pointer" }}>
             <option value="ALL">All Outstanding</option>
@@ -332,8 +326,8 @@ function APOutstandingPanel() {
             { label: "Total Invoices",       val: (data?.count || 0).toLocaleString(),               color: "#3b82f6" },
             { label: "Not Paid",             val: (sm?.not_paid_count    || 0).toLocaleString(),    color: "#dc2626" },
             { label: "Partially Paid",       val: (sm?.partial_paid_count|| 0).toLocaleString(),    color: "#d97706" },
-            { label: "Total Outstanding",    val: "Rp " + fmtNum(sm?.total_outstanding_idr || 0),   color: "#2563eb" },
-            { label: "Total After Revaluation", val: "Rp " + fmtNum(sm?.total_after_revaluation_idr || 0), color: "#dc2626" },
+            { label: "Total Outstanding",    val: "Rp " + fmtNumAp(sm?.total_outstanding_idr || 0),   color: "#2563eb" },
+            { label: "Total After Revaluation", val: "Rp " + fmtNumAp(sm?.total_after_revaluation_idr || 0), color: "#dc2626" },
           ].map(c => (
             <div key={c.label} style={{ background: NEU.bg, borderRadius: 12, padding: "10px 14px", boxShadow: NEU.shadowOutSm }}>
               <p style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{c.label}</p>
@@ -353,18 +347,19 @@ function APOutstandingPanel() {
         <>
           {/* Client-side search */}
           <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-            <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
-              placeholder="Filter by supplier / invoice / COA / OU…"
+            <input value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Filter by supplier / invoice / COA…"
               style={{ ...INPUT, width: 340 }} />
             <span style={{ fontSize: 11, color: "#94a3b8" }}>
               Showing {rows.length.toLocaleString()} of {data.count.toLocaleString()} rows
             </span>
           </div>
 
-          {/* Table */}
+          {/* Table — no pagination: all fetched rows (up to Limit) render
+              in one continuous table, page scrolls naturally. */}
           <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1800 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1660 }}>
                 <thead>
                   <tr style={{ background: "linear-gradient(135deg,#1e3a5f,#1e40af)" }}>
                     <th style={{ ...TH, color: "#bfdbfe", background: "transparent", fontSize: 9.5 }}>#</th>
@@ -375,22 +370,20 @@ function APOutstandingPanel() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pagedRows.length === 0 ? (
+                  {rows.length === 0 ? (
                     <tr>
                       <td colSpan={AP_HEADERS.length + 1} style={{ padding: "40px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
                         No records found
                       </td>
                     </tr>
-                  ) : pagedRows.map((r, i) => {
-                    const globalIndex = (page - 1) * AP_PAGE_SIZE + i;
+                  ) : rows.map((r, i) => {
                     return (
-                    <tr key={globalIndex}
+                    <tr key={i}
                       style={{ background: rowBg(r, i) }}
                       onMouseEnter={e => e.currentTarget.style.background = "rgba(59,130,246,0.07)"}
                       onMouseLeave={e => e.currentTarget.style.background = rowBg(r, i)}
                     >
-                      <td style={{ ...TD, color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>{globalIndex + 1}</td>
-                      <td style={{ ...TD, fontSize: 11, maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.operating_unit}>{r.operating_unit}</td>
+                      <td style={{ ...TD, color: "#94a3b8", fontSize: 10, fontFamily: "monospace" }}>{i + 1}</td>
                       <td style={{ ...TD, fontWeight: 700, color: "#1e293b", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.supplier_name}>{r.supplier_name}</td>
                       <td style={{ ...TD, fontSize: 11 }}>{r.transaction_type}</td>
                       <td style={{ ...TD, fontFamily: "monospace", fontWeight: 700, color: "#2563eb", whiteSpace: "nowrap" }}>{r.transaction_number}</td>
@@ -401,10 +394,10 @@ function APOutstandingPanel() {
                       <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.coa_number}</td>
                       <td style={{ ...TD, fontSize: 11, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.coa_descpt}>{r.coa_descpt}</td>
                       <td style={{ ...TD }}>{payBadge(r.payment_status)}</td>
-                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>{fmtNum(r.original_amount_idr)}</td>
-                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: r.remaining_amount_idr > 0 ? "#dc2626" : "#16a34a" }}>{fmtNum(r.remaining_amount_idr)}</td>
-                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#64748b" }}>{r.original_amount_orig != null ? fmtNum(r.original_amount_orig) : "—"}</td>
-                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#64748b" }}>{r.remaining_amount_orig != null ? fmtNum(r.remaining_amount_orig) : "—"}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>{fmtNumAp(r.original_amount_idr, true)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: r.remaining_amount_idr > 0 ? "#dc2626" : "#16a34a" }}>{fmtNumAp(r.remaining_amount_idr, true)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#64748b" }}>{r.original_amount_orig != null ? fmtNumAp(r.original_amount_orig, false) : "—"}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#64748b" }}>{r.remaining_amount_orig != null ? fmtNumAp(r.remaining_amount_orig, false) : "—"}</td>
                       <td style={{ ...TD, fontSize: 11, color: "#64748b", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.description}>{r.description}</td>
                     </tr>
                     );
@@ -412,9 +405,6 @@ function APOutstandingPanel() {
                 </tbody>
               </table>
             </div>
-            {rows.length > 0 && (
-              <Pagination total={rows.length} page={page} onPage={setPage} pageSize={AP_PAGE_SIZE} />
-            )}
           </div>
         </>
       )}
