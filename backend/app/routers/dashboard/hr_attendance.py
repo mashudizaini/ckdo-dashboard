@@ -1266,12 +1266,14 @@ async def get_today_attendance_issues(
     ever showed Administration and Plant since those are the only
     departments with attendance data most days).
 
-    Late/Sick Leave/Unpaid Leave are mutually exclusive per employee per
-    day in this data model (Late requires a check-in; Sick/Unpaid Leave
-    are leave_code-based, meaning no check-in), so Total is realistically
-    always 1 for any row here — confirmed with the user as an accepted
-    simplification (% = Total / 3 categories) rather than modeling a
-    richer multi-day rate. Employees with no issue that day (Total=0)
+    Late/Sick Leave/Unpaid Leave are usually mutually exclusive per
+    employee per day (Late requires a check-in; Sick/Unpaid Leave are
+    leave_code-based, meaning no check-in) so Total is usually 1, but real
+    data has rows with both a late check-in AND a same-day leave_code set
+    (verified live, e.g. a half-day sick leave with a late morning
+    check-in) — Total can be 2 or 3. rate = Total / 3 categories, an
+    accepted simplification confirmed with the user rather than modeling
+    a richer multi-day rate. Employees with no issue that day (Total=0)
     are omitted — same "only show exceptions" convention as Who's Off.
     """
     today = date.today()

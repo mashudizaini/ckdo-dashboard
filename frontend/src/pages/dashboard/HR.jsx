@@ -3118,6 +3118,7 @@ function AttendanceTodaySection() {
   const curYear = new Date().getFullYear();
   const [data,        setData]        = useState(null);
   const [loading,     setLoading]     = useState(false);
+  const [issuesData,  setIssuesData]  = useState(null);
   const [innerTab,    setInnerTab]    = useState("today");
   const [teamData,    setTeamData]    = useState(null);
   const [teamYear,    setTeamYear]    = useState(curYear);
@@ -3144,8 +3145,12 @@ function AttendanceTodaySection() {
     setLoading(true);
     try {
       const params = targetDate ? `?target_date=${targetDate}` : "";
-      const res = await fetch(`${ATT_API}/today${params}`, { headers });
+      const [res, issuesRes] = await Promise.all([
+        fetch(`${ATT_API}/today${params}`, { headers }),
+        fetch(`${ATT_API}/today/attendance-issues${params}`, { headers }),
+      ]);
       if (res.ok) setData(await res.json());
+      setIssuesData(issuesRes.ok ? await issuesRes.json() : null);
     } catch (_) {}
     finally { setLoading(false); }
   };
@@ -3425,38 +3430,55 @@ function AttendanceTodaySection() {
                   </div>
                 )}
 
-                {/* Table per department */}
+                {/* Table per employee — Late / Sick Leave / Unpaid Leave for
+                    the selected date (replaces the old per-department
+                    Total/Present/Absent/Rate table, which only ever showed
+                    Administration and Plant). Only employees with at least
+                    one issue that day are listed, same convention as
+                    Who's Off. */}
                 <div className="overflow-x-auto rounded-lg border border-gray-800">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-gray-800/60">
-                        <SortableTH label="Department" field="department" sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} className="px-3 py-2.5 text-xs" />
-                        <SortableTH label="Total"       field="total"     sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} className="px-3 py-2.5 text-xs" />
-                        <SortableTH label="Present"     field="hadir"     sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} className="px-3 py-2.5 text-xs" />
-                        <SortableTH label="Absent"      field="absen"     sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} className="px-3 py-2.5 text-xs" />
-                        <SortableTH label="Rate"        field="rate"      sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} className="px-3 py-2.5 text-xs" />
+                        <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-left align-bottom whitespace-nowrap">Name</th>
+                        <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-left align-bottom whitespace-nowrap">Department</th>
+                        <th colSpan={4} className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider text-center border-b border-gray-700">Attendance</th>
+                        <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">%</th>
+                      </tr>
+                      <tr className="bg-gray-800/60">
+                        <SortableTH label="Late"          field="late"   sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} align="center" />
+                        <SortableTH label="Sick Leave"    field="sick"   sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} align="center" />
+                        <SortableTH label="Unpaid Leave"  field="unpaid" sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} align="center" />
+                        <SortableTH label="Total"         field="total"  sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} align="center" />
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800">
-                      {data.data.length === 0 ? (
-                        <tr><td colSpan={5} className="py-10 text-center text-xs text-gray-600">No working day data</td></tr>
-                      ) : sortRows(data.data, deptSortBy, deptSortDir, ["total", "hadir", "absen", "rate"]).map((row) => (
-                        <tr key={row.department} className="hover:bg-gray-800/40 transition-colors">
-                          <td className="px-3 py-2.5 font-medium text-gray-200">{row.department}</td>
-                          <td className="px-3 py-2.5 text-gray-400 text-center">{row.total}</td>
-                          <td className="px-3 py-2.5 text-green-400 font-semibold text-center">{row.hadir}</td>
-                          <td className="px-3 py-2.5 text-red-400 font-semibold text-center">{row.absen}</td>
-                          <td className="px-3 py-2.5 text-center">
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 h-1.5 rounded-full bg-gray-700 overflow-hidden">
-                                <div className="h-full rounded-full bg-green-500" style={{ width: `${row.rate}%` }} />
-                              </div>
-                              <span className="text-xs text-gray-400 w-10 text-right">{row.rate}%</span>
-                            </div>
-                          </td>
+                      {!issuesData?.data?.length ? (
+                        <tr><td colSpan={7} className="py-10 text-center text-xs text-gray-600">No Late / Sick Leave / Unpaid Leave records for this date</td></tr>
+                      ) : sortRows(issuesData.data, deptSortBy, deptSortDir, ["late", "sick", "unpaid", "total", "rate"]).map((row) => (
+                        <tr key={row.id} className="hover:bg-gray-800/40 transition-colors">
+                          <td className="px-3 py-2.5 font-medium text-gray-200 whitespace-nowrap">{row.name}</td>
+                          <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap">{row.department}</td>
+                          <td className="px-3 py-2.5 text-center text-amber-400 font-semibold">{row.late || "-"}</td>
+                          <td className="px-3 py-2.5 text-center text-red-400 font-semibold">{row.sick || "-"}</td>
+                          <td className="px-3 py-2.5 text-center text-purple-400 font-semibold">{row.unpaid || "-"}</td>
+                          <td className="px-3 py-2.5 text-center text-gray-200 font-bold">{row.total}</td>
+                          <td className="px-3 py-2.5 text-center text-gray-400">{row.rate}%</td>
                         </tr>
                       ))}
                     </tbody>
+                    {issuesData?.data?.length > 0 && (
+                      <tfoot>
+                        <tr className="bg-gray-800/80 font-bold">
+                          <td className="px-3 py-2.5 text-gray-300" colSpan={2}>TOTAL</td>
+                          <td className="px-3 py-2.5 text-center text-amber-400">{issuesData.totals.late}</td>
+                          <td className="px-3 py-2.5 text-center text-red-400">{issuesData.totals.sick}</td>
+                          <td className="px-3 py-2.5 text-center text-purple-400">{issuesData.totals.unpaid}</td>
+                          <td className="px-3 py-2.5 text-center text-gray-200">{issuesData.totals.total}</td>
+                          <td className="px-3 py-2.5 text-center text-gray-300">{issuesData.totals.rate}%</td>
+                        </tr>
+                      </tfoot>
+                    )}
                   </table>
                 </div>
               </div>
