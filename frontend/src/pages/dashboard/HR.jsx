@@ -3134,6 +3134,31 @@ function AttendanceTodaySection() {
   const handleEmpSort  = (f) => { const r = toggleSort(empSortBy, empSortDir, f);   setEmpSortBy(r.sortBy);  setEmpSortDir(r.sortDir); };
   const handleDeptSort = (f) => { const r = toggleSort(deptSortBy, deptSortDir, f); setDeptSortBy(r.sortBy); setDeptSortDir(r.sortDir); };
 
+  // Monthly Summary — per-employee Late/Sick Leave/Unpaid Leave for a
+  // whole month (the monthly companion to the day-scoped table above).
+  const curMonth = new Date().getMonth() + 1;
+  const [monthlyData,   setMonthlyData]   = useState(null);
+  const [loadingMonthly, setLoadingMonthly] = useState(false);
+  const [monthlyMonth,  setMonthlyMonth]  = useState(curMonth);
+  const [monthlyYear,   setMonthlyYear]   = useState(curYear);
+  const [monthlyDept,   setMonthlyDept]   = useState("");
+  const [monthlyDepts,  setMonthlyDepts]  = useState([]);
+
+  useEffect(() => {
+    fetch(`${ATT_API}/departments`, { headers }).then(r => r.ok ? r.json() : []).then(setMonthlyDepts).catch(() => {});
+  }, []); // eslint-disable-line
+
+  const fetchMonthlyData = async (month = monthlyMonth, year = monthlyYear, dept = monthlyDept) => {
+    setLoadingMonthly(true);
+    try {
+      const params = new URLSearchParams({ month, year });
+      if (dept) params.set("department", dept);
+      const res = await fetch(`${ATT_API}/monthly-employee-summary?${params}`, { headers });
+      if (res.ok) setMonthlyData(await res.json());
+    } catch (_) {}
+    finally { setLoadingMonthly(false); }
+  };
+
   // Employee lookup — search for one person and see just their status for
   // the selected date, independent of the Total/Present/Absent card drill-down.
   const [empQuery,        setEmpQuery]        = useState("");
@@ -3205,6 +3230,7 @@ function AttendanceTodaySection() {
   const switchTab = (tab) => {
     setInnerTab(tab);
     if (tab === "team" && !teamData) fetchTeamData();
+    if (tab === "monthly" && !monthlyData) fetchMonthlyData();
   };
 
   const fetchEmployees = async (filter, targetDate) => {
@@ -3238,7 +3264,7 @@ function AttendanceTodaySection() {
     <div className="space-y-4">
       {/* Inner tabs */}
       <div className="flex gap-0 border-b border-gray-800">
-        {[["today", "Attendance Today"], ["team", "Team Summary"]].map(([id, label]) => (
+        {[["today", "Attendance Today"], ["team", "Team Summary"], ["monthly", "Monthly Summary"]].map(([id, label]) => (
           <button key={id} onClick={() => switchTab(id)}
             className={`px-4 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors ${
               innerTab === id ? "border-green-500 text-green-400" : "border-transparent text-gray-500 hover:text-gray-300"
@@ -3508,6 +3534,112 @@ function AttendanceTodaySection() {
           {!loadingTeam && !teamData && (
             <p className="py-10 text-center text-xs text-gray-600">No data yet.</p>
           )}
+        </div>
+      )}
+
+      {/* ── Tab: Monthly Summary — per-employee Late/Sick Leave/Unpaid
+          Leave for a whole month, the monthly companion to the day-scoped
+          table under "Attendance Today". Dept/Team columns render as
+          merged cells (Excel-style) since rows arrive pre-sorted by
+          department/team/name — sorting by another column would break
+          that grouping, so this table intentionally isn't sortable. ── */}
+      {innerTab === "monthly" && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <p className="text-xs text-gray-500">
+              Per-employee Late / Sick Leave / Unpaid Leave — {MONTHS_ID[monthlyMonth - 1]} {monthlyYear}
+            </p>
+            <div className="flex items-center gap-2">
+              <select value={monthlyDept} onChange={(e) => { setMonthlyDept(e.target.value); fetchMonthlyData(monthlyMonth, monthlyYear, e.target.value); }}
+                className="rounded-lg border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-xs text-gray-300 outline-none focus:border-green-500 cursor-pointer">
+                <option value="">All Departments</option>
+                {monthlyDepts.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+              <select value={monthlyMonth} onChange={(e) => { const m = Number(e.target.value); setMonthlyMonth(m); fetchMonthlyData(m, monthlyYear, monthlyDept); }}
+                className="rounded-lg border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-xs text-gray-300 outline-none focus:border-green-500 cursor-pointer">
+                {MONTHS_ID.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+              </select>
+              <select value={monthlyYear} onChange={(e) => { const y = Number(e.target.value); setMonthlyYear(y); fetchMonthlyData(monthlyMonth, y, monthlyDept); }}
+                className="rounded-lg border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-xs text-gray-300 outline-none focus:border-green-500 cursor-pointer">
+                {[curYear, curYear - 1, curYear - 2].map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+              <button onClick={() => fetchMonthlyData()}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+                <RefreshCw size={11} className={loadingMonthly ? "animate-spin" : ""} /> Refresh
+              </button>
+            </div>
+          </div>
+
+          {loadingMonthly ? (
+            <div className="flex justify-center py-16"><Loader2 size={20} className="animate-spin text-gray-600" /></div>
+          ) : !monthlyData?.data?.length ? (
+            <p className="py-10 text-center text-xs text-gray-600">No attendance data for this month.</p>
+          ) : (() => {
+            const rows = monthlyData.data;
+            const deptSpan = new Array(rows.length).fill(0);
+            const teamSpan = new Array(rows.length).fill(0);
+            for (let i = 0; i < rows.length; ) {
+              let j = i + 1;
+              while (j < rows.length && rows[j].department === rows[i].department) j++;
+              deptSpan[i] = j - i;
+              i = j;
+            }
+            for (let i = 0; i < rows.length; ) {
+              let j = i + 1;
+              while (j < rows.length && rows[j].department === rows[i].department && rows[j].team === rows[i].team) j++;
+              teamSpan[i] = j - i;
+              i = j;
+            }
+            const t = monthlyData.totals;
+            return (
+              <div className="overflow-x-auto rounded-lg border border-gray-800">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-800/60">
+                      <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-left align-bottom whitespace-nowrap">Dept</th>
+                      <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-left align-bottom whitespace-nowrap">Team</th>
+                      <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-left align-bottom whitespace-nowrap">Name</th>
+                      <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">Working Days</th>
+                      <th colSpan={4} className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider text-center border-b border-gray-700">Attendance</th>
+                      <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">%</th>
+                    </tr>
+                    <tr className="bg-gray-800/60">
+                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center whitespace-nowrap">Late</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center whitespace-nowrap">Sick Leave</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center whitespace-nowrap">Unpaid Leave</th>
+                      <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center whitespace-nowrap">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800">
+                    {rows.map((row, i) => (
+                      <tr key={row.employee_id || i} className="hover:bg-gray-800/40 transition-colors">
+                        {deptSpan[i] > 0 && <td rowSpan={deptSpan[i]} className="px-3 py-2.5 font-medium text-gray-200 align-top whitespace-nowrap border-r border-gray-800/60">{row.department}</td>}
+                        {teamSpan[i] > 0 && <td rowSpan={teamSpan[i]} className="px-3 py-2.5 text-gray-300 align-top whitespace-nowrap border-r border-gray-800/60">{row.team}</td>}
+                        <td className="px-3 py-2.5 text-gray-200 whitespace-nowrap">{row.name}</td>
+                        <td className="px-3 py-2.5 text-center text-gray-400">{row.working_days}</td>
+                        <td className="px-3 py-2.5 text-center text-amber-400 font-semibold">{row.late || "-"}</td>
+                        <td className="px-3 py-2.5 text-center text-red-400 font-semibold">{row.sick || "-"}</td>
+                        <td className="px-3 py-2.5 text-center text-purple-400 font-semibold">{row.unpaid || "-"}</td>
+                        <td className="px-3 py-2.5 text-center text-gray-200 font-bold">{row.total}</td>
+                        <td className="px-3 py-2.5 text-center text-gray-400">{row.rate}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-gray-800/80 font-bold">
+                      <td className="px-3 py-2.5 text-gray-300" colSpan={3}>TOTAL</td>
+                      <td className="px-3 py-2.5 text-center text-gray-300">{t.working_days}</td>
+                      <td className="px-3 py-2.5 text-center text-amber-400">{t.late}</td>
+                      <td className="px-3 py-2.5 text-center text-red-400">{t.sick}</td>
+                      <td className="px-3 py-2.5 text-center text-purple-400">{t.unpaid}</td>
+                      <td className="px-3 py-2.5 text-center text-gray-200">{t.total}</td>
+                      <td className="px-3 py-2.5 text-center text-gray-300">{t.rate}%</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
