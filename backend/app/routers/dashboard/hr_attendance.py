@@ -1900,6 +1900,80 @@ async def get_dept_team_summary(
     return {"departments": result_list, "grand_total": grand}
 
 
+@router.get("/monthly-employee-summary")
+async def get_monthly_employee_summary(
+    month:      int           = Query(..., ge=1, le=12),
+    year:       int           = Query(...),
+    department: Optional[str] = Query(None, description="Exact department name — omit for all"),
+    db:         AsyncSession  = Depends(get_db),
+    user:       CurrentUser   = Depends(require_role(Roles.HR)),
+):
+    """Per-employee monthly attendance summary — Dept/Team/Name, Working
+    Days (that employee's required working days for the month, same
+    _plan_expr() used everywhere else so it already excludes days off/
+    other leave), Late/Sick Leave/Unpaid Leave day-counts for the month,
+    Total, and rate = Total / Working Days. The monthly companion to
+    /today/attendance-issues (which is single-day) and a per-employee
+    drill-down of /dept-team-summary (which only aggregates to team
+    level) — requested by user 2026-08-19."""
+    from app.models.employee import Employee
+    from sqlalchemy import extract
+
+    q = (
+        select(
+            AttendanceRecord.department,
+            Employee.team,
+            AttendanceRecord.employee_id,
+            AttendanceRecord.employee_name,
+            func.sum(_plan_expr()).label("working_days"),
+            func.sum(_late_expr()).label("late"),
+            func.sum(_sick_expr()).label("sick"),
+            func.sum(_unpaid_leave_expr()).label("unpaid"),
+        )
+        .join(Employee, AttendanceRecord.employee_id == Employee.user_id, isouter=True)
+        .where(extract("year",  AttendanceRecord.attendance_date) == year)
+        .where(extract("month", AttendanceRecord.attendance_date) == month)
+    )
+    if department:
+        q = q.where(AttendanceRecord.department == department)
+    q = q.group_by(AttendanceRecord.department, Employee.team, AttendanceRecord.employee_id, AttendanceRecord.employee_name)
+    q = q.order_by(AttendanceRecord.department, Employee.team, AttendanceRecord.employee_name)
+    rows = (await db.execute(q)).fetchall()
+
+    data = []
+    for r in rows:
+        working_days = int(r.working_days or 0)
+        if working_days == 0:
+            continue  # nothing required of them that month (e.g. joined/left outside it) — not a meaningful row
+        late, sick, unpaid = int(r.late or 0), int(r.sick or 0), int(r.unpaid or 0)
+        total = late + sick + unpaid
+        data.append({
+            "department":   r.department or "—",
+            "team":         r.team or "—",
+            "employee_id":  r.employee_id,
+            "name":         r.employee_name or "—",
+            "working_days": working_days,
+            "late": late, "sick": sick, "unpaid": unpaid, "total": total,
+            "rate": round(total / working_days * 100, 1),
+        })
+
+    tot_wd     = sum(d["working_days"] for d in data)
+    tot_late   = sum(d["late"]   for d in data)
+    tot_sick   = sum(d["sick"]   for d in data)
+    tot_unpaid = sum(d["unpaid"] for d in data)
+    tot_total  = tot_late + tot_sick + tot_unpaid
+
+    return {
+        "month": month, "year": year,
+        "data": data,
+        "totals": {
+            "working_days": tot_wd, "late": tot_late, "sick": tot_sick, "unpaid": tot_unpaid,
+            "total": tot_total,
+            "rate": round(tot_total / tot_wd * 100, 1) if tot_wd else 0,
+        },
+    }
+
+
 # ── Employee search ────────────────────────────────────────────────────────────
 
 @router.get("/search-employees")
