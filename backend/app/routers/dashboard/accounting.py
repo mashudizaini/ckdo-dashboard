@@ -117,19 +117,21 @@ async def get_ar_outstanding(
 @router.get("/ar-aging")
 async def get_ar_aging(
     customer_name: str = Query(None, description="Partial customer name filter"),
-    base_date:     str = Query(None, description="Anchor date YYYY-MM-DD for aging/rate calc; defaults to today"),
+    as_of_date:    str = Query(None, description="Reconstruct each balance as of this date YYYY-MM-DD; defaults to today. No separate invoice-date-range filter exists — this alone scopes and prices the report."),
     limit:         int = Query(500, ge=1, le=2000, description="Max customer rows"),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
     """
-    AR Aging — open items (INV + DM + CM, same class filter as
-    ar-outstanding) grouped by customer into 5 buckets: Current, 1-30,
-    31-60, 61-90, >90 days overdue. Corporate-rate IDR converted. Priced
-    and bucketed as of base_date (defaults to today, editable by the
-    user to reprice/re-bucket the report as of any past date). Credit
-    memos/returns net into whichever bucket their own due_date falls into.
+    AR Aging — items (INV + DM + CM, same class filter as ar-outstanding)
+    grouped by customer into 5 buckets: Current, 1-30, 31-60, 61-90, >90
+    days overdue. Corporate-rate IDR converted. Balances are reconstructed
+    as of as_of_date (defaults to today, editable by the user) by
+    replaying receivable applications up to that date — not by reading
+    today's live remaining balance — so due_date-based bucketing is
+    accurate for any past date. Credit memos/returns net into whichever
+    bucket their own due_date falls into.
     """
-    return await AccountingService().get_ar_aging(customer_name, base_date, limit)
+    return await AccountingService().get_ar_aging(customer_name, as_of_date, limit)
 
 
 # ── COGS / Inventory RM PM ───────────────────────────────────────────────────

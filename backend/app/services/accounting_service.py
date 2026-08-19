@@ -687,20 +687,34 @@ class AccountingService:
             logger.error("ar_outstanding_error", error=str(e))
             return {"success": False, "error": str(e), "data": []}
 
-    async def get_ar_aging(self, customer_name: str = None, base_date: str = None, limit: int = 500) -> dict:
+    async def get_ar_aging(self, customer_name: str = None, as_of_date: str = None, limit: int = 500) -> dict:
         """
-        AR Aging — open items grouped by customer into 5 buckets (Current,
-        1-30, 31-60, 61-90, >90 days overdue), Corporate-rate IDR converted
-        and summed. class='CM' (credit memos / returns) is included in the
-        same grouping, so an open return nets against whichever bucket its
-        own due_date falls into instead of being excluded — "dikurangin
-        sales return" per request, same reasoning as get_ar_outstanding.
+        AR Aging — items grouped by customer into 5 buckets (Current, 1-30,
+        31-60, 61-90, >90 days overdue), Corporate-rate IDR converted and
+        summed. class='CM' (credit memos / returns) is included in the
+        same grouping, so a return nets against whichever bucket its own
+        due_date falls into instead of being excluded — "dikurangin sales
+        return" per request, same reasoning as get_ar_outstanding.
 
-        base_date anchors what "today" means for both the days-overdue
-        bucketing and the Corporate rate lookup — defaults to the actual
-        current date but can be overridden by the user to reprice/re-bucket
-        the report as of any past date (e.g. reconciling against a
-        month-end snapshot).
+        as_of_date anchors what "today" means for the whole report — no
+        separate invoice-date-range filter exists (or is needed) here,
+        since as_of_date alone both scopes which invoices are in play
+        (trx_date <= as_of_date) and reconstructs each one's remaining
+        balance as of that date. Defaults to the actual current date but
+        can be overridden by the user to re-bucket the report as of any
+        past date.
+
+        Like get_ar_outstanding's as_of_date, remaining balance is
+        reconstructed by replaying AR_RECEIVABLE_APPLICATIONS_ALL
+        (status='APP', apply_date <= as_of_date) against
+        amount_due_original — NOT by reading today's live
+        aps.status/amount_due_remaining — so a since-closed invoice that
+        was still genuinely open as of the chosen date is correctly
+        bucketed (see the MENSA 26110012 case that prompted this). Only
+        cash/credit-memo applications are replayed; manual write-offs/
+        adjustments (AR_ADJUSTMENTS_ALL) are not. due_date remains the
+        reference column for every bucket (days_overdue = as_of_date -
+        due_date), unchanged from before.
         """
         limit = min(max(limit, 1), 2000)
         where_extra = ""
@@ -709,9 +723,20 @@ class AccountingService:
             where_extra += " AND UPPER(hp.party_name) LIKE UPPER(:cust)"
             params["cust"] = f"%{customer_name}%"
 
-        base_date = base_date or date.today().isoformat()
-        params["base_date"] = base_date
-        base_date_expr = "TRUNC(TO_DATE(:base_date, 'YYYY-MM-DD'))"
+        as_of_date = as_of_date or date.today().isoformat()
+        params["as_of_date"] = as_of_date
+        asof_expr = "TRUNC(TO_DATE(:as_of_date, 'YYYY-MM-DD'))"
+
+        applied_asof_expr = """
+            NVL((
+                SELECT SUM(araa.amount_applied)
+                FROM apps.ar_receivable_applications_all araa
+                WHERE araa.applied_payment_schedule_id = aps.payment_schedule_id
+                  AND araa.status = 'APP'
+                  AND araa.apply_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')
+            ), 0)
+        """
+        remaining_asof_expr = f"(NVL(aps.amount_due_original, 0) - ({applied_asof_expr}))"
 
         rate_case = f"""
             CASE WHEN rct.invoice_currency_code = 'IDR' THEN 1
@@ -725,7 +750,7 @@ class AccountingService:
                       WHERE  gdr2.from_currency   = rct.invoice_currency_code
                         AND  gdr2.to_currency     = 'IDR'
                         AND  gdr2.conversion_type = 'Corporate'
-                        AND  gdr2.conversion_date <= {base_date_expr}
+                        AND  gdr2.conversion_date <= {asof_expr}
                   )
             ), 1) END
         """
@@ -744,8 +769,8 @@ class AccountingService:
                 SELECT
                     hp.party_name                                    AS customer_name,
                     hca.account_number,
-                    ({base_date_expr} - aps.due_date)                AS days_overdue,
-                    NVL(aps.amount_due_remaining, 0) * ({rate_case}) AS remaining_idr
+                    ({asof_expr} - aps.due_date)                     AS days_overdue,
+                    ({remaining_asof_expr}) * ({rate_case})          AS remaining_idr
                 FROM apps.ar_payment_schedules_all  aps
                 JOIN apps.ra_customer_trx_all        rct
                     ON  rct.customer_trx_id  = aps.customer_trx_id
@@ -754,7 +779,8 @@ class AccountingService:
                 JOIN apps.hz_parties                 hp
                     ON  hp.party_id          = hca.party_id
                 WHERE aps.class IN ('INV', 'DM', 'CM')
-                  AND aps.status = 'OP'
+                  AND rct.trx_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')
+                  AND ROUND({remaining_asof_expr}, 2) != 0
                   {where_extra}
             )
             GROUP BY customer_name, account_number
@@ -778,7 +804,7 @@ class AccountingService:
                 "total_idr":   round(sum(r.get("total_idr", 0) for r in clean), 2),
                 "item_count":  sum(r.get("item_count", 0) for r in clean),
             }
-            return {"success": True, "count": len(clean), "base_date": base_date, "data": clean, "totals": totals}
+            return {"success": True, "count": len(clean), "as_of_date": as_of_date, "data": clean, "totals": totals}
         except Exception as e:
             logger.error("ar_aging_error", error=str(e))
             return {"success": False, "error": str(e), "data": []}
