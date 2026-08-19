@@ -946,7 +946,7 @@ function AROutstandingPanel() {
 
 function ARAgingPanel() {
   const [customerName, setCustomerName] = useState("");
-  const [baseDate,      setBaseDate]     = useState(todayIso());
+  const [asOfDate,      setAsOfDate]     = useState(todayIso());
   const [data,          setData]         = useState(null);
   const [loading,       setLoading]      = useState(false);
   const [error,         setError]        = useState(null);
@@ -956,24 +956,24 @@ function ARAgingPanel() {
   const loadData = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const params = { limit: 500, base_date: baseDate || todayIso(), ...(customerName && { customer_name: customerName }) };
+      const params = { limit: 500, as_of_date: asOfDate || todayIso(), ...(customerName && { customer_name: customerName }) };
       const res = await accountingApi.getArAging(params);
       if (res.success) setData(res);
       else { setError(res.error || "Failed to load"); setData(null); }
     } catch (e) {
       setError(e?.response?.data?.detail || String(e)); setData(null);
     } finally { setLoading(false); }
-  }, [customerName, baseDate]);
+  }, [customerName, asOfDate]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
   const totals = data?.totals;
-  const isToday = (data?.base_date || baseDate) === todayIso();
+  const isToday = (data?.as_of_date || asOfDate) === todayIso();
 
   return (
     <SectionCard
       title="AR Aging by Customer"
-      subtitle={`Open items (Invoices + Debit Memos + Credit Memos/Returns, Corporate-rate IDR) priced and bucketed as of ${data?.base_date || baseDate}${isToday ? " (today)" : ""} — returns net into whichever bucket their own due date falls into.`}
+      subtitle={`Invoices + Debit Memos + Credit Memos/Returns, Corporate-rate IDR, balances reconstructed as of ${data?.as_of_date || asOfDate}${isToday ? " (today)" : ""} by replaying receivable applications up to that date — not today's live remaining balance. Bucketed by due date. Returns net into whichever bucket their own due date falls into.`}
     >
       <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
         <div>
@@ -983,11 +983,11 @@ function ARAgingPanel() {
             onKeyDown={e => e.key === "Enter" && loadData()} />
         </div>
         <div>
-          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Base Date</p>
-          <input type="date" value={baseDate} onChange={e => setBaseDate(e.target.value)} style={{ ...INPUT, width: 150 }} />
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>As Of Date</p>
+          <input type="date" value={asOfDate} onChange={e => setAsOfDate(e.target.value)} style={{ ...INPUT, width: 150 }} />
         </div>
-        {baseDate !== todayIso() && (
-          <ActionBtn icon={RefreshCw} label="Reset to Today" color="#64748b" onClick={() => setBaseDate(todayIso())} />
+        {asOfDate !== todayIso() && (
+          <ActionBtn icon={RefreshCw} label="Reset to Today" color="#64748b" onClick={() => setAsOfDate(todayIso())} />
         )}
         <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#f59e0b" onClick={loadData} disabled={loading} />
       </div>
