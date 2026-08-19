@@ -3592,37 +3592,6 @@ function WhosOffWidget({ data }) {
   );
 }
 
-function StatBreakdown({ title, data }) {
-  return (
-    <div style={NEU_CARD}>
-      <h4 style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", marginBottom: 10 }}>{title}</h4>
-      {!data?.length ? (
-        <p style={{ fontSize: 12, color: "#94a3b8", padding: "8px 0", textAlign: "center" }}>—</p>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {data.map((item) => (
-            <div key={item.label}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-                <span style={{ color: "#334155", fontWeight: 600, maxWidth: "65%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.label}</span>
-                <span style={{ color: "#2563eb", fontWeight: 800 }}>{item.rate}%</span>
-              </div>
-              <div style={{ height: 18, borderRadius: 99, ...NEU_IN, overflow: "hidden" }}>
-                <div style={{
-                  height: "100%", borderRadius: 99,
-                  background: "linear-gradient(90deg, #3b82f6, #60a5fa)",
-                  width: `${Math.max(item.rate, 2)}%`,
-                  boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
-                  transition: "width 0.5s ease",
-                }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function MiniBarChart({ data }) {
   if (!data?.length) return null;
   const maxVal = Math.max(...data.map((d) => d.plan), 1);
@@ -4492,7 +4461,6 @@ function AttendanceRateSection() {
   const [activeTab, setActiveTab] = useState("summary");
   const [deptData,  setDeptData]  = useState([]);
   const [whosOff,   setWhosOff]   = useState({ date: null, data: [] });
-  const [workforce, setWorkforce] = useState({ by_gender: [], by_location: [] });
   const [monthly,   setMonthly]   = useState([]);
   const [loading,   setLoading]   = useState(false);
   const [departments, setDepartments] = useState([]);
@@ -4513,13 +4481,12 @@ function AttendanceRateSection() {
       if (fYear)  p.set("year", fYear);
       const qs = p.toString() ? `?${p}` : "";
 
-      const [d, w, ws, m] = await Promise.all([
+      const [d, w, m] = await Promise.all([
         fetch(`${ATT_API}/dept-summary${qs}`,    { headers }).then((r) => r.ok ? r.json() : []),
         fetch(`${ATT_API}/whos-off`,             { headers }).then((r) => r.ok ? r.json() : { date: null, data: [] }),
-        fetch(`${ATT_API}/workforce-stats`,      { headers }).then((r) => r.ok ? r.json() : { by_gender: [], by_location: [] }),
         fetch(`${ATT_API}/monthly-rate?${new URLSearchParams({ ...(fDept ? {department: fDept} : {}), ...(fYear ? {year: fYear} : {}) })}`, { headers }).then((r) => r.ok ? r.json() : []),
       ]);
-      setDeptData(d); setWhosOff(w); setWorkforce(ws); setMonthly(m);
+      setDeptData(d); setWhosOff(w); setMonthly(m);
     } catch (_) {}
     finally { setLoading(false); }
   }, [fDept, fMonth, fYear]); // eslint-disable-line
@@ -4613,11 +4580,7 @@ function AttendanceRateSection() {
           {/* Left: dept chart + bottom row */}
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <DeptBarChart data={deptData} />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-              <WhosOffWidget data={whosOff} />
-              <StatBreakdown title="Based on Gender"        data={workforce.by_gender}   />
-              <StatBreakdown title="Based on Work Location" data={workforce.by_location} />
-            </div>
+            <WhosOffWidget data={whosOff} />
           </div>
 
           {/* Right: monthly overall */}
