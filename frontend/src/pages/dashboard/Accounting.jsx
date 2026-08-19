@@ -548,6 +548,9 @@ function AROutstandingPanel() {
   const [dateTo,         setDateTo]         = useState("");
   const [statusFilter,   setStatusFilter]   = useState("OP");
   const [limit,          setLimit]          = useState(500);
+  const [usdRate,        setUsdRate]        = useState("");
+  const [rateInfo,       setRateInfo]       = useState(null); // { date, source }
+  const [rateLoading,    setRateLoading]    = useState(false);
   const [data,           setData]           = useState(null);
   const [loading,        setLoading]        = useState(false);
   const [error,          setError]          = useState(null);
@@ -557,6 +560,24 @@ function AROutstandingPanel() {
 
   const AR_PAGE_SIZE = 10;
   const AR_NUMERIC_KEYS = ["original_amount", "remaining_amount", "conversion_rate", "remaining_amount_idr", "days_overdue"];
+
+  const loadBiRate = useCallback(async () => {
+    setRateLoading(true);
+    try {
+      const res = await accountingApi.getExchangeRate();
+      const usd = res?.rates?.find(r => r.code === "USD");
+      if (usd && (usd.sell || usd.buy)) {
+        const denom = usd.denomination || 1;
+        const mid = (usd.sell && usd.buy ? (usd.sell + usd.buy) / 2 : (usd.sell || usd.buy)) / denom;
+        setUsdRate(String(Math.round(mid * 100) / 100));
+        setRateInfo({ date: res.date, source: res.source });
+      }
+    } catch (e) {
+      // Silent — the field just stays editable/empty and the user can type a rate manually.
+    } finally { setRateLoading(false); }
+  }, []);
+
+  useEffect(() => { loadBiRate(); }, [loadBiRate]);
 
   const loadData = useCallback(async () => {
     setLoading(true); setError(null);
@@ -568,6 +589,7 @@ function AROutstandingPanel() {
         ...(invoiceNumber && { invoice_number: invoiceNumber }),
         ...(dateFrom      && { date_from:       dateFrom      }),
         ...(dateTo        && { date_to:         dateTo        }),
+        ...(usdRate       && { usd_rate:        Number(usdRate) }),
       };
       const res = await accountingApi.getArOutstanding(params);
       if (res.success) { setData(res); setPage(1); }
@@ -575,7 +597,7 @@ function AROutstandingPanel() {
     } catch (e) {
       setError(e?.response?.data?.detail || String(e)); setData(null);
     } finally { setLoading(false); }
-  }, [customerName, invoiceNumber, dateFrom, dateTo, statusFilter, limit]);
+  }, [customerName, invoiceNumber, dateFrom, dateTo, statusFilter, limit, usdRate]);
 
   const toggleSort = (key) => {
     setPage(1);
@@ -704,10 +726,20 @@ function AROutstandingPanel() {
             {[200, 500, 1000, 2000].map(n => <option key={n} value={n}>{n}</option>)}
           </select>
         </div>
-        <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#f59e0b" onClick={loadData} disabled={loading} />
-        {data?.data?.length > 0 && (
-          <ActionBtn icon={Download} label="Export CSV" color="#f59e0b" onClick={() => exportArCSV(data.data)} />
-        )}
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Exchange Rate (USD)</p>
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            <input type="number" step="0.01" value={usdRate} onChange={e => setUsdRate(e.target.value)}
+              placeholder="e.g. 16250" style={{ ...INPUT, width: 110 }} />
+            <button type="button" onClick={loadBiRate} disabled={rateLoading} title="Refresh from BI Kurs Tengah"
+              style={{ border: "none", borderRadius: 9, padding: "7px 8px", background: NEU.bg, boxShadow: NEU.shadowOutSm, cursor: rateLoading ? "default" : "pointer", color: "#64748b" }}>
+              <RefreshCw size={13} className={rateLoading ? "animate-spin" : ""} />
+            </button>
+          </div>
+          {rateInfo && (
+            <p style={{ fontSize: 9.5, color: "#94a3b8", marginTop: 4 }}>Kurs Tengah BI{rateInfo.date ? ` · ${rateInfo.date}` : ""}</p>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -716,30 +748,41 @@ function AROutstandingPanel() {
         </div>
       )}
 
+      {/* Summary cards — totals are Corporate-rate IDR conversions
+          (sm.total_remaining_idr/total_overdue_idr), not a raw sum of
+          remaining_amount across mixed currencies (that undercounted
+          open USD invoices at their bare numeric value, e.g. treating
+          $1 as Rp 1). Returns (CM) surfaces the unapplied credit
+          memos now included/netted into the total, instead of being
+          silently excluded. Open Invoices/Overdue Count are narrow
+          fixed-width (their values are short counts, max ~5 digits) so
+          the 3 IDR-amount cards get the freed-up space; Load/Export CSV
+          sit to the right of the row instead of in the filter bar. */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, alignItems: "stretch" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "110px 110px repeat(3, 1fr)", gap: 10, flex: 1 }}>
+          {[
+            { label: "Open Invoices",     val: (sm?.open_invoice_count || 0).toLocaleString(),    color: "#f59e0b" },
+            { label: "Overdue Count",      val: (sm?.overdue_count     || 0).toLocaleString(),    color: "#dc2626" },
+            { label: "Total Outstanding (IDR)", val: "Rp " + fmtNum(sm?.total_remaining_idr || 0), color: "#2563eb" },
+            { label: "Total Overdue (IDR)",     val: "Rp " + fmtNum(sm?.total_overdue_idr   || 0), color: "#dc2626" },
+            { label: "Returns (CM)",       val: `${sm?.returns_count || 0} · Rp ${fmtNum(sm?.returns_remaining_idr || 0)}`, color: "#7c3aed" },
+          ].map(c => (
+            <div key={c.label} style={{ background: NEU.bg, borderRadius: 12, padding: "10px 14px", boxShadow: NEU.shadowOutSm }}>
+              <p style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{c.label}</p>
+              <p style={{ fontSize: 13, fontWeight: 800, color: c.color, fontFamily: "monospace" }}>{c.val}</p>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, justifyContent: "center" }}>
+          <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#f59e0b" onClick={loadData} disabled={loading} />
+          {data?.data?.length > 0 && (
+            <ActionBtn icon={Download} label="Export CSV" color="#f59e0b" onClick={() => exportArCSV(data.data)} />
+          )}
+        </div>
+      </div>
+
       {data && (
         <>
-          {/* Summary cards — totals are Corporate-rate IDR conversions
-              (sm.total_remaining_idr/total_overdue_idr), not a raw sum of
-              remaining_amount across mixed currencies (that undercounted
-              open USD invoices at their bare numeric value, e.g. treating
-              $1 as Rp 1). Returns (CM) surfaces the unapplied credit
-              memos now included/netted into the total, instead of being
-              silently excluded. */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 14 }}>
-            {[
-              { label: "Open Invoices",     val: (sm?.open_invoice_count || 0).toLocaleString(),    color: "#f59e0b" },
-              { label: "Overdue Count",      val: (sm?.overdue_count     || 0).toLocaleString(),    color: "#dc2626" },
-              { label: "Total Outstanding (IDR)", val: "Rp " + fmtNum(sm?.total_remaining_idr || 0), color: "#2563eb" },
-              { label: "Total Overdue (IDR)",     val: "Rp " + fmtNum(sm?.total_overdue_idr   || 0), color: "#dc2626" },
-              { label: "Returns (CM)",       val: `${sm?.returns_count || 0} · Rp ${fmtNum(sm?.returns_remaining_idr || 0)}`, color: "#7c3aed" },
-            ].map(c => (
-              <div key={c.label} style={{ background: NEU.bg, borderRadius: 12, padding: "10px 14px", boxShadow: NEU.shadowOutSm }}>
-                <p style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{c.label}</p>
-                <p style={{ fontSize: 13, fontWeight: 800, color: c.color, fontFamily: "monospace" }}>{c.val}</p>
-              </div>
-            ))}
-          </div>
-
           {/* Client-side search */}
           <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
             <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}

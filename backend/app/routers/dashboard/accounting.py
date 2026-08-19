@@ -7,6 +7,7 @@ Endpoints:
   GET  /summary                        — placeholder
   GET  /material-transactions          — MTL_MATERIAL_TRANSACTIONS export
 """
+import asyncio
 import io
 from calendar import monthrange
 
@@ -17,8 +18,23 @@ from fastapi.responses import StreamingResponse
 
 from app.dependencies import require_role, CurrentUser, Roles
 from app.services.accounting_service import AccountingService
+from app.services import exchange_rate_service
 
 router = APIRouter()
+
+
+@router.get("/exchange-rate")
+async def get_exchange_rate(
+    refresh: bool = Query(False, description="Force re-scrape even if cache is fresh"),
+    source:  str  = Query("bi_html", description="Data source: bi_html (Kurs Tengah BI, default), auto, exchangerate_api, frankfurter"),
+    user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
+):
+    """
+    Kurs Tengah Bank Indonesia — reuses the same BI-scrape module already
+    used by the PAC Exchange Rate page, exposed here under the Accounting
+    role so AR Outstanding can default its Exchange Rate override to it.
+    """
+    return await asyncio.to_thread(exchange_rate_service.get_rates, source, refresh)
 
 
 @router.get("/summary")
@@ -73,6 +89,7 @@ async def get_ar_outstanding(
     date_to:        str  = Query(None, description="Invoice date to YYYY-MM-DD"),
     status:         str  = Query("OP",  description="OP=open, CL=closed, ALL=both"),
     limit:          int  = Query(500, ge=1, le=2000),
+    usd_rate:       float = Query(None, description="Override the Oracle Corporate rate for USD rows only (e.g. BI Kurs Tengah)"),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
     """
@@ -85,9 +102,10 @@ async def get_ar_outstanding(
     conversion rate is always priced as of today (standardized to match
     ar-aging, which has no date filter to anchor to) regardless of
     date_from/date_to — those only filter which invoices are included.
+    usd_rate overrides the Corporate rate for USD-denominated rows only.
     """
     return await AccountingService().get_ar_outstanding(
-        customer_name, invoice_number, date_from, date_to, status, limit
+        customer_name, invoice_number, date_from, date_to, status, limit, usd_rate
     )
 
 

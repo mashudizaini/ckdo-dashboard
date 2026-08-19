@@ -466,10 +466,18 @@ class AccountingService:
         date_to: str = None,
         status: str = "OP",
         limit: int = 500,
+        usd_rate: float = None,
     ) -> dict:
         """
         AR Outstanding from Oracle EBS Invoice Receivable.
         Sources: AR_PAYMENT_SCHEDULES_ALL + RA_CUSTOMER_TRX_ALL + HZ_PARTIES.
+
+        usd_rate, when provided, overrides the Oracle Corporate rate for
+        USD-denominated rows only (USD is the only material FX exposure in
+        this AR portfolio — see get_ar_outstanding investigation notes).
+        Lets the user substitute Bank Indonesia's Kurs Tengah (or any other
+        value) when the Corporate rate in EBS looks stale/off. Other
+        currencies keep using the Oracle Corporate rate lookup.
         """
         limit = min(max(limit, 1), 2000)
         where_extra = ""
@@ -499,10 +507,15 @@ class AccountingService:
         # every row, same as get_ar_aging, regardless of the Invoice Date
         # To filter (reverted from anchoring to date_to: that made the
         # List view's total diverge from Aging's whenever a date filter
-        # was set, since Aging always prices as of today).
-        rate_case = """
+        # was set, since Aging always prices as of today). usd_rate, when
+        # given, substitutes this lookup for USD rows only.
+        usd_override = ""
+        if usd_rate:
+            usd_override = "WHEN rct.invoice_currency_code = 'USD' THEN :usd_rate\n            "
+            params["usd_rate"] = usd_rate
+        rate_case = f"""
             CASE WHEN rct.invoice_currency_code = 'IDR' THEN 1
-            ELSE COALESCE((
+            {usd_override}ELSE COALESCE((
                 SELECT gdr.conversion_rate FROM apps.gl_daily_rates gdr
                 WHERE  gdr.from_currency   = rct.invoice_currency_code
                   AND  gdr.to_currency     = 'IDR'
@@ -581,9 +594,10 @@ class AccountingService:
             total_overdue_idr   = sum(r.get("remaining_amount_idr", 0) for r in overdue)
             returns_rows = [r for r in open_rows if r.get("class") == "CM"]
             return {
-                "success": True,
-                "count":   len(clean),
-                "limit":   limit,
+                "success":  True,
+                "count":    len(clean),
+                "limit":    limit,
+                "usd_rate": usd_rate,
                 "summary": {
                     "open_invoice_count":    len(open_rows),
                     "overdue_count":         len(overdue),
