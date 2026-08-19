@@ -127,6 +127,12 @@ def _sick_expr():
     return case((and_(IS_WEEKDAY, AttendanceRecord.leave_code == "SL"), 1), else_=0)
 
 
+def _unpaid_leave_expr():
+    """1 if this weekday was Unpaid Leave (leave_code="UL"/"ULBB" — both mean
+    the same "Unpaid Leave", ULBB is Talenta's own-account variant)."""
+    return case((and_(IS_WEEKDAY, AttendanceRecord.leave_code.in_(("UL", "ULBB"))), 1), else_=0)
+
+
 def _annual_leave_expr():
     """1 if this weekday was Annual Leave (leave_code="AL"/"ALAB" — both mean
     the same "Annual Leave", ALAB is Talenta's own-account variant)."""
@@ -1245,6 +1251,86 @@ async def get_today_attendance(
             "attendance_rate": round(total_hadir / total_all * 100, 1) if total_all > 0 else 0,
         },
         "data": data,
+    }
+
+
+@router.get("/today/attendance-issues")
+async def get_today_attendance_issues(
+    target_date: Optional[str] = Query(None),
+    db:          AsyncSession  = Depends(get_db),
+    user:        CurrentUser   = Depends(require_role(Roles.HR)),
+):
+    """Per-employee Late / Sick Leave / Unpaid Leave breakdown for a single
+    date (replaces the old per-department Total/Present/Absent/Rate table
+    below Attendance Today, per user request 2026-08-19 — that table only
+    ever showed Administration and Plant since those are the only
+    departments with attendance data most days).
+
+    Late/Sick Leave/Unpaid Leave are mutually exclusive per employee per
+    day in this data model (Late requires a check-in; Sick/Unpaid Leave
+    are leave_code-based, meaning no check-in), so Total is realistically
+    always 1 for any row here — confirmed with the user as an accepted
+    simplification (% = Total / 3 categories) rather than modeling a
+    richer multi-day rate. Employees with no issue that day (Total=0)
+    are omitted — same "only show exceptions" convention as Who's Off.
+    """
+    today = date.today()
+    q_date = today
+    if target_date:
+        try:
+            q_date = datetime.strptime(target_date, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
+    count_q = await db.execute(
+        select(func.count()).select_from(AttendanceRecord)
+        .where(AttendanceRecord.attendance_date == q_date)
+    )
+    if (count_q.scalar() or 0) == 0:
+        latest_q = await db.execute(select(func.max(AttendanceRecord.attendance_date)))
+        latest = latest_q.scalar()
+        if latest:
+            q_date = latest
+
+    q = (
+        select(
+            AttendanceRecord.employee_id,
+            AttendanceRecord.employee_name,
+            AttendanceRecord.department,
+            _late_expr().label("late"),
+            _sick_expr().label("sick"),
+            _unpaid_leave_expr().label("unpaid"),
+        )
+        .where(AttendanceRecord.attendance_date == q_date)
+        .where(IS_WEEKDAY)
+    )
+    rows = (await db.execute(q)).fetchall()
+
+    data = []
+    for r in rows:
+        late, sick, unpaid = int(r.late), int(r.sick), int(r.unpaid)
+        total = late + sick + unpaid
+        if total == 0:
+            continue
+        data.append({
+            "id": r.employee_id, "name": r.employee_name or "—", "department": r.department or "—",
+            "late": late, "sick": sick, "unpaid": unpaid, "total": total,
+            "rate": round(total / 3 * 100, 1),
+        })
+    data.sort(key=lambda d: (-d["total"], d["name"]))
+
+    tot_late   = sum(d["late"]   for d in data)
+    tot_sick   = sum(d["sick"]   for d in data)
+    tot_unpaid = sum(d["unpaid"] for d in data)
+    tot_total  = tot_late + tot_sick + tot_unpaid
+
+    return {
+        "date": str(q_date),
+        "data": data,
+        "totals": {
+            "late": tot_late, "sick": tot_sick, "unpaid": tot_unpaid, "total": tot_total,
+            "rate": round(tot_total / (len(data) * 3) * 100, 1) if data else 0,
+        },
     }
 
 
