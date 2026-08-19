@@ -1374,6 +1374,7 @@ function CashFlowPanel() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (!pickerYears.length) return;
@@ -1407,7 +1408,23 @@ function CashFlowPanel() {
 
   useEffect(() => { load(); }, [load]);
 
-  const rows = useMemo(() => (data ? data.rows : []), [data]);
+  // Same growth-rate convention as Balance Sheet: exactly 2 columns -> diff
+  // & %, more than 2 -> CAGR spanning Period From to Period To.
+  const growthMode = selectedYears.length === 2 ? "diff" : selectedYears.length > 2 ? "cagr" : "none";
+  const cagrYears = growthMode === "cagr" ? toYear - fromYear : 0;
+
+  const rows = useMemo(() => {
+    if (!data) return [];
+    return data.rows.map(r => ({ ...r, growth: computeGrowth(r.values, growthMode, cagrYears) }));
+  }, [data, growthMode, cagrYears]);
+
+  const handleExport = () => {
+    downloadExport(
+      () => financialStatementApi.exportCashFlow(selectedYears),
+      `Cash_Flow_${fromYear}-${toYear}.xlsx`,
+      setExporting, setError,
+    );
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1431,7 +1448,16 @@ function CashFlowPanel() {
         <button onClick={load} disabled={loading} style={BTN}>
           {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
         </button>
+        <button onClick={handleExport} disabled={exporting || !data} style={BTN}>
+          {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download Excel
+        </button>
       </div>
+
+      {!loading && growthMode === "cagr" && selectedYears.length > 1 && (
+        <div style={{ fontSize: 11, color: "#64748b" }}>
+          Comparing {selectedYears.length} years ({fromYear} → {toYear}) — the growth column uses CAGR ({cagrYears} years).
+        </div>
+      )}
 
       {fromYear && toYear && fromYear > toYear ? (
         <div style={{ padding: 16, fontSize: 12, color: "#dc2626" }}>Period From must not be after Period To.</div>
@@ -1440,7 +1466,7 @@ function CashFlowPanel() {
       ) : error ? (
         <div style={{ padding: 16, color: "#dc2626", fontSize: 13 }}>{error}</div>
       ) : data ? (
-        <FsTable columns={data.columns} rows={rows} />
+        <FsTable columns={data.columns} rows={rows} growthMode={growthMode} />
       ) : null}
     </div>
   );

@@ -370,6 +370,7 @@ export const financialStatementApi = {
       params: { period_this: periodThis, ytd_this: ytdThis.join(","), period_last: periodLast, ytd_last: ytdLast.join(","), date_label: dateLabel || "" },
       responseType: "blob",
     }),
+  exportCashFlow: (years) => api.get("/dashboard/accounting/financial-statement/cash-flow/export", { params: { years: years.join(",") }, responseType: "blob" }),
 };
 
 export const apInvoiceApi = {

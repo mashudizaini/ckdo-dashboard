@@ -282,6 +282,18 @@ async def get_cash_flow(
     return await _cash_flow_from_excel(db, years)
 
 
+@router.get("/cash-flow/export")
+async def export_cash_flow(
+    years: str = Query(..., description="Comma-separated fiscal years"),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
+):
+    data = await _cash_flow_from_excel(db, years)
+    if not data.get("success"):
+        raise HTTPException(400, data.get("error") or "Failed to export")
+    return _build_cash_flow_xlsx(data["rows"], data["columns"])
+
+
 # ── Excel exports — layout mirrors FS_CKD OTTO 2015-2026_sent.xlsx ────────────
 # (title block, dark-navy header row, indented hierarchical line items, bold
 # light-blue total rows, accounting number format with parentheses for
@@ -400,6 +412,28 @@ def _build_balance_sheet_xlsx(data: dict, column_labels: list, as_of_label: str,
 
     _autosize(ws, ncols)
     fname = f"Balance_Sheet{'_Detail' if detail else ''}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    return _stream(wb, fname)
+
+
+def _build_cash_flow_xlsx(rows: list, column_labels: list) -> StreamingResponse:
+    """Cash Flow's rows are already flat (label/level/type/values) — no
+    section grouping to unpack, unlike Balance Sheet/P&L, so this just
+    writes them straight through in file order."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Cash Flow"
+    ncols = len(column_labels)
+    _title_block(ws, "Cash Flow", datetime.now().strftime("%B %d, %Y"), ncols + 1)
+    _header_row(ws, 6, column_labels, ncols + 1)
+
+    row = 7
+    for r in rows:
+        bold = r.get("type") == "total"
+        _write_row(ws, row, r["label"], r.get("values") or [], level=r.get("level", 0), bold=bold, fill=TOTAL_FILL if bold else None)
+        row += 1
+
+    _autosize(ws, ncols)
+    fname = f"Cash_Flow_{datetime.now().strftime('%Y%m%d')}.xlsx"
     return _stream(wb, fname)
 
 
