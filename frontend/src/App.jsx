@@ -18,6 +18,7 @@ import EISDashboard from "@/pages/dashboard/EIS";
 // Setup Pages — one per team, same names as the DASHBOARD section
 import SetupPage from "@/pages/setup/SetupPage";
 import HRSetupPage from "@/pages/setup/HRSetupPage";
+import ITSetupPage from "@/pages/setup/ITSetupPage";
 
 // AI Tools Pages
 import Chatbot from "@/pages/ai-tools/Chatbot";
@@ -132,7 +133,7 @@ export default function App() {
           user, matching SETUP_ITEMS' roles: [] in Sidebar.jsx). */}
       <Route path="/setup" element={<Layout />}>
         <Route index             element={<Navigate to="/setup/it" replace />} />
-        <Route path="it"          element={<ProtectedRoute><SetupPage team="IT" /></ProtectedRoute>} />
+        <Route path="it"          element={<ProtectedRoute><ITSetupPage /></ProtectedRoute>} />
         <Route path="hr"          element={<ProtectedRoute><HRSetupPage /></ProtectedRoute>} />
         <Route path="pac"         element={<ProtectedRoute><SetupPage team="PAC" /></ProtectedRoute>} />
         <Route path="accounting"  element={<ProtectedRoute><SetupPage team="Accounting & Tax" /></ProtectedRoute>} />

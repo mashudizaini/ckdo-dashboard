@@ -20,8 +20,6 @@ const NAV_ITEMS = [
     { label: "Postgre DB Browser", path: "/dashboard/it/db-browser" },
     { label: "Oracle EBS Backup Recovery", path: "/dashboard/it/ebs-backup-recovery" },
     { label: "VPN Access Monitoring", path: "/dashboard/it/vpn-monitoring" },
-    { label: "HikCentral Integration", path: "/dashboard/it/hikcentral" },
-    { label: "ETL Admin", path: "/dashboard/it/etl-admin" },
   ] },
   { label: "HRGA", path: "/dashboard/hr", icon: Users, roles: ["hr_staff"], children: [
     { label: "Employee Data", path: "/dashboard/hr/employees" },
