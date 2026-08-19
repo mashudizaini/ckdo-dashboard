@@ -356,16 +356,19 @@ function APOutstandingPanel() {
           </div>
 
           {/* Table — no pagination: all fetched rows (up to Limit) render
-              in one continuous table, page scrolls naturally. */}
+              in one continuous table. Height is bounded with both-axis
+              scroll and a sticky header so the horizontal scrollbar sits
+              right under the visible rows — no need to scroll all the
+              way down the page to reach it. */}
           <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
-            <div style={{ overflowX: "auto" }}>
+            <div style={{ maxHeight: "70vh", overflow: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1660 }}>
                 <thead>
                   <tr style={{ background: "linear-gradient(135deg,#1e3a5f,#1e40af)" }}>
-                    <th style={{ ...TH, color: "#bfdbfe", background: "transparent", fontSize: 9.5 }}>#</th>
+                    <th style={{ ...TH, color: "#bfdbfe", background: "#1e3a5f", fontSize: 9.5, position: "sticky", top: 0, zIndex: 1 }}>#</th>
                     {AP_HEADERS.map(h => (
                       <SortableTH key={h.key} label={h.label} sortKey={h.key} sort={sort} onSort={toggleSort}
-                        style={{ color: "#bfdbfe", background: "transparent", fontSize: 9.5, minWidth: h.width, whiteSpace: "nowrap" }} />
+                        style={{ color: "#bfdbfe", background: "#1e3a5f", fontSize: 9.5, minWidth: h.width, whiteSpace: "nowrap", position: "sticky", top: 0, zIndex: 1 }} />
                     ))}
                   </tr>
                 </thead>
@@ -851,16 +854,19 @@ function AROutstandingPanel() {
           </div>
 
           {/* Table — no pagination: all fetched rows (up to Limit) render
-              in one continuous table, page scrolls naturally. */}
+              in one continuous table. Height is bounded with both-axis
+              scroll and a sticky header so the horizontal scrollbar sits
+              right under the visible rows — no need to scroll all the
+              way down the page to reach it. */}
           <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
-            <div style={{ overflowX: "auto" }}>
+            <div style={{ maxHeight: "70vh", overflow: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1620 }}>
                 <thead>
                   <tr style={{ background: "linear-gradient(135deg,#92400e,#78350f)" }}>
-                    <th style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5 }}>#</th>
+                    <th style={{ ...TH, color: "#fef3c7", background: "#92400e", fontSize: 9.5, position: "sticky", top: 0, zIndex: 1 }}>#</th>
                     {AR_HEADERS.map(h => (
                       <SortableTH key={h.key} label={h.label} sortKey={h.key} sort={sort} onSort={toggleSort}
-                        style={{ color: "#fef3c7", background: "transparent", fontSize: 9.5, minWidth: h.width, whiteSpace: "nowrap" }} />
+                        style={{ color: "#fef3c7", background: "#92400e", fontSize: 9.5, minWidth: h.width, whiteSpace: "nowrap", position: "sticky", top: 0, zIndex: 1 }} />
                     ))}
                   </tr>
                 </thead>
