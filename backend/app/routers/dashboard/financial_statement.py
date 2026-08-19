@@ -53,13 +53,18 @@ async def get_periods(user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)
 @router.get("/upload-status")
 async def get_upload_status(
     report_type: str = Query(..., pattern="^(balance_sheet|profit_loss|profit_loss_monthly|cash_flow)$"),
+    month: Optional[int] = Query(None, ge=1, le=12, description="profit_loss_monthly only — which stored snapshot; omit for the most recent"),
+    year:  Optional[int] = Query(None, description="profit_loss_monthly only — which stored snapshot; omit for the most recent"),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
-    """Metadata about the currently-stored Excel upload for a report, if
-    any — lets the frontend show "last uploaded by X on Y" and restrict
-    its year pickers to whatever years the uploaded file actually covers."""
-    upload = await FinancialStatementUploadService().get_upload(db, report_type)
+    """Metadata about a stored Excel upload for a report, if any — lets the
+    frontend show "last uploaded by X on Y" and restrict its year pickers
+    to whatever years the uploaded file actually covers. For
+    profit_loss_monthly (which stores one snapshot per month, unlike every
+    other report_type's single row), month/year selects which one; omitted
+    defaults to the most recently uploaded."""
+    upload = await FinancialStatementUploadService().get_upload(db, report_type, month, year)
     if not upload:
         return {"success": True, "data": None}
     content = upload["content"]
@@ -73,8 +78,22 @@ async def get_upload_status(
             "as_of_label": content.get("as_of_label"),
             "date_last": content.get("date_last"),
             "date_this": content.get("date_this"),
+            "period_month": upload.get("period_month"),
+            "period_year": upload.get("period_year"),
         },
     }
+
+
+@router.get("/profit-loss-monthly/snapshots")
+async def get_profit_loss_monthly_snapshots(
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
+):
+    """Every stored Profit or Loss Monthly snapshot (month, year), newest
+    first — populates the Month+Year picker with only the periods that
+    actually have an uploaded file, instead of offering all 12 months."""
+    snapshots = await FinancialStatementUploadService().list_snapshots(db, "profit_loss_monthly")
+    return {"success": True, "data": snapshots}
 
 
 @router.post("/upload")
@@ -86,8 +105,10 @@ async def upload_financial_statement_excel(
 ):
     """Upload the manual Excel report for one of the 4 supported report
     types — parses the matching sheet (Balance sheet / Profit or loss /
-    PL_monthly / Cashflow) and stores it, replacing any previous upload for
-    that report_type."""
+    PL_monthly / Cashflow) and stores it. profit_loss_monthly is stored as
+    its own (month, year) snapshot, additive to whatever other months are
+    already stored; every other report_type still replaces its single
+    previous upload wholesale."""
     content = await file.read()
     result = await FinancialStatementUploadService().save_upload(db, report_type, content, file.filename, user.username)
     if not result.get("success"):
@@ -195,13 +216,18 @@ async def _cash_flow_from_excel(db: AsyncSession, years_csv: str) -> dict:
     }
 
 
-async def _profit_loss_monthly_from_excel(db: AsyncSession) -> dict:
-    upload = await FinancialStatementUploadService().get_upload(db, "profit_loss_monthly")
+async def _profit_loss_monthly_from_excel(db: AsyncSession, month: Optional[int] = None, year: Optional[int] = None) -> dict:
+    upload = await FinancialStatementUploadService().get_upload(db, "profit_loss_monthly", month, year)
     if not upload:
-        return {"success": False, "error": "No Excel data uploaded yet for Profit or Loss Monthly."}
+        msg = "No Excel data uploaded yet for Profit or Loss Monthly."
+        if month and year:
+            msg = f"No Profit or Loss Monthly snapshot uploaded for {month}/{year}."
+        return {"success": False, "error": msg}
     result = dict(upload["content"])
     result["success"] = True
     result.setdefault("unmapped_accounts", [])
+    result["period_month"] = upload.get("period_month")
+    result["period_year"] = upload.get("period_year")
     return result
 
 
@@ -257,12 +283,14 @@ async def get_profit_and_loss_monthly(
     period_last: Optional[str] = Query(None, description="Same month last year, e.g. JUN-25 — oracle source only"),
     ytd_last: Optional[str] = Query(None, description="Comma-separated periods JAN-25,...,JUN-25 — oracle source only"),
     source: str = Query("oracle", pattern="^(oracle|excel)$"),
+    month: Optional[int] = Query(None, ge=1, le=12, description="excel source only — which stored snapshot; omit for the most recent"),
+    year:  Optional[int] = Query(None, description="excel source only — which stored snapshot; omit for the most recent"),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
     """MTD/YTD comparison — this year's period vs the same period last year."""
     if source == "excel":
-        return await _profit_loss_monthly_from_excel(db)
+        return await _profit_loss_monthly_from_excel(db, month, year)
     ytd_this_list = [p.strip() for p in ytd_this.split(",") if p.strip()]
     ytd_last_list = [p.strip() for p in ytd_last.split(",") if p.strip()]
     return await FinancialStatementService().get_profit_and_loss_monthly(

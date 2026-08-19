@@ -310,6 +310,18 @@ def parse_profit_loss_monthly_excel(content: bytes) -> dict:
     data["date_last"] = date_last.strip()
     data["date_this"] = date_this.strip()
     data["columns"] = ["MTD Last Year", "YTD Last Year", "MTD This Year", "YTD This Year"]
+
+    # Which calendar month/year this snapshot represents — lets
+    # save_upload() store it as its own row instead of overwriting
+    # whatever month was uploaded before, so a Month+Year picker in the
+    # UI can select between multiple stored snapshots.
+    try:
+        dt_this = datetime.strptime(data["date_this"], "%B %d, %Y")
+        data["period_month"] = dt_this.month
+        data["period_year"] = dt_this.year
+    except ValueError:
+        data["period_month"] = None
+        data["period_year"] = None
     return data
 
 
@@ -430,7 +442,28 @@ class FinancialStatementUploadService:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-        result = await db.execute(select(FinancialStatementUpload).where(FinancialStatementUpload.report_type == report_type))
+        # profit_loss_monthly is keyed by (report_type, period_month,
+        # period_year) — a new month's upload adds a new row instead of
+        # overwriting a prior month's. Every other report_type keeps the
+        # original single-row-per-type behavior (period_month IS NULL).
+        period_month = period_year = None
+        if report_type == "profit_loss_monthly":
+            period_month, period_year = parsed.get("period_month"), parsed.get("period_year")
+            if period_month is None or period_year is None:
+                return {"success": False, "error": (
+                    "Could not determine the month/year this snapshot represents from row 7's "
+                    "date header — expected a format like \"June 30, 2026\"."
+                )}
+
+        month_filter = FinancialStatementUpload.period_month == period_month if period_month is not None \
+            else FinancialStatementUpload.period_month.is_(None)
+        year_filter = FinancialStatementUpload.period_year == period_year if period_year is not None \
+            else FinancialStatementUpload.period_year.is_(None)
+        query = (
+            select(FinancialStatementUpload)
+            .where(FinancialStatementUpload.report_type == report_type, month_filter, year_filter)
+        )
+        result = await db.execute(query)
         row = result.scalar_one_or_none()
         if row:
             row.content = parsed
@@ -440,17 +473,33 @@ class FinancialStatementUploadService:
         else:
             row = FinancialStatementUpload(
                 report_type=report_type, content=parsed,
+                period_month=period_month, period_year=period_year,
                 original_filename=filename, uploaded_by=username,
             )
             db.add(row)
         await db.commit()
         return {"success": True, "data": parsed, "uploaded_at": row.uploaded_at.isoformat() if row.uploaded_at else None}
 
-    async def get_upload(self, db, report_type: str) -> dict | None:
+    async def get_upload(self, db, report_type: str, month: int | None = None, year: int | None = None) -> dict | None:
         from app.models.financial_statement_upload import FinancialStatementUpload
         from sqlalchemy import select
 
-        result = await db.execute(select(FinancialStatementUpload).where(FinancialStatementUpload.report_type == report_type))
+        query = select(FinancialStatementUpload).where(FinancialStatementUpload.report_type == report_type)
+        if report_type == "profit_loss_monthly":
+            if month is not None and year is not None:
+                query = query.where(FinancialStatementUpload.period_month == month, FinancialStatementUpload.period_year == year)
+            else:
+                # No month/year given — fall back to the most recently
+                # uploaded snapshot (e.g. for /upload-status's overview).
+                # nullslast() matters here: Postgres's default for DESC is
+                # NULLS FIRST, which would otherwise put a legacy
+                # pre-migration row (period_month/year still NULL) ahead
+                # of every properly-dated snapshot.
+                query = query.order_by(
+                    FinancialStatementUpload.period_year.desc().nullslast(),
+                    FinancialStatementUpload.period_month.desc().nullslast(),
+                )
+        result = await db.execute(query.limit(1))
         row = result.scalar_one_or_none()
         if not row:
             return None
@@ -459,4 +508,23 @@ class FinancialStatementUploadService:
             "original_filename": row.original_filename,
             "uploaded_by": row.uploaded_by,
             "uploaded_at": row.uploaded_at.isoformat() if row.uploaded_at else None,
+            "period_month": row.period_month,
+            "period_year": row.period_year,
         }
+
+    async def list_snapshots(self, db, report_type: str) -> list[dict]:
+        """profit_loss_monthly only — every stored (month, year) snapshot,
+        newest first, for the frontend's Month+Year picker."""
+        from app.models.financial_statement_upload import FinancialStatementUpload
+        from sqlalchemy import select
+
+        result = await db.execute(
+            select(FinancialStatementUpload.period_month, FinancialStatementUpload.period_year, FinancialStatementUpload.uploaded_at)
+            .where(FinancialStatementUpload.report_type == report_type)
+            .where(FinancialStatementUpload.period_month.isnot(None))
+            .order_by(FinancialStatementUpload.period_year.desc(), FinancialStatementUpload.period_month.desc())
+        )
+        return [
+            {"month": m, "year": y, "uploaded_at": u.isoformat() if u else None}
+            for m, y, u in result.fetchall()
+        ]
