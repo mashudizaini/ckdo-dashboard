@@ -542,6 +542,20 @@ class AccountingService:
         as_of_date too, and the `status` filter is evaluated against the
         reconstructed status rather than the live one. Without as_of_date,
         behavior is unchanged from before (today's live status/remaining).
+
+        Once a row is Closed, payment_date (the last receivable
+        application's apply_date — capped at as_of_date when given) is
+        surfaced and days_overdue freezes as of that date instead of
+        continuing to count against today/as_of_date, so a paid invoice
+        stops accumulating overdue days the moment it was actually paid.
+        Still-open rows keep counting normally (payment_date is blank).
+
+        class='CM' (credit memos / sales returns) rows are queried and
+        still netted into every summary total exactly as before, but are
+        no longer returned in `data` — "credit memo tidak ditampilkan
+        tapi langsung mengurangi" (not shown as a line, but still directly
+        reduces the totals). The Returns (CM) summary card is the only
+        remaining visibility into them.
         """
         limit = min(max(limit, 1), 2000)
         where_extra = ""
@@ -566,10 +580,30 @@ class AccountingService:
             remaining_expr = f"ROUND(NVL(aps.amount_due_original, 0) - ({applied_asof_expr}), 2)"
             status_expr = f"CASE WHEN ({remaining_expr}) <= 0 THEN 'CL' ELSE 'OP' END"
             where_extra += " AND rct.trx_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')"
+            payment_date_expr = """
+                (SELECT MAX(araa.apply_date) FROM apps.ar_receivable_applications_all araa
+                 WHERE araa.applied_payment_schedule_id = aps.payment_schedule_id
+                   AND araa.status = 'APP'
+                   AND araa.apply_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD'))
+            """
         else:
             today_expr = "TRUNC(SYSDATE)"
             remaining_expr = "ROUND(NVL(aps.amount_due_remaining, 0), 2)"
             status_expr = "aps.status"
+            payment_date_expr = """
+                (SELECT MAX(araa.apply_date) FROM apps.ar_receivable_applications_all araa
+                 WHERE araa.applied_payment_schedule_id = aps.payment_schedule_id
+                   AND araa.status = 'APP')
+            """
+        # Once Closed, days_overdue freezes as of the last applied payment
+        # instead of continuing to count against today/as_of_date — a paid
+        # invoice shouldn't keep accumulating overdue days.
+        days_overdue_anchor = f"""
+            CASE WHEN ({status_expr}) = 'CL' AND ({payment_date_expr}) IS NOT NULL
+                 THEN ({payment_date_expr})
+                 ELSE {today_expr}
+            END
+        """
 
         if status and status != "ALL":
             where_extra += f" AND ({status_expr}) = :status"
@@ -629,7 +663,8 @@ class AccountingService:
                 ({rate_case})                                        AS conversion_rate,
                 ROUND(NVL(aps.amount_due_original,  0) * ({rate_case}), 2) AS original_amount_idr,
                 ROUND(({remaining_expr}) * ({rate_case}), 2)         AS remaining_amount_idr,
-                ROUND({today_expr} - aps.due_date, 0)                AS days_overdue,
+                ROUND(({days_overdue_anchor}) - aps.due_date, 0)     AS days_overdue,
+                CASE WHEN ({status_expr}) = 'CL' THEN TO_CHAR(({payment_date_expr}), 'YYYY-MM-DD') END AS payment_date,
                 rcttt.name                                           AS transaction_type,
                 ({status_expr})                                      AS status,
                 aps.class,
@@ -679,9 +714,15 @@ class AccountingService:
             total_remaining_idr = sum(r.get("remaining_amount_idr", 0) for r in open_rows)
             total_overdue_idr   = sum(r.get("remaining_amount_idr", 0) for r in overdue)
             returns_rows = [r for r in open_rows if r.get("class") == "CM"]
+            # Credit memos are queried and netted into every total above
+            # exactly like any other row, but aren't returned as their own
+            # line — "tidak ditampilkan tapi langsung mengurangi" (not
+            # shown, but still directly reduces the totals). The Returns
+            # (CM) summary card remains the only visibility into them.
+            visible_rows = [r for r in clean if r.get("class") != "CM"]
             return {
                 "success":    True,
-                "count":      len(clean),
+                "count":      len(visible_rows),
                 "limit":      limit,
                 "usd_rate":   usd_rate,
                 "as_of_date": as_of_date,
@@ -695,7 +736,7 @@ class AccountingService:
                     "returns_count":         len(returns_rows),
                     "returns_remaining_idr": round(sum(r.get("remaining_amount_idr", 0) for r in returns_rows), 2),
                 },
-                "data": clean,
+                "data": visible_rows,
             }
         except Exception as e:
             logger.error("ar_outstanding_error", error=str(e))
