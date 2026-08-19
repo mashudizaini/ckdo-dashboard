@@ -15,6 +15,9 @@ import PurchasingDashboard from "@/pages/dashboard/Purchasing";
 import GeneralDashboard from "@/pages/dashboard/General";
 import EISDashboard from "@/pages/dashboard/EIS";
 
+// Setup Pages — one per team, same names as the DASHBOARD section
+import SetupPage from "@/pages/setup/SetupPage";
+
 // AI Tools Pages
 import Chatbot from "@/pages/ai-tools/Chatbot";
 import DocumentConverter from "@/pages/ai-tools/DocumentConverter";
@@ -121,6 +124,19 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+      </Route>
+
+      {/* SETUP — same team names as DASHBOARD, one placeholder page each
+          (no per-team role gate yet — reachable by any authenticated
+          user, matching SETUP_ITEMS' roles: [] in Sidebar.jsx). */}
+      <Route path="/setup" element={<Layout />}>
+        <Route index             element={<Navigate to="/setup/it" replace />} />
+        <Route path="it"          element={<ProtectedRoute><SetupPage team="IT" /></ProtectedRoute>} />
+        <Route path="hr"          element={<ProtectedRoute><SetupPage team="HRGA" /></ProtectedRoute>} />
+        <Route path="pac"         element={<ProtectedRoute><SetupPage team="PAC" /></ProtectedRoute>} />
+        <Route path="accounting"  element={<ProtectedRoute><SetupPage team="Accounting & Tax" /></ProtectedRoute>} />
+        <Route path="purchasing"  element={<ProtectedRoute><SetupPage team="Purchasing" /></ProtectedRoute>} />
+        <Route path="general"     element={<ProtectedRoute><SetupPage team="General" /></ProtectedRoute>} />
       </Route>
 
       {/* Bare new-tab view (no sidebar chrome) — opened via window.open() after transcribing */}

@@ -5,7 +5,7 @@ import { useThemeStore } from "@/store/themeStore";
 import {
   Monitor, Users, Factory, Calculator,
   ShoppingCart, FileText, LogOut, LayoutGrid, TrendingUp, FileStack,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, Settings,
 } from "lucide-react";
 import RobotIcon from "@/components/icons/RobotIcon";
 import logo from "@/assets/LOGO-ONLY.png";
@@ -59,6 +59,23 @@ const NAV_ITEMS = [
   // own team, resolved server-side.
   { label: "General", path: "/dashboard/general", icon: LayoutGrid, roles: [], children: [
     { label: "Budget Monitoring", path: "/dashboard/general/budget" },
+  ] },
+];
+
+// SETUP — same team names as the DASHBOARD section above, one flat level
+// (no further sub-items per team, unlike DASHBOARD's per-team feature
+// list), open to any authenticated user for now: unlike DASHBOARD's
+// per-team role gates, there's no per-child role field in this data shape
+// to restrict SETUP > IT to it_staff only etc. — every team's Setup entry
+// is visible to everyone until that's asked for.
+const SETUP_ITEMS = [
+  { label: "SETUP", path: "/setup", icon: Settings, roles: [], children: [
+    { label: "IT", path: "/setup/it" },
+    { label: "HRGA", path: "/setup/hr" },
+    { label: "PAC", path: "/setup/pac" },
+    { label: "Accounting & Tax", path: "/setup/accounting" },
+    { label: "Purchasing", path: "/setup/purchasing" },
+    { label: "General", path: "/setup/general" },
   ] },
 ];
 
@@ -155,7 +172,7 @@ export default function Sidebar() {
   const isVisible = (roles) => roles.length === 0 || hasAnyRole(...roles, "admin");
 
   // Whichever module matches the current URL starts expanded; user toggles freely afterward.
-  const ALL_TREE_ITEMS = [...NAV_ITEMS, ...EIS_ITEMS];
+  const ALL_TREE_ITEMS = [...NAV_ITEMS, ...EIS_ITEMS, ...SETUP_ITEMS];
 
   const [expanded, setExpanded] = useState(() => new Set(
     ALL_TREE_ITEMS.filter((item) => location.pathname.startsWith(item.path)).map((item) => item.path)
@@ -319,6 +336,23 @@ export default function Sidebar() {
             </p>
             <div className="space-y-1.5">
               {EIS_ITEMS.filter((item) => isVisible(item.roles)).map((item) => (
+                item.children?.length
+                  ? <NavTreeItem key={item.path} item={item} isOpen={expanded.has(item.path)} onToggle={toggle} />
+                  : <NavCard key={item.path} item={item} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* SETUP — team names mirrored from DASHBOARD, one flat level of
+            per-team configuration entries. */}
+        {SETUP_ITEMS.filter((item) => isVisible(item.roles)).length > 0 && (
+          <div>
+            <p style={{ fontSize: 13, fontWeight: 800, color: "#334155", letterSpacing: "0.07em", marginBottom: 8, paddingLeft: 8 }}>
+              SETUP
+            </p>
+            <div className="space-y-1.5">
+              {SETUP_ITEMS.filter((item) => isVisible(item.roles)).map((item) => (
                 item.children?.length
                   ? <NavTreeItem key={item.path} item={item} isOpen={expanded.has(item.path)} onToggle={toggle} />
                   : <NavCard key={item.path} item={item} />
