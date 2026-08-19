@@ -17,6 +17,7 @@ import EISDashboard from "@/pages/dashboard/EIS";
 
 // Setup Pages — one per team, same names as the DASHBOARD section
 import SetupPage from "@/pages/setup/SetupPage";
+import HRSetupPage from "@/pages/setup/HRSetupPage";
 
 // AI Tools Pages
 import Chatbot from "@/pages/ai-tools/Chatbot";
@@ -132,7 +133,7 @@ export default function App() {
       <Route path="/setup" element={<Layout />}>
         <Route index             element={<Navigate to="/setup/it" replace />} />
         <Route path="it"          element={<ProtectedRoute><SetupPage team="IT" /></ProtectedRoute>} />
-        <Route path="hr"          element={<ProtectedRoute><SetupPage team="HRGA" /></ProtectedRoute>} />
+        <Route path="hr"          element={<ProtectedRoute><HRSetupPage /></ProtectedRoute>} />
         <Route path="pac"         element={<ProtectedRoute><SetupPage team="PAC" /></ProtectedRoute>} />
         <Route path="accounting"  element={<ProtectedRoute><SetupPage team="Accounting & Tax" /></ProtectedRoute>} />
         <Route path="purchasing"  element={<ProtectedRoute><SetupPage team="Purchasing" /></ProtectedRoute>} />
