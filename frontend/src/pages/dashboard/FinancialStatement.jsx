@@ -30,6 +30,13 @@ const EMPTY_ARRAY = Object.freeze([]);
 // independent of this toggle.
 const SHOW_ORACLE_SOURCE = false;
 
+// "Today", computed once at module load — anchors the Period Type
+// defaults (current year / current year - 1) and the current-year
+// monthly-breakdown expansion below.
+const NOW = new Date();
+const CURRENT_YEAR = NOW.getFullYear();
+const CURRENT_MONTH_IDX = NOW.getMonth(); // 0 = Jan
+
 const NEU = {
   bg:          "#f1f5f9",
   shadowOut:   "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)",
@@ -535,6 +542,18 @@ function BalanceSheetPanel({ periods }) {
   const [toMonth, setToMonth] = useState("DEC");
   const [toYear, setToYear] = useState("");
 
+  // Period Type — "multi" (default): Period From/To both active, a real
+  // range. "single": Period To is disabled and ignored entirely; Period
+  // From alone drives a 1-column view.
+  const [periodType, setPeriodType] = useState("multi");
+
+  // Show Jan..current-month as separate columns wherever the current
+  // year appears in the range, instead of one single column for it —
+  // e.g. if today is in July, the current year expands into Jan-Jul.
+  // Oracle mode only (Excel snapshots have no month granularity to
+  // expand into). Defaults on.
+  const [showCurrentYearMonthly, setShowCurrentYearMonthly] = useState(true);
+
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -559,27 +578,44 @@ function BalanceSheetPanel({ periods }) {
   // EQUIVALENTS (Balance Sheet Detail is no longer a separate tab).
   const [viewMode, setViewMode] = useState("summary");
 
-  // Default (and re-default on source switch) — oracle uses the latest GL
-  // period for Period To; excel uses the newest year the uploaded file
-  // covers. Period From defaults to the prior year, or collapses onto
-  // Period To (a single column) if there's no prior year of data.
+  // Default on mount — anchored to today's real calendar year, not
+  // whatever year the data happens to cover: Period From = current year
+  // - 1, Period To = current year (Multi Period), or just Period From =
+  // current year - 1 (Single Period, Period To disabled).
+  // setPeriodTypeWithDefaults below re-applies the same defaults whenever
+  // Period Type is switched, since this guarded effect (only filling in
+  // blank values) won't re-fire just because periodType changed if
+  // fromYear/toYear are already set from before.
   useEffect(() => {
-    if (!pickerYears.length) return;
-    const latestY = source === "excel" ? Math.max(...pickerYears) : (latest?.period_year ?? Math.max(...pickerYears));
-    if (!toYear || !pickerYears.includes(toYear)) {
-      setToYear(latestY);
-      setToMonth(source === "oracle" && latest ? MONTHS[latest.period_num - 1] : "DEC");
-    }
-    if (!fromYear || !pickerYears.includes(fromYear)) {
-      const prevY = latestY - 1;
-      setFromYear(pickerYears.includes(prevY) ? prevY : latestY);
+    if (!fromYear) {
+      setFromYear(CURRENT_YEAR - 1);
       setFromMonth("DEC");
     }
+    if (periodType === "multi" && !toYear) {
+      setToYear(CURRENT_YEAR);
+      setToMonth(source === "oracle" && latest ? MONTHS[latest.period_num - 1] : "DEC");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source, pickerYears.join(","), latest]);
+  }, [periodType]);
+
+  const setPeriodTypeWithDefaults = (val) => {
+    setPeriodType(val);
+    setFromYear(CURRENT_YEAR - 1);
+    setFromMonth("DEC");
+    if (val === "multi") {
+      setToYear(CURRENT_YEAR);
+      setToMonth(source === "oracle" && latest ? MONTHS[latest.period_num - 1] : "DEC");
+    }
+  };
 
   useMonthSnap(source, periods, fromYear, fromMonth, setFromMonth);
   useMonthSnap(source, periods, toYear, toMonth, setToMonth);
+
+  // Single Period ignores Period To entirely — Period From is the only
+  // (and therefore also the "to") endpoint, producing exactly 1 column
+  // (subject to the current-year expansion below).
+  const effToYear = periodType === "single" ? fromYear : toYear;
+  const effToMonth = periodType === "single" ? fromMonth : toMonth;
 
   // Chronological period list, oldest → newest, left to right (this is the
   // ordering Balance Sheet Detail already had — now shared by construction
@@ -587,16 +623,25 @@ function BalanceSheetPanel({ periods }) {
   // Period To each resolve using their own month; any year strictly
   // between them is always its fiscal year-end (December) snapshot. In
   // excel mode there's no month component — each year is either present in
-  // the uploaded file or skipped.
+  // the uploaded file or skipped. Wherever the real current year lands in
+  // the range, showCurrentYearMonthly (Oracle only) expands it into one
+  // column per posted month (Jan..now) instead of a single column.
   const periodList = useMemo(() => {
-    if (!fromYear || !toYear || fromYear > toYear) return [];
+    if (!fromYear || !effToYear || fromYear > effToYear) return [];
     const list = [];
-    for (let y = fromYear; y <= toYear; y++) {
+    for (let y = fromYear; y <= effToYear; y++) {
+      if (source === "oracle" && showCurrentYearMonthly && y === CURRENT_YEAR) {
+        for (let m = 0; m <= CURRENT_MONTH_IDX; m++) {
+          const pn = periodNameForMonthYear(periods, MONTHS[m], y);
+          if (pn != null) list.push(pn);
+        }
+        continue;
+      }
       let pn;
       if (source === "excel") {
         pn = pickerYears.includes(y) ? y : null;
-      } else if (y === toYear) {
-        pn = periodNameForMonthYear(periods, toMonth, y);
+      } else if (y === effToYear) {
+        pn = periodNameForMonthYear(periods, effToMonth, y);
       } else if (y === fromYear) {
         pn = periodNameForMonthYear(periods, fromMonth, y);
       } else {
@@ -605,7 +650,7 @@ function BalanceSheetPanel({ periods }) {
       if (pn != null) list.push(pn);
     }
     return list;
-  }, [source, periods, fromYear, toYear, fromMonth, toMonth, pickerYears]);
+  }, [source, periods, fromYear, effToYear, fromMonth, effToMonth, pickerYears, showCurrentYearMonthly]);
 
   // Balance Sheet Detail always queries Oracle directly (no Excel
   // equivalent — the manual file has no natural-account granularity), so
@@ -624,7 +669,7 @@ function BalanceSheetPanel({ periods }) {
   // (a multi-year Period From/To range) -> CAGR spanning Period From to
   // Period To.
   const growthMode = activePeriodList.length === 2 ? "diff" : activePeriodList.length > 2 ? "cagr" : "none";
-  const cagrYears = growthMode === "cagr" ? toYear - fromYear : 0;
+  const cagrYears = growthMode === "cagr" ? effToYear - fromYear : 0;
 
   // Tracks the in-flight request so a newer one can cancel a still-running
   // older one — without this, a slow response arriving late (e.g. after
@@ -672,7 +717,7 @@ function BalanceSheetPanel({ periods }) {
     const apiFn = viewMode === "detail" ? financialStatementApi.exportBalanceSheetDetail : financialStatementApi.exportBalanceSheet;
     downloadExport(
       () => apiFn(activePeriodList, label),
-      `Balance_Sheet${viewMode === "detail" ? "_Detail" : ""}_${fromYear}-${toYear}.xlsx`,
+      `Balance_Sheet${viewMode === "detail" ? "_Detail" : ""}_${fromYear}-${effToYear}.xlsx`,
       setExporting, setError,
     );
   };
@@ -777,7 +822,20 @@ function BalanceSheetPanel({ periods }) {
           )}
         </div>
       )}
+      {source === "oracle" && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#334155", cursor: "pointer" }}>
+          <input type="checkbox" checked={showCurrentYearMonthly} onChange={e => setShowCurrentYearMonthly(e.target.checked)} />
+          Show {CURRENT_YEAR} by month (Jan–{MONTH_LABEL[MONTHS[CURRENT_MONTH_IDX]]}) instead of a single column
+        </label>
+      )}
       <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period Type</label>
+          <select style={SELECT} value={periodType} onChange={e => setPeriodTypeWithDefaults(e.target.value)}>
+            <option value="multi">Multi Period</option>
+            <option value="single">Single Period</option>
+          </select>
+        </div>
         <div>
           <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period From</label>
           <div style={{ display: "flex", gap: 6 }}>
@@ -795,11 +853,11 @@ function BalanceSheetPanel({ periods }) {
           <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period To</label>
           <div style={{ display: "flex", gap: 6 }}>
             {source === "oracle" && (
-              <select style={SELECT} value={toMonth} onChange={e => setToMonth(e.target.value)}>
+              <select style={SELECT} value={toMonth} onChange={e => setToMonth(e.target.value)} disabled={periodType === "single"}>
                 {monthOptionsForYear(periods, toYear).map(m => <option key={m} value={m}>{MONTH_LABEL[m]}</option>)}
               </select>
             )}
-            <select style={SELECT} value={toYear} onChange={e => setToYear(e.target.value ? Number(e.target.value) : "")}>
+            <select style={SELECT} value={toYear} onChange={e => setToYear(e.target.value ? Number(e.target.value) : "")} disabled={periodType === "single"}>
               {pickerYears.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
@@ -846,7 +904,7 @@ function BalanceSheetPanel({ periods }) {
         <div style={{ padding: 16, fontSize: 12, color: "#d97706" }}>
           Detail view needs a matching Oracle GL period for the selected years, but none were found.
         </div>
-      ) : fromYear && toYear && fromYear > toYear ? (
+      ) : fromYear && effToYear && fromYear > effToYear ? (
         <div style={{ padding: 16, fontSize: 12, color: "#dc2626" }}>Period From must not be after Period To.</div>
       ) : loading ? (
         // Shown for every load (not just the first one, before `data`
