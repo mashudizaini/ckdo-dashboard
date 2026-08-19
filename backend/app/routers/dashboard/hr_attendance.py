@@ -1974,6 +1974,100 @@ async def get_monthly_employee_summary(
     }
 
 
+@router.get("/yearly-summary")
+async def get_yearly_summary(
+    year:       int           = Query(...),
+    department: Optional[str] = Query(None, description="Exact department name — omit for all"),
+    db:         AsyncSession  = Depends(get_db),
+    user:       CurrentUser   = Depends(require_role(Roles.HR)),
+):
+    """Month-by-month attendance summary for a whole year — reverse-
+    engineered from the user's reference screenshot (2026-08-19) and
+    verified arithmetically against every number in it:
+      Expected Man-Days  = Total Employees x Working Days
+      Present Man-Days   = Expected Man-Days - (Late + Sick + Unpaid)
+      Attendance Ratio   = Present Man-Days / Expected Man-Days
+      Absence Ratio      = (Late + Sick + Unpaid) / Expected Man-Days
+    Two things that make this different from every other endpoint in this
+    file:
+      - Working Days is a COMPANY-CALENDAR count (distinct weekday dates
+        that month where at least one employee had a real required
+        working day, i.e. SUM(_plan_expr()) > 0 for that date) — not a
+        per-employee sum like _plan_expr() is used for elsewhere. A
+        company-wide holiday (leave_code='H' for everyone that date)
+        naturally drops out since nobody's plan is 1 that day.
+      - A late arrival counts as a DEDUCTION here (folded into Total same
+        as Sick/Unpaid Leave), unlike _actual_expr() elsewhere in this
+        file which still counts Late as present. This is what the
+        reference numbers require (Present = Expected - Total reconciles
+        exactly; if Late were excluded from the deduction the totals
+        wouldn't match).
+    All 12 months are always returned (zeros for months with no data),
+    matching the reference report's Jan-Dec layout.
+    """
+    from sqlalchemy import extract
+
+    MONTHS = ["January","February","March","April","May","June","July",
+              "August","September","October","November","December"]
+
+    months = []
+    for month in range(1, 13):
+        where = [
+            extract("year",  AttendanceRecord.attendance_date) == year,
+            extract("month", AttendanceRecord.attendance_date) == month,
+        ]
+        if department:
+            where.append(AttendanceRecord.department == department)
+
+        total_employees = (await db.execute(
+            select(func.count(func.distinct(AttendanceRecord.employee_id))).where(*where)
+        )).scalar() or 0
+
+        working_days = len((await db.execute(
+            select(AttendanceRecord.attendance_date)
+            .where(*where, IS_WEEKDAY)
+            .group_by(AttendanceRecord.attendance_date)
+            .having(func.sum(_plan_expr()) > 0)
+        )).fetchall())
+
+        issue_row = (await db.execute(
+            select(
+                func.sum(_late_expr()).label("late"),
+                func.sum(_sick_expr()).label("sick"),
+                func.sum(_unpaid_leave_expr()).label("unpaid"),
+            ).where(*where)
+        )).one()
+        late, sick, unpaid = int(issue_row.late or 0), int(issue_row.sick or 0), int(issue_row.unpaid or 0)
+        total = late + sick + unpaid
+
+        expected = total_employees * working_days
+        present  = expected - total
+
+        months.append({
+            "month": month, "month_label": MONTHS[month - 1],
+            "total_employees": total_employees, "working_days": working_days,
+            "expected_man_days": expected, "present_man_days": present,
+            "late": late, "sick": sick, "unpaid": unpaid, "total": total,
+            "attendance_ratio": round(present / expected * 100, 2) if expected else None,
+            "absence_ratio":    round(total   / expected * 100, 2) if expected else None,
+        })
+
+    annual = {
+        "total_employees":   sum(m["total_employees"]   for m in months),
+        "working_days":      sum(m["working_days"]       for m in months),
+        "expected_man_days": sum(m["expected_man_days"]  for m in months),
+        "present_man_days":  sum(m["present_man_days"]   for m in months),
+        "late":              sum(m["late"]   for m in months),
+        "sick":              sum(m["sick"]   for m in months),
+        "unpaid":            sum(m["unpaid"] for m in months),
+        "total":             sum(m["total"]  for m in months),
+    }
+    annual["attendance_ratio"] = round(annual["present_man_days"] / annual["expected_man_days"] * 100, 2) if annual["expected_man_days"] else None
+    annual["absence_ratio"]    = round(annual["total"]            / annual["expected_man_days"] * 100, 2) if annual["expected_man_days"] else None
+
+    return {"year": year, "department": department, "months": months, "annual": annual}
+
+
 # ── Employee search ────────────────────────────────────────────────────────────
 
 @router.get("/search-employees")
