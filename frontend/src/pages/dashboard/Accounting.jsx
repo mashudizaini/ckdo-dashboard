@@ -604,6 +604,7 @@ function AROutstandingPanel() {
   const [dateTo,         setDateTo]         = useState("");
   const [statusFilter,   setStatusFilter]   = useState("OP");
   const [limit,          setLimit]          = useState(500);
+  const [asOfDate,       setAsOfDate]       = useState("");
   const [usdRate,        setUsdRate]        = useState("");
   const [rateInfo,       setRateInfo]       = useState(null); // { date, source }
   const [rateLoading,    setRateLoading]    = useState(false);
@@ -646,6 +647,7 @@ function AROutstandingPanel() {
         ...(dateFrom      && { date_from:       dateFrom      }),
         ...(dateTo        && { date_to:         dateTo        }),
         ...(usdRate       && { usd_rate:        Number(usdRate) }),
+        ...(asOfDate      && { as_of_date:      asOfDate      }),
       };
       const res = await accountingApi.getArOutstanding(params);
       if (res.success) { setData(res); setPage(1); }
@@ -653,7 +655,7 @@ function AROutstandingPanel() {
     } catch (e) {
       setError(e?.response?.data?.detail || String(e)); setData(null);
     } finally { setLoading(false); }
-  }, [customerName, invoiceNumber, dateFrom, dateTo, statusFilter, limit, usdRate]);
+  }, [customerName, invoiceNumber, dateFrom, dateTo, statusFilter, limit, usdRate, asOfDate]);
 
   const toggleSort = (key) => {
     setPage(1);
@@ -769,6 +771,14 @@ function AROutstandingPanel() {
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...INPUT, width: 140 }} />
         </div>
         <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: asOfDate ? "#7c3aed" : "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>As Of Date</p>
+          <input type="date" value={asOfDate} onChange={e => setAsOfDate(e.target.value)}
+            style={{ ...INPUT, width: 140, boxShadow: asOfDate ? "inset 0 2px 5px rgba(124,58,237,0.25)" : NEU.shadowIn }} />
+          {asOfDate && (
+            <p style={{ fontSize: 9.5, color: "#7c3aed", marginTop: 4, maxWidth: 150 }}>Status &amp; Remaining reconstructed as of this date</p>
+          )}
+        </div>
+        <div>
           <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Status</p>
           <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ ...INPUT, width: 110, cursor: "pointer" }}>
             <option value="OP">Open</option>
@@ -801,6 +811,12 @@ function AROutstandingPanel() {
       {error && (
         <div style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 10, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", fontSize: 12, color: "#dc2626", display: "flex", gap: 8, alignItems: "center" }}>
           <AlertTriangle size={14} /> {error}
+        </div>
+      )}
+
+      {data?.as_of_date && (
+        <div style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 10, background: "rgba(124,58,237,0.08)", border: "1px solid rgba(124,58,237,0.2)", fontSize: 11.5, color: "#7c3aed", display: "flex", gap: 8, alignItems: "center" }}>
+          <AlertTriangle size={14} /> Showing Status &amp; Remaining Amount reconstructed as of {data.as_of_date} (replaying receipts applied by that date), not today's live values. Balances closed purely via manual write-off/adjustment aren't replayed and may still show as open.
         </div>
       )}
 
