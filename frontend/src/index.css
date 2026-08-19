@@ -168,6 +168,19 @@ table {
    (!important always beats inline), so this table needs its own scoped
    !important rule with higher specificity to keep its dark header dark
    and its grid lines actually visible. */
+/* ── AR/AP Outstanding List (Accounting) — dark gradient sticky header ──
+   Same global-override problem as .inv-rmpm-table below: the bare
+   `thead th` rule forces #374151 text color on every table via
+   !important. That used to be harmless here because the header <tr>'s
+   own inline gradient background was ALSO overridden by the global
+   `thead tr` rule, so a "transparent" <th> just showed the (light)
+   overridden tr background through — dark text on a light background,
+   readable by accident. Giving each <th> its own opaque background
+   (needed so the sticky-positioned header doesn't show rows scrolling
+   underneath it) turned that into a real dark-text-on-dark-background
+   bug, since the th's own background isn't touched by any global rule. */
+.acct-outstanding-table thead th { color: #ffffff !important; }
+
 .inv-rmpm-table { border-collapse: collapse !important; }
 .inv-rmpm-table thead tr {
   background: linear-gradient(135deg,#1e293b,#0f172a) !important;

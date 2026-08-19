@@ -100,6 +100,7 @@ const AP_HEADERS = [
   { key: "remaining_amount_idr", label: "Remaining (IDR)",   width: 130, num: true },
   { key: "original_amount_orig", label: "Orig Amt (FC)",     width: 110, num: true },
   { key: "remaining_amount_orig",label: "Remaining (FC)",    width: 110, num: true },
+  { key: "after_revaluation_idr",label: "After Revaluation (IDR)", width: 150, num: true },
   { key: "description",          label: "Description",       width: 160 },
 ];
 
@@ -135,7 +136,7 @@ function APOutstandingPanel() {
   const [search,         setSearch]         = useState("");
   const [sort,           setSort]           = useState({ key: null, dir: "asc" });
 
-  const AP_NUMERIC_KEYS = ["original_amount_idr", "remaining_amount_idr", "original_amount_orig", "remaining_amount_orig"];
+  const AP_NUMERIC_KEYS = ["original_amount_idr", "remaining_amount_idr", "original_amount_orig", "remaining_amount_orig", "after_revaluation_idr"];
 
   const loadBiRate = useCallback(async () => {
     setRateLoading(true);
@@ -362,7 +363,7 @@ function APOutstandingPanel() {
               way down the page to reach it. */}
           <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
             <div style={{ maxHeight: "70vh", overflow: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1660 }}>
+              <table className="acct-outstanding-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 1660 }}>
                 <thead>
                   <tr style={{ background: "linear-gradient(135deg,#1e3a5f,#1e40af)" }}>
                     <th style={{ ...TH, color: "#bfdbfe", background: "#1e3a5f", fontSize: 9.5, position: "sticky", top: 0, zIndex: 1 }}>#</th>
@@ -401,6 +402,7 @@ function APOutstandingPanel() {
                       <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: r.remaining_amount_idr > 0 ? "#dc2626" : "#16a34a" }}>{fmtNumAp(r.remaining_amount_idr, true)}</td>
                       <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#64748b" }}>{r.original_amount_orig != null ? fmtNumAp(r.original_amount_orig, false) : "—"}</td>
                       <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#64748b" }}>{r.remaining_amount_orig != null ? fmtNumAp(r.remaining_amount_orig, false) : "—"}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#dc2626" }}>{fmtNumAp(r.after_revaluation_idr, true)}</td>
                       <td style={{ ...TD, fontSize: 11, color: "#64748b", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.description}>{r.description}</td>
                     </tr>
                     );
@@ -860,7 +862,7 @@ function AROutstandingPanel() {
               way down the page to reach it. */}
           <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
             <div style={{ maxHeight: "70vh", overflow: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1620 }}>
+              <table className="acct-outstanding-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 1620 }}>
                 <thead>
                   <tr style={{ background: "linear-gradient(135deg,#92400e,#78350f)" }}>
                     <th style={{ ...TH, color: "#fef3c7", background: "#92400e", fontSize: 9.5, position: "sticky", top: 0, zIndex: 1 }}>#</th>

@@ -367,32 +367,39 @@ class AccountingService:
             )
             WHERE ROWNUM <= {limit}
         """
+        reval_override = {}
+        if usd_rate:
+            reval_override["USD"] = usd_rate
+        if eur_rate:
+            reval_override["EUR"] = eur_rate
+
+        def _revalued(r):
+            ccy = r.get("currency")
+            orig_fc = r.get("original_amount_orig")
+            if ccy in reval_override and orig_fc is not None:
+                return orig_fc * reval_override[ccy]
+            return r.get("original_amount_idr") or 0
+
         try:
             rows = await asyncio.to_thread(self._query, sql, params)
             clean = []
             for r in rows:
-                clean.append({
+                row = {
                     k: (float(v) if hasattr(v, "__float__") and not isinstance(v, (int, float, str, type(None), bool)) else v)
                     for k, v in r.items()
-                })
+                }
+                # Original amount revalued at the USD/EUR override rate
+                # (falls back to the existing base_amount-derived
+                # original_amount_idr for any other currency, or when no
+                # override was given) — same formula the summary total
+                # below sums, exposed per-row so the table shows exactly
+                # what's being added up.
+                row["after_revaluation_idr"] = round(_revalued(row), 2)
+                clean.append(row)
             not_paid     = [r for r in clean if r.get("payment_status") == "Not Paid"]
             partial_paid = [r for r in clean if r.get("payment_status") == "Partially Paid"]
             total_idr    = sum(r.get("remaining_amount_idr") or 0 for r in clean)
-
-            reval_override = {}
-            if usd_rate:
-                reval_override["USD"] = usd_rate
-            if eur_rate:
-                reval_override["EUR"] = eur_rate
-
-            def _revalued(r):
-                ccy = r.get("currency")
-                orig_fc = r.get("original_amount_orig")
-                if ccy in reval_override and orig_fc is not None:
-                    return orig_fc * reval_override[ccy]
-                return r.get("original_amount_idr") or 0
-
-            total_after_revaluation_idr = sum(_revalued(r) for r in not_paid)
+            total_after_revaluation_idr = sum(r.get("after_revaluation_idr") or 0 for r in clean)
 
             return {
                 "success":       True,
