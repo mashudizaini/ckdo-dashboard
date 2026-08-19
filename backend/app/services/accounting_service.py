@@ -4,6 +4,7 @@ Accounting Service
 Business logic for Accounting Dashboard.
 """
 import asyncio
+from datetime import date
 from app.database import get_oracle_connection
 import structlog
 
@@ -520,7 +521,7 @@ class AccountingService:
             logger.error("ar_outstanding_error", error=str(e))
             return {"success": False, "error": str(e), "data": []}
 
-    async def get_ar_aging(self, customer_name: str = None, limit: int = 500) -> dict:
+    async def get_ar_aging(self, customer_name: str = None, base_date: str = None, limit: int = 500) -> dict:
         """
         AR Aging — open items grouped by customer into 5 buckets (Current,
         1-30, 31-60, 61-90, >90 days overdue), Corporate-rate IDR converted
@@ -528,8 +529,12 @@ class AccountingService:
         same grouping, so an open return nets against whichever bucket its
         own due_date falls into instead of being excluded — "dikurangin
         sales return" per request, same reasoning as get_ar_outstanding.
-        Priced as of today (this is inherently a today's-exposure report,
-        unlike get_ar_outstanding's optional date_to anchor).
+
+        base_date anchors what "today" means for both the days-overdue
+        bucketing and the Corporate rate lookup — defaults to the actual
+        current date but can be overridden by the user to reprice/re-bucket
+        the report as of any past date (e.g. reconciling against a
+        month-end snapshot).
         """
         limit = min(max(limit, 1), 2000)
         where_extra = ""
@@ -538,7 +543,11 @@ class AccountingService:
             where_extra += " AND UPPER(hp.party_name) LIKE UPPER(:cust)"
             params["cust"] = f"%{customer_name}%"
 
-        rate_case = """
+        base_date = base_date or date.today().isoformat()
+        params["base_date"] = base_date
+        base_date_expr = "TRUNC(TO_DATE(:base_date, 'YYYY-MM-DD'))"
+
+        rate_case = f"""
             CASE WHEN rct.invoice_currency_code = 'IDR' THEN 1
             ELSE COALESCE((
                 SELECT gdr.conversion_rate FROM apps.gl_daily_rates gdr
@@ -550,7 +559,7 @@ class AccountingService:
                       WHERE  gdr2.from_currency   = rct.invoice_currency_code
                         AND  gdr2.to_currency     = 'IDR'
                         AND  gdr2.conversion_type = 'Corporate'
-                        AND  gdr2.conversion_date <= TRUNC(SYSDATE)
+                        AND  gdr2.conversion_date <= {base_date_expr}
                   )
             ), 1) END
         """
@@ -569,7 +578,7 @@ class AccountingService:
                 SELECT
                     hp.party_name                                    AS customer_name,
                     hca.account_number,
-                    (TRUNC(SYSDATE) - aps.due_date)                  AS days_overdue,
+                    ({base_date_expr} - aps.due_date)                AS days_overdue,
                     NVL(aps.amount_due_remaining, 0) * ({rate_case}) AS remaining_idr
                 FROM apps.ar_payment_schedules_all  aps
                 JOIN apps.ra_customer_trx_all        rct
@@ -603,7 +612,7 @@ class AccountingService:
                 "total_idr":   round(sum(r.get("total_idr", 0) for r in clean), 2),
                 "item_count":  sum(r.get("item_count", 0) for r in clean),
             }
-            return {"success": True, "count": len(clean), "data": clean, "totals": totals}
+            return {"success": True, "count": len(clean), "base_date": base_date, "data": clean, "totals": totals}
         except Exception as e:
             logger.error("ar_aging_error", error=str(e))
             return {"success": False, "error": str(e), "data": []}

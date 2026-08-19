@@ -657,8 +657,14 @@ function fmtIdr(v) {
   return n < 0 ? `(${s})` : s;
 }
 
+function todayIso() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function ARAgingPanel() {
   const [customerName, setCustomerName] = useState("");
+  const [baseDate,      setBaseDate]     = useState(todayIso());
   const [data,          setData]         = useState(null);
   const [loading,       setLoading]      = useState(false);
   const [error,         setError]        = useState(null);
@@ -668,23 +674,24 @@ function ARAgingPanel() {
   const loadData = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const params = { limit: 500, ...(customerName && { customer_name: customerName }) };
+      const params = { limit: 500, base_date: baseDate || todayIso(), ...(customerName && { customer_name: customerName }) };
       const res = await accountingApi.getArAging(params);
       if (res.success) setData(res);
       else { setError(res.error || "Failed to load"); setData(null); }
     } catch (e) {
       setError(e?.response?.data?.detail || String(e)); setData(null);
     } finally { setLoading(false); }
-  }, [customerName]);
+  }, [customerName, baseDate]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
   const totals = data?.totals;
+  const isToday = (data?.base_date || baseDate) === todayIso();
 
   return (
     <SectionCard
       title="AR Aging by Customer"
-      subtitle="Open items (Invoices + Debit Memos + Credit Memos/Returns, Corporate-rate IDR, priced as of today) — returns net into whichever bucket their own due date falls into."
+      subtitle={`Open items (Invoices + Debit Memos + Credit Memos/Returns, Corporate-rate IDR) priced and bucketed as of ${data?.base_date || baseDate}${isToday ? " (today)" : ""} — returns net into whichever bucket their own due date falls into.`}
     >
       <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
         <div>
@@ -693,6 +700,13 @@ function ARAgingPanel() {
             placeholder="Search customer…" style={{ ...INPUT, width: 220 }}
             onKeyDown={e => e.key === "Enter" && loadData()} />
         </div>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Base Date</p>
+          <input type="date" value={baseDate} onChange={e => setBaseDate(e.target.value)} style={{ ...INPUT, width: 150 }} />
+        </div>
+        {baseDate !== todayIso() && (
+          <ActionBtn icon={RefreshCw} label="Reset to Today" color="#64748b" onClick={() => setBaseDate(todayIso())} />
+        )}
         <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#f59e0b" onClick={loadData} disabled={loading} />
       </div>
 
