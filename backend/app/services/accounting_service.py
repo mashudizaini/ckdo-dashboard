@@ -497,6 +497,7 @@ class AccountingService:
         status: str = "OP",
         limit: int = 500,
         usd_rate: float = None,
+        as_of_date: str = None,
     ) -> dict:
         """
         AR Outstanding from Oracle EBS Invoice Receivable.
@@ -508,13 +509,56 @@ class AccountingService:
         Lets the user substitute Bank Indonesia's Kurs Tengah (or any other
         value) when the Corporate rate in EBS looks stale/off. Other
         currencies keep using the Oracle Corporate rate lookup.
+
+        as_of_date, when provided, reconstructs each row's Status and
+        Remaining Amount as they stood on that date instead of showing
+        today's live values — found necessary after a real case (MENSA
+        invoice 26110012) where a receipt applied after the user's chosen
+        date had already closed the invoice by the time they looked, even
+        though it was genuinely still open as of that date. Remaining is
+        recomputed as amount_due_original minus every receivable
+        application with apply_date <= as_of_date (AR_RECEIVABLE_
+        APPLICATIONS_ALL, status='APP'); Status is derived from that
+        reconstructed remaining (<=0 => CL, else OP). Only cash/credit-memo
+        applications are replayed — manual adjustments/write-offs
+        (AR_ADJUSTMENTS_ALL) are not, so a balance closed purely via
+        write-off may still show as marginally open as of a past date.
+        Invoices dated after as_of_date are excluded (they didn't exist
+        yet), the days-overdue and Corporate-rate lookup are anchored to
+        as_of_date too, and the `status` filter is evaluated against the
+        reconstructed status rather than the live one. Without as_of_date,
+        behavior is unchanged from before (today's live status/remaining).
         """
         limit = min(max(limit, 1), 2000)
         where_extra = ""
         params: dict = {}
 
+        # Point-in-time reconstruction (see docstring). remaining_expr/
+        # status_expr fall back to the plain live columns when no
+        # as_of_date is given, so every downstream usage stays identical
+        # to the pre-existing behavior in that case.
+        if as_of_date:
+            params["as_of_date"] = as_of_date
+            today_expr = "TO_DATE(:as_of_date, 'YYYY-MM-DD')"
+            applied_asof_expr = """
+                NVL((
+                    SELECT SUM(araa.amount_applied)
+                    FROM apps.ar_receivable_applications_all araa
+                    WHERE araa.applied_payment_schedule_id = aps.payment_schedule_id
+                      AND araa.status = 'APP'
+                      AND araa.apply_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')
+                ), 0)
+            """
+            remaining_expr = f"ROUND(NVL(aps.amount_due_original, 0) - ({applied_asof_expr}), 2)"
+            status_expr = f"CASE WHEN ({remaining_expr}) <= 0 THEN 'CL' ELSE 'OP' END"
+            where_extra += " AND rct.trx_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')"
+        else:
+            today_expr = "TRUNC(SYSDATE)"
+            remaining_expr = "ROUND(NVL(aps.amount_due_remaining, 0), 2)"
+            status_expr = "aps.status"
+
         if status and status != "ALL":
-            where_extra += " AND aps.status = :status"
+            where_extra += f" AND ({status_expr}) = :status"
             params["status"] = status.upper()
 
         if customer_name:
@@ -533,12 +577,10 @@ class AccountingService:
             where_extra += " AND rct.trx_date <= TO_DATE(:date_to, 'YYYY-MM-DD')"
             params["date_to"] = date_to
 
-        # Corporate-rate IDR conversion — standardized on today's rate for
-        # every row, same as get_ar_aging, regardless of the Invoice Date
-        # To filter (reverted from anchoring to date_to: that made the
-        # List view's total diverge from Aging's whenever a date filter
-        # was set, since Aging always prices as of today). usd_rate, when
-        # given, substitutes this lookup for USD rows only.
+        # Corporate-rate IDR conversion — anchored to as_of_date when given,
+        # otherwise standardized on today's rate for every row (same as
+        # get_ar_aging). usd_rate, when given, substitutes this lookup for
+        # USD rows only, regardless of the anchor date.
         usd_override = ""
         if usd_rate:
             usd_override = "WHEN rct.invoice_currency_code = 'USD' THEN :usd_rate\n            "
@@ -555,7 +597,7 @@ class AccountingService:
                       WHERE  gdr2.from_currency   = rct.invoice_currency_code
                         AND  gdr2.to_currency     = 'IDR'
                         AND  gdr2.conversion_type = 'Corporate'
-                        AND  gdr2.conversion_date <= TRUNC(SYSDATE)
+                        AND  gdr2.conversion_date <= {today_expr}
                   )
             ), 1) END
         """
@@ -568,14 +610,14 @@ class AccountingService:
                 TO_CHAR(rct.trx_date,  'YYYY-MM-DD')                AS invoice_date,
                 TO_CHAR(aps.due_date,  'YYYY-MM-DD')                AS due_date,
                 ROUND(NVL(aps.amount_due_original,  0), 2)          AS original_amount,
-                ROUND(NVL(aps.amount_due_remaining, 0), 2)          AS remaining_amount,
+                ({remaining_expr})                                   AS remaining_amount,
                 rct.invoice_currency_code                            AS currency,
                 ({rate_case})                                        AS conversion_rate,
                 ROUND(NVL(aps.amount_due_original,  0) * ({rate_case}), 2) AS original_amount_idr,
-                ROUND(NVL(aps.amount_due_remaining, 0) * ({rate_case}), 2) AS remaining_amount_idr,
-                ROUND(TRUNC(SYSDATE) - aps.due_date, 0)             AS days_overdue,
+                ROUND(({remaining_expr}) * ({rate_case}), 2)         AS remaining_amount_idr,
+                ROUND({today_expr} - aps.due_date, 0)                AS days_overdue,
                 rcttt.name                                           AS transaction_type,
-                aps.status,
+                ({status_expr})                                      AS status,
                 aps.class,
                 SUBSTR(NVL(rct.comments, '-'), 1, 100)               AS tax_invoice_number,
                 hou.name                                             AS operating_unit
@@ -594,7 +636,7 @@ class AccountingService:
             WHERE aps.class IN ('INV', 'DM', 'CM')
               {where_extra}
             ORDER BY
-                CASE WHEN aps.status = 'OP' THEN 0 ELSE 1 END,
+                CASE WHEN ({status_expr}) = 'OP' THEN 0 ELSE 1 END,
                 aps.due_date ASC,
                 hp.party_name
             FETCH FIRST {limit} ROWS ONLY
@@ -624,10 +666,11 @@ class AccountingService:
             total_overdue_idr   = sum(r.get("remaining_amount_idr", 0) for r in overdue)
             returns_rows = [r for r in open_rows if r.get("class") == "CM"]
             return {
-                "success":  True,
-                "count":    len(clean),
-                "limit":    limit,
-                "usd_rate": usd_rate,
+                "success":    True,
+                "count":      len(clean),
+                "limit":      limit,
+                "usd_rate":   usd_rate,
+                "as_of_date": as_of_date,
                 "summary": {
                     "open_invoice_count":    len(open_rows),
                     "overdue_count":         len(overdue),

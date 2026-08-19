@@ -92,6 +92,7 @@ async def get_ar_outstanding(
     status:         str  = Query("OP",  description="OP=open, CL=closed, ALL=both"),
     limit:          int  = Query(500, ge=1, le=2000),
     usd_rate:       float = Query(None, description="Override the Oracle Corporate rate for USD rows only (e.g. BI Kurs Tengah)"),
+    as_of_date:     str  = Query(None, description="Reconstruct Status/Remaining Amount as of this date YYYY-MM-DD instead of today (replays receivable applications up to this date)"),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
     """
@@ -100,14 +101,16 @@ async def get_ar_outstanding(
     credit memos carry negative remaining amounts, netting against the
     invoice total instead of being silently dropped). Each row also gets a
     Corporate-rate IDR conversion (conversion_rate/original_amount_idr/
-    remaining_amount_idr), and the summary totals are IDR-converted. The
-    conversion rate is always priced as of today (standardized to match
-    ar-aging, which has no date filter to anchor to) regardless of
-    date_from/date_to — those only filter which invoices are included.
+    remaining_amount_idr), and the summary totals are IDR-converted.
     usd_rate overrides the Corporate rate for USD-denominated rows only.
+    Without as_of_date, everything is priced/statused as of today
+    (regardless of date_from/date_to, which only filter which invoices are
+    included). With as_of_date, Status/Remaining Amount/days_overdue/rate
+    are all reconstructed as of that date instead — see
+    AccountingService.get_ar_outstanding docstring for the exact method.
     """
     return await AccountingService().get_ar_outstanding(
-        customer_name, invoice_number, date_from, date_to, status, limit, usd_rate
+        customer_name, invoice_number, date_from, date_to, status, limit, usd_rate, as_of_date
     )
 
 
