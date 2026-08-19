@@ -51,6 +51,8 @@ async def get_ap_outstanding(
     operating_unit: str  = Query(None, description="Partial operating unit name filter"),
     payment_status: str  = Query(None, description="Not Paid | Partially Paid | ALL"),
     limit:          int  = Query(500, ge=1, le=2000),
+    usd_rate:       float = Query(None, description="Kurs Tengah BI (USD) override for the Total After Revaluation summary"),
+    eur_rate:       float = Query(None, description="Kurs Tengah BI (EUR) override for the Total After Revaluation summary"),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
     """
@@ -58,7 +60,7 @@ async def get_ap_outstanding(
     Excludes fully Paid invoices. As-of date defaults to SYSDATE.
     """
     return await AccountingService().get_ap_outstanding(
-        as_of_date, supplier_name, operating_unit, payment_status, limit
+        as_of_date, supplier_name, operating_unit, payment_status, limit, usd_rate, eur_rate
     )
 
 

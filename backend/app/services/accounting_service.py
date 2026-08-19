@@ -245,11 +245,22 @@ class AccountingService:
         operating_unit: str = None,
         payment_status: str = None,
         limit: int = 500,
+        usd_rate: float = None,
+        eur_rate: float = None,
     ) -> dict:
         """
         AP Outstanding from Oracle EBS — AP_INVOICES_ALL + AP_PAYMENT_SCHEDULES_ALL.
         Mirrors the AP Outstanding report; excludes fully Paid invoices.
         as_of_date defaults to SYSDATE when not provided.
+
+        usd_rate/eur_rate (typically Bank Indonesia's Kurs Tengah as of
+        as_of_date) drive the "Total After Revaluation" summary figure —
+        SUM over Not Paid invoices of original_amount_orig * the matching
+        override rate for USD/EUR rows, falling back to the existing
+        base_amount-derived original_amount_idr for every other currency
+        (including IDR itself, and USD/EUR when no override was given).
+        This only affects that one summary number — the per-row
+        original_amount_idr/remaining_amount_idr columns are untouched.
         """
         limit = min(max(limit, 1), 2000)
 
@@ -360,16 +371,35 @@ class AccountingService:
             not_paid     = [r for r in clean if r.get("payment_status") == "Not Paid"]
             partial_paid = [r for r in clean if r.get("payment_status") == "Partially Paid"]
             total_idr    = sum(r.get("remaining_amount_idr") or 0 for r in clean)
+
+            reval_override = {}
+            if usd_rate:
+                reval_override["USD"] = usd_rate
+            if eur_rate:
+                reval_override["EUR"] = eur_rate
+
+            def _revalued(r):
+                ccy = r.get("currency")
+                orig_fc = r.get("original_amount_orig")
+                if ccy in reval_override and orig_fc is not None:
+                    return orig_fc * reval_override[ccy]
+                return r.get("original_amount_idr") or 0
+
+            total_after_revaluation_idr = sum(_revalued(r) for r in not_paid)
+
             return {
                 "success":       True,
                 "count":         len(clean),
                 "as_of_date":    as_of_date or "today",
+                "usd_rate":      usd_rate,
+                "eur_rate":      eur_rate,
                 "summary": {
                     "not_paid_count":    len(not_paid),
                     "partial_paid_count": len(partial_paid),
                     "total_outstanding_idr": round(total_idr, 2),
                     "not_paid_idr":      round(sum(r.get("remaining_amount_idr") or 0 for r in not_paid), 2),
                     "partial_paid_idr":  round(sum(r.get("remaining_amount_idr") or 0 for r in partial_paid), 2),
+                    "total_after_revaluation_idr": round(total_after_revaluation_idr, 2),
                 },
                 "data": clean,
             }

@@ -118,6 +118,10 @@ function APOutstandingPanel() {
   const [ouFilter,       setOuFilter]       = useState("");
   const [payStatusFilter,setPayStatusFilter] = useState("ALL");
   const [limit,          setLimit]          = useState(500);
+  const [usdRate,        setUsdRate]        = useState("");
+  const [eurRate,        setEurRate]        = useState("");
+  const [rateInfo,       setRateInfo]       = useState(null); // { date, source }
+  const [rateLoading,    setRateLoading]    = useState(false);
   const [data,           setData]           = useState(null);
   const [loading,        setLoading]        = useState(false);
   const [error,          setError]          = useState(null);
@@ -128,6 +132,27 @@ function APOutstandingPanel() {
   const AP_PAGE_SIZE = 10;
   const AP_NUMERIC_KEYS = ["original_amount_idr", "remaining_amount_idr", "original_amount_orig", "remaining_amount_orig"];
 
+  const loadBiRate = useCallback(async () => {
+    setRateLoading(true);
+    try {
+      const res = await accountingApi.getExchangeRate();
+      const midOf = (r) => {
+        if (!r || (!r.sell && !r.buy)) return null;
+        const denom = r.denomination || 1;
+        return ((r.sell && r.buy ? (r.sell + r.buy) / 2 : (r.sell || r.buy)) / denom);
+      };
+      const usd = midOf(res?.rates?.find(r => r.code === "USD"));
+      const eur = midOf(res?.rates?.find(r => r.code === "EUR"));
+      if (usd != null) setUsdRate(String(Math.round(usd * 100) / 100));
+      if (eur != null) setEurRate(String(Math.round(eur * 100) / 100));
+      if (usd != null || eur != null) setRateInfo({ date: res.date, source: res.source });
+    } catch (e) {
+      // Silent — fields stay editable/empty and the user can type rates manually.
+    } finally { setRateLoading(false); }
+  }, []);
+
+  useEffect(() => { loadBiRate(); }, [loadBiRate]);
+
   const loadData = useCallback(async () => {
     setLoading(true); setError(null);
     try {
@@ -137,6 +162,8 @@ function APOutstandingPanel() {
         ...(supplierName  && { supplier_name:   supplierName  }),
         ...(ouFilter      && { operating_unit:  ouFilter      }),
         ...(payStatusFilter && payStatusFilter !== "ALL" && { payment_status: payStatusFilter }),
+        ...(usdRate       && { usd_rate:        Number(usdRate) }),
+        ...(eurRate       && { eur_rate:        Number(eurRate) }),
       };
       const res = await accountingApi.getApOutstanding(params);
       if (res.success) { setData(res); setPage(1); }
@@ -144,7 +171,7 @@ function APOutstandingPanel() {
     } catch (e) {
       setError(e?.response?.data?.detail || String(e)); setData(null);
     } finally { setLoading(false); }
-  }, [asOfDate, supplierName, ouFilter, payStatusFilter, limit]);
+  }, [asOfDate, supplierName, ouFilter, payStatusFilter, limit, usdRate, eurRate]);
 
   const toggleSort = (key) => {
     setPage(1);
@@ -265,10 +292,25 @@ function APOutstandingPanel() {
             {[200, 500, 1000, 2000].map(n => <option key={n} value={n}>{n}</option>)}
           </select>
         </div>
-        <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#3b82f6" onClick={loadData} disabled={loading} />
-        {data?.data?.length > 0 && (
-          <ActionBtn icon={Download} label="Export CSV" color="#3b82f6" onClick={() => exportApCSV(data.data)} />
-        )}
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>USD Rate</p>
+          <input type="number" step="0.01" value={usdRate} onChange={e => setUsdRate(e.target.value)}
+            placeholder="e.g. 16250" style={{ ...INPUT, width: 100 }} />
+        </div>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>EUR Rate</p>
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            <input type="number" step="0.01" value={eurRate} onChange={e => setEurRate(e.target.value)}
+              placeholder="e.g. 17800" style={{ ...INPUT, width: 100 }} />
+            <button type="button" onClick={loadBiRate} disabled={rateLoading} title="Refresh from BI Kurs Tengah"
+              style={{ border: "none", borderRadius: 9, padding: "7px 8px", background: NEU.bg, boxShadow: NEU.shadowOutSm, cursor: rateLoading ? "default" : "pointer", color: "#64748b" }}>
+              <RefreshCw size={13} className={rateLoading ? "animate-spin" : ""} />
+            </button>
+          </div>
+          {rateInfo && (
+            <p style={{ fontSize: 9.5, color: "#94a3b8", marginTop: 4 }}>Kurs Tengah BI{rateInfo.date ? ` · ${rateInfo.date}` : ""}</p>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -277,24 +319,38 @@ function APOutstandingPanel() {
         </div>
       )}
 
+      {/* Summary cards — Total Invoices/Not Paid/Partially Paid are narrow
+          fixed-width (short counts) so the 2 IDR-amount cards get the
+          freed-up space; Load/Export CSV sit to the right of the row
+          instead of in the filter bar. Total After Revaluation revalues
+          Not Paid invoices' original amount at the USD/EUR Kurs Tengah
+          BI rate above (falling back to the existing base_amount-derived
+          conversion for any other currency, or when no rate is entered). */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, alignItems: "stretch" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "110px 110px 110px repeat(2, 1fr)", gap: 10, flex: 1 }}>
+          {[
+            { label: "Total Invoices",       val: (data?.count || 0).toLocaleString(),               color: "#3b82f6" },
+            { label: "Not Paid",             val: (sm?.not_paid_count    || 0).toLocaleString(),    color: "#dc2626" },
+            { label: "Partially Paid",       val: (sm?.partial_paid_count|| 0).toLocaleString(),    color: "#d97706" },
+            { label: "Total Outstanding",    val: "Rp " + fmtNum(sm?.total_outstanding_idr || 0),   color: "#2563eb" },
+            { label: "Total After Revaluation", val: "Rp " + fmtNum(sm?.total_after_revaluation_idr || 0), color: "#dc2626" },
+          ].map(c => (
+            <div key={c.label} style={{ background: NEU.bg, borderRadius: 12, padding: "10px 14px", boxShadow: NEU.shadowOutSm }}>
+              <p style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{c.label}</p>
+              <p style={{ fontSize: 13, fontWeight: 800, color: c.color, fontFamily: "monospace" }}>{c.val}</p>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, justifyContent: "center" }}>
+          <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#3b82f6" onClick={loadData} disabled={loading} />
+          {data?.data?.length > 0 && (
+            <ActionBtn icon={Download} label="Export CSV" color="#3b82f6" onClick={() => exportApCSV(data.data)} />
+          )}
+        </div>
+      </div>
+
       {data && (
         <>
-          {/* Summary cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 14 }}>
-            {[
-              { label: "Total Invoices",       val: (data.count || 0).toLocaleString(),               color: "#3b82f6" },
-              { label: "Not Paid",             val: (sm?.not_paid_count    || 0).toLocaleString(),    color: "#dc2626" },
-              { label: "Partially Paid",       val: (sm?.partial_paid_count|| 0).toLocaleString(),    color: "#d97706" },
-              { label: "Total Outstanding",    val: "Rp " + fmtNum(sm?.total_outstanding_idr || 0),   color: "#2563eb" },
-              { label: "Not Paid Amount",      val: "Rp " + fmtNum(sm?.not_paid_idr          || 0),   color: "#dc2626" },
-            ].map(c => (
-              <div key={c.label} style={{ background: NEU.bg, borderRadius: 12, padding: "10px 14px", boxShadow: NEU.shadowOutSm }}>
-                <p style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{c.label}</p>
-                <p style={{ fontSize: 13, fontWeight: 800, color: c.color, fontFamily: "monospace" }}>{c.val}</p>
-              </div>
-            ))}
-          </div>
-
           {/* Client-side search */}
           <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
             <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
