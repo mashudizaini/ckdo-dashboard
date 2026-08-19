@@ -572,6 +572,7 @@ const AR_HEADERS = [
   { key: "remaining_amount_idr", label: "Remaining (IDR)", width: 130, num: true },
   { key: "days_overdue",        label: "Days Overdue",    width: 90,  num: true },
   { key: "status",              label: "Status",          width: 60  },
+  { key: "payment_date",        label: "Payment Date",    width: 100 },
   { key: "operating_unit",      label: "OU",              width: 120 },
   { key: "tax_invoice_number",  label: "Tax Invoice Number", width: 160 },
 ];
@@ -890,13 +891,7 @@ function AROutstandingPanel() {
                       <td style={{ ...TD, fontWeight: 700, color: "#1e293b", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.customer_name}>{r.customer_name}</td>
                       <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.account_number}</td>
                       <td style={{ ...TD, fontFamily: "monospace", fontWeight: 700, color: "#2563eb", whiteSpace: "nowrap" }}>{r.invoice_number}</td>
-                      <td style={{ ...TD, fontSize: 11 }}>
-                        {r.class === "CM" ? (
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 20, fontSize: 9.5, fontWeight: 700, background: "rgba(124,58,237,0.12)", color: "#7c3aed" }} title={r.transaction_type}>
-                            ↩ Return
-                          </span>
-                        ) : r.transaction_type}
-                      </td>
+                      <td style={{ ...TD, fontSize: 11 }}>{r.transaction_type}</td>
                       <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.invoice_date}</td>
                       <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.due_date}</td>
                       <td style={{ ...TD, fontSize: 11, fontWeight: 600 }}>{r.currency}</td>
@@ -908,6 +903,7 @@ function AROutstandingPanel() {
                         {r.days_overdue > 0 ? `+${r.days_overdue}d` : r.days_overdue === 0 ? "Today" : r.days_overdue < 0 ? `${Math.abs(r.days_overdue)}d left` : "—"}
                       </td>
                       <td style={{ ...TD }}>{statusBadge(r.status)}</td>
+                      <td style={{ ...TD, fontFamily: "monospace", fontSize: 11, color: "#64748b" }}>{r.payment_date || "—"}</td>
                       <td style={{ ...TD, fontSize: 11, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.operating_unit}>{r.operating_unit}</td>
                       <td style={{ ...TD, fontSize: 11, color: "#64748b", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.tax_invoice_number}>{r.tax_invoice_number}</td>
                     </tr>
