@@ -301,9 +301,19 @@ tbody td {
   color: #1e293b !important;
   background: #D9E1F2 !important;
 }
+/* Natural-account rows spliced in below an expanded summary line (inline
+   drill-down — see BalanceSheetPanel's expandedLines) — lighter/smaller
+   than a plain line row so they read as nested detail, not a peer. */
+.fs-table tbody tr[data-type="detail-line"] td {
+  font-weight: 400 !important;
+  color: #64748b !important;
+  background: #F8FAFC !important;
+  font-size: 11.5px !important;
+}
 .fs-table tbody td[data-lvl="0"] { padding-left: 14px !important; }
 .fs-table tbody td[data-lvl="1"] { padding-left: 34px !important; }
 .fs-table tbody td[data-lvl="2"] { padding-left: 54px !important; }
+.fs-table tbody td[data-lvl="3"] { padding-left: 74px !important; }
 
 /* ── Recharts tooltip ── */
 .recharts-tooltip-wrapper .recharts-default-tooltip {

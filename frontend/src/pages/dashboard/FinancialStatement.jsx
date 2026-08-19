@@ -25,9 +25,9 @@ const EMPTY_ARRAY = Object.freeze([]);
 
 // Oracle GL_BALANCES as a Financial Statement data source is temporarily
 // disabled (2026-08-18, user request) — every report defaults to and is
-// locked onto the Excel source until this is flipped back on. Balance Sheet
-// Detail (drill-down) is unaffected: it always queries Oracle directly,
-// independent of this toggle.
+// locked onto the Excel source until this is flipped back on. Balance
+// Sheet's inline natural-account expansion is unaffected: it always
+// queries Oracle directly, independent of this toggle.
 const SHOW_ORACLE_SOURCE = false;
 
 // "Today", computed once at module load — anchors the Period Type
@@ -184,7 +184,7 @@ function periodNameForMonthYear(periods, month, year) {
 // period -> absolute delta + %) | "cagr" (>1 prior periods spanning years ->
 // compound annual growth rate). Only BalanceSheetPanel passes this — every
 // other caller keeps its original 1-column-per-period layout.
-function FsTable({ columns, rows, checkDiff, growthMode = "none", onLineClick }) {
+function FsTable({ columns, rows, checkDiff, growthMode = "none", onLineClick, expandedLines }) {
   const growthHeaders = growthMode === "diff" ? ["Growth", "Growth %"] : growthMode === "cagr" ? ["CAGR %"] : [];
   const allColumns = [...columns, ...growthHeaders];
   return (
@@ -206,7 +206,10 @@ function FsTable({ columns, rows, checkDiff, growthMode = "none", onLineClick })
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, ri) => <FsRow key={ri} row={row} columnCount={allColumns.length} growthMode={growthMode} onLineClick={onLineClick} />)}
+            {rows.map((row, ri) => (
+              <FsRow key={ri} row={row} columnCount={allColumns.length} growthMode={growthMode}
+                onLineClick={onLineClick} expandedLines={expandedLines} />
+            ))}
           </tbody>
         </table>
       </div>
@@ -230,8 +233,8 @@ function growthColor(v) {
   return v > 0 ? "#16a34a" : v < 0 ? "#dc2626" : "#334155";
 }
 
-function FsRow({ row, columnCount = 0, growthMode = "none", onLineClick }) {
-  const level = Math.min(row.level || 0, 2);
+function FsRow({ row, columnCount = 0, growthMode = "none", onLineClick, expandedLines }) {
+  const level = Math.min(row.level || 0, 3);
   // Header (section title) rows previously rendered zero <td> for the value
   // columns (row.values was undefined, so `(row.values||[]).map(...)` gave
   // an empty array) — the browser just left those column positions with no
@@ -246,22 +249,36 @@ function FsRow({ row, columnCount = 0, growthMode = "none", onLineClick }) {
       </tr>
     );
   }
+  // Same fix applies to a placeholder "detail-line" row (Loading…/Error/No
+  // accounts found) — it has no row.values at all (nothing to show per
+  // period yet), so it renders as a full-width message row instead of
+  // leaving misaligned/missing cells under the value columns.
+  if (row.type === "detail-line" && !row.values) {
+    return (
+      <tr data-type="detail-line">
+        <td data-lvl={level}>{row.label}</td>
+        {Array.from({ length: columnCount }, (_, ci) => <td key={ci} />)}
+      </tr>
+    );
+  }
   const values = row.values || [];
   const g = row.growth;
   // Only individual account lines (CASH & CASH EQUIVALENTS, ACCOUNT
-  // RECEIVABLES, ...) drill into Balance Sheet Detail — TOTAL rows and
-  // section headers stay inert. `row.group` (ASSETS/LIABILITIES/EQUITY) is
-  // only set by BalanceSheetPanel's summary rows, so this is a no-op for
-  // every other FsTable caller (Profit or Loss, etc.).
+  // RECEIVABLES, ...) expand into their natural-account detail — TOTAL
+  // rows and section headers stay inert, and so do the spliced-in
+  // "detail-line" rows themselves (no row.group). `row.group` is only set
+  // by BalanceSheetPanel's summary rows, so this is a no-op for every
+  // other FsTable caller (Profit or Loss, etc.).
   const clickable = row.type === "line" && !!row.group && !!onLineClick;
+  const expanded = clickable && expandedLines?.has(`${row.group}|${row.label}`);
   return (
     <tr
       data-type={row.type}
       onClick={clickable ? () => onLineClick(row.group, row.label) : undefined}
       style={clickable ? { cursor: "pointer" } : undefined}
-      title={clickable ? `View ${row.label} account detail` : undefined}
+      title={clickable ? (expanded ? `Hide ${row.label} account detail` : `Show ${row.label} account detail`) : undefined}
     >
-      <td data-lvl={level}>{row.label}{clickable ? " →" : ""}</td>
+      <td data-lvl={level}>{clickable ? (expanded ? "▾ " : "▸ ") : ""}{row.label}</td>
       {values.map((v, ci) => (
         <td key={ci} style={{ textAlign: "right", fontFamily: "monospace" }}>{fmtNum(v)}</td>
       ))}
@@ -563,20 +580,20 @@ function BalanceSheetPanel({ periods }) {
   // always scanning Assets+Liabilities+Equity together, which is what made
   // a wide Period From/To range (e.g. 2022-2026) slow enough to look stuck:
   // each extra column was a full extra sequential Oracle round-trip just
-  // for the Equity section's retained-earnings figure. "" = All. Also
-  // doubles as which group Balance Sheet Detail drills into.
+  // for the Equity section's retained-earnings figure. "" = All.
   const [accountGroup, setAccountGroup] = useState("");
 
-  // Which summary line item (e.g. "CASH & CASH EQUIVALENTS") Balance Sheet
-  // Detail is narrowed to — set together with accountGroup when a line row
-  // is clicked. "" = show every account in accountGroup (or every account,
-  // if accountGroup is also "").
-  const [lineFilter, setLineFilter] = useState("");
-
-  // "summary" = the normal Balance Sheet; "detail" = the natural-account
-  // drill-down, entered by clicking an account line like CASH & CASH
-  // EQUIVALENTS (Balance Sheet Detail is no longer a separate tab).
-  const [viewMode, setViewMode] = useState("summary");
+  // Natural-account detail for a summary line (e.g. "CASH & CASH
+  // EQUIVALENTS") now expands INLINE right below the clicked row instead
+  // of navigating to a separate "Balance Sheet Detail" screen — click
+  // again to collapse. expandedLines holds "GROUP|Label" keys currently
+  // expanded; groupDetail caches the (unfiltered) natural-account rows
+  // for a whole account group, fetched once and reused across every
+  // expanded line within that group (mirrors how the old detail view
+  // fetched the whole group then filtered client-side to one line).
+  const [expandedLines, setExpandedLines] = useState(() => new Set());
+  const [groupDetail, setGroupDetail] = useState({}); // { [group]: { loading, error, accounts, periodKey } }
+  const detailFetchKeys = useRef(new Set()); // in-flight/cached "group|periodKey" — de-dupes fetches
 
   // Default on mount — anchored to today's real calendar year, not
   // whatever year the data happens to cover: Period From = current year
@@ -652,23 +669,32 @@ function BalanceSheetPanel({ periods }) {
     return list;
   }, [source, periods, fromYear, effToYear, fromMonth, effToMonth, pickerYears, showCurrentYearMonthly]);
 
-  // Balance Sheet Detail always queries Oracle directly (no Excel
+  // Natural-account detail always queries Oracle directly (no Excel
   // equivalent — the manual file has no natural-account granularity), so
   // when the summary is in excel mode its bare years get resolved to their
-  // Oracle December period_name equivalents before drilling in. Years with
-  // no matching Oracle period (e.g. history older than Oracle's GL
-  // calendar) are simply dropped from the detail view.
+  // Oracle December period_name equivalents before an inline expansion can
+  // fetch them. Years with no matching Oracle period (e.g. history older
+  // than Oracle's GL calendar) are simply dropped.
   const detailPeriodList = useMemo(() => {
     if (source !== "excel") return periodList;
     return periodList.map(y => periodNameForMonthYear(periods, "DEC", y)).filter(Boolean);
   }, [periodList, source, periods]);
 
-  const activePeriodList = viewMode === "detail" ? detailPeriodList : periodList;
+  // Any expanded line's cached detail is only valid for the exact period
+  // set it was fetched for — collapse everything and drop the cache
+  // whenever Period From/To (or the data source) changes, so a stale
+  // expansion never shows the wrong period's numbers.
+  useEffect(() => {
+    setExpandedLines(new Set());
+    setGroupDetail({});
+    detailFetchKeys.current = new Set();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailPeriodList.join(","), source]);
 
   // Growth-rate mode: exactly 2 columns -> simple diff & %; more than 2
   // (a multi-year Period From/To range) -> CAGR spanning Period From to
   // Period To.
-  const growthMode = activePeriodList.length === 2 ? "diff" : activePeriodList.length > 2 ? "cagr" : "none";
+  const growthMode = periodList.length === 2 ? "diff" : periodList.length > 2 ? "cagr" : "none";
   const cagrYears = growthMode === "cagr" ? effToYear - fromYear : 0;
 
   // Tracks the in-flight request so a newer one can cancel a still-running
@@ -681,16 +707,14 @@ function BalanceSheetPanel({ periods }) {
   const abortRef = useRef(null);
 
   const load = useCallback(async () => {
-    if (!activePeriodList.length) return;
+    if (!periodList.length) return;
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
 
     setLoading(true); setError(null);
     try {
-      const res = viewMode === "detail"
-        ? await financialStatementApi.getBalanceSheetDetail(activePeriodList, accountGroup, controller.signal)
-        : await financialStatementApi.getBalanceSheet(activePeriodList, source, source === "oracle" ? accountGroup : "", controller.signal);
+      const res = await financialStatementApi.getBalanceSheet(periodList, source, source === "oracle" ? accountGroup : "", controller.signal);
       if (abortRef.current !== controller) return; // superseded — a newer request is already in charge
       if (res.success) setData(res); else setError(res.error || "Failed to load");
     } catch (e) {
@@ -700,7 +724,7 @@ function BalanceSheetPanel({ periods }) {
     } finally {
       if (abortRef.current === controller) { setLoading(false); abortRef.current = null; }
     }
-  }, [activePeriodList, viewMode, source, accountGroup]);
+  }, [periodList, source, accountGroup]);
 
   const stop = useCallback(() => { abortRef.current?.abort(); setLoading(false); }, []);
 
@@ -714,13 +738,55 @@ function BalanceSheetPanel({ periods }) {
 
   const handleExport = () => {
     const label = columnLabels[columnLabels.length - 1] || "";
-    const apiFn = viewMode === "detail" ? financialStatementApi.exportBalanceSheetDetail : financialStatementApi.exportBalanceSheet;
     downloadExport(
-      () => apiFn(activePeriodList, label),
-      `Balance_Sheet${viewMode === "detail" ? "_Detail" : ""}_${fromYear}-${effToYear}.xlsx`,
+      () => financialStatementApi.exportBalanceSheet(periodList, label),
+      `Balance_Sheet_${fromYear}-${effToYear}.xlsx`,
       setExporting, setError,
     );
   };
+
+  // Fetches (once, cached per group+period-set) every natural-account row
+  // for a whole Balance Sheet section — reused across every expanded line
+  // within that group instead of one fetch per line.
+  const ensureGroupDetail = useCallback((group) => {
+    const periodKey = detailPeriodList.join(",");
+    const cacheKey = `${group}|${periodKey}`;
+    if (detailFetchKeys.current.has(cacheKey)) return;
+    detailFetchKeys.current.add(cacheKey);
+
+    if (!detailPeriodList.length) {
+      setGroupDetail(prev => ({ ...prev, [group]: { loading: false, error: "No matching Oracle GL period for the selected years.", accounts: [], periodKey } }));
+      return;
+    }
+    setGroupDetail(prev => ({ ...prev, [group]: { loading: true, error: null, accounts: null, periodKey } }));
+    financialStatementApi.getBalanceSheetDetail(detailPeriodList, group)
+      .then(res => {
+        setGroupDetail(prev => ({
+          ...prev,
+          [group]: res.success
+            ? { loading: false, error: null, accounts: res.accounts || [], periodKey }
+            : { loading: false, error: res.error || "Failed to load", accounts: [], periodKey },
+        }));
+      })
+      .catch(e => {
+        detailFetchKeys.current.delete(cacheKey); // allow retry on next click
+        setGroupDetail(prev => ({ ...prev, [group]: { loading: false, error: e?.response?.data?.detail || String(e), accounts: [], periodKey } }));
+      });
+  }, [detailPeriodList]);
+
+  const toggleLineDetail = useCallback((group, label) => {
+    const key = `${group}|${label}`;
+    setExpandedLines(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+        ensureGroupDetail(group);
+      }
+      return next;
+    });
+  }, [ensureGroupDetail]);
 
   const withGrowth = useCallback(
     (row) => ({ ...row, growth: computeGrowth(row.values, growthMode, cagrYears) }),
@@ -737,33 +803,35 @@ function BalanceSheetPanel({ periods }) {
 
   const rows = useMemo(() => {
     if (!data) return [];
-    // While viewMode has already flipped to "detail" but the matching
-    // detail response hasn't landed yet, `data` is still the previous
-    // summary-shaped payload (no `.accounts`) — without this guard,
-    // `.forEach` on undefined threw and crashed the render, which is what
-    // showed up as the panel going blank right when a line was clicked.
-    if (viewMode === "detail") {
-      if (!Array.isArray(data.accounts)) return [];
-      const byType = { A: [], L: [], O: [] };
-      data.accounts
-        .filter(a => !lineFilter || a.line_item === lineFilter)
-        .forEach(a => byType[a.account_type]?.push(a));
-      const toLines = (accs) => accs.map(a => withGrowth({ type: "line", level: 1, label: `${a.account_code} — ${a.account_desc || a.line_item}`, values: a.values }));
-      return [
-        ...(showAssets ? [{ type: "header", level: 0, label: "ASSETS" }, ...toLines(byType.A)] : []),
-        ...(showLiabilities ? [{ type: "header", level: 0, label: "LIABILITIES" }, ...toLines(byType.L)] : []),
-        ...(showEquity ? [{ type: "header", level: 0, label: "EQUITY" }, ...toLines(byType.O)] : []),
-      ];
-    }
-    // Symmetric case: "← Back to Balance Sheet" flips viewMode to
-    // "summary" before the new summary response has landed, so `data` is
-    // still the detail-shaped payload (no `.current_assets`) for one
-    // render — same crash-to-blank-screen risk as above, mirrored.
+    // A viewMode flip used to make `data` transiently the wrong shape
+    // here (crash-to-blank-screen); that risk no longer exists since
+    // there's only one view now, but the shape guard stays as cheap
+    // insurance against a still-loading/empty response.
     if (!Array.isArray(data.current_assets)) return [];
     // Each account line is tagged with its group (ASSETS/LIABILITIES/
-    // EQUITY) so clicking it can both narrow the Detail query to that
-    // group and filter to that specific line item.
-    const lines = (arr, group) => arr.map(r => withGrowth({ type: "line", level: 2, label: r.label, values: r.values, group }));
+    // EQUITY) so clicking it can both identify which cached group-detail
+    // to expand and which line_item within it to show. When a line is
+    // expanded, its natural-account rows are spliced in directly after
+    // it (detail-line rows, indented one level deeper, not themselves
+    // clickable) instead of navigating to a separate screen.
+    const lines = (arr, group) => arr.flatMap(r => {
+      const line = withGrowth({ type: "line", level: 2, label: r.label, values: r.values, group });
+      const key = `${group}|${r.label}`;
+      if (!expandedLines.has(key)) return [line];
+      const gd = groupDetail[group];
+      let detailRows;
+      if (gd?.loading) {
+        detailRows = [{ type: "detail-line", level: 3, label: "Loading…" }];
+      } else if (gd?.error) {
+        detailRows = [{ type: "detail-line", level: 3, label: `Error: ${gd.error}` }];
+      } else {
+        const accs = (gd?.accounts || []).filter(a => a.line_item === r.label);
+        detailRows = accs.length
+          ? accs.map(a => ({ type: "detail-line", level: 3, label: `${a.account_code} — ${a.account_desc || a.line_item}`, values: a.values }))
+          : [{ type: "detail-line", level: 3, label: "No accounts found" }];
+      }
+      return [line, ...detailRows];
+    });
     return [
       ...(showAssets ? [
         { type: "header", level: 0, label: "ASSETS" },
@@ -787,41 +855,25 @@ function BalanceSheetPanel({ periods }) {
       ] : []),
       ...(showEquity ? [
         { type: "header", level: 0, label: "EQUITY" },
-        ...lines(data.equity, "EQUITY").map(r => ({ ...r, level: 1 })),
+        // Only the clickable "line" rows get bumped up to level 1 (Equity
+        // has no CURRENT/NON-CURRENT sub-header, unlike Assets/
+        // Liabilities) — a spliced-in "detail-line" row must keep its own
+        // deeper level so it still reads as nested under its parent.
+        ...lines(data.equity, "EQUITY").map(r => (r.type === "line" ? { ...r, level: 1 } : r)),
         withGrowth({ type: "total", level: 0, label: "TOTAL  EQUITY", values: data.total_equity }),
       ] : []),
       ...(showAssets && showLiabilities && showEquity ? [
         withGrowth({ type: "total", level: 0, label: "TOTAL  LIABILITIES AND EQUITY", values: data.total_liabilities_and_equity }),
       ] : []),
     ];
-  }, [data, viewMode, lineFilter, withGrowth, showAssets, showLiabilities, showEquity]);
-
-  const goToDetail = (group, lineLabel) => { setAccountGroup(group); setLineFilter(lineLabel); setViewMode("detail"); };
-  const backToSummary = () => { setViewMode("summary"); setAccountGroup(""); setLineFilter(""); };
+  }, [data, expandedLines, groupDetail, withGrowth, showAssets, showLiabilities, showEquity]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {viewMode === "summary" && (
-        <FsSourceControl
-          reportType="balance_sheet" source={source} setSource={setSource}
-          onStatus={setExcelStatus} onUploaded={load}
-        />
-      )}
-      {viewMode === "detail" && (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <button onClick={backToSummary} style={{ ...BTN, alignSelf: "flex-start" }}>
-            ← Back to Balance Sheet
-          </button>
-          {lineFilter && (
-            <span style={{ fontSize: 11, color: "#64748b" }}>
-              Filtered to <strong>{lineFilter}</strong> —{" "}
-              <button onClick={() => setLineFilter("")} style={{ border: "none", background: "none", color: "#2563eb", textDecoration: "underline", cursor: "pointer", fontSize: 11, padding: 0 }}>
-                show all {accountGroup.toLowerCase()}
-              </button>
-            </span>
-          )}
-        </div>
-      )}
+      <FsSourceControl
+        reportType="balance_sheet" source={source} setSource={setSource}
+        onStatus={setExcelStatus} onUploaded={load}
+      />
       {source === "oracle" && (
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#334155", cursor: "pointer" }}>
           <input type="checkbox" checked={showCurrentYearMonthly} onChange={e => setShowCurrentYearMonthly(e.target.checked)} />
@@ -862,10 +914,10 @@ function BalanceSheetPanel({ periods }) {
             </select>
           </div>
         </div>
-        {(source === "oracle" || viewMode === "detail") && (
+        {source === "oracle" && (
           <div>
             <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Account Group</label>
-            <select style={SELECT} value={accountGroup} onChange={e => { setAccountGroup(e.target.value); setLineFilter(""); }}
+            <select style={SELECT} value={accountGroup} onChange={e => setAccountGroup(e.target.value)}
               title="Narrow the query to one section — faster, especially for a wide Period From/To range">
               <option value="">All</option>
               <option value="ASSETS">Assets</option>
@@ -883,8 +935,8 @@ function BalanceSheetPanel({ periods }) {
             <RefreshCw size={13} /> Refresh
           </button>
         )}
-        <button onClick={handleExport} disabled={exporting || !data || (viewMode === "summary" && source === "excel")} style={BTN}
-          title={viewMode === "summary" && source === "excel" ? "Excel export isn't supported for the Excel data source" : undefined}>
+        <button onClick={handleExport} disabled={exporting || !data || source === "excel"} style={BTN}
+          title={source === "excel" ? "Excel export isn't supported for the Excel data source" : undefined}>
           {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download Excel
         </button>
         {data?.unmapped_accounts?.length > 0 && (
@@ -896,15 +948,11 @@ function BalanceSheetPanel({ periods }) {
 
       {!loading && growthMode === "cagr" && columnLabels.length > 1 && (
         <div style={{ fontSize: 11, color: "#64748b" }}>
-          Comparing {activePeriodList.length} years ({columnLabels[0]} → {columnLabels[columnLabels.length - 1]}) — the growth column uses CAGR ({cagrYears} years).
+          Comparing {periodList.length} years ({columnLabels[0]} → {columnLabels[columnLabels.length - 1]}) — the growth column uses CAGR ({cagrYears} years).
         </div>
       )}
 
-      {viewMode === "detail" && !detailPeriodList.length ? (
-        <div style={{ padding: 16, fontSize: 12, color: "#d97706" }}>
-          Detail view needs a matching Oracle GL period for the selected years, but none were found.
-        </div>
-      ) : fromYear && effToYear && fromYear > effToYear ? (
+      {fromYear && effToYear && fromYear > effToYear ? (
         <div style={{ padding: 16, fontSize: 12, color: "#dc2626" }}>Period From must not be after Period To.</div>
       ) : loading ? (
         // Shown for every load (not just the first one, before `data`
@@ -921,9 +969,10 @@ function BalanceSheetPanel({ periods }) {
       ) : data ? (
         <FsTable
           columns={columnLabels} rows={rows}
-          checkDiff={viewMode === "summary" && !accountGroup ? data.check_diff : null}
+          checkDiff={!accountGroup ? data.check_diff : null}
           growthMode={growthMode}
-          onLineClick={viewMode === "summary" ? goToDetail : undefined}
+          onLineClick={toggleLineDetail}
+          expandedLines={expandedLines}
         />
       ) : null}
     </div>
