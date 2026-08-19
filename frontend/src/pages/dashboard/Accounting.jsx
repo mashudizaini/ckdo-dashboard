@@ -52,6 +52,28 @@ export default function AccountingDashboard() {
   );
 }
 
+/* ─── Aging shared helpers (used by both AP Aging by Supplier and AR Aging
+       by Customer) ───────────────────────────────────────────────────── */
+
+function todayIso() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+const AGING_BUCKETS = [
+  { key: "current_amt", label: "Current",   color: "#16a34a" },
+  { key: "d1_30",       label: "1-30",      color: "#eab308" },
+  { key: "d31_60",      label: "31-60",     color: "#f59e0b" },
+  { key: "d61_90",      label: "61-90",     color: "#ea580c" },
+  { key: "over_90",     label: "> 90 Days", color: "#dc2626" },
+];
+
+function fmtIdr(v) {
+  const n = Number(v) || 0;
+  const s = Math.abs(n).toLocaleString("id-ID", { maximumFractionDigits: 0 });
+  return n < 0 ? `(${s})` : s;
+}
+
 /* ─── AP Outstanding Panel ───────────────────────────────────────────────── */
 
 const AP_HEADERS = [
@@ -89,6 +111,7 @@ function exportApCSV(rows) {
 }
 
 function APOutstandingPanel() {
+  const [viewMode,       setViewMode]       = useState("list"); // "list" | "aging"
   const today = new Date().toISOString().slice(0, 10);
   const [asOfDate,       setAsOfDate]       = useState(today);
   const [supplierName,   setSupplierName]   = useState("");
@@ -176,7 +199,39 @@ function APOutstandingPanel() {
 
   const sm = data?.summary;
 
+  const viewToggleBtn = (mode, label) => (
+    <button
+      onClick={() => setViewMode(mode)}
+      style={{
+        padding: "7px 14px", border: "none", borderRadius: 9, cursor: "pointer",
+        fontSize: 12, fontWeight: 700,
+        background: viewMode === mode ? "#3b82f6" : NEU.bg,
+        color: viewMode === mode ? "#ffffff" : "#64748b",
+        boxShadow: viewMode === mode ? NEU.shadowOutSm : NEU.shadowIn,
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  if (viewMode === "aging") {
+    return (
+      <>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          {viewToggleBtn("list", "List")}
+          {viewToggleBtn("aging", "Aging by Supplier")}
+        </div>
+        <APAgingPanel />
+      </>
+    );
+  }
+
   return (
+    <>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        {viewToggleBtn("list", "List")}
+        {viewToggleBtn("aging", "Aging by Supplier")}
+      </div>
     <SectionCard>
       {/* Filter bar */}
       <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -316,6 +371,137 @@ function APOutstandingPanel() {
         </div>
       )}
     </SectionCard>
+    </>
+  );
+}
+
+/* ─── AP Aging Panel ─────────────────────────────────────────────────────── */
+
+function APAgingPanel() {
+  const [supplierName, setSupplierName] = useState("");
+  const [baseDate,      setBaseDate]     = useState(todayIso());
+  const [data,          setData]         = useState(null);
+  const [loading,       setLoading]      = useState(false);
+  const [error,         setError]        = useState(null);
+
+  const INPUT = { padding: "7px 11px", borderRadius: 9, border: "none", fontSize: 12, background: NEU.bg, boxShadow: NEU.shadowIn, color: "#1e293b", outline: "none" };
+
+  const loadData = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const params = { limit: 500, base_date: baseDate || todayIso(), ...(supplierName && { supplier_name: supplierName }) };
+      const res = await accountingApi.getApAging(params);
+      if (res.success) setData(res);
+      else { setError(res.error || "Failed to load"); setData(null); }
+    } catch (e) {
+      setError(e?.response?.data?.detail || String(e)); setData(null);
+    } finally { setLoading(false); }
+  }, [supplierName, baseDate]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const totals = data?.totals;
+  const isToday = (data?.base_date || baseDate) === todayIso();
+
+  return (
+    <SectionCard
+      title="AP Aging by Supplier"
+      subtitle={`Open items (payment_status IN Not Paid/Partially Paid), IDR converted, priced and bucketed as of ${data?.base_date || baseDate}${isToday ? " (today)" : ""}.`}
+    >
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Supplier</p>
+          <input value={supplierName} onChange={e => setSupplierName(e.target.value)}
+            placeholder="Search supplier…" style={{ ...INPUT, width: 220 }}
+            onKeyDown={e => e.key === "Enter" && loadData()} />
+        </div>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Base Date</p>
+          <input type="date" value={baseDate} onChange={e => setBaseDate(e.target.value)} style={{ ...INPUT, width: 150 }} />
+        </div>
+        {baseDate !== todayIso() && (
+          <ActionBtn icon={RefreshCw} label="Reset to Today" color="#64748b" onClick={() => setBaseDate(todayIso())} />
+        )}
+        <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#3b82f6" onClick={loadData} disabled={loading} />
+      </div>
+
+      {error && (
+        <div style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 10, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", fontSize: 12, color: "#dc2626", display: "flex", gap: 8, alignItems: "center" }}>
+          <AlertTriangle size={14} /> {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ padding: 40, textAlign: "center", color: "#94a3b8" }}><Loader2 size={20} className="animate-spin" /></div>
+      ) : data ? (
+        <>
+          {/* Bucket summary cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 14 }}>
+            {AGING_BUCKETS.map(b => (
+              <div key={b.key} style={{ background: NEU.bg, borderRadius: 12, padding: "10px 14px", boxShadow: NEU.shadowOutSm }}>
+                <p style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{b.label}</p>
+                <p style={{ fontSize: 13, fontWeight: 800, color: b.color, fontFamily: "monospace" }}>Rp {fmtIdr(totals?.[b.key] || 0)}</p>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1040 }}>
+                <thead>
+                  <tr style={{ background: "linear-gradient(135deg,#1e3a5f,#1e40af)" }}>
+                    <th style={{ ...TH, color: "#bfdbfe", background: "transparent", fontSize: 9.5 }}>Supplier</th>
+                    <th style={{ ...TH, color: "#bfdbfe", background: "transparent", fontSize: 9.5 }}>Operating Unit</th>
+                    {AGING_BUCKETS.map(b => (
+                      <th key={b.key} style={{ ...TH, color: "#bfdbfe", background: "transparent", fontSize: 9.5, textAlign: "right" }}>{b.label}</th>
+                    ))}
+                    <th style={{ ...TH, color: "#bfdbfe", background: "transparent", fontSize: 9.5, textAlign: "right" }}>Total</th>
+                    <th style={{ ...TH, color: "#bfdbfe", background: "transparent", fontSize: 9.5, textAlign: "right" }}>Items</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.data.length === 0 ? (
+                    <tr>
+                      <td colSpan={AGING_BUCKETS.length + 4} style={{ padding: "40px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
+                        No open items found
+                      </td>
+                    </tr>
+                  ) : data.data.map((r, i) => (
+                    <tr key={r.supplier_name + r.operating_unit}
+                      style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(59,130,246,0.08)"}
+                      onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f8fafc" : "#f1f5f9"}
+                    >
+                      <td style={{ ...TD, fontWeight: 700, color: "#1e293b" }}>{r.supplier_name}</td>
+                      <td style={{ ...TD, fontSize: 11, color: "#64748b" }}>{r.operating_unit}</td>
+                      {AGING_BUCKETS.map(b => (
+                        <td key={b.key} style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: r[b.key] < 0 ? "#16a34a" : "#334155" }}>
+                          {fmtIdr(r[b.key])}
+                        </td>
+                      ))}
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#2563eb" }}>{fmtIdr(r.total_idr)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#94a3b8" }}>{r.item_count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                {data.data.length > 0 && (
+                  <tfoot>
+                    <tr style={{ background: "#D9E1F2" }}>
+                      <td style={{ ...TD, fontWeight: 800, color: "#1e293b" }} colSpan={2}>TOTAL</td>
+                      {AGING_BUCKETS.map(b => (
+                        <td key={b.key} style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#1e293b" }}>{fmtIdr(totals?.[b.key])}</td>
+                      ))}
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#1e293b" }}>{fmtIdr(totals?.total_idr)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#1e293b" }}>{totals?.item_count}</td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          </div>
+        </>
+      ) : null}
+    </SectionCard>
   );
 }
 
@@ -336,7 +522,7 @@ const AR_HEADERS = [
   { key: "days_overdue",        label: "Days Overdue",    width: 90,  num: true },
   { key: "status",              label: "Status",          width: 60  },
   { key: "operating_unit",      label: "OU",              width: 120 },
-  { key: "comments",            label: "Comments",        width: 160 },
+  { key: "tax_invoice_number",  label: "Tax Invoice Number", width: 160 },
 ];
 
 function exportArCSV(rows) {
@@ -615,7 +801,7 @@ function AROutstandingPanel() {
                       </td>
                       <td style={{ ...TD }}>{statusBadge(r.status)}</td>
                       <td style={{ ...TD, fontSize: 11, maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.operating_unit}>{r.operating_unit}</td>
-                      <td style={{ ...TD, fontSize: 11, color: "#64748b", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.comments}>{r.comments}</td>
+                      <td style={{ ...TD, fontSize: 11, color: "#64748b", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.tax_invoice_number}>{r.tax_invoice_number}</td>
                     </tr>
                     );
                   })}
@@ -642,25 +828,6 @@ function AROutstandingPanel() {
 }
 
 /* ─── AR Aging Panel ─────────────────────────────────────────────────────── */
-
-const AGING_BUCKETS = [
-  { key: "current_amt", label: "Current",   color: "#16a34a" },
-  { key: "d1_30",       label: "1-30",      color: "#eab308" },
-  { key: "d31_60",      label: "31-60",     color: "#f59e0b" },
-  { key: "d61_90",      label: "61-90",     color: "#ea580c" },
-  { key: "over_90",     label: "> 90 Days", color: "#dc2626" },
-];
-
-function fmtIdr(v) {
-  const n = Number(v) || 0;
-  const s = Math.abs(n).toLocaleString("id-ID", { maximumFractionDigits: 0 });
-  return n < 0 ? `(${s})` : s;
-}
-
-function todayIso() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 function ARAgingPanel() {
   const [customerName, setCustomerName] = useState("");

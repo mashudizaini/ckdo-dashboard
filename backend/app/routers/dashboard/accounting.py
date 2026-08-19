@@ -46,6 +46,23 @@ async def get_ap_outstanding(
     )
 
 
+@router.get("/ap-aging")
+async def get_ap_aging(
+    supplier_name: str = Query(None, description="Partial supplier name filter"),
+    base_date:     str = Query(None, description="Anchor date YYYY-MM-DD for aging calc; defaults to today"),
+    limit:         int = Query(500, ge=1, le=2000, description="Max supplier rows"),
+    user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
+):
+    """
+    AP Aging — open items (same scope as ap-outstanding: payment_status_flag
+    IN ('N','P')) grouped by supplier into 5 buckets: Current, 1-30, 31-60,
+    61-90, >90 days overdue. IDR converted. Priced and bucketed as of
+    base_date (defaults to today, editable by the user to reprice/
+    re-bucket the report as of any past date).
+    """
+    return await AccountingService().get_ap_aging(supplier_name, base_date, limit)
+
+
 # ── AR Outstanding ───────────────────────────────────────────────────────────
 
 @router.get("/ar-outstanding")

@@ -377,6 +377,85 @@ class AccountingService:
             logger.error("ap_outstanding_error", error=str(e))
             return {"success": False, "error": str(e), "data": []}
 
+    async def get_ap_aging(self, supplier_name: str = None, base_date: str = None, limit: int = 500) -> dict:
+        """
+        AP Aging — open items grouped by supplier into 5 buckets (Current,
+        1-30, 31-60, 61-90, >90 days overdue), IDR converted (same
+        base_amount/invoice_amount ratio used by get_ap_outstanding) and
+        summed. Mirrors get_ar_aging's shape/behavior on the AP side.
+
+        base_date anchors what "today" means for both the days-overdue
+        bucketing and which invoices are in scope (ai.gl_date <= base_date)
+        — defaults to the actual current date but can be overridden by the
+        user to reprice/re-bucket the report as of any past date.
+        """
+        limit = min(max(limit, 1), 2000)
+        where_extra = ""
+        params: dict = {}
+        if supplier_name:
+            where_extra += " AND UPPER(pv.vendor_name) LIKE UPPER(:supplier_name)"
+            params["supplier_name"] = f"%{supplier_name}%"
+
+        base_date = base_date or date.today().isoformat()
+        params["base_date"] = base_date
+        base_date_expr = "TRUNC(TO_DATE(:base_date, 'YYYY-MM-DD'))"
+
+        sql = f"""
+            SELECT
+                supplier_name, operating_unit,
+                ROUND(SUM(CASE WHEN days_overdue <= 0                THEN remaining_idr ELSE 0 END), 2) AS current_amt,
+                ROUND(SUM(CASE WHEN days_overdue BETWEEN 1  AND 30   THEN remaining_idr ELSE 0 END), 2) AS d1_30,
+                ROUND(SUM(CASE WHEN days_overdue BETWEEN 31 AND 60   THEN remaining_idr ELSE 0 END), 2) AS d31_60,
+                ROUND(SUM(CASE WHEN days_overdue BETWEEN 61 AND 90   THEN remaining_idr ELSE 0 END), 2) AS d61_90,
+                ROUND(SUM(CASE WHEN days_overdue > 90                THEN remaining_idr ELSE 0 END), 2) AS over_90,
+                ROUND(SUM(remaining_idr), 2)                                                             AS total_idr,
+                COUNT(*)                                                                                 AS item_count
+            FROM (
+                SELECT
+                    pv.vendor_name                                   AS supplier_name,
+                    hou.name                                         AS operating_unit,
+                    ({base_date_expr} - aps.due_date)                AS days_overdue,
+                    aps.amount_remaining *
+                        ( NVL(ai.base_amount, ai.invoice_amount) /
+                          DECODE(ai.invoice_amount, 0, 1, ai.invoice_amount) )
+                                                                      AS remaining_idr
+                FROM apps.ap_payment_schedules_all aps
+                JOIN apps.ap_invoices_all           ai
+                    ON  ai.invoice_id       = aps.invoice_id
+                JOIN apps.ap_suppliers               pv
+                    ON  pv.vendor_id        = ai.vendor_id
+                JOIN apps.hr_operating_units         hou
+                    ON  hou.organization_id = ai.org_id
+                WHERE aps.payment_status_flag IN ('N', 'P')
+                  AND ai.gl_date <= {base_date_expr}
+                  {where_extra}
+            )
+            GROUP BY supplier_name, operating_unit
+            ORDER BY total_idr DESC
+            FETCH FIRST {limit} ROWS ONLY
+        """
+        try:
+            rows = await asyncio.to_thread(self._query, sql, params)
+            clean = []
+            for r in rows:
+                clean.append({
+                    k: (float(v) if hasattr(v, "__float__") and not isinstance(v, (int, float, str, type(None), bool)) else v)
+                    for k, v in r.items()
+                })
+            totals = {
+                "current_amt": round(sum(r.get("current_amt", 0) for r in clean), 2),
+                "d1_30":       round(sum(r.get("d1_30", 0) for r in clean), 2),
+                "d31_60":      round(sum(r.get("d31_60", 0) for r in clean), 2),
+                "d61_90":      round(sum(r.get("d61_90", 0) for r in clean), 2),
+                "over_90":     round(sum(r.get("over_90", 0) for r in clean), 2),
+                "total_idr":   round(sum(r.get("total_idr", 0) for r in clean), 2),
+                "item_count":  sum(r.get("item_count", 0) for r in clean),
+            }
+            return {"success": True, "count": len(clean), "base_date": base_date, "data": clean, "totals": totals}
+        except Exception as e:
+            logger.error("ap_aging_error", error=str(e))
+            return {"success": False, "error": str(e), "data": []}
+
     # ── AR Outstanding ───────────────────────────────────────────────────────
 
     async def get_ar_outstanding(
@@ -455,7 +534,7 @@ class AccountingService:
                 rcttt.name                                           AS transaction_type,
                 aps.status,
                 aps.class,
-                SUBSTR(NVL(rct.comments, '-'), 1, 100)               AS comments,
+                SUBSTR(NVL(rct.comments, '-'), 1, 100)               AS tax_invoice_number,
                 hou.name                                             AS operating_unit
             FROM apps.ar_payment_schedules_all  aps
             JOIN apps.ra_customer_trx_all        rct
