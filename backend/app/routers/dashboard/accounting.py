@@ -48,7 +48,6 @@ async def get_summary(user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)
 async def get_ap_outstanding(
     as_of_date:     str  = Query(None, description="As-of date YYYY-MM-DD (default: today)"),
     supplier_name:  str  = Query(None, description="Partial supplier name filter"),
-    operating_unit: str  = Query(None, description="Partial operating unit name filter"),
     payment_status: str  = Query(None, description="Not Paid | Partially Paid | ALL"),
     limit:          int  = Query(500, ge=1, le=2000),
     usd_rate:       float = Query(None, description="Kurs Tengah BI (USD) override for the Total After Revaluation summary"),
@@ -57,10 +56,11 @@ async def get_ap_outstanding(
 ):
     """
     AP Outstanding — AP_INVOICES_ALL + AP_PAYMENT_SCHEDULES_ALL.
-    Excludes fully Paid invoices. As-of date defaults to SYSDATE.
+    Excludes fully Paid invoices. As-of date defaults to SYSDATE. Restricted
+    to the AP Chart-of-Account whitelist (see AccountingService.AP_COA_WHITELIST).
     """
     return await AccountingService().get_ap_outstanding(
-        as_of_date, supplier_name, operating_unit, payment_status, limit, usd_rate, eur_rate
+        as_of_date, supplier_name, payment_status, limit, usd_rate, eur_rate
     )
 
 

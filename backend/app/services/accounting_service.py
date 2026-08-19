@@ -238,11 +238,18 @@ class AccountingService:
 
     # ── AP Outstanding ───────────────────────────────────────────────────────
 
+    # Chart of Accounts whitelist for AP Outstanding — only the AP control
+    # accounts listed in sumber/list_COA.png (Trade/Non-Trade Accounts
+    # Payable to Related/Third Parties, Local/Import).
+    AP_COA_WHITELIST = (
+        "212111", "212112", "212121", "212122",
+        "212211", "212212", "212221", "212222",
+    )
+
     async def get_ap_outstanding(
         self,
         as_of_date: str = None,
         supplier_name: str = None,
-        operating_unit: str = None,
         payment_status: str = None,
         limit: int = 500,
         usd_rate: float = None,
@@ -251,7 +258,8 @@ class AccountingService:
         """
         AP Outstanding from Oracle EBS — AP_INVOICES_ALL + AP_PAYMENT_SCHEDULES_ALL.
         Mirrors the AP Outstanding report; excludes fully Paid invoices.
-        as_of_date defaults to SYSDATE when not provided.
+        as_of_date defaults to SYSDATE when not provided. Restricted to the
+        AP_COA_WHITELIST chart-of-account codes (segment4).
 
         usd_rate/eur_rate (typically Bank Indonesia's Kurs Tengah as of
         as_of_date) drive the "Total After Revaluation" summary figure —
@@ -269,13 +277,14 @@ class AccountingService:
         if as_of_date:
             params["as_of_date"] = as_of_date
 
+        coa_binds = {f"coa{i}": code for i, code in enumerate(self.AP_COA_WHITELIST)}
+        params.update(coa_binds)
+        coa_filter = "gcc.segment4 IN (" + ", ".join(f":{k}" for k in coa_binds) + ")"
+
         extra_where = ""
         if supplier_name:
             extra_where += " AND UPPER(pv.vendor_name) LIKE UPPER(:supplier_name)"
             params["supplier_name"] = f"%{supplier_name}%"
-        if operating_unit:
-            extra_where += " AND UPPER(hou.name) LIKE UPPER(:operating_unit)"
-            params["operating_unit"] = f"%{operating_unit}%"
         if payment_status and payment_status != "ALL":
             # Will be applied as HAVING-equivalent via subquery wrapping
             # We include it in the outer filter using CASE expression
@@ -292,7 +301,6 @@ class AccountingService:
             SELECT *
             FROM (
                 SELECT
-                    hou.name                                                       AS operating_unit,
                     ai.org_id,
                     pv.vendor_name                                                 AS supplier_name,
                     SUBSTR(NVL(ai.description, '-'), 1, 100)                       AS description,
@@ -325,7 +333,6 @@ class AccountingService:
                    , apps.gl_code_combinations         gcc
                    , apps.fnd_flex_values_vl           ffvl
                    , apps.fnd_flex_value_sets          ffvs
-                   , apps.hr_operating_units           hou
                    , ( SELECT aps.invoice_id
                             , SUM(aps.gross_amount)                                AS total_gross
                             , SUM(aps.amount_remaining)                            AS total_remaining_orig
@@ -343,10 +350,10 @@ class AccountingService:
                 WHERE ai.invoice_id                       = sched_summary.invoice_id
                   AND ai.vendor_id                        = pv.vendor_id
                   AND ai.accts_pay_code_combination_id    = gcc.code_combination_id
-                  AND ai.org_id                           = hou.organization_id
                   AND ai.gl_date                         <= {date_expr}
                   AND ffvl.flex_value_set_id              = ffvs.flex_value_set_id
                   AND ffvl.flex_value                     = gcc.segment4
+                  AND {coa_filter}
                   AND CASE
                           WHEN NVL(sched_summary.total_remaining, 0) = 0
                                THEN 'Paid'
@@ -356,7 +363,7 @@ class AccountingService:
                           ELSE 'Not Paid'
                       END != 'Paid'
                   {extra_where}
-                ORDER BY hou.name, pv.vendor_name, ai.invoice_date, ai.invoice_num
+                ORDER BY pv.vendor_name, ai.invoice_date, ai.invoice_num
             )
             WHERE ROWNUM <= {limit}
         """
