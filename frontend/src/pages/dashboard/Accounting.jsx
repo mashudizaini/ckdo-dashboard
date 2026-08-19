@@ -293,17 +293,17 @@ function APOutstandingPanel() {
         </div>
         <div>
           <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>EUR Rate</p>
-          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input type="number" step="0.01" value={eurRate} onChange={e => setEurRate(e.target.value)}
               placeholder="e.g. 17800" style={{ ...INPUT, width: 100 }} />
             <button type="button" onClick={loadBiRate} disabled={rateLoading} title="Refresh from BI Kurs Tengah"
               style={{ border: "none", borderRadius: 9, padding: "7px 8px", background: NEU.bg, boxShadow: NEU.shadowOutSm, cursor: rateLoading ? "default" : "pointer", color: "#64748b" }}>
               <RefreshCw size={13} className={rateLoading ? "animate-spin" : ""} />
             </button>
+            {rateInfo && (
+              <span style={{ fontSize: 9.5, color: "#94a3b8", whiteSpace: "nowrap" }}>Kurs Tengah BI{rateInfo.date ? ` · ${rateInfo.date}` : ""}</span>
+            )}
           </div>
-          {rateInfo && (
-            <p style={{ fontSize: 9.5, color: "#94a3b8", marginTop: 4 }}>Kurs Tengah BI{rateInfo.date ? ` · ${rateInfo.date}` : ""}</p>
-          )}
         </div>
       </div>
 
@@ -782,17 +782,17 @@ function AROutstandingPanel() {
         </div>
         <div>
           <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Exchange Rate (USD)</p>
-          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input type="number" step="0.01" value={usdRate} onChange={e => setUsdRate(e.target.value)}
               placeholder="e.g. 16250" style={{ ...INPUT, width: 110 }} />
             <button type="button" onClick={loadBiRate} disabled={rateLoading} title="Refresh from BI Kurs Tengah"
               style={{ border: "none", borderRadius: 9, padding: "7px 8px", background: NEU.bg, boxShadow: NEU.shadowOutSm, cursor: rateLoading ? "default" : "pointer", color: "#64748b" }}>
               <RefreshCw size={13} className={rateLoading ? "animate-spin" : ""} />
             </button>
+            {rateInfo && (
+              <span style={{ fontSize: 9.5, color: "#94a3b8", whiteSpace: "nowrap" }}>Kurs Tengah BI{rateInfo.date ? ` · ${rateInfo.date}` : ""}</span>
+            )}
           </div>
-          {rateInfo && (
-            <p style={{ fontSize: 9.5, color: "#94a3b8", marginTop: 4 }}>Kurs Tengah BI{rateInfo.date ? ` · ${rateInfo.date}` : ""}</p>
-          )}
         </div>
       </div>
 
