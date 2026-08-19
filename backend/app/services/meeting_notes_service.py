@@ -10,13 +10,20 @@ meeting itself. See app/config.py's whisper_api_url comment. Transcription
 itself has no Claude alternative — the Anthropic API has no audio input
 capability — so it always runs on-premise regardless of provider choice.
 
-MOM generation supports 4 providers: "onprem" (default, local Ollama —
-see config.py's ollama_mom_model — free), "anthropic" (Claude), "gemini" (reuses gemini_service.py),
-or "deepseek" (raw REST, OpenAI-compatible endpoint — see
-app/config.py's deepseek_api_key comment). All four return the same
+MOM generation supports 6 providers: "onprem" (default, local Ollama —
+see config.py's ollama_mom_model — free), "anthropic" (Claude), "gemini"
+(reuses gemini_service.py), "deepseek", "openai" (ChatGPT), or "kimi"
+(Moonshot AI) — the last 3 are raw REST, OpenAI-compatible endpoints (see
+app/config.py's deepseek/openai/kimi settings). All six return the same
 {"departments": [...]} JSON shape from the same MOM_PROMPT_TEMPLATE, so
 quality differences are purely down to the underlying model, not the
 instructions given to it.
+
+Each cloud provider (anthropic/gemini/deepseek/openai/kimi) will use the
+calling user's own saved key (see user_api_key_service.py) when one
+exists, falling back to the shared company key from Settings otherwise —
+resolved by the router before calling generate_mom(), passed in via the
+api_key parameter.
 
 MOM schema (departments -> topics -> discussion_points + action_plans) and
 the rendered DOCX layout match the company's previous meeting-notes tool
@@ -178,9 +185,37 @@ class MeetingNotesService:
             resp.raise_for_status()
             return resp.json()
 
-    async def generate_mom(self, transcript: str, meeting_title: str = "", participants: str = "", provider: str = "onprem") -> dict:
+    def extract_text_from_upload(self, file_bytes: bytes, filename: str) -> str:
+        """Pulls plain text out of an uploaded transcript file — .docx via
+        python-docx (paragraph text only, same library already used for
+        build_mom_docx below), anything else decoded as plain UTF-8 text
+        (.txt/.srt/.vtt/etc.). Raises ValueError with a user-facing message
+        on an unreadable/corrupt file."""
+        ext = (filename.rsplit(".", 1)[-1] if "." in filename else "").lower()
+        if ext == "docx":
+            try:
+                doc = Document(io.BytesIO(file_bytes))
+            except Exception as e:
+                raise ValueError(f"Tidak bisa membaca file .docx: {e}") from e
+            return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        try:
+            return file_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                return file_bytes.decode("latin-1")
+            except Exception as e:
+                raise ValueError(f"Tidak bisa membaca file sebagai teks: {e}") from e
+
+    async def generate_mom(
+        self, transcript: str, meeting_title: str = "", participants: str = "",
+        provider: str = "onprem", api_key: str | None = None,
+    ) -> dict:
         """Transcript -> {"departments": [...]}. provider: "onprem" (default,
-        local Ollama), "anthropic" (Claude), "gemini", or "deepseek"."""
+        local Ollama), "anthropic" (Claude), "gemini", "deepseek", "openai"
+        (ChatGPT), or "kimi" (Moonshot AI). api_key, when given, overrides
+        the shared company key for that provider (resolved by the router
+        from the calling user's own saved key, if any) — ignored for
+        "onprem" since that's a free local model with no key at all."""
         meta_lines = []
         if meeting_title:
             meta_lines.append(f"Judul rapat: {meeting_title}")
@@ -192,7 +227,7 @@ class MeetingNotesService:
 
         if provider == "anthropic":
             try:
-                client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+                client = anthropic.AsyncAnthropic(api_key=api_key or settings.anthropic_api_key)
                 response = await client.messages.create(
                     model="claude-opus-5",
                     max_tokens=MOM_MAX_OUTPUT_TOKENS,
@@ -211,6 +246,7 @@ class MeetingNotesService:
                 raw = (await gemini_service.generate(
                     system_prompt="You produce structured meeting minutes. Respond with valid JSON only, no commentary.",
                     contents=[{"role": "user", "parts": [{"text": prompt}]}],
+                    api_key=api_key,
                 )).strip()
             except httpx.HTTPStatusError as e:
                 if _is_credit_error(e.response.status_code, e.response.text):
@@ -223,7 +259,7 @@ class MeetingNotesService:
             async with httpx.AsyncClient(timeout=CLOUD_MOM_TIMEOUT_SECONDS) as client:
                 resp = await client.post(
                     "https://api.deepseek.com/chat/completions",
-                    headers={"Authorization": f"Bearer {settings.deepseek_api_key}"},
+                    headers={"Authorization": f"Bearer {api_key or settings.deepseek_api_key}"},
                     json={
                         "model": settings.deepseek_model,
                         "messages": [{"role": "user", "content": prompt}],
@@ -234,6 +270,45 @@ class MeetingNotesService:
                 if _is_credit_error(resp.status_code, resp.text):
                     raise MomProviderCreditError(
                         "Saldo API DeepSeek tidak cukup. Silakan top up di platform.deepseek.com, "
+                        "atau pilih provider lain."
+                    )
+                resp.raise_for_status()
+                raw = resp.json()["choices"][0]["message"]["content"].strip()
+        elif provider == "openai":
+            async with httpx.AsyncClient(timeout=CLOUD_MOM_TIMEOUT_SECONDS) as client:
+                resp = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key or settings.openai_api_key}"},
+                    json={
+                        "model": settings.openai_model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": MOM_MAX_OUTPUT_TOKENS,
+                        "response_format": {"type": "json_object"},
+                        "stream": False,
+                    },
+                )
+                if _is_credit_error(resp.status_code, resp.text):
+                    raise MomProviderCreditError(
+                        "Saldo/kredit API OpenAI (ChatGPT) tidak cukup. Silakan cek billing di "
+                        "platform.openai.com, atau pilih provider lain."
+                    )
+                resp.raise_for_status()
+                raw = resp.json()["choices"][0]["message"]["content"].strip()
+        elif provider == "kimi":
+            async with httpx.AsyncClient(timeout=CLOUD_MOM_TIMEOUT_SECONDS) as client:
+                resp = await client.post(
+                    f"{settings.kimi_api_base.rstrip('/')}/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key or settings.kimi_api_key}"},
+                    json={
+                        "model": settings.kimi_model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": MOM_MAX_OUTPUT_TOKENS,
+                        "stream": False,
+                    },
+                )
+                if _is_credit_error(resp.status_code, resp.text):
+                    raise MomProviderCreditError(
+                        "Saldo API Kimi (Moonshot AI) tidak cukup. Silakan top up di platform.moonshot.ai, "
                         "atau pilih provider lain."
                     )
                 resp.raise_for_status()

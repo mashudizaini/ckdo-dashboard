@@ -1,18 +1,23 @@
 """
-Per-user API key storage — lets each user opt into using their own Gemini
-account/quota for the AI Chatbot instead of the shared company key. Keys are
-encrypted at rest (see crypto.py) and validated against the live provider
-API before being saved, so a typo/invalid key fails fast at save time
-instead of silently breaking every future chat request.
+Per-user API key storage — lets each user opt into using their own AI
+provider account/quota (originally just Gemini for the AI Chatbot, now also
+Claude/ChatGPT/Kimi for Meeting Notes' MOM generation) instead of the
+shared company key. Keys are encrypted at rest (see crypto.py) and
+validated against the live provider API before being saved, so a typo/
+invalid key fails fast at save time instead of silently breaking every
+future request.
 """
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.config import get_settings
 from app.models.user_api_key import UserApiKey
 from app.services import crypto
 from app.services import gemini_service
 
-ALLOWED_PROVIDERS = {"gemini"}
+settings = get_settings()
+
+ALLOWED_PROVIDERS = {"gemini", "anthropic", "openai", "kimi"}
 
 
 async def _get_row(db: AsyncSession, username: str, provider: str) -> UserApiKey | None:
@@ -47,6 +52,71 @@ async def validate_gemini_key(api_key: str) -> None:
     except Exception:
         detail = f"HTTP {resp.status_code}"
     raise ValueError(f"API key tidak valid: {detail}")
+
+
+async def validate_anthropic_key(api_key: str) -> None:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://api.anthropic.com/v1/models",
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+            )
+    except httpx.HTTPError as e:
+        raise ValueError(f"Tidak bisa menghubungi Anthropic API: {e}")
+    if resp.status_code == 200:
+        return
+    try:
+        detail = resp.json().get("error", {}).get("message", f"HTTP {resp.status_code}")
+    except Exception:
+        detail = f"HTTP {resp.status_code}"
+    raise ValueError(f"API key tidak valid: {detail}")
+
+
+async def validate_openai_key(api_key: str) -> None:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+    except httpx.HTTPError as e:
+        raise ValueError(f"Tidak bisa menghubungi OpenAI API: {e}")
+    if resp.status_code == 200:
+        return
+    try:
+        detail = resp.json().get("error", {}).get("message", f"HTTP {resp.status_code}")
+    except Exception:
+        detail = f"HTTP {resp.status_code}"
+    raise ValueError(f"API key tidak valid: {detail}")
+
+
+async def validate_kimi_key(api_key: str) -> None:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{settings.kimi_api_base.rstrip('/')}/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+    except httpx.HTTPError as e:
+        raise ValueError(f"Tidak bisa menghubungi Kimi (Moonshot) API: {e}")
+    if resp.status_code == 200:
+        return
+    try:
+        detail = resp.json().get("error", {}).get("message", f"HTTP {resp.status_code}")
+    except Exception:
+        detail = f"HTTP {resp.status_code}"
+    raise ValueError(f"API key tidak valid: {detail}")
+
+
+# Provider -> validator dispatch, shared by user_settings.py so adding a new
+# provider only means adding a validate_<provider>_key function + one entry
+# here + the provider name in ALLOWED_PROVIDERS above.
+VALIDATORS = {
+    "gemini": validate_gemini_key,
+    "anthropic": validate_anthropic_key,
+    "openai": validate_openai_key,
+    "kimi": validate_kimi_key,
+}
 
 
 async def set_user_key(db: AsyncSession, username: str, provider: str, plaintext: str) -> str:

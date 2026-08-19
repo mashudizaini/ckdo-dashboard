@@ -4,10 +4,12 @@ AI User Settings Router
 Route prefix : /api/v1/ai/settings
 Required role: any authenticated user (each user manages only their own key)
 
-Lets each user optionally store their own Gemini API key so the AI Chatbot
-uses their personal account/quota instead of the shared company key. Keys
-are validated against the live Gemini API before saving and encrypted at
-rest — see user_api_key_service.py / crypto.py.
+Lets each user optionally store their own API key (Gemini for the AI
+Chatbot; Gemini/Claude/ChatGPT/Kimi for Meeting Notes' MOM generation) so
+those features use their personal account/quota instead of the shared
+company key. Keys are validated against the live provider API before
+saving (see user_api_key_service.VALIDATORS) and encrypted at rest — see
+user_api_key_service.py / crypto.py.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -51,7 +53,7 @@ async def save_api_key(
         raise HTTPException(400, "API key tidak boleh kosong")
 
     try:
-        await svc.validate_gemini_key(key)
+        await svc.VALIDATORS[provider](key)
     except ValueError as e:
         raise HTTPException(400, str(e))
 

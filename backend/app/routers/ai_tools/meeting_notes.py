@@ -8,11 +8,15 @@ Endpoints:
   POST   /transcribe                  — Upload/recorded audio -> saved permanently + transcribed
                                          (remote GPU Whisper, ai-engine 172.21.2.27; no provider
                                          choice — Claude has no audio transcription capability)
+  POST   /transcript/manual            — Paste a transcript directly -> saved (skips Whisper)
+  POST   /transcript/upload-file       — Upload a transcript file (.txt/.srt/.vtt/.docx) -> saved
   GET    /recordings                  — List all recordings (recorded + uploaded, unified)
   GET    /recordings/{id}             — Full detail (transcript, mom_json if generated)
   GET    /recordings/{id}/audio       — Download the stored audio file
   DELETE /recordings/{id}             — Delete a recording (audio file + row)
-  POST   /recordings/{id}/generate-mom — Transcript -> structured MOM (`provider`: "onprem" or "anthropic")
+  POST   /recordings/{id}/generate-mom — Transcript -> structured MOM (`provider`: onprem/anthropic/
+                                         gemini/deepseek/openai/kimi — uses the caller's own saved
+                                         key when set, see user_api_key_service.py)
   PUT    /recordings/{id}/mom          — Save user-edited MOM JSON back onto the recording
   GET    /recordings/{id}/mom/docx     — Render the (possibly edited) MOM as a .docx download
 """
@@ -28,6 +32,7 @@ from app.database import get_db
 from app.dependencies import get_current_user, CurrentUser
 from app.models.meeting_recording import MeetingRecording
 from app.services.meeting_notes_service import MeetingNotesService, MomProviderCreditError
+from app.services import user_api_key_service
 import structlog
 
 logger = structlog.get_logger()
@@ -109,6 +114,80 @@ async def transcribe_audio(
     await db.refresh(rec)
 
     return {"success": True, "id": rec.id, **result}
+
+
+async def _save_manual_transcript(
+    db: AsyncSession, user: CurrentUser, text: str, source: str,
+    meeting_title: str, participants: str, original_name: str = "",
+) -> dict:
+    """Shared by the paste and file-upload entry points below — creates a
+    MeetingRecording row directly from already-available text, skipping
+    Whisper entirely. filename is left blank (no audio file exists for
+    these); the NOT NULL constraint is satisfied with "" rather than
+    requiring a schema migration for a nullable column. Returns the same
+    shape /transcribe does ({success, id, text, ...}) so the frontend can
+    feed it into the exact same setTranscript()/step="transcript" flow."""
+    text = (text or "").strip()
+    if not text:
+        raise HTTPException(400, "Transcript tidak boleh kosong")
+
+    rec = MeetingRecording(
+        filename="",
+        original_name=original_name,
+        source=source,
+        status="transcribed",
+        meeting_title=meeting_title,
+        participants=participants,
+        transcript=text,
+        created_by=user.username,
+    )
+    db.add(rec)
+    await db.commit()
+    await db.refresh(rec)
+
+    return {
+        "success": True, "id": rec.id, "text": text, "language": None,
+        "audio_duration_seconds": None, "processing_time_seconds": None,
+    }
+
+
+class ManualTranscriptRequest(BaseModel):
+    text: str
+    meeting_title: str = ""
+    participants: str = ""
+
+
+@router.post("/transcript/manual")
+async def submit_manual_transcript(
+    body: ManualTranscriptRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Paste-a-transcript entry point — for a meeting that was already
+    transcribed elsewhere (or typed up from notes), skipping audio/Whisper
+    entirely so it can go straight to Generate MOM."""
+    return await _save_manual_transcript(db, user, body.text, "pasted", body.meeting_title, body.participants)
+
+
+@router.post("/transcript/upload-file")
+async def upload_transcript_file(
+    file: UploadFile = File(...),
+    meeting_title: str = Form(""),
+    participants: str = Form(""),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload-a-transcript-file entry point (.txt/.srt/.vtt/.docx) — same
+    purpose as the paste endpoint above, for a transcript that already
+    exists as a file instead of being typed/pasted by hand."""
+    content = await file.read()
+    try:
+        text = MeetingNotesService().extract_text_from_upload(content, file.filename or "")
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    return await _save_manual_transcript(
+        db, user, text, "uploaded_transcript", meeting_title, participants, file.filename or "",
+    )
 
 
 @router.get("/recordings")
@@ -194,11 +273,16 @@ async def delete_recording(
     return {"message": "Deleted"}
 
 
-_MOM_PROVIDERS = ("onprem", "anthropic", "gemini", "deepseek")
+_MOM_PROVIDERS = ("onprem", "anthropic", "gemini", "deepseek", "openai", "kimi")
+
+# Which providers support a per-user key override (must line up with
+# user_api_key_service.ALLOWED_PROVIDERS) — "deepseek" is intentionally
+# excluded for now, shared-key only, since nobody's asked for it yet.
+_USER_KEY_PROVIDERS = {"anthropic", "gemini", "openai", "kimi"}
 
 
 class GenerateMomRequest(BaseModel):
-    provider: str = "onprem"  # "onprem" (default, local Ollama), "anthropic" (Claude), "gemini", or "deepseek"
+    provider: str = "onprem"  # "onprem" (default, local Ollama), "anthropic" (Claude), "gemini", "deepseek", "openai" (ChatGPT), or "kimi"
     date: str = ""
     time: str = ""
     venue: str = ""
@@ -219,9 +303,13 @@ async def generate_mom(
     if not (rec.transcript or "").strip():
         raise HTTPException(400, "Recording ini belum punya transcript")
 
+    api_key = None
+    if body.provider in _USER_KEY_PROVIDERS:
+        api_key = await user_api_key_service.get_user_key(db, user.username, body.provider)
+
     try:
         mom_json = await MeetingNotesService().generate_mom(
-            rec.transcript, rec.meeting_title or "", rec.participants or "", body.provider
+            rec.transcript, rec.meeting_title or "", rec.participants or "", body.provider, api_key
         )
     except MomProviderCreditError as e:
         logger.warning("mom_generation_credit_error", error=str(e), provider=body.provider)

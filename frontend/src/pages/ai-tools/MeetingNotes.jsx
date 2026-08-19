@@ -2,9 +2,11 @@ import { useState, useRef, useEffect } from "react";
 import {
   FileText, Mic, Square, Upload, Sparkles, Clock, Users, Copy, Download, Loader2,
   AlertTriangle, CheckCircle2, Plus, Trash2, ExternalLink, Save as SaveIcon,
+  ClipboardPaste, KeyRound,
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import * as recoveryDb from "./meetingRecordingRecovery";
+import ApiKeyModal from "@/components/ai/ApiKeyModal";
 
 function fmtElapsed(sec) {
   const m = Math.floor(sec / 60).toString().padStart(2, "0");
@@ -72,7 +74,13 @@ const MOM_PROVIDER_LABELS = {
   anthropic: "Claude",
   gemini: "Gemini",
   deepseek: "DeepSeek",
+  openai: "ChatGPT",
+  kimi: "Kimi",
 };
+
+// Providers that support a per-user API key (Manage Key button) — must
+// line up with the backend's user_api_key_service.ALLOWED_PROVIDERS.
+const USER_KEY_PROVIDERS = ["anthropic", "gemini", "openai", "kimi"];
 
 // Meeting info + participant defaults mirror the company's actual recurring
 // weekly MOM template (sumber/4. MOM Admin Jul 24, 2026.pdf) so the form
@@ -139,10 +147,21 @@ export default function MeetingNotes() {
   const transcribeTimerRef = useRef(null);
   const [loadingRecording, setLoadingRecording] = useState(false);
 
+  // Alternate ways into a transcript, alongside Record & Upload -> Whisper:
+  // paste it directly, or upload an already-transcribed file (.txt/.srt/
+  // .vtt/.docx). Both land in the same `transcript` state via the same
+  // shape /transcribe returns, so everything downstream (Generate MOM,
+  // History, reprocessing) is unaffected.
+  const [pastedTranscript, setPastedTranscript] = useState("");
+  const [submittingTranscript, setSubmittingTranscript] = useState(false);
+  const [manualTranscriptError, setManualTranscriptError] = useState(null);
+  const transcriptFileRef = useRef(null);
+
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState(null);
   const [mom, setMom] = useState(null); // { departments: [...] }
   const [momProvider, setMomProvider] = useState("onprem");
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [savingMom, setSavingMom] = useState(false);
   const [saveMomMsg, setSaveMomMsg] = useState(null);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
@@ -467,6 +486,50 @@ export default function MeetingNotes() {
     } finally {
       if (transcribeTimerRef.current) { clearInterval(transcribeTimerRef.current); transcribeTimerRef.current = null; }
       setTranscribing(false);
+    }
+  };
+
+  const handlePasteTranscript = async () => {
+    const text = pastedTranscript.trim();
+    if (!text) return;
+    setSubmittingTranscript(true); setManualTranscriptError(null);
+    try {
+      const res = await fetch("/api/v1/ai/meeting-notes/transcript/manual", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ text, meeting_title: title, participants }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail || "Failed to submit transcript");
+      setTranscript(data);
+      setPastedTranscript("");
+      fetchHistory();
+    } catch (e) {
+      setManualTranscriptError(e.message || String(e));
+    } finally {
+      setSubmittingTranscript(false);
+    }
+  };
+
+  const handleUploadTranscriptFile = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setSubmittingTranscript(true); setManualTranscriptError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      fd.append("meeting_title", title);
+      fd.append("participants", participants);
+      const res = await fetch("/api/v1/ai/meeting-notes/transcript/upload-file", { method: "POST", headers, body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail || "Failed to read transcript file");
+      setTranscript(data);
+      fetchHistory();
+    } catch (e2) {
+      setManualTranscriptError(e2.message || String(e2));
+    } finally {
+      setSubmittingTranscript(false);
     }
   };
 
@@ -983,14 +1046,52 @@ export default function MeetingNotes() {
           {step === "transcript" && (
             <>
           {!transcript ? (
-            <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900 p-10 text-center">
-              <FileText size={28} className="text-gray-700 mx-auto mb-3" />
-              <p className="text-sm text-gray-400 mb-1">No transcript yet</p>
-              <p className="text-xs text-gray-600 mb-4">Record or upload audio and transcribe it first.</p>
-              <button onClick={() => setStep("setup")}
-                className="rounded-lg border border-blue-600 text-blue-400 hover:bg-blue-600/10 text-sm font-medium px-4 py-2 transition-colors">
-                Go to Record & Upload
-              </button>
+            <div className="space-y-4">
+              <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900 p-8 text-center">
+                <FileText size={28} className="text-gray-700 mx-auto mb-3" />
+                <p className="text-sm text-gray-400 mb-1">No transcript yet</p>
+                <p className="text-xs text-gray-600 mb-4">Record or upload audio and transcribe it, or provide a transcript directly below.</p>
+                <button onClick={() => setStep("setup")}
+                  className="rounded-lg border border-blue-600 text-blue-400 hover:bg-blue-600/10 text-sm font-medium px-4 py-2 transition-colors">
+                  Go to Record & Upload
+                </button>
+              </div>
+
+              {/* Alternate entry points — for a meeting already transcribed
+                  elsewhere, or notes typed up by hand. Skip audio/Whisper
+                  entirely and go straight to Generate MOM. */}
+              <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
+                <h3 className="text-sm font-semibold text-gray-200 flex items-center gap-2 mb-3">
+                  <ClipboardPaste size={15} className="text-gray-400" /> Or provide a transcript directly
+                </h3>
+                <textarea
+                  value={pastedTranscript}
+                  onChange={(e) => setPastedTranscript(e.target.value)}
+                  placeholder="Paste the meeting transcript text here…"
+                  rows={6}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-800/50 px-3 py-2.5 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 resize-y"
+                />
+                <div className="flex flex-wrap items-center gap-2 mt-3">
+                  <button onClick={handlePasteTranscript} disabled={!pastedTranscript.trim() || submittingTranscript}
+                    className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium px-4 py-2 transition-colors">
+                    {submittingTranscript ? <Loader2 size={14} className="animate-spin" /> : <ClipboardPaste size={14} />}
+                    Use This Transcript
+                  </button>
+                  <span className="text-xs text-gray-600">or</span>
+                  <input ref={transcriptFileRef} type="file" accept=".txt,.srt,.vtt,.docx" className="hidden" onChange={handleUploadTranscriptFile} />
+                  <button onClick={() => transcriptFileRef.current?.click()} disabled={submittingTranscript}
+                    className="flex items-center gap-2 rounded-lg border border-gray-700 hover:border-gray-500 text-gray-300 text-sm font-medium px-4 py-2 transition-colors disabled:opacity-50">
+                    {submittingTranscript ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                    Upload Transcript File
+                  </button>
+                  <span className="text-xs text-gray-600">.txt, .srt, .vtt, .docx</span>
+                </div>
+                {manualTranscriptError && (
+                  <div className="mt-3 flex items-start gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                    <AlertTriangle size={13} className="shrink-0 mt-0.5" />{manualTranscriptError}
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <>
@@ -1061,8 +1162,20 @@ export default function MeetingNotes() {
                 <option value="anthropic">Claude</option>
                 <option value="gemini">Gemini</option>
                 <option value="deepseek">DeepSeek</option>
+                <option value="openai">ChatGPT</option>
+                <option value="kimi">Kimi</option>
               </select>
+              {USER_KEY_PROVIDERS.includes(momProvider) && (
+                <button onClick={() => setShowApiKeyModal(true)}
+                  title={`Use your own ${MOM_PROVIDER_LABELS[momProvider]} API key instead of the shared company key`}
+                  className="flex items-center gap-1.5 rounded-lg border border-gray-700 hover:border-gray-500 text-gray-400 hover:text-gray-200 text-xs font-medium px-3 py-2 transition-colors">
+                  <KeyRound size={13} /> My API Key
+                </button>
+              )}
             </div>
+            {showApiKeyModal && USER_KEY_PROVIDERS.includes(momProvider) && (
+              <ApiKeyModal provider={momProvider} onClose={() => setShowApiKeyModal(false)} />
+            )}
 
             {generating && (
               <div className="mt-3 rounded-lg border border-blue-500/40 bg-blue-950/50 px-4 py-3">

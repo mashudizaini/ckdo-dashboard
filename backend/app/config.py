@@ -94,6 +94,24 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     deepseek_model: str = "deepseek-chat"
 
+    # OpenAI (ChatGPT) — opt-in provider for Meeting Notes MOM generation.
+    # OpenAI-compatible chat-completions endpoint, same raw-httpx approach
+    # as DeepSeek (no `openai` SDK dependency). These are shared/fallback
+    # keys — each user can also save their own via the per-user API key
+    # mechanism (user_api_key_service.py), which takes priority when set.
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o"
+
+    # Kimi (Moonshot AI) — opt-in provider for Meeting Notes MOM generation.
+    # OpenAI-compatible chat-completions endpoint (api.moonshot.ai is the
+    # international/global base; api.moonshot.cn is the China-region one —
+    # switch kimi_api_base if the company's account is China-registered).
+    # "kimi-latest" auto-routes to Moonshot's current flagship model instead
+    # of a version-pinned name that can go stale.
+    kimi_api_key: str = ""
+    kimi_model: str = "kimi-latest"
+    kimi_api_base: str = "https://api.moonshot.ai/v1"
+
     # Field-level encryption for secrets stored at rest in Postgres —
     # currently only per-user Gemini API keys (see crypto.py). Distinct from
     # any auth secret; generate once per environment with
