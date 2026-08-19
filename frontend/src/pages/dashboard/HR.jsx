@@ -3159,6 +3159,24 @@ function AttendanceTodaySection() {
     finally { setLoadingMonthly(false); }
   };
 
+  // Yearly Summary — month-by-month (Jan-Dec) company-wide attendance
+  // report, the annual companion to Monthly Summary's per-employee view.
+  const [yearlyData,    setYearlyData]    = useState(null);
+  const [loadingYearly, setLoadingYearly] = useState(false);
+  const [yearlyYear,    setYearlyYear]    = useState(curYear);
+  const [yearlyDept,    setYearlyDept]    = useState("");
+
+  const fetchYearlyData = async (year = yearlyYear, dept = yearlyDept) => {
+    setLoadingYearly(true);
+    try {
+      const params = new URLSearchParams({ year });
+      if (dept) params.set("department", dept);
+      const res = await fetch(`${ATT_API}/yearly-summary?${params}`, { headers });
+      if (res.ok) setYearlyData(await res.json());
+    } catch (_) {}
+    finally { setLoadingYearly(false); }
+  };
+
   // Employee lookup — search for one person and see just their status for
   // the selected date, independent of the Total/Present/Absent card drill-down.
   const [empQuery,        setEmpQuery]        = useState("");
@@ -3231,6 +3249,7 @@ function AttendanceTodaySection() {
     setInnerTab(tab);
     if (tab === "team" && !teamData) fetchTeamData();
     if (tab === "monthly" && !monthlyData) fetchMonthlyData();
+    if (tab === "yearly" && !yearlyData) fetchYearlyData();
   };
 
   const fetchEmployees = async (filter, targetDate) => {
@@ -3264,7 +3283,7 @@ function AttendanceTodaySection() {
     <div className="space-y-4">
       {/* Inner tabs */}
       <div className="flex gap-0 border-b border-gray-800">
-        {[["today", "Attendance Today"], ["team", "Team Summary"], ["monthly", "Monthly Summary"]].map(([id, label]) => (
+        {[["today", "Attendance Today"], ["team", "Team Summary"], ["monthly", "Monthly Summary"], ["yearly", "Yearly Summary"]].map(([id, label]) => (
           <button key={id} onClick={() => switchTab(id)}
             className={`px-4 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors ${
               innerTab === id ? "border-green-500 text-green-400" : "border-transparent text-gray-500 hover:text-gray-300"
@@ -3640,6 +3659,110 @@ function AttendanceTodaySection() {
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* ── Tab: Yearly Summary — month-by-month (Jan-Dec), company-wide
+          report. Reverse-engineered/verified against the user's reference
+          screenshot: Expected Man-Days = Total Employees x Working Days,
+          Present Man-Days = Expected - (Late+Sick+Unpaid). ── */}
+      {innerTab === "yearly" && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <p className="text-xs text-gray-500">
+              {(() => {
+                const withData = (yearlyData?.months || []).filter(m => m.total_employees > 0);
+                const range = withData.length
+                  ? `${withData[0].month_label.slice(0, 3).toUpperCase()}-${withData[withData.length - 1].month_label.slice(0, 3).toUpperCase()}`
+                  : "";
+                return `SUMMARY REPORT ATTENDANCE ${range ? range + " " : ""}${yearlyYear}`;
+              })()}
+            </p>
+            <div className="flex items-center gap-2">
+              <select value={yearlyDept} onChange={(e) => { setYearlyDept(e.target.value); fetchYearlyData(yearlyYear, e.target.value); }}
+                className="rounded-lg border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-xs text-gray-300 outline-none focus:border-green-500 cursor-pointer">
+                <option value="">All Departments</option>
+                {monthlyDepts.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+              <select value={yearlyYear} onChange={(e) => { const y = Number(e.target.value); setYearlyYear(y); fetchYearlyData(y, yearlyDept); }}
+                className="rounded-lg border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-xs text-gray-300 outline-none focus:border-green-500 cursor-pointer">
+                {[curYear, curYear - 1, curYear - 2].map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+              <button onClick={() => fetchYearlyData()}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+                <RefreshCw size={11} className={loadingYearly ? "animate-spin" : ""} /> Refresh
+              </button>
+            </div>
+          </div>
+
+          {loadingYearly ? (
+            <div className="flex justify-center py-16"><Loader2 size={20} className="animate-spin text-gray-600" /></div>
+          ) : !yearlyData ? (
+            <p className="py-10 text-center text-xs text-gray-600">No data yet.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-800">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-800/60">
+                    <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-left align-bottom whitespace-nowrap">Month</th>
+                    <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">Total Employees</th>
+                    <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">Working Days</th>
+                    <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">Expected Man-Days</th>
+                    <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">Present Man-Days</th>
+                    <th colSpan={4} className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider text-center border-b border-gray-700">Attendance</th>
+                    <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">Attendance Ratio</th>
+                    <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">Absence Ratio</th>
+                  </tr>
+                  <tr className="bg-gray-800/60">
+                    <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center whitespace-nowrap">Late</th>
+                    <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center whitespace-nowrap">Sick</th>
+                    <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center whitespace-nowrap">Unpaid</th>
+                    <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center whitespace-nowrap">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800">
+                  {yearlyData.months.map((m) => (
+                    <tr key={m.month} className="hover:bg-gray-800/40 transition-colors">
+                      <td className="px-3 py-2.5 font-medium text-gray-200 whitespace-nowrap">{m.month_label}</td>
+                      <td className="px-3 py-2.5 text-center text-gray-400">{m.total_employees || "—"}</td>
+                      <td className="px-3 py-2.5 text-center text-gray-400">{m.working_days || "—"}</td>
+                      <td className="px-3 py-2.5 text-center text-gray-400">{m.expected_man_days || "—"}</td>
+                      <td className="px-3 py-2.5 text-center text-gray-400">{m.present_man_days || "—"}</td>
+                      <td className="px-3 py-2.5 text-center text-amber-400 font-semibold">{m.late || "-"}</td>
+                      <td className="px-3 py-2.5 text-center text-red-400 font-semibold">{m.sick || "-"}</td>
+                      <td className="px-3 py-2.5 text-center text-purple-400 font-semibold">{m.unpaid || "-"}</td>
+                      <td className="px-3 py-2.5 text-center text-gray-200 font-bold">{m.total || "-"}</td>
+                      <td className={`px-3 py-2.5 text-center font-semibold ${m.attendance_ratio == null ? "text-gray-600" : m.attendance_ratio >= 95 ? "text-green-400" : "text-amber-400"}`}>
+                        {m.attendance_ratio == null ? "—" : `${m.attendance_ratio}%`}
+                      </td>
+                      <td className="px-3 py-2.5 text-center text-gray-400">
+                        {m.absence_ratio == null ? "—" : `${m.absence_ratio}%`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-800/80 font-bold">
+                    <td className="px-3 py-2.5 text-gray-300">TOTAL (ANNUAL)</td>
+                    <td className="px-3 py-2.5 text-center text-gray-300">{yearlyData.annual.total_employees}</td>
+                    <td className="px-3 py-2.5 text-center text-gray-300">{yearlyData.annual.working_days}</td>
+                    <td className="px-3 py-2.5 text-center text-gray-300">{yearlyData.annual.expected_man_days}</td>
+                    <td className="px-3 py-2.5 text-center text-gray-300">{yearlyData.annual.present_man_days}</td>
+                    <td className="px-3 py-2.5 text-center text-amber-400">{yearlyData.annual.late}</td>
+                    <td className="px-3 py-2.5 text-center text-red-400">{yearlyData.annual.sick}</td>
+                    <td className="px-3 py-2.5 text-center text-purple-400">{yearlyData.annual.unpaid}</td>
+                    <td className="px-3 py-2.5 text-center text-gray-200">{yearlyData.annual.total}</td>
+                    <td className="px-3 py-2.5 text-center text-green-400">
+                      {yearlyData.annual.attendance_ratio == null ? "—" : `${yearlyData.annual.attendance_ratio}%`}
+                    </td>
+                    <td className="px-3 py-2.5 text-center text-gray-300">
+                      {yearlyData.annual.absence_ratio == null ? "—" : `${yearlyData.annual.absence_ratio}%`}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
