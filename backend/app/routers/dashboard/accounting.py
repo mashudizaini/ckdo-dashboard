@@ -48,6 +48,8 @@ async def get_summary(user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)
 @router.get("/ap-outstanding")
 async def get_ap_outstanding(
     as_of_date:     str  = Query(None, description="As-of date YYYY-MM-DD (default: today)"),
+    date_from:      str  = Query(None, description="Period From — invoice date YYYY-MM-DD"),
+    date_to:        str  = Query(None, description="Period To — invoice date YYYY-MM-DD"),
     supplier_name:  str  = Query(None, description="Partial supplier name filter"),
     payment_status: str  = Query(None, description="Not Paid | Partially Paid | ALL"),
     limit:          int  = Query(500, ge=1, le=2000),
@@ -61,7 +63,9 @@ async def get_ap_outstanding(
     to the AP Chart-of-Account whitelist (see AccountingService.AP_COA_WHITELIST).
     """
     return await AccountingService().get_ap_outstanding(
-        as_of_date, supplier_name, payment_status, limit, usd_rate, eur_rate
+        as_of_date=as_of_date, date_from=date_from, date_to=date_to,
+        supplier_name=supplier_name, payment_status=payment_status,
+        limit=limit, usd_rate=usd_rate, eur_rate=eur_rate,
     )
 
 

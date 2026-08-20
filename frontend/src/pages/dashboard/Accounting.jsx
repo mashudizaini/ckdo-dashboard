@@ -96,10 +96,10 @@ const AP_HEADERS = [
   { key: "coa_number",           label: "Account",           width: 70  },
   { key: "coa_descpt",           label: "Account Desc",      width: 160 },
   { key: "payment_status",       label: "Status",            width: 100 },
-  { key: "original_amount_idr",  label: "Orig Amt (IDR)",    width: 130, num: true },
-  { key: "remaining_amount_idr", label: "Remaining (IDR)",   width: 130, num: true },
   { key: "original_amount_orig", label: "Orig Amt (FC)",     width: 110, num: true },
   { key: "remaining_amount_orig",label: "Remaining (FC)",    width: 110, num: true },
+  { key: "original_amount_idr",  label: "Orig Amt (IDR)",    width: 130, num: true },
+  { key: "remaining_amount_idr", label: "Remaining (IDR)",   width: 130, num: true },
   { key: "after_revaluation_idr",label: "After Revaluation (IDR)", width: 150, num: true },
   { key: "description",          label: "Description",       width: 160 },
 ];
@@ -123,6 +123,8 @@ function APOutstandingPanel() {
   const [viewMode,       setViewMode]       = useState("list"); // "list" | "aging"
   const today = new Date().toISOString().slice(0, 10);
   const [asOfDate,       setAsOfDate]       = useState(today);
+  const [dateFrom,       setDateFrom]       = useState("");
+  const [dateTo,         setDateTo]         = useState("");
   const [supplierName,   setSupplierName]   = useState("");
   const [payStatusFilter,setPayStatusFilter] = useState("ALL");
   const [limit,          setLimit]          = useState(100);
@@ -165,6 +167,8 @@ function APOutstandingPanel() {
       const params = {
         limit,
         ...(asOfDate      && { as_of_date:      asOfDate      }),
+        ...(dateFrom      && { date_from:       dateFrom      }),
+        ...(dateTo        && { date_to:         dateTo        }),
         ...(supplierName  && { supplier_name:   supplierName  }),
         ...(payStatusFilter && payStatusFilter !== "ALL" && { payment_status: payStatusFilter }),
         ...(usdRate       && { usd_rate:        Number(usdRate) }),
@@ -176,7 +180,7 @@ function APOutstandingPanel() {
     } catch (e) {
       setError(e?.response?.data?.detail || String(e)); setData(null);
     } finally { setLoading(false); }
-  }, [asOfDate, supplierName, payStatusFilter, limit, usdRate, eurRate]);
+  }, [asOfDate, dateFrom, dateTo, supplierName, payStatusFilter, limit, usdRate, eurRate]);
 
   const toggleSort = (key) => {
     setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
@@ -266,6 +270,14 @@ function APOutstandingPanel() {
         <div>
           <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>As of Date</p>
           <input type="date" value={asOfDate} onChange={e => setAsOfDate(e.target.value)} style={{ ...INPUT, width: 150 }} />
+        </div>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Period From</p>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...INPUT, width: 150 }} />
+        </div>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Period To</p>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...INPUT, width: 150 }} />
         </div>
         <div>
           <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Supplier</p>
@@ -398,10 +410,10 @@ function APOutstandingPanel() {
                       <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.coa_number}</td>
                       <td style={{ ...TD, fontSize: 11, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.coa_descpt}>{r.coa_descpt}</td>
                       <td style={{ ...TD }}>{payBadge(r.payment_status)}</td>
-                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>{fmtNumAp(r.original_amount_idr, true)}</td>
-                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: r.remaining_amount_idr > 0 ? "#dc2626" : "#16a34a" }}>{fmtNumAp(r.remaining_amount_idr, true)}</td>
                       <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#64748b" }}>{r.original_amount_orig != null ? fmtNumAp(r.original_amount_orig, false) : "—"}</td>
                       <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#64748b" }}>{r.remaining_amount_orig != null ? fmtNumAp(r.remaining_amount_orig, false) : "—"}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>{fmtNumAp(r.original_amount_idr, true)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: r.remaining_amount_idr > 0 ? "#dc2626" : "#16a34a" }}>{fmtNumAp(r.remaining_amount_idr, true)}</td>
                       <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#dc2626" }}>{fmtNumAp(r.after_revaluation_idr, true)}</td>
                       <td style={{ ...TD, fontSize: 11, color: "#64748b", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.description}>{r.description}</td>
                     </tr>

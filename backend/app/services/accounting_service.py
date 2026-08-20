@@ -246,9 +246,17 @@ class AccountingService:
         "212211", "212212", "212221", "212222",
     )
 
+    # Shared AP/AR legacy data-quality cutoff (see get_ap_outstanding /
+    # get_ar_outstanding docstrings): transactions dated on/before this are
+    # always shown Paid/remaining=0 in these dashboard reports, regardless
+    # of Oracle's live status/remaining figures.
+    LEGACY_PAID_CUTOFF = "2021-12-31"
+
     async def get_ap_outstanding(
         self,
         as_of_date: str = None,
+        date_from: str = None,
+        date_to: str = None,
         supplier_name: str = None,
         payment_status: str = None,
         limit: int = 500,
@@ -261,6 +269,11 @@ class AccountingService:
         as_of_date defaults to SYSDATE when not provided. Restricted to the
         AP_COA_WHITELIST chart-of-account codes (segment4).
 
+        date_from/date_to filter which invoices are in play by
+        ai.invoice_date (Period From/To) — same role as get_ar_outstanding's
+        date_from/date_to, independent of as_of_date (which anchors the
+        remaining/status calculation, not which invoices are considered).
+
         usd_rate/eur_rate (typically Bank Indonesia's Kurs Tengah as of
         as_of_date) drive the "Total After Revaluation" summary figure —
         SUM over Not Paid invoices of original_amount_orig * the matching
@@ -269,6 +282,15 @@ class AccountingService:
         (including IDR itself, and USD/EUR when no override was given).
         This only affects that one summary number — the per-row
         original_amount_idr/remaining_amount_idr columns are untouched.
+
+        LEGACY_PAID_CUTOFF (see get_ar_outstanding) applies here too:
+        invoices dated on/before it always have their remaining forced to
+        0 (both IDR and original-currency), which makes them classify as
+        Paid below and drop out of this report by construction (the
+        payment_status != 'Paid' filter already always applies) — same
+        dashboard-only exception, same reasoning (legacy-era invoices
+        genuinely collected but missing/incomplete payment-application
+        records in Oracle), Oracle itself untouched.
         """
         limit = min(max(limit, 1), 2000)
 
@@ -276,6 +298,9 @@ class AccountingService:
         params: dict = {}
         if as_of_date:
             params["as_of_date"] = as_of_date
+
+        params["legacy_paid_cutoff"] = self.LEGACY_PAID_CUTOFF
+        legacy_cond = "ai2.invoice_date <= TO_DATE(:legacy_paid_cutoff, 'YYYY-MM-DD')"
 
         coa_binds = {f"coa{i}": code for i, code in enumerate(self.AP_COA_WHITELIST)}
         params.update(coa_binds)
@@ -285,6 +310,12 @@ class AccountingService:
         if supplier_name:
             extra_where += " AND UPPER(pv.vendor_name) LIKE UPPER(:supplier_name)"
             params["supplier_name"] = f"%{supplier_name}%"
+        if date_from:
+            extra_where += " AND ai.invoice_date >= TO_DATE(:date_from, 'YYYY-MM-DD')"
+            params["date_from"] = date_from
+        if date_to:
+            extra_where += " AND ai.invoice_date <= TO_DATE(:date_to, 'YYYY-MM-DD')"
+            params["date_to"] = date_to
         if payment_status and payment_status != "ALL":
             # Will be applied as HAVING-equivalent via subquery wrapping
             # We include it in the outer filter using CASE expression
@@ -335,10 +366,13 @@ class AccountingService:
                    , apps.fnd_flex_value_sets          ffvs
                    , ( SELECT aps.invoice_id
                             , SUM(aps.gross_amount)                                AS total_gross
-                            , SUM(aps.amount_remaining)                            AS total_remaining_orig
-                            , SUM( aps.amount_remaining *
+                            , SUM(CASE WHEN {legacy_cond} THEN 0 ELSE aps.amount_remaining END)
+                                                                                   AS total_remaining_orig
+                            , SUM(CASE WHEN {legacy_cond} THEN 0 ELSE
+                                   aps.amount_remaining *
                                    NVL(ai2.base_amount, ai2.invoice_amount) /
-                                   DECODE(ai2.invoice_amount, 0, 1, ai2.invoice_amount) )
+                                   DECODE(ai2.invoice_amount, 0, 1, ai2.invoice_amount)
+                              END)
                                                                                    AS total_remaining
                          FROM apps.ap_payment_schedules_all aps
                             , apps.ap_invoices_all          ai2
@@ -502,10 +536,6 @@ class AccountingService:
 
     # ── AR Outstanding ───────────────────────────────────────────────────────
 
-    # AR legacy data-quality cutoff (see get_ar_outstanding docstring):
-    # invoices dated on/before this are always shown Paid/remaining=0.
-    AR_LEGACY_PAID_CUTOFF = "2021-12-31"
-
     async def get_ar_outstanding(
         self,
         customer_name: str = None,
@@ -554,8 +584,9 @@ class AccountingService:
         stops accumulating overdue days the moment it was actually paid.
         Still-open rows keep counting normally (payment_date is blank).
 
-        AR_LEGACY_PAID_CUTOFF: invoices dated on/before this are always
-        forced Status='CL'/remaining=0 here, regardless of what Oracle's
+        LEGACY_PAID_CUTOFF (shared with get_ap_outstanding): invoices dated
+        on/before this are always forced Status='CL'/remaining=0 here,
+        regardless of what Oracle's
         aps.status/amount_due_remaining say. Found via a MENSA case where
         many pre-2022 invoices sit open in Oracle despite being genuinely
         collected — that generation of records is missing/incomplete
@@ -612,10 +643,10 @@ class AccountingService:
                    AND araa.status = 'APP')
             """
 
-        # AR_LEGACY_PAID_CUTOFF override (see docstring) — forces old
+        # LEGACY_PAID_CUTOFF override (see docstring) — forces old
         # invoices Closed/remaining=0 in the dashboard regardless of
         # Oracle's live aps.status/amount_due_remaining.
-        params["legacy_paid_cutoff"] = self.AR_LEGACY_PAID_CUTOFF
+        params["legacy_paid_cutoff"] = self.LEGACY_PAID_CUTOFF
         legacy_cond = "rct.trx_date <= TO_DATE(:legacy_paid_cutoff, 'YYYY-MM-DD')"
         remaining_expr = f"CASE WHEN {legacy_cond} THEN 0 ELSE ({remaining_expr}) END"
         status_expr    = f"CASE WHEN {legacy_cond} THEN 'CL' ELSE ({status_expr}) END"
@@ -799,10 +830,11 @@ class AccountingService:
         reference column for every bucket (days_overdue = as_of_date -
         due_date), unchanged from before.
 
-        AR_LEGACY_PAID_CUTOFF (see get_ar_outstanding) applies here too —
-        invoices dated on/before it are forced remaining=0, which drops
-        them out of the report entirely via the remaining!=0 filter below,
-        same dashboard-only exception, Oracle untouched.
+        LEGACY_PAID_CUTOFF (see get_ap_outstanding / get_ar_outstanding)
+        applies here too — invoices dated on/before it are forced
+        remaining=0, which drops them out of the report entirely via the
+        remaining!=0 filter below, same dashboard-only exception, Oracle
+        untouched.
         """
         limit = min(max(limit, 1), 2000)
         where_extra = ""
@@ -826,7 +858,7 @@ class AccountingService:
         """
         remaining_asof_expr = f"(NVL(aps.amount_due_original, 0) - ({applied_asof_expr}))"
 
-        params["legacy_paid_cutoff"] = self.AR_LEGACY_PAID_CUTOFF
+        params["legacy_paid_cutoff"] = self.LEGACY_PAID_CUTOFF
         legacy_cond = "rct.trx_date <= TO_DATE(:legacy_paid_cutoff, 'YYYY-MM-DD')"
         remaining_asof_expr = f"CASE WHEN {legacy_cond} THEN 0 ELSE ({remaining_asof_expr}) END"
 
