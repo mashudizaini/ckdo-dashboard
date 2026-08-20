@@ -31,8 +31,8 @@ const NAV_ITEMS = [
   ] },
   { label: "PAC", path: "/dashboard/pac", icon: Factory, roles: ["pac_staff"], children: [
     { label: "Business Plan", path: "/dashboard/pac/bizplan" },
-    { label: "Budget Usage Report", path: "/dashboard/pac/budget" },
-    { label: "BCA MT940 Upload", path: "/dashboard/pac/mt940" },
+    // Temporarily hidden — not in active use yet.
+    // { label: "BCA MT940 Upload", path: "/dashboard/pac/mt940" },
     { label: "Exchange Rate", path: "/dashboard/pac/exchange" },
   ] },
   { label: "Accounting & Tax", path: "/dashboard/accounting", icon: Calculator, roles: ["accounting_staff"], children: [
@@ -57,6 +57,8 @@ const NAV_ITEMS = [
   // own team, resolved server-side.
   { label: "General", path: "/dashboard/general", icon: LayoutGrid, roles: [], children: [
     { label: "Budget Monitoring", path: "/dashboard/general/budget" },
+    // Temporarily hidden — not in active use yet.
+    // { label: "Budget Usage Report", path: "/dashboard/general/budget-usage" },
   ] },
 ];
 

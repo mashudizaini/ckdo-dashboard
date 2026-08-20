@@ -4,14 +4,16 @@ Sources:
   1. bi_html           — scrape bi.go.id (existing implementation)
   2. exchangerate_api  — open.er-api.com (free, no key, daily)
   3. frankfurter       — api.frankfurter.dev (free, no key, daily)
-Cache: module-level in-memory, 4-hour TTL, keyed by source.
+Cache: module-level in-memory, 4-hour TTL, keyed by source + as_of_date.
 """
+import http.cookiejar
 import json
 import re
 import ssl
 import time
+import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from html.parser import HTMLParser
 
 BI_URL = "https://www.bi.go.id/id/statistik/informasi-kurs/transaksi-bi/Default.aspx"
@@ -207,6 +209,136 @@ def _make_ssl_ctx(verify: bool = True):
     return ctx
 
 
+# ── Source 1b: BI HTML scrape — historical date via the "Harian" search ───────
+#
+# bi.go.id's rate page is a legacy ASP.NET/SharePoint WebForms page — the
+# "Harian" date search is a form postback, not a URL parameter. Replaying it
+# from the server requires, in order:
+#   1. A GET to pick up session cookies + __VIEWSTATE/__EVENTVALIDATION
+#      (the postback is rejected without a matching viewstate from the same
+#      session).
+#   2. A POST of every hidden field from that GET, plus txtTanggal (the date
+#      — the field's own placeholder says "dd-mm-yyyy" but the server
+#      actually parses it as MM-DD-YYYY, confirmed by probing), the search
+#      button's name=value pair, and hidSourceID set to that button's client
+#      ID — its onclick JS (SetSource) sets this before the real browser
+#      submits, and the search silently no-ops (returns today's default
+#      table) without it.
+# Confirmed against the live site: searching a past date returns a distinct
+# gvSearchResult1 table (no <tbody>, unlike the default live table) labelled
+# with the requested date.
+
+def _bi_opener():
+    return urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
+
+def _bi_urlopen(opener, req, timeout: int) -> str:
+    errors = []
+    for label, ctx in [
+        ("default", None),
+        ("no-hostname", _make_ssl_ctx()),
+        ("no-verify", _make_ssl_ctx(verify=False)),
+    ]:
+        try:
+            kw = {"timeout": timeout}
+            if ctx is not None:
+                kw["context"] = ctx
+            with opener.open(req, **kw) as r:
+                raw = r.read()
+                enc = r.headers.get_content_charset("utf-8")
+                return raw.decode(enc, errors="replace")
+        except Exception as e:
+            errors.append(f"{label}: {type(e).__name__}({e})")
+    raise RuntimeError(f"Tidak bisa mengakses bi.go.id setelah 3 percobaan — {' | '.join(errors)}")
+
+
+def _extract_hidden_fields(html: str) -> dict:
+    fields = {}
+    for m in re.finditer(r'<input[^>]*type="hidden"[^>]*/?>', html, re.IGNORECASE):
+        tag = m.group(0)
+        nm = re.search(r'name="([^"]*)"', tag)
+        if not nm:
+            continue
+        val = re.search(r'value="([^"]*)"', tag)
+        fields[nm.group(1)] = val.group(1) if val else ""
+    return fields
+
+
+def _parse_search_result_table(html: str) -> list[dict]:
+    m = re.search(r'<table[^>]*id="[^"]*_gvSearchResult1"[^>]*>(.*?)</table>', html, re.IGNORECASE | re.DOTALL)
+    if not m:
+        return []
+    rates = []
+    for row_m in re.finditer(r'<tr[^>]*>(.*?)</tr>', m.group(1), re.IGNORECASE | re.DOTALL):
+        cells = re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', row_m.group(1), re.IGNORECASE | re.DOTALL)
+        cells = [re.sub(r'<[^>]+>', '', c).strip() for c in cells]
+        if len(cells) < 4:
+            continue
+        code = cells[0].strip()
+        if not code or len(code) > 5 or not code[0].isalpha():
+            continue
+        # Unlike the live table's "Nilai" column (plain "1"), this GridView
+        # renders it in plain decimal notation ("1.00", "100.00") rather
+        # than Indonesian thousands-grouping — _parse_idr would misread
+        # "100.00" as 10000.
+        try:
+            denomination = float(cells[1].strip())
+        except (ValueError, AttributeError):
+            denomination = None
+        rates.append({
+            "code": code,
+            "name": CURRENCY_NAMES.get(code, code),
+            "denomination": int(denomination or 1),
+            "sell": _parse_idr(cells[2]),
+            "buy": _parse_idr(cells[3]),
+        })
+    return rates
+
+
+def _fetch_bi_html_for_date(date_iso: str, timeout: int = 25) -> dict:
+    opener = _bi_opener()
+    html = _bi_urlopen(opener, urllib.request.Request(BI_URL, headers=_HEADERS), timeout)
+
+    if len(html) < 5_000:
+        raise RuntimeError(f"Respons bi.go.id terlalu kecil ({len(html)} chars) saat mengambil form pencarian.")
+
+    m = re.search(r'name="([^"]*\$txtTanggal)"', html)
+    if not m:
+        raise RuntimeError(
+            "Field pencarian tanggal (txtTanggal) tidak ditemukan di halaman BI — "
+            "kemungkinan struktur halaman bi.go.id berubah."
+        )
+    prefix = m.group(1)[: -len("txtTanggal")]
+    txt_name = prefix + "txtTanggal"
+    btn_name = prefix + "btnSearch2"
+    hid_name = prefix + "hidSourceID"
+
+    y, mo, d = date_iso.split("-")
+    fields = _extract_hidden_fields(html)
+    fields[txt_name] = f"{mo}-{d}-{y}"
+    fields[btn_name] = "Cari"
+    fields[hid_name] = btn_name.replace("$", "_")
+
+    post_req = urllib.request.Request(
+        BI_URL,
+        data=urllib.parse.urlencode(fields).encode("utf-8"),
+        headers={**_HEADERS, "Content-Type": "application/x-www-form-urlencoded"},
+    )
+    result_html = _bi_urlopen(opener, post_req, timeout)
+
+    rates = _parse_search_result_table(result_html)
+    if not rates:
+        raise RuntimeError(
+            f"Tidak ada data Kurs Transaksi BI untuk tanggal {date_iso} "
+            "(kemungkinan hari libur/bukan hari kerja, atau tanggal belum tersedia di bi.go.id)."
+        )
+
+    label_m = re.search(r'id="[^"]*_lblKursTransaksiKTBI2"[^>]*>([^<]*)<', result_html)
+    date_str = label_m.group(1).strip() if label_m else date_iso
+
+    return {"rates": rates, "date": date_str, "source": "bi_html"}
+
+
 # ── Source 2: ExchangeRate-API (open access) ──────────────────────────────────
 
 def _fetch_exchangerate_api(timeout: int = 20) -> dict:
@@ -312,14 +444,23 @@ _SOURCE_LABELS = {
 }
 
 
-def _cache_key(source: str) -> str:
-    return f"rates:{source}"
+def _cache_key(source: str, as_of_date: str | None = None) -> str:
+    return f"rates:{source}:{as_of_date or 'latest'}"
 
 
-def get_rates(source: str = "auto", force_refresh: bool = False) -> dict:
+def get_rates(source: str = "auto", force_refresh: bool = False, as_of_date: str | None = None) -> dict:
     now = time.time()
 
-    if source == "auto":
+    # A past date can only be answered by replaying BI's own historical
+    # "Harian" search (see _fetch_bi_html_for_date) — the other sources have
+    # no historical endpoint, so silently substituting them would return a
+    # rate that isn't actually as of the requested date. as_of_date == today
+    # falls through to the normal fast live-scrape path below.
+    historical = bool(as_of_date) and as_of_date != date.today().isoformat()
+
+    if historical:
+        candidates = ["bi_html"]
+    elif source == "auto":
         candidates = ["bi_html", "exchangerate_api", "frankfurter"]
     elif source in _FETCHERS:
         candidates = [source]
@@ -331,7 +472,7 @@ def get_rates(source: str = "auto", force_refresh: bool = False) -> dict:
     result = None
 
     for src in candidates:
-        ck = _cache_key(src)
+        ck = _cache_key(src, as_of_date if historical else None)
         cached = _CACHE.get(ck, {})
         is_fresh = bool(cached.get("cached_at")) and (now - cached["cached_at"]) < _TTL
 
@@ -341,10 +482,11 @@ def get_rates(source: str = "auto", force_refresh: bool = False) -> dict:
             break
 
         try:
-            result = _FETCHERS[src]()
+            fetched = _fetch_bi_html_for_date(as_of_date) if (historical and src == "bi_html") else _FETCHERS[src]()
+            result = fetched
             _CACHE[ck] = {
-                "rates": result["rates"],
-                "date": result["date"],
+                "rates": fetched["rates"],
+                "date": fetched["date"],
                 "cached_at": now,
                 "error": None,
                 "source": src,

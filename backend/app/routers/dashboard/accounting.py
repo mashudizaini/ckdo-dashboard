@@ -27,14 +27,15 @@ router = APIRouter()
 async def get_exchange_rate(
     refresh: bool = Query(False, description="Force re-scrape even if cache is fresh"),
     source:  str  = Query("bi_html", description="Data source: bi_html (Kurs Tengah BI, default), auto, exchangerate_api, frankfurter"),
+    as_of_date: str = Query(None, description="YYYY-MM-DD; when given and in the past, replays BI's own 'Harian' historical search instead of today's live rate (bi_html only)"),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
     """
     Kurs Tengah Bank Indonesia — reuses the same BI-scrape module already
     used by the PAC Exchange Rate page, exposed here under the Accounting
-    role so AR Outstanding can default its Exchange Rate override to it.
+    role so AR/AP Outstanding can default its Exchange Rate override to it.
     """
-    return await asyncio.to_thread(exchange_rate_service.get_rates, source, refresh)
+    return await asyncio.to_thread(exchange_rate_service.get_rates, source, refresh, as_of_date)
 
 
 @router.get("/summary")

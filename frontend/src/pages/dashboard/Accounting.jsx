@@ -141,7 +141,7 @@ function APOutstandingPanel() {
   const loadBiRate = useCallback(async () => {
     setRateLoading(true);
     try {
-      const res = await accountingApi.getExchangeRate();
+      const res = await accountingApi.getExchangeRate({ as_of_date: asOfDate });
       const midOf = (r) => {
         if (!r || (!r.sell && !r.buy)) return null;
         const denom = r.denomination || 1;
@@ -155,9 +155,9 @@ function APOutstandingPanel() {
     } catch (e) {
       // Silent — fields stay editable/empty and the user can type rates manually.
     } finally { setRateLoading(false); }
-  }, []);
+  }, [asOfDate]);
 
-  useEffect(() => { loadBiRate(); }, [loadBiRate]);
+  useEffect(() => { loadBiRate(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   const loadData = useCallback(async () => {
     setLoading(true); setError(null);
@@ -297,7 +297,7 @@ function APOutstandingPanel() {
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input type="number" step="0.01" value={eurRate} onChange={e => setEurRate(e.target.value)}
               placeholder="e.g. 17800" style={{ ...INPUT, width: 100 }} />
-            <button type="button" onClick={loadBiRate} disabled={rateLoading} title="Refresh from BI Kurs Tengah"
+            <button type="button" onClick={() => { loadBiRate(); loadData(); }} disabled={rateLoading} title="Refresh rate (as of the selected date) and reload the list"
               style={{ border: "none", borderRadius: 9, padding: "7px 8px", background: NEU.bg, boxShadow: NEU.shadowOutSm, cursor: rateLoading ? "default" : "pointer", color: "#64748b" }}>
               <RefreshCw size={13} className={rateLoading ? "animate-spin" : ""} />
             </button>
