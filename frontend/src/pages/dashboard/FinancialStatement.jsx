@@ -725,7 +725,7 @@ function BalanceSheetPanel({ periods, fromYear, setFromYear, fromMonth, setFromM
   const handleExport = () => {
     const label = columnLabels[columnLabels.length - 1] || "";
     downloadExport(
-      () => financialStatementApi.exportBalanceSheet(periodList, label),
+      () => financialStatementApi.exportBalanceSheet(periodList, label, source),
       `Balance_Sheet_${fromYear}-${effToYear}.xlsx`,
       setExporting, setError,
     );
@@ -921,8 +921,7 @@ function BalanceSheetPanel({ periods, fromYear, setFromYear, fromMonth, setFromM
             <RefreshCw size={13} /> Refresh
           </button>
         )}
-        <button onClick={handleExport} disabled={exporting || !data || source === "excel"} style={BTN}
-          title={source === "excel" ? "Excel export isn't supported for the Excel data source" : undefined}>
+        <button onClick={handleExport} disabled={exporting || !data} style={BTN}>
           {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download Excel
         </button>
         {data?.unmapped_accounts?.length > 0 && (
@@ -1074,7 +1073,7 @@ function ProfitLossPanel({ periods, fromYear, setFromYear, toYear, setToYear }) 
 
   const handleExport = () => {
     downloadExport(
-      () => financialStatementApi.exportProfitLoss(columnsForYears()),
+      () => financialStatementApi.exportProfitLoss(columnsForYears(), undefined, source, selectedYears),
       `Profit_or_Loss_${selectedYears.join("-")}.xlsx`,
       setExporting, setError,
     );
@@ -1129,8 +1128,7 @@ function ProfitLossPanel({ periods, fromYear, setFromYear, toYear, setToYear }) 
         <button onClick={load} disabled={loading} style={BTN}>
           {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
         </button>
-        <button onClick={handleExport} disabled={exporting || !data || source === "excel"} style={BTN}
-          title={source === "excel" ? "Excel export isn't supported for the Excel data source" : undefined}>
+        <button onClick={handleExport} disabled={exporting || !data} style={BTN}>
           {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download Excel
         </button>
         {data?.unmapped_accounts?.length > 0 && (
@@ -1290,10 +1288,19 @@ function ProfitLossMonthlyPanel({ periods, asOfYear, setAsOfYear, asOfMonth, set
   useEffect(() => { load(); }, [load]);
 
   const handleExport = () => {
+    if (source === "excel") {
+      if (!resolvedExcelYear || !resolvedExcelMonth) return;
+      downloadExport(
+        () => financialStatementApi.exportProfitLossMonthly({ source: "excel", month: resolvedExcelMonth, year: resolvedExcelYear, dateLabel: headerDates.this }),
+        `Profit_or_Loss_Monthly_${resolvedExcelYear}-${String(resolvedExcelMonth).padStart(2, "0")}.xlsx`,
+        setExporting, setError,
+      );
+      return;
+    }
     const params = buildParams();
     if (!params) return;
     downloadExport(
-      () => financialStatementApi.exportProfitLossMonthly(params),
+      () => financialStatementApi.exportProfitLossMonthly({ ...params, source: "oracle" }),
       `Profit_or_Loss_Monthly_${resolvedPeriod}.xlsx`,
       setExporting, setError,
     );
@@ -1391,8 +1398,7 @@ function ProfitLossMonthlyPanel({ periods, asOfYear, setAsOfYear, asOfMonth, set
         <button onClick={load} disabled={loading} style={BTN}>
           {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
         </button>
-        <button onClick={handleExport} disabled={exporting || !data || source === "excel"} style={BTN}
-          title={source === "excel" ? "Excel export isn't supported for the Excel data source" : undefined}>
+        <button onClick={handleExport} disabled={exporting || !data} style={BTN}>
           {exporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Download Excel
         </button>
       </div>

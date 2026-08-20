@@ -511,9 +511,17 @@ def _build_pl_xlsx(data: dict, title2: str, date_label: str, sheet_title: str) -
 @router.get("/balance-sheet/export")
 async def export_balance_sheet(
     periods: str = Query(...),
+    source: str = Query("oracle", pattern="^(oracle|excel)$"),
     as_of_label: str = Query("", description="Display label for the report date line, e.g. 'June 30, 2026'"),
+    db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
+    if source == "excel":
+        data = await _balance_sheet_from_excel(db, periods)
+        if not data.get("success"):
+            raise HTTPException(400, data.get("error") or "Failed to export")
+        labels = data["column_labels"]
+        return _build_balance_sheet_xlsx(data, labels, as_of_label or (labels[-1] if labels else ""), detail=False)
     period_list = [p.strip() for p in periods.split(",") if p.strip()]
     data = await FinancialStatementService().get_balance_sheet(period_list)
     labels = [FinancialStatementService.period_display_label(p) for p in period_list]
@@ -534,10 +542,18 @@ async def export_balance_sheet_detail(
 
 @router.get("/profit-loss/export")
 async def export_profit_and_loss(
-    columns: str = Query(...),
+    columns: Optional[str] = Query(None, description='JSON list of {"label","periods":[...]} — oracle source only'),
+    source: str = Query("oracle", pattern="^(oracle|excel)$"),
+    years: Optional[str] = Query(None, description="Comma-separated fiscal years — excel source only"),
     date_label: str = Query(""),
+    db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
+    if source == "excel":
+        data = await _profit_loss_from_excel(db, years or "")
+        if not data.get("success"):
+            raise HTTPException(400, data.get("error") or "Failed to export")
+        return _build_pl_xlsx(data, "Profit or Loss", date_label or datetime.now().strftime("%B %d, %Y"), "Profit or Loss")
     col_list = json.loads(columns)
     data = await FinancialStatementService().get_profit_and_loss(col_list)
     return _build_pl_xlsx(data, "Profit or Loss", date_label or datetime.now().strftime("%B %d, %Y"), "Profit or Loss")
@@ -545,13 +561,23 @@ async def export_profit_and_loss(
 
 @router.get("/profit-loss-monthly/export")
 async def export_profit_and_loss_monthly(
-    period_this: str = Query(...),
-    ytd_this: str = Query(...),
-    period_last: str = Query(...),
-    ytd_last: str = Query(...),
+    period_this: Optional[str] = Query(None, description="oracle source only"),
+    ytd_this: Optional[str] = Query(None, description="oracle source only"),
+    period_last: Optional[str] = Query(None, description="oracle source only"),
+    ytd_last: Optional[str] = Query(None, description="oracle source only"),
+    source: str = Query("oracle", pattern="^(oracle|excel)$"),
+    month: Optional[int] = Query(None, ge=1, le=12, description="excel source only — which stored snapshot; omit for the most recent"),
+    year:  Optional[int] = Query(None, description="excel source only — which stored snapshot; omit for the most recent"),
     date_label: str = Query(""),
+    db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
+    if source == "excel":
+        data = await _profit_loss_monthly_from_excel(db, month, year)
+        if not data.get("success"):
+            raise HTTPException(400, data.get("error") or "Failed to export")
+        label = date_label or data.get("date_this") or ""
+        return _build_pl_xlsx(data, "Profit or Loss", label, "PL Monthly")
     ytd_this_list = [p.strip() for p in ytd_this.split(",") if p.strip()]
     ytd_last_list = [p.strip() for p in ytd_last.split(",") if p.strip()]
     data = await FinancialStatementService().get_profit_and_loss_monthly(

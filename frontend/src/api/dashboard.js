@@ -367,12 +367,19 @@ export const financialStatementApi = {
       headers: { "Content-Type": "multipart/form-data" },
     });
   },
-  exportBalanceSheet:       (periods, asOfLabel) => api.get("/dashboard/accounting/financial-statement/balance-sheet/export", { params: { periods: periods.join(","), as_of_label: asOfLabel || "" }, responseType: "blob" }),
+  exportBalanceSheet:       (periods, asOfLabel, source = "oracle") => api.get("/dashboard/accounting/financial-statement/balance-sheet/export", { params: { periods: periods.join(","), as_of_label: asOfLabel || "", source }, responseType: "blob" }),
   exportBalanceSheetDetail: (periods, asOfLabel) => api.get("/dashboard/accounting/financial-statement/balance-sheet-detail/export", { params: { periods: periods.join(","), as_of_label: asOfLabel || "" }, responseType: "blob" }),
-  exportProfitLoss:         (columns, dateLabel) => api.get("/dashboard/accounting/financial-statement/profit-loss/export", { params: { columns: JSON.stringify(columns), date_label: dateLabel || "" }, responseType: "blob" }),
-  exportProfitLossMonthly:  ({ periodThis, ytdThis, periodLast, ytdLast, dateLabel }) =>
+  exportProfitLoss:         (columns, dateLabel, source = "oracle", years = []) => api.get("/dashboard/accounting/financial-statement/profit-loss/export", {
+    params: source === "excel"
+      ? { source, years: years.join(","), date_label: dateLabel || "" }
+      : { source, columns: JSON.stringify(columns), date_label: dateLabel || "" },
+    responseType: "blob",
+  }),
+  exportProfitLossMonthly:  ({ periodThis, ytdThis, periodLast, ytdLast, dateLabel, source = "oracle", month, year }) =>
     api.get("/dashboard/accounting/financial-statement/profit-loss-monthly/export", {
-      params: { period_this: periodThis, ytd_this: ytdThis.join(","), period_last: periodLast, ytd_last: ytdLast.join(","), date_label: dateLabel || "" },
+      params: source === "excel"
+        ? { source, month, year, date_label: dateLabel || "" }
+        : { source, period_this: periodThis, ytd_this: ytdThis.join(","), period_last: periodLast, ytd_last: ytdLast.join(","), date_label: dateLabel || "" },
       responseType: "blob",
     }),
   exportCashFlow: (years) => api.get("/dashboard/accounting/financial-statement/cash-flow/export", { params: { years: years.join(",") }, responseType: "blob" }),
