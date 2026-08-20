@@ -539,7 +539,7 @@ function useMonthSnap(source, periods, year, month, setMonth) {
   }, [year, periods, source]);
 }
 
-function BalanceSheetPanel({ periods }) {
+function BalanceSheetPanel({ periods, fromYear, setFromYear, fromMonth, setFromMonth, toYear, setToYear, toMonth, setToMonth }) {
   const years = useMemo(() => fiscalYears(periods), [periods]);
   const latest = useMemo(() => latestActivePeriod(periods), [periods]);
 
@@ -556,11 +556,9 @@ function BalanceSheetPanel({ periods }) {
   // separate "Single Period" picker was folded in: Period To plays that
   // role for the most recent/rightmost column). Each carries its own
   // month + year — Oracle mode only; Excel snapshots are year-only so the
-  // month selects don't render in that mode.
-  const [fromMonth, setFromMonth] = useState("DEC");
-  const [fromYear, setFromYear] = useState("");
-  const [toMonth, setToMonth] = useState("DEC");
-  const [toYear, setToYear] = useState("");
+  // month selects don't render in that mode. Lifted to FinancialStatement
+  // (passed down as props) so they're shared with every other tab instead
+  // of resetting when this panel unmounts on tab switch.
 
   // Period Type — "multi" (default): Period From/To both active, a real
   // range. "single": Period To is disabled and ignored entirely; Period
@@ -598,33 +596,18 @@ function BalanceSheetPanel({ periods }) {
   const [groupDetail, setGroupDetail] = useState({}); // { [group]: { loading, error, accounts, periodKey } }
   const detailFetchKeys = useRef(new Set()); // in-flight/cached "group|periodKey" — de-dupes fetches
 
-  // Default on mount — anchored to today's real calendar year, not
-  // whatever year the data happens to cover: Period From = current year
-  // - 1, Period To = current year (Multi Period), or just Period From =
-  // current year - 1 (Single Period, Period To disabled).
-  // setPeriodTypeWithDefaults below re-applies the same defaults whenever
-  // Period Type is switched, since this guarded effect (only filling in
-  // blank values) won't re-fire just because periodType changed if
-  // fromYear/toYear are already set from before.
-  useEffect(() => {
-    if (!fromYear) {
-      setFromYear(CURRENT_YEAR - 1);
-      setFromMonth("DEC");
-    }
-    if (periodType === "multi" && !toYear) {
-      setToYear(CURRENT_YEAR);
-      setToMonth(source === "oracle" && latest ? MONTHS[latest.period_num - 1] : "DEC");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodType]);
-
+  // Switching Period Type re-applies the shared global defaults (Period
+  // From = Jan of the current year, Period To = the current real month) —
+  // fromYear/toYear themselves now come from FinancialStatement (props),
+  // already seeded with these same defaults on first load, so there's no
+  // separate "fill in if blank" mount effect needed here anymore.
   const setPeriodTypeWithDefaults = (val) => {
     setPeriodType(val);
-    setFromYear(CURRENT_YEAR - 1);
-    setFromMonth("DEC");
+    setFromYear(CURRENT_YEAR);
+    setFromMonth("JAN");
     if (val === "multi") {
       setToYear(CURRENT_YEAR);
-      setToMonth(source === "oracle" && latest ? MONTHS[latest.period_num - 1] : "DEC");
+      setToMonth(source === "oracle" && latest ? MONTHS[latest.period_num - 1] : MONTHS[CURRENT_MONTH_IDX]);
     }
   };
 
@@ -1024,7 +1007,7 @@ function ProfitLossChart({ data }) {
   );
 }
 
-function ProfitLossPanel({ periods }) {
+function ProfitLossPanel({ periods, fromYear, setFromYear, toYear, setToYear }) {
   const years = useMemo(() => fiscalYears(periods), [periods]);
 
   // Data source toggle — Oracle (live GL_BALANCES YTD) vs the last
@@ -1034,19 +1017,21 @@ function ProfitLossPanel({ periods }) {
   const [excelStatus, setExcelStatus] = useState(null);
   const pickerYears = source === "excel" ? (excelStatus?.years || EMPTY_ARRAY) : years;
 
-  // Period From / Period To — the only period controls (the old separate
-  // single "Period" picker was folded in: Period To plays that role as
-  // the rightmost/most-recent column). Same year on both = 1 column.
-  const [fromYear, setFromYear] = useState("");
-  const [toYear, setToYear] = useState("");
+  // Period From / Period To — shared with every other tab (props, lifted
+  // to FinancialStatement) instead of resetting when this panel unmounts
+  // on tab switch. Same year on both = 1 column.
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [exporting, setExporting] = useState(false);
 
-  // Default (and re-default on source switch) — years[] sorts descending
-  // so years[0] is the latest either way.
+  // fromYear/toYear come in from the shared global default (Jan/now of the
+  // current year) — clamp them to whatever this report's own Excel upload
+  // actually covers (which can differ year-to-year from the other 3
+  // reports' own uploads) if the global picks lands outside it, and
+  // re-clamp on every source switch. years[] sorts descending so years[0]
+  // is the latest either way.
   useEffect(() => {
     if (!pickerYears.length) return;
     const latestYear = source === "excel" ? Math.max(...pickerYears) : pickerYears[0];
@@ -1208,7 +1193,7 @@ function PlMonthlyTable({ rows, dateLast, dateThis }) {
   );
 }
 
-function ProfitLossMonthlyPanel({ periods }) {
+function ProfitLossMonthlyPanel({ periods, asOfYear, setAsOfYear, asOfMonth, setAsOfMonth }) {
   const latest = useMemo(() => latestActivePeriod(periods), [periods]);
 
   // Data source toggle — Oracle (live MTD/YTD this-vs-last-year query) vs
@@ -1219,23 +1204,28 @@ function ProfitLossMonthlyPanel({ periods }) {
   // actually exist — not a blind 12-month list.
   const [source, setSource] = useState(SHOW_ORACLE_SOURCE ? "oracle" : "excel");
   const [snapshots, setSnapshots] = useState([]); // [{month, year, uploaded_at}], newest first
-  const [excelMonth, setExcelMonth] = useState("");
-  const [excelYear, setExcelYear] = useState("");
 
-  const [period, setPeriod] = useState("");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [exporting, setExporting] = useState(false);
 
-  useEffect(() => { if (latest && !period) setPeriod(latest.period_name); }, [latest]); // eslint-disable-line react-hooks/exhaustive-deps
+  // This report's single anchor is the shared "As Of Date" (asOfYear/
+  // asOfMonth, props — lifted to FinancialStatement so it doesn't reset
+  // when this panel unmounts on tab switch), resolved against whichever
+  // GL period / uploaded snapshot actually exists for it — falling back
+  // to the latest available one when the exact as-of month isn't there
+  // yet (e.g. as-of = current month but this month hasn't posted/been
+  // uploaded).
+  const resolvedPeriod = useMemo(
+    () => periodNameForMonthYear(periods, asOfMonth, asOfYear) || latest?.period_name || "",
+    [periods, asOfMonth, asOfYear, latest],
+  );
 
   const loadSnapshots = useCallback(async () => {
     try {
       const res = await financialStatementApi.getProfitLossMonthlySnapshots();
-      const list = res.success ? (res.data || []) : [];
-      setSnapshots(list);
-      if (list.length) { setExcelMonth(list[0].month); setExcelYear(list[0].year); }
+      setSnapshots(res.success ? (res.data || []) : []);
     } catch (e) { /* snapshot list is informational — load() below still reports its own error */ }
   }, []);
 
@@ -1244,33 +1234,42 @@ function ProfitLossMonthlyPanel({ periods }) {
   // Years/months actually available, for the two selects below — years
   // sorted newest first, months for the selected year sorted Jan-Dec.
   const excelYears = useMemo(() => [...new Set(snapshots.map(s => s.year))].sort((a, b) => b - a), [snapshots]);
+  const resolvedExcelYear = useMemo(
+    () => (excelYears.length ? (excelYears.includes(asOfYear) ? asOfYear : excelYears[0]) : asOfYear),
+    [excelYears, asOfYear],
+  );
   const excelMonthsForYear = useMemo(
-    () => snapshots.filter(s => s.year === excelYear).map(s => s.month).sort((a, b) => a - b),
-    [snapshots, excelYear],
+    () => snapshots.filter(s => s.year === resolvedExcelYear).map(s => s.month).sort((a, b) => a - b),
+    [snapshots, resolvedExcelYear],
+  );
+  const askedExcelMonth = MONTHS.indexOf(asOfMonth) + 1;
+  const resolvedExcelMonth = useMemo(
+    () => (excelMonthsForYear.length ? (excelMonthsForYear.includes(askedExcelMonth) ? askedExcelMonth : Math.max(...excelMonthsForYear)) : askedExcelMonth),
+    [excelMonthsForYear, askedExcelMonth],
   );
 
   const buildParams = useCallback(() => {
-    const p = periods.find(x => x.period_name === period);
+    const p = periods.find(x => x.period_name === resolvedPeriod);
     if (!p) return null;
     const lastYearP = periods.find(x => x.period_year === p.period_year - 1 && x.period_num === p.period_num && x.adjustment_period_flag !== "Y");
     if (!lastYearP) return null;
     const ytdThis = periodsOfYear(periods, p.period_year).filter(x => x.period_num <= p.period_num).map(x => x.period_name);
     const ytdLast = periodsOfYear(periods, lastYearP.period_year).filter(x => x.period_num <= lastYearP.period_num).map(x => x.period_name);
     return { periodThis: p.period_name, ytdThis, periodLast: lastYearP.period_name, ytdLast, dateLabel: periodLabel(p) };
-  }, [period, periods]);
+  }, [resolvedPeriod, periods]);
 
   const load = useCallback(async () => {
     if (source === "excel") {
       setLoading(true); setError(null);
       try {
-        const res = await financialStatementApi.getProfitLossMonthly({ month: excelMonth, year: excelYear }, "excel");
+        const res = await financialStatementApi.getProfitLossMonthly({ month: resolvedExcelMonth, year: resolvedExcelYear }, "excel");
         if (res.success) setData(res); else setError(res.error || "Failed to load");
       } catch (e) {
         setError(e?.response?.data?.detail || e?.detail || String(e));
       } finally { setLoading(false); }
       return;
     }
-    if (!period) return;
+    if (!resolvedPeriod) return;
     const params = buildParams();
     if (!params) { setError("No corresponding period found in the prior year."); setData(null); return; }
     setLoading(true); setError(null);
@@ -1280,11 +1279,12 @@ function ProfitLossMonthlyPanel({ periods }) {
     } catch (e) {
       setError(e?.response?.data?.detail || e?.detail || String(e));
     } finally { setLoading(false); }
-  }, [period, buildParams, source, excelMonth, excelYear]);
+  }, [resolvedPeriod, buildParams, source, resolvedExcelMonth, resolvedExcelYear]);
 
-  // A fresh upload may add a new month — refresh the snapshot list (and
-  // jump to the newest one) instead of just reloading the still-selected
-  // month's data, so the new upload is actually reachable afterward.
+  // A fresh upload may add a new month — refresh the snapshot list so the
+  // new upload becomes selectable (resolvedExcelYear/Month re-derive
+  // against it automatically) instead of just reloading the previously
+  // resolved month's data.
   const handleUploaded = useCallback(() => { loadSnapshots(); }, [loadSnapshots]);
 
   useEffect(() => { load(); }, [load]);
@@ -1294,7 +1294,7 @@ function ProfitLossMonthlyPanel({ periods }) {
     if (!params) return;
     downloadExport(
       () => financialStatementApi.exportProfitLossMonthly(params),
-      `Profit_or_Loss_Monthly_${period}.xlsx`,
+      `Profit_or_Loss_Monthly_${resolvedPeriod}.xlsx`,
       setExporting, setError,
     );
   };
@@ -1308,11 +1308,11 @@ function ProfitLossMonthlyPanel({ periods }) {
     const fmt = (p) => p?.end_date
       ? new Date(p.end_date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
       : "";
-    const p = periods.find(x => x.period_name === period);
+    const p = periods.find(x => x.period_name === resolvedPeriod);
     if (!p) return { this: "", last: "" };
     const lastYearP = periods.find(x => x.period_year === p.period_year - 1 && x.period_num === p.period_num && x.adjustment_period_flag !== "Y");
     return { this: fmt(p), last: fmt(lastYearP) };
-  }, [source, data, period, periods]);
+  }, [source, data, resolvedPeriod, periods]);
 
   const rows = useMemo(() => {
     if (!data) return [];
@@ -1347,13 +1347,16 @@ function ProfitLossMonthlyPanel({ periods }) {
       <FsSourceControl
         reportType="profit_loss_monthly" source={source} setSource={setSource}
         onUploaded={source === "excel" ? handleUploaded : load}
-        month={source === "excel" ? excelMonth : undefined} year={source === "excel" ? excelYear : undefined}
+        month={source === "excel" ? resolvedExcelMonth : undefined} year={source === "excel" ? resolvedExcelYear : undefined}
       />
       <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
         {source === "oracle" ? (
           <div>
-            <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period</label>
-            <select style={SELECT} value={period} onChange={e => setPeriod(e.target.value)}>
+            <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period (As Of Date)</label>
+            <select style={SELECT} value={resolvedPeriod} onChange={e => {
+              const p = periods.find(x => x.period_name === e.target.value);
+              if (p) { setAsOfYear(p.period_year); setAsOfMonth(MONTHS[p.period_num - 1]); }
+            }}>
               {periods.filter(p => p.has_activity === "Y" && p.adjustment_period_flag !== "Y").map(p => (
                 <option key={p.period_name} value={p.period_name}>{periodLabel(p)}</option>
               ))}
@@ -1362,19 +1365,19 @@ function ProfitLossMonthlyPanel({ periods }) {
         ) : snapshots.length ? (
           <>
             <div>
-              <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Year</label>
-              <select style={SELECT} value={excelYear} onChange={e => {
+              <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Year (As Of Date)</label>
+              <select style={SELECT} value={resolvedExcelYear} onChange={e => {
                 const y = Number(e.target.value);
-                setExcelYear(y);
+                setAsOfYear(y);
                 const months = snapshots.filter(s => s.year === y).map(s => s.month);
-                if (!months.includes(excelMonth)) setExcelMonth(Math.max(...months));
+                if (!months.includes(askedExcelMonth)) setAsOfMonth(MONTHS[Math.max(...months) - 1]);
               }}>
                 {excelYears.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
             <div>
-              <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Month</label>
-              <select style={SELECT} value={excelMonth} onChange={e => setExcelMonth(Number(e.target.value))}>
+              <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Month (As Of Date)</label>
+              <select style={SELECT} value={resolvedExcelMonth} onChange={e => setAsOfMonth(MONTHS[Number(e.target.value) - 1])}>
                 {excelMonthsForYear.map(m => <option key={m} value={m}>{MONTH_LABEL[MONTHS[m - 1]] || MONTHS[m - 1]}</option>)}
               </select>
             </div>
@@ -1415,18 +1418,22 @@ function ProfitLossMonthlyPanel({ periods }) {
 // returns each row pre-leveled/typed (level 0/1/2, type total|line)
 // exactly as read from the sheet, so rows pass straight through to FsTable
 // with no client-side reshaping.
-function CashFlowPanel() {
+function CashFlowPanel({ fromYear, setFromYear, toYear, setToYear }) {
   const [excelStatus, setExcelStatus] = useState(null);
   const pickerYears = excelStatus?.years || EMPTY_ARRAY;
 
-  const [fromYear, setFromYear] = useState("");
-  const [toYear, setToYear] = useState("");
+  // Period From / Period To — shared with every other tab (props, lifted
+  // to FinancialStatement) instead of resetting when this panel unmounts
+  // on tab switch.
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [exporting, setExporting] = useState(false);
 
+  // Clamp the shared fromYear/toYear to whatever this report's own Excel
+  // upload actually covers (can differ from the other reports' own
+  // uploads), same reasoning as ProfitLossPanel.
   useEffect(() => {
     if (!pickerYears.length) return;
     const latestYear = Math.max(...pickerYears);
@@ -1531,6 +1538,22 @@ export default function FinancialStatement() {
   const [loadingPeriods, setLoadingPeriods] = useState(true);
   const [periodsError, setPeriodsError] = useState(null);
 
+  // Global report parameters — shared across all 4 tabs (previously local
+  // to each tab's own panel, which meant switching tabs remounted the
+  // panel and silently reset them back to their defaults, since
+  // subTab === "x" && <Panel /> below unmounts the previous tab entirely).
+  // Period From/To (month+year) drive the multi-period range reports
+  // (Balance Sheet, Profit or Loss, Cash Flow — the latter two only use
+  // the year half); As Of Date (month+year) drives Profit or Loss
+  // Monthly's single-month anchor. Defaults: Period From = Jan of the
+  // current year, Period To / As Of Date = the current real month/year.
+  const [fromYear,  setFromYear]  = useState(CURRENT_YEAR);
+  const [fromMonth, setFromMonth] = useState("JAN");
+  const [toYear,    setToYear]    = useState(CURRENT_YEAR);
+  const [toMonth,   setToMonth]   = useState(MONTHS[CURRENT_MONTH_IDX]);
+  const [asOfYear,  setAsOfYear]  = useState(CURRENT_YEAR);
+  const [asOfMonth, setAsOfMonth] = useState(MONTHS[CURRENT_MONTH_IDX]);
+
   useEffect(() => {
     (async () => {
       try {
@@ -1584,10 +1607,22 @@ export default function FinancialStatement() {
         <div style={{ padding: 16, color: "#dc2626", fontSize: 13 }}>{periodsError}</div>
       ) : (
         <>
-          {subTab === "balance-sheet"        && <BalanceSheetPanel periods={periods} />}
-          {subTab === "profit-loss"          && <ProfitLossPanel periods={periods} />}
-          {subTab === "profit-loss-monthly"  && <ProfitLossMonthlyPanel periods={periods} />}
-          {subTab === "cash-flow"            && <CashFlowPanel />}
+          {subTab === "balance-sheet" && (
+            <BalanceSheetPanel periods={periods}
+              fromYear={fromYear} setFromYear={setFromYear} fromMonth={fromMonth} setFromMonth={setFromMonth}
+              toYear={toYear} setToYear={setToYear} toMonth={toMonth} setToMonth={setToMonth} />
+          )}
+          {subTab === "profit-loss" && (
+            <ProfitLossPanel periods={periods}
+              fromYear={fromYear} setFromYear={setFromYear} toYear={toYear} setToYear={setToYear} />
+          )}
+          {subTab === "profit-loss-monthly" && (
+            <ProfitLossMonthlyPanel periods={periods}
+              asOfYear={asOfYear} setAsOfYear={setAsOfYear} asOfMonth={asOfMonth} setAsOfMonth={setAsOfMonth} />
+          )}
+          {subTab === "cash-flow" && (
+            <CashFlowPanel fromYear={fromYear} setFromYear={setFromYear} toYear={toYear} setToYear={setToYear} />
+          )}
         </>
       )}
     </div>

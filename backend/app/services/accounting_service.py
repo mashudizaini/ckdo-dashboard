@@ -502,6 +502,10 @@ class AccountingService:
 
     # ── AR Outstanding ───────────────────────────────────────────────────────
 
+    # AR legacy data-quality cutoff (see get_ar_outstanding docstring):
+    # invoices dated on/before this are always shown Paid/remaining=0.
+    AR_LEGACY_PAID_CUTOFF = "2021-12-31"
+
     async def get_ar_outstanding(
         self,
         customer_name: str = None,
@@ -550,6 +554,18 @@ class AccountingService:
         stops accumulating overdue days the moment it was actually paid.
         Still-open rows keep counting normally (payment_date is blank).
 
+        AR_LEGACY_PAID_CUTOFF: invoices dated on/before this are always
+        forced Status='CL'/remaining=0 here, regardless of what Oracle's
+        aps.status/amount_due_remaining say. Found via a MENSA case where
+        many pre-2022 invoices sit open in Oracle despite being genuinely
+        collected — that generation of records is missing/incomplete
+        AR_RECEIVABLE_APPLICATIONS_ALL rows for their receipts, and
+        reconciling that in Oracle would mean replaying years of old
+        receipts for no operational benefit. This is a dashboard-only
+        display exception (Oracle itself is untouched) and applies
+        globally across all customers, not just MENSA, since the gap is a
+        legacy-data-era issue rather than a customer-specific one.
+
         class='CM' (credit memos / sales returns) rows are queried and
         still netted into every summary total exactly as before, but are
         no longer returned in `data` — "credit memo tidak ditampilkan
@@ -595,9 +611,20 @@ class AccountingService:
                  WHERE araa.applied_payment_schedule_id = aps.payment_schedule_id
                    AND araa.status = 'APP')
             """
+
+        # AR_LEGACY_PAID_CUTOFF override (see docstring) — forces old
+        # invoices Closed/remaining=0 in the dashboard regardless of
+        # Oracle's live aps.status/amount_due_remaining.
+        params["legacy_paid_cutoff"] = self.AR_LEGACY_PAID_CUTOFF
+        legacy_cond = "rct.trx_date <= TO_DATE(:legacy_paid_cutoff, 'YYYY-MM-DD')"
+        remaining_expr = f"CASE WHEN {legacy_cond} THEN 0 ELSE ({remaining_expr}) END"
+        status_expr    = f"CASE WHEN {legacy_cond} THEN 'CL' ELSE ({status_expr}) END"
+
         # Once Closed, days_overdue freezes as of the last applied payment
         # instead of continuing to count against today/as_of_date — a paid
-        # invoice shouldn't keep accumulating overdue days.
+        # invoice shouldn't keep accumulating overdue days. Legacy-forced
+        # rows have no real payment_date to freeze on, so they're zeroed
+        # out directly below instead of falling through to today_expr.
         days_overdue_anchor = f"""
             CASE WHEN ({status_expr}) = 'CL' AND ({payment_date_expr}) IS NOT NULL
                  THEN ({payment_date_expr})
@@ -663,7 +690,8 @@ class AccountingService:
                 ({rate_case})                                        AS conversion_rate,
                 ROUND(NVL(aps.amount_due_original,  0) * ({rate_case}), 2) AS original_amount_idr,
                 ROUND(({remaining_expr}) * ({rate_case}), 2)         AS remaining_amount_idr,
-                ROUND(({days_overdue_anchor}) - aps.due_date, 0)     AS days_overdue,
+                CASE WHEN {legacy_cond} THEN 0
+                     ELSE ROUND(({days_overdue_anchor}) - aps.due_date, 0) END AS days_overdue,
                 CASE WHEN ({status_expr}) = 'CL' THEN TO_CHAR(({payment_date_expr}), 'YYYY-MM-DD') END AS payment_date,
                 rcttt.name                                           AS transaction_type,
                 ({status_expr})                                      AS status,
@@ -770,6 +798,11 @@ class AccountingService:
         adjustments (AR_ADJUSTMENTS_ALL) are not. due_date remains the
         reference column for every bucket (days_overdue = as_of_date -
         due_date), unchanged from before.
+
+        AR_LEGACY_PAID_CUTOFF (see get_ar_outstanding) applies here too —
+        invoices dated on/before it are forced remaining=0, which drops
+        them out of the report entirely via the remaining!=0 filter below,
+        same dashboard-only exception, Oracle untouched.
         """
         limit = min(max(limit, 1), 2000)
         where_extra = ""
@@ -792,6 +825,10 @@ class AccountingService:
             ), 0)
         """
         remaining_asof_expr = f"(NVL(aps.amount_due_original, 0) - ({applied_asof_expr}))"
+
+        params["legacy_paid_cutoff"] = self.AR_LEGACY_PAID_CUTOFF
+        legacy_cond = "rct.trx_date <= TO_DATE(:legacy_paid_cutoff, 'YYYY-MM-DD')"
+        remaining_asof_expr = f"CASE WHEN {legacy_cond} THEN 0 ELSE ({remaining_asof_expr}) END"
 
         rate_case = f"""
             CASE WHEN rct.invoice_currency_code = 'IDR' THEN 1
