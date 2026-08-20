@@ -21,6 +21,14 @@ const API        = "/api/v1/dashboard/hr/employees";
 
 const MONTHS_ID = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
+// The 4 canonical HRGA departments (see department_taxonomy.py) — hardcoded
+// here rather than fetched from the /departments LOV endpoint, which unions
+// raw Employee/AttendanceRecord values and has repeatedly leaked stray
+// legacy junk (old "All Departments" placeholder rows, case duplicates,
+// numeric-junk) into that dropdown despite clean_department_list()'s
+// cleanup. A fixed list can't go stale from dirty data the same way.
+const HR_DEPARTMENTS = ["Administration", "Sales & Marketing", "Strategy & Development", "Plant"];
+
 const STATUS_BADGE = {
   "Permanent": "bg-green-500/15 text-green-400 border-green-500/30",
   "Contract":  "bg-amber-500/15 text-amber-400 border-amber-500/30",
@@ -4412,40 +4420,45 @@ function AttendanceEditModal({ record, onClose, onSaved }) {
 // the "Data Coverage" tab of Attendance Rate; that tab is gone from this
 // page now, the component lives standalone in the new file instead.
 
-// ── Target vs Achievement (Attendance Ratio formula) ──────────────────────────
-// Target (Man-Days) = Total Employees x Effective Working Days
-// Achievement         = man-days hadir aktual
-function TargetAchievementPanel({ apiBase, headers }) {
-  const curYear = new Date().getFullYear();
-  const [year, setYear]   = useState(curYear);
-  const [rows, setRows]   = useState([]);
+// ── Summary Report Attendance (Month x Department) ────────────────────────
+// Reuses the same /yearly-summary endpoint and column set as Attendance
+// Today > Yearly Summary (see AttendanceTodaySection) — Department/Year
+// now come from the Summary tab's own filters (fDept/fYear) instead of a
+// separate internal Year picker, so there's one source of truth for both
+// instead of two Year selectors on the same tab.
+function TargetAchievementPanel({ apiBase, headers, department, year }) {
+  const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(true);
-  const [sortBy,  setSortBy]  = useState(null);
-  const [sortDir, setSortDir] = useState("asc");
-  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
 
   useEffect(() => {
     setLoading(true);
-    fetch(`${apiBase}/target-vs-achievement?year=${year}`, { headers })
-      .then((r) => r.ok ? r.json() : { months: [] })
-      .then((d) => setRows(d.months || []))
-      .catch(() => setRows([]))
+    const params = new URLSearchParams({ year });
+    if (department) params.set("department", department);
+    fetch(`${apiBase}/yearly-summary?${params}`, { headers })
+      .then((r) => r.ok ? r.json() : null)
+      .then(setData)
+      .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [year]); // eslint-disable-line
+  }, [apiBase, department, year]); // eslint-disable-line
 
-  const years = Array.from({ length: 5 }, (_, i) => curYear - i);
+  const rows = data?.months || [];
+  const withData = rows.filter((m) => m.total_employees > 0);
+  const range = withData.length
+    ? `${withData[0].month_label.slice(0, 3).toUpperCase()}-${withData[withData.length - 1].month_label.slice(0, 3).toUpperCase()}`
+    : "";
+
+  const th = (extra) => ({ padding: "8px 10px", textAlign: "center", fontSize: 10, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.04em", ...extra });
+  const td = { padding: "7px 10px", textAlign: "center", color: "#475569" };
 
   return (
     <div style={NEU_CARD}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
-        <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>Target vs Achievement</h4>
-        <select value={year} onChange={(e) => setYear(Number(e.target.value))}
-          style={{ fontSize: 11, fontWeight: 700, padding: "5px 12px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#2563eb", boxShadow: NEU_IN.boxShadow, outline: "none", cursor: "pointer" }}>
-          {years.map((y) => <option key={y} value={y}>{y}</option>)}
-        </select>
+        <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>
+          SUMMARY REPORT ATTENDANCE {range ? `${range} ` : ""}{year}
+        </h4>
       </div>
       <p style={{ fontSize: 10.5, color: "#64748b", marginBottom: 12 }}>
-        Target (Man-Days) = Total Employees × Effective Working Days &nbsp;·&nbsp; Achievement = actual man-days present
+        Expected Man-Days = Total Employees × Working Days &nbsp;·&nbsp; Present Man-Days = Expected − (Late + Sick + Unpaid)
       </p>
 
       {loading ? (
@@ -4457,34 +4470,66 @@ function TargetAchievementPanel({ apiBase, headers }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
             <thead>
               <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
-                {[["Month", "period"], ["Employees", "headcount"], ["Effective Working Days", "working_days"], ["Target (Man-Days)", "target"], ["Achievement", "achievement"], ["Rate", "rate"]].map(([h, field]) => (
-                  <th key={h} onClick={() => handleSort(field)}
-                    style={{ padding: "8px 10px", textAlign: h === "Month" ? "left" : "center", fontSize: 10, fontWeight: 700, color: sortBy === field ? "#2563eb" : "#374151", textTransform: "uppercase", letterSpacing: "0.04em", cursor: "pointer", userSelect: "none" }}>
-                    {h} {sortBy === field && (sortDir === "asc" ? "▲" : "▼")}
-                  </th>
-                ))}
+                <th rowSpan={2} style={th({ textAlign: "left" })}>Month</th>
+                <th rowSpan={2} style={th()}>Total Employees</th>
+                <th rowSpan={2} style={th()}>Working Days</th>
+                <th rowSpan={2} style={th()}>Expected Man-Days</th>
+                <th rowSpan={2} style={th()}>Present Man-Days</th>
+                <th colSpan={4} style={th({ borderBottom: "1px solid rgba(15,23,42,0.15)" })}>Attendance</th>
+                <th rowSpan={2} style={th()}>Attendance Ratio</th>
+                <th rowSpan={2} style={th()}>Absence Ratio</th>
+              </tr>
+              <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
+                <th style={th()}>Late</th>
+                <th style={th()}>Sick</th>
+                <th style={th()}>Unpaid</th>
+                <th style={th()}>Total</th>
               </tr>
             </thead>
             <tbody>
-              {sortRows(rows, sortBy, sortDir, ["headcount", "working_days", "target", "achievement", "rate"]).map((m, i) => (
-                <tr key={m.period} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
-                  <td style={{ padding: "7px 10px", fontWeight: 700, color: "#1e293b" }}>{m.period}</td>
-                  <td style={{ padding: "7px 10px", textAlign: "center", color: "#475569" }}>{m.headcount}</td>
-                  <td style={{ padding: "7px 10px", textAlign: "center", color: "#475569" }}>{m.working_days}</td>
-                  <td style={{ padding: "7px 10px", textAlign: "center", fontWeight: 700, color: "#2563eb" }}>{m.target.toLocaleString()}</td>
-                  <td style={{ padding: "7px 10px", textAlign: "center", fontWeight: 700, color: "#16a34a" }}>{m.achievement.toLocaleString()}</td>
+              {rows.map((m, i) => (
+                <tr key={m.month} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
+                  <td style={{ padding: "7px 10px", fontWeight: 700, color: "#1e293b" }}>{m.month_label}</td>
+                  <td style={td}>{m.total_employees || "—"}</td>
+                  <td style={td}>{m.working_days || "—"}</td>
+                  <td style={td}>{m.expected_man_days || "—"}</td>
+                  <td style={td}>{m.present_man_days || "—"}</td>
+                  <td style={{ ...td, color: "#d97706", fontWeight: 700 }}>{m.late || "-"}</td>
+                  <td style={{ ...td, color: "#dc2626", fontWeight: 700 }}>{m.sick || "-"}</td>
+                  <td style={{ ...td, color: "#7c3aed", fontWeight: 700 }}>{m.unpaid || "-"}</td>
+                  <td style={{ ...td, color: "#1e293b", fontWeight: 800 }}>{m.total || "-"}</td>
                   <td style={{ padding: "7px 10px", textAlign: "center" }}>
-                    <span style={{
-                      padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800,
-                      background: m.rate >= 80 ? "#dcfce7" : m.rate >= 60 ? "#fef3c7" : "#fee2e2",
-                      color:      m.rate >= 80 ? "#16a34a" : m.rate >= 60 ? "#d97706" : "#dc2626",
-                    }}>
-                      {m.rate}%
-                    </span>
+                    {m.attendance_ratio == null ? <span style={{ color: "#94a3b8" }}>—</span> : (
+                      <span style={{
+                        padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800,
+                        background: m.attendance_ratio >= 95 ? "#dcfce7" : m.attendance_ratio >= 80 ? "#fef3c7" : "#fee2e2",
+                        color:      m.attendance_ratio >= 95 ? "#16a34a" : m.attendance_ratio >= 80 ? "#d97706" : "#dc2626",
+                      }}>
+                        {m.attendance_ratio}%
+                      </span>
+                    )}
                   </td>
+                  <td style={td}>{m.absence_ratio == null ? "—" : `${m.absence_ratio}%`}</td>
                 </tr>
               ))}
             </tbody>
+            {data?.annual && (
+              <tfoot>
+                <tr style={{ background: "#dfe5ed", fontWeight: 800 }}>
+                  <td style={{ padding: "7px 10px", color: "#1e293b" }}>TOTAL (ANNUAL)</td>
+                  <td style={td}>{data.annual.total_employees}</td>
+                  <td style={td}>{data.annual.working_days}</td>
+                  <td style={td}>{data.annual.expected_man_days}</td>
+                  <td style={td}>{data.annual.present_man_days}</td>
+                  <td style={{ ...td, color: "#d97706" }}>{data.annual.late}</td>
+                  <td style={{ ...td, color: "#dc2626" }}>{data.annual.sick}</td>
+                  <td style={{ ...td, color: "#7c3aed" }}>{data.annual.unpaid}</td>
+                  <td style={{ ...td, color: "#1e293b" }}>{data.annual.total}</td>
+                  <td style={{ ...td, color: "#16a34a" }}>{data.annual.attendance_ratio == null ? "—" : `${data.annual.attendance_ratio}%`}</td>
+                  <td style={td}>{data.annual.absence_ratio == null ? "—" : `${data.annual.absence_ratio}%`}</td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       )}
@@ -4615,6 +4660,12 @@ function AttendanceRateSection() {
   const [whosOff,   setWhosOff]   = useState({ date: null, data: [] });
   const [monthly,   setMonthly]   = useState([]);
   const [loading,   setLoading]   = useState(false);
+  // Raw DB-derived list — kept only for AttendanceCorrectionSection below,
+  // which needs to see/select whatever department value a record actually
+  // has (including legacy/junk ones) to correct it. The Summary tab's own
+  // filter uses the hardcoded HR_DEPARTMENTS canonical list instead (see
+  // its definition) since this fetched list has repeatedly leaked stray
+  // values into that dropdown.
   const [departments, setDepartments] = useState([]);
   const [fDept,  setFDept]  = useState("");
   const [fMonth, setFMonth] = useState("");
@@ -4696,8 +4747,8 @@ function AttendanceRateSection() {
             <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Department</label>
             <select value={fDept} onChange={e => setFDept(e.target.value)}
               style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#1e293b", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)", cursor: "pointer", outline: "none" }}>
-              <option value="">All Departments</option>
-              {departments.map(d => <option key={d} value={d}>{d}</option>)}
+              <option value="">All Department</option>
+              {HR_DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>
           <div>
@@ -4728,6 +4779,8 @@ function AttendanceRateSection() {
       {/* ── Summary ── */}
       {activeTab === "summary" && (
         <div className="space-y-4">
+        <TargetAchievementPanel apiBase={ATT_API} headers={headers} department={fDept} year={fYear} />
+
         <div style={{ display: "grid", gridTemplateColumns: "3fr 2fr", gap: 16 }}>
           {/* Left: dept chart + bottom row */}
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -4771,8 +4824,6 @@ function AttendanceRateSection() {
             </div>
           </div>
         </div>
-
-        <TargetAchievementPanel apiBase={ATT_API} headers={headers} />
         </div>
       )}
 

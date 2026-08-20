@@ -13,7 +13,7 @@ import logging
 import psycopg2
 from app.tasks.celery_app import celery_app
 from app.config import get_settings
-from app.services.document_converter_service import convert_one
+from app.services.document_converter_service import build_converter, convert_one
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -36,13 +36,11 @@ def _update(pg, job_id: int, **fields):
 
 
 @celery_app.task(name="app.tasks.document_converter_tasks.convert_document")
-def convert_document_task(job_id: int, file_path: str, ext: str):
-    from docling.document_converter import DocumentConverter
-
+def convert_document_task(job_id: int, file_path: str, ext: str, language: str = "auto"):
     pg = _get_pg()
     try:
         _update(pg, job_id, status="processing", status_message="Starting…")
-        converter = DocumentConverter()
+        converter = build_converter(language)
 
         if ext == ".pdf":
             import fitz

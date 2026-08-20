@@ -8,6 +8,17 @@ import { useAuthStore } from "@/store/authStore";
 const ACCEPTED = ".pdf,.docx,.doc,.png,.jpg,.jpeg";
 const POLL_MS = 2500;
 
+// Must match OCR_LANGUAGE_PACKS in document_converter_service.py — "auto"
+// uses the default RapidOCR pipeline (fine for English/Indonesian/Latin
+// script); everything else switches to Tesseract with that language's
+// pack, since RapidOCR itself has no real non-Latin language support.
+// PDF only for now — DOCX/image uploads always use the default pipeline
+// regardless of this choice.
+const OCR_LANGUAGES = [
+  { value: "auto",   label: "Auto (Default — English/Indonesian, fast)" },
+  { value: "korean", label: "Korean (Tesseract OCR — slower, more accurate for Korean PDFs)" },
+];
+
 const STATUS_STYLE = {
   pending:    { label: "Queued",     color: "text-gray-400",   bar: "bg-gray-600" },
   processing: { label: "Processing", color: "text-teal-400",   bar: "bg-teal-500" },
@@ -19,6 +30,7 @@ const STATUS_STYLE = {
 export default function DocumentConverter() {
   const { token } = useAuthStore();
   const [file, setFile] = useState(null);
+  const [language, setLanguage] = useState("auto");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState(null);
   const fileRef = useRef(null);
@@ -113,6 +125,7 @@ export default function DocumentConverter() {
     try {
       const fd = new FormData();
       fd.append("file", file);
+      fd.append("language", language);
       const res = await fetch("/api/v1/ai/document-converter/convert", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -277,6 +290,14 @@ export default function DocumentConverter() {
             </div>
           </div>
 
+          <div>
+            <label className="text-xs text-gray-500 mb-2 block">Document Language (OCR)</label>
+            <select value={language} onChange={(e) => setLanguage(e.target.value)}
+              className="w-full rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-200 outline-none focus:border-teal-500 cursor-pointer">
+              {OCR_LANGUAGES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
+            </select>
+          </div>
+
           <button
             onClick={handleConvert}
             disabled={!file || uploading}
@@ -328,6 +349,7 @@ export default function DocumentConverter() {
                         <p className="text-[10px] text-gray-600 truncate flex-1">
                           {job.status === "error" ? job.error_message : job.status_message}
                           {job.total_pages > 1 && ` · page ${job.current_page || 0}/${job.total_pages}`}
+                          {job.language && job.language !== "auto" && ` · ${job.language}`}
                         </p>
                         <div className="flex items-center gap-2 shrink-0">
                           <span className="text-[10px] text-gray-600 flex items-center gap-1"><Clock size={9} />{fmtDate(job.created_at)}</span>

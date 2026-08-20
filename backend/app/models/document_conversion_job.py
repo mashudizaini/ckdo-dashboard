@@ -26,6 +26,7 @@ class DocumentConversionJob(Base):
     filename         = Column(String(255), nullable=False)
     stored_path      = Column(String(500), nullable=False)  # persistent copy on disk (uploads/doc_converter_jobs/), removed once the job finishes or errors
     ext              = Column(String(10), nullable=False)
+    language         = Column(String(20), default="auto")  # "auto" (default RapidOCR pipeline) | "korean" (Tesseract+kor — RapidOCR has no real Korean model, see document_converter_service.py)
     status           = Column(String(20), default="pending")  # pending -> processing -> done -> error -> stopped
     total_pages      = Column(Integer)
     current_page     = Column(Integer, default=0)

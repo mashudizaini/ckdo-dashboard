@@ -29,7 +29,7 @@ only handles conversion, not storage.
 """
 import os
 from datetime import datetime
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -47,6 +47,7 @@ def _job_to_dict(job: DocumentConversionJob, include_markdown: bool = False) -> 
     d = {
         "id": job.id,
         "filename": job.filename,
+        "language": job.language,
         "status": job.status,
         "total_pages": job.total_pages,
         "current_page": job.current_page,
@@ -73,6 +74,7 @@ async def _get_job_or_404(db: AsyncSession, job_id: int) -> DocumentConversionJo
 @router.post("/convert")
 async def convert_document(
     file: UploadFile = File(...),
+    language: str = Form("auto", description='"auto" (default OCR pipeline) or one of document_converter_service.OCR_LANGUAGE_PACKS, e.g. "korean"'),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -89,6 +91,7 @@ async def convert_document(
         filename=file.filename or os.path.basename(stored_path),
         stored_path=stored_path,
         ext=ext,
+        language=language,
         status="pending",
         created_by=user.username,
     )
@@ -100,7 +103,7 @@ async def convert_document(
     from app.tasks.celery_app import celery_app
     result = celery_app.send_task(
         "app.tasks.document_converter_tasks.convert_document",
-        kwargs={"job_id": job.id, "file_path": stored_path, "ext": ext},
+        kwargs={"job_id": job.id, "file_path": stored_path, "ext": ext, "language": language},
     )
     job.celery_task_id = result.id
     await db.commit()
