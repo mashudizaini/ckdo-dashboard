@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import require_role, CurrentUser, Roles
-from app.services.department_taxonomy import normalize_department, clean_department_list
+from app.services.department_taxonomy import normalize_department, clean_department_list, CANONICAL_DEPARTMENTS
 from app.models.attendance import AttendanceRecord, AttendanceRecordAuditLog, AttendanceUploadLog
 
 router = APIRouter()
@@ -137,6 +137,91 @@ def _annual_leave_expr():
     """1 if this weekday was Annual Leave (leave_code="AL"/"ALAB" — both mean
     the same "Annual Leave", ALAB is Talenta's own-account variant)."""
     return case((and_(IS_WEEKDAY, AttendanceRecord.leave_code.in_(("AL", "ALAB"))), 1), else_=0)
+
+
+async def _year_period_stats(db: AsyncSession, year: int, department: Optional[str] = None) -> dict:
+    """
+    Single source of truth for Expected/Present Man-Days and Attendance/
+    Absence Ratio — every endpoint that shows an attendance rate for a
+    month (Yearly Summary's report table, the Department chart, the
+    Monthly Overall Rate list) calls this instead of each computing its
+    own version, so they can't silently drift apart the way /dept-summary
+    and /monthly-rate previously did (they used _actual_expr(), which
+    still counts a late arrival as present — this formula doesn't).
+
+      Expected Man-Days = Total Employees x Working Days
+      Present Man-Days  = Expected Man-Days - (Late + Sick + Unpaid)
+      Attendance Ratio  = Present Man-Days / Expected Man-Days
+      Absence Ratio     = (Late + Sick + Unpaid) / Expected Man-Days
+
+    Working Days is a COMPANY-CALENDAR count per month (distinct weekday
+    dates where at least one employee had a real required working day,
+    i.e. SUM(_plan_expr()) > 0 that date) — not a per-employee sum.
+
+    Batched to 3 queries total for the whole year (GROUP BY month), not 3
+    per month, so scanning all 12 months — or 4 departments x 12 months
+    from /dept-summary — stays cheap.
+
+    Returns {1: {...}, ..., 12: {...}}, one entry per calendar month.
+    """
+    from sqlalchemy import extract
+
+    where = [extract("year", AttendanceRecord.attendance_date) == year]
+    if department:
+        where.append(AttendanceRecord.department == department)
+
+    emp_rows = (await db.execute(
+        select(
+            extract("month", AttendanceRecord.attendance_date).label("month"),
+            func.count(func.distinct(AttendanceRecord.employee_id)).label("n"),
+        )
+        .where(*where)
+        .group_by(extract("month", AttendanceRecord.attendance_date))
+    )).fetchall()
+    employees_by_month = {int(r.month): int(r.n) for r in emp_rows}
+
+    wd_rows = (await db.execute(
+        select(
+            extract("month", AttendanceRecord.attendance_date).label("month"),
+            AttendanceRecord.attendance_date,
+        )
+        .where(*where, IS_WEEKDAY)
+        .group_by(extract("month", AttendanceRecord.attendance_date), AttendanceRecord.attendance_date)
+        .having(func.sum(_plan_expr()) > 0)
+    )).fetchall()
+    working_days_by_month: dict = {}
+    for r in wd_rows:
+        m = int(r.month)
+        working_days_by_month[m] = working_days_by_month.get(m, 0) + 1
+
+    issue_rows = (await db.execute(
+        select(
+            extract("month", AttendanceRecord.attendance_date).label("month"),
+            func.sum(_late_expr()).label("late"),
+            func.sum(_sick_expr()).label("sick"),
+            func.sum(_unpaid_leave_expr()).label("unpaid"),
+        )
+        .where(*where)
+        .group_by(extract("month", AttendanceRecord.attendance_date))
+    )).fetchall()
+    issues_by_month = {int(r.month): (int(r.late or 0), int(r.sick or 0), int(r.unpaid or 0)) for r in issue_rows}
+
+    result = {}
+    for m in range(1, 13):
+        total_employees = employees_by_month.get(m, 0)
+        working_days = working_days_by_month.get(m, 0)
+        late, sick, unpaid = issues_by_month.get(m, (0, 0, 0))
+        total = late + sick + unpaid
+        expected = total_employees * working_days
+        present = expected - total
+        result[m] = {
+            "total_employees": total_employees, "working_days": working_days,
+            "expected_man_days": expected, "present_man_days": present,
+            "late": late, "sick": sick, "unpaid": unpaid, "total": total,
+            "attendance_ratio": round(present / expected * 100, 2) if expected else None,
+            "absence_ratio":    round(total   / expected * 100, 2) if expected else None,
+        }
+    return result
 
 
 def _read_data_rows(contents: bytes) -> list:
@@ -1466,50 +1551,31 @@ async def get_monthly_attendance_rate(
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Attendance rate per bulan."""
-    from sqlalchemy import extract
-
-    q = select(
-        extract("year",  AttendanceRecord.attendance_date).label("year"),
-        extract("month", AttendanceRecord.attendance_date).label("month"),
-        func.sum(_plan_expr()).label("working"),
-        func.sum(_actual_expr()).label("hadir"),
-    )
-    if department:
-        q = q.where(AttendanceRecord.department == department)
-    if year:
-        q = q.where(extract("year", AttendanceRecord.attendance_date) == year)
-
-    result = await db.execute(
-        q.group_by(
-            extract("year",  AttendanceRecord.attendance_date),
-            extract("month", AttendanceRecord.attendance_date),
-        )
-        .order_by(
-            extract("year",  AttendanceRecord.attendance_date).desc(),
-            extract("month", AttendanceRecord.attendance_date).desc(),
-        )
-        .limit(12)
-    )
-    rows = result.fetchall()
+    """Attendance rate per bulan — same Expected/Present Man-Days formula
+    as /yearly-summary and /dept-summary (see _year_period_stats), so the
+    Summary tab's "Monthly Overall Rate" chart always agrees with the
+    report table above it instead of the two silently using different
+    definitions of "present" the way this used to (this previously
+    counted a late arrival as present via _actual_expr(); the shared
+    formula counts it as a deduction, same as the report table)."""
+    yr = year or date.today().year
+    stats = await _year_period_stats(db, yr, department)
 
     MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
     data = []
-    for r in rows:
-        year    = int(r[0])
-        month   = int(r[1])
-        working = int(r[2] or 0)
-        hadir   = int(r[3] or 0)
-        absen   = working - hadir
-        rate    = round(hadir / working * 100, 1) if working > 0 else 0
+    for m in range(1, 13):
+        s = stats[m]
+        if s["total_employees"] == 0 and s["working_days"] == 0:
+            continue  # no data at all this month — skip rather than pad with a misleading 0%
         data.append({
-            "period":   f"{MONTHS[month-1]} {year}",
-            "year":     year,
-            "month":    month,
-            "working":  working,
-            "hadir":    hadir,
-            "absen":    absen,
-            "rate":     rate,
+            "period":   f"{MONTHS[m-1]} {yr}",
+            "year":     yr,
+            "month":    m,
+            "working":  s["expected_man_days"],
+            "hadir":    s["present_man_days"],
+            "absen":    s["total"],
+            "late":     s["late"], "sick": s["sick"], "unpaid": s["unpaid"],
+            "rate":     s["attendance_ratio"] if s["attendance_ratio"] is not None else 0,
         })
     return data
 
@@ -1614,47 +1680,38 @@ async def get_dept_summary(
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Attendance Plan vs Actual per department.
-
-    Always includes every department from the Employee master list (as
-    0%) when no department filter is applied, not just departments that
-    already have attendance records — otherwise a department with no
-    attendance uploaded yet silently disappears from the chart even
-    though it's a real department (visible in the filter dropdown)."""
-    from sqlalchemy import extract
-    from app.models.employee import Employee
-
-    q = select(
-        AttendanceRecord.department,
-        func.sum(_plan_expr()).label("plan"),
-        func.sum(_actual_expr()).label("actual"),
-    )
-    if department:
-        q = q.where(AttendanceRecord.department == department)
-    if month:
-        q = q.where(extract("month", AttendanceRecord.attendance_date) == month)
-    if year:
-        q = q.where(extract("year", AttendanceRecord.attendance_date) == year)
-
-    result = await db.execute(q.group_by(AttendanceRecord.department))
-    att_map = {r[0]: (int(r[1] or 0), int(r[2] or 0)) for r in result.fetchall() if r[0]}
-
-    if department:
-        dept_names = {department}
-    else:
-        emp_result = await db.execute(
-            select(Employee.department).where(Employee.department.isnot(None)).distinct()
-        )
-        dept_names = {r[0] for r in emp_result.fetchall() if r[0]} | set(att_map.keys())
+    """Attendance Expected (Plan) vs Present (Actual) per department — same
+    formula as /yearly-summary and /monthly-rate (see _year_period_stats),
+    so this chart can't show a different number than the Summary Report
+    table for the same period again (previously used _actual_expr(),
+    which still counts a late arrival as present — this doesn't). Also
+    now includes the Late/Sick/Unpaid breakdown, and is always the 4
+    canonical HRGA departments (department_taxonomy.CANONICAL_DEPARTMENTS)
+    in that fixed display order — Administration, Sales & Marketing,
+    Strategy & Development, Plant — rather than whatever raw values/order
+    Employee.department happens to sort to (which can still carry legacy
+    labels pending manual HR correction)."""
+    yr = year or date.today().year
+    months = [month] if month else list(range(1, 13))
+    depts = [department] if department else CANONICAL_DEPARTMENTS
 
     rows = []
-    for dept in sorted(dept_names):
-        plan, actual = att_map.get(dept, (0, 0))
+    for dept in depts:
+        stats = await _year_period_stats(db, yr, dept)
+        expected = present = late = sick = unpaid = 0
+        for m in months:
+            s = stats[m]
+            expected += s["expected_man_days"]
+            present  += s["present_man_days"]
+            late     += s["late"]
+            sick     += s["sick"]
+            unpaid   += s["unpaid"]
         rows.append({
             "department": dept,
-            "plan":   plan,
-            "actual": actual,
-            "rate":   round(actual / max(plan, 1) * 100) if plan else 0,
+            "plan":   expected,
+            "actual": present,
+            "late": late, "sick": sick, "unpaid": unpaid, "total": late + sick + unpaid,
+            "rate":   round(present / expected * 100) if expected else 0,
         })
     return rows
 
@@ -1983,74 +2040,21 @@ async def get_yearly_summary(
 ):
     """Month-by-month attendance summary for a whole year — reverse-
     engineered from the user's reference screenshot (2026-08-19) and
-    verified arithmetically against every number in it:
+    verified arithmetically against every number in it. Formula lives in
+    _year_period_stats (shared with /dept-summary and /monthly-rate, so
+    all three agree on the same numbers for the same period):
       Expected Man-Days  = Total Employees x Working Days
       Present Man-Days   = Expected Man-Days - (Late + Sick + Unpaid)
       Attendance Ratio   = Present Man-Days / Expected Man-Days
       Absence Ratio      = (Late + Sick + Unpaid) / Expected Man-Days
-    Two things that make this different from every other endpoint in this
-    file:
-      - Working Days is a COMPANY-CALENDAR count (distinct weekday dates
-        that month where at least one employee had a real required
-        working day, i.e. SUM(_plan_expr()) > 0 for that date) — not a
-        per-employee sum like _plan_expr() is used for elsewhere. A
-        company-wide holiday (leave_code='H' for everyone that date)
-        naturally drops out since nobody's plan is 1 that day.
-      - A late arrival counts as a DEDUCTION here (folded into Total same
-        as Sick/Unpaid Leave), unlike _actual_expr() elsewhere in this
-        file which still counts Late as present. This is what the
-        reference numbers require (Present = Expected - Total reconciles
-        exactly; if Late were excluded from the deduction the totals
-        wouldn't match).
     All 12 months are always returned (zeros for months with no data),
     matching the reference report's Jan-Dec layout.
     """
-    from sqlalchemy import extract
-
     MONTHS = ["January","February","March","April","May","June","July",
               "August","September","October","November","December"]
 
-    months = []
-    for month in range(1, 13):
-        where = [
-            extract("year",  AttendanceRecord.attendance_date) == year,
-            extract("month", AttendanceRecord.attendance_date) == month,
-        ]
-        if department:
-            where.append(AttendanceRecord.department == department)
-
-        total_employees = (await db.execute(
-            select(func.count(func.distinct(AttendanceRecord.employee_id))).where(*where)
-        )).scalar() or 0
-
-        working_days = len((await db.execute(
-            select(AttendanceRecord.attendance_date)
-            .where(*where, IS_WEEKDAY)
-            .group_by(AttendanceRecord.attendance_date)
-            .having(func.sum(_plan_expr()) > 0)
-        )).fetchall())
-
-        issue_row = (await db.execute(
-            select(
-                func.sum(_late_expr()).label("late"),
-                func.sum(_sick_expr()).label("sick"),
-                func.sum(_unpaid_leave_expr()).label("unpaid"),
-            ).where(*where)
-        )).one()
-        late, sick, unpaid = int(issue_row.late or 0), int(issue_row.sick or 0), int(issue_row.unpaid or 0)
-        total = late + sick + unpaid
-
-        expected = total_employees * working_days
-        present  = expected - total
-
-        months.append({
-            "month": month, "month_label": MONTHS[month - 1],
-            "total_employees": total_employees, "working_days": working_days,
-            "expected_man_days": expected, "present_man_days": present,
-            "late": late, "sick": sick, "unpaid": unpaid, "total": total,
-            "attendance_ratio": round(present / expected * 100, 2) if expected else None,
-            "absence_ratio":    round(total   / expected * 100, 2) if expected else None,
-        })
+    stats = await _year_period_stats(db, year, department)
+    months = [{"month": m, "month_label": MONTHS[m - 1], **stats[m]} for m in range(1, 13)]
 
     annual = {
         "total_employees":   sum(m["total_employees"]   for m in months),

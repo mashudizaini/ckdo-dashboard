@@ -3787,6 +3787,12 @@ const NEU_CARD = {
 };
 const NEU_IN = { background: "#f1f5f9", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)" };
 
+// data: [{department, plan (Expected Man-Days), actual (Present Man-Days),
+// late, sick, unpaid, total, rate}], already in the canonical department
+// order (Administration/Sales & Marketing/Strategy & Development/Plant)
+// and the same Expected/Present Man-Days formula as the Summary Report
+// table above it (see hr_attendance.py's _year_period_stats) — this chart
+// no longer computes attendance differently than that table.
 function DeptBarChart({ data }) {
   if (!data.length) return <p style={{ padding: "24px 0", textAlign: "center", color: "#94a3b8", fontSize: 13 }}>No data</p>;
   const maxVal = Math.max(...data.map((d) => d.plan), 1);
@@ -3794,18 +3800,21 @@ function DeptBarChart({ data }) {
   const manyDepts = data.length > 8; // beyond this, fixed-width bars + horizontal scroll stay readable instead of squishing
   return (
     <div style={NEU_CARD}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 6 }}>
         <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>Attendance Ratio per Department</h4>
-        <div style={{ display: "flex", gap: 14, fontSize: 11, color: "#64748b", fontWeight: 600 }}>
+        <div style={{ display: "flex", gap: 12, fontSize: 10.5, color: "#64748b", fontWeight: 600, flexWrap: "wrap" }}>
           <span style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: "#3b82f6" }} /> Plan</span>
           <span style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: "#f97316" }} /> Actual</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: "#d97706" }} /> Late</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: "#dc2626" }} /> Sick</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: "#7c3aed" }} /> Unpaid</span>
         </div>
       </div>
       <div style={{ overflowX: manyDepts ? "auto" : "visible" }}>
         <div style={{
           display: "flex", alignItems: "flex-end",
           justifyContent: manyDepts ? "flex-start" : "space-around",
-          gap: manyDepts ? 10 : 4, height: BAR_H + 50,
+          gap: manyDepts ? 10 : 4, height: BAR_H + 74,
           minWidth: manyDepts ? data.length * 64 : "auto",
         }}>
           {data.map((dept) => {
@@ -3813,7 +3822,7 @@ function DeptBarChart({ data }) {
             const actualH = Math.max(Math.round((dept.actual / maxVal) * BAR_H), dept.actual > 0 ? 4 : 0);
             const short   = dept.department.split(/[\s/&]/)[0];
             return (
-              <div key={dept.department} style={{ flex: manyDepts ? "0 0 56px" : 1, display: "flex", flexDirection: "column", alignItems: "center" }} title={dept.department}>
+              <div key={dept.department} style={{ flex: manyDepts ? "0 0 64px" : 1, display: "flex", flexDirection: "column", alignItems: "center" }} title={dept.department}>
                 <div style={{ width: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 2, height: BAR_H }}>
                   <div style={{ width: "40%", display: "flex", flexDirection: "column", alignItems: "center" }}>
                     <span style={{ fontSize: 11, color: "#1e293b", fontWeight: 700 }}>{dept.plan}</span>
@@ -3826,6 +3835,11 @@ function DeptBarChart({ data }) {
                 </div>
                 <p style={{ fontSize: 10, color: "#475569", fontWeight: 600, marginTop: 4, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "center" }}>{short}</p>
                 <p style={{ fontSize: 12, fontWeight: 800, color: "#ea580c" }}>{dept.rate}%</p>
+                <div style={{ display: "flex", gap: 5, marginTop: 2, fontSize: 9, fontWeight: 700, whiteSpace: "nowrap" }}>
+                  <span style={{ color: "#d97706" }} title="Late">L {dept.late ?? 0}</span>
+                  <span style={{ color: "#dc2626" }} title="Sick">S {dept.sick ?? 0}</span>
+                  <span style={{ color: "#7c3aed" }} title="Unpaid">U {dept.unpaid ?? 0}</span>
+                </div>
               </div>
             );
           })}
