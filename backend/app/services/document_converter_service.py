@@ -56,7 +56,16 @@ def build_converter(language: str = "auto") -> DocumentConverter:
 
     pipeline_options = PdfPipelineOptions()
     pipeline_options.do_ocr = True
-    pipeline_options.ocr_options = TesseractCliOcrOptions(lang=packs)
+    # `path` MUST be set explicitly — this image's baked-in TESSDATA_PREFIX
+    # env var targets Tesseract 4.x's path, but the image actually ships
+    # Tesseract 5.x (tessdata moved to .../5/tessdata; same quirk chatbot.py
+    # already works around with `os.environ["TESSDATA_PREFIX"] = ...` for
+    # its own OCR fallback). Without this, TesseractCliOcrOptions falls
+    # back to the wrong env var, `tesseract` can't find kor.traineddata,
+    # and its stdout isn't the TSV output docling expects — surfaces as a
+    # confusing "'utf-8' codec can't decode byte ..." from docling blindly
+    # decoding that stdout, not as a clear "language pack not found" error.
+    pipeline_options.ocr_options = TesseractCliOcrOptions(lang=packs, path="/usr/share/tesseract-ocr/5/tessdata")
     return DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)})
 
 
