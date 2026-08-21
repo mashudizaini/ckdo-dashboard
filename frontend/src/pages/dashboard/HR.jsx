@@ -4461,8 +4461,15 @@ function TargetAchievementPanel({ apiBase, headers, department, year }) {
     ? `${withData[0].month_label.slice(0, 3).toUpperCase()}-${withData[withData.length - 1].month_label.slice(0, 3).toUpperCase()}`
     : "";
 
-  const th = (extra) => ({ padding: "8px 10px", textAlign: "center", fontSize: 10, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.04em", ...extra });
-  const td = { padding: "7px 10px", textAlign: "center", color: "#475569" };
+  // table-layout: fixed + an explicit colgroup, not "auto" — with "auto"
+  // the browser stretches every column to fit its header text on one
+  // line ("EXPECTED MAN-DAYS", "ATTENDANCE RATIO", ...), which is what
+  // made every column far wider than the actual numeric values need.
+  // Fixed layout instead honors these widths and wraps a long header
+  // onto a second line within its own narrow column.
+  const COL_WIDTHS = ["13%", "9%", "8%", "9%", "9%", "6%", "6%", "7%", "6%", "9%", "9%"];
+  const th = (extra) => ({ padding: "8px 6px", textAlign: "center", fontSize: 9.5, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.03em", lineHeight: 1.25, wordBreak: "break-word", ...extra });
+  const td = { padding: "7px 6px", textAlign: "center", color: "#475569" };
 
   return (
     <div style={NEU_CARD}>
@@ -4481,7 +4488,10 @@ function TargetAchievementPanel({ apiBase, headers, department, year }) {
         <p style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No data available for this year yet.</p>
       ) : (
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, tableLayout: "fixed" }}>
+            <colgroup>
+              {COL_WIDTHS.map((w, i) => <col key={i} style={{ width: w }} />)}
+            </colgroup>
             <thead>
               <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
                 <th rowSpan={2} style={th({ textAlign: "left" })}>Month</th>
@@ -4503,7 +4513,7 @@ function TargetAchievementPanel({ apiBase, headers, department, year }) {
             <tbody>
               {rows.map((m, i) => (
                 <tr key={m.month} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
-                  <td style={{ padding: "7px 10px", fontWeight: 700, color: "#1e293b" }}>{m.month_label}</td>
+                  <td style={{ padding: "7px 6px", fontWeight: 700, color: "#1e293b" }}>{m.month_label}</td>
                   <td style={td}>{m.total_employees || "—"}</td>
                   <td style={td}>{m.working_days || "—"}</td>
                   <td style={td}>{m.expected_man_days || "—"}</td>
@@ -4512,7 +4522,7 @@ function TargetAchievementPanel({ apiBase, headers, department, year }) {
                   <td style={{ ...td, color: "#dc2626", fontWeight: 700 }}>{m.sick || "-"}</td>
                   <td style={{ ...td, color: "#7c3aed", fontWeight: 700 }}>{m.unpaid || "-"}</td>
                   <td style={{ ...td, color: "#1e293b", fontWeight: 800 }}>{m.total || "-"}</td>
-                  <td style={{ padding: "7px 10px", textAlign: "center" }}>
+                  <td style={{ padding: "7px 6px", textAlign: "center" }}>
                     {m.attendance_ratio == null ? <span style={{ color: "#94a3b8" }}>—</span> : (
                       <span style={{
                         padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800,
@@ -4530,7 +4540,7 @@ function TargetAchievementPanel({ apiBase, headers, department, year }) {
             {data?.annual && (
               <tfoot>
                 <tr style={{ background: "#dfe5ed", fontWeight: 800 }}>
-                  <td style={{ padding: "7px 10px", color: "#1e293b" }}>TOTAL (ANNUAL)</td>
+                  <td style={{ padding: "7px 6px", color: "#1e293b" }}>TOTAL (ANNUAL)</td>
                   <td style={td}>{data.annual.total_employees}</td>
                   <td style={td}>{data.annual.working_days}</td>
                   <td style={td}>{data.annual.expected_man_days}</td>
@@ -4682,19 +4692,23 @@ function AttendanceRateSection() {
   // values into that dropdown.
   const [departments, setDepartments] = useState([]);
   const [fDept,  setFDept]  = useState("");
-  const [fMonth, setFMonth] = useState("");
   const [fYear,  setFYear]  = useState(curYear);
 
   useEffect(() => {
     fetch(`${ATT_API}/departments`, { headers }).then(r => r.ok ? r.json() : []).then(setDepartments).catch(() => {});
   }, []); // eslint-disable-line
 
+  // No Month filter here — every widget on this tab (Summary Report table,
+  // dept chart, Monthly Overall Rate) always shows a full year (Jan-Dec),
+  // never one isolated month, so a Month param would silently do nothing
+  // useful for 2 of the 3 and be actively misleading for dept-summary
+  // (which used to narrow to one month while the other two ignored it —
+  // exactly the kind of drift this tab is supposed to not have).
   const loadSummary = useCallback(async () => {
     setLoading(true);
     try {
       const p = new URLSearchParams();
       if (fDept)  p.set("department", fDept);
-      if (fMonth) p.set("month", fMonth);
       if (fYear)  p.set("year", fYear);
       const qs = p.toString() ? `?${p}` : "";
 
@@ -4706,7 +4720,7 @@ function AttendanceRateSection() {
       setDeptData(d); setWhosOff(w); setMonthly(m);
     } catch (_) {}
     finally { setLoading(false); }
-  }, [fDept, fMonth, fYear]); // eslint-disable-line
+  }, [fDept, fYear]); // eslint-disable-line
 
   useEffect(() => { loadSummary(); }, [loadSummary]);
 
@@ -4766,22 +4780,14 @@ function AttendanceRateSection() {
             </select>
           </div>
           <div>
-            <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Month</label>
-            <select value={fMonth} onChange={e => setFMonth(e.target.value)}
-              style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#1e293b", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)", cursor: "pointer", outline: "none" }}>
-              <option value="">All Months</option>
-              {MONTHS_ID.map((m, i) => <option key={i+1} value={i+1}>{m}</option>)}
-            </select>
-          </div>
-          <div>
             <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Year</label>
             <select value={fYear} onChange={e => setFYear(e.target.value)}
               style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#1e293b", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)", cursor: "pointer", outline: "none" }}>
               {[curYear, curYear - 1, curYear - 2].map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
-          {(fDept || fMonth) && (
-            <button onClick={() => { setFDept(""); setFMonth(""); setFYear(curYear); }}
+          {fDept && (
+            <button onClick={() => { setFDept(""); setFYear(curYear); }}
               style={{ fontSize: 11, fontWeight: 700, padding: "6px 14px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#dc2626", cursor: "pointer", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>
               Reset
             </button>
