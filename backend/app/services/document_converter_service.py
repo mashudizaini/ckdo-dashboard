@@ -49,23 +49,41 @@ OCR_LANGUAGE_PACKS = {
 }
 
 
+_TESSDATA_DIR = "/usr/share/tesseract-ocr/5/tessdata"
+
+
 def build_converter(language: str = "auto") -> DocumentConverter:
     packs = OCR_LANGUAGE_PACKS.get(language)
     if not packs:
         return DocumentConverter()
 
+    # Root-caused by reading docling's actual installed source
+    # (TesseractOcrCliModel, docling/models/stages/ocr/tesseract_ocr_cli_
+    # model.py): before every OCR call it unconditionally runs an
+    # orientation/script-detection pre-check (`tesseract --psm 0 -l osd
+    # ... stdout`) that needs osd.traineddata — a SEPARATE Debian/Ubuntu
+    # package (`tesseract-ocr-osd`), not bundled with `tesseract-ocr` or
+    # any language pack, and missing from the Dockerfile until now. That
+    # pre-check call also never receives docling's `path=`/`--tessdata-dir`
+    # option at all (a docling quirk, not something we control) — it
+    # relies purely on the TESSDATA_PREFIX env var — and this image's
+    # baked-in TESSDATA_PREFIX targets Tesseract 4.x's path while the
+    # image actually ships 5.x (tessdata moved to .../5/tessdata; chatbot.
+    # py already works around the same quirk for its own OCR fallback).
+    # Together this made both tesseract calls unable to find their
+    # language data, and docling's blind `.decode("utf-8")` on
+    # tesseract's resulting stdout is what actually surfaced as a
+    # confusing "'utf-8' codec can't decode byte ..." instead of a clear
+    # "language pack not found" error. Two fixes, both required: (1) the
+    # env var here, so the OSD pre-check finds osd.traineddata; (2)
+    # `path=` below, so the real OCR call finds kor/eng.traineddata; and
+    # (3) `tesseract-ocr-osd` added to the Dockerfile's apt-get install.
+    import os
+    os.environ["TESSDATA_PREFIX"] = _TESSDATA_DIR
+
     pipeline_options = PdfPipelineOptions()
     pipeline_options.do_ocr = True
-    # `path` MUST be set explicitly — this image's baked-in TESSDATA_PREFIX
-    # env var targets Tesseract 4.x's path, but the image actually ships
-    # Tesseract 5.x (tessdata moved to .../5/tessdata; same quirk chatbot.py
-    # already works around with `os.environ["TESSDATA_PREFIX"] = ...` for
-    # its own OCR fallback). Without this, TesseractCliOcrOptions falls
-    # back to the wrong env var, `tesseract` can't find kor.traineddata,
-    # and its stdout isn't the TSV output docling expects — surfaces as a
-    # confusing "'utf-8' codec can't decode byte ..." from docling blindly
-    # decoding that stdout, not as a clear "language pack not found" error.
-    pipeline_options.ocr_options = TesseractCliOcrOptions(lang=packs, path="/usr/share/tesseract-ocr/5/tessdata")
+    pipeline_options.ocr_options = TesseractCliOcrOptions(lang=packs, path=_TESSDATA_DIR)
     return DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)})
 
 
