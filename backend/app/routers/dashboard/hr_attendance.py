@@ -1345,21 +1345,26 @@ async def get_today_attendance_issues(
     db:          AsyncSession  = Depends(get_db),
     user:        CurrentUser   = Depends(require_role(Roles.HR)),
 ):
-    """Per-employee Late / Sick Leave / Unpaid Leave breakdown for a single
-    date (replaces the old per-department Total/Present/Absent/Rate table
-    below Attendance Today, per user request 2026-08-19 — that table only
-    ever showed Administration and Plant since those are the only
-    departments with attendance data most days).
+    """Per-employee attendance detail for a single date — EVERY employee
+    with a record that day, not just those with an issue (per user
+    request: the table below Attendance Today only ever showed Late/Sick/
+    Unpaid rows, so a normal on-time present employee never appeared
+    anywhere in the default view — this now covers everyone in one list).
 
-    Late/Sick Leave/Unpaid Leave are usually mutually exclusive per
-    employee per day (Late requires a check-in; Sick/Unpaid Leave are
-    leave_code-based, meaning no check-in) so Total is usually 1, but real
-    data has rows with both a late check-in AND a same-day leave_code set
-    (verified live, e.g. a half-day sick leave with a late morning
-    check-in) — Total can be 2 or 3. rate = Total / 3 categories, an
-    accepted simplification confirmed with the user rather than modeling
-    a richer multi-day rate. Employees with no issue that day (Total=0)
-    are omitted — same "only show exceptions" convention as Who's Off.
+    status, in priority order (an employee only gets one label even
+    though late/sick/unpaid can technically all be set the same day —
+    see the real-data note below):
+      1. leave_code set  -> its label via LEAVE_LABELS (Sick Leave,
+         Unpaid Leave, Annual Leave, Business Trip, ...)
+      2. late             -> "Late" (still counted present elsewhere in
+         this file, e.g. _actual_expr — a late arrival, not an absence)
+      3. present via Intercom -> "Present"
+      4. else             -> "Absent"
+    late/sick/unpaid are also kept as their own int columns (usually one
+    is 1, mutually exclusive — but real data has rows with both a late
+    check-in AND a same-day leave_code set, e.g. a half-day sick leave
+    with a late morning check-in) so the totals footer still reconciles
+    exactly like before.
     """
     today = date.today()
     q_date = today
@@ -1384,9 +1389,13 @@ async def get_today_attendance_issues(
             AttendanceRecord.employee_id,
             AttendanceRecord.employee_name,
             AttendanceRecord.department,
+            AttendanceRecord.leave_code,
+            AttendanceRecord.actual_checkin,
+            AttendanceRecord.actual_checkout,
             _late_expr().label("late"),
             _sick_expr().label("sick"),
             _unpaid_leave_expr().label("unpaid"),
+            case((_is_present_intercom(), 1), else_=0).label("is_present"),
         )
         .where(AttendanceRecord.attendance_date == q_date)
         .where(IS_WEEKDAY)
@@ -1396,27 +1405,38 @@ async def get_today_attendance_issues(
     data = []
     for r in rows:
         late, sick, unpaid = int(r.late), int(r.sick), int(r.unpaid)
-        total = late + sick + unpaid
-        if total == 0:
-            continue
+        if r.leave_code:
+            status = LEAVE_LABELS.get(r.leave_code, r.leave_code)
+        elif late:
+            status = "Late"
+        elif r.is_present:
+            status = "Present"
+        else:
+            status = "Absent"
         data.append({
             "id": r.employee_id, "name": r.employee_name or "—", "department": r.department or "—",
-            "late": late, "sick": sick, "unpaid": unpaid, "total": total,
-            "rate": round(total / 3 * 100, 1),
+            "status": status, "checkin": r.actual_checkin, "checkout": r.actual_checkout,
+            "late": late, "sick": sick, "unpaid": unpaid, "total": late + sick + unpaid,
         })
-    data.sort(key=lambda d: (-d["total"], d["name"]))
 
-    tot_late   = sum(d["late"]   for d in data)
-    tot_sick   = sum(d["sick"]   for d in data)
-    tot_unpaid = sum(d["unpaid"] for d in data)
-    tot_total  = tot_late + tot_sick + tot_unpaid
+    # Scan order: whoever needs attention first (Absent, then Late, then
+    # on leave), Present last since it's the expected/uninteresting case —
+    # alphabetical by name within each group.
+    _PRIORITY = {"Absent": 0, "Late": 1}
+    data.sort(key=lambda d: (_PRIORITY.get(d["status"], 2 if d["status"] != "Present" else 3), d["name"]))
+
+    tot_late    = sum(d["late"]   for d in data)
+    tot_sick    = sum(d["sick"]   for d in data)
+    tot_unpaid  = sum(d["unpaid"] for d in data)
+    tot_present = sum(1 for d in data if d["status"] in ("Present", "Late"))
+    tot_absent  = sum(1 for d in data if d["status"] == "Absent")
 
     return {
         "date": str(q_date),
         "data": data,
         "totals": {
-            "late": tot_late, "sick": tot_sick, "unpaid": tot_unpaid, "total": tot_total,
-            "rate": round(tot_total / (len(data) * 3) * 100, 1) if data else 0,
+            "late": tot_late, "sick": tot_sick, "unpaid": tot_unpaid, "total": tot_late + tot_sick + tot_unpaid,
+            "present": tot_present, "absent": tot_absent, "count": len(data),
         },
     }
 

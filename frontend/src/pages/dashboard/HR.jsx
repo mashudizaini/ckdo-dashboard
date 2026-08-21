@@ -29,6 +29,24 @@ const MONTHS_ID = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","
 // cleanup. A fixed list can't go stale from dirty data the same way.
 const HR_DEPARTMENTS = ["Administration", "Sales & Marketing", "Strategy & Development", "Plant"];
 
+// Status badge colors for Attendance Today's per-employee detail table —
+// keys match the `status` labels hr_attendance.py's /today/attendance-
+// issues computes (LEAVE_LABELS values, plus "Late"/"Present"/"Absent").
+const ATT_STATUS_BADGE = {
+  "Present":            "bg-green-500/15 text-green-400",
+  "Late":               "bg-amber-500/15 text-amber-400",
+  "Absent":             "bg-red-600/20 text-red-400",
+  "Sick Leave":         "bg-rose-500/15 text-rose-400",
+  "Unpaid Leave":       "bg-purple-500/15 text-purple-400",
+  "Annual Leave":       "bg-blue-500/15 text-blue-400",
+  "Maternity Leave":    "bg-pink-500/15 text-pink-400",
+  "Employee Marriage":  "bg-pink-500/15 text-pink-400",
+  "Business Trip":      "bg-cyan-500/15 text-cyan-400",
+  "Holiday":            "bg-gray-500/15 text-gray-400",
+  "Event Leave":        "bg-indigo-500/15 text-indigo-400",
+  "Half Day Leave":     "bg-indigo-500/15 text-indigo-400",
+};
+
 const STATUS_BADGE = {
   "Permanent": "bg-green-500/15 text-green-400 border-green-500/30",
   "Contract":  "bg-amber-500/15 text-amber-400 border-amber-500/30",
@@ -3126,7 +3144,7 @@ function AttendanceTodaySection() {
   const curYear = new Date().getFullYear();
   const [data,        setData]        = useState(null);
   const [loading,     setLoading]     = useState(false);
-  const [issuesData,  setIssuesData]  = useState(null);
+  const [detailData,  setDetailData]  = useState(null);
   const [innerTab,    setInnerTab]    = useState("today");
   const [teamData,    setTeamData]    = useState(null);
   const [teamYear,    setTeamYear]    = useState(curYear);
@@ -3167,24 +3185,6 @@ function AttendanceTodaySection() {
     finally { setLoadingMonthly(false); }
   };
 
-  // Yearly Summary — month-by-month (Jan-Dec) company-wide attendance
-  // report, the annual companion to Monthly Summary's per-employee view.
-  const [yearlyData,    setYearlyData]    = useState(null);
-  const [loadingYearly, setLoadingYearly] = useState(false);
-  const [yearlyYear,    setYearlyYear]    = useState(curYear);
-  const [yearlyDept,    setYearlyDept]    = useState("");
-
-  const fetchYearlyData = async (year = yearlyYear, dept = yearlyDept) => {
-    setLoadingYearly(true);
-    try {
-      const params = new URLSearchParams({ year });
-      if (dept) params.set("department", dept);
-      const res = await fetch(`${ATT_API}/yearly-summary?${params}`, { headers });
-      if (res.ok) setYearlyData(await res.json());
-    } catch (_) {}
-    finally { setLoadingYearly(false); }
-  };
-
   // Employee lookup — search for one person and see just their status for
   // the selected date, independent of the Total/Present/Absent card drill-down.
   const [empQuery,        setEmpQuery]        = useState("");
@@ -3201,7 +3201,7 @@ function AttendanceTodaySection() {
         fetch(`${ATT_API}/today/attendance-issues${params}`, { headers }),
       ]);
       if (res.ok) setData(await res.json());
-      setIssuesData(issuesRes.ok ? await issuesRes.json() : null);
+      setDetailData(issuesRes.ok ? await issuesRes.json() : null);
     } catch (_) {}
     finally { setLoading(false); }
   };
@@ -3257,7 +3257,6 @@ function AttendanceTodaySection() {
     setInnerTab(tab);
     if (tab === "team" && !teamData) fetchTeamData();
     if (tab === "monthly" && !monthlyData) fetchMonthlyData();
-    if (tab === "yearly" && !yearlyData) fetchYearlyData();
   };
 
   const fetchEmployees = async (filter, targetDate) => {
@@ -3291,7 +3290,7 @@ function AttendanceTodaySection() {
     <div className="space-y-4">
       {/* Inner tabs */}
       <div className="flex gap-0 border-b border-gray-800">
-        {[["today", "Attendance Today"], ["team", "Team Summary"], ["monthly", "Monthly Summary"], ["yearly", "Yearly Summary"]].map(([id, label]) => (
+        {[["today", "Attendance Today"], ["monthly", "Attendance Monthly"], ["team", "Team Summary"]].map(([id, label]) => (
           <button key={id} onClick={() => switchTab(id)}
             className={`px-4 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors ${
               innerTab === id ? "border-green-500 text-green-400" : "border-transparent text-gray-500 hover:text-gray-300"
@@ -3483,52 +3482,50 @@ function AttendanceTodaySection() {
                   </div>
                 )}
 
-                {/* Table per employee — Late / Sick Leave / Unpaid Leave for
-                    the selected date (replaces the old per-department
-                    Total/Present/Absent/Rate table, which only ever showed
-                    Administration and Plant). Only employees with at least
-                    one issue that day are listed, same convention as
-                    Who's Off. */}
+                {/* Table per employee — everyone with a record that date
+                    (Present included, not just Late/Sick/Unpaid/Absent —
+                    previously this table only ever listed people with an
+                    issue, so a normal on-time employee never showed up
+                    anywhere in the default view). Absent/Late/on-leave
+                    sort first (who needs attention), Present last. */}
                 <div className="overflow-x-auto rounded-lg border border-gray-800">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-gray-800/60">
-                        <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-left align-bottom whitespace-nowrap">Name</th>
-                        <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-left align-bottom whitespace-nowrap">Department</th>
-                        <th colSpan={4} className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider text-center border-b border-gray-700">Attendance</th>
-                        <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">%</th>
-                      </tr>
-                      <tr className="bg-gray-800/60">
-                        <SortableTH label="Late"          field="late"   sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} align="center" />
-                        <SortableTH label="Sick Leave"    field="sick"   sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} align="center" />
-                        <SortableTH label="Unpaid Leave"  field="unpaid" sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} align="center" />
-                        <SortableTH label="Total"         field="total"  sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} align="center" />
+                        <SortableTH label="Name"       field="name"       sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} />
+                        <SortableTH label="Department" field="department" sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} />
+                        <SortableTH label="Status"     field="status"     sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} align="center" />
+                        <SortableTH label="Check-In"   field="checkin"    sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} align="center" />
+                        <SortableTH label="Check-Out"  field="checkout"   sortBy={deptSortBy} sortDir={deptSortDir} onSort={handleDeptSort} align="center" />
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800">
-                      {!issuesData?.data?.length ? (
-                        <tr><td colSpan={7} className="py-10 text-center text-xs text-gray-600">No Late / Sick Leave / Unpaid Leave records for this date</td></tr>
-                      ) : sortRows(issuesData.data, deptSortBy, deptSortDir, ["late", "sick", "unpaid", "total", "rate"]).map((row) => (
+                      {!detailData?.data?.length ? (
+                        <tr><td colSpan={5} className="py-10 text-center text-xs text-gray-600">No attendance records for this date</td></tr>
+                      ) : sortRows(detailData.data, deptSortBy, deptSortDir, []).map((row) => (
                         <tr key={row.id} className="hover:bg-gray-800/40 transition-colors">
                           <td className="px-3 py-2.5 font-medium text-gray-200 whitespace-nowrap">{row.name}</td>
                           <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap">{row.department}</td>
-                          <td className="px-3 py-2.5 text-center text-amber-400 font-semibold">{row.late || "-"}</td>
-                          <td className="px-3 py-2.5 text-center text-red-400 font-semibold">{row.sick || "-"}</td>
-                          <td className="px-3 py-2.5 text-center text-purple-400 font-semibold">{row.unpaid || "-"}</td>
-                          <td className="px-3 py-2.5 text-center text-gray-200 font-bold">{row.total}</td>
-                          <td className="px-3 py-2.5 text-center text-gray-400">{row.rate}%</td>
+                          <td className="px-3 py-2.5 text-center">
+                            <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap ${ATT_STATUS_BADGE[row.status] || "bg-gray-500/15 text-gray-400"}`}>
+                              {row.status}
+                            </span>
+                          </td>
+                          <td className={`px-3 py-2.5 text-center font-mono ${row.checkin ? "text-green-400" : "text-gray-600"}`}>{row.checkin || "—"}</td>
+                          <td className="px-3 py-2.5 text-center font-mono text-gray-500">{row.checkout || "—"}</td>
                         </tr>
                       ))}
                     </tbody>
-                    {issuesData?.data?.length > 0 && (
+                    {detailData?.data?.length > 0 && (
                       <tfoot>
                         <tr className="bg-gray-800/80 font-bold">
-                          <td className="px-3 py-2.5 text-gray-300" colSpan={2}>TOTAL</td>
-                          <td className="px-3 py-2.5 text-center text-amber-400">{issuesData.totals.late}</td>
-                          <td className="px-3 py-2.5 text-center text-red-400">{issuesData.totals.sick}</td>
-                          <td className="px-3 py-2.5 text-center text-purple-400">{issuesData.totals.unpaid}</td>
-                          <td className="px-3 py-2.5 text-center text-gray-200">{issuesData.totals.total}</td>
-                          <td className="px-3 py-2.5 text-center text-gray-300">{issuesData.totals.rate}%</td>
+                          <td className="px-3 py-2.5 text-gray-300" colSpan={2}>TOTAL ({detailData.totals.count})</td>
+                          <td className="px-3 py-2.5 text-center text-xs">
+                            <span className="text-green-400">{detailData.totals.present} present</span>
+                            <span className="text-gray-600"> · </span>
+                            <span className="text-red-400">{detailData.totals.absent} absent</span>
+                          </td>
+                          <td className="px-3 py-2.5 text-center text-amber-400 text-xs" colSpan={2}>{detailData.totals.late} late</td>
                         </tr>
                       </tfoot>
                     )}
@@ -3670,109 +3667,6 @@ function AttendanceTodaySection() {
         </div>
       )}
 
-      {/* ── Tab: Yearly Summary — month-by-month (Jan-Dec), company-wide
-          report. Reverse-engineered/verified against the user's reference
-          screenshot: Expected Man-Days = Total Employees x Working Days,
-          Present Man-Days = Expected - (Late+Sick+Unpaid). ── */}
-      {innerTab === "yearly" && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <p className="text-xs text-gray-500">
-              {(() => {
-                const withData = (yearlyData?.months || []).filter(m => m.total_employees > 0);
-                const range = withData.length
-                  ? `${withData[0].month_label.slice(0, 3).toUpperCase()}-${withData[withData.length - 1].month_label.slice(0, 3).toUpperCase()}`
-                  : "";
-                return `SUMMARY REPORT ATTENDANCE ${range ? range + " " : ""}${yearlyYear}`;
-              })()}
-            </p>
-            <div className="flex items-center gap-2">
-              <select value={yearlyDept} onChange={(e) => { setYearlyDept(e.target.value); fetchYearlyData(yearlyYear, e.target.value); }}
-                className="rounded-lg border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-xs text-gray-300 outline-none focus:border-green-500 cursor-pointer">
-                <option value="">All Departments</option>
-                {monthlyDepts.map((d) => <option key={d} value={d}>{d}</option>)}
-              </select>
-              <select value={yearlyYear} onChange={(e) => { const y = Number(e.target.value); setYearlyYear(y); fetchYearlyData(y, yearlyDept); }}
-                className="rounded-lg border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-xs text-gray-300 outline-none focus:border-green-500 cursor-pointer">
-                {[curYear, curYear - 1, curYear - 2].map((y) => <option key={y} value={y}>{y}</option>)}
-              </select>
-              <button onClick={() => fetchYearlyData()}
-                className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
-                <RefreshCw size={11} className={loadingYearly ? "animate-spin" : ""} /> Refresh
-              </button>
-            </div>
-          </div>
-
-          {loadingYearly ? (
-            <div className="flex justify-center py-16"><Loader2 size={20} className="animate-spin text-gray-600" /></div>
-          ) : !yearlyData ? (
-            <p className="py-10 text-center text-xs text-gray-600">No data yet.</p>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-gray-800">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-800/60">
-                    <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-left align-bottom whitespace-nowrap">Month</th>
-                    <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">Total Employees</th>
-                    <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">Working Days</th>
-                    <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">Expected Man-Days</th>
-                    <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">Present Man-Days</th>
-                    <th colSpan={4} className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider text-center border-b border-gray-700">Attendance</th>
-                    <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">Attendance Ratio</th>
-                    <th rowSpan={2} className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center align-bottom whitespace-nowrap">Absence Ratio</th>
-                  </tr>
-                  <tr className="bg-gray-800/60">
-                    <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center whitespace-nowrap">Late</th>
-                    <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center whitespace-nowrap">Sick</th>
-                    <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center whitespace-nowrap">Unpaid</th>
-                    <th className="px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wider text-center whitespace-nowrap">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-800">
-                  {yearlyData.months.map((m) => (
-                    <tr key={m.month} className="hover:bg-gray-800/40 transition-colors">
-                      <td className="px-3 py-2.5 font-medium text-gray-200 whitespace-nowrap">{m.month_label}</td>
-                      <td className="px-3 py-2.5 text-center text-gray-400">{m.total_employees || "—"}</td>
-                      <td className="px-3 py-2.5 text-center text-gray-400">{m.working_days || "—"}</td>
-                      <td className="px-3 py-2.5 text-center text-gray-400">{m.expected_man_days || "—"}</td>
-                      <td className="px-3 py-2.5 text-center text-gray-400">{m.present_man_days || "—"}</td>
-                      <td className="px-3 py-2.5 text-center text-amber-400 font-semibold">{m.late || "-"}</td>
-                      <td className="px-3 py-2.5 text-center text-red-400 font-semibold">{m.sick || "-"}</td>
-                      <td className="px-3 py-2.5 text-center text-purple-400 font-semibold">{m.unpaid || "-"}</td>
-                      <td className="px-3 py-2.5 text-center text-gray-200 font-bold">{m.total || "-"}</td>
-                      <td className={`px-3 py-2.5 text-center font-semibold ${m.attendance_ratio == null ? "text-gray-600" : m.attendance_ratio >= 95 ? "text-green-400" : "text-amber-400"}`}>
-                        {m.attendance_ratio == null ? "—" : `${m.attendance_ratio}%`}
-                      </td>
-                      <td className="px-3 py-2.5 text-center text-gray-400">
-                        {m.absence_ratio == null ? "—" : `${m.absence_ratio}%`}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="bg-gray-800/80 font-bold">
-                    <td className="px-3 py-2.5 text-gray-300">TOTAL (ANNUAL)</td>
-                    <td className="px-3 py-2.5 text-center text-gray-300">{yearlyData.annual.total_employees}</td>
-                    <td className="px-3 py-2.5 text-center text-gray-300">{yearlyData.annual.working_days}</td>
-                    <td className="px-3 py-2.5 text-center text-gray-300">{yearlyData.annual.expected_man_days}</td>
-                    <td className="px-3 py-2.5 text-center text-gray-300">{yearlyData.annual.present_man_days}</td>
-                    <td className="px-3 py-2.5 text-center text-amber-400">{yearlyData.annual.late}</td>
-                    <td className="px-3 py-2.5 text-center text-red-400">{yearlyData.annual.sick}</td>
-                    <td className="px-3 py-2.5 text-center text-purple-400">{yearlyData.annual.unpaid}</td>
-                    <td className="px-3 py-2.5 text-center text-gray-200">{yearlyData.annual.total}</td>
-                    <td className="px-3 py-2.5 text-center text-green-400">
-                      {yearlyData.annual.attendance_ratio == null ? "—" : `${yearlyData.annual.attendance_ratio}%`}
-                    </td>
-                    <td className="px-3 py-2.5 text-center text-gray-300">
-                      {yearlyData.annual.absence_ratio == null ? "—" : `${yearlyData.annual.absence_ratio}%`}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -4466,10 +4360,14 @@ function TargetAchievementPanel({ apiBase, headers, department, year }) {
   // line ("EXPECTED MAN-DAYS", "ATTENDANCE RATIO", ...), which is what
   // made every column far wider than the actual numeric values need.
   // Fixed layout instead honors these widths and wraps a long header
-  // onto a second line within its own narrow column.
-  const COL_WIDTHS = ["13%", "9%", "8%", "9%", "9%", "6%", "6%", "7%", "6%", "9%", "9%"];
-  const th = (extra) => ({ padding: "8px 6px", textAlign: "center", fontSize: 9.5, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.03em", lineHeight: 1.25, wordBreak: "break-word", ...extra });
-  const td = { padding: "7px 6px", textAlign: "center", color: "#475569" };
+  // onto a second line within its own narrow column. Actual padding/
+  // font-size/wrapping is done in index.css's .attendance-summary-table
+  // rules, not inline — this app's bare `thead th`/`tbody td` CSS forces
+  // its own values via !important on every table, which silently beats
+  // any inline style attempting to shrink or wrap these cells.
+  const COL_WIDTHS = ["9%", "9%", "8%", "9%", "9%", "6%", "6%", "7%", "6%", "9%", "9%"];
+  const th = (extra) => ({ textAlign: "center", ...extra });
+  const td = { textAlign: "center" };
 
   return (
     <div style={NEU_CARD}>
@@ -4488,7 +4386,7 @@ function TargetAchievementPanel({ apiBase, headers, department, year }) {
         <p style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No data available for this year yet.</p>
       ) : (
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, tableLayout: "fixed" }}>
+          <table className="attendance-summary-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, tableLayout: "fixed" }}>
             <colgroup>
               {COL_WIDTHS.map((w, i) => <col key={i} style={{ width: w }} />)}
             </colgroup>
@@ -4513,19 +4411,19 @@ function TargetAchievementPanel({ apiBase, headers, department, year }) {
             <tbody>
               {rows.map((m, i) => (
                 <tr key={m.month} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
-                  <td style={{ padding: "7px 6px", fontWeight: 700, color: "#1e293b" }}>{m.month_label}</td>
+                  <td data-c="month">{m.month_label}</td>
                   <td style={td}>{m.total_employees || "—"}</td>
                   <td style={td}>{m.working_days || "—"}</td>
                   <td style={td}>{m.expected_man_days || "—"}</td>
                   <td style={td}>{m.present_man_days || "—"}</td>
-                  <td style={{ ...td, color: "#d97706", fontWeight: 700 }}>{m.late || "-"}</td>
-                  <td style={{ ...td, color: "#dc2626", fontWeight: 700 }}>{m.sick || "-"}</td>
-                  <td style={{ ...td, color: "#7c3aed", fontWeight: 700 }}>{m.unpaid || "-"}</td>
-                  <td style={{ ...td, color: "#1e293b", fontWeight: 800 }}>{m.total || "-"}</td>
-                  <td style={{ padding: "7px 6px", textAlign: "center" }}>
+                  <td style={td} data-c="late">{m.late || "-"}</td>
+                  <td style={td} data-c="sick">{m.sick || "-"}</td>
+                  <td style={td} data-c="unpaid">{m.unpaid || "-"}</td>
+                  <td style={td} data-c="total">{m.total || "-"}</td>
+                  <td style={td}>
                     {m.attendance_ratio == null ? <span style={{ color: "#94a3b8" }}>—</span> : (
                       <span style={{
-                        padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800,
+                        padding: "2px 8px", borderRadius: 20, fontSize: 10, fontWeight: 800,
                         background: m.attendance_ratio >= 95 ? "#dcfce7" : m.attendance_ratio >= 80 ? "#fef3c7" : "#fee2e2",
                         color:      m.attendance_ratio >= 95 ? "#16a34a" : m.attendance_ratio >= 80 ? "#d97706" : "#dc2626",
                       }}>
@@ -4540,16 +4438,16 @@ function TargetAchievementPanel({ apiBase, headers, department, year }) {
             {data?.annual && (
               <tfoot>
                 <tr style={{ background: "#dfe5ed", fontWeight: 800 }}>
-                  <td style={{ padding: "7px 6px", color: "#1e293b" }}>TOTAL (ANNUAL)</td>
+                  <td data-c="month">TOTAL (ANNUAL)</td>
                   <td style={td}>{data.annual.total_employees}</td>
                   <td style={td}>{data.annual.working_days}</td>
                   <td style={td}>{data.annual.expected_man_days}</td>
                   <td style={td}>{data.annual.present_man_days}</td>
-                  <td style={{ ...td, color: "#d97706" }}>{data.annual.late}</td>
-                  <td style={{ ...td, color: "#dc2626" }}>{data.annual.sick}</td>
-                  <td style={{ ...td, color: "#7c3aed" }}>{data.annual.unpaid}</td>
-                  <td style={{ ...td, color: "#1e293b" }}>{data.annual.total}</td>
-                  <td style={{ ...td, color: "#16a34a" }}>{data.annual.attendance_ratio == null ? "—" : `${data.annual.attendance_ratio}%`}</td>
+                  <td style={td} data-c="late">{data.annual.late}</td>
+                  <td style={td} data-c="sick">{data.annual.sick}</td>
+                  <td style={td} data-c="unpaid">{data.annual.unpaid}</td>
+                  <td style={td} data-c="total">{data.annual.total}</td>
+                  <td style={td} data-c="ok">{data.annual.attendance_ratio == null ? "—" : `${data.annual.attendance_ratio}%`}</td>
                   <td style={td}>{data.annual.absence_ratio == null ? "—" : `${data.annual.absence_ratio}%`}</td>
                 </tr>
               </tfoot>

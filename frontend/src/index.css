@@ -230,6 +230,36 @@ tbody td {
   border-bottom: 1px solid rgba(0,0,0,0.04) !important;
 }
 
+/* ── HRGA Attendance Rate > Summary — SUMMARY REPORT ATTENDANCE table ──
+   Same global-override problem as every other scoped table below: the
+   bare `thead th`/`tbody td` rules above force nowrap + 12px/14px padding
+   on every header (so "Total Employees" etc. couldn't wrap onto 2 lines
+   no matter how narrow the column was told to be) and force a single
+   text color on every body cell (so the inline colors on the Late/Sick/
+   Unpaid/Total cells never actually rendered). Scoped class + higher-
+   specificity !important rules, keyed off a small `data-c` "cell kind"
+   attribute for the colored cells instead of inline style — inline can
+   never win against an !important rule regardless of specificity. */
+.attendance-summary-table thead th {
+  white-space: normal !important;
+  padding: 4px 3px !important;
+  font-size: 8.5px !important;
+  line-height: 1.15 !important;
+}
+.attendance-summary-table tbody td,
+.attendance-summary-table tfoot td {
+  padding: 5px 3px !important;
+  font-size: 10.5px !important;
+  color: #475569 !important;
+  font-weight: 500 !important;
+}
+.attendance-summary-table td[data-c="month"]   { color: #1e293b !important; font-weight: 700 !important; text-align: left !important; }
+.attendance-summary-table td[data-c="late"]    { color: #d97706 !important; font-weight: 700 !important; }
+.attendance-summary-table td[data-c="sick"]    { color: #dc2626 !important; font-weight: 700 !important; }
+.attendance-summary-table td[data-c="unpaid"]  { color: #7c3aed !important; font-weight: 700 !important; }
+.attendance-summary-table td[data-c="total"]   { color: #1e293b !important; font-weight: 800 !important; }
+.attendance-summary-table td[data-c="ok"]      { color: #16a34a !important; font-weight: 700 !important; }
+
 /* ── Financial Statement (Accounting > Financial Statement) — bold no-fill
    group/section headers vs. indented line items vs. bold light-blue TOTAL
    rows. The bare tbody/thead rules above force nth-child zebra striping,
