@@ -63,3 +63,136 @@ def build_converter(language: str = "auto") -> DocumentConverter:
 def convert_one(converter: DocumentConverter, path: str) -> str:
     result = converter.convert(path)
     return result.document.export_to_markdown()
+
+
+# ── Structured extraction (blocks) ──────────────────────────────────────────
+#
+# Docling's own `result.document` is already structured (docling-core's
+# DoclingDocument: `.tables` as TableItem objects exportable to a real 2D
+# grid via `.export_to_dataframe()`, `.texts`/section headers walked via
+# `.iterate_items()`) — Markdown is only ever one *serialization* of it.
+# extract_blocks() walks that structure directly instead of exporting to
+# Markdown and re-parsing pipe tables back out of text, so a table cell
+# never gets flattened and reflowed mid-pipeline. Every render format
+# (MD/DOCX/XLSX/JSONL — document_render_service.py) and the translation
+# step (document_translation_service.py) both operate on this block list,
+# not on Markdown text.
+#
+# NOTE ON RELIABILITY: iterate_items()/export_to_dataframe()'s exact
+# signature was verified against docling's own published examples and
+# GitHub issue tracker, not against a locally installed copy — docling
+# isn't installed on the machine this was written on. If docling-core's
+# API has drifted from that in the pinned docling==2.117.0, the structured
+# walk below will raise and extract_blocks() falls back to deriving the
+# same block shape from the (already proven, unchanged) Markdown export
+# instead of breaking conversion entirely. Confirm on first real deploy
+# which path is actually being taken (blocks aren't materially different
+# either way for prose-only documents — it mainly matters for tables).
+BlockList = list  # list[dict] — {"type": "heading", "level": int, "text": str}
+                   #            | {"type": "paragraph", "text": str}
+                   #            | {"type": "table", "rows": [[str, ...], ...]}
+
+
+def extract_blocks(converter: DocumentConverter, path: str) -> "BlockList":
+    result = converter.convert(path)
+    document = result.document
+    try:
+        blocks = _blocks_from_structured_document(document)
+        if blocks:
+            return blocks
+    except Exception:
+        pass
+    return _blocks_from_markdown(document.export_to_markdown())
+
+
+def _blocks_from_structured_document(document) -> "BlockList":
+    from docling_core.types.doc import TableItem, TextItem, SectionHeaderItem
+
+    blocks: BlockList = []
+    for item, _level in document.iterate_items():
+        if isinstance(item, TableItem):
+            df = item.export_to_dataframe(doc=document)
+            rows = []
+            if df is not None and not df.empty:
+                rows.append([str(c) for c in df.columns])
+                rows.extend(row.astype(str).tolist() for _, row in df.iterrows())
+            if rows:
+                blocks.append({"type": "table", "rows": rows})
+        elif isinstance(item, SectionHeaderItem):
+            text = (getattr(item, "text", "") or "").strip()
+            if text:
+                blocks.append({"type": "heading", "level": getattr(item, "level", 1) or 1, "text": text})
+        elif isinstance(item, TextItem):
+            text = (getattr(item, "text", "") or "").strip()
+            if text:
+                blocks.append({"type": "paragraph", "text": text})
+    return blocks
+
+
+def _blocks_from_markdown(md: str) -> "BlockList":
+    """Fallback intermediate — same block shape as the structured walk
+    above, derived by parsing docling's own Markdown export instead. Also
+    what per-page OCR falls back to internally (see document_converter_
+    tasks.py), since a scanned page's structure is thinner anyway."""
+    import re
+
+    blocks: BlockList = []
+    para_buf: list[str] = []
+
+    def flush_para():
+        text = " ".join(para_buf).strip()
+        if text:
+            blocks.append({"type": "paragraph", "text": text})
+        para_buf.clear()
+
+    lines = md.split("\n")
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        heading_m = re.match(r"^(#{1,6})\s+(.*)", stripped)
+        if heading_m:
+            flush_para()
+            blocks.append({"type": "heading", "level": len(heading_m.group(1)), "text": heading_m.group(2).strip()})
+            i += 1
+            continue
+        if stripped.startswith("|") and stripped.endswith("|") and len(stripped) > 1:
+            flush_para()
+            table_lines = []
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                table_lines.append(lines[i].strip())
+                i += 1
+            rows = []
+            for tl in table_lines:
+                cells = [c.strip() for c in tl.strip("|").split("|")]
+                if cells and all(re.fullmatch(r":?-{2,}:?", c) for c in cells if c):
+                    continue  # markdown header-separator row, not real data
+                rows.append(cells)
+            if rows:
+                blocks.append({"type": "table", "rows": rows})
+            continue
+        if not stripped:
+            flush_para()
+            i += 1
+            continue
+        para_buf.append(stripped)
+        i += 1
+    flush_para()
+    return blocks
+
+
+def render_markdown_from_blocks(blocks: "BlockList") -> str:
+    parts = []
+    for b in blocks:
+        if b["type"] == "heading":
+            parts.append(f"{'#' * min(max(b.get('level', 1), 1), 6)} {b['text']}")
+        elif b["type"] == "paragraph":
+            parts.append(b["text"])
+        elif b["type"] == "table" and b.get("rows"):
+            rows = b["rows"]
+            header, *body = rows
+            parts.append("| " + " | ".join(header) + " |")
+            parts.append("|" + "|".join(["---"] * len(header)) + "|")
+            for r in body:
+                cells = list(r) + [""] * (len(header) - len(r))
+                parts.append("| " + " | ".join(cells[:len(header)]) + " |")
+    return "\n\n".join(parts)

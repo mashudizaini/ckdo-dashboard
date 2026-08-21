@@ -1,5 +1,6 @@
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Text, DateTime
+from sqlalchemy.dialects.postgresql import JSONB
 from app.database import Base
 
 
@@ -35,6 +36,25 @@ class DocumentConversionJob(Base):
     markdown         = Column(Text)
     error_message    = Column(Text)
     celery_task_id   = Column(String(100))
+
+    # Structured intermediate (see document_converter_service.extract_blocks) —
+    # every render format (MD/DOCX/XLSX/JSONL) reads from this, not from
+    # `markdown` or each other, so a table cell is never re-parsed out of
+    # flattened text. `markdown` above is itself just one render of this,
+    # kept populated for backward compatibility with the existing preview/
+    # edit/download-.md/send-to-KB flow.
+    extracted_blocks = Column(JSONB)
+
+    # Translation — populated by document_translation_tasks.translate_document.
+    # Same block shape as extracted_blocks, translated in place (table cells
+    # stay in their row/column position instead of being flattened through
+    # Markdown mid-pipeline).
+    translated_en    = Column(JSONB)
+    translated_id    = Column(JSONB)
+    translate_status = Column(String(20))   # pending -> processing -> done -> error
+    translate_provider = Column(String(20))  # onprem | gemini | anthropic | openai | kimi
+    translate_error  = Column(Text)
+    translate_qa_warnings = Column(JSONB)   # list of {block_index, text, issues: [...]}
 
     created_by       = Column(String(100))
     created_at       = Column(DateTime, default=datetime.utcnow)

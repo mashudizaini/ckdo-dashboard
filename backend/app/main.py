@@ -29,6 +29,7 @@ import app.models.meeting_recording  # noqa: F401
 import app.models.outlook_material  # noqa: F401
 import app.models.financial_statement_upload  # noqa: F401
 import app.models.document_conversion_job  # noqa: F401
+import app.models.document_glossary  # noqa: F401
 from app.models.ebs_backup import init_ebs_db
 from app.models.vpn_monitor import init_vpn_db
 from app.models.hikcentral import init_hikcentral_db

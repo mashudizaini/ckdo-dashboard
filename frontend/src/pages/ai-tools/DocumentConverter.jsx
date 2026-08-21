@@ -1,12 +1,32 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import {
   FileStack, Upload, Loader2, Download, Send, AlertTriangle, CheckCircle2, FileText,
-  FolderOpen, X, Save, Clock, Square, Trash2, History,
+  FolderOpen, X, Save, Clock, Square, Trash2, History, Languages, BookOpen, Plus,
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 
 const ACCEPTED = ".pdf,.docx,.doc,.png,.jpg,.jpeg";
 const POLL_MS = 2500;
+
+// Must match _USER_KEY_PROVIDERS / document_translation_service.py.
+const TRANSLATE_PROVIDERS = [
+  { value: "onprem",    label: "Standard (on-prem, free)" },
+  { value: "gemini",    label: "Premium — Gemini" },
+  { value: "anthropic", label: "Premium — Claude" },
+  { value: "openai",    label: "Premium — ChatGPT" },
+  { value: "kimi",      label: "Premium — Kimi" },
+];
+const TRANSLATE_TARGETS = [
+  { value: "en",   label: "English" },
+  { value: "id",   label: "Indonesian" },
+  { value: "both", label: "Both" },
+];
+const DOWNLOAD_FORMATS = [
+  { value: "md",    label: "Markdown" },
+  { value: "docx",  label: "Word (.docx)" },
+  { value: "xlsx",  label: "Excel (.xlsx)" },
+  { value: "jsonl", label: "JSONL" },
+];
 
 // Must match OCR_LANGUAGE_PACKS in document_converter_service.py — "auto"
 // uses the default RapidOCR pipeline (fine for English/Indonesian/Latin
@@ -56,8 +76,32 @@ export default function DocumentConverter() {
   const [loadingDoc, setLoadingDoc] = useState(false);
   const [editingExisting, setEditingExisting] = useState(null); // { source, title } of the doc currently loaded for editing, or null
 
+  // Translation — target/provider picker, dispatched to a background task
+  // (same job row, polled the same way as conversion progress) and a
+  // view-language tab (Original/English/Indonesian) that swaps what the
+  // preview textarea shows by re-fetching the rendered Markdown for that
+  // language, not by re-translating.
+  const [translateTarget,   setTranslateTarget]   = useState("id");
+  const [translateProvider, setTranslateProvider] = useState("onprem");
+  const [translating,       setTranslating]       = useState(false);
+  const [translateErr,      setTranslateErr]      = useState(null);
+  const [viewLang,          setViewLang]          = useState("original"); // "original" | "en" | "id"
+  const [viewLoading,       setViewLoading]       = useState(false);
+  const [downloadingFmt,    setDownloadingFmt]    = useState(null);
+
+  // Glossary — shared term dictionary injected into every translation
+  // prompt, editable here so a correction sticks for every future run.
+  const [showGlossary,   setShowGlossary]   = useState(false);
+  const [glossaryTerms,  setGlossaryTerms]  = useState([]);
+  const [glossaryLoading, setGlossaryLoading] = useState(false);
+  const [glossaryForm,   setGlossaryForm]   = useState({ id: null, source_term: "", target_en: "", target_id: "", domain: "", notes: "" });
+  const [glossarySaving, setGlossarySaving] = useState(false);
+
   const headers = { Authorization: `Bearer ${token}` };
-  const anyActive = jobs.some((j) => j.status === "pending" || j.status === "processing");
+  const anyActive = jobs.some((j) =>
+    j.status === "pending" || j.status === "processing" ||
+    j.translate_status === "pending" || j.translate_status === "processing"
+  );
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -98,7 +142,7 @@ export default function DocumentConverter() {
   // When the selected job finishes, pull its full markdown (the list
   // endpoint omits it to keep the history payload light).
   useEffect(() => {
-    if (!selectedJobId) return;
+    if (!selectedJobId || viewLang !== "original") return;
     const job = jobs.find((j) => j.id === selectedJobId);
     if (!job || job.status !== "done" || markdownDirty) return;
     (async () => {
@@ -110,7 +154,26 @@ export default function DocumentConverter() {
         }
       } catch (_) {}
     })();
-  }, [selectedJobId, jobs]); // eslint-disable-line
+  }, [selectedJobId, jobs, viewLang]); // eslint-disable-line
+
+  // Switching the view-language tab (English/Indonesian) re-fetches the
+  // rendered Markdown for that language from the server instead of
+  // re-translating — translation itself only ever runs once per job/
+  // target via handleTranslate below.
+  useEffect(() => {
+    if (!selectedJobId || viewLang === "original" || markdownDirty) return;
+    const job = jobs.find((j) => j.id === selectedJobId);
+    if (!job || job.status !== "done") return;
+    setViewLoading(true);
+    (async () => {
+      try {
+        const res = await fetch(`/api/v1/ai/document-converter/jobs/${selectedJobId}/render?format=md&lang=${viewLang}`, { headers });
+        if (res.ok) setMarkdown(await res.text());
+        else setMarkdown("");
+      } catch (_) { setMarkdown(""); }
+      finally { setViewLoading(false); }
+    })();
+  }, [selectedJobId, viewLang, jobs]); // eslint-disable-line
 
   const handleFileChange = (f) => {
     setFile(f);
@@ -138,6 +201,7 @@ export default function DocumentConverter() {
       setMarkdownDirty(false);
       setEditingExisting(null);
       setSelectedDocKey("");
+      setViewLang("original");
       setFile(null);
       if (fileRef.current) fileRef.current.value = "";
       fetchJobs();
@@ -171,6 +235,8 @@ export default function DocumentConverter() {
     setMarkdownDirty(false);
     setEditingExisting(null);
     setSelectedDocKey("");
+    setViewLang("original");
+    setTranslateErr(null);
     setForm((p) => ({ ...p, title: p.title || job.filename.replace(/\.[^.]+$/, "") }));
     if (job.status !== "done") setMarkdown("");
   };
@@ -214,6 +280,108 @@ export default function DocumentConverter() {
     a.download = `${form.title || "document"}.md`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleTranslate = async () => {
+    if (!selectedJobId || translating) return;
+    setTranslating(true);
+    setTranslateErr(null);
+    try {
+      const res = await fetch(`/api/v1/ai/document-converter/jobs/${selectedJobId}/translate`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ target: translateTarget, provider: translateProvider }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
+      fetchJobs();
+    } catch (e) {
+      setTranslateErr(e.message);
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  // DOCX/XLSX/JSONL — always rendered server-side from the job's stored
+  // extracted/translated blocks (real tables, not re-parsed Markdown), so
+  // these require a completed job and reflect whatever's saved there, not
+  // any in-progress edits in the preview textarea below. Plain Markdown
+  // keeps using handleDownload above instead (client-side, from whatever
+  // text is currently in the textarea) so it still works for a manually
+  // edited or KB-loaded document with no job behind it at all.
+  const handleRenderDownload = async (format) => {
+    if (!selectedJobId || downloadingFmt) return;
+    setDownloadingFmt(format);
+    try {
+      const params = new URLSearchParams({ format, lang: viewLang });
+      const res = await fetch(`/api/v1/ai/document-converter/jobs/${selectedJobId}/render?${params}`, { headers });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.detail || `Download failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get("Content-Disposition") || "";
+      const m = cd.match(/filename=([^;]+)/);
+      const fname = m ? m[1].trim() : `${form.title || "document"}.${format}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = fname; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setUploadError(e.message);
+    } finally {
+      setDownloadingFmt(null);
+    }
+  };
+
+  const loadGlossary = useCallback(async () => {
+    setGlossaryLoading(true);
+    try {
+      const res = await fetch("/api/v1/ai/document-converter/glossary", { headers });
+      if (res.ok) setGlossaryTerms(await res.json());
+    } catch (_) {}
+    setGlossaryLoading(false);
+  }, [token]); // eslint-disable-line
+
+  useEffect(() => { if (showGlossary) loadGlossary(); }, [showGlossary, loadGlossary]);
+
+  const resetGlossaryForm = () => setGlossaryForm({ id: null, source_term: "", target_en: "", target_id: "", domain: "", notes: "" });
+
+  const handleGlossaryEdit = (t) => setGlossaryForm({
+    id: t.id, source_term: t.source_term, target_en: t.target_en || "",
+    target_id: t.target_id || "", domain: t.domain || "", notes: t.notes || "",
+  });
+
+  const handleGlossarySave = async () => {
+    if (!glossaryForm.source_term.trim() || glossarySaving) return;
+    setGlossarySaving(true);
+    try {
+      const body = JSON.stringify({
+        source_term: glossaryForm.source_term.trim(),
+        target_en: glossaryForm.target_en || null,
+        target_id: glossaryForm.target_id || null,
+        domain: glossaryForm.domain || null,
+        notes: glossaryForm.notes || null,
+      });
+      const url = glossaryForm.id
+        ? `/api/v1/ai/document-converter/glossary/${glossaryForm.id}`
+        : "/api/v1/ai/document-converter/glossary";
+      const res = await fetch(url, {
+        method: glossaryForm.id ? "PUT" : "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body,
+      });
+      if (res.ok) { resetGlossaryForm(); loadGlossary(); }
+    } catch (_) {}
+    setGlossarySaving(false);
+  };
+
+  const handleGlossaryDelete = async (id) => {
+    if (!confirm("Delete this glossary term?")) return;
+    try {
+      await fetch(`/api/v1/ai/document-converter/glossary/${id}`, { method: "DELETE", headers });
+      loadGlossary();
+    } catch (_) {}
   };
 
   const handleSendToKB = async () => {
@@ -262,15 +430,21 @@ export default function DocumentConverter() {
 
   return (
     <div className="flex flex-col h-full p-6">
-      <div className="mb-5">
-        <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-          <FileStack className="text-teal-400" size={26} />
-          Document Converter
-        </h1>
-        <p className="text-gray-500 text-sm mt-1">
-          Konversi PDF, DOCX, atau gambar (termasuk hasil scan) ke Markdown terstruktur — tabel tetap rapi, cocok untuk Knowledge Base AI Chatbot.
-          Konversi berjalan di background — aman ditinggal atau tutup tab, progress tersimpan.
-        </p>
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+            <FileStack className="text-teal-400" size={26} />
+            Document Converter
+          </h1>
+          <p className="text-gray-500 text-sm mt-1">
+            Konversi PDF, DOCX, atau gambar (termasuk hasil scan) ke Markdown/DOCX/XLSX/JSONL terstruktur, dengan opsi terjemahan Korea/Inggris ke Inggris/Indonesia — cocok untuk Knowledge Base AI Chatbot maupun dokumen siap pakai.
+            Konversi berjalan di background — aman ditinggal atau tutup tab, progress tersimpan.
+          </p>
+        </div>
+        <button onClick={() => setShowGlossary(true)}
+          className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-medium text-gray-300 hover:border-teal-500 hover:text-teal-400 transition-colors shrink-0">
+          <BookOpen size={14} /> Glossary
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 flex-1 min-h-0">
@@ -373,6 +547,54 @@ export default function DocumentConverter() {
             )}
           </div>
 
+          {/* Translate — only meaningful once a job's extraction is done;
+              dispatched to a background task and polled the same as
+              conversion progress (see anyActive above). */}
+          {selectedJob && selectedJob.status === "done" && (
+            <div className="border-t border-gray-800 pt-4">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Languages size={12} /> Translate
+              </p>
+              <div className="flex gap-2 mb-2">
+                <select value={translateTarget} onChange={(e) => setTranslateTarget(e.target.value)}
+                  className="flex-1 rounded-md border border-gray-700 bg-gray-950 px-2.5 py-2 text-xs text-gray-200 outline-none focus:border-teal-500 cursor-pointer">
+                  {TRANSLATE_TARGETS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+                <select value={translateProvider} onChange={(e) => setTranslateProvider(e.target.value)}
+                  className="flex-1 rounded-md border border-gray-700 bg-gray-950 px-2.5 py-2 text-xs text-gray-200 outline-none focus:border-teal-500 cursor-pointer">
+                  {TRANSLATE_PROVIDERS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                </select>
+              </div>
+              <button onClick={handleTranslate}
+                disabled={translating || selectedJob.translate_status === "pending" || selectedJob.translate_status === "processing"}
+                className="w-full flex items-center justify-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 hover:border-teal-500 disabled:opacity-50 px-3 py-2 text-xs font-medium text-gray-300 transition-colors">
+                {(translating || selectedJob.translate_status === "pending" || selectedJob.translate_status === "processing")
+                  ? <><Loader2 size={13} className="animate-spin" /> Translating…</>
+                  : <><Languages size={13} /> Translate</>}
+              </button>
+              {translateErr && (
+                <div className="mt-2 rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-400 flex items-center gap-2">
+                  <AlertTriangle size={12} /> {translateErr}
+                </div>
+              )}
+              {selectedJob.translate_status === "error" && (
+                <div className="mt-2 rounded-md bg-red-500/10 border border-red-500/30 px-3 py-2 text-xs text-red-400 flex items-center gap-2">
+                  <AlertTriangle size={12} /> {selectedJob.translate_error || "Translation failed"}
+                </div>
+              )}
+              {selectedJob.translate_status === "done" && (selectedJob.has_translation_en || selectedJob.has_translation_id) && (
+                <div className="mt-2 space-y-1.5">
+                  <p className="text-[10px] text-green-400 flex items-center gap-1"><CheckCircle2 size={11} /> Translation ready — pick a tab above the preview to view it.</p>
+                  {selectedJob.translate_qa_warnings?.length > 0 && (
+                    <p className="text-[10px] text-amber-400 flex items-center gap-1">
+                      <AlertTriangle size={11} /> {selectedJob.translate_qa_warnings.length} item(s) flagged for review — check English/Indonesian text against the original.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="border-t border-gray-800 pt-4">
             {editingExisting ? (
               <div className="rounded-lg border border-amber-700/40 bg-amber-500/10 px-3 py-2.5 flex items-center justify-between gap-2 mb-3">
@@ -439,6 +661,21 @@ export default function DocumentConverter() {
                 </button>
               </div>
 
+              {/* Server-rendered formats — real DOCX tables/XLSX cells/JSONL
+                  records straight from the job's stored blocks, so these
+                  need a completed job (not available for a manually-typed
+                  or KB-loaded document with nothing behind it). */}
+              {selectedJob?.status === "done" && (
+                <div className="flex gap-1.5 flex-wrap">
+                  {DOWNLOAD_FORMATS.filter((f) => f.value !== "md").map((f) => (
+                    <button key={f.value} onClick={() => handleRenderDownload(f.value)} disabled={!!downloadingFmt}
+                      className="flex-1 flex items-center justify-center gap-1 rounded-md border border-gray-700 bg-gray-800 hover:border-teal-500 disabled:opacity-40 px-2 py-1.5 text-[11px] font-medium text-gray-300 transition-colors">
+                      {downloadingFmt === f.value ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />} {f.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {sendMsg && (
                 <div className={`rounded-md px-3 py-2 text-xs font-medium flex items-center gap-2 ${sendMsg.type === "error" ? "bg-red-500/10 border border-red-500/30 text-red-400" : "bg-green-500/10 border border-green-500/30 text-green-400"}`}>
                   {sendMsg.type === "success" && <CheckCircle2 size={12} />} {sendMsg.text}
@@ -450,10 +687,24 @@ export default function DocumentConverter() {
 
         {/* Right: markdown preview/edit */}
         <div className="flex flex-col rounded-xl border border-gray-800 bg-gray-900 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between">
+          <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between flex-wrap gap-2">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
               Result (Markdown){selectedJob && <span className="text-gray-600 normal-case font-normal"> — {selectedJob.filename}</span>}
             </p>
+            {selectedJob?.status === "done" && (selectedJob.has_translation_en || selectedJob.has_translation_id) && (
+              <div className="flex gap-1">
+                {[["original", "Original"], ["en", "English"], ["id", "Indonesian"]]
+                  .filter(([v]) => v === "original" || selectedJob[`has_translation_${v}`])
+                  .map(([v, label]) => (
+                    <button key={v} onClick={() => { setViewLang(v); setMarkdownDirty(false); }}
+                      className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
+                        viewLang === v ? "bg-teal-600 text-white" : "bg-gray-800 text-gray-400 hover:text-gray-200"
+                      }`}>
+                      {label}
+                    </button>
+                  ))}
+              </div>
+            )}
             {markdown && <p className="text-xs text-gray-600">{markdown.length.toLocaleString()} karakter — bisa diedit sebelum dikirim</p>}
           </div>
           {selectedJob && selectedJob.status !== "done" ? (
@@ -476,6 +727,8 @@ export default function DocumentConverter() {
                 </>
               )}
             </div>
+          ) : viewLoading ? (
+            <div className="flex-1 flex items-center justify-center"><Loader2 size={22} className="animate-spin text-gray-600" /></div>
           ) : (
             <textarea
               value={markdown}
@@ -486,6 +739,80 @@ export default function DocumentConverter() {
           )}
         </div>
       </div>
+
+      {/* Glossary modal — shared term dictionary injected into every
+          translation prompt (document_translation_service.py), so a
+          correction here applies to every future run, not just this doc. */}
+      {showGlossary && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6" onClick={() => setShowGlossary(false)}>
+          <div onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-3xl max-h-[85vh] flex flex-col rounded-xl border border-gray-800 bg-gray-900 overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-gray-800 flex items-center justify-between">
+              <p className="text-sm font-semibold text-gray-200 flex items-center gap-2"><BookOpen size={16} className="text-teal-400" /> Translation Glossary</p>
+              <button onClick={() => setShowGlossary(false)} className="text-gray-500 hover:text-gray-300"><X size={16} /></button>
+            </div>
+
+            <div className="p-5 border-b border-gray-800 grid grid-cols-2 gap-3">
+              <input value={glossaryForm.source_term} onChange={(e) => setGlossaryForm((p) => ({ ...p, source_term: e.target.value }))}
+                placeholder="Source term (e.g. 전결)" className="rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-teal-500" />
+              <input value={glossaryForm.domain} onChange={(e) => setGlossaryForm((p) => ({ ...p, domain: e.target.value }))}
+                placeholder="Domain (e.g. pharma, finance) — optional" className="rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-teal-500" />
+              <input value={glossaryForm.target_en} onChange={(e) => setGlossaryForm((p) => ({ ...p, target_en: e.target.value }))}
+                placeholder="English translation" className="rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-teal-500" />
+              <input value={glossaryForm.target_id} onChange={(e) => setGlossaryForm((p) => ({ ...p, target_id: e.target.value }))}
+                placeholder="Indonesian translation" className="rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-teal-500" />
+              <input value={glossaryForm.notes} onChange={(e) => setGlossaryForm((p) => ({ ...p, notes: e.target.value }))}
+                placeholder="Notes — when/why this term applies (optional)" className="col-span-2 rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-teal-500" />
+              <div className="col-span-2 flex gap-2">
+                <button onClick={handleGlossarySave} disabled={!glossaryForm.source_term.trim() || glossarySaving}
+                  className="flex items-center justify-center gap-1.5 rounded-md bg-teal-600 hover:bg-teal-700 disabled:opacity-40 px-4 py-2 text-xs font-semibold text-white transition-colors">
+                  {glossarySaving ? <Loader2 size={13} className="animate-spin" /> : glossaryForm.id ? <Save size={13} /> : <Plus size={13} />}
+                  {glossaryForm.id ? "Save Changes" : "Add Term"}
+                </button>
+                {glossaryForm.id && (
+                  <button onClick={resetGlossaryForm} className="text-xs text-gray-500 hover:text-gray-300 px-2">Cancel edit</button>
+                )}
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5">
+              {glossaryLoading ? (
+                <div className="flex justify-center py-8"><Loader2 size={18} className="animate-spin text-gray-600" /></div>
+              ) : glossaryTerms.length === 0 ? (
+                <p className="text-xs text-gray-600 text-center py-8">No glossary terms yet — add one above.</p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-gray-500 border-b border-gray-800">
+                      <th className="py-1.5 pr-2">Source</th>
+                      <th className="py-1.5 pr-2">English</th>
+                      <th className="py-1.5 pr-2">Indonesian</th>
+                      <th className="py-1.5 pr-2">Domain</th>
+                      <th className="py-1.5 w-14"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {glossaryTerms.map((t) => (
+                      <tr key={t.id} className="border-b border-gray-800/60 hover:bg-gray-800/30">
+                        <td className="py-1.5 pr-2 text-gray-200 font-medium">{t.source_term}</td>
+                        <td className="py-1.5 pr-2 text-gray-400">{t.target_en || "—"}</td>
+                        <td className="py-1.5 pr-2 text-gray-400">{t.target_id || "—"}</td>
+                        <td className="py-1.5 pr-2 text-gray-500">{t.domain || "—"}</td>
+                        <td className="py-1.5">
+                          <div className="flex gap-2 justify-end">
+                            <span onClick={() => handleGlossaryEdit(t)} className="text-gray-500 hover:text-teal-400 cursor-pointer" title="Edit"><Save size={12} /></span>
+                            <span onClick={() => handleGlossaryDelete(t.id)} className="text-gray-500 hover:text-red-400 cursor-pointer" title="Delete"><Trash2 size={12} /></span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

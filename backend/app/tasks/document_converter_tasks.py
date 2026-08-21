@@ -11,9 +11,10 @@ polls eis.etl_job_log instead of asking Celery directly.
 import os
 import logging
 import psycopg2
+import psycopg2.extras
 from app.tasks.celery_app import celery_app
 from app.config import get_settings
-from app.services.document_converter_service import build_converter, convert_one
+from app.services.document_converter_service import build_converter, extract_blocks, render_markdown_from_blocks
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -48,7 +49,7 @@ def convert_document_task(job_id: int, file_path: str, ext: str, language: str =
             total = len(doc)
             _update(pg, job_id, total_pages=total)
 
-            md_parts = []
+            blocks = []
             for i in range(total):
                 _update(
                     pg, job_id,
@@ -62,21 +63,23 @@ def convert_document_task(job_id: int, file_path: str, ext: str, language: str =
                 single_doc.save(page_pdf_path)
                 single_doc.close()
                 try:
-                    page_md = convert_one(converter, page_pdf_path)
+                    blocks.extend(extract_blocks(converter, page_pdf_path))
                 finally:
                     if os.path.exists(page_pdf_path):
                         os.remove(page_pdf_path)
-                md_parts.append(page_md)
                 _update(pg, job_id, progress_percent=round((i + 1) / total * 100))
             doc.close()
-            markdown = "\n\n".join(md_parts)
         else:
             _update(pg, job_id, total_pages=1, current_page=1, status_message="Processing document…")
-            markdown = convert_one(converter, file_path)
+            blocks = extract_blocks(converter, file_path)
             _update(pg, job_id, progress_percent=100)
 
-        _update(pg, job_id, status="done", progress_percent=100, markdown=markdown, status_message="Done")
-        logger.info(f"[document_converter] job {job_id} done ({len(markdown)} chars)")
+        markdown = render_markdown_from_blocks(blocks)
+        _update(
+            pg, job_id, status="done", progress_percent=100, status_message="Done",
+            markdown=markdown, extracted_blocks=psycopg2.extras.Json(blocks),
+        )
+        logger.info(f"[document_converter] job {job_id} done ({len(markdown)} chars, {len(blocks)} blocks)")
 
     except Exception as e:
         logger.error(f"[document_converter] job {job_id} failed: {e}")
