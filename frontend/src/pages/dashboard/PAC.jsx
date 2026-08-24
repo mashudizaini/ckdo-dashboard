@@ -4750,6 +4750,31 @@ function SalesPlanPanel({ year }) {
     return (form.content.rows || []).reduce((sum, row) => sum + (Number(row[colIdx]) || 0), 0);
   };
 
+  const viewGrandTotal = (colIdx) => {
+    return (selectedPlan?.content?.rows || []).reduce((sum, row) => sum + (Number(row[colIdx]) || 0), 0);
+  };
+
+  const [deleting, setDeleting] = useState(false);
+  const handleDelete = async () => {
+    if (!selectedPlan) return;
+    const label = selectedPlan.content?.meta?.sheet_name || selectedPlan.department || `#${selectedPlan.id}`;
+    if (!window.confirm(`Delete sales plan "${label}" (${selectedPlan.plan_year})? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      const res = await pacApi.deleteSalesPlan(selectedPlan.id);
+      if (res.success) {
+        setSelectedPlan(null);
+        await loadPlans();
+      } else {
+        alert(res.error || "Delete failed");
+      }
+    } catch (e) {
+      alert("Delete error: " + (e?.detail || e?.message || e));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleUploadFile = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // allow re-selecting the same file next time
@@ -4840,7 +4865,12 @@ function SalesPlanPanel({ year }) {
                 Upload Excel
               </button>
               {selectedPlan && (
-                <button onClick={() => openEdit(selectedPlan)} className={BTN_SM("indigo")}><Edit3 size={11} /> Edit</button>
+                <>
+                  <button onClick={() => openEdit(selectedPlan)} className={BTN_SM("indigo")}><Edit3 size={11} /> Edit</button>
+                  <button onClick={handleDelete} disabled={deleting} className={BTN_SM("red")}>
+                    {deleting ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />} Delete
+                  </button>
+                </>
               )}
               <button onClick={() => exportExcel("value")} disabled={exporting || !selectedPlan} className={BTN_SM("sky")}>
                 {exporting ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
@@ -4876,7 +4906,7 @@ function SalesPlanPanel({ year }) {
                   <option value="">-- Select Sales Plan --</option>
                   {plans.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.plan_year} - {p.department || "(no dept)"} / {p.team_code || "(no team)"} [{p.plan_type}]
+                      {p.plan_year} - {p.content?.meta?.sheet_name || p.department || "(no dept)"} / {p.team_code || "(no team)"} [{p.plan_type}]
                     </option>
                   ))}
                 </select>
@@ -4892,17 +4922,17 @@ function SalesPlanPanel({ year }) {
             </div>
             {selectedPlan && selectedPlan.content && (
               <div className="space-y-3">
-                {(selectedPlan.content.meta || selectedPlan.content).area && (
-                  <div className="flex items-center gap-3 text-xs text-gray-400">
-                    <span className="px-2 py-1 rounded bg-violet-500/10 border border-violet-500/30 text-violet-300 font-medium">{selectedPlan.content.meta?.area || 'Total'}</span>
-                    {selectedPlan.content.meta?.type && <span className="px-2 py-1 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-medium">{selectedPlan.content.meta.type}</span>}
-                    <span className="text-gray-500">{selectedPlan.department} / {selectedPlan.team_code} - {selectedPlan.team_name}</span>
-                  </div>
-                )}
+                <div className="flex items-center gap-3 text-xs text-gray-400">
+                  {selectedPlan.content.meta?.type && <span className="px-2 py-1 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-medium">Type: {selectedPlan.content.meta.type}</span>}
+                  {selectedPlan.content.meta?.area && <span className="px-2 py-1 rounded bg-violet-500/10 border border-violet-500/30 text-violet-300 font-medium">{selectedPlan.content.meta.area}</span>}
+                  {selectedPlan.content.meta?.sheet_name && <span className="px-2 py-1 rounded bg-gray-700/40 border border-gray-600 text-gray-300 font-medium">Sheet: {selectedPlan.content.meta.sheet_name}</span>}
+                  <span className="text-gray-500">{selectedPlan.department} / {selectedPlan.team_code} - {selectedPlan.team_name}</span>
+                </div>
                 <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "21rem" }}>
                   <table className="w-full border-collapse text-xs">
                     <thead>
                       <tr className="bg-gray-800/80">
+                        <th className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">Type</th>
                         {(selectedPlan.content.headers || DEFAULT_SALES_PLAN_CONTENT.headers).map((h, ci) => (
                           <th key={ci} className={`sticky top-0 z-10 bg-gray-800 px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${ci >= 4 && ci <= 15 ? 'text-center w-16' : ci === 16 || ci === 17 ? 'text-right w-20' : ''}`}>{h}</th>
                         ))}
@@ -4911,6 +4941,7 @@ function SalesPlanPanel({ year }) {
                     <tbody>
                       {(selectedPlan.content.rows || []).map((row, i) => (
                         <tr key={i} className="border-b border-gray-800 hover:bg-gray-800/30">
+                          <td className="px-2 py-1.5 border border-gray-700 text-gray-400 whitespace-nowrap">{selectedPlan.content.meta?.type || '—'}</td>
                           <td className="px-2 py-1.5 border border-gray-700 text-center w-8">{row[0]}</td>
                           <td className="px-2 py-1.5 border border-gray-700">{row[1]}</td>
                           <td className="px-2 py-1.5 border border-gray-700">{row[2]}</td>
@@ -4925,6 +4956,17 @@ function SalesPlanPanel({ year }) {
                         </tr>
                       ))}
                     </tbody>
+                    <tfoot>
+                      <tr className="bg-gray-800/60">
+                        <td colSpan={5} className="px-2 py-1.5 border border-gray-700 text-xs font-bold text-gray-300">GRAND TOTAL</td>
+                        {[4,5,6,7,8,9,10,11,12,13,14,15].map(ci => (
+                          <td key={ci} className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-gray-200">{viewGrandTotal(ci).toLocaleString()}</td>
+                        ))}
+                        <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-violet-400">{viewGrandTotal(16).toLocaleString()}</td>
+                        <td className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-sky-400">{viewGrandTotal(17).toLocaleString()}</td>
+                        <td colSpan={2}></td>
+                      </tr>
+                    </tfoot>
                   </table>
                 </div>
               </div>
@@ -4932,7 +4974,7 @@ function SalesPlanPanel({ year }) {
           </>
         ) : (
           <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <Field label="Plan Year">
                 <input type="number" className={`${INP}`} value={form.plan_year} onChange={e => setForm({ ...form, plan_year: Number(e.target.value) })} />
               </Field>
@@ -4944,6 +4986,11 @@ function SalesPlanPanel({ year }) {
               </Field>
               <Field label="Team Name">
                 <input className={`${INP}`} value={form.team_name} onChange={e => setForm({ ...form, team_name: e.target.value })} placeholder="e.g. Domestic Sales" />
+              </Field>
+              <Field label="Type">
+                <input className={`${INP}`} value={form.content.meta?.type || ""}
+                  onChange={e => setForm({ ...form, content: { ...form.content, meta: { ...form.content.meta, type: e.target.value } } })}
+                  placeholder="e.g. Public / Private" />
               </Field>
             </div>
             <div className="flex items-center gap-4">
@@ -4962,6 +5009,7 @@ function SalesPlanPanel({ year }) {
               <table className="w-full border-collapse text-xs">
                 <thead>
                   <tr className="bg-gray-800/80">
+                    <th className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap">Type</th>
                     {(form.content.headers || DEFAULT_SALES_PLAN_CONTENT.headers).map((h, ci) => (
                       <th key={ci} className={`sticky top-0 z-10 bg-gray-800 px-2 py-2 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap ${ci >= 4 && ci <= 15 ? 'text-center w-16' : ci === 16 || ci === 17 ? 'text-right w-20' : ''}`}>{h}</th>
                     ))}
@@ -4971,6 +5019,7 @@ function SalesPlanPanel({ year }) {
                 <tbody>
                   {(form.content.rows || []).map((row, ri) => (
                     <tr key={ri} className="border-b border-gray-800 hover:bg-gray-800/30">
+                      <td className="px-2 py-1.5 border border-gray-700 text-gray-400 whitespace-nowrap">{form.content.meta?.type || '—'}</td>
                       <td className="px-2 py-1.5 border border-gray-700 text-center w-8 font-bold text-gray-400">{row[0]}</td>
                       <td className="px-2 py-1.5 border border-gray-700">
                         <input className={`${INP} !text-xs`} value={row[1]} onChange={e => updateCell(ri, 1, e.target.value)} placeholder="Country" />
@@ -5002,7 +5051,7 @@ function SalesPlanPanel({ year }) {
                 </tbody>
                 <tfoot>
                   <tr className="bg-gray-800/60">
-                    <td colSpan={4} className="px-2 py-1.5 border border-gray-700 text-xs font-bold text-gray-300">GRAND TOTAL</td>
+                    <td colSpan={5} className="px-2 py-1.5 border border-gray-700 text-xs font-bold text-gray-300">GRAND TOTAL</td>
                     {[4,5,6,7,8,9,10,11,12,13,14,15].map(ci => (
                       <td key={ci} className="px-2 py-1.5 border border-gray-700 text-right font-mono font-bold text-gray-200">{grandTotal(ci).toLocaleString()}</td>
                     ))}

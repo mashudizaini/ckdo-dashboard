@@ -149,6 +149,11 @@ class SalesPlanService:
                 "department": ws.cell(row=10, column=3).value or "",
                 "team_code":  ws.cell(row=12, column=3).value or "",
                 "team_name":  str(ws.cell(row=12, column=4).value or "").lstrip("/ ").strip(),
+                # The Excel *tab* name, not any in-sheet cell — lets the
+                # plan picker show which sheet a plan came from (e.g.
+                # "Public"/"Private") when several sheets share the same
+                # department/team_code and only differ by tab name.
+                "sheet_name": ws.title,
             }
 
             is_export_layout = str(ws.cell(row=14, column=2).value or "").strip() == "Country"
