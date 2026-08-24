@@ -4888,7 +4888,7 @@ function SalesPlanPanel({ year }) {
                 {clearingYear ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />} Clear {year}
               </button>
               <input value={sheetRange} onChange={e => setSheetRange(e.target.value)}
-                placeholder="Sheet(s) e.g. 1 or 1-2" title="Which sheets to import, 1-based in tab order — e.g. '1', '1-2', '1,3,5-7'. Leave blank to import every recognized sheet."
+                placeholder="Sheet(s) e.g. 1 or 1-2" title="Which sheets to import — e.g. '1', '1-2', '1,3,5-7'. Counted among recognized Sales Plan tabs only (a leading non-data reference tab, if any, doesn't count as sheet 1). Leave blank to import every recognized sheet."
                 className={`${INP} !w-40 !text-xs`} />
               <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleUploadFile} />
               <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM("teal")}>

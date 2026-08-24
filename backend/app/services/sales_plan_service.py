@@ -125,9 +125,10 @@ class SalesPlanService:
         to save a numeric Team Code as the text `department` column.
 
         `sheets` optionally narrows which tabs even get looked at — a
-        1-based, in-tab-order spec like "1", "1-2", or "1,3,5-7" — for
-        workbooks where only some sheets should be (re-)imported this run.
-        None/blank means every sheet is considered, same as before this
+        1-based spec like "1", "1-2", or "1,3,5-7", counted among
+        *recognized* ("[ S1 ]") data sheets only, in tab order — a leading
+        non-data reference tab does NOT count as sheet 1. None/blank means
+        every recognized sheet is considered, same as before this
         parameter existed.
 
         Two header layouts exist in the wild, detected per-sheet from
@@ -151,8 +152,18 @@ class SalesPlanService:
         except Exception as e:
             return {"success": False, "error": f"Could not read Excel file: {e}"}
 
+        # `sheets` numbers count among *recognized* Sales Plan tabs only
+        # (A1 == "[ S1 ]"), not raw tab position — these workbooks commonly
+        # carry a leading non-data reference tab (e.g. "Index_Team Code")
+        # that a user counting tabs by eye would naturally skip too, so
+        # numbering against raw tab position was off by however many such
+        # tabs came first (reported: "sheets 2-3" requested, "sheets 1-2"
+        # — i.e. the two data sheets right after the skipped leading
+        # tab — actually processed).
+        data_sheets = [ws for ws in wb.worksheets if str(ws.cell(row=1, column=1).value or "").strip() == "[ S1 ]"]
+
         try:
-            allowed_sheet_nums = self._parse_sheet_range(sheets, len(wb.worksheets))
+            allowed_sheet_nums = self._parse_sheet_range(sheets, len(data_sheets))
         except ValueError as e:
             return {"success": False, "error": str(e)}
 
@@ -177,10 +188,8 @@ class SalesPlanService:
                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total Value", "Total Unit", "Price (USD)", "Price (IDR)"]
 
         imported = []
-        for sheet_num, ws in enumerate(wb.worksheets, start=1):
+        for sheet_num, ws in enumerate(data_sheets, start=1):
             if allowed_sheet_nums is not None and sheet_num not in allowed_sheet_nums:
-                continue
-            if str(ws.cell(row=1, column=1).value or "").strip() != "[ S1 ]":
                 continue
 
             meta = {
