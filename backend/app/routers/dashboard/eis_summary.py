@@ -4,9 +4,13 @@ from sqlalchemy import text
 from app.eis_database import get_eis_db as get_db
 from app.database import get_db as get_main_db
 from app.dependencies import get_current_user
+from app.services.financial_statement_service import FinancialStatementService
 from app.services.pac_sales_plan_bp import pac_monthly_business_plan
 
 router = APIRouter()
+
+_MONTH_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+               "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
 
 
 @router.get("/portfolio")
@@ -125,14 +129,38 @@ async def get_kpi_cards(
     prod = await db.execute(prod_q, {"year": year, "period": period})
     prod_row = prod.mappings().first()
 
+    # Plan stays sourced from the EIS ETL schema (eis.fact_financial) —
+    # Accounting & Tax's Financial Statement module has no Plan/Budget
+    # figure anywhere. Actual is queried live from Oracle EBS GL_BALANCES
+    # via FinancialStatementService — the same data Financial Statement >
+    # Profit or Loss / Balance Sheet use — instead of eis.fact_financial's
+    # actual columns, which were never populated (hence these cards coming
+    # back empty). Net profit actual = YTD (Jan through `period`) net
+    # profit; cashflow actual = the Cash & Cash Equivalents balance at
+    # `period`'s month-end (a point-in-time snapshot, same as an
+    # "Ending Balance").
     fin_q = text("""
-        SELECT net_profit_actual_cumulative, net_profit_bp_cumulative,
-               cf_ending_balance_actual, cf_ending_balance_bp
+        SELECT net_profit_bp_cumulative, cf_ending_balance_bp
         FROM eis.fact_financial
         WHERE period_id = (SELECT id FROM eis.dim_period WHERE fiscal_year = :year AND period_num = :period)
     """)
     fin = await db.execute(fin_q, {"year": year, "period": period})
     fin_row = fin.mappings().first()
+
+    yy = str(year)[2:].zfill(2)
+    ytd_periods = [f"{_MONTH_ABBR[m - 1]}-{yy}" for m in range(1, period + 1)]
+    period_name = f"{_MONTH_ABBR[period - 1]}-{yy}"
+
+    fs = FinancialStatementService()
+    pl_result = await fs.get_profit_and_loss([{"label": "YTD", "periods": ytd_periods}])
+    net_profit_actual_ytd = (pl_result.get("profit_after_tax") or [0])[0]
+
+    bs_result = await fs.get_balance_sheet([period_name], "ASSETS")
+    cash_row = next((r for r in bs_result.get("current_assets", []) if r["label"] == "CASH & CASH EQUIVALENTS"), None)
+    cf_ending_balance_actual = cash_row["values"][0] if cash_row else 0
+
+    net_profit_bp_cumulative = float(fin_row["net_profit_bp_cumulative"] or 0) if fin_row else 0
+    cf_ending_balance_bp = float(fin_row["cf_ending_balance_bp"] or 0) if fin_row else 0
 
     actual_total = float(sales_row["actual_total"] or 0) if sales_row else 0
     if has_pac_data:
@@ -147,10 +175,10 @@ async def get_kpi_cards(
             "sales_actual": actual_total,
             "yield_pct": float(prod_row["yield_pct"] or 0) if prod_row else 0,
             "net_profit_achievement": round(
-                float(fin_row["net_profit_actual_cumulative"] or 0) / float(fin_row["net_profit_bp_cumulative"] or 1) * 100, 2
-            ) if fin_row and fin_row["net_profit_bp_cumulative"] else 0,
+                net_profit_actual_ytd / net_profit_bp_cumulative * 100, 2
+            ) if net_profit_bp_cumulative else 0,
             "cashflow_achievement": round(
-                float(fin_row["cf_ending_balance_actual"] or 0) / float(fin_row["cf_ending_balance_bp"] or 1) * 100, 2
-            ) if fin_row and fin_row["cf_ending_balance_bp"] else 0,
+                cf_ending_balance_actual / cf_ending_balance_bp * 100, 2
+            ) if cf_ending_balance_bp else 0,
         }
     }

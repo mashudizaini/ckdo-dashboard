@@ -326,7 +326,7 @@ function EisSummaryTab({ year, period }) {
 
   return (
     <div className="space-y-4">
-      <SourceTag>ETL Financial &middot; Dashboard PAC (Sales Business Plan)</SourceTag>
+      <SourceTag>ETL Financial (Plan) &middot; Dashboard PAC (Sales BP) &middot; Dashboard Accounting &amp; Tax (Net Profit/Cashflow Actual)</SourceTag>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <EisKpiCard title="Sales Achievement" value={kpi?.sales_achievement || 0} unit="%" icon={DollarSign} color="cyan" />
         <EisKpiCard title="Production Yield" value={kpi?.yield_pct || 0} unit="%" target={95} icon={Activity} color="emerald" />
