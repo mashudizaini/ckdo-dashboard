@@ -171,18 +171,18 @@ class SalesPlanService:
             # Blank template cells sometimes hold a stray placeholder like
             # "\" instead of being truly empty — anything non-numeric just
             # means "no value yet", not a parse error.
+            #
+            # NOTE: an earlier version of this function multiplied monetary
+            # cells (monthly Sales Value, Total Value) by 1000, on the
+            # assumption the template stores figures in "ribu" (thousands).
+            # That was wrong — confirmed against a real Local total: the
+            # ×1000 result read 7.65 trillion where the correct figure is
+            # ~7.65 billion, i.e. the raw cell values (no scaling at all)
+            # already match. Every numeric cell is read as-is now.
             try:
                 return int(v or 0)
             except (TypeError, ValueError):
                 return 0
-
-        def _money(v):
-            # The Sales Plan template enters monetary figures in "ribu"
-            # (thousands) — every currency value (monthly Sales Value,
-            # Total Value) is scaled ×1000 at import time so this app
-            # stores/displays actual Rupiah. Total Unit (a quantity, not
-            # money) and unit prices are left unscaled.
-            return _num(v) * 1000
 
         headers = ["No", "Country", "Customer", "Product", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total Value", "Total Unit", "Price (USD)", "Price (IDR)"]
@@ -216,8 +216,8 @@ class SalesPlanService:
                     product  = ws.cell(row=r, column=4).value
                     if no is None or product is None:
                         continue
-                    months = [_money(ws.cell(row=r, column=c).value) for c in range(5, 17)]  # E-P
-                    total_value = _money(ws.cell(row=r, column=17).value)
+                    months = [_num(ws.cell(row=r, column=c).value) for c in range(5, 17)]  # E-P
+                    total_value = _num(ws.cell(row=r, column=17).value)
                     total_unit  = _num(ws.cell(row=r, column=18).value)
                     price_usd   = ws.cell(row=r, column=19).value
                     price_usd   = price_usd if isinstance(price_usd, (int, float)) else ""
@@ -229,8 +229,8 @@ class SalesPlanService:
                     product = ws.cell(row=r, column=2).value
                     if no is None or product is None:
                         continue
-                    months = [_money(ws.cell(row=r, column=c).value) for c in range(4, 16)]  # D-O
-                    total_value = _money(ws.cell(row=r, column=16).value)
+                    months = [_num(ws.cell(row=r, column=c).value) for c in range(4, 16)]  # D-O
+                    total_value = _num(ws.cell(row=r, column=16).value)
                     total_unit  = _num(ws.cell(row=r, column=17).value)
                     price       = ws.cell(row=r, column=18).value
                     price       = price if isinstance(price, (int, float)) else ""
