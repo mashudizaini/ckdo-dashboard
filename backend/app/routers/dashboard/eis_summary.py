@@ -55,23 +55,36 @@ _CLOSING_SHEET_GROUPS = {
 @router.get("/closing-estimation")
 async def get_closing_estimation(
     year: int = Query(2025),
+    month: int = Query(12, ge=1, le=12),
     db: AsyncSession = Depends(get_main_db),
     user = Depends(get_current_user),
 ):
     """Sales Closing Estimation — sourced from PAC's Sales Plan (Simulation
     Data), not the disconnected EIS ETL schema. Business Plan per segment
-    is each segment's Sales Plan sheets' "Total Value" column (row[16]),
-    summed across every product AND every month for `year` — segments are
-    grouped by which Excel tab a plan came from (content.meta.sheet_name,
-    set at import time by sales_plan_service.py):
-      Local       = "National Public" + "National Private" sheets
-      Export      = "Export" sheet
-      CMO & Other = "CMO" + "Agreement" sheets
+    is that segment's Sales Plan sheets' Jan..`month` monthly cells (row
+    indices 4..4+month, NOT the row's own "Total Value" column, which is
+    always the full Jan-Dec year regardless of `month`), summed across
+    every product — e.g. month=7 totals January through July only.
+    month=12 (default) sums the whole year, same total the row's own
+    "Total Value" column already holds. Segments are grouped by which
+    Excel tab a plan came from (content.meta.sheet_name, set at import
+    time by sales_plan_service.py — matched as a case-insensitive
+    substring, so "National Public FY26" still matches "national public"):
+      Local       = sheet name contains "national public" or "national private"
+      Export      = sheet name contains "export"
+      CMO & Other = sheet name contains "cmo" or "agreement"
     Sales' own Business Plan is Local + CMO & Other + Export.
     Estimation has no data source yet anywhere in the app — always 0 until
     one exists; % is Estimation / Business Plan so it lights up on its own
     once a real estimation source is wired in, rather than needing a second
-    change here."""
+    change here.
+
+    `unmatched_sheets` in the response lists every sheet_name found on a
+    Sales Plan row for `year` that didn't match any of the 3 groups above
+    (including blank, for rows uploaded before sheet_name existed) — a
+    quick way to tell "no data uploaded yet" apart from "uploaded but the
+    sheet naming doesn't match what this endpoint expects" without needing
+    direct DB access."""
     from app.models.sales_plan import SalesPlan
 
     rows = (await db.execute(
@@ -79,12 +92,17 @@ async def get_closing_estimation(
     )).scalars().all()
 
     totals = {"local": 0.0, "export": 0.0, "cmo_other": 0.0}
+    unmatched_sheets = set()
     for content in rows:
-        sheet = str((content or {}).get("meta", {}).get("sheet_name") or "").strip().lower()
-        group = next((g for g, names in _CLOSING_SHEET_GROUPS.items() if sheet in names), None)
+        sheet_raw = (content or {}).get("meta", {}).get("sheet_name") or ""
+        sheet = str(sheet_raw).strip().lower()
+        group = next((g for g, keywords in _CLOSING_SHEET_GROUPS.items() if any(k in sheet for k in keywords)), None)
         if not group:
+            unmatched_sheets.add(sheet_raw if sheet_raw else "(no sheet_name — uploaded before this feature; re-upload the file)")
             continue
-        totals[group] += sum(float(r[16] or 0) for r in (content.get("rows") or []) if len(r) > 16)
+        for r in (content.get("rows") or []):
+            if len(r) > 15:
+                totals[group] += sum(float(v or 0) for v in r[4:4 + month])
 
     def _segment(plan_total: float) -> dict:
         est = 0.0
@@ -100,7 +118,7 @@ async def get_closing_estimation(
         "local":     _segment(local),
         "cmo_other": _segment(cmo_other),
         "export":    _segment(export),
-    }}
+    }, "unmatched_sheets": sorted(unmatched_sheets)}
 
 
 @router.get("/nwc")

@@ -336,6 +336,7 @@ function ClosingEstArrow() {
 function EisSummaryTab({ year, period }) {
   const [kpi, setKpi] = useState(null);
   const [closing, setClosing] = useState(null);
+  const [closingUnmatched, setClosingUnmatched] = useState([]);
   const [nwc, setNwc] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -344,11 +345,12 @@ function EisSummaryTab({ year, period }) {
     try {
       const [kpiRes, closingRes, nwcRes] = await Promise.all([
         eisApi.getKpiCards(year, period),
-        eisApi.getClosingEstimation(year),
+        eisApi.getClosingEstimation(year, period),
         eisApi.getNwc(year, period),
       ]);
       setKpi(kpiRes.data);
       setClosing(closingRes.data || null);
+      setClosingUnmatched(closingRes.unmatched_sheets || []);
       setNwc(nwcRes.data);
     } catch (e) { console.error("Failed to load EIS summary:", e); }
     setLoading(false);
@@ -368,15 +370,24 @@ function EisSummaryTab({ year, period }) {
         <EisKpiCard title="Cashflow Achievement" value={kpi?.cashflow_achievement || 0} unit="%" icon={Wallet} color="orange" />
       </div>
 
-      <ChartCard title="Sales Closing Estimation" subtitle="Business Plan: PAC Sales Plan (all products, all months) &middot; Estimation: no data source yet">
+      <ChartCard title="Sales Closing Estimation" subtitle={`Business Plan: PAC Sales Plan, Jan–${MONTHS_SHORT[period - 1]} ${year} (all products) · Estimation: no data source yet`}>
         {closing ? (
-          <div className="flex items-stretch gap-3 overflow-x-auto py-1">
-            <ClosingEstBox title="Sales" seg={closing.sales} planLabel="Business Plan" estLabel="Estimation" />
-            <ClosingEstArrow />
-            <ClosingEstBox title="Local" seg={closing.local} planLabel="Plan" estLabel="Est." />
-            <ClosingEstBox title="CMO & Other" seg={closing.cmo_other} planLabel="Plan" estLabel="Est." />
-            <ClosingEstBox title="Export" seg={closing.export} planLabel="Plan" estLabel="Est." />
-          </div>
+          <>
+            <div className="flex items-stretch gap-3 overflow-x-auto py-1">
+              <ClosingEstBox title="Sales" seg={closing.sales} planLabel="Business Plan" estLabel="Estimation" />
+              <ClosingEstArrow />
+              <ClosingEstBox title="Local" seg={closing.local} planLabel="Plan" estLabel="Est." />
+              <ClosingEstBox title="CMO & Other" seg={closing.cmo_other} planLabel="Plan" estLabel="Est." />
+              <ClosingEstBox title="Export" seg={closing.export} planLabel="Plan" estLabel="Est." />
+            </div>
+            {closingUnmatched.length > 0 && (
+              <div className="mt-3 text-[11px] text-amber-400/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                {closing.sales.plan === 0 && "Business Plan is 0 — likely cause: "}
+                {closingUnmatched.length} Sales Plan sheet(s) for {year} didn't match Local/Export/CMO &amp; Other and were skipped: {closingUnmatched.join(", ")}.
+                {" "}If a sheet shows "(no sheet_name — uploaded before this feature)", re-upload that Sales Plan Excel file in PAC &rarr; Simulation Data &rarr; Sales Plan so it gets tagged correctly.
+              </div>
+            )}
+          </>
         ) : <div className="text-center text-gray-600 py-10 text-sm">No data available</div>}
       </ChartCard>
 
