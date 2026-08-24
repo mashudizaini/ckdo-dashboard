@@ -546,6 +546,7 @@ async def export_sales_plan_excel(
 @router.post("/sales-plans/upload")
 async def upload_sales_plan_excel(
     plan_year: int = Query(...),
+    sheets: Optional[str] = Query(None, description="Which sheets (1-based, in tab order) to process, e.g. '1', '1-2', '1,3,5-7' — omit to process every recognized sheet"),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.PAC)),
@@ -554,7 +555,7 @@ async def upload_sales_plan_excel(
     plan_Value.xlsx" template — creates/overwrites the plan for whatever
     department/team the file's own meta section specifies."""
     content = await file.read()
-    return await SalesPlanService().import_excel(db, content, plan_year, user.username)
+    return await SalesPlanService().import_excel(db, content, plan_year, user.username, sheets)
 
 
 def _write_gross_sales_sheet(ws, lines: list, plan_year: int) -> tuple:

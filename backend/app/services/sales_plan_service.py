@@ -94,7 +94,8 @@ class SalesPlanService:
         await db.refresh(row)
         return {"success": True, "data": self._to_dict(row)}
 
-    async def import_excel(self, db: AsyncSession, file_bytes: bytes, plan_year: int, username: str) -> dict:
+    async def import_excel(self, db: AsyncSession, file_bytes: bytes, plan_year: int, username: str,
+                            sheets: Optional[str] = None) -> dict:
         """Parse an uploaded Excel matching the "(S1) Sales plan_Value.xlsx"
         template family — sheet-agnostic, like every other PAC Simulation
         upload: any worksheet whose A1 is "[ S1 ]" is read as one plan (one
@@ -104,6 +105,12 @@ class SalesPlanService:
         on any workbook where the first sheet isn't the data sheet — it
         would silently parse a lookup table as sales figures and 500 trying
         to save a numeric Team Code as the text `department` column.
+
+        `sheets` optionally narrows which tabs even get looked at — a
+        1-based, in-tab-order spec like "1", "1-2", or "1,3,5-7" — for
+        workbooks where only some sheets should be (re-)imported this run.
+        None/blank means every sheet is considered, same as before this
+        parameter existed.
 
         Two header layouts exist in the wild, detected per-sheet from
         row 14 col B:
@@ -126,6 +133,11 @@ class SalesPlanService:
         except Exception as e:
             return {"success": False, "error": f"Could not read Excel file: {e}"}
 
+        try:
+            allowed_sheet_nums = self._parse_sheet_range(sheets, len(wb.worksheets))
+        except ValueError as e:
+            return {"success": False, "error": str(e)}
+
         def _num(v):
             # Blank template cells sometimes hold a stray placeholder like
             # "\" instead of being truly empty — anything non-numeric just
@@ -139,7 +151,9 @@ class SalesPlanService:
                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total Value", "Total Unit", "Price (USD)", "Price (IDR)"]
 
         imported = []
-        for ws in wb.worksheets:
+        for sheet_num, ws in enumerate(wb.worksheets, start=1):
+            if allowed_sheet_nums is not None and sheet_num not in allowed_sheet_nums:
+                continue
             if str(ws.cell(row=1, column=1).value or "").strip() != "[ S1 ]":
                 continue
 
@@ -205,10 +219,47 @@ class SalesPlanService:
                 imported.append({"sheet": ws.title, "rows": len(rows), "id": result["data"]["id"]})
 
         if not imported:
-            return {"success": False, "error": "No recognizable data sheets found — none of the sheets in this "
-                                                 "file match the Sales Plan template layout (expected '[ S1 ]' "
-                                                 "in cell A1 of each data sheet)."}
+            scope = f" in the selected sheet(s) ({sheets})" if allowed_sheet_nums is not None else ""
+            return {"success": False, "error": f"No recognizable data sheets found{scope} — none match the Sales "
+                                                 "Plan template layout (expected '[ S1 ]' in cell A1 of each data "
+                                                 "sheet)."}
         return {"success": True, "imported": imported, "rows_imported": sum(x["rows"] for x in imported)}
+
+    @staticmethod
+    def _parse_sheet_range(spec: Optional[str], sheet_count: int) -> Optional[set[int]]:
+        """'1' / '1-2' / '1,3,5-7' (1-based, in workbook tab order) -> the
+        set of sheet numbers to consider; None (spec blank) means every
+        sheet, preserving the pre-existing behavior. Raises ValueError with
+        a user-facing message on a malformed or out-of-range spec, rather
+        than silently processing zero (or the wrong) sheets."""
+        spec = (spec or "").strip()
+        if not spec:
+            return None
+
+        result: set[int] = set()
+        for token in spec.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            if "-" in token:
+                a, _, b = token.partition("-")
+                if not a.strip().isdigit() or not b.strip().isdigit():
+                    raise ValueError(f"Invalid sheet range '{token}' — expected e.g. '1-3'.")
+                start, end = int(a), int(b)
+                if start < 1 or end < start:
+                    raise ValueError(f"Invalid sheet range '{token}'.")
+                result.update(range(start, end + 1))
+            elif token.isdigit():
+                result.add(int(token))
+            else:
+                raise ValueError(f"Invalid sheet number '{token}' — expected a number, e.g. '1' or '1-3'.")
+
+        out_of_range = {n for n in result if n < 1 or n > sheet_count}
+        if out_of_range:
+            raise ValueError(
+                f"Sheet number(s) {sorted(out_of_range)} out of range — this file only has {sheet_count} sheet(s)."
+            )
+        return result
 
     async def get_gross_sales_report_data(self, db: AsyncSession, plan_year: int) -> dict:
         """Flatten every Sales Plan (Value) product row for the given year

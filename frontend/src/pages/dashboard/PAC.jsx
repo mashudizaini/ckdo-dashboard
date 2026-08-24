@@ -4610,6 +4610,7 @@ function SalesPlanPanel({ year }) {
   const [exportingGross, setExportingGross] = useState(false);
   const [exportingSummary, setExportingSummary] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [sheetRange, setSheetRange] = useState("");
   const [showForm, setShowForm] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -4781,7 +4782,7 @@ function SalesPlanPanel({ year }) {
     if (!file) return;
     setUploading(true);
     try {
-      const res = await pacApi.uploadSalesPlanExcel(file, year);
+      const res = await pacApi.uploadSalesPlanExcel(file, year, sheetRange.trim());
       if (res.success) {
         const summary = (res.imported || []).map(x => `${x.sheet} (${x.rows} rows)`).join(", ");
         alert(`Import successful: ${res.rows_imported} product rows total — ${summary}`);
@@ -4859,6 +4860,9 @@ function SalesPlanPanel({ year }) {
           {!showForm ? (
             <>
               <button onClick={openCreate} className={BTN_SM("violet")}><Plus size={11} /> New Plan</button>
+              <input value={sheetRange} onChange={e => setSheetRange(e.target.value)}
+                placeholder="Sheet(s) e.g. 1 or 1-2" title="Which sheets to import, 1-based in tab order — e.g. '1', '1-2', '1,3,5-7'. Leave blank to import every recognized sheet."
+                className={`${INP} !w-40 !text-xs`} />
               <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleUploadFile} />
               <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM("teal")}>
                 {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}

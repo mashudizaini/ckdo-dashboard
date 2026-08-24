@@ -252,10 +252,10 @@ export const pacApi = {
   upsertSalesPlan:      (body) => api.post("/dashboard/pac/sales-plans", body),
   deleteSalesPlan:      (id)   => api.delete(`/dashboard/pac/sales-plans/${id}`),
   exportSalesPlanExcel: (id, type) => api.post(`/dashboard/pac/sales-plans/${id}/export`, null, { params: { plan_type: type }, responseType: "blob" }),
-  uploadSalesPlanExcel: (file, planYear) => {
+  uploadSalesPlanExcel: (file, planYear, sheets) => {
     const form = new FormData();
     form.append("file", file);
-    return api.post("/dashboard/pac/sales-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
+    return api.post("/dashboard/pac/sales-plans/upload", form, { params: { plan_year: planYear, sheets: sheets || undefined }, headers: { "Content-Type": "multipart/form-data" } });
   },
   exportGrossSalesReport: (planYear) => api.get("/dashboard/pac/sales-plans/gross-sales-report", { params: { plan_year: planYear }, responseType: "blob" }),
   exportSalesSummary: (planYear) => api.get("/dashboard/pac/sales-plans/sales-summary", { params: { plan_year: planYear }, responseType: "blob" }),
