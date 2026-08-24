@@ -10,12 +10,14 @@ from app.dependencies import get_current_user
 from app.eis_database import get_eis_db as get_db
 from app.models.employee import Employee
 from app.services.department_taxonomy import CANONICAL_DEPARTMENTS, normalize_department
-from app.services.financial_statement_upload_service import FinancialStatementUploadService
+from app.services.financial_statement_service import FinancialStatementService
 
 router = APIRouter()
 
 _MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
                 "July", "August", "September", "October", "November", "December"]
+_MONTH_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+               "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
 
 
 @router.get("/headcount")
@@ -91,48 +93,44 @@ async def turnover_rate(
 @router.get("/profit")
 async def net_profit(
     year: int = Query(2025),
-    db: AsyncSession = Depends(get_main_db), user = Depends(get_current_user),
+    user = Depends(get_current_user),
 ):
-    """Actual net profit sourced from Accounting & Tax's Financial Statement
-    module (PL_monthly Excel uploads — one snapshot per calendar month,
-    each holding a "MTD This Year" net-profit figure keyed by the month it
-    represents), instead of the disconnected EIS ETL schema, so this chart
-    always agrees with what Accounting sees under Profit or Loss. A month
-    nobody has uploaded a PL_monthly snapshot for comes back with a null
-    value (no bar), never an estimate."""
-    svc = FinancialStatementUploadService()
-    snapshots = await svc.list_snapshots(db, "profit_loss_monthly")
-    months_in_year = {s["month"] for s in snapshots if s["year"] == year}
-
-    data = []
-    for m in range(1, 13):
-        net_profit_actual = None
-        if m in months_in_year:
-            upload = await svc.get_upload(db, "profit_loss_monthly", m, year)
-            pat = (upload or {}).get("content", {}).get("profit_after_tax") or []
-            # columns = ["MTD Last Year", "YTD Last Year", "MTD This Year", "YTD This Year"]
-            net_profit_actual = pat[2] if len(pat) > 2 else None
-        data.append({
+    """Actual net profit queried live from Oracle EBS GL_BALANCES — the
+    same table Accounting & Tax's Financial Statement > Profit or Loss
+    reads — instead of the EIS ETL schema or a manually-uploaded Excel
+    snapshot (both of which required someone to keep re-uploading a file
+    and were coming back empty). One column per calendar month, each a
+    single GL period (not a YTD range), so the value is that month's own
+    net profit; a month with nothing posted in Oracle yet comes back 0."""
+    yy = str(year)[2:].zfill(2)
+    columns = [
+        {"label": _MONTH_NAMES[m - 1], "periods": [f"{_MONTH_ABBR[m - 1]}-{yy}"]}
+        for m in range(1, 13)
+    ]
+    result = await FinancialStatementService().get_profit_and_loss(columns)
+    pat = result.get("profit_after_tax") or []
+    data = [
+        {
             "period_num": m, "period_name": _MONTH_NAMES[m - 1],
-            "net_profit_actual": net_profit_actual,
-        })
+            "net_profit_actual": pat[m - 1] if m - 1 < len(pat) else None,
+        }
+        for m in range(1, 13)
+    ]
     return {"data": data}
 
 
 @router.get("/cashflow")
 async def cashflow(
     year: int = Query(2025),
-    eis_db: AsyncSession = Depends(get_db), db: AsyncSession = Depends(get_main_db),
-    user = Depends(get_current_user),
+    eis_db: AsyncSession = Depends(get_db), user = Depends(get_current_user),
 ):
     """Plan stays sourced from the EIS ETL schema (eis.fact_financial) —
-    Accounting & Tax's Financial Statement module has no Plan/Budget figure
-    anywhere. Actual is sourced from Financial Statement's Cashflow upload
-    (Ending Balance, month-by-month for whichever year is currently
-    "in progress" in that sheet — see parse_cash_flow_excel's
-    monthly_ending_balance). Re-upload the Cashflow Excel once after this
-    ships for the monthly Actual series to populate — earlier uploads were
-    parsed before this breakdown was captured."""
+    Accounting & Tax has no Plan/Budget figure anywhere. Actual is now the
+    live Oracle EBS "CASH & CASH EQUIVALENTS" balance at each month's end
+    (same GL_BALANCES data behind Accounting & Tax's Balance Sheet) instead
+    of a manually re-uploaded Cashflow Excel — there's no live Oracle
+    equivalent of a full statutory cash-flow statement, but the ending cash
+    balance is exactly what a Cashflow chart's "Ending Balance" tracks."""
     plan_q = text("""
         SELECT per.period_num, per.period_name, f.cf_ending_balance_bp
         FROM eis.fact_financial f
@@ -144,11 +142,11 @@ async def cashflow(
         r["period_num"]: r for r in (await eis_db.execute(plan_q, {"year": year})).mappings().all()
     }
 
-    upload = await FinancialStatementUploadService().get_upload(db, "cash_flow")
-    content = (upload or {}).get("content") or {}
-    actual_by_month = {}
-    if content.get("partial_year") == year:
-        actual_by_month = {item["month"]: item["value"] for item in content.get("monthly_ending_balance", [])}
+    yy = str(year)[2:].zfill(2)
+    period_names = [f"{_MONTH_ABBR[m - 1]}-{yy}" for m in range(1, 13)]
+    bs = await FinancialStatementService().get_balance_sheet(period_names, "ASSETS")
+    cash_row = next((r for r in bs.get("current_assets", []) if r["label"] == "CASH & CASH EQUIVALENTS"), None)
+    cash_values = cash_row["values"] if cash_row else [None] * 12
 
     data = []
     for m in range(1, 13):
@@ -157,7 +155,7 @@ async def cashflow(
             "period_num": m,
             "period_name": plan_row["period_name"] if plan_row else _MONTH_NAMES[m - 1],
             "cf_ending_balance_bp": float(plan_row["cf_ending_balance_bp"]) if plan_row and plan_row["cf_ending_balance_bp"] is not None else None,
-            "cf_ending_balance_actual": actual_by_month.get(m),
+            "cf_ending_balance_actual": cash_values[m - 1] if m - 1 < len(cash_values) else None,
         })
     return {"data": data}
 

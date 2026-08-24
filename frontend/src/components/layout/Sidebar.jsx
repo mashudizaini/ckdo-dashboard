@@ -88,7 +88,7 @@ const EIS_ITEMS = [
     { label: "Production", path: "/dashboard/eis/production" },
     { label: "Expansion", path: "/dashboard/eis/expansion" },
     { label: "Administration", path: "/dashboard/eis/administration" },
-    { label: "Business Plan", path: "/dashboard/eis/business-plan" },
+    // { label: "Business Plan", path: "/dashboard/eis/business-plan" }, // hidden — already covered by PAC dashboard
     { label: "Daily Sales", path: "/dashboard/eis/daily-sales" },
     { label: "Data Upload", path: "/dashboard/eis/data-upload" },
   ] },
