@@ -326,6 +326,7 @@ function EisSummaryTab({ year, period }) {
 
   return (
     <div className="space-y-4">
+      <SourceTag>ETL Financial &middot; Dashboard PAC (Sales Business Plan)</SourceTag>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <EisKpiCard title="Sales Achievement" value={kpi?.sales_achievement || 0} unit="%" icon={DollarSign} color="cyan" />
         <EisKpiCard title="Production Yield" value={kpi?.yield_pct || 0} unit="%" target={95} icon={Activity} color="emerald" />
@@ -411,6 +412,7 @@ function EisPerformanceTab({ year, period, segment }) {
 
   return (
     <div className="space-y-4">
+      <SourceTag>ETL Financial</SourceTag>
       {latestAch && (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-6">
           <div className="relative w-24 h-24 shrink-0">
@@ -538,6 +540,7 @@ function EisProductionTab({ year, period }) {
 
   return (
     <div className="space-y-4">
+      <SourceTag>ETL Financial</SourceTag>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: "Current yield", value: `${fmtN(latestYield?.yield_pct || 0, 1)}%`, sub: "Target: 95%", good: Number(latestYield?.yield_pct || 0) >= 95 },
