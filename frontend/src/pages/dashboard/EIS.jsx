@@ -780,11 +780,10 @@ function EisAdministrationTab({ year }) {
                 <YAxis tick={AXIS_TICK} />
                 <Tooltip contentStyle={TOOLTIP_STYLE} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="SM" stackId="a" fill={COLOR_PRIMARY} name="S&M" />
-                <Bar dataKey="SD" stackId="a" fill="#47a7c7" name="SD" />
-                <Bar dataKey="Plant Direct" stackId="a" fill={COLOR_GREEN} name="Plant Direct" />
-                <Bar dataKey="Plant Indirect" stackId="a" fill="#6ee7b7" name="Plant Indirect" />
-                <Bar dataKey="Admin" stackId="a" fill={COLOR_GOLD} name="Admin" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Sales & Marketing" stackId="a" fill={COLOR_PRIMARY} name="Sales & Marketing" />
+                <Bar dataKey="Strategy & Development" stackId="a" fill="#47a7c7" name="Strategy & Development" />
+                <Bar dataKey="Plant" stackId="a" fill={COLOR_GREEN} name="Plant" />
+                <Bar dataKey="Administration" stackId="a" fill={COLOR_GOLD} name="Administration" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
