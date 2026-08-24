@@ -251,6 +251,7 @@ export const pacApi = {
   getSalesPlan:         (id)   => api.get(`/dashboard/pac/sales-plans/${id}`),
   upsertSalesPlan:      (body) => api.post("/dashboard/pac/sales-plans", body),
   deleteSalesPlan:      (id)   => api.delete(`/dashboard/pac/sales-plans/${id}`),
+  deleteSalesPlansByYear: (planYear, planType) => api.delete("/dashboard/pac/sales-plans", { params: { plan_year: planYear, plan_type: planType || undefined } }),
   exportSalesPlanExcel: (id, type) => api.post(`/dashboard/pac/sales-plans/${id}/export`, null, { params: { plan_type: type }, responseType: "blob" }),
   uploadSalesPlanExcel: (file, planYear, sheets) => {
     const form = new FormData();

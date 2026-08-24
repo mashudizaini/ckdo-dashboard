@@ -4776,6 +4776,30 @@ function SalesPlanPanel({ year }) {
     }
   };
 
+  const [clearingYear, setClearingYear] = useState(false);
+  const handleClearYear = async () => {
+    const typed = window.prompt(
+      `This deletes ALL Sales Plan (Value) data for ${year} — every sheet, for cleansing before a fresh re-upload. ` +
+      `This cannot be undone. Type ${year} to confirm:`
+    );
+    if (typed !== String(year)) return;
+    setClearingYear(true);
+    try {
+      const res = await pacApi.deleteSalesPlansByYear(year, "value");
+      if (res.success) {
+        alert(res.message);
+        setSelectedPlan(null);
+        await loadPlans();
+      } else {
+        alert(res.error || "Clear failed");
+      }
+    } catch (e) {
+      alert("Clear error: " + (e?.detail || e?.message || e));
+    } finally {
+      setClearingYear(false);
+    }
+  };
+
   const handleUploadFile = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // allow re-selecting the same file next time
@@ -4860,6 +4884,9 @@ function SalesPlanPanel({ year }) {
           {!showForm ? (
             <>
               <button onClick={openCreate} className={BTN_SM("violet")}><Plus size={11} /> New Plan</button>
+              <button onClick={handleClearYear} disabled={clearingYear} className={BTN_SM("red")} title={`Delete every Sales Plan (Value) row for ${year} — cleansing before a fresh re-upload`}>
+                {clearingYear ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />} Clear {year}
+              </button>
               <input value={sheetRange} onChange={e => setSheetRange(e.target.value)}
                 placeholder="Sheet(s) e.g. 1 or 1-2" title="Which sheets to import, 1-based in tab order — e.g. '1', '1-2', '1,3,5-7'. Leave blank to import every recognized sheet."
                 className={`${INP} !w-40 !text-xs`} />

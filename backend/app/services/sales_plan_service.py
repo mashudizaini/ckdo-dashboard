@@ -52,31 +52,49 @@ class SalesPlanService:
         if plan_id:
             row = await db.get(SalesPlan, plan_id)
         if not row:
-            q = select(SalesPlan).where(
-                SalesPlan.plan_year  == payload.get("plan_year"),
-                SalesPlan.department == payload.get("department", ""),
-                SalesPlan.team_code  == payload.get("team_code", ""),
-                SalesPlan.plan_type  == payload.get("plan_type", "value"),
-            )
-            # A team can submit more than one plan under the same
-            # department/team_code (e.g. Business Development's CMO and
-            # Service Agreement plans both use team_code 62) — distinguished
-            # by [ Type ]/[ Area ] meta, not by team_code. Only apply this
-            # extra match when the incoming content actually carries a meta
-            # dict (Excel import always does; the manual "New Plan" form
-            # doesn't set one at all) so manual entries keep matching purely
-            # on year/department/team_code/plan_type as before.
-            meta = (payload.get("content") or {}).get("meta")
-            if meta and "type" in meta:
-                q = q.where(
-                    SalesPlan.content["meta"]["type"].astext == str(meta.get("type") or ""),
-                    SalesPlan.content["meta"]["area"].astext == str(meta.get("area") or ""),
+            meta = (payload.get("content") or {}).get("meta") or {}
+            sheet_name = meta.get("sheet_name")
+            if sheet_name:
+                # Excel-imported plans: the sheet tab is the real identity
+                # of a plan — department/team_code cells in the sheet can
+                # be blank or inconsistent between uploads, which used to
+                # let a re-upload of the *same* sheet slip past the old
+                # department/team_code match and insert a duplicate row
+                # instead of replacing the existing one. Match on
+                # year + plan_type + sheet_name only when we have one.
+                q = select(SalesPlan).where(
+                    SalesPlan.plan_year == payload.get("plan_year"),
+                    SalesPlan.plan_type == payload.get("plan_type", "value"),
+                    SalesPlan.content["meta"]["sheet_name"].astext == str(sheet_name),
                 )
+            else:
+                q = select(SalesPlan).where(
+                    SalesPlan.plan_year  == payload.get("plan_year"),
+                    SalesPlan.department == payload.get("department", ""),
+                    SalesPlan.team_code  == payload.get("team_code", ""),
+                    SalesPlan.plan_type  == payload.get("plan_type", "value"),
+                )
+                # A team can submit more than one plan under the same
+                # department/team_code (e.g. Business Development's CMO and
+                # Service Agreement plans both use team_code 62) —
+                # distinguished by [ Type ]/[ Area ] meta, not by team_code.
+                # Only reached when there's no sheet_name (legacy content,
+                # or the manual "New Plan" form which never sets a meta
+                # dict at all) so manual entries keep matching purely on
+                # year/department/team_code/plan_type as before.
+                if meta and "type" in meta:
+                    q = q.where(
+                        SalesPlan.content["meta"]["type"].astext == str(meta.get("type") or ""),
+                        SalesPlan.content["meta"]["area"].astext == str(meta.get("area") or ""),
+                    )
             result = await db.execute(q)
             row = result.scalars().first()
         if row:
-            row.content   = payload.get("content", row.content)
-            row.status    = payload.get("status",  row.status)
+            row.department = payload.get("department", row.department)
+            row.team_code  = payload.get("team_code",  row.team_code)
+            row.team_name  = payload.get("team_name",  row.team_name)
+            row.content    = payload.get("content", row.content)
+            row.status     = payload.get("status",  row.status)
             row.updated_at = datetime.utcnow()
         else:
             row = SalesPlan(
@@ -147,6 +165,14 @@ class SalesPlanService:
             except (TypeError, ValueError):
                 return 0
 
+        def _money(v):
+            # The Sales Plan template enters monetary figures in "ribu"
+            # (thousands) — every currency value (monthly Sales Value,
+            # Total Value) is scaled ×1000 at import time so this app
+            # stores/displays actual Rupiah. Total Unit (a quantity, not
+            # money) and unit prices are left unscaled.
+            return _num(v) * 1000
+
         headers = ["No", "Country", "Customer", "Product", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total Value", "Total Unit", "Price (USD)", "Price (IDR)"]
 
@@ -181,8 +207,8 @@ class SalesPlanService:
                     product  = ws.cell(row=r, column=4).value
                     if no is None or product is None:
                         continue
-                    months = [_num(ws.cell(row=r, column=c).value) for c in range(5, 17)]  # E-P
-                    total_value = _num(ws.cell(row=r, column=17).value)
+                    months = [_money(ws.cell(row=r, column=c).value) for c in range(5, 17)]  # E-P
+                    total_value = _money(ws.cell(row=r, column=17).value)
                     total_unit  = _num(ws.cell(row=r, column=18).value)
                     price_usd   = ws.cell(row=r, column=19).value
                     price_usd   = price_usd if isinstance(price_usd, (int, float)) else ""
@@ -194,8 +220,8 @@ class SalesPlanService:
                     product = ws.cell(row=r, column=2).value
                     if no is None or product is None:
                         continue
-                    months = [_num(ws.cell(row=r, column=c).value) for c in range(4, 16)]  # D-O
-                    total_value = _num(ws.cell(row=r, column=16).value)
+                    months = [_money(ws.cell(row=r, column=c).value) for c in range(4, 16)]  # D-O
+                    total_value = _money(ws.cell(row=r, column=16).value)
                     total_unit  = _num(ws.cell(row=r, column=17).value)
                     price       = ws.cell(row=r, column=18).value
                     price       = price if isinstance(price, (int, float)) else ""
@@ -324,6 +350,16 @@ class SalesPlanService:
             return {"success": False, "error": "Not found"}
         await db.execute(delete(SalesPlan).where(SalesPlan.id == plan_id))
         return {"success": True, "message": f"Deleted sales plan #{plan_id}"}
+
+    async def delete_sales_plans_by_year(self, db: AsyncSession, plan_year: int, plan_type: Optional[str] = None) -> dict:
+        """Bulk delete — for cleansing stale/duplicate plans (e.g. rows
+        imported before sheet_name-based de-dup or the ×1000 monetary-scale
+        fix existed) before re-uploading a year's Sales Plan sheets fresh."""
+        q = delete(SalesPlan).where(SalesPlan.plan_year == plan_year)
+        if plan_type:
+            q = q.where(SalesPlan.plan_type == plan_type)
+        result = await db.execute(q)
+        return {"success": True, "message": f"Deleted {result.rowcount} sales plan(s) for {plan_year}", "deleted": result.rowcount}
 
     async def export_excel(self, db: AsyncSession, plan_id: int, plan_type: str, username: str) -> dict:
         row = await db.get(SalesPlan, plan_id)

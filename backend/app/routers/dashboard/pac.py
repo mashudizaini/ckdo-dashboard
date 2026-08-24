@@ -532,6 +532,19 @@ async def delete_sales_plan(
     return await SalesPlanService().delete_sales_plan(db, plan_id)
 
 
+@router.delete("/sales-plans")
+async def delete_sales_plans_by_year(
+    plan_year: int = Query(...),
+    plan_type: Optional[str] = Query(None, description="value | unit — omit to delete both"),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Bulk-delete every Sales Plan for a year (optionally narrowed to one
+    plan_type) — for cleansing stale/duplicate data before a fresh
+    re-upload, e.g. after a fix to how plans are matched/scaled on import."""
+    return await SalesPlanService().delete_sales_plans_by_year(db, plan_year, plan_type)
+
+
 @router.post("/sales-plans/{plan_id}/export")
 async def export_sales_plan_excel(
     plan_id: int,

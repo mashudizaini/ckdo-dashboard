@@ -95,7 +95,10 @@ async def get_closing_estimation(
     unmatched_sheets = set()
     for content in rows:
         sheet_raw = (content or {}).get("meta", {}).get("sheet_name") or ""
-        sheet = str(sheet_raw).strip().lower()
+        # Real tab names use underscores as word separators (e.g.
+        # "Sales plan_V_National_Public"), not spaces — normalize both so
+        # "national public" still matches "national_public".
+        sheet = str(sheet_raw).strip().lower().replace("_", " ")
         group = next((g for g, keywords in _CLOSING_SHEET_GROUPS.items() if any(k in sheet for k in keywords)), None)
         if not group:
             unmatched_sheets.add(sheet_raw if sheet_raw else "(no sheet_name — uploaded before this feature; re-upload the file)")
