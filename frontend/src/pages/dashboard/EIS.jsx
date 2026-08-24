@@ -712,6 +712,16 @@ function EisExpansionTab({ year, period }) {
 }
 
 /* ─── Tab: Administration ───────────────────────────────────────── */
+function SourceTag({ children }) {
+  return (
+    <div className="flex justify-end">
+      <span className="text-[10px] uppercase tracking-wide text-gray-500 bg-gray-900 border border-gray-800 rounded-full px-2.5 py-1">
+        Source data: {children}
+      </span>
+    </div>
+  );
+}
+
 const ADMIN_TABS = [
   { key: "personnel", label: "Personnel", icon: Users },
   { key: "financial", label: "Financial", icon: Landmark },
@@ -771,6 +781,8 @@ function EisAdministrationTab({ year }) {
       </div>
 
       {tab === "personnel" && (
+        <div className="space-y-2">
+        <SourceTag>Dashboard HRGA &ndash; Employee Data</SourceTag>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <ChartCard title="Employee headcount">
             <ResponsiveContainer width="100%" height={280}>
@@ -801,9 +813,12 @@ function EisAdministrationTab({ year }) {
             </ResponsiveContainer>
           </ChartCard>
         </div>
+        </div>
       )}
 
       {tab === "financial" && (
+        <div className="space-y-2">
+        <SourceTag>Dashboard Accounting &amp; Tax (Actual) &middot; ETL Financial (Plan)</SourceTag>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <ChartCard title="Monthly net profit">
             <ResponsiveContainer width="100%" height={280}>
@@ -833,9 +848,12 @@ function EisAdministrationTab({ year }) {
             </ResponsiveContainer>
           </ChartCard>
         </div>
+        </div>
       )}
 
       {tab === "ratios" && (
+        <div className="space-y-2">
+        <SourceTag>ETL Financial</SourceTag>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <ChartCard title="DSO & DPO trend">
             <ResponsiveContainer width="100%" height={280}>
@@ -862,9 +880,12 @@ function EisAdministrationTab({ year }) {
             </ResponsiveContainer>
           </ChartCard>
         </div>
+        </div>
       )}
 
       {tab === "budget" && (
+        <div className="space-y-2">
+        <SourceTag>ETL Financial</SourceTag>
         <ChartCard title="Monthly budget: plan vs actual">
           <ResponsiveContainer width="100%" height={340}>
             <BarChart data={budgetChart} barCategoryGap="25%">
@@ -878,6 +899,7 @@ function EisAdministrationTab({ year }) {
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
+        </div>
       )}
     </div>
   );

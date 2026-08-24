@@ -398,6 +398,7 @@ def parse_cash_flow_excel(content: bytes) -> dict:
         return out
 
     rows_out = []
+    monthly_ending_balance = []
     for r in range(9, ws.max_row + 1):
         label, level = None, None
         for lvl, col in enumerate((2, 3, 4)):  # B=level0 (trunk), C=level1 (Operating/Investing/Financing), D=level2 (line items)
@@ -412,11 +413,28 @@ def parse_cash_flow_excel(content: bytes) -> dict:
             continue  # thin/blank line item for this year range — same convention as _lines_between
         rows_out.append({"label": label, "level": level, "type": "total" if level < 2 else "line", "values": values})
 
+        # The trunk "Ending Balance" row already holds a running balance in
+        # every posted month column (row_values() above only ever reads the
+        # LAST one, to synthesize a single year-end figure) — capture the
+        # per-month series too, so a monthly Actual trend (e.g. EIS
+        # Administration's Cashflow chart) can be built without re-deriving
+        # it from Cash In/Out.
+        if level == 0 and "ENDING BALANCE" in label.upper() and partial_year and month_cols:
+            for c in month_cols:
+                month_label = str(ws.cell(row=8, column=c).value or "").strip().upper()[:3]
+                if month_label not in _MONTH_ABBR:
+                    continue
+                monthly_ending_balance.append({
+                    "month": _MONTH_ABBR.index(month_label) + 1,
+                    "value": _num(ws.cell(row=r, column=c).value),
+                })
+
     return {
         "years": years,
         "as_of_label": as_of_label,
         "partial_year": partial_year,
         "rows": rows_out,
+        "monthly_ending_balance": monthly_ending_balance,
     }
 
 

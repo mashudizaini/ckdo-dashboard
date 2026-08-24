@@ -10,6 +10,7 @@ from app.dependencies import get_current_user
 from app.eis_database import get_eis_db as get_db
 from app.models.employee import Employee
 from app.services.department_taxonomy import CANONICAL_DEPARTMENTS, normalize_department
+from app.services.financial_statement_upload_service import FinancialStatementUploadService
 
 router = APIRouter()
 
@@ -90,42 +91,75 @@ async def turnover_rate(
 @router.get("/profit")
 async def net_profit(
     year: int = Query(2025),
-    db: AsyncSession = Depends(get_db), user = Depends(get_current_user),
+    db: AsyncSession = Depends(get_main_db), user = Depends(get_current_user),
 ):
-    q = text("""
-        SELECT per.period_num, per.period_name,
-               f.net_profit_bp, f.net_profit_actual,
-               f.net_profit_bp_cumulative, f.net_profit_actual_cumulative,
-               CASE WHEN f.net_profit_bp_cumulative != 0
-                    THEN ROUND((f.net_profit_actual_cumulative / f.net_profit_bp_cumulative * 100)::numeric, 2)
-                    ELSE 0 END as achievement_pct
-        FROM eis.fact_financial f
-        JOIN eis.dim_period per ON f.period_id = per.id
-        WHERE per.fiscal_year = :year
-        ORDER BY per.period_num
-    """)
-    result = await db.execute(q, {"year": year})
-    return {"data": [dict(r) for r in result.mappings().all()]}
+    """Actual net profit sourced from Accounting & Tax's Financial Statement
+    module (PL_monthly Excel uploads — one snapshot per calendar month,
+    each holding a "MTD This Year" net-profit figure keyed by the month it
+    represents), instead of the disconnected EIS ETL schema, so this chart
+    always agrees with what Accounting sees under Profit or Loss. A month
+    nobody has uploaded a PL_monthly snapshot for comes back with a null
+    value (no bar), never an estimate."""
+    svc = FinancialStatementUploadService()
+    snapshots = await svc.list_snapshots(db, "profit_loss_monthly")
+    months_in_year = {s["month"] for s in snapshots if s["year"] == year}
+
+    data = []
+    for m in range(1, 13):
+        net_profit_actual = None
+        if m in months_in_year:
+            upload = await svc.get_upload(db, "profit_loss_monthly", m, year)
+            pat = (upload or {}).get("content", {}).get("profit_after_tax") or []
+            # columns = ["MTD Last Year", "YTD Last Year", "MTD This Year", "YTD This Year"]
+            net_profit_actual = pat[2] if len(pat) > 2 else None
+        data.append({
+            "period_num": m, "period_name": _MONTH_NAMES[m - 1],
+            "net_profit_actual": net_profit_actual,
+        })
+    return {"data": data}
 
 
 @router.get("/cashflow")
 async def cashflow(
     year: int = Query(2025),
-    db: AsyncSession = Depends(get_db), user = Depends(get_current_user),
+    eis_db: AsyncSession = Depends(get_db), db: AsyncSession = Depends(get_main_db),
+    user = Depends(get_current_user),
 ):
-    q = text("""
-        SELECT per.period_num, per.period_name,
-               f.cf_ending_balance_bp, f.cf_ending_balance_actual,
-               CASE WHEN f.cf_ending_balance_bp > 0
-                    THEN ROUND((f.cf_ending_balance_actual / f.cf_ending_balance_bp * 100)::numeric, 2)
-                    ELSE 0 END as achievement_pct
+    """Plan stays sourced from the EIS ETL schema (eis.fact_financial) —
+    Accounting & Tax's Financial Statement module has no Plan/Budget figure
+    anywhere. Actual is sourced from Financial Statement's Cashflow upload
+    (Ending Balance, month-by-month for whichever year is currently
+    "in progress" in that sheet — see parse_cash_flow_excel's
+    monthly_ending_balance). Re-upload the Cashflow Excel once after this
+    ships for the monthly Actual series to populate — earlier uploads were
+    parsed before this breakdown was captured."""
+    plan_q = text("""
+        SELECT per.period_num, per.period_name, f.cf_ending_balance_bp
         FROM eis.fact_financial f
         JOIN eis.dim_period per ON f.period_id = per.id
         WHERE per.fiscal_year = :year
         ORDER BY per.period_num
     """)
-    result = await db.execute(q, {"year": year})
-    return {"data": [dict(r) for r in result.mappings().all()]}
+    plan_by_month = {
+        r["period_num"]: r for r in (await eis_db.execute(plan_q, {"year": year})).mappings().all()
+    }
+
+    upload = await FinancialStatementUploadService().get_upload(db, "cash_flow")
+    content = (upload or {}).get("content") or {}
+    actual_by_month = {}
+    if content.get("partial_year") == year:
+        actual_by_month = {item["month"]: item["value"] for item in content.get("monthly_ending_balance", [])}
+
+    data = []
+    for m in range(1, 13):
+        plan_row = plan_by_month.get(m)
+        data.append({
+            "period_num": m,
+            "period_name": plan_row["period_name"] if plan_row else _MONTH_NAMES[m - 1],
+            "cf_ending_balance_bp": float(plan_row["cf_ending_balance_bp"]) if plan_row and plan_row["cf_ending_balance_bp"] is not None else None,
+            "cf_ending_balance_actual": actual_by_month.get(m),
+        })
+    return {"data": data}
 
 
 @router.get("/ratios")
