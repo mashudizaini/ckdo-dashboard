@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
+from sqlalchemy import select, text
 from app.eis_database import get_eis_db as get_db
 from app.database import get_db as get_main_db
 from app.dependencies import get_current_user
@@ -45,29 +45,62 @@ async def get_portfolio(
     return {"data": dict(row) if row else None}
 
 
+_CLOSING_SHEET_GROUPS = {
+    "local":     {"national public", "national private"},
+    "export":    {"export"},
+    "cmo_other": {"cmo", "agreement"},
+}
+
+
 @router.get("/closing-estimation")
 async def get_closing_estimation(
     year: int = Query(2025),
-    period: int = Query(11),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_main_db),
     user = Depends(get_current_user),
 ):
-    """Sales closing estimation by segment."""
-    q = text("""
-        SELECT s.business_type,
-               SUM(s.bp_amount) as bp_total,
-               SUM(s.actual_amount) as actual_total,
-               CASE WHEN SUM(s.bp_amount) > 0
-                    THEN ROUND((SUM(s.actual_amount) / SUM(s.bp_amount) * 100)::numeric, 2)
-                    ELSE 0 END as achievement_pct
-        FROM eis.fact_sales s
-        JOIN eis.dim_period per ON s.period_id = per.id
-        WHERE per.fiscal_year = :year AND per.period_num = :period
-        GROUP BY s.business_type
-        ORDER BY s.business_type
-    """)
-    result = await db.execute(q, {"year": year, "period": period})
-    return {"data": [dict(r) for r in result.mappings().all()]}
+    """Sales Closing Estimation — sourced from PAC's Sales Plan (Simulation
+    Data), not the disconnected EIS ETL schema. Business Plan per segment
+    is each segment's Sales Plan sheets' "Total Value" column (row[16]),
+    summed across every product AND every month for `year` — segments are
+    grouped by which Excel tab a plan came from (content.meta.sheet_name,
+    set at import time by sales_plan_service.py):
+      Local       = "National Public" + "National Private" sheets
+      Export      = "Export" sheet
+      CMO & Other = "CMO" + "Agreement" sheets
+    Sales' own Business Plan is Local + CMO & Other + Export.
+    Estimation has no data source yet anywhere in the app — always 0 until
+    one exists; % is Estimation / Business Plan so it lights up on its own
+    once a real estimation source is wired in, rather than needing a second
+    change here."""
+    from app.models.sales_plan import SalesPlan
+
+    rows = (await db.execute(
+        select(SalesPlan.content).where(SalesPlan.plan_year == year, SalesPlan.plan_type == "value")
+    )).scalars().all()
+
+    totals = {"local": 0.0, "export": 0.0, "cmo_other": 0.0}
+    for content in rows:
+        sheet = str((content or {}).get("meta", {}).get("sheet_name") or "").strip().lower()
+        group = next((g for g, names in _CLOSING_SHEET_GROUPS.items() if sheet in names), None)
+        if not group:
+            continue
+        totals[group] += sum(float(r[16] or 0) for r in (content.get("rows") or []) if len(r) > 16)
+
+    def _segment(plan_total: float) -> dict:
+        est = 0.0
+        return {
+            "plan": round(plan_total, 2),
+            "est":  est,
+            "pct":  round(est / plan_total * 100, 2) if plan_total else 0,
+        }
+
+    local, export, cmo_other = totals["local"], totals["export"], totals["cmo_other"]
+    return {"data": {
+        "sales":     _segment(local + export + cmo_other),
+        "local":     _segment(local),
+        "cmo_other": _segment(cmo_other),
+        "export":    _segment(export),
+    }}
 
 
 @router.get("/nwc")

@@ -151,7 +151,7 @@ export const eisApi = {
   // Summary
   getKpiCards:          (year, period) => api.get(`${EIS}/summary/kpi-cards`, { params: { year, period } }),
   getPortfolio:         (params)       => api.get(`${EIS}/summary/portfolio`, { params }),
-  getClosingEstimation: (year, period) => api.get(`${EIS}/summary/closing-estimation`, { params: { year, period } }),
+  getClosingEstimation: (year) => api.get(`${EIS}/summary/closing-estimation`, { params: { year } }),
   getNwc:               (year, period) => api.get(`${EIS}/summary/nwc`, { params: { year, period } }),
 
   // Performance

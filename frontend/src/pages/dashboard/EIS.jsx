@@ -299,9 +299,43 @@ const COGS_COLUMNS = [
 ];
 
 /* ─── Tab: Summary ──────────────────────────────────────────────── */
+function ClosingEstBox({ title, seg, planLabel, estLabel }) {
+  const s = seg || { plan: 0, est: 0, pct: 0 };
+  const pctCls = s.pct >= 80 ? "text-emerald-400" : s.pct >= 60 ? "text-amber-400" : "text-red-400";
+  return (
+    <div className="shrink-0 border border-gray-700 rounded-lg overflow-hidden">
+      <table className="text-xs border-collapse">
+        <thead>
+          <tr><th colSpan={3} className="bg-gray-800 text-gray-200 font-semibold px-3 py-1.5 text-center border-b border-gray-700 whitespace-nowrap">{title}</th></tr>
+          <tr className="bg-gray-800/60 text-gray-500">
+            <th className="px-3 py-1.5 border-r border-gray-700 font-medium whitespace-nowrap">{planLabel}</th>
+            <th className="px-3 py-1.5 border-r border-gray-700 font-medium whitespace-nowrap">{estLabel}</th>
+            <th className="px-3 py-1.5 font-medium">%</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr className="text-gray-100 font-mono">
+            <td className="px-3 py-2 border-r border-t border-gray-700 text-right">{fmtInt(s.plan)}</td>
+            <td className="px-3 py-2 border-r border-t border-gray-700 text-right">{fmtInt(s.est)}</td>
+            <td className={`px-3 py-2 border-t border-gray-700 text-right font-semibold ${pctCls}`}>{fmtN(s.pct, 0)}%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ClosingEstArrow() {
+  return (
+    <div className="shrink-0 w-9 flex items-center justify-center self-center">
+      <div className="w-7 h-7 bg-sky-500" style={{ clipPath: "polygon(0% 20%, 50% 20%, 50% 0%, 100% 50%, 50% 100%, 50% 80%, 0% 80%)" }} />
+    </div>
+  );
+}
+
 function EisSummaryTab({ year, period }) {
   const [kpi, setKpi] = useState(null);
-  const [closing, setClosing] = useState([]);
+  const [closing, setClosing] = useState(null);
   const [nwc, setNwc] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -310,11 +344,11 @@ function EisSummaryTab({ year, period }) {
     try {
       const [kpiRes, closingRes, nwcRes] = await Promise.all([
         eisApi.getKpiCards(year, period),
-        eisApi.getClosingEstimation(year, period),
+        eisApi.getClosingEstimation(year),
         eisApi.getNwc(year, period),
       ]);
       setKpi(kpiRes.data);
-      setClosing(closingRes.data || []);
+      setClosing(closingRes.data || null);
       setNwc(nwcRes.data);
     } catch (e) { console.error("Failed to load EIS summary:", e); }
     setLoading(false);
@@ -334,23 +368,19 @@ function EisSummaryTab({ year, period }) {
         <EisKpiCard title="Cashflow Achievement" value={kpi?.cashflow_achievement || 0} unit="%" icon={Wallet} color="orange" />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ChartCard title="Sales closing estimation">
-          {closing.length > 0 ? (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={closing} barCategoryGap="25%">
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
-                <XAxis dataKey="business_type" tick={AXIS_TICK} />
-                <YAxis tick={AXIS_TICK} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
-                <Tooltip formatter={(v) => `${fmtInt(v)} M IDR`} contentStyle={TOOLTIP_STYLE} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="bp_total" name="Business Plan" fill={COLOR_PRIMARY} radius={[4, 4, 0, 0]} />
-                <Bar dataKey="actual_total" name="Actual" fill={COLOR_GOLD} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : <div className="text-center text-gray-600 py-10 text-sm">No data available</div>}
-        </ChartCard>
+      <ChartCard title="Sales Closing Estimation" subtitle="Business Plan: PAC Sales Plan (all products, all months) &middot; Estimation: no data source yet">
+        {closing ? (
+          <div className="flex items-stretch gap-3 overflow-x-auto py-1">
+            <ClosingEstBox title="Sales" seg={closing.sales} planLabel="Business Plan" estLabel="Estimation" />
+            <ClosingEstArrow />
+            <ClosingEstBox title="Local" seg={closing.local} planLabel="Plan" estLabel="Est." />
+            <ClosingEstBox title="CMO & Other" seg={closing.cmo_other} planLabel="Plan" estLabel="Est." />
+            <ClosingEstBox title="Export" seg={closing.export} planLabel="Plan" estLabel="Est." />
+          </div>
+        ) : <div className="text-center text-gray-600 py-10 text-sm">No data available</div>}
+      </ChartCard>
 
+      <div className="max-w-md">
         <ChartCard title="Net working capital">
           {nwc ? (
             <div className="space-y-4">
