@@ -1256,6 +1256,11 @@ function EisDataUploadTab({ year: sharedYear }) {
   const [bpLogsKey, setBpLogsKey] = useState(0);
   const bpFileRef = useRef(null);
 
+  const [expUploading, setExpUploading] = useState(false);
+  const [expMsg, setExpMsg] = useState(null);
+  const [expLogsKey, setExpLogsKey] = useState(0);
+  const expFileRef = useRef(null);
+
   const loadOvertime = async () => { setOtLoading(true); try { setOvertime((await eisApi.getOvertimeData(selectedYear)).data || []); } catch (e) { console.error(e); } setOtLoading(false); };
   const loadCogs = async () => { setCogsLoading(true); try { setCogs((await eisApi.getCogsUploadData(selectedYear, selectedPeriod)).data || []); } catch (e) { console.error(e); } setCogsLoading(false); };
   const loadSalesBP = async () => { setBpLoading(true); try { setSalesBP((await eisApi.getSalesBP(selectedYear)).data || []); } catch (e) { console.error(e); } setBpLoading(false); };
@@ -1303,6 +1308,19 @@ function EisDataUploadTab({ year: sharedYear }) {
       setBpLogsKey((k) => k + 1);
     } catch (err) { setBpMsg({ type: "err", text: "Gagal: " + (err?.response?.data?.detail || err?.detail || err.message) }); setBpLogsKey((k) => k + 1); }
     setBpUploading(false); e.target.value = "";
+  };
+
+  const handleExpUpload = async (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    setExpUploading(true); setExpMsg(null);
+    try {
+      const fd = new FormData(); fd.append("file", file);
+      const res = await eisApi.uploadExpansionData(selectedYear, fd);
+      const note = res.detected_year && res.detected_year !== selectedYear ? ` (tahun di file: ${res.detected_year})` : "";
+      setExpMsg({ type: "ok", text: res.message + note });
+      setExpLogsKey((k) => k + 1);
+    } catch (err) { setExpMsg({ type: "err", text: "Gagal: " + (err?.response?.data?.detail || err?.detail || err.message) }); setExpLogsKey((k) => k + 1); }
+    setExpUploading(false); e.target.value = "";
   };
 
   const YearSelector = () => (
@@ -1399,6 +1417,26 @@ function EisDataUploadTab({ year: sharedYear }) {
         <MsgBanner msg={cogsMsg} onClose={() => setCogsMsg(null)} />
         <RequiredColumnsTable columns={COGS_COLUMNS} />
         <UploadHistoryTable uploadType="cogs" refreshKey={cogsLogsKey} />
+      </ChartCard>
+
+      <ChartCard title="Upload Data Business Expansion" subtitle="Sheet 'Business Expansion_Dashboard': kolom Product, Potential Supplier, header bulan Jan–Dec. Referensi: Business Expansion.xlsx"
+        right={
+          <div className="flex items-center gap-2 shrink-0">
+            <YearSelector />
+            <button onClick={() => expFileRef.current?.click()} disabled={expUploading} className={`${uploadBtnCls} bg-emerald-600 hover:bg-emerald-700`}>
+              {expUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {expUploading ? "Mengupload..." : "Pilih File"}
+            </button>
+            <input ref={expFileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleExpUpload} />
+          </div>
+        }>
+        <MsgBanner msg={expMsg} onClose={() => setExpMsg(null)} />
+        <RequiredFormatNote>
+          <p>Header <strong className="text-gray-300">Product</strong> (kolom B) dan <strong className="text-gray-300">Potential Supplier</strong> (kolom D) diikuti header bulan <strong className="text-gray-300">Jan–Dec</strong> (dicari otomatis, minimal 10 dari 12 bulan terdeteksi di baris manapun).</p>
+          <p>Format Potential Supplier: <strong className="text-gray-300">"Nama Supplier - Negara"</strong> (mis. "Kexing Biopharm - China") — bagian negara opsional.</p>
+          <p>Kolom bulan diisi nama <strong className="text-gray-300">stage</strong> hanya di bulan stage-nya berubah (sel boleh merge sepanjang beberapa bulan) — bulan kosong di antaranya otomatis dianggap melanjutkan stage terakhir. Isi "-" atau kosong = belum ada stage. Stage yang dikenali:</p>
+          <p className="text-gray-300">Market Analysis &middot; Resource Supplier &middot; Contract Agreement &middot; Registration &middot; Launch Preparation</p>
+        </RequiredFormatNote>
+        <UploadHistoryTable uploadType="expansion" refreshKey={expLogsKey} />
       </ChartCard>
 
       <ChartCard title={`COGS Ratio by Product — ${selectedYear}`}

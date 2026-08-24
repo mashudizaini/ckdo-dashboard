@@ -745,12 +745,235 @@ async def upload_sales_bp(
 
 
 # ══════════════════════════════════════════════════════════════
-# Upload history — shared by all three upload types above
+# Business Expansion Upload — format Business Expansion.xlsx
+#
+# Struktur Excel (sheet "Business Expansion_Dashboard"):
+#   Row 1     : judul, fiscal year di kolom P (merged P1:R2)
+#   Row 3     : "as of" bulan, kolom P (merged P3:R4) — info saja, tidak dipakai
+#   Row 6     : header — kolom B "Product" (merged A:C), kolom D
+#               "Potential Supplier" (merged D:F), kolom G–R "Jan"–"Dec"
+#   Row 7+    : satu baris per produk —
+#                 kolom A = No, kolom B = Product, kolom D = Potential
+#                 Supplier (format "Supplier - Country", country opsional),
+#                 kolom G–R = stage per bulan.
+#               Sel stage di-merge sepanjang bulan-bulan stage itu masih
+#               berlaku (mis. G7:M7 = "Registration" utk Jan–Jul) — openpyxl
+#               hanya membaca nilai di sel kiri-atas merge, sel lain terbaca
+#               None, jadi kolom masih kosong di-forward-fill ke stage
+#               terakhir yang diketahui (None sebelum stage pertama = belum
+#               mulai, dibiarkan kosong / tidak diinsert). Nilai "-" = belum
+#               ada stage.
+# ══════════════════════════════════════════════════════════════
+
+_STAGE_NAME_TO_ORDER = {
+    "market analysis":   1,
+    "resource supplier": 2,
+    "contract agreement": 3,
+    "registration":       4,
+    "launch preparation": 5,
+}
+
+
+def _parse_expansion_excel(content: bytes) -> dict:
+    try:
+        import openpyxl
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl not installed")
+
+    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+    ws = wb.active
+    all_rows = list(ws.iter_rows(min_row=1, max_row=ws.max_row, values_only=True))
+
+    detected_year = None
+    for row in all_rows[:5]:
+        for v in (row or []):
+            if isinstance(v, (int, float)) and 2020 <= v <= 2035:
+                detected_year = int(v)
+                break
+        if detected_year:
+            break
+
+    # Header row = the one with >=10 "Jan".."Dec" month-name cells (same
+    # detection strategy as Sales BP above) — gives the month block's
+    # column positions. Product / Potential Supplier stay at fixed columns
+    # B / D per the reference template regardless of where the month block
+    # starts.
+    header_row_idx = None
+    month_col_map: dict[int, int] = {}
+    for row_idx, row in enumerate(all_rows):
+        if not row:
+            continue
+        row_lower = [str(v).strip().lower() if v is not None else '' for v in row]
+        found: list[tuple[int, int]] = []
+        for col_idx, cell in enumerate(row_lower):
+            for m_idx, (sh, lo) in enumerate(zip(_BP_MONTH_SHORT, _BP_MONTH_LONG)):
+                if cell in (sh, lo):
+                    found.append((m_idx, col_idx))
+                    break
+        if len(found) >= 10:
+            header_row_idx = row_idx
+            for m_idx, col_idx in found:
+                month_col_map[m_idx] = col_idx
+            break
+
+    if header_row_idx is None or len(month_col_map) < 12:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Format tidak valid: header bulan (Jan–Dec) tidak ditemukan. "
+                "Pastikan sheet mengikuti format 'Business Expansion_Dashboard'."
+            ),
+        )
+
+    products = []
+    for row in all_rows[header_row_idx + 1:]:
+        if not row or len(row) < 2:
+            continue
+        product_name = str(row[1]).strip() if row[1] is not None else ''
+        if not product_name:
+            continue
+
+        supplier_raw = str(row[3]).strip() if len(row) > 3 and row[3] is not None else ''
+        if ' - ' in supplier_raw:
+            supplier, country = supplier_raw.rsplit(' - ', 1)
+            supplier, country = supplier.strip(), country.strip()
+        else:
+            supplier, country = supplier_raw, ''
+
+        stages: dict[int, int] = {}  # month_num (1-12) -> stage_order (1-5)
+        current_stage = None
+        for m_idx in range(12):
+            col_idx = month_col_map.get(m_idx)
+            raw = row[col_idx] if col_idx is not None and col_idx < len(row) else None
+            text_val = str(raw).strip() if raw is not None else ''
+            if text_val and text_val != '-':
+                order = _STAGE_NAME_TO_ORDER.get(text_val.lower())
+                if order:
+                    current_stage = order
+            if current_stage is not None:
+                stages[m_idx + 1] = current_stage
+
+        products.append({
+            "product_name":    product_name[:150],
+            "supplier":        (supplier or product_name)[:200],
+            "country_origin":  country[:100] if country else None,
+            "stages":          stages,
+        })
+
+    if not products:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Tidak ada data produk yang bisa dibaca. Pastikan kolom Product (B), "
+                "Potential Supplier (D), dan bulan Jan–Dec terisi."
+            ),
+        )
+
+    return {"products": products, "detected_year": detected_year}
+
+
+@router.post("/expansion/upload")
+async def upload_expansion(
+    year: int = Query(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    """Parse Business Expansion.xlsx dan insert langsung ke
+    dim_pipeline_product + fact_pipeline_progress untuk tahun yang dipilih."""
+    if not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=422, detail="File harus .xlsx atau .xls")
+
+    uploaded_by = user.full_name or user.username or "upload"
+    content = await file.read()
+
+    try:
+        parsed = _parse_expansion_excel(content)
+        products = parsed["products"]
+
+        period_res = await db.execute(
+            text("SELECT period_num, id FROM eis.dim_period WHERE fiscal_year=:y ORDER BY period_num"),
+            {"y": year},
+        )
+        period_map = {r[0]: r[1] for r in period_res.fetchall()}
+        if not period_map:
+            raise HTTPException(status_code=422, detail=f"Tidak ada data periode untuk tahun {year}")
+
+        stage_res = await db.execute(text("SELECT stage_order, id FROM eis.dim_dev_stage"))
+        stage_map = {r[0]: r[1] for r in stage_res.fetchall()}
+
+        loaded_products = 0
+        loaded_rows = 0
+        for prod in products:
+            # Upsert dim_pipeline_product by product_name — no unique
+            # constraint on that column to ON CONFLICT against, so this is a
+            # manual select-then-insert/update. Only overwrite
+            # country_origin when the new file actually supplies one (some
+            # rows only ever list the supplier, e.g. "Samsung Bioepis" with
+            # no " - Country" suffix) — never blank out a value a previous
+            # upload already set.
+            existing = await db.execute(
+                text("SELECT id, country_origin FROM eis.dim_pipeline_product WHERE product_name = :n"),
+                {"n": prod["product_name"]},
+            )
+            row = existing.fetchone()
+            if row:
+                product_id = row[0]
+                new_country = prod["country_origin"] or row[1]
+                await db.execute(text("""
+                    UPDATE eis.dim_pipeline_product
+                       SET supplier = :sup, country_origin = :ctry
+                     WHERE id = :id
+                """), {"sup": prod["supplier"], "ctry": new_country, "id": product_id})
+            else:
+                inserted = await db.execute(text("""
+                    INSERT INTO eis.dim_pipeline_product (product_name, supplier, country_origin)
+                    VALUES (:name, :sup, :ctry)
+                    RETURNING id
+                """), {"name": prod["product_name"], "sup": prod["supplier"], "ctry": prod["country_origin"]})
+                product_id = inserted.scalar_one()
+            loaded_products += 1
+
+            for month_num, stage_order in prod["stages"].items():
+                period_id = period_map.get(month_num)
+                stage_id = stage_map.get(stage_order)
+                if not period_id or not stage_id:
+                    continue
+                await db.execute(text("""
+                    INSERT INTO eis.fact_pipeline_progress (pipeline_product_id, period_id, stage_id)
+                    VALUES (:pid, :perid, :sid)
+                    ON CONFLICT (pipeline_product_id, period_id) DO UPDATE SET
+                        stage_id = EXCLUDED.stage_id
+                """), {"pid": product_id, "perid": period_id, "sid": stage_id})
+                loaded_rows += 1
+
+        await db.commit()
+        logger.info(f"[upload_expansion] {loaded_products} products, {loaded_rows} progress rows for {year}")
+    except HTTPException as e:
+        await _log_upload("expansion", file.filename, year, 0, "failed", str(e.detail), uploaded_by)
+        raise
+    except Exception as e:
+        logger.exception("[upload_expansion] failed")
+        await _log_upload("expansion", file.filename, year, 0, "failed", str(e), uploaded_by)
+        raise HTTPException(status_code=500, detail=f"Upload gagal: {e}")
+
+    await _log_upload("expansion", file.filename, year, loaded_rows, "success", None, uploaded_by)
+    return {
+        "message": f"Berhasil upload {loaded_products} produk ({loaded_rows} baris progress) untuk tahun {year}",
+        "year": year,
+        "products": loaded_products,
+        "rows": loaded_rows,
+        "detected_year": parsed.get("detected_year"),
+    }
+
+
+# ══════════════════════════════════════════════════════════════
+# Upload history — shared by all upload types above
 # ══════════════════════════════════════════════════════════════
 
 @router.get("/upload-logs")
 async def get_upload_logs(
-    upload_type: Optional[str] = Query(None, description="overtime | cogs | sales-bp"),
+    upload_type: Optional[str] = Query(None, description="overtime | cogs | sales-bp | expansion"),
     limit: int = Query(20, le=100),
     db: AsyncSession = Depends(get_db),
     user = Depends(get_current_user),

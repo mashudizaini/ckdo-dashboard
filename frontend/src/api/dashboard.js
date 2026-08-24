@@ -203,6 +203,7 @@ export const eisApi = {
   uploadCogsData:    (year, formData) => api.post(`${EIS}/data-upload/cogs/upload`, formData, { params: { year }, headers: { "Content-Type": "multipart/form-data" } }),
   getSalesBP:        (year)         => api.get(`${EIS}/data-upload/sales-bp`, { params: { year } }),
   uploadSalesBP:     (year, formData) => api.post(`${EIS}/data-upload/sales-bp/upload`, formData, { params: { year }, headers: { "Content-Type": "multipart/form-data" } }),
+  uploadExpansionData:(year, formData) => api.post(`${EIS}/data-upload/expansion/upload`, formData, { params: { year }, headers: { "Content-Type": "multipart/form-data" } }),
   getUploadLogs:     (uploadType, limit) => api.get(`${EIS}/data-upload/upload-logs`, { params: { upload_type: uploadType, limit } }),
 };
 
