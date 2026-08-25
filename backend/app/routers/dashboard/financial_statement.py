@@ -304,10 +304,26 @@ async def get_cash_flow(
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
 ):
-    """Cash Flow statement — Excel-only. There's no live Oracle equivalent:
-    a statutory cash flow isn't a direct GL_BALANCES query, it's manually
-    prepared/derived from the other statements each period."""
+    """Cash Flow statement (Direct method) — Excel-only. There's no live
+    Oracle equivalent: a statutory direct cash flow isn't a direct
+    GL_BALANCES query, it's manually prepared/derived each period. See
+    /cash-flow-indirect for the Indirect method, which IS derivable live
+    from Oracle (Net Profit + non-cash adjustments + Balance Sheet
+    movements)."""
     return await _cash_flow_from_excel(db, years)
+
+
+@router.get("/cash-flow-indirect")
+async def get_cash_flow_indirect(
+    period_from: str = Query(..., description="GL period name, e.g. 'JAN-26'"),
+    period_to: str = Query(..., description="GL period name, e.g. 'JUN-26'"),
+    user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
+):
+    """Cash Flow statement (Indirect method) — live from Oracle EBS
+    GL_BALANCES, unlike the Direct method above. See
+    FinancialStatementService.get_cash_flow_indirect for the full
+    Operating/Investing/Financing classification and its reasoning."""
+    return await FinancialStatementService().get_cash_flow_indirect(period_from, period_to)
 
 
 @router.get("/cash-flow/export")

@@ -619,3 +619,156 @@ class FinancialStatementService:
             {"label": "YTD This Year", "periods": ytd_this},
         ]
         return await self.get_profit_and_loss(columns)
+
+    # ── Cash Flow (Indirect method) ─────────────────────────────────────────
+    # There's no live Oracle equivalent of the statutory (direct) Cash Flow
+    # statement — see cash-flow's own docstring in the router — but the
+    # INDIRECT method is, by construction, entirely derivable from data this
+    # service already computes: Net Profit After Tax (from get_profit_and_loss
+    # for the exact period range) adjusted for non-cash items and the
+    # PERIOD-OVER-PERIOD MOVEMENT of every other Balance Sheet line (from
+    # get_balance_sheet at the opening and closing periods). Classification
+    # below (which BS line -> Operating/Investing/Financing) follows standard
+    # PSAK/IFRS indirect-method convention:
+    #   Operating   = working-capital current assets/liabilities (AR,
+    #                 Inventory, Prepaids, AP, Tax Payables, Accrued Expenses,
+    #                 Other Current *) + non-current employee-benefit/sales-
+    #                 return provisions (non-cash, not real financing) +
+    #                 Depreciation & Amortization add-back.
+    #   Investing   = non-current assets (PPE, Intangibles, Other Non-Current
+    #                 Assets) — a change here is treated as the net of any
+    #                 capex/disposal for the period (this service has no
+    #                 separate capex sub-ledger to split gross additions from
+    #                 depreciation runoff, so it's the net BS movement).
+    #   Financing   = borrowings (short-term, current portion of LT, LT),
+    #                 lease liabilities (current + non-current — lease
+    #                 principal repayment is a financing activity under
+    #                 PSAK 73/IFRS 16, not operating), and Capital Stock.
+    #   Excluded    = Retained Earnings / OCI equity movements — already
+    #                 fully represented by Net Profit After Tax above; adding
+    #                 their BS delta too would double-count it.
+    # Every Balance Sheet bucket this service knows about (BS_ASSET_CURRENT/
+    # NONCURRENT, BS_LIAB_CURRENT/NONCURRENT, and Capital Stock from equity)
+    # is classified exactly once above — Cash itself is used only as the
+    # opening/closing anchor. That completeness is what makes the
+    # reconciliation check below meaningful: opening cash + net movement
+    # should equal closing cash almost exactly; a nonzero diff flags GL
+    # activity this derivation can't see (FX translation, revaluations,
+    # rounding in an adjustment period) worth a manual look from Accounting.
+    _CF_OPERATING_CURRENT_ASSETS = ["ACCOUNT RECEIVABLES", "INVENTORY", "PREPAIDS", "ACCRUED INCOME", "OTHER CURRENT ASSETS"]
+    _CF_OPERATING_CURRENT_LIAB   = ["ACCOUNT PAYABLES", "TAX PAYABLES", "ACCRUED EXPENSES", "OTHER CURRENT LIABILITIES"]
+    _CF_OPERATING_NONCURRENT_LIAB = ["ESTIMATED LIABILITIES FOR EMPLOYEES", "NON-CURRENT SALES RETURN ALLOWANCE"]
+    _CF_INVESTING_NONCURRENT_ASSETS = ["PROPERTY, PLANT AND EQUIPMENT", "INTANGIBLE ASSET", "OTHER NON - CURRENT ASSETS"]
+    _CF_FINANCING_CURRENT_LIAB    = ["SHORT TERM BORROWINGS", "CURRENT PORTION OF LONG TERM BORROWINGS", "CURRENT LEASE LIABILITIES"]
+    _CF_FINANCING_NONCURRENT_LIAB = ["LTB-LOANS", "LONG-TERM LEASE LIABILITIES"]
+
+    def _all_periods_ordered(self) -> list[dict]:
+        sql = """
+            SELECT period_name, period_year, period_num, adjustment_period_flag
+            FROM gl_periods
+            WHERE period_set_name = (
+                SELECT period_set_name FROM gl_ledgers WHERE ledger_category_code='PRIMARY' AND object_type_code='L' AND ROWNUM=1)
+            ORDER BY start_date
+        """
+        return self._query(sql)
+
+    async def get_cash_flow_indirect(self, period_from: str, period_to: str) -> dict:
+        """Indirect Cash Flow statement for the range period_from..period_to
+        inclusive (both GL period names, e.g. "JAN-26".."JUN-26") — one
+        column, covering the whole range as a single movement, the way an
+        indirect CF statement is normally read (not one column per month)."""
+        all_periods = await asyncio.to_thread(self._all_periods_ordered)
+        names = [p["period_name"] for p in all_periods if p["adjustment_period_flag"] != "Y"]
+        if period_from not in names or period_to not in names:
+            return {"success": False, "error": "Selected period not found in the GL calendar."}
+        i_from, i_to = names.index(period_from), names.index(period_to)
+        if i_from > i_to:
+            return {"success": False, "error": "Period From must not be after Period To."}
+        if i_from == 0:
+            return {"success": False, "error": "No prior period exists to use as the opening Balance Sheet snapshot — pick a later Period From."}
+        range_periods = names[i_from:i_to + 1]
+        opening_period = names[i_from - 1]
+
+        bs, pl = await asyncio.gather(
+            self.get_balance_sheet([opening_period, period_to], None),
+            self.get_profit_and_loss([{"label": "Period", "periods": range_periods}]),
+        )
+        if not bs.get("success"):
+            return bs
+
+        def bs_values(section: str, label: str) -> list:
+            row = next((r for r in bs.get(section, []) if r["label"] == label), None)
+            return row["values"] if row else [0, 0]
+
+        def bs_delta(section: str, label: str) -> float:
+            v = bs_values(section, label)
+            return v[1] - v[0]
+
+        net_income = pl["profit_after_tax"][0]
+        depreciation = next(
+            (l["values"][0] for l in pl.get("expense_lines", []) if l["label"] == "DEPRECIATIONS & AMORTIZATION"), 0
+        )
+
+        operating_lines = [("Depreciation & Amortization (add back)", depreciation)]
+        for label in self._CF_OPERATING_CURRENT_ASSETS:
+            d = bs_delta("current_assets", label)
+            operating_lines.append((f"(Increase) / Decrease in {label.title()}", -d))
+        for label in self._CF_OPERATING_CURRENT_LIAB:
+            d = bs_delta("current_liabilities", label)
+            operating_lines.append((f"Increase / (Decrease) in {label.title()}", d))
+        for label in self._CF_OPERATING_NONCURRENT_LIAB:
+            d = bs_delta("noncurrent_liabilities", label)
+            operating_lines.append((f"Increase / (Decrease) in {label.title()}", d))
+        net_operating = net_income + sum(v for _, v in operating_lines)
+
+        investing_lines = []
+        for label in self._CF_INVESTING_NONCURRENT_ASSETS:
+            d = bs_delta("noncurrent_assets", label)
+            investing_lines.append((f"(Acquisition) / Disposal — {label.title()}", -d))
+        net_investing = sum(v for _, v in investing_lines)
+
+        financing_lines = []
+        for label in self._CF_FINANCING_CURRENT_LIAB:
+            d = bs_delta("current_liabilities", label)
+            financing_lines.append((f"Increase / (Decrease) in {label.title()}", d))
+        for label in self._CF_FINANCING_NONCURRENT_LIAB:
+            d = bs_delta("noncurrent_liabilities", label)
+            financing_lines.append((f"Increase / (Decrease) in {label.title()}", d))
+        d_capital = bs_delta("equity", "CAPITAL STOCK")
+        financing_lines.append(("Increase / (Decrease) in Capital Stock", d_capital))
+        net_financing = sum(v for _, v in financing_lines)
+
+        net_change_in_cash = net_operating + net_investing + net_financing
+        cash_vals = bs_values("current_assets", "CASH & CASH EQUIVALENTS")
+        cash_opening, cash_closing = cash_vals[0], cash_vals[1]
+        reconciliation_diff = (cash_opening + net_change_in_cash) - cash_closing
+
+        def _line(label, val):
+            return {"label": label, "type": "line", "level": 1, "values": [val]}
+
+        rows = [
+            {"label": "OPERATING ACTIVITIES", "type": "header", "level": 0},
+            _line("Net Profit After Tax", net_income),
+            *[_line(l, v) for l, v in operating_lines],
+            {"label": "Net Cash from Operating Activities", "type": "total", "level": 0, "values": [net_operating]},
+
+            {"label": "INVESTING ACTIVITIES", "type": "header", "level": 0},
+            *[_line(l, v) for l, v in investing_lines],
+            {"label": "Net Cash from Investing Activities", "type": "total", "level": 0, "values": [net_investing]},
+
+            {"label": "FINANCING ACTIVITIES", "type": "header", "level": 0},
+            *[_line(l, v) for l, v in financing_lines],
+            {"label": "Net Cash from Financing Activities", "type": "total", "level": 0, "values": [net_financing]},
+
+            {"label": "NET INCREASE (DECREASE) IN CASH", "type": "total", "level": 0, "values": [net_change_in_cash]},
+            {"label": "Cash & Cash Equivalents, Beginning of Period", "type": "line", "level": 0, "values": [cash_opening]},
+            {"label": "Cash & Cash Equivalents, End of Period", "type": "total", "level": 0, "values": [cash_closing]},
+        ]
+
+        return {
+            "success": True,
+            "period_from": period_from, "period_to": period_to, "opening_period": opening_period,
+            "columns": [f"{self.period_display_label(period_from)} – {self.period_display_label(period_to)}"],
+            "rows": rows,
+            "reconciliation_diff": [reconciliation_diff],
+        }

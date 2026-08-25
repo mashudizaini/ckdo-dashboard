@@ -1424,7 +1424,25 @@ function ProfitLossMonthlyPanel({ periods, asOfYear, setAsOfYear, asOfMonth, set
 // returns each row pre-leveled/typed (level 0/1/2, type total|line)
 // exactly as read from the sheet, so rows pass straight through to FsTable
 // with no client-side reshaping.
-function CashFlowPanel({ fromYear, setFromYear, toYear, setToYear }) {
+function CashFlowPanel(props) {
+  const [method, setMethod] = useState("direct");
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div>
+        <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Method</label>
+        <select style={SELECT} value={method} onChange={e => setMethod(e.target.value)}>
+          <option value="direct">Direct</option>
+          <option value="indirect">Indirect</option>
+        </select>
+      </div>
+      {method === "direct"
+        ? <CashFlowDirectPanel {...props} />
+        : <CashFlowIndirectPanel {...props} />}
+    </div>
+  );
+}
+
+function CashFlowDirectPanel({ fromYear, setFromYear, toYear, setToYear }) {
   const [excelStatus, setExcelStatus] = useState(null);
   const pickerYears = excelStatus?.years || EMPTY_ARRAY;
 
@@ -1536,6 +1554,93 @@ function CashFlowPanel({ fromYear, setFromYear, toYear, setToYear }) {
   );
 }
 
+// Indirect method — live from Oracle (unlike Direct, which is Excel-only),
+// so it reuses the same Period From/To month+year pickers BalanceSheetPanel
+// established, instead of the Direct panel's plain fiscal-year pickers.
+// Always resolves to exactly 1 column covering the whole range, since an
+// indirect statement is read as one movement, not one column per month.
+function CashFlowIndirectPanel({ periods, fromYear, setFromYear, fromMonth, setFromMonth, toYear, setToYear, toMonth, setToMonth }) {
+  const years = useMemo(() => fiscalYears(periods), [periods]);
+  useMonthSnap("oracle", periods, fromYear, fromMonth, setFromMonth);
+  useMonthSnap("oracle", periods, toYear, toMonth, setToMonth);
+
+  const periodFrom = useMemo(() => periodNameForMonthYear(periods, fromMonth, fromYear), [periods, fromMonth, fromYear]);
+  const periodTo = useMemo(() => periodNameForMonthYear(periods, toMonth, toYear), [periods, toMonth, toYear]);
+  const fromAfterTo = fromYear && toYear
+    ? fromYear * 12 + MONTHS.indexOf(fromMonth) > toYear * 12 + MONTHS.indexOf(toMonth)
+    : false;
+
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    if (!periodFrom || !periodTo) return;
+    setLoading(true); setError(null);
+    try {
+      const res = await financialStatementApi.getCashFlowIndirect(periodFrom, periodTo);
+      if (res.success) setData(res); else setError(res.error || "Failed to load");
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.detail || String(e));
+    } finally { setLoading(false); }
+  }, [periodFrom, periodTo]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <p style={{ fontSize: 11, color: "#64748b", margin: 0 }}>
+        Live from Oracle EBS — Net Profit After Tax adjusted for non-cash items and Balance Sheet movements between
+        Period From's prior period (the opening snapshot) and Period To (the closing snapshot).
+      </p>
+      <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period From</label>
+          <div style={{ display: "flex", gap: 6 }}>
+            <select style={SELECT} value={fromMonth} onChange={e => setFromMonth(e.target.value)}>
+              {monthOptionsForYear(periods, fromYear).map(m => <option key={m} value={m}>{MONTH_LABEL[m]}</option>)}
+            </select>
+            <select style={SELECT} value={fromYear} onChange={e => setFromYear(e.target.value ? Number(e.target.value) : "")}>
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: "#64748b", marginBottom: 4 }}>Period To</label>
+          <div style={{ display: "flex", gap: 6 }}>
+            <select style={SELECT} value={toMonth} onChange={e => setToMonth(e.target.value)}>
+              {monthOptionsForYear(periods, toYear).map(m => <option key={m} value={m}>{MONTH_LABEL[m]}</option>)}
+            </select>
+            <select style={SELECT} value={toYear} onChange={e => setToYear(e.target.value ? Number(e.target.value) : "")}>
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+        </div>
+        <button onClick={load} disabled={loading} style={BTN}>
+          {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Refresh
+        </button>
+      </div>
+
+      {fromAfterTo ? (
+        <div style={{ padding: 16, fontSize: 12, color: "#dc2626" }}>Period From must not be after Period To.</div>
+      ) : loading && !data ? (
+        <div style={{ padding: 40, textAlign: "center", color: "#64748b" }}><Loader2 size={20} className="animate-spin" /></div>
+      ) : error ? (
+        <div style={{ padding: 16, color: "#dc2626", fontSize: 13 }}>{error}</div>
+      ) : data ? (
+        <>
+          <FsTable columns={data.columns} rows={data.rows} checkDiff={data.reconciliation_diff} />
+          <div style={{ fontSize: 11, color: "#94a3b8" }}>
+            Opening Balance Sheet snapshot: {data.opening_period} · Closing: {data.period_to}. A nonzero reconciliation
+            check above means some GL activity (FX translation, revaluation, adjustment-period entries) moved cash
+            without moving through the Balance Sheet lines this report tracks — worth a look from Accounting.
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 /* ── Root ─────────────────────────────────────────────────────────────── */
 
 export default function FinancialStatement() {
@@ -1627,7 +1732,9 @@ export default function FinancialStatement() {
               asOfYear={asOfYear} setAsOfYear={setAsOfYear} asOfMonth={asOfMonth} setAsOfMonth={setAsOfMonth} />
           )}
           {subTab === "cash-flow" && (
-            <CashFlowPanel fromYear={fromYear} setFromYear={setFromYear} toYear={toYear} setToYear={setToYear} />
+            <CashFlowPanel periods={periods}
+              fromYear={fromYear} setFromYear={setFromYear} fromMonth={fromMonth} setFromMonth={setFromMonth}
+              toYear={toYear} setToYear={setToYear} toMonth={toMonth} setToMonth={setToMonth} />
           )}
         </>
       )}

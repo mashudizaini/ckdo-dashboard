@@ -356,6 +356,8 @@ export const financialStatementApi = {
   // Excel-only — no live Oracle equivalent (a statutory cash flow isn't a
   // direct GL_BALANCES query, it's manually derived each period).
   getCashFlow: (years, signal) => api.get("/dashboard/accounting/financial-statement/cash-flow", { params: { years: years.join(",") }, signal }),
+  // Indirect method — live from Oracle, unlike Direct above (Excel-only).
+  getCashFlowIndirect: (periodFrom, periodTo, signal) => api.get("/dashboard/accounting/financial-statement/cash-flow-indirect", { params: { period_from: periodFrom, period_to: periodTo }, signal }),
   // Excel upload source (transition from manual reporting to Oracle) —
   // reportType: balance_sheet | profit_loss | profit_loss_monthly | cash_flow.
   // month/year are profit_loss_monthly-only (which stored snapshot to show
