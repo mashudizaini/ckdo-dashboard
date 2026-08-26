@@ -1,41 +1,30 @@
 """
-HikCentral OpenAPI (Artemis) client — pulls raw access-control events from
-the office's Hikvision DS-K1T342MFWX face-recognition terminals, aggregated
-behind the HikCentral server the terminals already report to (screenshot:
-"HikCentral Access Control" web client at https://<host>/#/portal).
+Hikvision ISAPI client — pulls raw access-control (face/card authentication)
+events directly from the office's Hikvision DS-K1T342MFWX terminal at its
+own IP (HTTP digest auth, e.g. http://192.168.1.20), rather than through a
+HikCentral aggregation server. This app talks to the terminal itself.
 
-We deliberately pull RAW check-in events, not HikCentral's own computed
-Present/Absent/Leave numbers (visible in its "Attendance Report" widget) —
-those get normalized into AttendanceRecord and scored by this app's own
+We deliberately pull RAW events, not any device-side computed attendance
+status — normalized into AttendanceRecord by this app's own
 _plan_expr()/_actual_expr() rules (see hr_attendance.py's module docstring),
-the same as every other source (Intercom/Talenta/Plant/Office). Importing
-HikCentral's own computed rate instead would create two different attendance
-methodologies that could silently disagree.
+same as every other source (Intercom/Talenta/Plant/Office).
 
-── SIGNING — NEEDS VERIFICATION AGAINST YOUR HIKCENTRAL EDITION ──
-The scheme below (HMAC-SHA256 over a canonical string, Alibaba Cloud API
-Gateway-style headers) is Hikvision's documented Artemis/OpenAPI signing
-convention and is consistent across most HikCentral Professional/Enterprise
-deployments, but exact header casing/order can vary by version. Before
-relying on this in production:
-  1. In HikCentral: System > Open Platform (or "Third-party Integration") >
-     add an application to get an AppKey + AppSecret.
-  2. Most HikCentral installs ship (or let you download) an "OpenAPI
-     Development Guide" PDF and/or a Postman collection with one WORKED
-     signed-request example for your exact version — use that to confirm
-     the canonical-string format matches `_build_headers()` below, and fix
-     it here if not (that's the only function that should need to change).
-  3. The endpoint path in `search_door_events()` (/artemis/api/acs/v1/door/
-     events) is Hikvision's standard ACS event-search endpoint, stable
-     across editions — but if your HikCentral build exposes a dedicated
-     Attendance-module raw-record endpoint, that may be a better fit and
-     can replace this call without touching anything else in this file.
+── Confirmed live against the real device ──
+  - Every JSON POST must have `?format=json` appended to the URL itself —
+    the device parses XML vs JSON based on this query param, not the
+    Content-Type header or actual body content.
+  - `AcsEventCond.maxResults` is capped at 30 by this device's firmware
+    (see GET /ISAPI/AccessControl/AcsEvent/capabilities?format=json).
+    Pagination is via `searchResultPosition`, not a real page size.
+  - Only events carrying `employeeNoString` are an actual face/card
+    authentication pass identifying a person (major=5/minor=75 on this
+    device); door-open/close and periodic heartbeat events (e.g.
+    major=5/minor=21/22, major=3/minor=1029) don't carry identity and are
+    filtered out by the caller.
+  - Event fields used: employeeNoString (matches Employee.user_id and the
+    roster's employeeNo — confirmed e.g. "A25002"), name, time (ISO-8601
+    with timezone offset, e.g. "2026-08-26T07:14:12+07:00").
 """
-import base64
-import hashlib
-import hmac
-import json
-import time
 from typing import Optional
 
 import httpx
@@ -47,75 +36,58 @@ class HikCentralError(Exception):
     pass
 
 
-def _build_headers(app_key: str, app_secret: str, method: str, path: str, body_str: str) -> dict:
-    """Builds the signed request headers. HMAC-SHA256 over a canonical
-    string (method/Accept/Content-MD5/Content-Type/Date/signed-headers/
-    path) — Content-MD5 and Date are left blank since the body isn't
-    MD5-hashed and X-Ca-Timestamp is used instead of the Date header."""
-    accept = "application/json"
-    content_type = "application/json;charset=UTF-8" if body_str else ""
-    timestamp = str(int(time.time() * 1000))
-
-    string_to_sign = (
-        f"{method}\n"
-        f"{accept}\n"
-        "\n"
-        f"{content_type}\n"
-        "\n"
-        f"x-ca-key:{app_key}\n"
-        f"x-ca-timestamp:{timestamp}\n"
-        f"{path}"
-    )
-    digest = hmac.new(app_secret.encode(), string_to_sign.encode(), hashlib.sha256).digest()
-    signature = base64.b64encode(digest).decode()
-
-    headers = {
-        "Accept": accept,
-        "x-ca-key": app_key,
-        "x-ca-timestamp": timestamp,
-        "x-ca-signature-headers": "x-ca-key,x-ca-timestamp",
-        "x-ca-signature": signature,
-    }
-    if content_type:
-        headers["Content-Type"] = content_type
-    return headers
-
-
 class HikCentralClient:
-    def __init__(self, base_url: Optional[str] = None, app_key: Optional[str] = None, app_secret: Optional[str] = None):
+    def __init__(self, base_url: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None):
         s = get_settings()
         self.base_url = (base_url or s.hikcentral_base_url).rstrip("/")
-        self.app_key = app_key or s.hikcentral_app_key
-        self.app_secret = app_secret or s.hikcentral_app_secret
-        if not (self.base_url and self.app_key and self.app_secret):
+        self.username = username or s.hikcentral_app_key
+        self.password = password or s.hikcentral_app_secret
+        if not (self.base_url and self.username and self.password):
             raise HikCentralError(
-                "HikCentral not configured — set hikcentral_base_url / "
-                "hikcentral_app_key / hikcentral_app_secret (.env)"
+                "Hikvision device not configured — set hikcentral_base_url / "
+                "hikcentral_app_key / hikcentral_app_secret (.env), or fill in "
+                "IT Dashboard > HikCentral Integration (device host / username / password)"
             )
 
-    def _post(self, path: str, payload: dict) -> dict:
-        body_str = json.dumps(payload)
-        headers = _build_headers(self.app_key, self.app_secret, "POST", path, body_str)
-        url = f"{self.base_url}{path}"
-        with httpx.Client(verify=False, timeout=30) as client:  # HikCentral's local cert is usually self-signed
-            resp = client.post(url, content=body_str, headers=headers)
+    def _post_json(self, path: str, payload: dict) -> dict:
+        url = f"{self.base_url}{path}?format=json"
+        try:
+            with httpx.Client(auth=httpx.DigestAuth(self.username, self.password), timeout=30) as client:
+                resp = client.post(url, json=payload)
+        except httpx.HTTPError as exc:
+            raise HikCentralError(f"Could not reach Hikvision device at {self.base_url}: {exc}") from exc
         try:
             data = resp.json()
         except Exception as exc:
-            raise HikCentralError(f"HikCentral returned non-JSON (HTTP {resp.status_code}): {resp.text[:300]}") from exc
-        if data.get("code") not in ("0", 0, None):
-            raise HikCentralError(f"HikCentral API error {data.get('code')}: {data.get('msg')}")
-        return data.get("data", data)
+            raise HikCentralError(f"Device returned non-JSON (HTTP {resp.status_code}): {resp.text[:300]}") from exc
+        if resp.status_code != 200:
+            detail = data.get("subStatusCode") or data.get("statusString") or data.get("errorMsg") or data
+            raise HikCentralError(f"Device error (HTTP {resp.status_code}): {detail}")
+        return data
 
-    def search_door_events(self, start_time: str, end_time: str, page_no: int = 1, page_size: int = 1000) -> dict:
-        """Raw ACS (access control) events in [start_time, end_time)
-        (ISO-8601, e.g. "2026-08-13T00:00:00+07:00") — each face-recognition
-        pass at a terminal is one event, carrying personId/name/time/
-        doorName. This is the "raw check-in/out" data source; pagination via
-        pageNo/pageSize (HikCentral typically caps pageSize around 1000)."""
-        return self._post("/artemis/api/acs/v1/door/events", {
-            "startTime": start_time,
-            "endTime": end_time,
-            "pageNo": page_no,
-            "pageSize": page_size,
+    def search_door_events(self, start_time: str, end_time: str, search_position: int = 0, max_results: int = 30) -> dict:
+        """Raw access-control events in [start_time, end_time) (ISO-8601
+        with tz offset, e.g. "2026-08-26T00:00:00+07:00"). max_results is
+        capped at 30 by this device's firmware regardless of what's
+        requested; paginate via search_position, following
+        responseStatusStrg == "MORE", until it isn't."""
+        data = self._post_json("/ISAPI/AccessControl/AcsEvent", {
+            "AcsEventCond": {
+                "searchID": "1",
+                "searchResultPosition": search_position,
+                "maxResults": min(max_results, 30),
+                "major": 0,
+                "minor": 0,
+                "startTime": start_time,
+                "endTime": end_time,
+                "picEnable": False,
+            }
         })
+        block = data.get("AcsEvent")
+        if block is None:
+            raise HikCentralError(f"Unexpected device response: {data}")
+        return {
+            "list": block.get("InfoList", []),
+            "totalMatches": block.get("totalMatches", 0),
+            "responseStatusStrg": block.get("responseStatusStrg"),
+        }

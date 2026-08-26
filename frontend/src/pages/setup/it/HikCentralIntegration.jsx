@@ -1,15 +1,16 @@
 /**
  * HikCentral Integration
  * ─────────────────────────────────────────
- * One place to configure and control the office's HikCentral OpenAPI
- * connection (the Hikvision DS-K1T342MFWX face-recognition terminals report
- * to HikCentral, not directly to this app) — connection status, a manual
- * connectivity test, the 15-minute background sync's status/history, and a
- * manual "Sync Now". Config is DB-backed (editable here, takes effect
- * immediately) instead of requiring an SSH session + .env edit + backend
- * restart, which was the slow loop the initial integration setup went
- * through. Local `Panel`/`Btn`/`Field` helpers duplicated rather than
- * shared, matching the convention already used by VpnAccessMonitoring.jsx.
+ * One place to configure and control the direct connection to the office's
+ * Hikvision DS-K1T342MFWX face-recognition terminal (this app talks to the
+ * terminal itself over its ISAPI, digest auth — not through a HikCentral
+ * aggregation server) — connection status, a manual connectivity test, the
+ * 15-minute background sync's status/history, and a manual "Sync Now".
+ * Config is DB-backed (editable here, takes effect immediately) instead of
+ * requiring an SSH session + .env edit + backend restart, which was the
+ * slow loop the initial integration setup went through. Local
+ * `Panel`/`Btn`/`Field` helpers duplicated rather than shared, matching the
+ * convention already used by VpnAccessMonitoring.jsx.
  */
 import { useState, useEffect, useCallback } from "react";
 import {
@@ -150,7 +151,7 @@ export default function HikCentralIntegration() {
 
   return (
     <>
-      <Panel title="Connection Status" subtitle="HikCentral OpenAPI (Artemis) — aggregates the Hikvision DS-K1T342MFWX terminals."
+      <Panel title="Connection Status" subtitle="Direct ISAPI connection to the Hikvision DS-K1T342MFWX terminal."
         action={<Btn icon={testing ? Loader2 : Wifi} disabled={testing} onClick={testConnection}>{testing ? "Testing…" : "Test Connection"}</Btn>}>
         <div className="flex items-center gap-4 flex-wrap mb-4">
           <div className="flex items-center gap-2.5 rounded-xl px-4 py-3" style={{
@@ -171,7 +172,7 @@ export default function HikCentralIntegration() {
             <p style={{ fontSize: 13, color: "#334155", fontFamily: "monospace" }}>{config?.base_url || "—"}</p>
           </div>
           <div>
-            <p style={{ fontSize: 10.5, color: "#94a3b8", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.04em" }}>AppKey</p>
+            <p style={{ fontSize: 10.5, color: "#94a3b8", textTransform: "uppercase", fontWeight: 700, letterSpacing: "0.04em" }}>Username</p>
             <p style={{ fontSize: 13, color: "#334155", fontFamily: "monospace" }}>{config?.app_key_masked || "—"}</p>
           </div>
         </div>
@@ -274,7 +275,7 @@ function SetupSection({ config, onChanged }) {
 
   const save = async () => {
     if (!form.base_url || !form.app_key || !form.app_secret) {
-      setSaveError("Base URL, AppKey, and AppSecret are all required.");
+      setSaveError("Base URL, Username, and Password are all required.");
       return;
     }
     setSaving(true);
@@ -298,18 +299,18 @@ function SetupSection({ config, onChanged }) {
       {open && (
         <div className="space-y-3">
           <p style={{ fontSize: 11.5, color: "#64748b" }}>
-            From HikCentral: System &gt; Open Platform (or "Third-party Integration") &gt; add an Integration
-            Partner to get an AppKey + AppSecret. Base URL is HikCentral's own host (e.g. <code>https://172.21.x.x</code>),
-            not the individual terminal IPs.
+            Base URL is the terminal's own address on the office LAN (e.g. <code>http://192.168.1.20</code>), and
+            Username/Password are the ISAPI login for that device (the same credentials used to log into its web
+            admin page or configure it in software like SADP/iVMS).
           </p>
           <div className="grid grid-cols-3 gap-3">
             <Field label="Base URL">
-              <input style={inputStyle} value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} placeholder="https://172.21.x.x" />
+              <input style={inputStyle} value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} placeholder="http://192.168.1.20" />
             </Field>
-            <Field label="AppKey">
-              <input style={inputStyle} value={form.app_key} onChange={(e) => setForm({ ...form, app_key: e.target.value })} placeholder={config?.app_key_masked || "AppKey"} />
+            <Field label="Username">
+              <input style={inputStyle} value={form.app_key} onChange={(e) => setForm({ ...form, app_key: e.target.value })} placeholder={config?.app_key_masked || "admin"} />
             </Field>
-            <Field label="AppSecret">
+            <Field label="Password">
               <input type="password" style={inputStyle} value={form.app_secret} onChange={(e) => setForm({ ...form, app_secret: e.target.value })} placeholder="Leave blank to keep existing" />
             </Field>
           </div>
@@ -334,37 +335,30 @@ function SetupGuide() {
         <div className="space-y-4" style={{ fontSize: 12, color: "#334155", lineHeight: 1.6 }}>
           <div>
             <p style={{ fontWeight: 700, marginBottom: 4 }}>1. Network reachability</p>
-            <p>This backend server must reach HikCentral's Base URL over the network — a plain ping is not enough, the exact
-              port used by Base URL (usually 443) must also be open. If Test Connection times out, check firewall rules
-              between the two sites/subnets first.</p>
+            <p>This backend server must reach the terminal's IP directly over the network (LAN or VPN) on port 80 — a plain
+              ping is not enough, HTTP must also be open. If Test Connection times out, check firewall/routing between this
+              server and the terminal's subnet first.</p>
           </div>
           <div>
-            <p style={{ fontWeight: 700, marginBottom: 4 }}>2. Create an Integration Partner</p>
-            <p>In HikCentral: <strong>System &gt; Open Platform</strong> (some editions call it "Third-party Integration") &gt;
-              add a new Integration Partner. This generates the AppKey/AppSecret pair used above — make sure to save the
-              Secret shown at creation time, HikCentral won't show it again.</p>
+            <p style={{ fontWeight: 700, marginBottom: 4 }}>2. Credentials</p>
+            <p>Username/Password are the terminal's own ISAPI login — the same admin credentials used to open its web
+              interface (<code>http://&lt;device-ip&gt;</code>) or configure it via SADP/iVMS-4200. No separate app key or
+              integration partner setup is needed; this connects to the device itself, not to a HikCentral server.</p>
           </div>
           <div>
-            <p style={{ fontWeight: 700, marginBottom: 4 }}>3. Authorize the APIs this integration needs</p>
-            <p>Still under Open Platform, the Integration Partner has an <strong>"Authorized APIs"</strong> list — if this is
-              empty, every call fails regardless of how correct the AppKey/AppSecret/Base URL are. This is the most common
-              blocker: the OpenAPI Gateway module sometimes needs a separate license activation before any APIs can be
-              authorized at all. If Test Connection keeps failing and steps 1-2 check out, check License Management in
-              HikCentral (or contact your HikCentral integrator/vendor) for an OpenAPI Gateway license.</p>
-          </div>
-          <div>
-            <p style={{ fontWeight: 700, marginBottom: 4 }}>4. Signing quirks across HikCentral editions</p>
-            <p>The signing scheme (HMAC-SHA256, Alibaba Cloud API Gateway-style headers) is Hikvision's documented Artemis/
-              OpenAPI convention, but exact header casing/order can vary slightly by version — most HikCentral installs
-              ship (or let you download) an "OpenAPI Development Guide" PDF with one worked signed-request example for
-              your exact version, useful for comparing against a failing request here.</p>
+            <p style={{ fontWeight: 700, marginBottom: 4 }}>3. Digest auth and JSON quirks</p>
+            <p>The device uses HTTP Digest authentication, and — confirmed by live testing — every request needs
+              <code>?format=json</code> appended to the URL itself (the <code>Content-Type</code> header alone isn't enough
+              to avoid a <code>badJsonFormat</code> error). <code>maxResults</code> per search is capped at 30 by this
+              device's firmware regardless of what's requested; the sync paginates automatically to get the full day.</p>
           </div>
           <div>
             <p style={{ fontWeight: 700, marginBottom: 4 }}>What syncs, and how</p>
-            <p>Every 15 minutes (and on manual "Sync Now"), this pulls the day's raw door (face-recognition check-in)
-              events and derives each employee's earliest event as check-in / latest as check-out — the same
-              upsert-by-(employee, date) pattern as the other attendance sources (Plant/Intercom/Talenta uploads), so it
-              shows up in Attendance Today/Rate with <code>source = "hikcentral"</code>.</p>
+            <p>Every 15 minutes (and on manual "Sync Now"), this pulls the day's raw access-control (face/card
+              authentication) events straight from the terminal and derives each employee's earliest event as check-in /
+              latest as check-out — the same upsert-by-(employee, date) pattern as the other attendance sources
+              (Plant/Intercom/Talenta uploads), so it shows up in Attendance Today/Rate with
+              <code>source = "hikcentral"</code>.</p>
           </div>
         </div>
       )}

@@ -34,12 +34,13 @@ class Settings(BaseSettings):
     talenta_api_key: str = ""
     talenta_api_url: str = "https://api.talenta.co"
 
-    # HikCentral OpenAPI (Artemis) — attendance event poller for the office's
-    # Hikvision DS-K1T342MFWX face-recognition terminals, aggregated behind
-    # HikCentral rather than talked to per-device. base_url is HikCentral's
-    # own host (reachable over the office LAN/VPN from this server), not the
-    # individual terminal IPs. AppKey/AppSecret come from HikCentral's
-    # System > Open Platform > add a third-party integration application.
+    # Hikvision ISAPI — attendance event poller talking directly to the
+    # office's Hikvision DS-K1T342MFWX face-recognition terminal (digest
+    # auth), not through a HikCentral aggregation server. base_url is the
+    # terminal's own address (e.g. "http://192.168.1.20"), reachable over the
+    # office LAN/VPN from this server. app_key/app_secret hold the device's
+    # ISAPI username/password (field names kept from this integration's
+    # earlier HikCentral-OpenAPI design to avoid a schema migration).
     hikcentral_base_url: str = ""
     hikcentral_app_key: str = ""
     hikcentral_app_secret: str = ""

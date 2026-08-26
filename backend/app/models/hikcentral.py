@@ -1,5 +1,5 @@
 """
-HikCentral OpenAPI integration — IT dashboard control tab.
+Hikvision ISAPI integration — IT dashboard control tab.
 
 Same pattern as vpn_monitor.py: a dedicated sync SQLAlchemy engine against
 the same Postgres database (own `hikcentral_` prefixed table), rather than
@@ -8,9 +8,15 @@ the app's shared async Base/AsyncSession, since config edits and the
 
 HikCentralConfig is a single editable row (falls back to the .env values in
 app/config.py when no row exists yet) — the point is letting IT staff
-rotate the AppKey/AppSecret or fix the base URL from the dashboard UI
+rotate the device credentials or fix the base URL from the dashboard UI
 instead of needing an SSH session + .env edit + backend restart, which was
 the slow, error-prone loop the initial integration setup went through.
+
+Columns kept from this integration's earlier HikCentral-OpenAPI (Artemis)
+design to avoid a schema migration — they're now used for direct-to-device
+ISAPI credentials: `base_url` is the terminal's own address (e.g.
+"http://192.168.1.20"), `app_key` is the ISAPI username, and
+`app_secret_encrypted` is the ISAPI password (still Fernet-encrypted).
 """
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text

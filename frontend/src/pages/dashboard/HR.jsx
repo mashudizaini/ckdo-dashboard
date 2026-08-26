@@ -4460,8 +4460,8 @@ function TargetAchievementPanel({ apiBase, headers, department, year }) {
 }
 
 // ── HikCentral integration — live poller status + manual "Sync Now" for the
-// office's Hikvision DS-K1T342MFWX terminals (via HikCentral OpenAPI). The
-// actual 15-minute poll runs server-side (hikcentral_scheduler.py); this
+// office's Hikvision DS-K1T342MFWX terminal, read directly via its ISAPI.
+// The actual 15-minute poll runs server-side (hikcentral_scheduler.py); this
 // panel just surfaces its status and lets HR force an immediate sync,
 // alongside the file-upload sources it feeds the same reports as. ─────────
 function HikCentralIntegration() {
@@ -4516,7 +4516,7 @@ function HikCentralIntegration() {
         <h4 className="text-sm font-semibold text-cyan-300">HikCentral Integration</h4>
       </div>
       <p className="text-xs text-gray-500">
-        Auto-syncs check-in/out events every 15 minutes from the office's Hikvision face-recognition terminals via HikCentral OpenAPI — feeds the same Attendance Ratio reports as the uploads below.
+        Auto-syncs check-in/out events every 15 minutes directly from the office's Hikvision face-recognition terminal — feeds the same Attendance Ratio reports as the uploads below.
       </p>
 
       {loading ? (
@@ -4552,7 +4552,7 @@ function HikCentralIntegration() {
             <button
               onClick={handleSyncNow}
               disabled={syncing || !status?.configured}
-              title={!status?.configured ? "Waiting on HikCentral AppKey/AppSecret/base URL" : undefined}
+              title={!status?.configured ? "Waiting on Hikvision device host/username/password (IT Dashboard)" : undefined}
               className="flex items-center gap-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 text-xs font-semibold text-white transition-colors"
             >
               {syncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}

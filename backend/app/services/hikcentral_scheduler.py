@@ -1,28 +1,28 @@
 """
-HikCentral attendance poller — pulls today's raw door (face-recognition
-check-in) events from HikCentral every 15 minutes and upserts them into
-AttendanceRecord, same table and same UPSERT-by-(employee_id, attendance_date)
-pattern as the Plant/Intercom/Talenta/Office Excel uploads (see
-hr_attendance.py's upload_attendance_plant for the reference implementation
-this mirrors).
+Hikvision ISAPI attendance poller — pulls today's raw access-control (face/
+card authentication) events directly from the office's Hikvision terminal
+every 15 minutes and upserts them into AttendanceRecord, same table and same
+UPSERT-by-(employee_id, attendance_date) pattern as the Plant/Intercom/
+Talenta/Office Excel uploads (see hr_attendance.py's upload_attendance_plant
+for the reference implementation this mirrors).
 
 Design: each tick re-fetches ALL of today's events (midnight -> now) and
 re-derives checkin (earliest event) / checkout (latest event) per person,
 rather than tracking a "last synced" checkpoint. Simpler and self-healing —
 a missed tick or a restart just gets caught up by the next tick, since
 re-deriving from the full day's events is idempotent. The trade-off is
-re-fetching the whole day every 15 minutes rather than only new events;
-acceptable at office headcount scale (dozens-hundreds of events/day).
+re-fetching (and re-paginating, 30 events/page — see hikcentral_client.py)
+the whole day every 15 minutes rather than only new events; acceptable at
+office headcount scale (dozens-hundreds of identity events/day, even though
+the device's raw event log also contains hundreds more door-status/heartbeat
+entries per day that carry no employee identity and get filtered out).
 
-── NEEDS VERIFICATION once HikCentral AppKey/AppSecret exist ──
-The exact JSON field names below (personId/jobNo/name/time) are Hikvision's
-commonly-documented ACS event shape, but should be confirmed against a real
-response from your HikCentral version before trusting this in production —
-see hikcentral_client.py's module docstring for how to get one. In
-particular: `_employee_id_from_event()` assumes the terminal was enrolled
-with each person's company NIK in the "Job No" field — if your enrollment
-used a different field (or HikCentral's internal personId happens to *be*
-the NIK), adjust that one function; nothing else needs to change.
+── VERIFIED against the live device ──
+Confirmed via GET .../AcsEvent/capabilities?format=json and a real
+AcsEvent search: identity-carrying events use `employeeNoString` (matches
+Employee.user_id / the roster's employeeNo, e.g. "A25002") and `name`;
+`time` is ISO-8601 with a timezone offset. See hikcentral_client.py's module
+docstring for the full picture, including which major/minor codes are noise.
 """
 import logging
 from collections import defaultdict
@@ -45,10 +45,10 @@ WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturd
 
 
 def _employee_id_from_event(evt: dict) -> str | None:
-    """The company NIK for this event — see module docstring. Falls back
-    through the field names Hikvision events commonly carry for a
-    person's external ID, in likely-correctness order."""
-    return evt.get("jobNo") or evt.get("personCode") or evt.get("cardNo") or evt.get("personId")
+    """The company NIK for this event — ISAPI AcsEvent identity events carry
+    it as employeeNoString (confirmed live, matches Employee.user_id / the
+    roster's employeeNo, e.g. "A25002")."""
+    return evt.get("employeeNoString") or evt.get("employeeNo")
 
 
 def _parse_event_time(evt: dict) -> datetime | None:
@@ -70,17 +70,17 @@ def _fetch_today_events(client: HikCentralClient, today: date) -> list[dict]:
     end_time = datetime.now().strftime(f"%Y-%m-%dT%H:%M:%S{tz_suffix}")
 
     events: list[dict] = []
-    page_no = 1
+    position = 0
     while True:
-        result = client.search_door_events(start_time, end_time, page_no=page_no, page_size=1000)
-        batch = result.get("list") or result.get("events") or []
-        if not batch:
+        result = client.search_door_events(start_time, end_time, search_position=position, max_results=30)
+        batch = result.get("list") or []
+        # Door-status/heartbeat events (no employeeNoString) are noise —
+        # drop them here so `len(events)` reflects real identity events.
+        events.extend(e for e in batch if e.get("employeeNoString") or e.get("employeeNo"))
+        position += len(batch)
+        total = result.get("totalMatches", position)
+        if not batch or result.get("responseStatusStrg") != "MORE" or position >= total:
             break
-        events.extend(batch)
-        total = int(result.get("total", len(events)))
-        if len(events) >= total or not batch:
-            break
-        page_no += 1
     return events
 
 
@@ -111,7 +111,7 @@ def run_sync(uploaded_by: str = "scheduler") -> dict:
 
     db = SessionLocal()
     try:
-        client = HikCentralClient(base_url=cfg["base_url"], app_key=cfg["app_key"], app_secret=cfg["app_secret"])
+        client = HikCentralClient(base_url=cfg["base_url"], username=cfg["app_key"], password=cfg["app_secret"])
         today = date.today()
         events = _fetch_today_events(client, today)
 
@@ -124,8 +124,8 @@ def run_sync(uploaded_by: str = "scheduler") -> dict:
             if not emp_id or not ts:
                 continue
             by_employee[str(emp_id)].append(ts)
-            if evt.get("personName"):
-                names[str(emp_id)] = evt["personName"]
+            if evt.get("name"):
+                names[str(emp_id)] = evt["name"]
 
         if not by_employee:
             return {"events": len(events), "employees": 0, "inserted": 0, "updated": 0, "date": today.isoformat()}
