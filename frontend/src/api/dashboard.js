@@ -222,11 +222,6 @@ export const pacApi = {
     form.append("file", file);
     return api.post("/dashboard/pac/business-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
   },
-  uploadManufacturePlanReportExcel: (file, planYear) => {
-    const form = new FormData();
-    form.append("file", file);
-    return api.post("/dashboard/pac/business-plans/mfg-report/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
-  },
 
   // Setup Modules (Schedule / Guideline / Outlook)
   listSetupModules:     (p)    => api.get("/dashboard/pac/setup-modules", { params: p }),
@@ -299,6 +294,10 @@ export const pacApi = {
     return api.post("/dashboard/pac/manufacture-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
   },
   exportManufacturePlanDetailReport: (planYear) => api.get("/dashboard/pac/manufacture-plans/detail-report", { params: { plan_year: planYear }, responseType: "blob" }),
+  // Reporting > Manufacturing Plan — computed live from the Manufacture Plan
+  // Simulation Data above, no separate upload for this one.
+  getManufacturePlanReport:    (planYear) => api.get("/dashboard/pac/manufacture-plans/report", { params: { plan_year: planYear } }),
+  exportManufacturePlanReport: (planYear) => api.get("/dashboard/pac/manufacture-plans/report/export", { params: { plan_year: planYear }, responseType: "blob" }),
 
   // Investment Plan (Simulation)
   listInvestmentPlans:  (p)    => api.get("/dashboard/pac/investment-plans", { params: p }),

@@ -127,22 +127,6 @@ async def upload_business_plan_excel(
     return await BusinessPlanService().import_excel(db, content, plan_year, user.username)
 
 
-@router.post("/business-plans/mfg-report/upload")
-async def upload_manufacture_plan_report_excel(
-    plan_year: int = Query(...),
-    file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-    user: CurrentUser = Depends(require_role(Roles.PAC)),
-):
-    """Import Reporting > Manufacturing Plan from the "4.Manufacture_Plan"
-    sheet of a Business Plan Report workbook (e.g. "01.V3.2026
-    Business_Plan_Report_...xlsx"). Stored as a business-plans document
-    (doc_type="mfg_plan_report"), so it's read/listed/deleted through the
-    same generic /business-plans endpoints as every other doc_type."""
-    content = await file.read()
-    return await BusinessPlanService().import_manufacture_plan_report_excel(db, content, plan_year, user.username)
-
-
 @router.delete("/business-plans/{plan_id}")
 async def delete_business_plan(
     plan_id: int,
@@ -861,6 +845,72 @@ def _build_manufacture_plan_detail_xlsx(rows: list, plan_year: int) -> Streaming
     )
 
 
+def _build_manufacture_plan_report_xlsx(report: dict, plan_year: int) -> StreamingResponse:
+    """Reporting > Manufacturing Plan — same hierarchical layout (indented
+    Total -> Local/CMO/Export -> customer sub-group -> Liquid/Freeze Dry ->
+    product) as the in-app report table built by
+    ManufacturePlanService.get_report(), just rendered to .xlsx instead of
+    HTML. `report` is that method's return value."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"Manufacturing_Plan_{plan_year}"
+
+    bold = Font(bold=True)
+    title_font = Font(bold=True, size=13)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    fill_hdr = PatternFill("solid", fgColor="D9E1F2")
+    row_fill = {
+        "total":    PatternFill("solid", fgColor="D9C6F2"),
+        "group":    PatternFill("solid", fgColor="F2F2F2"),
+        "subtotal": PatternFill("solid", fgColor="FAFAFA"),
+    }
+    row_font = {"total": bold, "group": bold, "subtotal": Font(italic=True)}
+
+    columns = report["columns"]
+    headers = ["Product / Group"] + columns
+    ncols = len(headers)
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
+    ws.cell(row=1, column=1, value="PT CKD OTTO Pharmaceuticals").font = title_font
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
+    ws.cell(row=2, column=1, value=f"Manufacturing Plan Report — {plan_year} (unit: vial) — from Simulation Data > Manufacture Plan").font = Font(italic=True, size=10)
+
+    HR = 4
+    for c, label in enumerate(headers, 1):
+        cell = ws.cell(row=HR, column=c, value=label)
+        cell.font, cell.alignment, cell.fill = bold, center, fill_hdr
+
+    r = HR + 1
+    for row in report["rows"]:
+        label_cell = ws.cell(row=r, column=1, value=("  " * (row.get("level") or 0)) + row["label"])
+        for ci, v in enumerate(row.get("values") or [], 2):
+            ws.cell(row=r, column=ci, value=v if v else None)
+        font, fill = row_font.get(row["type"]), row_fill.get(row["type"])
+        if font:
+            label_cell.font = font
+            for c in range(2, ncols + 1):
+                ws.cell(row=r, column=c).font = font
+        if fill:
+            for c in range(1, ncols + 1):
+                ws.cell(row=r, column=c).fill = fill
+        r += 1
+
+    ws.freeze_panes = ws.cell(row=HR + 1, column=2)
+    ws.column_dimensions["A"].width = 32
+    for c in range(2, ncols + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 14
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"Manufacturing_Plan_Report_{plan_year}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
+
+
 def _classify_business_unit(market: str) -> str:
     """Business-unit bucket rule mirrored from V5.Sales Estimation2026.xlsx's
     Summary sheet: Local = Public/Private, CMO/Export are their own units,
@@ -1197,6 +1247,37 @@ async def export_manufacture_plan_detail_report(
         raise HTTPException(404, f"Tidak ada data Manufacture Plan untuk tahun {plan_year}")
     try:
         return _build_manufacture_plan_detail_xlsx(rows, plan_year)
+    except Exception as e:
+        raise HTTPException(500, f"Excel generation failed: {e}")
+
+
+@router.get("/manufacture-plans/report")
+async def get_manufacture_plan_report(
+    plan_year: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Reporting > Manufacturing Plan — computed live from Simulation Data
+    > Manufacture Plan, no separate upload. See
+    ManufacturePlanService.get_report for the Local/CMO/Export and Liquid/
+    Freeze Dry classification this infers from that input data.
+    Registered before /manufacture-plans/{plan_id} for the same reason as
+    /manufacture-plans/detail-report above."""
+    return await ManufacturePlanService().get_report(db, plan_year)
+
+
+@router.get("/manufacture-plans/report/export")
+async def export_manufacture_plan_report(
+    plan_year: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Excel download of the same report as GET /manufacture-plans/report."""
+    result = await ManufacturePlanService().get_report(db, plan_year)
+    if not result.get("success"):
+        raise HTTPException(404, result.get("error") or "No report data available")
+    try:
+        return _build_manufacture_plan_report_xlsx(result, plan_year)
     except Exception as e:
         raise HTTPException(500, f"Excel generation failed: {e}")
 

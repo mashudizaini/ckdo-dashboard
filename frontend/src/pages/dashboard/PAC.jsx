@@ -2913,10 +2913,11 @@ function ReportingSection({ year }) {
 }
 
 /* ══ Manufacturing Plan Report Panel ═══════════════════════════════════════════ */
-/* Read-only report — format reference: sumber/01.V3.2026 Business_Plan_Report_
-   Dec20_2025.xlsx, sheet "4.Manufacture_Plan". Uploaded via
-   business_plan_service.import_manufacture_plan_report_excel(), stored as a
-   business-plans document (doc_type="mfg_plan_report"), one per plan_year. */
+/* Read-only report, computed live from Simulation Data > Manufacture Plan —
+   no separate upload here. Format reference: sumber/01.V3.2026
+   Business_Plan_Report_Dec20_2025.xlsx, sheet "4.Manufacture_Plan". See
+   ManufacturePlanService.get_report (backend) for how Local/CMO/Export and
+   Liquid/Freeze Dry are inferred from that input data. */
 
 const MFG_REPORT_ROW_STYLE = {
   total:    "bg-violet-500/15 text-violet-200 font-bold",
@@ -2927,18 +2928,18 @@ const MFG_REPORT_ROW_STYLE = {
 
 function ManufacturePlanReportPanel({ year }) {
   const [report, setReport] = useState(null);
+  const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const fileInputRef = useRef(null);
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    setLoading(true); setError(null);
     try {
-      const res = await pacApi.listBusinessPlans({ plan_year: year, doc_type: "mfg_plan_report" });
-      setReport(res.success && res.data?.length ? res.data[0] : null);
-    } catch {
+      const res = await pacApi.getManufacturePlanReport(year);
+      if (res.success) setReport(res); else { setReport(null); setError(res.error || "Failed to load"); }
+    } catch (e) {
       setReport(null);
+      setError(e?.detail || e?.message || String(e));
     } finally {
       setLoading(false);
     }
@@ -2946,37 +2947,22 @@ function ManufacturePlanReportPanel({ year }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleUploadFile = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setUploading(true);
+  const handleDownload = async () => {
+    setExporting(true);
     try {
-      const res = await pacApi.uploadManufacturePlanReportExcel(file, year);
-      if (res.success) {
-        await load();
-      } else {
-        alert(res.error || "Import failed");
-      }
+      const blobData = await pacApi.exportManufacturePlanReport(year);
+      const blob = new Blob([blobData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `Manufacturing_Plan_Report_${year}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
     } catch (e) {
-      alert("Import error: " + (e?.detail || e?.message || e));
+      let msg = "Download failed";
+      if (e instanceof Blob) { try { msg = JSON.parse(await e.text())?.detail || msg; } catch (_) {} }
+      else if (e?.detail) msg = e.detail; else if (e?.message) msg = e.message;
+      alert("Download error: " + msg);
     } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!report) return;
-    if (!window.confirm(`Delete the Manufacturing Plan report for ${year}? This cannot be undone.`)) return;
-    setDeleting(true);
-    try {
-      const res = await pacApi.deleteBusinessPlan(report.id);
-      if (res.success) { setReport(null); await load(); }
-      else alert(res.error || "Delete failed");
-    } catch (e) {
-      alert("Delete error: " + (e?.detail || e?.message || e));
-    } finally {
-      setDeleting(false);
+      setExporting(false);
     }
   };
 
@@ -2992,42 +2978,39 @@ function ManufacturePlanReportPanel({ year }) {
           </p>
         </div>
         <div className="flex gap-2">
-          <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleUploadFile} />
-          <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM("teal")}>
-            {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
-            Upload Excel
+          <button onClick={load} className={BTN_SM("gray")}><RefreshCw size={11} /> Refresh</button>
+          <button onClick={handleDownload} disabled={exporting || !report} className={BTN_SM("green")}>
+            {exporting ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+            Download Excel
           </button>
-          {report && (
-            <button onClick={handleDelete} disabled={deleting} className={BTN_SM("red")}>
-              {deleting ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />} Delete
-            </button>
-          )}
         </div>
       </div>
       <div className="p-5">
         <div className="mb-3 rounded-lg border border-gray-800 bg-gray-950/40 px-3 py-2 text-[11px] text-gray-500">
-          Uploaded from the "4.Manufacture_Plan" sheet of the Business Plan Report workbook (e.g. "01.V3.2026
-          Business_Plan_Report_...xlsx") — re-uploading for the same year replaces the previous report. Row
-          indentation is reconstructed from the sheet's own labeling, not stored explicitly in the source file —
-          worth a spot-check against the source after the first upload.
+          Computed from Simulation Data → Manufacture Plan — no separate upload for this report. Local/CMO/Export
+          comes from each plan's [Type] field; Liquid/Freeze Dry is inferred per product from a short known-products
+          list (extend it in the backend if a new freeze-dried product is added). Prior-year column comes from
+          {" "}{year - 1}'s Manufacture Plan data, if any was uploaded.
         </div>
         {loading ? (
           <div className="py-10 text-center text-gray-600 text-sm"><Loader2 size={16} className="animate-spin inline" /></div>
+        ) : error ? (
+          <div className="py-10 text-center text-red-400 text-sm">{error}</div>
         ) : !report ? (
-          <div className="py-10 text-center text-gray-600 text-sm">No Manufacturing Plan report uploaded for {year} yet.</div>
+          <div className="py-10 text-center text-gray-600 text-sm">No Manufacturing Plan report for {year}.</div>
         ) : (
           <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "32rem" }}>
             <table className="w-full border-collapse text-xs">
               <thead>
                 <tr className="bg-gray-800/80">
                   <th className="sticky top-0 left-0 z-20 bg-gray-800 px-2 py-2 text-left text-gray-400 font-semibold border border-gray-700 min-w-[220px]">Product / Group</th>
-                  {(report.content?.columns || []).map((h, ci) => (
+                  {(report.columns || []).map((h, ci) => (
                     <th key={ci} className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-right text-gray-400 font-semibold border border-gray-700 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {(report.content?.rows || []).map((row, ri) => (
+                {(report.rows || []).map((row, ri) => (
                   <tr key={ri} className={`border-b border-gray-800/60 ${MFG_REPORT_ROW_STYLE[row.type] || "text-gray-400"}`}>
                     <td className="sticky left-0 z-10 bg-gray-900 px-2 py-1.5 border border-gray-800" style={{ paddingLeft: `${8 + (row.level || 0) * 16}px` }}>
                       {row.label}
