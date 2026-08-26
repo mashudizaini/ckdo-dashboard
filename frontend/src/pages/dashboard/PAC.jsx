@@ -3470,6 +3470,7 @@ function PersonnelPlanPanel({ year }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [exportingReport, setExportingReport] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -3594,6 +3595,25 @@ function PersonnelPlanPanel({ year }) {
 
   const fmtNum = (v) => Number(v || 0).toLocaleString();
 
+  const handleExportReport = async () => {
+    setExportingReport(true);
+    try {
+      const blobData = await pacApi.exportPersonnelPlanReport(year);
+      const blob = new Blob([blobData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `Personnel_Plan_Report_${year}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      let msg = "Download failed";
+      if (e instanceof Blob) { try { msg = JSON.parse(await e.text())?.detail || msg; } catch (_) {} }
+      else if (e?.detail) msg = e.detail; else if (e?.message) msg = e.message;
+      alert("Download error: " + msg);
+    } finally {
+      setExportingReport(false);
+    }
+  };
+
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
@@ -3613,6 +3633,11 @@ function PersonnelPlanPanel({ year }) {
               {selectedPlan && (
                 <button onClick={() => openEdit(selectedPlan)} className={BTN_SM("indigo")}><Edit3 size={11} /> Edit</button>
               )}
+              <button onClick={handleExportReport} disabled={exportingReport} className={BTN_SM("green")}
+                title="Download Personnel Plan report (headcount, format matches sheet '9.Personnel plan' section 2 in the Business Plan Report workbook — Organization Chart excluded)">
+                {exportingReport ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                Download Excel
+              </button>
             </>
           ) : (
             <>

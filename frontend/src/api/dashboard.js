@@ -284,6 +284,7 @@ export const pacApi = {
     form.append("file", file);
     return api.post("/dashboard/pac/personnel-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
   },
+  exportPersonnelPlanReport: (planYear) => api.get("/dashboard/pac/personnel-plans/report/export", { params: { plan_year: planYear }, responseType: "blob" }),
 
   // Manufacture Plan (Simulation)
   listManufacturePlans:  (p)    => api.get("/dashboard/pac/manufacture-plans", { params: p }),

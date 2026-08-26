@@ -1463,6 +1463,25 @@ async def list_personnel_plans(
     return await PersonnelPlanService().list_personnel_plans(db, plan_year, department)
 
 
+@router.get("/personnel-plans/report/export")
+async def export_personnel_plan_report(
+    plan_year: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Excel download of Personnel Plan Simulation Data, formatted like the
+    "2) Personnel Plan" section of sheet "9.Personnel plan" in the
+    Business Plan Report workbook — the Organization Chart section is
+    intentionally excluded. See _build_personnel_plan_report_xlsx for the
+    one grouping difference (Level, not Team/Function).
+    Registered before /personnel-plans/{plan_id} for the same reason as
+    /manufacture-plans/detail-report."""
+    result = await PersonnelPlanService().list_personnel_plans(db, plan_year=plan_year)
+    if not result.get("success"):
+        raise HTTPException(400, result.get("error") or "Failed to load Personnel Plan data")
+    return _build_personnel_plan_report_xlsx(result["data"], plan_year)
+
+
 @router.get("/personnel-plans/{plan_id}")
 async def get_personnel_plan(
     plan_id: int,
@@ -1641,6 +1660,129 @@ def _build_sales_plan_report_xlsx(plans: list, plan_year: int) -> StreamingRespo
     wb.save(buf)
     buf.seek(0)
     fname = f"Sales_Plan_Report_{plan_year}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
+
+
+def _build_personnel_plan_report_xlsx(plans: list, plan_year: int) -> StreamingResponse:
+    """Reporting format reference: sumber/01.V3.2026 Business_Plan_Report_
+    Dec20_2025.xlsx, sheet "9.Personnel plan" — its "2) Personnel Plan"
+    section only (headcount by Department -> Level, Prev/Curr Year +
+    Increase, each split Permanent/Temporary/Total). The sheet's "1)
+    Organization Chart" section is out of scope per the user's request —
+    it's hand-drawn/free-text in the source file anyway, nothing in
+    Personnel Plan Simulation Data corresponds to it.
+
+    One difference from the reference worth knowing: the reference's
+    second grouping level under each Department is by TEAM/FUNCTION (e.g.
+    Plant -> "Quality Management"/"Production"/"Engineering"). Personnel
+    Plan Simulation Data groups headcount by LEVEL instead (e.g. "General
+    Manager"/"Manager"/"Staff") — that's the dimension this input actually
+    captures, so it's what's reported here; there's no function/team field
+    to fall back to."""
+    FIELDS = ["prev_permanent", "prev_temporary", "prev_total",
+              "curr_permanent", "curr_temporary", "curr_total",
+              "inc_permanent", "inc_temporary", "inc_total"]
+
+    def sum_rows(rows):
+        return {f: sum(float(r.get(f) or 0) for r in rows) for f in FIELDS}
+
+    dept_rows: dict = {}
+    dept_totals: dict = {}
+    year_prev = year_curr = None
+    for plan in plans:
+        dept = str(plan.get("department") or "").strip() or "(Unspecified)"
+        hc = (plan.get("content") or {}).get("headcount") or {}
+        if hc.get("year_prev") and not year_prev:
+            year_prev = hc["year_prev"]
+        if hc.get("year_curr") and not year_curr:
+            year_curr = hc["year_curr"]
+        dept_rows.setdefault(dept, []).extend(hc.get("rows") or [])
+        # Trust the uploaded file's own department total when present
+        # (matches whatever the source Excel said), fall back to summing
+        # the level rows only when it's missing.
+        if hc.get("total"):
+            dept_totals[dept] = hc["total"]
+
+    if not dept_rows:
+        raise HTTPException(404, f"Tidak ada data Personnel Plan untuk tahun {plan_year}")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"Personnel_Plan_{plan_year}"
+
+    bold = Font(bold=True)
+    title_font = Font(bold=True, size=13)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    fill_hdr = PatternFill("solid", fgColor="D9E1F2")
+    fill_dept = PatternFill("solid", fgColor="F2F2F2")
+    fill_total = PatternFill("solid", fgColor="D9C6F2")
+
+    y_prev = year_prev or (plan_year - 1)
+    y_curr = year_curr or plan_year
+    headers = ["Department / Level",
+               f"{y_prev} Permanent", f"{y_prev} Temporary", f"{y_prev} Total",
+               f"{y_curr} Permanent", f"{y_curr} Temporary", f"{y_curr} Total",
+               "Increase Permanent", "Increase Temporary", "Increase Total"]
+    ncols = len(headers)
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
+    ws.cell(row=1, column=1, value="PT CKD OTTO Pharmaceuticals").font = title_font
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
+    ws.cell(row=2, column=1, value=f"Personnel Plan — {plan_year} (headcount) — from Simulation Data > Personnel Plan").font = Font(italic=True, size=10)
+
+    HR = 4
+    for c, label in enumerate(headers, 1):
+        cell = ws.cell(row=HR, column=c, value=label)
+        cell.font, cell.alignment, cell.fill = bold, center, fill_hdr
+
+    def emit_row(r, label, values, level, fill=None, bold_row=False):
+        cell = ws.cell(row=r, column=1, value=("  " * level) + label)
+        if bold_row:
+            cell.font = bold
+        for ci, f in enumerate(FIELDS, 2):
+            c = ws.cell(row=r, column=ci, value=values.get(f) or None)
+            if bold_row:
+                c.font = bold
+        if fill:
+            for c in range(1, ncols + 1):
+                ws.cell(row=r, column=c).fill = fill
+
+    r = HR + 1
+    grand = {f: 0.0 for f in FIELDS}
+    for dept in sorted(dept_rows):
+        rows = dept_rows[dept]
+        dept_total = dept_totals.get(dept) or sum_rows(rows)
+        emit_row(r, dept, dept_total, 0, fill=fill_dept, bold_row=True)
+        r += 1
+        for lvl_row in rows:
+            emit_row(r, str(lvl_row.get("level") or ""), lvl_row, 1)
+            r += 1
+        for f in FIELDS:
+            grand[f] += float(dept_total.get(f) or 0)
+
+    emit_row(r, "Total", grand, 0, fill=fill_total, bold_row=True)
+    r += 1
+    emit_row(r, "Permanent Employees", {
+        "prev_total": grand["prev_permanent"], "curr_total": grand["curr_permanent"], "inc_total": grand["inc_permanent"],
+    }, 1, fill=fill_total)
+    r += 1
+    emit_row(r, "Temporary Employees", {
+        "prev_total": grand["prev_temporary"], "curr_total": grand["curr_temporary"], "inc_total": grand["inc_temporary"],
+    }, 1, fill=fill_total)
+
+    ws.freeze_panes = ws.cell(row=HR + 1, column=2)
+    ws.column_dimensions["A"].width = 30
+    for c in range(2, ncols + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 14
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"Personnel_Plan_Report_{plan_year}.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
