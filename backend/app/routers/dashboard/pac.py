@@ -127,6 +127,22 @@ async def upload_business_plan_excel(
     return await BusinessPlanService().import_excel(db, content, plan_year, user.username)
 
 
+@router.post("/business-plans/mfg-report/upload")
+async def upload_manufacture_plan_report_excel(
+    plan_year: int = Query(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Import Reporting > Manufacturing Plan from the "4.Manufacture_Plan"
+    sheet of a Business Plan Report workbook (e.g. "01.V3.2026
+    Business_Plan_Report_...xlsx"). Stored as a business-plans document
+    (doc_type="mfg_plan_report"), so it's read/listed/deleted through the
+    same generic /business-plans endpoints as every other doc_type."""
+    content = await file.read()
+    return await BusinessPlanService().import_manufacture_plan_report_excel(db, content, plan_year, user.username)
+
+
 @router.delete("/business-plans/{plan_id}")
 async def delete_business_plan(
     plan_id: int,

@@ -55,6 +55,7 @@ const BP_SUBTABS = [
   { id: "history",    label: "Document List",          icon: Clock    },
   { id: "setup",      label: "Setup",                   icon: Settings },
   { id: "simulation", label: "Simulation Data",         icon: BarChart },
+  { id: "reporting",  label: "Reporting",               icon: FileSpreadsheet },
 ];
 
 const ROMAN = ["i","ii","iii","iv","v","vi","vii","viii","ix","x"];
@@ -750,6 +751,7 @@ function BusinessPlanSection() {
       {subTab === "history"    && <SectionCard title="Document List" subtitle={`All Business Plan documents for ${year}`}><BPHistoryPanel year={year} /></SectionCard>}
       {subTab === "setup"      && <SetupSection year={year} />}
       {subTab === "simulation" && <SimulationSection year={year} />}
+      {subTab === "reporting"  && <ReportingSection year={year} />}
     </div>
   );
 }
@@ -2875,6 +2877,171 @@ function SimulationSection({ year }) {
       {subTab === "manufacture_plan" && <ManufacturePlanPanel year={year} />}
       {subTab === "investment_plan"  && <InvestmentPlanPanel year={year} />}
       {subTab === "opex_plan"        && <OpexPlanPanel year={year} />}
+    </div>
+  );
+}
+
+/* ─── Section: Reporting ───────────────────────────── */
+const REPORTING_SUBTABS = [
+  { id: "manufacture_plan_report", label: "Manufacturing Plan", icon: Factory },
+];
+
+function ReportingSection({ year }) {
+  const [subTab, setSubTab] = useState("manufacture_plan_report");
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="flex gap-1 p-1 rounded-lg bg-gray-800/60 border border-gray-700">
+          {REPORTING_SUBTABS.map(t => (
+            <button key={t.id} onClick={() => setSubTab(t.id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                subTab === t.id ? "bg-violet-500/20 border border-violet-500/40 text-violet-300"
+                                : "text-gray-500 hover:text-gray-300"
+              }`}>
+              <t.icon size={11} />{t.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-gray-500">Plan Year: <span className="text-violet-400 font-bold">{year}</span></label>
+        </div>
+      </div>
+      {subTab === "manufacture_plan_report" && <ManufacturePlanReportPanel year={year} />}
+    </div>
+  );
+}
+
+/* ══ Manufacturing Plan Report Panel ═══════════════════════════════════════════ */
+/* Read-only report — format reference: sumber/01.V3.2026 Business_Plan_Report_
+   Dec20_2025.xlsx, sheet "4.Manufacture_Plan". Uploaded via
+   business_plan_service.import_manufacture_plan_report_excel(), stored as a
+   business-plans document (doc_type="mfg_plan_report"), one per plan_year. */
+
+const MFG_REPORT_ROW_STYLE = {
+  total:    "bg-violet-500/15 text-violet-200 font-bold",
+  group:    "bg-gray-800/70 text-gray-100 font-semibold",
+  subtotal: "bg-gray-800/30 text-gray-300 font-medium",
+  line:     "text-gray-400",
+};
+
+function ManufacturePlanReportPanel({ year }) {
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await pacApi.listBusinessPlans({ plan_year: year, doc_type: "mfg_plan_report" });
+      setReport(res.success && res.data?.length ? res.data[0] : null);
+    } catch {
+      setReport(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [year]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleUploadFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const res = await pacApi.uploadManufacturePlanReportExcel(file, year);
+      if (res.success) {
+        await load();
+      } else {
+        alert(res.error || "Import failed");
+      }
+    } catch (e) {
+      alert("Import error: " + (e?.detail || e?.message || e));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!report) return;
+    if (!window.confirm(`Delete the Manufacturing Plan report for ${year}? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      const res = await pacApi.deleteBusinessPlan(report.id);
+      if (res.success) { setReport(null); await load(); }
+      else alert(res.error || "Delete failed");
+    } catch (e) {
+      alert("Delete error: " + (e?.detail || e?.message || e));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const fmt = (v) => v === "" || v == null ? "—" : Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-200">Manufacturing Plan Report</h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Batch Size (vial) plan — Total → Local/CMO/Export → Liquid/Freeze Dry → Product · {year}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleUploadFile} />
+          <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM("teal")}>
+            {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+            Upload Excel
+          </button>
+          {report && (
+            <button onClick={handleDelete} disabled={deleting} className={BTN_SM("red")}>
+              {deleting ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />} Delete
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="p-5">
+        <div className="mb-3 rounded-lg border border-gray-800 bg-gray-950/40 px-3 py-2 text-[11px] text-gray-500">
+          Uploaded from the "4.Manufacture_Plan" sheet of the Business Plan Report workbook (e.g. "01.V3.2026
+          Business_Plan_Report_...xlsx") — re-uploading for the same year replaces the previous report. Row
+          indentation is reconstructed from the sheet's own labeling, not stored explicitly in the source file —
+          worth a spot-check against the source after the first upload.
+        </div>
+        {loading ? (
+          <div className="py-10 text-center text-gray-600 text-sm"><Loader2 size={16} className="animate-spin inline" /></div>
+        ) : !report ? (
+          <div className="py-10 text-center text-gray-600 text-sm">No Manufacturing Plan report uploaded for {year} yet.</div>
+        ) : (
+          <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "32rem" }}>
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr className="bg-gray-800/80">
+                  <th className="sticky top-0 left-0 z-20 bg-gray-800 px-2 py-2 text-left text-gray-400 font-semibold border border-gray-700 min-w-[220px]">Product / Group</th>
+                  {(report.content?.columns || []).map((h, ci) => (
+                    <th key={ci} className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-right text-gray-400 font-semibold border border-gray-700 whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(report.content?.rows || []).map((row, ri) => (
+                  <tr key={ri} className={`border-b border-gray-800/60 ${MFG_REPORT_ROW_STYLE[row.type] || "text-gray-400"}`}>
+                    <td className="sticky left-0 z-10 bg-gray-900 px-2 py-1.5 border border-gray-800" style={{ paddingLeft: `${8 + (row.level || 0) * 16}px` }}>
+                      {row.label}
+                    </td>
+                    {(row.values || []).map((v, ci) => (
+                      <td key={ci} className="px-2 py-1.5 border border-gray-800 text-right font-mono">{fmt(v)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

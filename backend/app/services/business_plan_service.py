@@ -191,6 +191,141 @@ class BusinessPlanService:
         }
         return await self.upsert_plan(db, payload, username)
 
+    # ── Import Reporting > Manufacturing Plan from Excel ────────────────────────
+
+    _MFG_REPORT_MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    async def import_manufacture_plan_report_excel(self, db: AsyncSession, file_bytes: bytes,
+                                                     plan_year: int, username: str) -> dict:
+        """Parse the "4.Manufacture_Plan" sheet from the Business Plan
+        Report workbook (e.g. "01.V3.2026 Business_Plan_Report_...xlsx") —
+        a hierarchical Batch Size (vial) plan: Total -> Local/CMO/Export ->
+        (CMO/Export only) per-customer sub-group -> Liquid/Freeze Dry ->
+        individual products, each carrying a prior-year actual total,
+        this-year plan total, and a Jan-Dec monthly breakdown of the plan
+        total.
+
+        Row shape in the source sheet (columns, 1-based):
+          C = group/subgroup/numbered-subtotal label (e.g. "Total",
+              "Local", "CMO, Etana", "1. Liquid")   -- OR --
+          E = a leaf label: either a bare "Liquid"/"Freeze Dry" quick
+              breakdown, or a real product name
+          H = prior-year actual total, I = this-year plan total,
+          J..U = this-year Jan..Dec monthly plan breakdown (12 columns)
+
+        Row TYPE / indentation LEVEL is inferred from which column carries
+        the label and the label text itself — there's no explicit
+        level/indent stored in the source file:
+          "Total"/"Local"/"CMO"/"Export" (col C, no comma)      -> group,    level 0
+          "CMO, X"/"Export, X" (col C, contains a comma)        -> group,    level 1 (nested under the group above)
+          "1. Liquid"/"2. Freeze Dry" (col C, "N. " prefix)     -> subtotal, one level under the current group
+          bare "Liquid"/"Freeze Dry" (col E)                    -> subtotal, one level under the current group
+          any other label (col E)                               -> line,     one level under the current subtotal
+        (Classified by the col E label text alone, not by whether column G
+        — a per-row reference batch size — happens to be filled in: a
+        product with zero planned production can have a blank G cell in
+        the source, which would otherwise be indistinguishable from a bare
+        "Liquid"/"Freeze Dry" breakdown row.) This is a heuristic
+        reconstruction of the sheet's visual nesting, not something the
+        file states explicitly — worth a spot-check against the source
+        after the first real upload.
+
+        Repeated page headers (title row, "4. Manufacture Plan" section
+        title, the "Title"/month header rows the source repeats on every
+        printed page) are skipped by pattern, not by row number, so this
+        survives a different row count in a future year's file."""
+        import io
+        import re
+        from openpyxl import load_workbook
+
+        try:
+            wb = load_workbook(io.BytesIO(file_bytes), data_only=True)
+        except Exception as e:
+            return {"success": False, "error": f"Could not read Excel file: {e}"}
+
+        ws = next((s for s in wb.worksheets if "manufactur" in s.title.lower()), wb.worksheets[0])
+
+        def cell(r, c):
+            return ws.cell(row=r, column=c).value
+
+        def clean(v) -> str:
+            return str(v).strip() if v is not None else ""
+
+        def num(v) -> float:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return 0.0
+
+        # Column labels for the 2 summary + 12 monthly value slots — read
+        # from whichever header row appears first, instead of hardcoding
+        # "2025(E)"/"2026(P)", so a future year's file just works.
+        col_labels = None
+        for r in range(1, ws.max_row + 1):
+            if clean(cell(r, 3)) == "Title":
+                month_row = r + 1
+                col_labels = [clean(cell(r, 8)) or "Prior Year", clean(cell(r, 9)) or "Plan Year"]
+                col_labels += [clean(cell(month_row, c)) or self._MFG_REPORT_MONTH_NAMES[c - 10] for c in range(10, 22)]
+                break
+        if col_labels is None:
+            return {"success": False, "error": (
+                "Could not find the header row (column C = 'Title') — this doesn't look like the "
+                "'4.Manufacture_Plan' sheet layout."
+            )}
+
+        rows_out = []
+        group_base = 0      # indentation level of the most recent group/subgroup row
+        subtotal_base = 1   # indentation level of the most recent Liquid/Freeze Dry subtotal
+        for r in range(1, ws.max_row + 1):
+            c_val, e_val = clean(cell(r, 3)), clean(cell(r, 5))
+            if not c_val and not e_val:
+                continue
+            if (c_val == "Title" or e_val == "Jan" or c_val == "Jan"
+                    or clean(cell(r, 2)).startswith("4. Manufacture")
+                    or clean(cell(r, 1)).startswith("PT CKD OTTO")):
+                continue
+
+            values = [num(cell(r, 8)), num(cell(r, 9))] + [num(cell(r, c)) for c in range(10, 22)]
+
+            if c_val:
+                if re.match(r"^\d+\.\s*(Liquid|Freeze Dry)", c_val, re.IGNORECASE):
+                    level = group_base + 1
+                    subtotal_base = level
+                    rows_out.append({"label": c_val, "level": level, "type": "subtotal", "values": values})
+                elif "," in c_val:
+                    group_base = 1
+                    rows_out.append({"label": c_val, "level": 1, "type": "group", "values": values})
+                else:
+                    group_base = 0
+                    row_type = "total" if c_val.lower() == "total" else "group"
+                    rows_out.append({"label": c_val, "level": 0, "type": row_type, "values": values})
+            elif e_val.lower() not in ("liquid", "freeze dry"):
+                # A real product — classified by its NAME, not by whether G
+                # (the reference batch size) happens to be filled in: a
+                # product with zero planned production can have a blank G
+                # cell in the source, which would otherwise be
+                # indistinguishable from a bare "Liquid"/"Freeze Dry"
+                # breakdown row.
+                rows_out.append({"label": e_val, "level": subtotal_base + 1, "type": "line", "values": values})
+            else:
+                level = group_base + 1
+                subtotal_base = level
+                rows_out.append({"label": e_val, "level": level, "type": "subtotal", "values": values})
+
+        if not rows_out:
+            return {"success": False, "error": (
+                "No recognizable rows found — check the sheet matches the '4.Manufacture_Plan' layout."
+            )}
+
+        payload = {
+            "doc_type": "mfg_plan_report", "plan_year": plan_year,
+            "department": "ALL", "team_code": "", "team_name": "",
+            "content": {"columns": col_labels, "rows": rows_out},
+            "status": "final",
+        }
+        return await self.upsert_plan(db, payload, username)
+
     # ── Delete ────────────────────────────────────────────────────────────────
 
     async def delete_plan(self, db: AsyncSession, plan_id: int) -> dict:

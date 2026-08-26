@@ -222,6 +222,11 @@ export const pacApi = {
     form.append("file", file);
     return api.post("/dashboard/pac/business-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
   },
+  uploadManufacturePlanReportExcel: (file, planYear) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/dashboard/pac/business-plans/mfg-report/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
+  },
 
   // Setup Modules (Schedule / Guideline / Outlook)
   listSetupModules:     (p)    => api.get("/dashboard/pac/setup-modules", { params: p }),
