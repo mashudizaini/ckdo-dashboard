@@ -1790,6 +1790,100 @@ def _build_personnel_plan_report_xlsx(plans: list, plan_year: int) -> StreamingR
     )
 
 
+def _build_opex_plan_report_xlsx(plans: list, plan_year: int) -> StreamingResponse:
+    """Format reference: user-provided "Operating Expense" summary
+    screenshot (Expense | Estimation PL {YY} (total)-FS), sourced from
+    OPEX Plan Simulation Data. Grouped by Managerial Account Name (row's
+    own budget category, e.g. "Salary & Allowance") — a category expands
+    into its Chart of Account Name sub-lines only when more than one
+    distinct COA exists under it, matching the screenshot's "Sales &
+    Marketing activity" -> Seminar & Event / Sponsorship / Entertainment
+    breakdown; every other category in the screenshot has just one COA
+    line, so it stays flat. Category (and sub-line) order follows first-
+    appearance order in the uploaded data, not alphabetical — the source
+    template's own category ordering is business-meaningful (matches the
+    screenshot's ordering), alphabetizing it would scramble that. Sums
+    every department/team plan for the year; the Sales & Mkt/Strategy
+    Development/Plant/Admin columns in the input are cost-center
+    ALLOCATION markers, not additional amounts, so only each row's own
+    Total (Jan-Dec already summed) is used."""
+    groups: dict = {}  # ma_name -> {coa_name: total}, insertion-ordered
+    for plan in plans:
+        for row in (plan.get("content") or {}).get("rows") or []:
+            if len(row) < 23:
+                continue
+            ma_name = str(row[2] or "").strip()
+            if not ma_name:
+                continue
+            coa_name = str(row[4] or "").strip() or ma_name
+            total = float(row[22] or 0)
+            g = groups.setdefault(ma_name, {})
+            g[coa_name] = g.get(coa_name, 0.0) + total
+
+    if not groups:
+        raise HTTPException(404, f"Tidak ada data OPEX Plan untuk tahun {plan_year}")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"OPEX_Plan_{plan_year}"
+
+    bold = Font(bold=True)
+    title_font = Font(bold=True, size=13)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    fill_hdr = PatternFill("solid", fgColor="D9E1F2")
+    fill_total = PatternFill("solid", fgColor="D9C6F2")
+    sub_font = Font(italic=True, color="4472C4")
+
+    yy = str(plan_year)[2:].zfill(2)
+    headers = ["Expense", f"Estimation PL {yy} (total)-FS"]
+    ncols = len(headers)
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
+    ws.cell(row=1, column=1, value="PT CKD OTTO Pharmaceuticals").font = title_font
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
+    ws.cell(row=2, column=1, value=f"Operating Expense — {plan_year} — from Simulation Data > OPEX Plan").font = Font(italic=True, size=10)
+
+    HR = 4
+    for c, label in enumerate(headers, 1):
+        cell = ws.cell(row=HR, column=c, value=label)
+        cell.font, cell.alignment, cell.fill = bold, center, fill_hdr
+
+    r = HR + 1
+    grand_total = sum(sum(coa.values()) for coa in groups.values())
+    ws.cell(row=r, column=1, value="Operating Expense").font = bold
+    ws.cell(row=r, column=2, value=grand_total or None).font = bold
+    for c in range(1, ncols + 1):
+        ws.cell(row=r, column=c).fill = fill_total
+    r += 1
+
+    for ma_name, coa_totals in groups.items():
+        ma_total = sum(coa_totals.values())
+        ws.cell(row=r, column=1, value="  " + ma_name)
+        ws.cell(row=r, column=2, value=ma_total or None)
+        r += 1
+        if len(coa_totals) > 1:
+            for coa_name, coa_total in coa_totals.items():
+                c1 = ws.cell(row=r, column=1, value="    " + coa_name)
+                c1.font = sub_font
+                c2 = ws.cell(row=r, column=2, value=coa_total or None)
+                c2.font = sub_font
+                r += 1
+
+    ws.freeze_panes = ws.cell(row=HR + 1, column=2)
+    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["B"].width = 22
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"OPEX_Plan_Report_{plan_year}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
+
+
 # ── Manufacture Plan ────────────────────────────────────────────────────────────
 
 class ManufacturePlanPayload(BaseModel):
@@ -1840,28 +1934,17 @@ async def export_manufacture_plan_detail_report(
         raise HTTPException(500, f"Excel generation failed: {e}")
 
 
-@router.get("/manufacture-plans/report")
-async def get_manufacture_plan_report(
-    plan_year: int = Query(...),
-    db: AsyncSession = Depends(get_db),
-    user: CurrentUser = Depends(require_role(Roles.PAC)),
-):
-    """Reporting > Manufacturing Plan — computed live from Simulation Data
-    > Manufacture Plan, no separate upload. See
-    ManufacturePlanService.get_report for the Local/CMO/Export and Liquid/
-    Freeze Dry classification this infers from that input data.
-    Registered before /manufacture-plans/{plan_id} for the same reason as
-    /manufacture-plans/detail-report above."""
-    return await ManufacturePlanService().get_report(db, plan_year)
-
-
 @router.get("/manufacture-plans/report/export")
 async def export_manufacture_plan_report(
     plan_year: int = Query(...),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.PAC)),
 ):
-    """Excel download of the same report as GET /manufacture-plans/report."""
+    """Excel download — computed live from Simulation Data > Manufacture
+    Plan, no separate upload. See ManufacturePlanService.get_report for
+    the Local/CMO/Export and Liquid/Freeze Dry classification this infers
+    from that input data. Registered before /manufacture-plans/{plan_id}
+    for the same reason as /manufacture-plans/detail-report above."""
     result = await ManufacturePlanService().get_report(db, plan_year)
     if not result.get("success"):
         raise HTTPException(404, result.get("error") or "No report data available")
@@ -2021,6 +2104,23 @@ async def list_opex_plans(
 ):
     """List OPEX plans filtered by year/department/team."""
     return await OpexPlanService().list_opex_plans(db, plan_year, department, team_code)
+
+
+@router.get("/opex-plans/report/export")
+async def export_opex_plan_report(
+    plan_year: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Excel download of OPEX Plan Simulation Data, formatted as an
+    "Operating Expense" summary (Expense | Estimation PL {YY} (total)-FS).
+    See _build_opex_plan_report_xlsx for the Managerial-Account/Chart-of-
+    Account grouping rule. Registered before /opex-plans/{plan_id} for the
+    same reason as /manufacture-plans/detail-report."""
+    result = await OpexPlanService().list_opex_plans(db, plan_year=plan_year)
+    if not result.get("success"):
+        raise HTTPException(400, result.get("error") or "Failed to load OPEX Plan data")
+    return _build_opex_plan_report_xlsx(result["data"], plan_year)
 
 
 @router.get("/opex-plans/{plan_id}")

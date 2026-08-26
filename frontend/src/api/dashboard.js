@@ -297,9 +297,8 @@ export const pacApi = {
     return api.post("/dashboard/pac/manufacture-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
   },
   exportManufacturePlanDetailReport: (planYear) => api.get("/dashboard/pac/manufacture-plans/detail-report", { params: { plan_year: planYear }, responseType: "blob" }),
-  // Reporting > Manufacturing Plan — computed live from the Manufacture Plan
-  // Simulation Data above, no separate upload for this one.
-  getManufacturePlanReport:    (planYear) => api.get("/dashboard/pac/manufacture-plans/report", { params: { plan_year: planYear } }),
+  // Business Plan Report format ("4.Manufacture_Plan") — computed live
+  // from the Manufacture Plan Simulation Data above, no separate upload.
   exportManufacturePlanReport: (planYear) => api.get("/dashboard/pac/manufacture-plans/report/export", { params: { plan_year: planYear }, responseType: "blob" }),
 
   // Investment Plan (Simulation)
@@ -324,6 +323,7 @@ export const pacApi = {
     form.append("file", file);
     return api.post("/dashboard/pac/opex-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
   },
+  exportOpexPlanReport: (planYear) => api.get("/dashboard/pac/opex-plans/report/export", { params: { plan_year: planYear }, responseType: "blob" }),
 
   // Exchange Rates
   getExchangeRates:    (refresh = false, source = "auto") => api.get("/dashboard/pac/exchange-rates", { params: { refresh, source } }),

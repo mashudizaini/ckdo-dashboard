@@ -55,7 +55,6 @@ const BP_SUBTABS = [
   { id: "history",    label: "Document List",          icon: Clock    },
   { id: "setup",      label: "Setup",                   icon: Settings },
   { id: "simulation", label: "Simulation Data",         icon: BarChart },
-  { id: "reporting",  label: "Reporting",               icon: FileSpreadsheet },
 ];
 
 const ROMAN = ["i","ii","iii","iv","v","vi","vii","viii","ix","x"];
@@ -751,7 +750,6 @@ function BusinessPlanSection() {
       {subTab === "history"    && <SectionCard title="Document List" subtitle={`All Business Plan documents for ${year}`}><BPHistoryPanel year={year} /></SectionCard>}
       {subTab === "setup"      && <SetupSection year={year} />}
       {subTab === "simulation" && <SimulationSection year={year} />}
-      {subTab === "reporting"  && <ReportingSection year={year} />}
     </div>
   );
 }
@@ -2881,154 +2879,6 @@ function SimulationSection({ year }) {
   );
 }
 
-/* ─── Section: Reporting ───────────────────────────── */
-const REPORTING_SUBTABS = [
-  { id: "manufacture_plan_report", label: "Manufacturing Plan", icon: Factory },
-];
-
-function ReportingSection({ year }) {
-  const [subTab, setSubTab] = useState("manufacture_plan_report");
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex gap-1 p-1 rounded-lg bg-gray-800/60 border border-gray-700">
-          {REPORTING_SUBTABS.map(t => (
-            <button key={t.id} onClick={() => setSubTab(t.id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
-                subTab === t.id ? "bg-violet-500/20 border border-violet-500/40 text-violet-300"
-                                : "text-gray-500 hover:text-gray-300"
-              }`}>
-              <t.icon size={11} />{t.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-500">Plan Year: <span className="text-violet-400 font-bold">{year}</span></label>
-        </div>
-      </div>
-      {subTab === "manufacture_plan_report" && <ManufacturePlanReportPanel year={year} />}
-    </div>
-  );
-}
-
-/* ══ Manufacturing Plan Report Panel ═══════════════════════════════════════════ */
-/* Read-only report, computed live from Simulation Data > Manufacture Plan —
-   no separate upload here. Format reference: sumber/01.V3.2026
-   Business_Plan_Report_Dec20_2025.xlsx, sheet "4.Manufacture_Plan". See
-   ManufacturePlanService.get_report (backend) for how Local/CMO/Export and
-   Liquid/Freeze Dry are inferred from that input data. */
-
-const MFG_REPORT_ROW_STYLE = {
-  total:    "bg-violet-500/15 text-violet-200 font-bold",
-  group:    "bg-gray-800/70 text-gray-100 font-semibold",
-  subtotal: "bg-gray-800/30 text-gray-300 font-medium",
-  line:     "text-gray-400",
-};
-
-function ManufacturePlanReportPanel({ year }) {
-  const [report, setReport] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [exporting, setExporting] = useState(false);
-
-  const load = useCallback(async () => {
-    setLoading(true); setError(null);
-    try {
-      const res = await pacApi.getManufacturePlanReport(year);
-      if (res.success) setReport(res); else { setReport(null); setError(res.error || "Failed to load"); }
-    } catch (e) {
-      setReport(null);
-      setError(e?.detail || e?.message || String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [year]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const handleDownload = async () => {
-    setExporting(true);
-    try {
-      const blobData = await pacApi.exportManufacturePlanReport(year);
-      const blob = new Blob([blobData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = `Manufacturing_Plan_Report_${year}.xlsx`; a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      let msg = "Download failed";
-      if (e instanceof Blob) { try { msg = JSON.parse(await e.text())?.detail || msg; } catch (_) {} }
-      else if (e?.detail) msg = e.detail; else if (e?.message) msg = e.message;
-      alert("Download error: " + msg);
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const fmt = (v) => v === "" || v == null ? "—" : Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 });
-
-  return (
-    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
-      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-200">Manufacturing Plan Report</h3>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Batch Size (vial) plan — Total → Local/CMO/Export → Liquid/Freeze Dry → Product · {year}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={load} className={BTN_SM("gray")}><RefreshCw size={11} /> Refresh</button>
-          <button onClick={handleDownload} disabled={exporting || !report} className={BTN_SM("green")}>
-            {exporting ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
-            Download Excel
-          </button>
-        </div>
-      </div>
-      <div className="p-5">
-        <div className="mb-3 rounded-lg border border-gray-800 bg-gray-950/40 px-3 py-2 text-[11px] text-gray-500">
-          Computed from Simulation Data → Manufacture Plan — no separate upload for this report. Local/CMO/Export
-          comes from each plan's [Type] field; Liquid/Freeze Dry is inferred per product from a short known-products
-          list (extend it in the backend if a new freeze-dried product is added). Prior-year column comes from
-          {" "}{year - 1}'s Manufacture Plan data, if any was uploaded.
-        </div>
-        {loading ? (
-          <div className="py-10 text-center text-gray-600 text-sm"><Loader2 size={16} className="animate-spin inline" /></div>
-        ) : error ? (
-          <div className="py-10 text-center text-red-400 text-sm">{error}</div>
-        ) : !report ? (
-          <div className="py-10 text-center text-gray-600 text-sm">No Manufacturing Plan report for {year}.</div>
-        ) : (
-          <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "32rem" }}>
-            <table className="w-full border-collapse text-xs">
-              <thead>
-                <tr className="bg-gray-800/80">
-                  <th className="sticky top-0 left-0 z-20 bg-gray-800 px-2 py-2 text-left text-gray-400 font-semibold border border-gray-700 min-w-[220px]">Product / Group</th>
-                  {(report.columns || []).map((h, ci) => (
-                    <th key={ci} className="sticky top-0 z-10 bg-gray-800 px-2 py-2 text-right text-gray-400 font-semibold border border-gray-700 whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {(report.rows || []).map((row, ri) => (
-                  <tr key={ri} className={`border-b border-gray-800/60 ${MFG_REPORT_ROW_STYLE[row.type] || "text-gray-400"}`}>
-                    <td className="sticky left-0 z-10 bg-gray-900 px-2 py-1.5 border border-gray-800" style={{ paddingLeft: `${8 + (row.level || 0) * 16}px` }}>
-                      {row.label}
-                    </td>
-                    {(row.values || []).map((v, ci) => (
-                      <td key={ci} className="px-2 py-1.5 border border-gray-800 text-right font-mono">{fmt(v)}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 /* ══ Purchase Plan (Material) Panel ═══════════════════════════════════════════ */
 /* Field set + Excel format reference: sumber/(P1-M) Purchase plan_Material.xlsx
    Each item has an "Order" row (planned monthly order qty + price) and a
@@ -3237,7 +3087,7 @@ function PurchasePlanPanel({ year }) {
               <button onClick={handleExportReport} disabled={exportingReport} className={BTN_SM("green")}
                 title="Download Purchase Plan report (format matches sheet '6-1.Purchase_Plan_Value' in the Business Plan Report workbook)">
                 {exportingReport ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
-                Download Excel
+                Download
               </button>
             </>
           ) : (
@@ -3636,7 +3486,7 @@ function PersonnelPlanPanel({ year }) {
               <button onClick={handleExportReport} disabled={exportingReport} className={BTN_SM("green")}
                 title="Download Personnel Plan report (headcount, format matches sheet '9.Personnel plan' section 2 in the Business Plan Report workbook — Organization Chart excluded)">
                 {exportingReport ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
-                Download Excel
+                Download
               </button>
             </>
           ) : (
@@ -3875,6 +3725,7 @@ function ManufacturePlanPanel({ year }) {
   const [saved, setSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [exportingReport, setExportingReport] = useState(false);
+  const [exportingBpReport, setExportingBpReport] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -4012,6 +3863,25 @@ function ManufacturePlanPanel({ year }) {
     }
   };
 
+  const handleExportBpReport = async () => {
+    setExportingBpReport(true);
+    try {
+      const blobData = await pacApi.exportManufacturePlanReport(year);
+      const blob = new Blob([blobData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `Manufacturing_Plan_Report_${year}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      let msg = "Download failed";
+      if (e instanceof Blob) { try { msg = JSON.parse(await e.text())?.detail || msg; } catch (_) {} }
+      else if (e?.detail) msg = e.detail; else if (e?.message) msg = e.message;
+      alert("Download error: " + msg);
+    } finally {
+      setExportingBpReport(false);
+    }
+  };
+
   const grandTotal = (colIdx) => (form.content.rows || []).reduce((sum, row) => sum + (Number(row[colIdx]) || 0), 0);
   const fmtNum = (v) => v === "" || v == null ? "—" : Number(v).toLocaleString();
 
@@ -4036,6 +3906,11 @@ function ManufacturePlanPanel({ year }) {
               <button onClick={handleExportDetailReport} disabled={exportingReport} className={BTN_SM("green")} title="Export Detail Manufacturing Plan report (format & calculation matching the reference BOM/Manufacturing Plan file)">
                 {exportingReport ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
                 Export Detail Report
+              </button>
+              <button onClick={handleExportBpReport} disabled={exportingBpReport} className={BTN_SM("green")}
+                title="Download (format matches sheet '4.Manufacture_Plan' in the Business Plan Report workbook)">
+                {exportingBpReport ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                Download
               </button>
               {selectedPlan && (
                 <button onClick={() => openEdit(selectedPlan)} className={BTN_SM("indigo")}><Edit3 size={11} /> Edit</button>
@@ -4367,7 +4242,7 @@ function InvestmentPlanPanel({ year }) {
               <button onClick={handleExportReport} disabled={exportingReport} className={BTN_SM("green")}
                 title="Download Investment Plan report (format matches sheet '5. Investment Plan' in the Business Plan Report workbook)">
                 {exportingReport ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
-                Download Excel
+                Download
               </button>
             </>
           ) : (
@@ -4532,6 +4407,7 @@ function OpexPlanPanel({ year }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [exportingReport, setExportingReport] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -4656,6 +4532,25 @@ function OpexPlanPanel({ year }) {
 
   const NUMERIC_COLS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
 
+  const handleExportReport = async () => {
+    setExportingReport(true);
+    try {
+      const blobData = await pacApi.exportOpexPlanReport(year);
+      const blob = new Blob([blobData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `OPEX_Plan_Report_${year}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      let msg = "Download failed";
+      if (e instanceof Blob) { try { msg = JSON.parse(await e.text())?.detail || msg; } catch (_) {} }
+      else if (e?.detail) msg = e.detail; else if (e?.message) msg = e.message;
+      alert("Download error: " + msg);
+    } finally {
+      setExportingReport(false);
+    }
+  };
+
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
@@ -4675,6 +4570,11 @@ function OpexPlanPanel({ year }) {
               {selectedPlan && (
                 <button onClick={() => openEdit(selectedPlan)} className={BTN_SM("indigo")}><Edit3 size={11} /> Edit</button>
               )}
+              <button onClick={handleExportReport} disabled={exportingReport} className={BTN_SM("green")}
+                title="Download (Operating Expense summary, format matches the reference screenshot)">
+                {exportingReport ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                Download
+              </button>
             </>
           ) : (
             <>
@@ -5196,9 +5096,9 @@ function SalesPlanPanel({ year }) {
                 Sales Summary
               </button>
               <button onClick={handleExportSalesPlanReport} disabled={exportingReport} className={BTN_SM("teal")}
-                title="Format matches sheet '2-1.Sales plan_product_Value' in the Business Plan Report workbook">
+                title="Download (format matches sheet '2-1.Sales plan_product_Value' in the Business Plan Report workbook)">
                 {exportingReport ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
-                Sales Plan Report
+                Download
               </button>
             </div>
             {selectedPlan && selectedPlan.content && (
