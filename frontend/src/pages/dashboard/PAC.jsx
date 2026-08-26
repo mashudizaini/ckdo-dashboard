@@ -3056,6 +3056,7 @@ function PurchasePlanPanel({ year }) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [exportingReport, setExportingReport] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -3195,6 +3196,25 @@ function PurchasePlanPanel({ year }) {
 
   const fmtNum = (v) => Number(v || 0).toLocaleString();
 
+  const handleExportReport = async () => {
+    setExportingReport(true);
+    try {
+      const blobData = await pacApi.exportPurchasePlanReport(year);
+      const blob = new Blob([blobData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `Purchase_Plan_Report_${year}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      let msg = "Download failed";
+      if (e instanceof Blob) { try { msg = JSON.parse(await e.text())?.detail || msg; } catch (_) {} }
+      else if (e?.detail) msg = e.detail; else if (e?.message) msg = e.message;
+      alert("Download error: " + msg);
+    } finally {
+      setExportingReport(false);
+    }
+  };
+
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
@@ -3214,6 +3234,11 @@ function PurchasePlanPanel({ year }) {
               {selectedPlan && (
                 <button onClick={() => openEdit(selectedPlan)} className={BTN_SM("indigo")}><Edit3 size={11} /> Edit</button>
               )}
+              <button onClick={handleExportReport} disabled={exportingReport} className={BTN_SM("green")}
+                title="Download Purchase Plan report (format matches sheet '6-1.Purchase_Plan_Value' in the Business Plan Report workbook)">
+                {exportingReport ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                Download Excel
+              </button>
             </>
           ) : (
             <>
@@ -4273,6 +4298,26 @@ function InvestmentPlanPanel({ year }) {
   const grandTotal = (colIdx) => (form.content.rows || []).reduce((sum, row) => sum + (Number(row[colIdx]) || 0), 0);
   const fmtNum = (v) => v === "" || v == null ? "—" : Number(v).toLocaleString();
 
+  const [exportingReport, setExportingReport] = useState(false);
+  const handleExportReport = async () => {
+    setExportingReport(true);
+    try {
+      const blobData = await pacApi.exportInvestmentPlanReport(year);
+      const blob = new Blob([blobData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `Investment_Plan_Report_${year}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      let msg = "Download failed";
+      if (e instanceof Blob) { try { msg = JSON.parse(await e.text())?.detail || msg; } catch (_) {} }
+      else if (e?.detail) msg = e.detail; else if (e?.message) msg = e.message;
+      alert("Download error: " + msg);
+    } finally {
+      setExportingReport(false);
+    }
+  };
+
   const NUMERIC_COLS = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
 
   return (
@@ -4294,6 +4339,11 @@ function InvestmentPlanPanel({ year }) {
               {selectedPlan && (
                 <button onClick={() => openEdit(selectedPlan)} className={BTN_SM("indigo")}><Edit3 size={11} /> Edit</button>
               )}
+              <button onClick={handleExportReport} disabled={exportingReport} className={BTN_SM("green")}
+                title="Download Investment Plan report (format matches sheet '5. Investment Plan' in the Business Plan Report workbook)">
+                {exportingReport ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                Download Excel
+              </button>
             </>
           ) : (
             <>
@@ -4759,6 +4809,7 @@ function SalesPlanPanel({ year }) {
   const [exporting, setExporting] = useState(false);
   const [exportingGross, setExportingGross] = useState(false);
   const [exportingSummary, setExportingSummary] = useState(false);
+  const [exportingReport, setExportingReport] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [sheetRange, setSheetRange] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -5023,6 +5074,25 @@ function SalesPlanPanel({ year }) {
     }
   };
 
+  const handleExportSalesPlanReport = async () => {
+    setExportingReport(true);
+    try {
+      const blobData = await pacApi.exportSalesPlanReport(year);
+      const blob = new Blob([blobData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `Sales_Plan_Report_${year}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      let msg = "Export failed";
+      if (e instanceof Blob) { try { msg = JSON.parse(await e.text())?.detail || msg; } catch (_) {} }
+      else if (e?.detail) msg = e.detail; else if (e?.message) msg = e.message;
+      alert("Sales Plan Report error: " + msg);
+    } finally {
+      setExportingReport(false);
+    }
+  };
+
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
@@ -5099,6 +5169,11 @@ function SalesPlanPanel({ year }) {
               <button onClick={handleExportSalesSummary} disabled={exportingSummary} className={BTN_SM("indigo")}>
                 {exportingSummary ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
                 Sales Summary
+              </button>
+              <button onClick={handleExportSalesPlanReport} disabled={exportingReport} className={BTN_SM("teal")}
+                title="Format matches sheet '2-1.Sales plan_product_Value' in the Business Plan Report workbook">
+                {exportingReport ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                Sales Plan Report
               </button>
             </div>
             {selectedPlan && selectedPlan.content && (

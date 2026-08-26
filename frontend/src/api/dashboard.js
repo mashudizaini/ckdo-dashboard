@@ -260,6 +260,7 @@ export const pacApi = {
   },
   exportGrossSalesReport: (planYear) => api.get("/dashboard/pac/sales-plans/gross-sales-report", { params: { plan_year: planYear }, responseType: "blob" }),
   exportSalesSummary: (planYear) => api.get("/dashboard/pac/sales-plans/sales-summary", { params: { plan_year: planYear }, responseType: "blob" }),
+  exportSalesPlanReport: (planYear) => api.get("/dashboard/pac/sales-plans/report/export", { params: { plan_year: planYear }, responseType: "blob" }),
 
   // Purchase Plan Material (Simulation)
   listPurchasePlans:  (p)    => api.get("/dashboard/pac/purchase-plans", { params: p }),
@@ -271,6 +272,7 @@ export const pacApi = {
     form.append("file", file);
     return api.post("/dashboard/pac/purchase-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
   },
+  exportPurchasePlanReport: (planYear) => api.get("/dashboard/pac/purchase-plans/report/export", { params: { plan_year: planYear }, responseType: "blob" }),
 
   // Personnel Plan (Simulation)
   listPersonnelPlans:  (p)    => api.get("/dashboard/pac/personnel-plans", { params: p }),
@@ -309,6 +311,7 @@ export const pacApi = {
     form.append("file", file);
     return api.post("/dashboard/pac/investment-plans/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
   },
+  exportInvestmentPlanReport: (planYear) => api.get("/dashboard/pac/investment-plans/report/export", { params: { plan_year: planYear }, responseType: "blob" }),
 
   // OPEX Plan (Simulation)
   listOpexPlans:  (p)    => api.get("/dashboard/pac/opex-plans", { params: p }),

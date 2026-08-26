@@ -502,6 +502,24 @@ async def export_sales_summary(
         raise HTTPException(500, f"Excel generation failed: {e}")
 
 
+@router.get("/sales-plans/report/export")
+async def export_sales_plan_report(
+    plan_year: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Excel download of Sales Plan Simulation Data, formatted like
+    "2-1.Sales plan_product_Value" in the Business Plan Report workbook.
+    See _build_sales_plan_report_xlsx for what's deliberately left out
+    (therapeutic-area split, Export's Product-vs-Freight split, no
+    prior-year comparison). Registered before /sales-plans/{plan_id} for
+    the same reason as /sales-plans/gross-sales-report."""
+    result = await SalesPlanService().list_sales_plans(db, plan_year=plan_year, plan_type="value")
+    if not result.get("success"):
+        raise HTTPException(400, result.get("error") or "Failed to load Sales Plan data")
+    return _build_sales_plan_report_xlsx(result["data"], plan_year)
+
+
 @router.get("/sales-plans/{plan_id}")
 async def get_sales_plan(
     plan_id: int,
@@ -911,6 +929,274 @@ def _build_manufacture_plan_report_xlsx(report: dict, plan_year: int) -> Streami
     )
 
 
+def _build_investment_plan_report_xlsx(plans: list, plan_year: int) -> StreamingResponse:
+    """Reporting format reference: sumber/01.V3.2026 Business_Plan_Report_
+    Dec20_2025.xlsx, sheet "5. Investment Plan" — grouped by Classification
+    (each item's Clarification field), Q1-Q4 + annual Total per item and
+    per group, Team from each plan's own team_code.
+
+    Deliberately NOT reproduced: the reference sheet's Acquisition Month /
+    Depreciation Charged (COGS·OPEX) / Depreciation Amount columns and its
+    bottom depreciation-summary block. Investment Plan Simulation Data has
+    no "acquisition month" field to derive them from reliably — reverse-
+    engineering it from which Jan-Dec column holds the entered value gave
+    inconsistent results against two known reference rows (Head Space
+    Analyzer implied depreciation starting the month AFTER acquisition;
+    Technical Transfer implied starting the SAME month) — a real accounting
+    policy nuance (or manual override) this data doesn't capture, so
+    fabricating a depreciation figure risked being confidently wrong on a
+    number people would actually rely on. Lifetime (Year) is included as
+    entered; Acquisition/Depreciation are left for Accounting to add from
+    the source workbook until there's a reliable way to derive them.
+    """
+    from openpyxl.utils import get_column_letter as _col_letter
+
+    def _num(v):
+        try:
+            return float(v or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    rows_by_clarification: dict = {}
+    for plan in plans:
+        team = plan.get("team_code") or plan.get("team_name") or plan.get("department") or ""
+        for row in (plan.get("content") or {}).get("rows") or []:
+            if len(row) < 21:
+                continue
+            clarification = str(row[1] or "").strip()
+            item = str(row[3] or "").strip()
+            if not clarification or not item:
+                continue
+            months = [_num(row[8 + m]) for m in range(12)]
+            quarters = [sum(months[0:3]), sum(months[3:6]), sum(months[6:9]), sum(months[9:12])]
+            lifetime = row[7]
+            notes = row[21] if len(row) > 21 else ""
+            rows_by_clarification.setdefault(clarification, []).append({
+                "item": item, "team": team, "quarters": quarters, "total": sum(quarters),
+                "lifetime": lifetime, "notes": notes,
+            })
+
+    if not rows_by_clarification:
+        raise HTTPException(404, f"Tidak ada data Investment Plan untuk tahun {plan_year}")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"Investment_Plan_{plan_year}"
+
+    bold = Font(bold=True)
+    title_font = Font(bold=True, size=13)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    fill_hdr = PatternFill("solid", fgColor="D9E1F2")
+    fill_group = PatternFill("solid", fgColor="F2F2F2")
+    fill_total = PatternFill("solid", fgColor="D9C6F2")
+
+    headers = ["No", "Classification / Item", "Team", "Q1", "Q2", "Q3", "Q4", "Total", "Lifetime (Year)", "Notes"]
+    ncols = len(headers)
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
+    ws.cell(row=1, column=1, value="PT CKD OTTO Pharmaceuticals").font = title_font
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
+    ws.cell(row=2, column=1, value=f"Investment Plan — {plan_year} (unit: mil Rp) — from Simulation Data > Investment Plan").font = Font(italic=True, size=10)
+
+    HR = 4
+    for c, label in enumerate(headers, 1):
+        cell = ws.cell(row=HR, column=c, value=label)
+        cell.font, cell.alignment, cell.fill = bold, center, fill_hdr
+
+    r = HR + 1
+    grand_q = [0.0, 0.0, 0.0, 0.0]
+    for no, clarification in enumerate(sorted(rows_by_clarification), 1):
+        items = rows_by_clarification[clarification]
+        group_q = [sum(it["quarters"][i] for it in items) for i in range(4)]
+        ws.cell(row=r, column=1, value=no).font = bold
+        ws.cell(row=r, column=2, value=clarification).font = bold
+        for i in range(4):
+            ws.cell(row=r, column=4 + i, value=group_q[i] or None).font = bold
+        ws.cell(row=r, column=8, value=sum(group_q) or None).font = bold
+        for c in range(1, ncols + 1):
+            ws.cell(row=r, column=c).fill = fill_group
+        for i in range(4):
+            grand_q[i] += group_q[i]
+        r += 1
+
+        for it in items:
+            ws.cell(row=r, column=2, value=it["item"])
+            ws.cell(row=r, column=3, value=it["team"])
+            for i in range(4):
+                ws.cell(row=r, column=4 + i, value=it["quarters"][i] or None)
+            ws.cell(row=r, column=8, value=it["total"] or None)
+            ws.cell(row=r, column=9, value=it["lifetime"] or None)
+            ws.cell(row=r, column=10, value=it["notes"] or None)
+            r += 1
+
+    ws.cell(row=r, column=2, value="Total Investment").font = bold
+    for i in range(4):
+        ws.cell(row=r, column=4 + i, value=grand_q[i] or None).font = bold
+    ws.cell(row=r, column=8, value=sum(grand_q) or None).font = bold
+    for c in range(1, ncols + 1):
+        ws.cell(row=r, column=c).fill = fill_total
+
+    ws.freeze_panes = ws.cell(row=HR + 1, column=3)
+    ws.column_dimensions["B"].width = 32
+    ws.column_dimensions["C"].width = 12
+    for c in range(4, 9):
+        ws.column_dimensions[_col_letter(c)].width = 13
+    ws.column_dimensions["I"].width = 14
+    ws.column_dimensions["J"].width = 40
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"Investment_Plan_Report_{plan_year}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
+
+
+def _build_purchase_plan_report_xlsx(plans_this: list, plans_prior: list, plan_year: int) -> StreamingResponse:
+    """Reporting format reference: sumber/01.V3.2026 Business_Plan_Report_
+    Dec20_2025.xlsx, sheet "6-1.Purchase_Plan_Value" — grouped by Type
+    (API/Excipient/Primary Packaging/...), with a prior-year comparison and
+    growth % per item, matching the reference's "2025(E)"/"2026(P)"/"% G/R"
+    columns.
+
+    Deliberately NOT reproduced: Vendor (not captured anywhere in Purchase
+    Plan Simulation Data), and the reference's separate "Delivery 2026" /
+    "Outstanding PO 2027" QTY+Value columns — this input only distinguishes
+    planned Order vs planned Received quantities, which isn't reliably the
+    same concept as a delivery schedule or PO-slippage carryover into next
+    year; fabricating those would risk presenting a guess as a real supply
+    figure. Prior-year ("2025(E)") figures come from this same app's
+    Purchase Plan Simulation Data for plan_year-1, if any was entered —
+    not from a separate actuals source.
+    """
+    def _num(v):
+        try:
+            return float(v or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _item_key(item: dict):
+        code = str(item.get("item_code_no") or "").strip()
+        name = str(item.get("item_code_name") or "").strip()
+        return (str(item.get("type") or "").strip(), code or name)
+
+    prior_by_key: dict = {}
+    for plan in plans_prior:
+        for item in (plan.get("content") or {}).get("items") or []:
+            k = _item_key(item)
+            agg = prior_by_key.setdefault(k, {"qty": 0.0, "value": 0.0})
+            agg["qty"] += _num(item.get("order_total"))
+            agg["value"] += _num(item.get("total_price"))
+
+    rows_by_type: dict = {}
+    for plan in plans_this:
+        for item in (plan.get("content") or {}).get("items") or []:
+            name = str(item.get("item_code_name") or "").strip()
+            if not name:
+                continue
+            item_type = str(item.get("type") or "").strip() or "(Unclassified)"
+            prior = prior_by_key.get(_item_key(item), {"qty": 0.0, "value": 0.0})
+            rows_by_type.setdefault(item_type, []).append({
+                "name": name, "uom": item.get("uom") or "",
+                "unit_price_idr": _num(item.get("unit_price_idr")),
+                "qty_prior": prior["qty"], "value_prior": prior["value"],
+                "qty_this": _num(item.get("order_total")), "value_this": _num(item.get("total_price")),
+            })
+
+    if not rows_by_type:
+        raise HTTPException(404, f"Tidak ada data Purchase Plan untuk tahun {plan_year}")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"Purchase_Plan_{plan_year}"
+
+    bold = Font(bold=True)
+    title_font = Font(bold=True, size=13)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    fill_hdr = PatternFill("solid", fgColor="D9E1F2")
+    fill_group = PatternFill("solid", fgColor="F2F2F2")
+    fill_total = PatternFill("solid", fgColor="D9C6F2")
+
+    headers = ["No", "Type / Material Name", "UOM", "Price (IDR)",
+               f"{plan_year - 1}(E) QTY", f"{plan_year - 1}(E) Value", f"{plan_year}(P) QTY", f"{plan_year}(P) Value", "% G/R"]
+    ncols = len(headers)
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
+    ws.cell(row=1, column=1, value="PT CKD OTTO Pharmaceuticals").font = title_font
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
+    ws.cell(row=2, column=1, value=f"Purchase Plan — {plan_year} (unit: mil Rp) — from Simulation Data > Purchase Plan").font = Font(italic=True, size=10)
+
+    HR = 4
+    for c, label in enumerate(headers, 1):
+        cell = ws.cell(row=HR, column=c, value=label)
+        cell.font, cell.alignment, cell.fill = bold, center, fill_hdr
+
+    def _growth(prior_v, this_v):
+        return (this_v - prior_v) / prior_v if prior_v else None
+
+    r = HR + 1
+    grand = {"qty_prior": 0.0, "value_prior": 0.0, "qty_this": 0.0, "value_this": 0.0}
+    for no, item_type in enumerate(sorted(rows_by_type), 1):
+        items = rows_by_type[item_type]
+        g = {k: sum(it[k] for it in items) for k in ("qty_prior", "value_prior", "qty_this", "value_this")}
+        ws.cell(row=r, column=1, value=no).font = bold
+        ws.cell(row=r, column=2, value=item_type).font = bold
+        ws.cell(row=r, column=5, value=g["qty_prior"] or None).font = bold
+        ws.cell(row=r, column=6, value=g["value_prior"] or None).font = bold
+        ws.cell(row=r, column=7, value=g["qty_this"] or None).font = bold
+        ws.cell(row=r, column=8, value=g["value_this"] or None).font = bold
+        gr = _growth(g["value_prior"], g["value_this"])
+        gr_cell = ws.cell(row=r, column=9, value=gr)
+        gr_cell.font, gr_cell.number_format = bold, "0.0%"
+        for c in range(1, ncols + 1):
+            ws.cell(row=r, column=c).fill = fill_group
+        for k in grand:
+            grand[k] += g[k]
+        r += 1
+
+        for it in items:
+            ws.cell(row=r, column=2, value=it["name"])
+            ws.cell(row=r, column=3, value=it["uom"])
+            ws.cell(row=r, column=4, value=it["unit_price_idr"] or None)
+            ws.cell(row=r, column=5, value=it["qty_prior"] or None)
+            ws.cell(row=r, column=6, value=it["value_prior"] or None)
+            ws.cell(row=r, column=7, value=it["qty_this"] or None)
+            ws.cell(row=r, column=8, value=it["value_this"] or None)
+            gr = _growth(it["value_prior"], it["value_this"])
+            if gr is not None:
+                ws.cell(row=r, column=9, value=gr).number_format = "0.0%"
+            r += 1
+
+    ws.cell(row=r, column=2, value="Total Purchase Plan").font = bold
+    ws.cell(row=r, column=5, value=grand["qty_prior"] or None).font = bold
+    ws.cell(row=r, column=6, value=grand["value_prior"] or None).font = bold
+    ws.cell(row=r, column=7, value=grand["qty_this"] or None).font = bold
+    ws.cell(row=r, column=8, value=grand["value_this"] or None).font = bold
+    gr_cell = ws.cell(row=r, column=9, value=_growth(grand["value_prior"], grand["value_this"]))
+    gr_cell.font, gr_cell.number_format = bold, "0.0%"
+    for c in range(1, ncols + 1):
+        ws.cell(row=r, column=c).fill = fill_total
+
+    ws.freeze_panes = ws.cell(row=HR + 1, column=3)
+    ws.column_dimensions["B"].width = 34
+    ws.column_dimensions["C"].width = 10
+    for c in range(4, ncols + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 15
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"Purchase_Plan_Report_{plan_year}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
+
+
 def _classify_business_unit(market: str) -> str:
     """Business-unit bucket rule mirrored from V5.Sales Estimation2026.xlsx's
     Summary sheet: Local = Public/Private, CMO/Export are their own units,
@@ -1093,6 +1379,25 @@ async def list_purchase_plans(
     return await PurchasePlanService().list_purchase_plans(db, plan_year, department, team_code, plan_category)
 
 
+@router.get("/purchase-plans/report/export")
+async def export_purchase_plan_report(
+    plan_year: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Excel download of Purchase Plan Simulation Data, formatted like
+    "6-1.Purchase_Plan_Value" in the Business Plan Report workbook. See
+    _build_purchase_plan_report_xlsx for what's deliberately left out
+    (Vendor, Delivery/Outstanding PO columns).
+    Registered before /purchase-plans/{plan_id} for the same reason as
+    /manufacture-plans/detail-report."""
+    this_year = await PurchasePlanService().list_purchase_plans(db, plan_year=plan_year)
+    if not this_year.get("success"):
+        raise HTTPException(400, this_year.get("error") or "Failed to load Purchase Plan data")
+    prior_year = await PurchasePlanService().list_purchase_plans(db, plan_year=plan_year - 1)
+    return _build_purchase_plan_report_xlsx(this_year["data"], prior_year.get("data") or [], plan_year)
+
+
 @router.get("/purchase-plans/{plan_id}")
 async def get_purchase_plan(
     plan_id: int,
@@ -1199,6 +1504,148 @@ async def upload_personnel_plan_excel(
     plan template.xlsx" layout (headcount by level + recruitment schedules)."""
     content = await file.read()
     return await PersonnelPlanService().import_excel(db, content, plan_year, user.username)
+
+
+def _build_sales_plan_report_xlsx(plans: list, plan_year: int) -> StreamingResponse:
+    """Reporting format reference: sumber/01.V3.2026 Business_Plan_Report_
+    Dec20_2025.xlsx, sheet "2-1.Sales plan_product_Value" — Total ->
+    Local (Public/Private) / CMO & Others (CMO/Service Agreement) / Export
+    (per country) -> product, with a Jan-Dec monthly breakdown + annual
+    Total, matching that sheet's layout. Local/CMO/Export and Public/
+    Private/CMO/Service-Agreement all come from each plan's Excel tab name
+    (content.meta.sheet_name) — same substring convention already used by
+    eis_summary.py's Sales Closing Estimation card — Export's per-country
+    split comes from each row's own Country field.
+
+    Deliberately NOT reproduced: the reference sheet's further Oncology /
+    Immunosuppressant therapeutic-area split (no such classification
+    exists anywhere in Sales Plan Simulation Data — it only has Country/
+    Customer/Product) and its Export rows' Product-vs-Freight value split
+    (Sales Plan stores one blended Total Value per product, not a separate
+    freight charge). No prior-year ("2025(E)") comparison either — Sales
+    Plan Simulation Data is entered fresh each cycle from the S1 template,
+    not carried forward year to year the way Manufacture Plan is.
+    """
+    MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    def _classify(sheet_name):
+        s = str(sheet_name or "").strip().lower().replace("_", " ")
+        if "national public" in s:
+            return ("Local", "Public")
+        if "national private" in s:
+            return ("Local", "Private")
+        if "export" in s:
+            return ("Export", None)
+        if "cmo" in s:
+            return ("CMO & Others", "CMO")
+        if "agreement" in s:
+            return ("CMO & Others", "Service Agreement")
+        return ("Other", sheet_name or "(Unclassified)")
+
+    tree: dict = {}  # tree[top][sub_or_country][product] = [12 floats]
+    for plan in plans:
+        sheet_name = (plan.get("content") or {}).get("meta", {}).get("sheet_name")
+        top, sub = _classify(sheet_name)
+        for row in (plan.get("content") or {}).get("rows") or []:
+            if len(row) < 16:
+                continue
+            product = str(row[3] or "").strip()
+            if not product:
+                continue
+            months = [float(row[4 + m] or 0) for m in range(12)]
+            if not any(months):
+                continue
+            key2 = sub if sub else (str(row[1] or "").strip() or "(Unspecified)")
+            arr = tree.setdefault(top, {}).setdefault(key2, {}).setdefault(product, [0.0] * 12)
+            for i in range(12):
+                arr[i] += months[i]
+
+    if not tree:
+        raise HTTPException(404, f"Tidak ada data Sales Plan untuk tahun {plan_year}")
+
+    def sum_months(node):
+        if isinstance(node, list):
+            return list(node)
+        total = [0.0] * 12
+        for child in node.values():
+            cs = sum_months(child)
+            for i in range(12):
+                total[i] += cs[i]
+        return total
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"Sales_Plan_{plan_year}"
+
+    bold = Font(bold=True)
+    title_font = Font(bold=True, size=13)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    fill_hdr = PatternFill("solid", fgColor="D9E1F2")
+    fill_top = PatternFill("solid", fgColor="D9C6F2")
+    fill_sub = PatternFill("solid", fgColor="F2F2F2")
+
+    headers = ["Product / Group"] + MONTH_LABELS + ["Total"]
+    ncols = len(headers)
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
+    ws.cell(row=1, column=1, value="PT CKD OTTO Pharmaceuticals").font = title_font
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
+    ws.cell(row=2, column=1, value=f"Sales Plan — {plan_year} (unit: mil Rp) — from Simulation Data > Sales Plan").font = Font(italic=True, size=10)
+
+    HR = 4
+    for c, label in enumerate(headers, 1):
+        cell = ws.cell(row=HR, column=c, value=label)
+        cell.font, cell.alignment, cell.fill = bold, center, fill_hdr
+
+    r = HR + 1
+
+    def emit(label, level, months, fill=None, bold_row=False):
+        nonlocal r
+        cell = ws.cell(row=r, column=1, value=("  " * level) + label)
+        if bold_row:
+            cell.font = bold
+        for i, v in enumerate(months, 2):
+            c = ws.cell(row=r, column=i, value=v or None)
+            if bold_row:
+                c.font = bold
+        tot = ws.cell(row=r, column=ncols, value=sum(months) or None)
+        if bold_row:
+            tot.font = bold
+        if fill:
+            for c in range(1, ncols + 1):
+                ws.cell(row=r, column=c).fill = fill
+        r += 1
+
+    grand_total = [0.0] * 12
+    for top in ["Local", "CMO & Others", "Export", "Other"]:
+        if top not in tree:
+            continue
+        top_months = sum_months(tree[top])
+        emit(top, 0, top_months, fill=fill_top, bold_row=True)
+        for i in range(12):
+            grand_total[i] += top_months[i]
+        for sub in sorted(tree[top]):
+            sub_months = sum_months(tree[top][sub])
+            emit(sub, 1, sub_months, fill=fill_sub, bold_row=True)
+            for product in sorted(tree[top][sub]):
+                emit(product, 2, tree[top][sub][product])
+
+    emit("TOTAL SALES PLAN", 0, grand_total, fill=fill_top, bold_row=True)
+
+    ws.freeze_panes = ws.cell(row=HR + 1, column=2)
+    ws.column_dimensions["A"].width = 34
+    for c in range(2, ncols + 1):
+        ws.column_dimensions[get_column_letter(c)].width = 12
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"Sales_Plan_Report_{plan_year}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
 
 
 # ── Manufacture Plan ────────────────────────────────────────────────────────────
@@ -1347,6 +1794,24 @@ async def list_investment_plans(
 ):
     """List investment plans filtered by year/department/team."""
     return await InvestmentPlanService().list_investment_plans(db, plan_year, department, team_code)
+
+
+@router.get("/investment-plans/report/export")
+async def export_investment_plan_report(
+    plan_year: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Excel download of Investment Plan Simulation Data, formatted like
+    "5. Investment Plan" in the Business Plan Report workbook — grouped by
+    Classification, Q1-Q4 + Total. See _build_investment_plan_report_xlsx
+    for what's deliberately left out (Acquisition/Depreciation columns).
+    Registered before /investment-plans/{plan_id} for the same reason as
+    /manufacture-plans/detail-report."""
+    result = await InvestmentPlanService().list_investment_plans(db, plan_year=plan_year)
+    if not result.get("success"):
+        raise HTTPException(400, result.get("error") or "Failed to load Investment Plan data")
+    return _build_investment_plan_report_xlsx(result["data"], plan_year)
 
 
 @router.get("/investment-plans/{plan_id}")
