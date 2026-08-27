@@ -2222,6 +2222,8 @@ async def get_employee_detail(
         "monthly": [
             {
                 "period": f"{MONTHS[int(r[1])-1]} {int(r[0])}",
+                "year":   int(r[0]),
+                "month":  int(r[1]),
                 "plan":   int(r[2] or 0),
                 "actual": int(r[3] or 0),
                 "rate":   round(int(r[3] or 0) / max(int(r[2] or 1), 1) * 100),

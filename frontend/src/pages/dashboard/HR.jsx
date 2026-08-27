@@ -3804,7 +3804,7 @@ function WhosOffWidget({ data }) {
   );
 }
 
-function MiniBarChart({ data }) {
+function MiniBarChart({ data, onMonthClick, selectedPeriod }) {
   if (!data?.length) return null;
   const maxVal = Math.max(...data.map((d) => d.plan), 1);
   const H = 140;
@@ -3816,13 +3816,28 @@ function MiniBarChart({ data }) {
           <span style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: "#3b82f6" }} />Plan</span>
           <span style={{ display: "flex", alignItems: "center", gap: 4 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: "#f97316" }} />Actual</span>
         </div>
+        {onMonthClick && (
+          <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 500 }}>· click a month to see its daily records</span>
+        )}
       </div>
       <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: H }}>
         {data.map((m) => {
           const planH   = Math.max(Math.round((m.plan / maxVal) * (H - 40)), 4);
           const actualH = Math.max(Math.round((m.actual / maxVal) * (H - 40)), m.actual > 0 ? 4 : 0);
+          const isSelected = selectedPeriod === m.period;
           return (
-            <div key={m.period} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <div
+              key={m.period}
+              onClick={() => onMonthClick?.(m)}
+              style={{
+                flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+                cursor: onMonthClick ? "pointer" : "default",
+                padding: "4px 2px 2px", borderRadius: 8,
+                background: isSelected ? "rgba(37,99,235,0.10)" : "transparent",
+                boxShadow: isSelected ? "inset 0 0 0 1.5px #2563eb" : "none",
+                transition: "background 0.15s ease",
+              }}
+            >
               <div style={{ width: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 2, height: H - 40 }}>
                 <div style={{ width: "40%", display: "flex", flexDirection: "column", alignItems: "center" }}>
                   <span style={{ fontSize: 10, color: "#475569", fontWeight: 700 }}>{m.plan}</span>
@@ -3833,7 +3848,7 @@ function MiniBarChart({ data }) {
                   <div style={{ width: "100%", height: actualH, background: "linear-gradient(180deg, #fb923c, #f97316)", borderRadius: "5px 5px 0 0", boxShadow: "0 1px 2px rgba(15,23,42,0.08)" }} />
                 </div>
               </div>
-              <p style={{ fontSize: 10, color: "#475569", fontWeight: 600, marginTop: 3 }}>{m.period}</p>
+              <p style={{ fontSize: 10, color: isSelected ? "#2563eb" : "#475569", fontWeight: 600, marginTop: 3 }}>{m.period}</p>
               <p style={{ fontSize: 11, fontWeight: 800, color: "#ea580c" }}>{m.rate}%</p>
             </div>
           );
@@ -3843,10 +3858,66 @@ function MiniBarChart({ data }) {
   );
 }
 
+// ── Daily attendance list — shown below the Monthly Attendance chart once
+// a month bar is clicked. Reuses the same AttendanceRecord list endpoint
+// AttendanceCorrectionSection uses, scoped to one employee_id + that
+// month's date range; the backend already orders by attendance_date desc.
+function MonthRecordsList({ month, records, loading }) {
+  if (!month) return null;
+  const statusColor = { W: "#16a34a", L: "#d97706", E: "#d97706", LE: "#dc2626", A: "#dc2626" };
+  return (
+    <div style={{ ...NEU_CARD, marginTop: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>Daily Records — {month.period}</h4>
+        {loading && <Loader2 size={14} className="animate-spin" style={{ color: "#94a3b8" }} />}
+      </div>
+      {!loading && records.length === 0 ? (
+        <p style={{ padding: "20px 0", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>No attendance records for {month.period}</p>
+      ) : (
+        <div style={{ maxHeight: 320, overflowY: "auto", borderRadius: 12, boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)", position: "sticky", top: 0 }}>
+                {["Date", "Day", "Check In", "Check Out", "Status", "Leave", "Source"].map((h) => (
+                  <th key={h} style={{ padding: "7px 10px", textAlign: "left", fontSize: 10.5, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {records.map((r, i) => (
+                <tr key={r.id || i} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}>
+                  <td style={{ padding: "6px 10px", fontSize: 12, color: "#334155", fontWeight: 600, whiteSpace: "nowrap" }}>{r.attendance_date}</td>
+                  <td style={{ padding: "6px 10px", fontSize: 11.5, color: "#64748b" }}>{r.week_day || "—"}</td>
+                  <td style={{ padding: "6px 10px", fontSize: 12, color: "#334155", fontFamily: "monospace" }}>{r.actual_checkin || "—"}</td>
+                  <td style={{ padding: "6px 10px", fontSize: 12, color: "#334155", fontFamily: "monospace" }}>{r.actual_checkout || "—"}</td>
+                  <td style={{ padding: "6px 10px", fontSize: 11.5, fontWeight: 700, color: statusColor[r.attendance_status] || "#94a3b8" }}>{r.attendance_status || "—"}</td>
+                  <td style={{ padding: "6px 10px", fontSize: 11.5, color: "#7c3aed", fontWeight: 600 }}>{r.leave_code || (r.is_day_off ? "OFF" : "—")}</td>
+                  <td style={{ padding: "6px 10px", fontSize: 10.5, color: "#94a3b8" }}>{r.source || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// "mashudi@ckd-otto.com" -> "mashudi" — the local part is what most source
+// systems (e.g. the Hikvision terminal enrollment, seen live as "MASHUDI"
+// with no surname) actually store as employee_name, so it's a far more
+// reliable search-employees match than the Keycloak profile's full legal
+// name ("Mashudi Zaini"), which an ILIKE against a short source name can
+// fail to match at all.
+const _emailLocalPart = (email) => (email || "").split("@")[0];
+
 function EmployeeDetailPanel({ headers, apiBase }) {
   const curYear = new Date().getFullYear();
   const { user } = useAuthStore();
-  const [query,   setQuery]   = useState(user?.fullName || "");
+  const defaultSearchName = _emailLocalPart(user?.email) || user?.fullName || "";
+  const [query,   setQuery]   = useState(defaultSearchName);
   const [results, setResults] = useState([]);
   const [detail,  setDetail]  = useState(null);
   const [selected, setSelected] = useState(null);
@@ -3855,6 +3926,10 @@ function EmployeeDetailPanel({ headers, apiBase }) {
   const [absSortBy,  setAbsSortBy]  = useState(null);
   const [absSortDir, setAbsSortDir] = useState("asc");
   const handleAbsSort = (f) => { const r = toggleSort(absSortBy, absSortDir, f); setAbsSortBy(r.sortBy); setAbsSortDir(r.sortDir); };
+
+  const [selectedMonth, setSelectedMonth] = useState(null);
+  const [monthRecords, setMonthRecords] = useState([]);
+  const [loadingMonth, setLoadingMonth] = useState(false);
 
   const doSearch = async (q) => {
     if (q.length < 2) { setResults([]); return; }
@@ -3866,6 +3941,7 @@ function EmployeeDetailPanel({ headers, apiBase }) {
 
   const loadDetail = async (emp, forYear) => {
     setResults([]); setQuery(emp.name || emp.id); setSelected(emp); setLoading(true);
+    setSelectedMonth(null); setMonthRecords([]); // switching employee/year invalidates the picked month
     try {
       const res = await fetch(`${apiBase}/employee/${emp.id}/detail?year=${forYear ?? year}`, { headers });
       if (res.ok) setDetail(await res.json());
@@ -3873,13 +3949,30 @@ function EmployeeDetailPanel({ headers, apiBase }) {
     setLoading(false);
   };
 
-  // Default the search to the logged-in HR user's own name so Detail opens
-  // with something useful already loaded, instead of an empty prompt.
+  const loadMonthRecords = async (m) => {
+    if (!selected) return;
+    setSelectedMonth(m); setLoadingMonth(true);
+    try {
+      const lastDay = new Date(m.year, m.month, 0).getDate();
+      const date_from = `${m.year}-${String(m.month).padStart(2, "0")}-01`;
+      const date_to   = `${m.year}-${String(m.month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+      const res = await hrApi.getAttendance({ employee_id: selected.id, date_from, date_to, page_size: 100 });
+      setMonthRecords(res?.records || []); // already sorted attendance_date desc by the backend
+    } catch (_) {
+      setMonthRecords([]);
+    } finally {
+      setLoadingMonth(false);
+    }
+  };
+
+  // Default the search to the logged-in user's own name (email-derived —
+  // see _emailLocalPart) so Detail opens with something useful already
+  // loaded, instead of an empty prompt.
   useEffect(() => {
-    if (!user?.fullName) return;
+    if (!defaultSearchName) return;
     (async () => {
       try {
-        const res = await fetch(`${apiBase}/search-employees?q=${encodeURIComponent(user.fullName)}`, { headers });
+        const res = await fetch(`${apiBase}/search-employees?q=${encodeURIComponent(defaultSearchName)}`, { headers });
         if (res.ok) {
           const matches = await res.json();
           if (matches.length > 0) loadDetail(matches[0]);
@@ -4012,7 +4105,8 @@ function EmployeeDetailPanel({ headers, apiBase }) {
               <p style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
                 Year {year} Monthly Rate
               </p>
-              <MiniBarChart data={detail.monthly} />
+              <MiniBarChart data={detail.monthly} onMonthClick={loadMonthRecords} selectedPeriod={selectedMonth?.period} />
+              <MonthRecordsList month={selectedMonth} records={monthRecords} loading={loadingMonth} />
             </>
           )
           : (
