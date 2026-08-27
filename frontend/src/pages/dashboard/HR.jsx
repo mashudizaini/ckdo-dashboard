@@ -3944,19 +3944,34 @@ function EmployeeDetailPanel({ headers, apiBase }) {
     setSelectedMonth(null); setMonthRecords([]); // switching employee/year invalidates the picked month
     try {
       const res = await fetch(`${apiBase}/employee/${emp.id}/detail?year=${forYear ?? year}`, { headers });
-      if (res.ok) setDetail(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setDetail(data);
+        // Jump straight to the running month's daily list (only meaningful
+        // when the loaded year is the current year — a past year has no
+        // "current month" of its own).
+        const effectiveYear = forYear ?? year;
+        if (effectiveYear === curYear) {
+          const now = new Date();
+          const cur = data.monthly?.find((m) => m.year === curYear && m.month === now.getMonth() + 1);
+          if (cur) loadMonthRecords(cur, emp);
+        }
+      }
     } catch (_) {}
     setLoading(false);
   };
 
-  const loadMonthRecords = async (m) => {
-    if (!selected) return;
+  // `emp` is passed explicitly (rather than read from `selected` state)
+  // because loadDetail() calls this synchronously right after setSelected() —
+  // relying on `selected` here would still see the previous render's value.
+  const loadMonthRecords = async (m, emp = selected) => {
+    if (!emp) return;
     setSelectedMonth(m); setLoadingMonth(true);
     try {
       const lastDay = new Date(m.year, m.month, 0).getDate();
       const date_from = `${m.year}-${String(m.month).padStart(2, "0")}-01`;
       const date_to   = `${m.year}-${String(m.month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-      const res = await hrApi.getAttendance({ employee_id: selected.id, date_from, date_to, page_size: 100 });
+      const res = await hrApi.getAttendance({ employee_id: emp.id, date_from, date_to, page_size: 100 });
       setMonthRecords(res?.records || []); // already sorted attendance_date desc by the backend
     } catch (_) {
       setMonthRecords([]);
