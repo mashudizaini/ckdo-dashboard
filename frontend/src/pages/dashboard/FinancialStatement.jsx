@@ -363,16 +363,17 @@ const FS_FORMAT_GUIDE = {
     totalsNote: "The TOTAL rows above must exist with exactly this name.",
   },
   profit_loss_monthly: {
-    sheetName: "PL_monthly",
+    sheetName: "one sheet per year, e.g. \"2026\", \"2025\", \"2024\" (bare 4-digit year as the sheet name)",
     notes: [
-      "Row 7: 2 adjacent date labels — last year then this year, e.g. \"June 30, 2025\" then \"June 30, 2026\". Each is followed by 2 columns (MTD, YTD).",
-      "Row 8: MTD/YTD sub-labels in those same 4 columns.",
+      "PL_Monthly_Dashboard_Sent.xlsx format (since 2026-08-27) — one upload covers every year/month in the file; a Month + Year picker below lets you view any (month, year) combo the file contains, compared against the same month a year earlier if that year is also in the file.",
+      "Each year's sheet: row 6 has \"20XX (MTD)\" starting one column, and \"20XX (YTD)\" starting a later column; row 7 has the month names (January, February, ...) repeated under each block, one column per posted month.",
+      "Column B (\"Mapping\") holds each line item's label; column D holds a fuller description used only when column B is blank. Column C holds section headers and TOTAL rows.",
       "Same section headers as the annual \"Profit or loss\" sheet: NET SALES, COGS, EXPENSES, OTHER INCOME / EXPENSES, INCOME TAX.",
       "The TOTAL row names are DIFFERENT from the annual sheet — see the exact wording below.",
     ],
     sections: [],
-    totals: ["TOTAL NET SALES", "TOTAL COGS", "GROSS PROFIT", "TOTAL EXPENSES", "TOTAL OTHER INCOME (EXPENSE)", "PROFIT (LOSS) BEFORE INCOME TAX", "TOTAL INCOME TAX", "NET PROFIT (LOSS)", "OTHER COMPREHENSIVE INCOME (LOSS)", "TOTAL COMPREHENSIVE INCOME (LOSS) FOR THE YEAR"],
-    totalsNote: "The TOTAL rows above must exist with exactly this name — different from the annual \"Profit or loss\" sheet (e.g. \"TOTAL INCOME TAX\", not \"TOTAL INCOME TAX BENEFIT (EXPENSE)\").",
+    totals: ["TOTAL NET SALES", "TOTAL COGS", "GROSS PROFIT", "TOTAL EXPENSES", "TOTAL OTHER INCOME (EXPENSE)", "PROFIT (LOSS) BEFORE INCOME TAX", "TOTAL INCOME TAX", "NET PROFIT (LOSS)", "TOTAL OTHER COMPREHENSIVE INCOME (LOSS)", "TOTAL COMPREHENSIVE INCOME (LOSS) FOR THE YEAR"],
+    totalsNote: "The TOTAL rows above must exist with exactly this name, in every year sheet, — different from the annual \"Profit or loss\" sheet (e.g. \"TOTAL INCOME TAX\", not \"TOTAL INCOME TAX BENEFIT (EXPENSE)\").",
   },
   cash_flow: {
     sheetName: "Cashflow",

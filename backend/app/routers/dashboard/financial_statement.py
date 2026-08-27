@@ -19,6 +19,7 @@ Endpoints:
   GET  /profit-loss-monthly/export  — same, as .xlsx
   GET  /cash-flow                   — Cash Flow statement, Excel-only (no Oracle equivalent)
 """
+import calendar
 import io
 import json
 from datetime import datetime
@@ -33,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dependencies import require_role, CurrentUser, Roles
 from app.database import get_db
 from app.services.financial_statement_service import FinancialStatementService
-from app.services.financial_statement_upload_service import FinancialStatementUploadService
+from app.services.financial_statement_upload_service import FinancialStatementUploadService, _MONTH_FULL
 
 router = APIRouter()
 
@@ -61,10 +62,12 @@ async def get_upload_status(
     """Metadata about a stored Excel upload for a report, if any — lets the
     frontend show "last uploaded by X on Y" and restrict its year pickers
     to whatever years the uploaded file actually covers. For
-    profit_loss_monthly (which stores one snapshot per month, unlike every
-    other report_type's single row), month/year selects which one; omitted
-    defaults to the most recently uploaded."""
-    upload = await FinancialStatementUploadService().get_upload(db, report_type, month, year)
+    profit_loss_monthly's month/year params are unused now (kept for
+    backward-compatible query strings) — since 2026-08-27 a single upload
+    covers every year/month in the file, so there's nothing to select
+    between at the storage layer; see /profit-loss-monthly/snapshots for
+    which (month, year) combos that one upload actually contains."""
+    upload = await FinancialStatementUploadService().get_upload(db, report_type)
     if not upload:
         return {"success": True, "data": None}
     content = upload["content"]
@@ -76,10 +79,6 @@ async def get_upload_status(
             "uploaded_at": upload["uploaded_at"],
             "years": content.get("years"),
             "as_of_label": content.get("as_of_label"),
-            "date_last": content.get("date_last"),
-            "date_this": content.get("date_this"),
-            "period_month": upload.get("period_month"),
-            "period_year": upload.get("period_year"),
         },
     }
 
@@ -216,19 +215,88 @@ async def _cash_flow_from_excel(db: AsyncSession, years_csv: str) -> dict:
     }
 
 
+def _pl_monthly_merge_lines(this_lines: list, last_lines: list, this_i: int, this_iy: int, last_i: Optional[int], last_iy: Optional[int]) -> list:
+    """`this` year's lines are authoritative for order/labels (it's the
+    period actually being reported); a `last`-year value is looked up by
+    label and defaults to 0 if that line didn't exist that year — same
+    zero-fallback convention parse_balance_sheet_excel already uses."""
+    last_by_label = {l["label"]: l for l in last_lines}
+    out = []
+    for l in this_lines:
+        last_l = last_by_label.get(l["label"])
+        last_mtd = last_l["mtd"][last_i] if (last_l and last_i is not None) else 0.0
+        last_ytd = last_l["ytd"][last_iy] if (last_l and last_iy is not None) else 0.0
+        out.append({"label": l["label"], "values": [last_mtd, last_ytd, l["mtd"][this_i], l["ytd"][this_iy]]})
+    return out
+
+
+def _pl_monthly_merge_total(this_dual: dict, last_dual: Optional[dict], this_i: int, this_iy: int, last_i: Optional[int], last_iy: Optional[int]) -> list:
+    last_mtd = last_dual["mtd"][last_i] if (last_dual and last_i is not None) else 0.0
+    last_ytd = last_dual["ytd"][last_iy] if (last_dual and last_iy is not None) else 0.0
+    return [last_mtd, last_ytd, this_dual["mtd"][this_i], this_dual["ytd"][this_iy]]
+
+
 async def _profit_loss_monthly_from_excel(db: AsyncSession, month: Optional[int] = None, year: Optional[int] = None) -> dict:
-    upload = await FinancialStatementUploadService().get_upload(db, "profit_loss_monthly", month, year)
+    """Projects the uploaded file's by_year data (every month/year in one
+    upload — see financial_statement_upload_service.py) onto the same
+    4-column MTD-Last/YTD-Last/MTD-This/YTD-This shape the frontend table
+    and .xlsx export already render, for whichever (month, year) was
+    asked for (defaulting to the latest available). The prior calendar
+    year is looked up in the SAME upload for the "Last Year" columns —
+    zeros if that year wasn't included in the file."""
+    upload = await FinancialStatementUploadService().get_upload(db, "profit_loss_monthly")
     if not upload:
-        msg = "No Excel data uploaded yet for Profit or Loss Monthly."
-        if month and year:
-            msg = f"No Profit or Loss Monthly snapshot uploaded for {month}/{year}."
-        return {"success": False, "error": msg}
-    result = dict(upload["content"])
-    result["success"] = True
-    result.setdefault("unmapped_accounts", [])
-    result["period_month"] = upload.get("period_month")
-    result["period_year"] = upload.get("period_year")
-    return result
+        return {"success": False, "error": "No Excel data uploaded yet for Profit or Loss Monthly."}
+    by_year = (upload["content"] or {}).get("by_year", {})
+    if not by_year:
+        return {"success": False, "error": "Uploaded file has no year data."}
+
+    years_avail = sorted(int(y) for y in by_year)
+    if year is None or str(year) not in by_year:
+        year = years_avail[-1]
+    yd_this = by_year[str(year)]
+    months_avail = [_MONTH_FULL.index(m) + 1 for m in yd_this.get("mtd_months", []) if m in yd_this.get("ytd_months", [])]
+    if not months_avail:
+        return {"success": False, "error": f"No monthly data uploaded for year {year}."}
+    if month is None or month not in months_avail:
+        month = max(months_avail)
+
+    month_name = _MONTH_FULL[month - 1]
+    this_i, this_iy = yd_this["mtd_months"].index(month_name), yd_this["ytd_months"].index(month_name)
+
+    yd_last = by_year.get(str(year - 1))
+    last_i  = yd_last["mtd_months"].index(month_name) if yd_last and month_name in yd_last.get("mtd_months", []) else None
+    last_iy = yd_last["ytd_months"].index(month_name) if yd_last and month_name in yd_last.get("ytd_months", []) else None
+
+    def lines(key):
+        return _pl_monthly_merge_lines(yd_this[key], (yd_last or {}).get(key, []), this_i, this_iy, last_i, last_iy)
+
+    def total(key):
+        return _pl_monthly_merge_total(yd_this[key], (yd_last or {}).get(key), this_i, this_iy, last_i, last_iy)
+
+    days_in_month = calendar.monthrange(year, month)[1]
+    date_this = f"{month_name} {days_in_month}, {year}"
+    date_last = None
+    if yd_last and last_i is not None:
+        days_last = calendar.monthrange(year - 1, month)[1]
+        date_last = f"{month_name} {days_last}, {year - 1}"
+
+    return {
+        "success": True,
+        "columns": ["MTD Last Year", "YTD Last Year", "MTD This Year", "YTD This Year"],
+        "date_last": date_last, "date_this": date_this,
+        "period_month": month, "period_year": year,
+        "sales_lines": lines("sales_lines"), "contra_lines": [], "total_net_sales": total("total_net_sales"),
+        "cogs_lines": lines("cogs_lines"), "total_cogs": total("total_cogs"),
+        "gross_profit": total("gross_profit"),
+        "expense_lines": lines("expense_lines"), "total_expenses": total("total_expenses"),
+        "other_lines": lines("other_lines"), "total_other": total("total_other"),
+        "profit_before_tax": total("profit_before_tax"),
+        "tax_lines": lines("tax_lines"), "total_tax": total("total_tax"),
+        "profit_after_tax": total("profit_after_tax"),
+        "oci": total("oci"), "total_comprehensive": total("total_comprehensive"),
+        "unmapped_accounts": [],
+    }
 
 
 @router.get("/balance-sheet")

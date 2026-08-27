@@ -12,7 +12,9 @@ the same response shape the frontend already consumes.
 Sheet -> report_type:
   "Balance sheet"    -> balance_sheet
   "Profit or loss"   -> profit_loss       (annual, FY columns)
-  "PL_monthly"       -> profit_loss_monthly (single MTD/YTD this-vs-last-year snapshot)
+  one sheet per year (e.g. "2026", "2025", "2024") -> profit_loss_monthly
+                        (PL_Monthly_Dashboard_Sent.xlsx format, since
+                        2026-08-27 — see parse_profit_loss_monthly_excel)
   "Cashflow"         -> cash_flow         (annual, bare-year columns — see parse_cash_flow_excel)
 
 Label-matching notes (verified against the actual reference file — NOT
@@ -29,10 +31,31 @@ assumed):
     file order — only the section header / TOTAL row labels are matched
     literally (verified 1:1 against the file), since those drive the
     growth-rate chart and the table's bold TOTAL rows.
-  - PL_monthly uses its own distinct TOTAL-row wording (e.g. "TOTAL INCOME
-    TAX", "NET PROFIT (LOSS)") — different from both Balance Sheet's and
-    the annual Profit or loss sheet's TOTAL labels — matching the labels
-    ProfitLossMonthlyPanel already renders in the frontend.
+  - The monthly P&L sheet uses its own distinct TOTAL-row wording (e.g.
+    "TOTAL INCOME TAX", "NET PROFIT (LOSS)") — different from both Balance
+    Sheet's and the annual Profit or loss sheet's TOTAL labels — matching
+    the labels ProfitLossMonthlyPanel already renders in the frontend.
+
+── profit_loss_monthly format change, 2026-08-27 ──
+Replaced a single "PL_monthly" sheet holding one fixed MTD/YTD-this-vs-
+last-year snapshot (4 value columns) with PT CKD OTTO's own
+PL_Monthly_Dashboard_Sent.xlsx export: one sheet per year (e.g. "2026",
+"2025", "2024"), each with a full Jan..(latest posted month) MTD block
+immediately followed by the same months' YTD block — so ALL months
+posted so far, across several years, arrive in one upload instead of
+needing a fresh upload every month.
+
+Rather than reshape the frontend/export code (which already renders and
+downloads the old 4-column MTD-Last/YTD-Last/MTD-This/YTD-This shape),
+parse_profit_loss_monthly_excel() below stores the richer multi-year/
+multi-month data as `by_year`, and financial_statement.py's
+_profit_loss_monthly_from_excel() PROJECTS whatever (month, year) the
+user has selected — plus the same month a year earlier, if that year was
+also in the file — into that same 4-column shape. The stored upload is
+also no longer keyed by (month, year): one upload now covers every month
+in the file, so — like balance_sheet/profit_loss/cash_flow — a new
+upload simply replaces the previous one wholesale instead of adding a
+new per-month row.
 """
 import io
 import re
@@ -45,6 +68,8 @@ from app.services.financial_statement_service import (
 )
 
 _MONTH_RE = re.compile(r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\b", re.I)
+_MONTH_FULL = ["January", "February", "March", "April", "May", "June", "July",
+               "August", "September", "October", "November", "December"]
 
 
 def _norm(s) -> str:
@@ -261,15 +286,6 @@ _PL_ANNUAL_TOTALS = {
     "total_comprehensive": "TOTAL COMPREHENSIVE INCOME (LOSS) FOR THE YEAR",
 }
 
-_PL_MONTHLY_TOTALS = {
-    "total_net_sales": "TOTAL NET SALES", "total_cogs": "TOTAL COGS", "gross_profit": "GROSS PROFIT",
-    "total_expenses": "TOTAL EXPENSES", "total_other": "TOTAL OTHER INCOME (EXPENSE)",
-    "profit_before_tax": "PROFIT (LOSS) BEFORE INCOME TAX", "total_tax": "TOTAL INCOME TAX",
-    "profit_after_tax": "NET PROFIT (LOSS)", "oci": "OTHER COMPREHENSIVE INCOME (LOSS)",
-    "total_comprehensive": "TOTAL COMPREHENSIVE INCOME (LOSS) FOR THE YEAR",
-}
-
-
 def parse_profit_loss_excel(content: bytes) -> dict:
     wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     ws = _sheet(wb, "Profit or loss")
@@ -290,39 +306,160 @@ def parse_profit_loss_excel(content: bytes) -> dict:
     return data
 
 
-# ── Profit or Loss Monthly ───────────────────────────────────────────────
+# ── Profit or Loss Monthly (PL_Monthly_Dashboard_Sent.xlsx format) ───────
+# See module docstring ("profit_loss_monthly format change, 2026-08-27")
+# for why this stores per-year/per-month data instead of a single
+# pre-built 4-column snapshot.
+
+_PL_MONTHLY_MULTI_TOTALS = {
+    "total_net_sales": "TOTAL NET SALES", "total_cogs": "TOTAL COGS", "gross_profit": "GROSS PROFIT",
+    "total_expenses": "TOTAL EXPENSES", "total_other": "TOTAL OTHER INCOME (EXPENSE)",
+    "profit_before_tax": "PROFIT (LOSS) BEFORE INCOME TAX", "total_tax": "TOTAL INCOME TAX",
+    "profit_after_tax": "NET PROFIT (LOSS)",
+    # This file's OCI section is a single row that's simultaneously its own
+    # header AND total (column B carries "TOTAL OTHER COMPREHENSIVE INCOME
+    # (LOSS)", column C carries "OTHER COMPREHENSIVE INCOME (LOSS)" — no
+    # separate detail lines) — _row_label()'s column scan order (B before
+    # C) picks up the B text, so that's what's matched here.
+    "oci": "TOTAL OTHER COMPREHENSIVE INCOME (LOSS)",
+    "total_comprehensive": "TOTAL COMPREHENSIVE INCOME (LOSS) FOR THE YEAR",
+}
+
+
+def _year_month_blocks(ws, header_row: int, month_row: int) -> dict:
+    """Locates the "20XX (MTD)"/"20XX (YTD)" block start columns in
+    `header_row`, then walks `month_row` within each block's own column
+    range — bounded by the NEXT block's start column — collecting
+    consecutive month-name cells. Needed because December (end of the MTD
+    block) sits directly next to January (start of the YTD block) with no
+    blank column between them on a full 12-month sheet, so a single
+    continuous "is this cell a month name" walk can't tell where one
+    block ends and the next begins on its own — it would otherwise walk
+    straight through the boundary and double the MTD series with YTD's
+    columns tacked on (caught 2026-08-27 by comparing parsed output
+    against the source file's own values)."""
+    starts = []
+    for c in range(1, ws.max_column + 1):
+        v = ws.cell(row=header_row, column=c).value
+        if not isinstance(v, str):
+            continue
+        vu = v.upper()
+        if "MTD" in vu:
+            starts.append((c, "MTD"))
+        elif "YTD" in vu:
+            starts.append((c, "YTD"))
+    starts.sort(key=lambda t: t[0])
+
+    blocks = {}
+    for i, (start_col, marker) in enumerate(starts):
+        end_col = starts[i + 1][0] - 1 if i + 1 < len(starts) else ws.max_column
+        cols, months = [], []
+        for c in range(start_col, end_col + 1):
+            v = ws.cell(row=month_row, column=c).value
+            label = v.strip() if isinstance(v, str) else None
+            if label not in _MONTH_FULL:
+                break
+            cols.append(c)
+            months.append(label)
+        blocks[marker] = (cols, months)
+    return blocks
+
+
+def _lines_between_dual(ws, header_row: int, total_row: int, mtd_cols: list[int], ytd_cols: list[int]) -> list[dict]:
+    """Same idea as _lines_between(), but keeping the MTD and YTD series
+    separate per line instead of one flat `values` list — a month index
+    means something different in each series (MTD's Nth column is that
+    month alone; YTD's Nth column is cumulative through that month)."""
+    lines = []
+    for r in range(header_row + 1, total_row):
+        label = _row_label(ws, r)
+        if not label:
+            continue
+        mtd = [_num(ws.cell(row=r, column=c).value) for c in mtd_cols]
+        ytd = [_num(ws.cell(row=r, column=c).value) for c in ytd_cols]
+        if all(v == 0 for v in mtd) and all(v == 0 for v in ytd):
+            continue
+        lines.append({"label": label, "mtd": mtd, "ytd": ytd})
+    return lines
+
+
+def _parse_pl_monthly_year_sheet(ws, year: int) -> dict:
+    blocks = _year_month_blocks(ws, 6, 7)
+    mtd_cols, mtd_months = blocks.get("MTD", ([], []))
+    ytd_cols, ytd_months = blocks.get("YTD", ([], []))
+    if not mtd_cols or not ytd_cols:
+        raise ValueError(f"MTD/YTD month-header block (row 6/7) not found in the '{year}' sheet.")
+
+    as_of_label = None
+    for r in range(1, 6):
+        v = ws.cell(row=r, column=1).value
+        if isinstance(v, str) and _MONTH_RE.search(v):
+            as_of_label = v.strip()
+            break
+
+    max_row = ws.max_row
+
+    def find(label):
+        r = _find_row(ws, label, max_row)
+        if r is None:
+            raise ValueError(f"Row '{label}' not found in the '{year}' sheet.")
+        return r
+
+    def dual_row(row):
+        return {
+            "mtd": [_num(ws.cell(row=row, column=c).value) for c in mtd_cols],
+            "ytd": [_num(ws.cell(row=row, column=c).value) for c in ytd_cols],
+        }
+
+    t = _PL_MONTHLY_MULTI_TOTALS
+    r_net_sales, r_total_net_sales = find("NET SALES"), find(t["total_net_sales"])
+    r_cogs, r_total_cogs = find("COGS"), find(t["total_cogs"])
+    r_gross_profit = find(t["gross_profit"])
+    r_expenses, r_total_expenses = find("EXPENSES"), find(t["total_expenses"])
+    r_other, r_total_other = find("OTHER INCOME / EXPENSES"), find(t["total_other"])
+    r_pbt = find(t["profit_before_tax"])
+    r_tax, r_total_tax = find("INCOME TAX"), find(t["total_tax"])
+    r_profit_after_tax = find(t["profit_after_tax"])
+    r_oci = find(t["oci"])
+    r_total_comprehensive = find(t["total_comprehensive"])
+
+    return {
+        "year": year, "as_of_label": as_of_label,
+        "mtd_months": mtd_months, "ytd_months": ytd_months,
+        "sales_lines": _lines_between_dual(ws, r_net_sales, r_total_net_sales, mtd_cols, ytd_cols),
+        "total_net_sales": dual_row(r_total_net_sales),
+        "cogs_lines": _lines_between_dual(ws, r_cogs, r_total_cogs, mtd_cols, ytd_cols),
+        "total_cogs": dual_row(r_total_cogs),
+        "gross_profit": dual_row(r_gross_profit),
+        "expense_lines": _lines_between_dual(ws, r_expenses, r_total_expenses, mtd_cols, ytd_cols),
+        "total_expenses": dual_row(r_total_expenses),
+        "other_lines": _lines_between_dual(ws, r_other, r_total_other, mtd_cols, ytd_cols),
+        "total_other": dual_row(r_total_other),
+        "profit_before_tax": dual_row(r_pbt),
+        "tax_lines": _lines_between_dual(ws, r_tax, r_total_tax, mtd_cols, ytd_cols),
+        "total_tax": dual_row(r_total_tax),
+        "profit_after_tax": dual_row(r_profit_after_tax),
+        "oci": dual_row(r_oci),
+        "total_comprehensive": dual_row(r_total_comprehensive),
+    }
+
 
 def parse_profit_loss_monthly_excel(content: bytes) -> dict:
+    """PL_Monthly_Dashboard_Sent.xlsx format — one sheet per year (sheet
+    name is the bare year, e.g. "2026"), each holding every month posted
+    so far that year, MTD and YTD side by side. See module docstring."""
     wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-    ws = _sheet(wb, "PL_monthly")
 
-    # Row 7: date labels spanning each year's MTD/YTD pair (e.g. "June 30,
-    # 2025" over cols G:H, "June 30, 2026" over cols I:J). Row 8 confirms
-    # the MTD/YTD sub-labels at those same 4 columns.
-    date_cells = [(c, ws.cell(row=7, column=c).value) for c in range(1, ws.max_column + 1)
-                  if isinstance(ws.cell(row=7, column=c).value, str) and ws.cell(row=7, column=c).value.strip()]
-    if len(date_cells) < 2:
-        raise ValueError("Date header (row 7) not found in the 'PL_monthly' sheet.")
-    (col_last, date_last), (col_this, date_this) = date_cells[0], date_cells[1]
-    value_cols = [col_last, col_last + 1, col_this, col_this + 1]  # MTD Last, YTD Last, MTD This, YTD This
+    year_sheets = [(int(name.strip()), wb[name]) for name in wb.sheetnames if re.fullmatch(r"\d{4}", name.strip())]
+    if not year_sheets:
+        raise ValueError(f"No year-named sheets (e.g. '2026') found — available sheets: {', '.join(wb.sheetnames)}")
+    year_sheets.sort(key=lambda t: t[0])
 
-    data = _parse_pl_sheet(ws, value_cols, _PL_MONTHLY_TOTALS)
-    data["date_last"] = date_last.strip()
-    data["date_this"] = date_this.strip()
-    data["columns"] = ["MTD Last Year", "YTD Last Year", "MTD This Year", "YTD This Year"]
+    by_year = {str(year): _parse_pl_monthly_year_sheet(ws, year) for year, ws in year_sheets}
+    years = [y for y, _ in year_sheets]
+    latest = by_year[str(years[-1])]
 
-    # Which calendar month/year this snapshot represents — lets
-    # save_upload() store it as its own row instead of overwriting
-    # whatever month was uploaded before, so a Month+Year picker in the
-    # UI can select between multiple stored snapshots.
-    try:
-        dt_this = datetime.strptime(data["date_this"], "%B %d, %Y")
-        data["period_month"] = dt_this.month
-        data["period_year"] = dt_this.year
-    except ValueError:
-        data["period_month"] = None
-        data["period_year"] = None
-    return data
+    return {"years": years, "as_of_label": latest["as_of_label"], "by_year": by_year}
 
 
 # ── Cash Flow ─────────────────────────────────────────────────────────────
@@ -460,26 +597,19 @@ class FinancialStatementUploadService:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-        # profit_loss_monthly is keyed by (report_type, period_month,
-        # period_year) — a new month's upload adds a new row instead of
-        # overwriting a prior month's. Every other report_type keeps the
-        # original single-row-per-type behavior (period_month IS NULL).
-        period_month = period_year = None
-        if report_type == "profit_loss_monthly":
-            period_month, period_year = parsed.get("period_month"), parsed.get("period_year")
-            if period_month is None or period_year is None:
-                return {"success": False, "error": (
-                    "Could not determine the month/year this snapshot represents from row 7's "
-                    "date header — expected a format like \"June 30, 2026\"."
-                )}
-
-        month_filter = FinancialStatementUpload.period_month == period_month if period_month is not None \
-            else FinancialStatementUpload.period_month.is_(None)
-        year_filter = FinancialStatementUpload.period_year == period_year if period_year is not None \
-            else FinancialStatementUpload.period_year.is_(None)
-        query = (
-            select(FinancialStatementUpload)
-            .where(FinancialStatementUpload.report_type == report_type, month_filter, year_filter)
+        # Every report_type — including profit_loss_monthly since the
+        # 2026-08-27 format change — is a single row that a new upload
+        # replaces wholesale (period_month/period_year are legacy columns
+        # from the old per-month-snapshot design; new rows always leave
+        # them NULL). Matching on report_type + NULL month/year here means
+        # an old orphaned per-month snapshot row (uploaded before this
+        # change) is left in place rather than overwritten — harmless,
+        # nothing reads those rows anymore (get_upload() below always
+        # takes the newest row by uploaded_at).
+        query = select(FinancialStatementUpload).where(
+            FinancialStatementUpload.report_type == report_type,
+            FinancialStatementUpload.period_month.is_(None),
+            FinancialStatementUpload.period_year.is_(None),
         )
         result = await db.execute(query)
         row = result.scalar_one_or_none()
@@ -491,33 +621,22 @@ class FinancialStatementUploadService:
         else:
             row = FinancialStatementUpload(
                 report_type=report_type, content=parsed,
-                period_month=period_month, period_year=period_year,
                 original_filename=filename, uploaded_by=username,
             )
             db.add(row)
         await db.commit()
         return {"success": True, "data": parsed, "uploaded_at": row.uploaded_at.isoformat() if row.uploaded_at else None}
 
-    async def get_upload(self, db, report_type: str, month: int | None = None, year: int | None = None) -> dict | None:
+    async def get_upload(self, db, report_type: str) -> dict | None:
         from app.models.financial_statement_upload import FinancialStatementUpload
         from sqlalchemy import select
 
-        query = select(FinancialStatementUpload).where(FinancialStatementUpload.report_type == report_type)
-        if report_type == "profit_loss_monthly":
-            if month is not None and year is not None:
-                query = query.where(FinancialStatementUpload.period_month == month, FinancialStatementUpload.period_year == year)
-            else:
-                # No month/year given — fall back to the most recently
-                # uploaded snapshot (e.g. for /upload-status's overview).
-                # nullslast() matters here: Postgres's default for DESC is
-                # NULLS FIRST, which would otherwise put a legacy
-                # pre-migration row (period_month/year still NULL) ahead
-                # of every properly-dated snapshot.
-                query = query.order_by(
-                    FinancialStatementUpload.period_year.desc().nullslast(),
-                    FinancialStatementUpload.period_month.desc().nullslast(),
-                )
-        result = await db.execute(query.limit(1))
+        result = await db.execute(
+            select(FinancialStatementUpload)
+            .where(FinancialStatementUpload.report_type == report_type)
+            .order_by(FinancialStatementUpload.uploaded_at.desc())
+            .limit(1)
+        )
         row = result.scalar_one_or_none()
         if not row:
             return None
@@ -526,23 +645,22 @@ class FinancialStatementUploadService:
             "original_filename": row.original_filename,
             "uploaded_by": row.uploaded_by,
             "uploaded_at": row.uploaded_at.isoformat() if row.uploaded_at else None,
-            "period_month": row.period_month,
-            "period_year": row.period_year,
         }
 
     async def list_snapshots(self, db, report_type: str) -> list[dict]:
-        """profit_loss_monthly only — every stored (month, year) snapshot,
-        newest first, for the frontend's Month+Year picker."""
-        from app.models.financial_statement_upload import FinancialStatementUpload
-        from sqlalchemy import select
-
-        result = await db.execute(
-            select(FinancialStatementUpload.period_month, FinancialStatementUpload.period_year, FinancialStatementUpload.uploaded_at)
-            .where(FinancialStatementUpload.report_type == report_type)
-            .where(FinancialStatementUpload.period_month.isnot(None))
-            .order_by(FinancialStatementUpload.period_year.desc(), FinancialStatementUpload.period_month.desc())
-        )
-        return [
-            {"month": m, "year": y, "uploaded_at": u.isoformat() if u else None}
-            for m, y, u in result.fetchall()
-        ]
+        """profit_loss_monthly only — synthesizes the frontend's Month+Year
+        picker options from the single uploaded file's by_year data (one
+        upload can now cover many years/months at once — see module
+        docstring), rather than querying separate per-snapshot DB rows
+        the way this did before the 2026-08-27 format change."""
+        upload = await self.get_upload(db, report_type)
+        if not upload:
+            return []
+        by_year = (upload["content"] or {}).get("by_year", {})
+        out = []
+        for year_str, yd in by_year.items():
+            for m_name in yd.get("mtd_months", []):
+                if m_name in _MONTH_FULL:
+                    out.append({"month": _MONTH_FULL.index(m_name) + 1, "year": int(year_str), "uploaded_at": upload["uploaded_at"]})
+        out.sort(key=lambda s: (s["year"], s["month"]), reverse=True)
+        return out
