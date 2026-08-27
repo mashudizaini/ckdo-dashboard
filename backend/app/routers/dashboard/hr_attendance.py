@@ -1310,6 +1310,7 @@ async def get_attendance_day_history(
 @router.get("/today")
 async def get_today_attendance(
     target_date: Optional[str] = Query(None),
+    department:  Optional[str] = Query(None, description="Exact department name — omit for all"),
     db:          AsyncSession  = Depends(get_db),
     user:        CurrentUser   = Depends(require_role(Roles.HR)),
 ):
@@ -1347,6 +1348,8 @@ async def get_today_attendance(
         func.sum(_plan_expr()).label("total"),
         func.sum(_actual_expr()).label("hadir"),
     ).where(AttendanceRecord.attendance_date == actual_date)
+    if department:
+        q = q.where(AttendanceRecord.department == department)
     result = await db.execute(q.group_by(AttendanceRecord.department).order_by(AttendanceRecord.department))
     rows = result.fetchall()
 
@@ -1383,6 +1386,7 @@ async def get_today_attendance(
 @router.get("/today/attendance-issues")
 async def get_today_attendance_issues(
     target_date: Optional[str] = Query(None),
+    department:  Optional[str] = Query(None, description="Exact department name — omit for all"),
     db:          AsyncSession  = Depends(get_db),
     user:        CurrentUser   = Depends(require_role(Roles.HR)),
 ):
@@ -1441,6 +1445,8 @@ async def get_today_attendance_issues(
         .where(AttendanceRecord.attendance_date == q_date)
         .where(IS_WEEKDAY)
     )
+    if department:
+        q = q.where(AttendanceRecord.department == department)
     rows = (await db.execute(q)).fetchall()
 
     data = []
@@ -1783,6 +1789,7 @@ async def get_dept_summary(
 async def get_today_employees(
     target_date: Optional[str] = Query(None),
     filter:      str           = Query("all"),   # all | hadir | absen
+    department:  Optional[str] = Query(None, description="Exact department name — omit for all"),
     db:          AsyncSession  = Depends(get_db),
     user:        CurrentUser   = Depends(require_role(Roles.HR)),
 ):
@@ -1812,6 +1819,9 @@ async def get_today_employees(
         q = q.where(or_(_is_bt_code(), _is_present_intercom())).where(_not(_is_leave_code()))
     elif filter == "absen":
         q = q.where(_not(_is_leave_code())).where(_not(_is_bt_code())).where(_not(_is_present_intercom()))
+
+    if department:
+        q = q.where(AttendanceRecord.department == department)
 
     q = q.order_by(AttendanceRecord.department, AttendanceRecord.employee_name)
     result = await db.execute(q)

@@ -3172,6 +3172,7 @@ function AttendanceTodaySection() {
   const [employees,    setEmployees]    = useState([]);
   const [loadingEmps,  setLoadingEmps]  = useState(false);
   const [selectedDate, setSelectedDate] = useState(""); // "" = today / latest available
+  const [todayDept,    setTodayDept]    = useState(""); // "" = all departments
   const [empSortBy,  setEmpSortBy]  = useState(null);
   const [empSortDir, setEmpSortDir] = useState("asc");
   const [deptSortBy,  setDeptSortBy]  = useState(null);
@@ -3211,13 +3212,16 @@ function AttendanceTodaySection() {
   const [empLookup,        setEmpLookup]        = useState(null);
   const [loadingLookup,    setLoadingLookup]     = useState(false);
 
-  const fetchData = async (targetDate = selectedDate) => {
+  const fetchData = async (targetDate = selectedDate, dept = todayDept) => {
     setLoading(true);
     try {
-      const params = targetDate ? `?target_date=${targetDate}` : "";
+      const params = new URLSearchParams();
+      if (targetDate) params.set("target_date", targetDate);
+      if (dept) params.set("department", dept);
+      const qs = params.toString() ? `?${params}` : "";
       const [res, issuesRes] = await Promise.all([
-        fetch(`${ATT_API}/today${params}`, { headers }),
-        fetch(`${ATT_API}/today/attendance-issues${params}`, { headers }),
+        fetch(`${ATT_API}/today${qs}`, { headers }),
+        fetch(`${ATT_API}/today/attendance-issues${qs}`, { headers }),
       ]);
       if (res.ok) setData(await res.json());
       setDetailData(issuesRes.ok ? await issuesRes.json() : null);
@@ -3230,6 +3234,12 @@ function AttendanceTodaySection() {
     setActiveFilter(null); setEmployees([]);
     setEmpQuery(""); setEmpSearchResults([]); setEmpLookup(null);
     fetchData(v);
+  };
+
+  const handleTodayDeptChange = (v) => {
+    setTodayDept(v);
+    setActiveFilter(null); setEmployees([]);
+    fetchData(selectedDate, v);
   };
 
   const doEmpSearch = async (q) => {
@@ -3278,11 +3288,12 @@ function AttendanceTodaySection() {
     if (tab === "monthly" && !monthlyData) fetchMonthlyData();
   };
 
-  const fetchEmployees = async (filter, targetDate) => {
+  const fetchEmployees = async (filter, targetDate, dept = todayDept) => {
     setLoadingEmps(true);
     try {
       const params = new URLSearchParams({ filter });
       if (targetDate) params.append("target_date", targetDate);
+      if (dept) params.append("department", dept);
       const res = await fetch(`${ATT_API}/today/employees?${params}`, { headers });
       if (res.ok) { const r = await res.json(); setEmployees(r.employees || []); }
     } catch (_) {}
@@ -3337,6 +3348,14 @@ function AttendanceTodaySection() {
                   Reset to latest
                 </button>
               )}
+              <select
+                value={todayDept}
+                onChange={(e) => handleTodayDeptChange(e.target.value)}
+                className="rounded-lg border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-xs text-gray-300 outline-none focus:border-green-500 cursor-pointer"
+              >
+                <option value="">All Departments</option>
+                {monthlyDepts.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
             </div>
             <div className="flex items-center gap-2">
               <div className="relative">
