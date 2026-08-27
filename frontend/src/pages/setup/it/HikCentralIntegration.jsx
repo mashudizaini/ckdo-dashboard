@@ -226,6 +226,7 @@ export default function HikCentralIntegration() {
       </Panel>
 
       <BackfillSection configured={config?.configured} onTick={refreshHistory} />
+      <RecomputeSection configured={config?.configured} />
 
       <Panel title={<span className="flex items-center gap-2"><History size={14} /> Sync History</span>}
         action={<Btn size="sm" icon={loadingHistory ? Loader2 : RefreshCw} disabled={loadingHistory} onClick={refreshHistory}>Refresh</Btn>}>
@@ -373,6 +374,79 @@ function BackfillSection({ configured, onTick }) {
                   {status.errors.length} day(s) failed — e.g. {status.errors[0]}
                 </div>
               )}
+            </div>
+          )}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+/* ─── Recompute — re-score Late/Worked for already-synced rows against an
+   employee's CURRENT Scheduled Check-in, without touching the device. A
+   schedule change (HR > Employee edit) only affects future syncs; this
+   fixes already-written days in seconds instead of re-running a full
+   device backfill. ──────────────────────────────────────────────────── */
+
+function RecomputeSection({ configured }) {
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [employeeId, setEmployeeId] = useState("");
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+
+  const run = async () => {
+    if (!startDate) { setError("From date is required."); return; }
+    setRunning(true); setError(null); setResult(null);
+    try {
+      const r = await hikcentralApi.recomputeLate(startDate, endDate, employeeId.trim() || undefined);
+      setResult(r);
+    } catch (e) {
+      setError(e?.detail || "Recompute failed");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <Panel
+      title={<span className="flex items-center gap-2"><RefreshCw size={14} /> Recompute Late Status</span>}
+      subtitle="Re-scores Late/Worked for already-synced days against each employee's CURRENT Scheduled Check-in — reads the database only, no device call, so it's fast."
+    >
+      {!configured ? (
+        <Empty>Configure the connection above first.</Empty>
+      ) : (
+        <div className="space-y-3">
+          <p style={{ fontSize: 11.5, color: "#64748b" }}>
+            Use this after changing someone's Scheduled Check-in (HR &gt; Employee List &gt; edit) — the change only
+            applies to future syncs on its own; this fixes days already written. Leave Employee ID blank to recompute
+            everyone in the date range.
+          </p>
+          <div className="grid grid-cols-4 gap-3 items-end">
+            <Field label="Employee ID (optional)">
+              <input style={inputStyle} value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} placeholder="e.g. A25002" disabled={running} />
+            </Field>
+            <Field label="From date">
+              <input type="date" style={inputStyle} value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={running} />
+            </Field>
+            <Field label="To date">
+              <input type="date" style={inputStyle} value={endDate} onChange={(e) => setEndDate(e.target.value)} placeholder={startDate} disabled={running} />
+            </Field>
+            <Btn variant="primary" icon={running ? Loader2 : RefreshCw} disabled={running} onClick={run}>
+              {running ? "Recomputing…" : "Recompute"}
+            </Btn>
+          </div>
+
+          {error && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm" style={{ background: "rgba(220,38,38,0.08)", color: "#dc2626" }}>
+              <XCircle size={14} /> {error}
+            </div>
+          )}
+          {result && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm" style={{ background: "rgba(22,163,74,0.08)", color: "#16a34a" }}>
+              <CheckCircle size={14} /> Scanned {result.scanned} day-record{result.scanned === 1 ? "" : "s"} ({result.start_date}..{result.end_date}
+              {result.employee_id ? `, ${result.employee_id}` : ""}) — {result.changed} status change{result.changed === 1 ? "" : "s"}.
             </div>
           )}
         </div>

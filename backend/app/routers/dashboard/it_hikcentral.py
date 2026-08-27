@@ -28,6 +28,12 @@ loop the initial integration setup went through.
   POST /sync/backfill/pause  — pause a running backfill (takes effect after
                             the day currently in progress finishes).
   POST /sync/backfill/resume — resume a paused backfill.
+  POST /recompute-late    — re-derives Late/Worked for already-synced rows
+                            against each employee's CURRENT
+                            scheduled_checkin (HR > Employee edit). A
+                            schedule change only affects future syncs;
+                            this re-scores past days without touching the
+                            device at all — fast (DB-only), synchronous.
 
 Field names on the wire/DB (base_url/app_key/app_secret) are unchanged from
 this integration's earlier HikCentral-OpenAPI design to avoid a schema
@@ -185,6 +191,24 @@ def sync_backfill_resume():
         return hikcentral_scheduler.resume_backfill()
     except HikCentralError as e:
         raise HTTPException(409, str(e))
+
+
+class RecomputeIn(BaseModel):
+    start_date: str  # "YYYY-MM-DD"
+    end_date: Optional[str] = None  # defaults to start_date
+    employee_id: Optional[str] = None  # omit for all employees
+
+
+@router.post("/recompute-late")
+def recompute_late(payload: RecomputeIn):
+    try:
+        start = date.fromisoformat(payload.start_date)
+        end = date.fromisoformat(payload.end_date) if payload.end_date else start
+    except ValueError:
+        raise HTTPException(400, "Dates must be in YYYY-MM-DD format.")
+    if start > end:
+        raise HTTPException(400, "start_date must not be after end_date.")
+    return hikcentral_scheduler.recompute_late_status(start, end, employee_id=payload.employee_id or None)
 
 
 @router.get("/sync/history")

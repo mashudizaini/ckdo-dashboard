@@ -340,6 +340,67 @@ def get_last_sync() -> dict | None:
         db.close()
 
 
+# ── Recompute (no device involved) ───────────────────────────────────────
+# A schedule change (HR > Employee edit > Scheduled Check-in) only affects
+# syncs from that point on — a day already written keeps whatever
+# attendance_status was computed against the schedule in effect *at sync
+# time*. This re-scores already-synced rows against each employee's
+# CURRENT scheduled_checkin, reading/writing only the database — no device
+# calls, so it's fast and immune to the lockout issues backfill can hit.
+
+def recompute_late_status(start_date: date, end_date: date, employee_id: str | None = None) -> dict:
+    """Re-derives attendance_status (Late vs Worked) for already-synced
+    Hikvision rows in [start_date, end_date]. Same leave-safe scope as the
+    live sync — only touches source="hikcentral" rows with no leave_code/
+    is_day_off and an actual_checkin on record. Returns scan/change
+    counts."""
+    db = SessionLocal()
+    try:
+        from app.models.employee import Employee
+        emp_sched = {
+            r[0]: r[1]
+            for r in db.execute(select(Employee.user_id, Employee.scheduled_checkin)).fetchall()
+        }
+
+        q = (
+            select(AttendanceRecord)
+            .where(AttendanceRecord.source == "hikcentral")
+            .where(AttendanceRecord.attendance_date.between(start_date, end_date))
+            .where(AttendanceRecord.actual_checkin.isnot(None))
+            .where(AttendanceRecord.leave_code.is_(None))
+            .where(AttendanceRecord.is_day_off.is_(False))
+        )
+        if employee_id:
+            q = q.where(AttendanceRecord.employee_id == employee_id)
+        rows = db.execute(q).scalars().all()
+
+        scanned = changed = 0
+        for r in rows:
+            scanned += 1
+            try:
+                actual_time = datetime.strptime(r.actual_checkin, "%H:%M").time()
+            except (ValueError, TypeError):
+                continue
+            sched_checkin = emp_sched.get(r.employee_id) or DEFAULT_SCHEDULED_CHECKIN
+            sched_checkout = _shift_hhmm(sched_checkin, _STANDARD_SHIFT_HOURS)
+            new_status = "L" if actual_time > _parse_hhmm(sched_checkin) else "W"
+            if r.attendance_status != new_status or r.scheduled_checkin != sched_checkin or r.scheduled_checkout != sched_checkout:
+                r.attendance_status = new_status
+                r.scheduled_checkin = sched_checkin
+                r.scheduled_checkout = sched_checkout
+                changed += 1
+        db.commit()
+        return {
+            "start_date": start_date.isoformat(), "end_date": end_date.isoformat(),
+            "employee_id": employee_id, "scanned": scanned, "changed": changed,
+        }
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 # ── Historical backfill ──────────────────────────────────────────────────
 # Migrates the device's existing event log into AttendanceRecord, day by
 # day, so history predating the 15-minute poller is also in sync across

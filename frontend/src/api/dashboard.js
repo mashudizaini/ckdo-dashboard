@@ -71,6 +71,7 @@ export const hikcentralApi = {
   getBackfillStatus: () => api.get("/dashboard/it/hikcentral/sync/backfill/status"),
   pauseBackfill: () => api.post("/dashboard/it/hikcentral/sync/backfill/pause"),
   resumeBackfill: () => api.post("/dashboard/it/hikcentral/sync/backfill/resume"),
+  recomputeLate: (startDate, endDate, employeeId) => api.post("/dashboard/it/hikcentral/recompute-late", { start_date: startDate, end_date: endDate || undefined, employee_id: employeeId || undefined }),
 };
 
 export const hrApi = {
