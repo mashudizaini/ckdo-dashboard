@@ -17,6 +17,14 @@ loop the initial integration setup went through.
                             15-minute background poller)
   GET  /sync/history      — recent sync log rows (AttendanceUploadLog,
                             source="hikcentral")
+  POST /sync/backfill     — one-time historical migration: walks day-by-day
+                            from a start date to today (or a given end date)
+                            re-running the same sync, so pre-poller history
+                            lands in AttendanceRecord too. Runs in a
+                            background thread (a multi-month range is
+                            thousands of paginated device calls) — returns
+                            immediately, poll progress via the next route.
+  GET  /sync/backfill/status — progress of the running (or last) backfill.
 
 Field names on the wire/DB (base_url/app_key/app_secret) are unchanged from
 this integration's earlier HikCentral-OpenAPI design to avoid a schema
@@ -25,7 +33,7 @@ password respectively.
 
 Role-gated at the router level in main.py (require_role(Roles.IT)).
 """
-from datetime import datetime, timedelta
+from datetime import datetime, date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -135,6 +143,29 @@ def sync_now(user: CurrentUser = Depends(get_current_user)):
         return hikcentral_scheduler.run_sync(uploaded_by=user.username)
     except HikCentralError as e:
         raise HTTPException(502, str(e))
+
+
+class BackfillIn(BaseModel):
+    start_date: str  # "YYYY-MM-DD"
+    end_date: Optional[str] = None  # defaults to today
+
+
+@router.post("/sync/backfill")
+def sync_backfill(payload: BackfillIn, user: CurrentUser = Depends(get_current_user)):
+    try:
+        start = date.fromisoformat(payload.start_date)
+        end = date.fromisoformat(payload.end_date) if payload.end_date else None
+    except ValueError:
+        raise HTTPException(400, "Dates must be in YYYY-MM-DD format.")
+    try:
+        return hikcentral_scheduler.start_backfill(start, end, uploaded_by=user.username)
+    except HikCentralError as e:
+        raise HTTPException(409, str(e))
+
+
+@router.get("/sync/backfill/status")
+def sync_backfill_status():
+    return hikcentral_scheduler.get_backfill_status()
 
 
 @router.get("/sync/history")

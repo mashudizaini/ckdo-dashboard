@@ -67,6 +67,8 @@ export const hikcentralApi = {
   getSyncStatus: ()      => api.get("/dashboard/it/hikcentral/sync/status"),
   syncNow:       ()      => api.post("/dashboard/it/hikcentral/sync/now"),
   getSyncHistory:(limit) => api.get("/dashboard/it/hikcentral/sync/history", { params: { limit } }),
+  startBackfill: (startDate, endDate) => api.post("/dashboard/it/hikcentral/sync/backfill", { start_date: startDate, end_date: endDate || undefined }),
+  getBackfillStatus: () => api.get("/dashboard/it/hikcentral/sync/backfill/status"),
 };
 
 export const hrApi = {

@@ -225,6 +225,8 @@ export default function HikCentralIntegration() {
         )}
       </Panel>
 
+      <BackfillSection configured={config?.configured} onTick={refreshHistory} />
+
       <Panel title={<span className="flex items-center gap-2"><History size={14} /> Sync History</span>}
         action={<Btn size="sm" icon={loadingHistory ? Loader2 : RefreshCw} disabled={loadingHistory} onClick={refreshHistory}>Refresh</Btn>}>
         {history.length === 0 ? (
@@ -257,6 +259,104 @@ export default function HikCentralIntegration() {
       <SetupSection config={config} onChanged={refreshConfig} />
       <SetupGuide />
     </>
+  );
+}
+
+/* ─── Backfill — one-time historical migration from the device ────── */
+
+const TODAY_ISO = () => new Date().toISOString().slice(0, 10);
+
+function BackfillSection({ configured, onTick }) {
+  const [status, setStatus] = useState(null);
+  const [startDate, setStartDate] = useState("2026-01-05");
+  const [endDate, setEndDate] = useState(TODAY_ISO);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState(null);
+
+  const refreshStatus = useCallback(async () => {
+    try { setStatus(await hikcentralApi.getBackfillStatus()); } catch (_) {}
+  }, []);
+
+  useEffect(() => { refreshStatus(); }, [refreshStatus]);
+
+  useEffect(() => {
+    if (!status?.running) return;
+    const t = setInterval(async () => { await refreshStatus(); onTick?.(); }, 3000);
+    return () => clearInterval(t);
+  }, [status?.running, refreshStatus, onTick]);
+
+  const start = async () => {
+    setStarting(true);
+    setStartError(null);
+    try {
+      await hikcentralApi.startBackfill(startDate, endDate);
+      await refreshStatus();
+    } catch (e) {
+      setStartError(e?.detail || "Failed to start backfill");
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const pct = status?.total_days ? Math.round((status.done_days / status.total_days) * 100) : 0;
+
+  return (
+    <Panel
+      title={<span className="flex items-center gap-2"><History size={14} /> Migrate History from Device</span>}
+      subtitle="One-time backfill — walks day by day from a start date to today, syncing each day the same way the 15-minute poller does."
+    >
+      {!configured ? (
+        <Empty>Configure the connection above first.</Empty>
+      ) : (
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-3 items-end">
+            <Field label="From date">
+              <input type="date" style={inputStyle} value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={status?.running} />
+            </Field>
+            <Field label="To date">
+              <input type="date" style={inputStyle} value={endDate} onChange={(e) => setEndDate(e.target.value)} disabled={status?.running} />
+            </Field>
+            <Btn variant="primary" icon={status?.running ? Loader2 : PlayCircle} disabled={starting || status?.running} onClick={start}>
+              {status?.running ? "Running…" : "Start Backfill"}
+            </Btn>
+          </div>
+          <p style={{ fontSize: 11, color: "#94a3b8" }}>
+            This terminal's own event log currently goes back to 2026-01-05 — an earlier "From date" just finds nothing
+            for those days. Runs in the background on the server; this page can be closed and reopened without stopping it.
+          </p>
+
+          {startError && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm" style={{ background: "rgba(220,38,38,0.08)", color: "#dc2626" }}>
+              <XCircle size={14} /> {startError}
+            </div>
+          )}
+
+          {status && (status.running || status.finished_at) && (
+            <div className="rounded-xl p-3" style={{ border: "1px solid rgba(0,0,0,0.06)", background: "#f8fafc" }}>
+              <div className="flex items-center justify-between mb-2">
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>
+                  {status.running ? `Syncing ${status.current_date || "…"}` : "Last backfill finished"}
+                </span>
+                <span style={{ fontSize: 11, color: "#64748b" }}>{status.done_days}/{status.total_days} day(s)</span>
+              </div>
+              <div className="rounded-full overflow-hidden" style={{ height: 6, background: "#e2e8f0" }}>
+                <div style={{ width: `${pct}%`, height: "100%", background: status.running ? "#2563eb" : "#16a34a", transition: "width 0.3s" }} />
+              </div>
+              <div className="flex gap-4 mt-2" style={{ fontSize: 11.5, color: "#64748b" }}>
+                <span>{status.totals?.events ?? 0} events</span>
+                <span style={{ color: "#16a34a" }}>{status.totals?.inserted ?? 0} new</span>
+                <span style={{ color: "#2563eb" }}>{status.totals?.updated ?? 0} updated</span>
+              </div>
+              {status.errors?.length > 0 && (
+                <div className="mt-2" style={{ fontSize: 11, color: "#dc2626" }}>
+                  {status.errors.length} day(s) failed — e.g. {status.errors[0]}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </Panel>
   );
 }
 
