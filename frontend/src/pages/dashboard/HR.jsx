@@ -799,7 +799,7 @@ const EMPLOYEE_DETAIL_FIELDS = [
   { section: "Employment", fields: [
     ["level", "Level"], ["department", "Department"], ["division", "Division"], ["team", "Team"],
     ["job_title", "Position"], ["supervisor_id", "Direct Supervisor"], ["work_placement", "Placement"], ["status", "Status"],
-    ["employment_status", "Employment Status"], ["employee_grade", "Grade"],
+    ["employment_status", "Employment Status"], ["employee_grade", "Grade"], ["scheduled_checkin", "Scheduled Check-in"],
     ["date_of_joining", "Join Date"], ["pkwt_ke", "PKWT Ke"], ["starting_pkwt", "Starting PKWT"], ["end_pkwt", "End PKWT"],
     ["permanent_date", "Permanent Date"], ["resign_date", "Resign Date"], ["resign_reason", "Resign Reason"], ["retire_date", "Retire Date"],
   ] },
@@ -820,6 +820,12 @@ const EMPLOYEE_DETAIL_FIELDS = [
 const EMPLOYEE_DETAIL_DATE_KEYS = new Set([
   "date_of_joining", "date_of_birth", "retire_date", "end_pkwt", "starting_pkwt", "permanent_date", "resign_date",
 ]);
+
+// This employee's individual scheduled check-in ("HH:MM") — some employees
+// are permitted a later 09:00-18:00 shift instead of the 08:30-17:30
+// company standard. Left blank, the Hikvision attendance sync falls back
+// to the standard (see hikcentral_scheduler.py's DEFAULT_SCHEDULED_CHECKIN).
+const EMPLOYEE_DETAIL_TIME_KEYS = new Set(["scheduled_checkin"]);
 
 const EMPLOYEE_SELECT_OPTIONS = {
   sex: [["M", "Male"], ["F", "Female"]],
@@ -986,6 +992,7 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
                 {fields.map(([key, label]) => {
                   const isSupervisor = key === "supervisor_id";
                   const isDate = EMPLOYEE_DETAIL_DATE_KEYS.has(key);
+                  const isTime = EMPLOYEE_DETAIL_TIME_KEYS.has(key);
                   const selectOptions = EMPLOYEE_SELECT_OPTIONS[key];
                   const isUserId = key === "user_id";
                   const inputStyle = {
@@ -1072,6 +1079,18 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
                           onChange={(e) => setField(key, e.target.value)}
                           style={inputStyle}
                         />
+                      ) : isTime ? (
+                        <>
+                          <input
+                            type="time"
+                            value={form[key] || ""}
+                            onChange={(e) => setField(key, e.target.value)}
+                            style={inputStyle}
+                          />
+                          <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 2 }}>
+                            Blank = standard 08:30
+                          </div>
+                        </>
                       ) : (
                         <input
                           type="text"

@@ -29,11 +29,11 @@ from typing import Optional
 import openpyxl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
 from pydantic import BaseModel
-from sqlalchemy import select, update, func, case, and_, or_
+from sqlalchemy import select, update, func, case, and_, or_, extract
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import require_role, CurrentUser, Roles
+from app.dependencies import require_role, get_current_user, CurrentUser, Roles
 from app.services.department_taxonomy import normalize_department, clean_department_list, CANONICAL_DEPARTMENTS
 from app.models.attendance import AttendanceRecord, AttendanceRecordAuditLog, AttendanceUploadLog
 
@@ -1072,6 +1072,47 @@ def trigger_hikcentral_sync(user: CurrentUser = Depends(require_role(Roles.HR)))
         return hik.run_sync(uploaded_by=user.username or "manual")
     except HikCentralError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/late-this-month")
+async def get_late_this_month(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(get_current_user),
+):
+    """Employees with at least one late arrival this calendar month — powers
+    the Application Center's Announcement panel, same open-to-any-
+    authenticated-user convention as birthdays-this-month in
+    hr_employees.py. "Late" mirrors _late_expr()'s own definition
+    (attendance_status == "L", weekdays only) so this list always agrees
+    with the tardiness tally shown elsewhere in Attendance Rate."""
+    today = date.today()
+    q = await db.execute(
+        select(
+            AttendanceRecord.employee_id,
+            AttendanceRecord.employee_name,
+            AttendanceRecord.department,
+            func.count().label("late_count"),
+            func.max(AttendanceRecord.attendance_date).label("last_late_date"),
+        )
+        .where(
+            IS_WEEKDAY,
+            AttendanceRecord.attendance_status == "L",
+            extract("month", AttendanceRecord.attendance_date) == today.month,
+            extract("year", AttendanceRecord.attendance_date) == today.year,
+        )
+        .group_by(AttendanceRecord.employee_id, AttendanceRecord.employee_name, AttendanceRecord.department)
+        .order_by(func.count().desc())
+    )
+    return [
+        {
+            "employee_id":    r[0],
+            "name":           r[1],
+            "department":     r[2],
+            "late_count":     r[3],
+            "last_late_date": r[4].isoformat() if r[4] else None,
+        }
+        for r in q.fetchall()
+    ]
 
 
 # ── List attendance records ────────────────────────────────────────────────────

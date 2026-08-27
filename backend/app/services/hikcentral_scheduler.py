@@ -63,6 +63,29 @@ _scheduler: BackgroundScheduler | None = None
 
 WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
+# Company-standard scheduled check-in — used whenever Employee.scheduled_checkin
+# is blank. A handful of employees are permitted the later 09:00-18:00 shift
+# instead (set per-employee via HR > Employee edit > "Scheduled Check-in").
+DEFAULT_SCHEDULED_CHECKIN = "08:30"
+# Both known shift variants (08:30-17:30, 09:00-18:00) are a 9-hour day —
+# used only to derive a display value for AttendanceRecord.scheduled_checkout,
+# never to determine lateness (that's actual_checkin vs scheduled_checkin
+# alone). Revisit if a non-9h shift variant is ever added.
+_STANDARD_SHIFT_HOURS = 9
+
+
+def _parse_hhmm(value: str | None, default: str = DEFAULT_SCHEDULED_CHECKIN):
+    try:
+        return datetime.strptime(value, "%H:%M").time()
+    except (ValueError, TypeError):
+        return datetime.strptime(default, "%H:%M").time()
+
+
+def _shift_hhmm(hhmm: str, hours: int) -> str:
+    t = _parse_hhmm(hhmm)
+    total_minutes = (t.hour * 60 + t.minute + hours * 60) % (24 * 60)
+    return f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
+
 # Earliest event available on the device as of 2026-08-27 (probed live via
 # AcsEvent with a startTime of 2020-01-01 — the device returned its oldest
 # stored event at 2026-01-05). Used only as the frontend's default backfill
@@ -154,9 +177,9 @@ def _upsert_grouped(db, grouped: dict[tuple[str, date], list[datetime]], names: 
         return 0, 0, 0
 
     from app.models.employee import Employee
-    emp_dept_map = {
-        r[0]: (r[1], r[2])
-        for r in db.execute(select(Employee.user_id, Employee.department, Employee.team)).fetchall()
+    emp_map = {
+        r[0]: (r[1], r[2], r[3])
+        for r in db.execute(select(Employee.user_id, Employee.department, Employee.team, Employee.scheduled_checkin)).fetchall()
     }
 
     dates = {d for (_, d) in grouped}
@@ -173,7 +196,10 @@ def _upsert_grouped(db, grouped: dict[tuple[str, date], list[datetime]], names: 
         checkin, checkout = timestamps[0], timestamps[-1]
         checkin_str = checkin.strftime("%H:%M")
         checkout_str = checkout.strftime("%H:%M") if checkout != checkin else None
-        dept, team = emp_dept_map.get(emp_id, (None, None))
+        dept, team, sched_checkin_raw = emp_map.get(emp_id, (None, None, None))
+        sched_checkin = sched_checkin_raw or DEFAULT_SCHEDULED_CHECKIN
+        sched_checkout = _shift_hhmm(sched_checkin, _STANDARD_SHIFT_HOURS)
+        is_late = checkin.time() > _parse_hhmm(sched_checkin)
         existing = existing_rows.get((emp_id, d))
 
         if existing is None:
@@ -181,9 +207,9 @@ def _upsert_grouped(db, grouped: dict[tuple[str, date], list[datetime]], names: 
                 employee_id=emp_id, employee_name=names.get(emp_id),
                 department=dept, team=team,
                 attendance_date=d, week_day=WEEKDAY_NAMES[d.weekday()],
-                scheduled_checkin=None, scheduled_checkout=None,
+                scheduled_checkin=sched_checkin, scheduled_checkout=sched_checkout,
                 actual_checkin=checkin_str, actual_checkout=checkout_str,
-                attendance_status="W", notes=None, is_day_off=False, leave_code=None,
+                attendance_status="L" if is_late else "W", notes=None, is_day_off=False, leave_code=None,
                 source="hikcentral", upload_batch_id=batch_id,
             ))
             inserted += 1
@@ -202,8 +228,12 @@ def _upsert_grouped(db, grouped: dict[tuple[str, date], list[datetime]], names: 
             values["team"] = team
         if not (existing.leave_code or existing.is_day_off):
             # No leave/rest-day already recorded — Hikvision's physical
-            # presence is authoritative for this day.
-            values["attendance_status"] = "W"
+            # presence is authoritative for this day. Lateness is scored
+            # against this employee's own scheduled_checkin (HR > Employee
+            # edit), not a single company-wide cutoff.
+            values["scheduled_checkin"] = sched_checkin
+            values["scheduled_checkout"] = sched_checkout
+            values["attendance_status"] = "L" if is_late else "W"
             values["source"] = "hikcentral"
         db.execute(
             update(AttendanceRecord)

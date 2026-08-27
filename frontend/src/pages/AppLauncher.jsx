@@ -195,6 +195,36 @@ function AnnouncementRow({ item }) {
     );
   }
 
+  if (item.kind === "late") {
+    return (
+      <div style={{
+        display: "flex", alignItems: "center", gap: 10,
+        padding: "9px 12px", marginBottom: 8, borderRadius: 12,
+        background: "#fff",
+        boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
+      }}>
+        <div style={{
+          width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+          background: "linear-gradient(135deg,#f97316,#c2410c)",
+          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14,
+        }}>
+          ⏱️
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {item.name}
+          </p>
+          <p style={{ fontSize: 10, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {[item.department, item.last_late_date && `last ${new Date(item.last_late_date + "T00:00:00").toLocaleDateString("en-US", { day: "numeric", month: "short" })}`].filter(Boolean).join(" · ") || "—"}
+          </p>
+        </div>
+        <div style={{ flexShrink: 0, textAlign: "center", padding: "3px 9px", borderRadius: 10, background: "#ffedd5", color: "#c2410c", fontSize: 10.5, fontWeight: 800 }}>
+          {item.late_count}× LATE
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 10,
@@ -304,11 +334,13 @@ export default function AppLauncher() {
     Promise.all([
       fetch("/api/v1/dashboard/hr/todo/active-alerts", { headers }).then(r => r.ok ? r.json() : []),
       fetch("/api/v1/dashboard/hr/employees/birthdays-this-month", { headers }).then(r => r.ok ? r.json() : []),
+      fetch("/api/v1/dashboard/hr/attendance/late-this-month", { headers }).then(r => r.ok ? r.json() : []),
     ])
-      .then(([alerts, birthdays]) => {
+      .then(([alerts, birthdays, lateArrivals]) => {
         setAnnouncements([
           ...alerts.map(a => ({ ...a, kind: "task_alert" })),
           ...birthdays.map(b => ({ ...b, kind: "birthday" })),
+          ...lateArrivals.map(l => ({ ...l, kind: "late" })),
         ]);
       })
       .catch(() => {});

@@ -50,6 +50,15 @@ class Employee(Base):
     company_email   = Column(String(200))
     photo_filename  = Column(String(255))  # stored name on disk under uploads/employee_photos/
 
+    # This employee's individual scheduled check-in time ("HH:MM", e.g.
+    # "08:30" or "09:00") — some employees are permitted a later 09:00-18:00
+    # shift instead of the 08:30-17:30 company standard. NULL falls back to
+    # the standard (see hikcentral_scheduler.py's DEFAULT_SCHEDULED_CHECKIN).
+    # Currently only consulted by the Hikvision ISAPI sync to score
+    # lateness — other attendance sources (Intercom/Talenta/Plant) already
+    # carry their own pre-computed late status from their source system.
+    scheduled_checkin = Column(String(5))
+
     # Upload metadata
     upload_batch_id = Column(String(50), index=True)
     uploaded_at     = Column(DateTime, default=datetime.utcnow)

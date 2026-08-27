@@ -677,6 +677,7 @@ def _emp_dict(e: Employee) -> dict:
         "npwp_number":      e.npwp_number,
         "bank_account_bca": e.bank_account_bca,
         "bank_account_name": e.bank_account_name,
+        "scheduled_checkin": e.scheduled_checkin,
         "has_photo":        bool(e.photo_filename),
     }
 
@@ -1735,7 +1736,7 @@ _EMPLOYEE_UPSERT_TEXT_FIELDS = [
     "education_major", "employee_grade", "supervisor_id", "working_experience_years",
     "previous_company", "address", "marital_status", "phone_number", "emergency_phone",
     "religion", "blood_type", "npwp_number", "bank_account_bca", "bank_account_name",
-    "personal_email", "company_email", "resign_reason",
+    "personal_email", "company_email", "resign_reason", "scheduled_checkin",
 ]
 
 
@@ -1781,6 +1782,7 @@ class EmployeeUpsert(BaseModel):
     bank_account_name: Optional[str] = None
     personal_email: Optional[str] = None
     company_email: Optional[str] = None
+    scheduled_checkin: Optional[str] = None
 
 
 def _apply_upsert_fields(target: Employee, body: EmployeeUpsert):
