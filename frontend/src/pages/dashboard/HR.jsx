@@ -4481,9 +4481,88 @@ function AttendanceEditModal({ record, onClose, onSaved }) {
 // now come from the Summary tab's own filters (fDept/fYear) instead of a
 // separate internal Year picker, so there's one source of truth for both
 // instead of two Year selectors on the same tab.
+// Category cell click -> per-employee breakdown (who + which date) behind
+// one Late/Sick/Unpaid number, powered by /yearly-summary/detail.
+function SummaryDetailModal({ apiBase, headers, info, onClose }) {
+  const [rows,    setRows]    = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    const params = new URLSearchParams({ year: info.year, month: info.month, category: info.category });
+    if (info.department) params.set("department", info.department);
+    fetch(`${apiBase}/yearly-summary/detail?${params}`, { headers })
+      .then((r) => r.ok ? r.json() : [])
+      .then(setRows)
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  }, [info.year, info.month, info.category, info.department]); // eslint-disable-line
+
+  const fmtDate = (iso) => {
+    if (!iso) return "—";
+    try { return new Date(iso + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", day: "2-digit", month: "short", year: "numeric" }); }
+    catch (_) { return iso; }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,0.6)" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-2xl" style={{ background: "#f1f5f9", boxShadow: "0 4px 12px rgba(15,23,42,0.10), 0 2px 4px rgba(15,23,42,0.05)" }}>
+        <div className="flex items-center justify-between px-5 py-4 sticky top-0" style={{ background: `linear-gradient(135deg, ${info.color}, ${info.color}cc)`, borderRadius: "16px 16px 0 0" }}>
+          <div>
+            <h3 style={{ fontSize: 14, fontWeight: 800, color: "#fff" }}>{info.categoryLabel} — {info.monthLabel} {info.year}</h3>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.85)", fontWeight: 600, marginTop: 2 }}>
+              {info.department || "All Departments"} · {rows.length} record{rows.length === 1 ? "" : "s"}
+            </p>
+          </div>
+          <button onClick={onClose} style={{ padding: 6, borderRadius: 8, border: "none", background: "rgba(255,255,255,0.2)", color: "#fff", cursor: "pointer" }}>
+            <X size={16} />
+          </button>
+        </div>
+        <div className="p-5">
+          {loading ? (
+            <div className="flex justify-center py-10"><Loader2 size={18} className="animate-spin" style={{ color: "#94a3b8" }} /></div>
+          ) : rows.length === 0 ? (
+            <p style={{ textAlign: "center", fontSize: 12, color: "#94a3b8", padding: "20px 0" }}>No records</p>
+          ) : (
+            <div style={{ borderRadius: 12, overflow: "hidden", boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
+                    {["Date", "Name", "Department", info.category === "late" ? "Check-In" : "Detail"].map((h) => (
+                      <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontSize: 10.5, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => (
+                    <tr key={`${r.employee_id}-${r.date}-${i}`} style={{ background: i % 2 === 0 ? "#f8fafc" : "#ffffff" }}>
+                      <td style={{ padding: "7px 12px", fontWeight: 600, color: "#334155", whiteSpace: "nowrap" }}>{fmtDate(r.date)}</td>
+                      <td style={{ padding: "7px 12px", color: "#1e293b", fontWeight: 500 }}>{r.name}</td>
+                      <td style={{ padding: "7px 12px", color: "#64748b" }}>{r.department}</td>
+                      <td style={{ padding: "7px 12px", color: "#64748b" }}>
+                        {info.category === "late" ? (r.checkin || "—") : (r.leave_code || r.notes || "—")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TargetAchievementPanel({ apiBase, headers, department, year }) {
   const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(true);
+  const [detailModal, setDetailModal] = useState(null);
+
+  const openDetail = (m, category, categoryLabel, color) => {
+    if (!m[category]) return;
+    setDetailModal({ year, month: m.month, monthLabel: m.month_label, department, category, categoryLabel, color });
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -4563,9 +4642,9 @@ function TargetAchievementPanel({ apiBase, headers, department, year }) {
                   <td style={td}>{m.working_days || "—"}</td>
                   <td style={td}>{m.expected_man_days || "—"}</td>
                   <td style={td}>{m.present_man_days || "—"}</td>
-                  <td style={td} data-c="late">{m.late || "-"}</td>
-                  <td style={td} data-c="sick">{m.sick || "-"}</td>
-                  <td style={td} data-c="unpaid">{m.unpaid || "-"}</td>
+                  <td style={{ ...td, cursor: m.late   ? "pointer" : "default", color: m.late   ? "#d97706" : undefined, fontWeight: m.late   ? 700 : 400, textDecoration: m.late   ? "underline" : "none" }} data-c="late"   onClick={() => openDetail(m, "late",   "Late",         "#d97706")}>{m.late   || "-"}</td>
+                  <td style={{ ...td, cursor: m.sick   ? "pointer" : "default", color: m.sick   ? "#dc2626" : undefined, fontWeight: m.sick   ? 700 : 400, textDecoration: m.sick   ? "underline" : "none" }} data-c="sick"   onClick={() => openDetail(m, "sick",   "Sick Leave",   "#dc2626")}>{m.sick   || "-"}</td>
+                  <td style={{ ...td, cursor: m.unpaid ? "pointer" : "default", color: m.unpaid ? "#7c3aed" : undefined, fontWeight: m.unpaid ? 700 : 400, textDecoration: m.unpaid ? "underline" : "none" }} data-c="unpaid" onClick={() => openDetail(m, "unpaid", "Unpaid Leave", "#7c3aed")}>{m.unpaid || "-"}</td>
                   <td style={td} data-c="total">{m.total || "-"}</td>
                   <td style={td}>
                     {m.attendance_ratio == null ? <span style={{ color: "#94a3b8" }}>—</span> : (
@@ -4601,6 +4680,10 @@ function TargetAchievementPanel({ apiBase, headers, department, year }) {
             )}
           </table>
         </div>
+      )}
+
+      {detailModal && (
+        <SummaryDetailModal apiBase={apiBase} headers={headers} info={detailModal} onClose={() => setDetailModal(null)} />
       )}
     </div>
   );

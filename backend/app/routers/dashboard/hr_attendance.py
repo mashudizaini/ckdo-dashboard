@@ -2143,6 +2143,55 @@ async def get_yearly_summary(
     return {"year": year, "department": department, "months": months, "annual": annual}
 
 
+@router.get("/yearly-summary/detail")
+async def get_yearly_summary_detail(
+    year:       int           = Query(...),
+    month:      int           = Query(..., ge=1, le=12),
+    category:   str           = Query(..., description="late | sick | unpaid"),
+    department: Optional[str] = Query(None, description="Exact department name — omit for all"),
+    db:         AsyncSession  = Depends(get_db),
+    user:       CurrentUser   = Depends(require_role(Roles.HR)),
+):
+    """Per-employee breakdown behind one Late/Sick/Unpaid cell in the
+    Summary Report table — same condition each cell's sum uses
+    (_late_expr/_sick_expr/_unpaid_leave_expr, from _year_period_stats),
+    just returning the individual rows instead of a count, so HR can see
+    who and which date."""
+    from sqlalchemy import extract
+
+    expr_map = {"late": _late_expr(), "sick": _sick_expr(), "unpaid": _unpaid_leave_expr()}
+    if category not in expr_map:
+        raise HTTPException(status_code=400, detail="category must be one of: late, sick, unpaid")
+
+    where = [
+        extract("year", AttendanceRecord.attendance_date) == year,
+        extract("month", AttendanceRecord.attendance_date) == month,
+        expr_map[category] == 1,
+    ]
+    if department:
+        where.append(AttendanceRecord.department == department)
+
+    q = (
+        select(AttendanceRecord)
+        .where(*where)
+        .order_by(AttendanceRecord.attendance_date, AttendanceRecord.employee_name)
+    )
+    rows = (await db.execute(q)).scalars().all()
+
+    return [
+        {
+            "employee_id": r.employee_id,
+            "name":        r.employee_name or "—",
+            "department":  r.department or "—",
+            "date":        str(r.attendance_date),
+            "checkin":     r.actual_checkin,
+            "leave_code":  r.leave_code,
+            "notes":       r.notes,
+        }
+        for r in rows
+    ]
+
+
 # ── Employee search ────────────────────────────────────────────────────────────
 
 @router.get("/search-employees")
