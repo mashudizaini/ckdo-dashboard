@@ -15,7 +15,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Wifi, WifiOff, RefreshCw, Loader2, Settings2, ChevronDown, ChevronUp,
-  Clock, CheckCircle, XCircle, History, PlayCircle, HelpCircle,
+  Clock, CheckCircle, XCircle, History, PlayCircle, HelpCircle, Pause,
 } from "lucide-react";
 import { hikcentralApi } from "@/api/dashboard";
 
@@ -272,6 +272,7 @@ function BackfillSection({ configured, onTick }) {
   const [endDate, setEndDate] = useState(TODAY_ISO);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState(null);
+  const [pausing, setPausing] = useState(false);
 
   const refreshStatus = useCallback(async () => {
     try { setStatus(await hikcentralApi.getBackfillStatus()); } catch (_) {}
@@ -298,6 +299,19 @@ function BackfillSection({ configured, onTick }) {
     }
   };
 
+  const togglePause = async () => {
+    setPausing(true);
+    try {
+      if (status?.paused) await hikcentralApi.resumeBackfill();
+      else await hikcentralApi.pauseBackfill();
+      await refreshStatus();
+    } catch (e) {
+      setStartError(e?.detail || "Failed to pause/resume backfill");
+    } finally {
+      setPausing(false);
+    }
+  };
+
   const pct = status?.total_days ? Math.round((status.done_days / status.total_days) * 100) : 0;
 
   return (
@@ -316,9 +330,16 @@ function BackfillSection({ configured, onTick }) {
             <Field label="To date">
               <input type="date" style={inputStyle} value={endDate} onChange={(e) => setEndDate(e.target.value)} disabled={status?.running} />
             </Field>
-            <Btn variant="primary" icon={status?.running ? Loader2 : PlayCircle} disabled={starting || status?.running} onClick={start}>
-              {status?.running ? "Running…" : "Start Backfill"}
-            </Btn>
+            <div className="flex gap-2">
+              <Btn variant="primary" icon={status?.running ? Loader2 : PlayCircle} disabled={starting || status?.running} onClick={start}>
+                {status?.running ? "Running…" : "Start Backfill"}
+              </Btn>
+              {status?.running && (
+                <Btn icon={pausing ? Loader2 : (status.paused ? PlayCircle : Pause)} disabled={pausing} onClick={togglePause}>
+                  {status.paused ? "Resume" : "Pause"}
+                </Btn>
+              )}
+            </div>
           </div>
           <p style={{ fontSize: 11, color: "#94a3b8" }}>
             This terminal's own event log currently goes back to 2026-01-05 — an earlier "From date" just finds nothing
@@ -334,13 +355,13 @@ function BackfillSection({ configured, onTick }) {
           {status && (status.running || status.finished_at) && (
             <div className="rounded-xl p-3" style={{ border: "1px solid rgba(0,0,0,0.06)", background: "#f8fafc" }}>
               <div className="flex items-center justify-between mb-2">
-                <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>
-                  {status.running ? `Syncing ${status.current_date || "…"}` : "Last backfill finished"}
+                <span style={{ fontSize: 12, fontWeight: 700, color: status.paused ? "#d97706" : "#334155" }}>
+                  {status.paused ? `Paused after ${status.current_date || "…"}` : status.running ? `Syncing ${status.current_date || "…"}` : "Last backfill finished"}
                 </span>
                 <span style={{ fontSize: 11, color: "#64748b" }}>{status.done_days}/{status.total_days} day(s)</span>
               </div>
               <div className="rounded-full overflow-hidden" style={{ height: 6, background: "#e2e8f0" }}>
-                <div style={{ width: `${pct}%`, height: "100%", background: status.running ? "#2563eb" : "#16a34a", transition: "width 0.3s" }} />
+                <div style={{ width: `${pct}%`, height: "100%", background: status.paused ? "#d97706" : status.running ? "#2563eb" : "#16a34a", transition: "width 0.3s" }} />
               </div>
               <div className="flex gap-4 mt-2" style={{ fontSize: 11.5, color: "#64748b" }}>
                 <span>{status.totals?.events ?? 0} events</span>

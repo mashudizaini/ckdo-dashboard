@@ -25,6 +25,9 @@ loop the initial integration setup went through.
                             thousands of paginated device calls) — returns
                             immediately, poll progress via the next route.
   GET  /sync/backfill/status — progress of the running (or last) backfill.
+  POST /sync/backfill/pause  — pause a running backfill (takes effect after
+                            the day currently in progress finishes).
+  POST /sync/backfill/resume — resume a paused backfill.
 
 Field names on the wire/DB (base_url/app_key/app_secret) are unchanged from
 this integration's earlier HikCentral-OpenAPI design to avoid a schema
@@ -117,8 +120,8 @@ def test_connection(db: Session = Depends(get_hikcentral_db)):
     end = now.strftime(f"%Y-%m-%dT%H:%M:%S{tz}")
 
     try:
-        client = HikCentralClient(base_url=cfg["base_url"], username=cfg["app_key"], password=cfg["app_secret"])
-        result = client.search_door_events(start, end, search_position=0, max_results=10)
+        with HikCentralClient(base_url=cfg["base_url"], username=cfg["app_key"], password=cfg["app_secret"]) as client:
+            result = client.search_door_events(start, end, search_position=0, max_results=10)
         events = result.get("list") or []
         return {"ok": True, "message": f"Connected — {len(events)} event(s) in the last 5 minutes.", "event_count": len(events)}
     except HikCentralError as e:
@@ -166,6 +169,22 @@ def sync_backfill(payload: BackfillIn, user: CurrentUser = Depends(get_current_u
 @router.get("/sync/backfill/status")
 def sync_backfill_status():
     return hikcentral_scheduler.get_backfill_status()
+
+
+@router.post("/sync/backfill/pause")
+def sync_backfill_pause():
+    try:
+        return hikcentral_scheduler.pause_backfill()
+    except HikCentralError as e:
+        raise HTTPException(409, str(e))
+
+
+@router.post("/sync/backfill/resume")
+def sync_backfill_resume():
+    try:
+        return hikcentral_scheduler.resume_backfill()
+    except HikCentralError as e:
+        raise HTTPException(409, str(e))
 
 
 @router.get("/sync/history")

@@ -44,6 +44,7 @@ docstring for the full picture, including which major/minor codes are noise.
 """
 import logging
 import threading
+import time
 from collections import defaultdict
 from datetime import datetime, date, timedelta
 
@@ -69,12 +70,17 @@ WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturd
 EARLIEST_KNOWN_EVENT_DATE = date(2026, 1, 5)
 
 _backfill_status: dict = {
-    "running": False, "start_date": None, "end_date": None, "current_date": None,
+    "running": False, "paused": False, "start_date": None, "end_date": None, "current_date": None,
     "done_days": 0, "total_days": 0,
     "totals": {"events": 0, "inserted": 0, "updated": 0},
     "errors": [], "finished_at": None,
 }
 _backfill_lock = threading.Lock()
+# Set = keep going, clear = pause. The loop blocks on this between days (not
+# mid-day — a day's own pagination always finishes first), so "Pause" takes
+# effect once the day in progress is done.
+_backfill_resume_event = threading.Event()
+_backfill_resume_event.set()
 
 
 def _employee_id_from_event(evt: dict) -> str | None:
@@ -115,6 +121,11 @@ def _fetch_events_range(client: HikCentralClient, start_time: str, end_time: str
         total = result.get("totalMatches", position)
         if not batch or result.get("responseStatusStrg") != "MORE" or position >= total:
             break
+        # Small pacing between paginated calls — a multi-month backfill can
+        # mean thousands of sequential requests, and firing them back to
+        # back occasionally trips this device's own login-rate lockout
+        # (see hikcentral_client.py's module docstring).
+        time.sleep(0.1)
     return events
 
 
@@ -266,7 +277,10 @@ def run_sync(uploaded_by: str = "scheduler") -> dict:
     fails (caller decides how to surface that — the scheduler tick logs and
     swallows it, the manual "Sync Now" endpoint lets it become a 502)."""
     client = _build_client()
-    result = _sync_one_day(client, date.today(), uploaded_by)
+    try:
+        result = _sync_one_day(client, date.today(), uploaded_by)
+    finally:
+        client.close()
     logger.info("HikCentral sync: %d events -> %d inserted, %d updated", result["events"], result["inserted"], result["updated"])
     return result
 
@@ -312,8 +326,9 @@ def get_backfill_status() -> dict:
 def _run_backfill_body(start_date: date, end_date: date, uploaded_by: str):
     global _backfill_status
     total_days = (end_date - start_date).days + 1
+    _backfill_resume_event.set()
     _backfill_status.update(
-        running=True, start_date=start_date.isoformat(), end_date=end_date.isoformat(),
+        running=True, paused=False, start_date=start_date.isoformat(), end_date=end_date.isoformat(),
         current_date=None, done_days=0, total_days=total_days,
         totals={"events": 0, "inserted": 0, "updated": 0}, errors=[], finished_at=None,
     )
@@ -325,24 +340,51 @@ def _run_backfill_body(start_date: date, end_date: date, uploaded_by: str):
         _backfill_status["finished_at"] = datetime.utcnow().isoformat()
         return
 
-    d = start_date
-    while d <= end_date:
-        _backfill_status["current_date"] = d.isoformat()
-        try:
-            result = _sync_one_day(client, d, uploaded_by)
-            _backfill_status["totals"]["events"] += result["events"]
-            _backfill_status["totals"]["inserted"] += result["inserted"]
-            _backfill_status["totals"]["updated"] += result["updated"]
-        except Exception as e:
-            logger.exception("HikCentral backfill failed for %s", d)
-            _backfill_status["errors"].append(f"{d.isoformat()}: {e}")
-        _backfill_status["done_days"] += 1
-        d += timedelta(days=1)
+    try:
+        d = start_date
+        while d <= end_date:
+            _backfill_resume_event.wait()  # blocks here while paused
+            _backfill_status["current_date"] = d.isoformat()
+            try:
+                try:
+                    result = _sync_one_day(client, d, uploaded_by)
+                except HikCentralError:
+                    # One retry with a longer pause — covers a device
+                    # lockout that outlasts _post_json()'s own backoff.
+                    time.sleep(10)
+                    result = _sync_one_day(client, d, uploaded_by)
+                _backfill_status["totals"]["events"] += result["events"]
+                _backfill_status["totals"]["inserted"] += result["inserted"]
+                _backfill_status["totals"]["updated"] += result["updated"]
+            except Exception as e:
+                logger.exception("HikCentral backfill failed for %s", d)
+                _backfill_status["errors"].append(f"{d.isoformat()}: {e}")
+            _backfill_status["done_days"] += 1
+            d += timedelta(days=1)
+    finally:
+        client.close()
 
     _backfill_status["running"] = False
+    _backfill_status["paused"] = False
     _backfill_status["current_date"] = None
     _backfill_status["finished_at"] = datetime.utcnow().isoformat()
     logger.info("HikCentral backfill done: %s..%s (%d day(s)) -> %s", start_date, end_date, total_days, _backfill_status["totals"])
+
+
+def pause_backfill() -> dict:
+    if not _backfill_status.get("running"):
+        raise HikCentralError("No backfill is currently running.")
+    _backfill_resume_event.clear()
+    _backfill_status["paused"] = True
+    return get_backfill_status()
+
+
+def resume_backfill() -> dict:
+    if not _backfill_status.get("running"):
+        raise HikCentralError("No backfill is currently running.")
+    _backfill_status["paused"] = False
+    _backfill_resume_event.set()
+    return get_backfill_status()
 
 
 def start_backfill(start_date: date, end_date: date | None = None, uploaded_by: str = "manual") -> dict:

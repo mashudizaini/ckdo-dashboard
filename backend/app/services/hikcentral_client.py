@@ -24,7 +24,20 @@ same as every other source (Intercom/Talenta/Plant/Office).
   - Event fields used: employeeNoString (matches Employee.user_id and the
     roster's employeeNo — confirmed e.g. "A25002"), name, time (ISO-8601
     with timezone offset, e.g. "2026-08-26T07:14:12+07:00").
+  - The client is a persistent httpx.Client (reused across calls, close()d
+    by the caller when done) rather than one-per-request — a historical
+    backfill fires thousands of sequential requests, and each fresh
+    httpx.Client + DigestAuth pair used to mean a brand-new TCP connection
+    AND a full unauthenticated-probe/401-challenge/authenticated-retry
+    round trip every single time. Under that load this firmware's
+    brute-force/"illegal login" lockout occasionally trips — even though
+    every individual request eventually succeeds — and briefly returns an
+    XML `<userCheck>` 401 body instead of the requested JSON (confirmed
+    live during a real backfill run, ~2 of ~230 days). `_post_json()`
+    retries with backoff on a 401 to ride out that window instead of
+    failing the whole day.
 """
+import time
 from typing import Optional
 
 import httpx
@@ -48,14 +61,31 @@ class HikCentralClient:
                 "hikcentral_app_key / hikcentral_app_secret (.env), or fill in "
                 "IT Dashboard > HikCentral Integration (device host / username / password)"
             )
+        self._client = httpx.Client(auth=httpx.DigestAuth(self.username, self.password), timeout=30)
 
-    def _post_json(self, path: str, payload: dict) -> dict:
+    def close(self):
+        self._client.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        self.close()
+
+    def _post_json(self, path: str, payload: dict, max_attempts: int = 4) -> dict:
         url = f"{self.base_url}{path}?format=json"
-        try:
-            with httpx.Client(auth=httpx.DigestAuth(self.username, self.password), timeout=30) as client:
-                resp = client.post(url, json=payload)
-        except httpx.HTTPError as exc:
-            raise HikCentralError(f"Could not reach Hikvision device at {self.base_url}: {exc}") from exc
+        resp = None
+        for attempt in range(max_attempts):
+            try:
+                resp = self._client.post(url, json=payload)
+            except httpx.HTTPError as exc:
+                raise HikCentralError(f"Could not reach Hikvision device at {self.base_url}: {exc}") from exc
+            if resp.status_code == 401 and attempt < max_attempts - 1:
+                # Transient device-side lockout (see module docstring) —
+                # back off and retry rather than failing this request.
+                time.sleep(2 * (attempt + 1))
+                continue
+            break
         try:
             data = resp.json()
         except Exception as exc:
