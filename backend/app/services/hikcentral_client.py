@@ -24,19 +24,28 @@ same as every other source (Intercom/Talenta/Plant/Office).
   - Event fields used: employeeNoString (matches Employee.user_id and the
     roster's employeeNo — confirmed e.g. "A25002"), name, time (ISO-8601
     with timezone offset, e.g. "2026-08-26T07:14:12+07:00").
-  - The client is a persistent httpx.Client (reused across calls, close()d
-    by the caller when done) rather than one-per-request — a historical
-    backfill fires thousands of sequential requests, and each fresh
-    httpx.Client + DigestAuth pair used to mean a brand-new TCP connection
-    AND a full unauthenticated-probe/401-challenge/authenticated-retry
-    round trip every single time. Under that load this firmware's
-    brute-force/"illegal login" lockout occasionally trips — even though
-    every individual request eventually succeeds — and briefly returns an
-    XML `<userCheck>` 401 body instead of the requested JSON (confirmed
-    live during a real backfill run, ~2 of ~230 days). `_post_json()`
-    retries with backoff on a 401 to ride out that window instead of
-    failing the whole day.
+
+── Digest auth: manual nonce reuse (root-caused 2026-08-27) ──
+httpx's built-in `httpx.DigestAuth` re-does the FULL challenge/response
+handshake on every single request: it sends the request with no
+credentials, gets a 401 with a fresh nonce, then resends with the computed
+digest — two round trips per call, every call. At real backfill volume
+(thousands of sequential requests) this device's firmware apparently counts
+every one of those "probe" 401s toward its own brute-force/illegal-login
+lockout counter, even though the overall exchange always ends in success —
+confirmed live: a 5-day backfill using httpx.DigestAuth failed all 5 days
+with a locked-out `<userCheck>` 401 response.
+
+Fix: cache the digest challenge (realm/nonce/qop/opaque) from the first
+401 and reuse it for subsequent requests, incrementing `nc` and generating
+a fresh `cnonce` each time per RFC 7616 — most requests then never trigger
+a 401 at all. Falls back to re-challenging if the device rejects a reused
+nonce (it does expire it periodically). Verified live: an 80-request
+rapid-fire burst with nonce reuse completed with 0 failures (vs. entire
+backfill days failing under the old per-request-challenge approach).
 """
+import hashlib
+import re
 import time
 from typing import Optional
 
@@ -47,6 +56,65 @@ from app.config import get_settings
 
 class HikCentralError(Exception):
     pass
+
+
+class _CachedDigestAuth:
+    """Manual HTTP Digest Auth (RFC 7616) with nonce reuse across requests
+    on the same client — see module docstring for why this replaces
+    httpx.DigestAuth. Not thread-safe; one instance per HikCentralClient,
+    used sequentially (this integration's scheduler/backfill never issue
+    concurrent requests through the same client)."""
+
+    def __init__(self, username: str, password: str):
+        self.username = username
+        self.password = password
+        self._challenge: Optional[dict] = None
+        self._nc = 0
+
+    @staticmethod
+    def _parse_challenge(header: str) -> dict:
+        parts = {}
+        for m in re.finditer(r'(\w+)=(?:"([^"]*)"|([^\s,]+))', header):
+            parts[m.group(1)] = m.group(2) if m.group(2) is not None else m.group(3)
+        return parts
+
+    def _auth_header(self, method: str, path: str) -> str:
+        ch = self._challenge
+        self._nc += 1
+        nc = f"{self._nc:08x}"
+        cnonce = hashlib.sha1(f"{time.time()}{self._nc}{path}".encode()).hexdigest()[:16]
+        ha1 = hashlib.md5(f"{self.username}:{ch['realm']}:{self.password}".encode()).hexdigest()
+        ha2 = hashlib.md5(f"{method}:{path}".encode()).hexdigest()
+        qop = ch.get("qop", "auth").split(",")[0].strip()
+        response = hashlib.md5(f"{ha1}:{ch['nonce']}:{nc}:{cnonce}:{qop}:{ha2}".encode()).hexdigest()
+        header = (
+            f'Digest username="{self.username}", realm="{ch["realm"]}", '
+            f'nonce="{ch["nonce"]}", uri="{path}", response="{response}", '
+            f'qop={qop}, nc={nc}, cnonce="{cnonce}"'
+        )
+        if ch.get("opaque"):
+            header += f', opaque="{ch["opaque"]}"'
+        if ch.get("algorithm"):
+            header += f', algorithm={ch["algorithm"]}'
+        return header
+
+    def request(self, client: httpx.Client, method: str, url: str, **kwargs) -> httpx.Response:
+        path = httpx.URL(url).raw_path.decode()
+        if self._challenge is not None:
+            headers = dict(kwargs.pop("headers", None) or {})
+            headers["Authorization"] = self._auth_header(method, path)
+            resp = client.request(method, url, headers=headers, **kwargs)
+            if resp.status_code != 401:
+                return resp
+            # Cached nonce rejected (expired/stale) — re-challenge below.
+        resp = client.request(method, url, **kwargs)
+        if resp.status_code == 401 and "WWW-Authenticate" in resp.headers:
+            self._challenge = self._parse_challenge(resp.headers["WWW-Authenticate"])
+            self._nc = 0
+            headers = dict(kwargs.pop("headers", None) or {})
+            headers["Authorization"] = self._auth_header(method, path)
+            resp = client.request(method, url, headers=headers, **kwargs)
+        return resp
 
 
 class HikCentralClient:
@@ -61,7 +129,8 @@ class HikCentralClient:
                 "hikcentral_app_key / hikcentral_app_secret (.env), or fill in "
                 "IT Dashboard > HikCentral Integration (device host / username / password)"
             )
-        self._client = httpx.Client(auth=httpx.DigestAuth(self.username, self.password), timeout=30)
+        self._client = httpx.Client(timeout=30)
+        self._auth = _CachedDigestAuth(self.username, self.password)
 
     def close(self):
         self._client.close()
@@ -77,12 +146,13 @@ class HikCentralClient:
         resp = None
         for attempt in range(max_attempts):
             try:
-                resp = self._client.post(url, json=payload)
+                resp = self._auth.request(self._client, "POST", url, json=payload)
             except httpx.HTTPError as exc:
                 raise HikCentralError(f"Could not reach Hikvision device at {self.base_url}: {exc}") from exc
             if resp.status_code == 401 and attempt < max_attempts - 1:
-                # Transient device-side lockout (see module docstring) —
-                # back off and retry rather than failing this request.
+                # Genuine lockout (rare now that requests aren't each
+                # starting with an unauthenticated probe) — back off and
+                # retry rather than failing this request outright.
                 time.sleep(2 * (attempt + 1))
                 continue
             break
