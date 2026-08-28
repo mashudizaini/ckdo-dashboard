@@ -82,6 +82,37 @@ function fmtDate(iso) {
   try { return new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }); } catch (_) { return iso; }
 }
 
+// Live progress while a sync is running — polled from GET .../sync/now/status.
+// `phase` is "devices" (polling terminals) or "writing" (upserting
+// AttendanceRecord); done/total mean something different in each phase, so
+// the bar resets rather than jumping when the phase changes.
+const PHASE_LABEL = { devices: "Polling devices", writing: "Writing to database" };
+
+function SyncProgress({ progress }) {
+  const { phase, done, total, log } = progress;
+  const pct = total ? Math.round((done / total) * 100) : (phase ? 5 : 0);
+  return (
+    <div className="mt-3 rounded-xl p-3" style={{ border: "1px solid rgba(0,0,0,0.06)", background: "#f8fafc" }}>
+      <div className="flex items-center justify-between mb-2">
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>
+          {PHASE_LABEL[phase] || "Starting…"}
+        </span>
+        {!!total && <span style={{ fontSize: 11, color: "#64748b" }}>{done}/{total}</span>}
+      </div>
+      <div className="rounded-full overflow-hidden" style={{ height: 6, background: "#e2e8f0" }}>
+        <div style={{ width: `${pct}%`, height: "100%", background: "#2563eb", transition: "width 0.3s" }} />
+      </div>
+      {log?.length > 0 && (
+        <div className="mt-2 rounded-lg" style={{ maxHeight: 160, overflowY: "auto", background: "#0f172a", padding: "8px 10px" }}>
+          {log.slice(-40).map((line, i) => (
+            <div key={i} style={{ fontSize: 10.5, fontFamily: "monospace", color: "#94a3b8", lineHeight: 1.6 }}>{line}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Main ────────────────────────────────────────── */
 
 export default function ZKTecoIntegration() {
@@ -96,6 +127,7 @@ export default function ZKTecoIntegration() {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
   const [syncError, setSyncError] = useState(null);
+  const [syncProgress, setSyncProgress] = useState(null); // live status while syncing: {phase, done, total, log}
 
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -149,6 +181,7 @@ export default function ZKTecoIntegration() {
     setSyncing(true);
     setSyncResult(null);
     setSyncError(null);
+    setSyncProgress(null);
     try {
       await zktecoApi.syncNow();
     } catch (e) {
@@ -158,9 +191,10 @@ export default function ZKTecoIntegration() {
     }
     const poll = async () => {
       let s;
-      try { s = await zktecoApi.getSyncNowStatus(); } catch (_) { return; }
+      try { s = await zktecoApi.getSyncNowStatus(); } catch (_) { setTimeout(poll, 2000); return; }
+      setSyncProgress(s);
       if (s.running) {
-        setTimeout(poll, 2000);
+        setTimeout(poll, 1500);
         return;
       }
       setSyncing(false);
@@ -169,7 +203,7 @@ export default function ZKTecoIntegration() {
       refreshSyncStatus();
       refreshHistory();
     };
-    setTimeout(poll, 1500);
+    setTimeout(poll, 1000);
   };
 
   return (
@@ -263,6 +297,8 @@ export default function ZKTecoIntegration() {
             )}
           </div>
         )}
+
+        {syncing && syncProgress && <SyncProgress progress={syncProgress} />}
 
         {syncResult && (
           <div className="mt-3 space-y-1.5">

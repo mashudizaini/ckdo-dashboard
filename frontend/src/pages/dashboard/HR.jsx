@@ -4829,6 +4829,7 @@ function ZKTecoIntegrationHR() {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
   const [error, setError] = useState("");
+  const [progress, setProgress] = useState(null); // live status while syncing: {phase, done, total, log}
 
   const loadStatus = async () => {
     setLoading(true);
@@ -4848,7 +4849,7 @@ function ZKTecoIntegrationHR() {
   // waiting on the POST response — see zkteco_scheduler.py's
   // start_manual_sync() docstring for the full story.
   const handleSyncNow = async () => {
-    setSyncing(true); setError(""); setSyncResult(null);
+    setSyncing(true); setError(""); setSyncResult(null); setProgress(null);
     try {
       const res = await fetch(`${API}/zkteco/sync-now`, { method: "POST", headers });
       if (!res.ok) {
@@ -4866,16 +4867,17 @@ function ZKTecoIntegrationHR() {
       let s;
       try {
         const res = await fetch(`${API}/zkteco/sync-now/status`, { headers });
-        if (!res.ok) return;
+        if (!res.ok) { setTimeout(poll, 2000); return; }
         s = await res.json();
-      } catch (_) { return; }
-      if (s.running) { setTimeout(poll, 2000); return; }
+      } catch (_) { setTimeout(poll, 2000); return; }
+      setProgress(s);
+      if (s.running) { setTimeout(poll, 1500); return; }
       setSyncing(false);
       if (s.error) setError(s.error);
       else setSyncResult(s.result);
       loadStatus();
     };
-    setTimeout(poll, 1500);
+    setTimeout(poll, 1000);
   };
 
   const fmtDateTime = (iso) => {
@@ -4912,6 +4914,23 @@ function ZKTecoIntegrationHR() {
             </div>
           ) : (
             <p className="text-xs text-gray-600">No sync recorded yet.</p>
+          )}
+
+          {syncing && progress && (
+            <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-2.5 text-xs space-y-1.5">
+              <div className="flex justify-between">
+                <span className="text-gray-400">{progress.phase === "writing" ? "Writing to database" : progress.phase === "devices" ? "Polling devices" : "Starting…"}</span>
+                {!!progress.total && <span className="text-gray-500">{progress.done}/{progress.total}</span>}
+              </div>
+              <div className="rounded-full overflow-hidden" style={{ height: 5, background: "#1f2937" }}>
+                <div style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 5}%`, height: "100%", background: "#a855f7", transition: "width 0.3s" }} />
+              </div>
+              {progress.log?.length > 0 && (
+                <div className="text-gray-500 truncate" title={progress.log[progress.log.length - 1]}>
+                  {progress.log[progress.log.length - 1]}
+                </div>
+              )}
+            </div>
           )}
 
           {syncResult && (
