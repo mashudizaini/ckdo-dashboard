@@ -4840,7 +4840,42 @@ function ZKTecoIntegrationHR() {
     setLoading(false);
   };
 
-  useEffect(() => { loadStatus(); }, []); // eslint-disable-line
+  // A sync keeps running server-side (background thread) regardless of
+  // whether anyone's watching — logging out or closing the tab doesn't
+  // stop it, only this component's own React state used to reset on
+  // remount. On mount, check /zkteco/sync-now/status once and resume
+  // watching (or show the last run's log) instead of assuming nothing's
+  // happening — see the matching comment in ZKTecoIntegration.jsx (IT
+  // Setup's fuller panel), which this mirrors.
+  const pollSyncStatus = useCallback(() => {
+    const poll = async () => {
+      let s;
+      try {
+        const res = await fetch(`${API}/zkteco/sync-now/status`, { headers });
+        if (!res.ok) { setTimeout(poll, 2000); return; }
+        s = await res.json();
+      } catch (_) { setTimeout(poll, 2000); return; }
+      setProgress(s);
+      if (s.running) {
+        setSyncing(true);
+        setTimeout(poll, 1500);
+        return;
+      }
+      setSyncing(false);
+      if (s.error) setError(s.error);
+      else if (s.result) setSyncResult(s.result);
+    };
+    poll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => { loadStatus(); pollSyncStatus(); }, [pollSyncStatus]); // eslint-disable-line
+
+  const prevSyncing = useRef(false);
+  useEffect(() => {
+    if (prevSyncing.current && !syncing) loadStatus();
+    prevSyncing.current = syncing;
+  }, [syncing]); // eslint-disable-line
 
   // Starts in the background and returns immediately — a full sync
   // reprocesses every device's ENTIRE attendance history (this company's
@@ -4863,21 +4898,7 @@ function ZKTecoIntegrationHR() {
       setSyncing(false);
       return;
     }
-    const poll = async () => {
-      let s;
-      try {
-        const res = await fetch(`${API}/zkteco/sync-now/status`, { headers });
-        if (!res.ok) { setTimeout(poll, 2000); return; }
-        s = await res.json();
-      } catch (_) { setTimeout(poll, 2000); return; }
-      setProgress(s);
-      if (s.running) { setTimeout(poll, 1500); return; }
-      setSyncing(false);
-      if (s.error) setError(s.error);
-      else setSyncResult(s.result);
-      loadStatus();
-    };
-    setTimeout(poll, 1000);
+    setTimeout(pollSyncStatus, 1000);
   };
 
   const fmtDateTime = (iso) => {
@@ -4916,20 +4937,23 @@ function ZKTecoIntegrationHR() {
             <p className="text-xs text-gray-600">No sync recorded yet.</p>
           )}
 
-          {syncing && progress && (
+          {/* Shown whenever there's a log to show — while actively running,
+              AND after logging back in to find a sync already finished
+              (its log/result persists server-side; see pollSyncStatus()). */}
+          {progress?.log?.length > 0 && (
             <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-2.5 text-xs space-y-1.5">
               <div className="flex justify-between">
-                <span className="text-gray-400">{progress.phase === "writing" ? "Writing to database" : progress.phase === "devices" ? "Polling devices" : "Starting…"}</span>
-                {!!progress.total && <span className="text-gray-500">{progress.done}/{progress.total}</span>}
+                <span className="text-gray-400">
+                  {syncing ? (progress.phase === "writing" ? "Writing to database" : progress.phase === "devices" ? "Polling devices" : "Starting…") : "Last run's log"}
+                </span>
+                {syncing && !!progress.total && <span className="text-gray-500">{progress.done}/{progress.total}</span>}
               </div>
               <div className="rounded-full overflow-hidden" style={{ height: 5, background: "#1f2937" }}>
-                <div style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 5}%`, height: "100%", background: "#a855f7", transition: "width 0.3s" }} />
+                <div style={{ width: `${syncing ? (progress.total ? Math.round((progress.done / progress.total) * 100) : 5) : 100}%`, height: "100%", background: syncing ? "#a855f7" : "#16a34a", transition: "width 0.3s" }} />
               </div>
-              {progress.log?.length > 0 && (
-                <div className="text-gray-500 truncate" title={progress.log[progress.log.length - 1]}>
-                  {progress.log[progress.log.length - 1]}
-                </div>
-              )}
+              <div className="text-gray-500 truncate" title={progress.log[progress.log.length - 1]}>
+                {progress.log[progress.log.length - 1]}
+              </div>
             </div>
           )}
 

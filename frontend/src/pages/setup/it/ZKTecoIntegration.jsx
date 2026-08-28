@@ -11,7 +11,7 @@
  * Local `Panel`/`Btn`/`Field` helpers duplicated rather than shared,
  * matching the convention already used by HikCentralIntegration.jsx.
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Wifi, RefreshCw, Loader2, ChevronDown, ChevronUp,
   CheckCircle, XCircle, History, PlayCircle, HelpCircle,
@@ -88,19 +88,19 @@ function fmtDate(iso) {
 // the bar resets rather than jumping when the phase changes.
 const PHASE_LABEL = { devices: "Polling devices", writing: "Writing to database" };
 
-function SyncProgress({ progress }) {
+function SyncProgress({ progress, running }) {
   const { phase, done, total, log } = progress;
-  const pct = total ? Math.round((done / total) * 100) : (phase ? 5 : 0);
+  const pct = running ? (total ? Math.round((done / total) * 100) : (phase ? 5 : 0)) : 100;
   return (
     <div className="mt-3 rounded-xl p-3" style={{ border: "1px solid rgba(0,0,0,0.06)", background: "#f8fafc" }}>
       <div className="flex items-center justify-between mb-2">
         <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>
-          {PHASE_LABEL[phase] || "Starting…"}
+          {running ? (PHASE_LABEL[phase] || "Starting…") : "Last run's log"}
         </span>
-        {!!total && <span style={{ fontSize: 11, color: "#64748b" }}>{done}/{total}</span>}
+        {running && !!total && <span style={{ fontSize: 11, color: "#64748b" }}>{done}/{total}</span>}
       </div>
       <div className="rounded-full overflow-hidden" style={{ height: 6, background: "#e2e8f0" }}>
-        <div style={{ width: `${pct}%`, height: "100%", background: "#2563eb", transition: "width 0.3s" }} />
+        <div style={{ width: `${pct}%`, height: "100%", background: running ? "#2563eb" : "#16a34a", transition: "width 0.3s" }} />
       </div>
       {log?.length > 0 && (
         <div className="mt-2 rounded-lg" style={{ maxHeight: 160, overflowY: "auto", background: "#0f172a", padding: "8px 10px" }}>
@@ -150,7 +150,35 @@ export default function ZKTecoIntegration() {
     finally { setLoadingHistory(false); }
   }, []);
 
-  useEffect(() => { refreshDevices(); refreshSyncStatus(); refreshHistory(); }, [refreshDevices, refreshSyncStatus, refreshHistory]);
+  // A sync keeps running server-side (background thread) regardless of
+  // whether anyone's watching — logging out or closing the tab doesn't
+  // stop it. What used to reset on remount was purely this component's
+  // OWN React state, so re-opening the page after logging back in showed
+  // a blank "idle" panel even though the server was still (or had just
+  // finished) working. On mount, check /sync/now/status once and resume
+  // watching (or show the last run's log) instead of assuming nothing's
+  // happening.
+  const pollSyncStatus = useCallback(() => {
+    const poll = async () => {
+      let s;
+      try { s = await zktecoApi.getSyncNowStatus(); } catch (_) { setTimeout(poll, 2000); return; }
+      setSyncProgress(s);
+      if (s.running) {
+        setSyncing(true);
+        setTimeout(poll, 1500);
+        return;
+      }
+      setSyncing(false);
+      if (s.error) setSyncError(s.error);
+      else if (s.result) setSyncResult(s.result);
+    };
+    poll();
+  }, []);
+
+  useEffect(() => {
+    refreshDevices(); refreshSyncStatus(); refreshHistory();
+    pollSyncStatus(); // resumes watching if a sync is already running, or shows its last log/result if not
+  }, [refreshDevices, refreshSyncStatus, refreshHistory, pollSyncStatus]);
 
   const testDevice = async (id) => {
     setTestingId(id);
@@ -189,22 +217,18 @@ export default function ZKTecoIntegration() {
       setSyncing(false);
       return;
     }
-    const poll = async () => {
-      let s;
-      try { s = await zktecoApi.getSyncNowStatus(); } catch (_) { setTimeout(poll, 2000); return; }
-      setSyncProgress(s);
-      if (s.running) {
-        setTimeout(poll, 1500);
-        return;
-      }
-      setSyncing(false);
-      if (s.error) setSyncError(s.error);
-      else setSyncResult(s.result);
-      refreshSyncStatus();
-      refreshHistory();
-    };
-    setTimeout(poll, 1000);
+    setTimeout(pollSyncStatus, 1000);
   };
+
+  // refreshSyncStatus()/refreshHistory() only need to re-run once a sync
+  // actually finishes — pollSyncStatus() alone doesn't know to call them,
+  // so watch `syncing`'s false->done transition here instead of inlining
+  // it in the poll loop (which now also runs from the mount-time resume).
+  const prevSyncing = useRef(false);
+  useEffect(() => {
+    if (prevSyncing.current && !syncing) { refreshSyncStatus(); refreshHistory(); }
+    prevSyncing.current = syncing;
+  }, [syncing, refreshSyncStatus, refreshHistory]);
 
   return (
     <>
@@ -298,7 +322,10 @@ export default function ZKTecoIntegration() {
           </div>
         )}
 
-        {syncing && syncProgress && <SyncProgress progress={syncProgress} />}
+        {/* Shown whenever there's a log to show — while actively running,
+            AND after logging back in to find a sync already finished (its
+            log/result persists server-side; see pollSyncStatus() above). */}
+        {syncProgress?.log?.length > 0 && <SyncProgress progress={syncProgress} running={syncing} />}
 
         {syncResult && (
           <div className="mt-3 space-y-1.5">
