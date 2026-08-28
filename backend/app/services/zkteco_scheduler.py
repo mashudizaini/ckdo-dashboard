@@ -185,6 +185,20 @@ def _fetch_all_devices(devices: list[dict], on_progress=None) -> tuple[list[tupl
     return events, names, errors
 
 
+# Guards run_sync() itself so the 15-minute scheduler tick and a manual
+# "Sync Now" can never execute at the same time. Found live 2026-08-29:
+# with all 8 devices finally reachable, a full sync processes ~307,000
+# raw events into ~39,000 employee-day rows — long enough that a manual
+# sync and the next scheduled tick routinely overlapped, both writing to
+# the same AttendanceRecord rows and deadlocking each other (one session
+# left "idle in transaction" holding locks the other's INSERT/UPDATE then
+# waited on indefinitely — the dashboard going blank both times traced
+# back to this, not to run_sync() itself being slow). A non-blocking lock
+# here means whichever call arrives second simply fails fast with a clear
+# "already running" error instead of quietly piling up behind the first.
+_sync_run_lock = threading.Lock()
+
+
 def run_sync(uploaded_by: str = "scheduler", on_progress=None) -> dict:
     """Fetches every enabled device's full log, merges per (employee,
     date) ACROSS all devices (someone can swipe in at Lobby and out at
@@ -193,7 +207,9 @@ def run_sync(uploaded_by: str = "scheduler", on_progress=None) -> dict:
     does. Raises ZKTecoError only if every configured device failed; a
     partial failure (some devices unreachable, others fine) is instead
     reported in the result's "device_errors" list so one broken terminal
-    doesn't block the other 7.
+    doesn't block the other 7. Also raises ZKTecoError immediately
+    (rather than blocking) if another run_sync() call is already in
+    progress — see _sync_run_lock above.
 
     `on_progress(message, phase=None, done=None, total=None)`, if given,
     is called at each major step (and per-device as devices finish, via
@@ -203,6 +219,15 @@ def run_sync(uploaded_by: str = "scheduler", on_progress=None) -> dict:
     start_manual_sync() uses this to feed a live progress bar/log; the
     regular 15-minute scheduler tick doesn't pass one, since nothing is
     watching it."""
+    if not _sync_run_lock.acquire(blocking=False):
+        raise ZKTecoError("Another ZKTeco sync is already running — try again once it finishes.")
+    try:
+        return _run_sync_locked(uploaded_by, on_progress)
+    finally:
+        _sync_run_lock.release()
+
+
+def _run_sync_locked(uploaded_by: str, on_progress) -> dict:
     def progress(message, **kw):
         if on_progress:
             on_progress(message, **kw)
@@ -248,8 +273,14 @@ def run_sync(uploaded_by: str = "scheduler", on_progress=None) -> dict:
         }
 
         dates = {d for (_, d) in grouped}
-        existing_rows = {
-            (r.employee_id, r.attendance_date): r
+        # Plain dicts, not live ORM objects — periodic commits below would
+        # otherwise expire these mid-loop (SQLAlchemy's default
+        # expire_on_commit) and force a re-fetch per row on next access.
+        existing_map = {
+            (r.employee_id, r.attendance_date): {
+                "employee_name": r.employee_name, "department": r.department, "team": r.team,
+                "leave_code": r.leave_code, "is_day_off": r.is_day_off,
+            }
             for r in db.execute(select(AttendanceRecord).where(AttendanceRecord.attendance_date.in_(dates))).scalars().all()
         } if dates else {}
 
@@ -259,6 +290,15 @@ def run_sync(uploaded_by: str = "scheduler", on_progress=None) -> dict:
         PROGRESS_EVERY = 100  # log every Nth row — this loop can run into the
         # thousands (years of history x ~150 employees) and a line-per-row log
         # would swamp the UI; batching keeps it readable while still moving.
+        COMMIT_EVERY = 1000  # keeps each transaction — and the row locks it
+        # holds — short. A single ~39,000-row transaction was the direct
+        # cause of a real production lock pile-up (confirmed live
+        # 2026-08-29): it held every touched row locked for the ENTIRE run,
+        # so a second sync attempt deadlocked against it and the dashboard
+        # went blank. Now paired with _sync_run_lock above (which stops a
+        # second run_sync() from starting at all) — this cuts how much a
+        # crash/kill mid-run could lose, from everything back to the last
+        # full commit down to at most COMMIT_EVERY rows.
         for i, ((emp_id, d), timestamps) in enumerate(grouped.items(), start=1):
             if i == 1 or i % PROGRESS_EVERY == 0 or i == total_groups:
                 progress(f"Writing to database... {i}/{total_groups} record(s)", phase="writing", done=i, total=total_groups)
@@ -270,7 +310,7 @@ def run_sync(uploaded_by: str = "scheduler", on_progress=None) -> dict:
             sched_checkin = sched_checkin_raw or DEFAULT_SCHEDULED_CHECKIN
             sched_checkout = _shift_hhmm(sched_checkin, _STANDARD_SHIFT_HOURS)
             is_late = checkin.time() > _parse_hhmm(sched_checkin)
-            existing = existing_rows.get((emp_id, d))
+            existing = existing_map.get((emp_id, d))
 
             if existing is None:
                 db.add(AttendanceRecord(
@@ -283,33 +323,35 @@ def run_sync(uploaded_by: str = "scheduler", on_progress=None) -> dict:
                     source="zkteco", upload_batch_id=batch_id,
                 ))
                 inserted += 1
-                continue
+            else:
+                values = {
+                    "actual_checkin":  checkin_str,
+                    "actual_checkout": checkout_str,
+                    "upload_batch_id": batch_id,
+                }
+                if not existing["employee_name"] and resolved_names.get(emp_id):
+                    values["employee_name"] = resolved_names[emp_id]
+                if not existing["department"] and dept:
+                    values["department"] = dept
+                if not existing["team"] and team:
+                    values["team"] = team
+                if not (existing["leave_code"] or existing["is_day_off"]):
+                    # No leave/rest-day already recorded — Plant terminal
+                    # presence is authoritative for this day.
+                    values["scheduled_checkin"] = sched_checkin
+                    values["scheduled_checkout"] = sched_checkout
+                    values["attendance_status"] = "L" if is_late else "W"
+                    values["source"] = "zkteco"
+                db.execute(
+                    update(AttendanceRecord)
+                    .where(AttendanceRecord.employee_id == emp_id)
+                    .where(AttendanceRecord.attendance_date == d)
+                    .values(**values)
+                )
+                updated += 1
 
-            values = {
-                "actual_checkin":  checkin_str,
-                "actual_checkout": checkout_str,
-                "upload_batch_id": batch_id,
-            }
-            if not existing.employee_name and resolved_names.get(emp_id):
-                values["employee_name"] = resolved_names[emp_id]
-            if not existing.department and dept:
-                values["department"] = dept
-            if not existing.team and team:
-                values["team"] = team
-            if not (existing.leave_code or existing.is_day_off):
-                # No leave/rest-day already recorded — Plant terminal
-                # presence is authoritative for this day.
-                values["scheduled_checkin"] = sched_checkin
-                values["scheduled_checkout"] = sched_checkout
-                values["attendance_status"] = "L" if is_late else "W"
-                values["source"] = "zkteco"
-            db.execute(
-                update(AttendanceRecord)
-                .where(AttendanceRecord.employee_id == emp_id)
-                .where(AttendanceRecord.attendance_date == d)
-                .values(**values)
-            )
-            updated += 1
+            if i % COMMIT_EVERY == 0:
+                db.commit()
 
         if grouped:
             db.add(AttendanceUploadLog(
