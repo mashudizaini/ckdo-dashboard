@@ -13,8 +13,14 @@ devices instead of a single config.
   POST   /devices/{id}/test      — on-demand connectivity probe (connect,
                                   count users) — same protocol path as sync
   GET    /sync/status           — configured?, last sync summary, poll interval
-  POST   /sync/now               — manual "Sync Now" (same code path as the
-                                  15-minute background poller, all devices)
+  POST   /sync/now               — starts a manual sync in the background
+                                  (same code path as the 15-minute poller,
+                                  all devices) and returns immediately —
+                                  a full sync reprocesses every device's
+                                  entire history and can take a while.
+  GET    /sync/now/status         — progress/result of the running (or
+                                  last) manual sync — poll this after
+                                  POST /sync/now.
   GET    /sync/history           — recent sync log rows (AttendanceUploadLog,
                                   source="zkteco")
 
@@ -131,10 +137,20 @@ def sync_status():
 
 @router.post("/sync/now")
 def sync_now(user: CurrentUser = Depends(get_current_user)):
+    """Starts a sync in the background and returns immediately — a full
+    sync can take a while (every device's ENTIRE attendance history is
+    reprocessed each time, and this company's real data spans ~150
+    employees across 2018-2026), easily longer than an HTTP/reverse-proxy
+    timeout. Poll /sync/now/status for progress and the result."""
     try:
-        return zkteco_scheduler.run_sync(uploaded_by=user.username)
+        return zkteco_scheduler.start_manual_sync(uploaded_by=user.username)
     except ZKTecoError as e:
-        raise HTTPException(502, str(e))
+        raise HTTPException(409, str(e))
+
+
+@router.get("/sync/now/status")
+def sync_now_status():
+    return zkteco_scheduler.get_manual_sync_status()
 
 
 @router.get("/sync/history")

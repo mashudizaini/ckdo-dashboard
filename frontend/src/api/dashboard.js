@@ -82,6 +82,7 @@ export const zktecoApi = {
   testDevice:    (id)        => api.post(`/dashboard/it/zkteco/devices/${id}/test`),
   getSyncStatus: ()          => api.get("/dashboard/it/zkteco/sync/status"),
   syncNow:       ()          => api.post("/dashboard/it/zkteco/sync/now"),
+  getSyncNowStatus: ()       => api.get("/dashboard/it/zkteco/sync/now/status"),
   getSyncHistory:(limit)     => api.get("/dashboard/it/zkteco/sync/history", { params: { limit } }),
 };
 

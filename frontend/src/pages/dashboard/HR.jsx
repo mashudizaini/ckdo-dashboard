@@ -4824,21 +4824,41 @@ function ZKTecoIntegrationHR() {
 
   useEffect(() => { loadStatus(); }, []); // eslint-disable-line
 
+  // Starts in the background and returns immediately — a full sync
+  // reprocesses every device's ENTIRE attendance history (this company's
+  // real data spans ~150 employees since 2018), easily longer than an
+  // HTTP/reverse-proxy timeout. Poll /zkteco/sync-now/status instead of
+  // waiting on the POST response — see zkteco_scheduler.py's
+  // start_manual_sync() docstring for the full story.
   const handleSyncNow = async () => {
     setSyncing(true); setError(""); setSyncResult(null);
     try {
       const res = await fetch(`${API}/zkteco/sync-now`, { method: "POST", headers });
-      if (res.ok) {
-        setSyncResult(await res.json());
-        loadStatus();
-      } else {
+      if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.detail || `Sync failed (HTTP ${res.status})`);
+        setError(body?.detail || `Failed to start sync (HTTP ${res.status})`);
+        setSyncing(false);
+        return;
       }
     } catch (e) {
       setError(e?.message || "Network error");
+      setSyncing(false);
+      return;
     }
-    setSyncing(false);
+    const poll = async () => {
+      let s;
+      try {
+        const res = await fetch(`${API}/zkteco/sync-now/status`, { headers });
+        if (!res.ok) return;
+        s = await res.json();
+      } catch (_) { return; }
+      if (s.running) { setTimeout(poll, 2000); return; }
+      setSyncing(false);
+      if (s.error) setError(s.error);
+      else setSyncResult(s.result);
+      loadStatus();
+    };
+    setTimeout(poll, 1500);
   };
 
   const fmtDateTime = (iso) => {

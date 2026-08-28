@@ -138,20 +138,38 @@ export default function ZKTecoIntegration() {
     try { await zktecoApi.deleteDevice(id); await refreshDevices(); } catch (_) {}
   };
 
+  // "Sync Now" starts in the background and returns immediately (a full
+  // sync reprocesses every device's ENTIRE attendance history — with this
+  // company's real data spanning ~150 employees since 2018, that's easily
+  // longer than an HTTP/reverse-proxy timeout, confirmed live 2026-08-28:
+  // the sync itself succeeded server-side but the browser still showed
+  // "Sync failed" because the connection had already been dropped). Poll
+  // /sync/now/status instead of waiting on the POST response.
   const syncNow = async () => {
     setSyncing(true);
     setSyncResult(null);
     setSyncError(null);
     try {
-      const r = await zktecoApi.syncNow();
-      setSyncResult(r);
-      await refreshSyncStatus();
-      await refreshHistory();
+      await zktecoApi.syncNow();
     } catch (e) {
-      setSyncError(e?.detail || "Sync failed");
-    } finally {
+      setSyncError(e?.detail || "Failed to start sync");
       setSyncing(false);
+      return;
     }
+    const poll = async () => {
+      let s;
+      try { s = await zktecoApi.getSyncNowStatus(); } catch (_) { return; }
+      if (s.running) {
+        setTimeout(poll, 2000);
+        return;
+      }
+      setSyncing(false);
+      if (s.error) setSyncError(s.error);
+      else setSyncResult(s.result);
+      refreshSyncStatus();
+      refreshHistory();
+    };
+    setTimeout(poll, 1500);
   };
 
   return (

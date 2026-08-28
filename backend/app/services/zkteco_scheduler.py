@@ -40,6 +40,7 @@ recognizes).
 """
 import logging
 import re
+import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date
@@ -281,6 +282,62 @@ def get_last_sync() -> dict | None:
         }
     finally:
         db.close()
+
+
+# ── Manual "Sync Now" — runs in the background ───────────────────────────
+# run_sync() reprocesses each device's ENTIRE history every time (see
+# module docstring) — with ~150 employees' NIKs spanning 2018-2026 in this
+# company's real data, that means the per-(employee, date) upsert loop can
+# run for many thousands of rows across several devices in one call.
+# Confirmed live 2026-08-28: the sync itself completed successfully (full
+# log line reached, db.commit() succeeded) but "Sync Now" still showed
+# "Sync failed" in the browser — the HTTP request/reverse-proxy had
+# already timed out and closed the connection before the (now much
+# faster, but still not instant) response could be sent back. Mirrors
+# hikcentral_scheduler.py's backfill: run in a background thread, poll
+# progress instead of blocking the request. The scheduled 15-minute tick
+# doesn't need this — APScheduler already runs it off the request path.
+
+_manual_sync_status: dict = {
+    "running": False, "started_at": None, "finished_at": None,
+    "result": None, "error": None,
+}
+_manual_sync_lock = threading.Lock()
+
+
+def get_manual_sync_status() -> dict:
+    return dict(_manual_sync_status)
+
+
+def _run_manual_sync_body(uploaded_by: str):
+    global _manual_sync_status
+    try:
+        result = run_sync(uploaded_by=uploaded_by)
+        _manual_sync_status["result"] = result
+        _manual_sync_status["error"] = None
+    except ZKTecoError as e:
+        _manual_sync_status["error"] = str(e)
+        _manual_sync_status["result"] = None
+    except Exception as e:
+        logger.exception("ZKTeco manual sync failed")
+        _manual_sync_status["error"] = f"Unexpected error: {e}"
+        _manual_sync_status["result"] = None
+    finally:
+        _manual_sync_status["running"] = False
+        _manual_sync_status["finished_at"] = datetime.utcnow().isoformat()
+
+
+def start_manual_sync(uploaded_by: str = "manual") -> dict:
+    """Kicks off run_sync() in a background thread and returns
+    immediately — see comment above for why. Raises ZKTecoError (-> 409)
+    if a manual sync is already in progress."""
+    with _manual_sync_lock:
+        if _manual_sync_status.get("running"):
+            raise ZKTecoError("A sync is already running — check its progress before starting another.")
+        _manual_sync_status.update(running=True, started_at=datetime.utcnow().isoformat(), finished_at=None, result=None, error=None)
+    t = threading.Thread(target=_run_manual_sync_body, args=(uploaded_by,), daemon=True)
+    t.start()
+    return {"status": "started"}
 
 
 def _tick():

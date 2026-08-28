@@ -1089,12 +1089,22 @@ def get_zkteco_status(user: CurrentUser = Depends(require_role(Roles.HR))):
 
 @router.post("/zkteco/sync-now")
 def trigger_zkteco_sync(user: CurrentUser = Depends(require_role(Roles.HR))):
+    """Starts in the background and returns immediately — see
+    zkteco_scheduler.start_manual_sync()'s docstring: a full sync
+    reprocesses every device's entire history and can take a while,
+    longer than an HTTP/reverse-proxy timeout. Poll /zkteco/sync-now/status."""
     from app.services import zkteco_scheduler as zk
     from app.services.zkteco_client import ZKTecoError
     try:
-        return zk.run_sync(uploaded_by=user.username or "manual")
+        return zk.start_manual_sync(uploaded_by=user.username or "manual")
     except ZKTecoError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.get("/zkteco/sync-now/status")
+def get_zkteco_sync_now_status(user: CurrentUser = Depends(require_role(Roles.HR))):
+    from app.services import zkteco_scheduler as zk
+    return zk.get_manual_sync_status()
 
 
 @router.get("/late-this-month")
