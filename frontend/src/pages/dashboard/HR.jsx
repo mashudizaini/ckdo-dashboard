@@ -21,6 +21,23 @@ const API        = "/api/v1/dashboard/hr/employees";
 
 const MONTHS_ID = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
+// Earliest year Attendance Rate has real data for — the Plant ZKTeco
+// terminals' NIK-based employee IDs go back to 2018 (confirmed live
+// 2026-08-28). Every Year <select> across Attendance Rate's tabs
+// (Summary, Attendance Today, Detail, Attendance Leave, Annual Leave
+// Report) used to hardcode a small range near the current year (or, in
+// LeaveDataSection's case, a literal [2024,2025,2026,2027]) — neither
+// could reach 2018+ data once the Plant integration made it real.
+// Bump this constant if an even older data source is ever added; every
+// picker derives its range from it via attendanceYearOptions() so there's
+// one place to change instead of 6.
+const ATTENDANCE_EARLIEST_YEAR = 2018;
+function attendanceYearOptions(curYear, aheadYears = 0) {
+  const years = [];
+  for (let y = curYear + aheadYears; y >= ATTENDANCE_EARLIEST_YEAR; y--) years.push(y);
+  return years;
+}
+
 // The 4 canonical HRGA departments (see department_taxonomy.py) — hardcoded
 // here rather than fetched from the /departments LOV endpoint, which unions
 // raw Employee/AttendanceRecord values and has repeatedly leaked stray
@@ -3583,7 +3600,7 @@ function AttendanceTodaySection() {
             <div className="flex items-center gap-2">
               <select value={teamYear} onChange={(e) => handleTeamYearChange(Number(e.target.value))}
                 className="rounded-lg border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-xs text-gray-300 outline-none focus:border-green-500 cursor-pointer">
-                {[curYear, curYear - 1, curYear - 2].map((y) => <option key={y} value={y}>{y}</option>)}
+                {attendanceYearOptions(curYear).map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
               <button onClick={() => fetchTeamData()}
                 className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
@@ -3623,7 +3640,7 @@ function AttendanceTodaySection() {
               </select>
               <select value={monthlyYear} onChange={(e) => { const y = Number(e.target.value); setMonthlyYear(y); fetchMonthlyData(monthlyMonth, y, monthlyDept); }}
                 className="rounded-lg border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-xs text-gray-300 outline-none focus:border-green-500 cursor-pointer">
-                {[curYear, curYear - 1, curYear - 2].map((y) => <option key={y} value={y}>{y}</option>)}
+                {attendanceYearOptions(curYear).map((y) => <option key={y} value={y}>{y}</option>)}
               </select>
               <button onClick={() => fetchMonthlyData()}
                 className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
@@ -4071,7 +4088,7 @@ function EmployeeDetailPanel({ headers, apiBase }) {
           <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Year</label>
           <select value={year} onChange={e => handleYearChange(Number(e.target.value))}
             style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#1e293b", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)", cursor: "pointer", outline: "none" }}>
-            {[curYear, curYear - 1, curYear - 2, curYear - 3].map(y => <option key={y} value={y}>{y}</option>)}
+            {attendanceYearOptions(curYear).map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
 
@@ -5039,7 +5056,7 @@ function AttendanceRateSection() {
             <label style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.05em" }}>Year</label>
             <select value={fYear} onChange={e => setFYear(e.target.value)}
               style={{ fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: "#f1f5f9", color: "#1e293b", boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)", cursor: "pointer", outline: "none" }}>
-              {[curYear, curYear - 1, curYear - 2].map(y => <option key={y} value={y}>{y}</option>)}
+              {attendanceYearOptions(curYear).map(y => <option key={y} value={y}>{y}</option>)}
             </select>
           </div>
           {fDept && (
@@ -5834,7 +5851,7 @@ function LeaveDataSection() {
           <label className="text-xs text-gray-500 block mb-1">Year</label>
           <select value={filters.year} onChange={e => handleFilter("year", e.target.value ? Number(e.target.value) : "")}
             className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5">
-            {[2024,2025,2026,2027].map(y => <option key={y} value={y}>{y}</option>)}
+            {attendanceYearOptions(new Date().getFullYear(), 1).map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
         <div>
@@ -6017,7 +6034,7 @@ function AnnualLeaveReportSection() {
           <label className="text-xs text-gray-500 block mb-1">Year</label>
           <select value={year} onChange={e => setYear(Number(e.target.value))}
             className="text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5">
-            {[curYear + 1, curYear, curYear - 1, curYear - 2, curYear - 3].map(y => <option key={y} value={y}>{y}</option>)}
+            {attendanceYearOptions(curYear, 1).map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
         <div>
