@@ -4798,6 +4798,114 @@ function HikCentralIntegration() {
   );
 }
 
+// ── ZKTeco integration — live poller status + manual "Sync Now" for Plant's
+// "Solution" X606-S terminals (ZKTeco protocol, up to 8 physical machines).
+// Same shape as HikCentralIntegration above, pointed at /zkteco/* instead —
+// the actual 15-minute poll runs server-side (zkteco_scheduler.py). ───────
+function ZKTecoIntegrationHR() {
+  const { token } = useAuthStore();
+  const headers = { Authorization: `Bearer ${token}` };
+  const API = "/api/v1/dashboard/hr/attendance";
+
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
+  const [error, setError] = useState("");
+
+  const loadStatus = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/zkteco/status`, { headers });
+      if (res.ok) setStatus(await res.json());
+    } catch (_) {}
+    setLoading(false);
+  };
+
+  useEffect(() => { loadStatus(); }, []); // eslint-disable-line
+
+  const handleSyncNow = async () => {
+    setSyncing(true); setError(""); setSyncResult(null);
+    try {
+      const res = await fetch(`${API}/zkteco/sync-now`, { method: "POST", headers });
+      if (res.ok) {
+        setSyncResult(await res.json());
+        loadStatus();
+      } else {
+        const body = await res.json().catch(() => null);
+        setError(body?.detail || `Sync failed (HTTP ${res.status})`);
+      }
+    } catch (e) {
+      setError(e?.message || "Network error");
+    }
+    setSyncing(false);
+  };
+
+  const fmtDateTime = (iso) => {
+    if (!iso) return "—";
+    try { return new Date(iso).toLocaleString("en-US", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }); }
+    catch (_) { return iso; }
+  };
+
+  return (
+    <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <Network size={15} className="text-purple-400" />
+        <h4 className="text-sm font-semibold text-purple-300">ZKTeco Integration (Plant)</h4>
+      </div>
+      <p className="text-xs text-gray-500">
+        Auto-syncs check-in/out events every 15 minutes from Plant's "Solution" attendance terminals — feeds the same Attendance Ratio reports as the uploads below.
+      </p>
+
+      {loading ? (
+        <div className="flex justify-center py-4"><Loader2 size={16} className="animate-spin text-gray-600" /></div>
+      ) : (
+        <>
+          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${status?.configured ? "bg-green-500/15 text-green-400" : "bg-amber-500/15 text-amber-400"}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${status?.configured ? "bg-green-400" : "bg-amber-400"}`} />
+            {status?.configured ? "Configured" : "No devices added yet"}
+          </span>
+
+          {status?.last_sync ? (
+            <div className="rounded-lg border border-gray-800 bg-gray-900/60 p-3 text-xs space-y-1">
+              <div className="flex justify-between"><span className="text-gray-500">Last sync</span><span className="text-gray-300">{fmtDateTime(status.last_sync.uploaded_at)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Result</span><span className="text-gray-300">{status.last_sync.inserted} new, {status.last_sync.updated} updated</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Triggered by</span><span className="text-gray-300">{status.last_sync.uploaded_by || "—"}</span></div>
+              {status.last_sync.notes && <div className="text-gray-600">{status.last_sync.notes}</div>}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-600">No sync recorded yet.</p>
+          )}
+
+          {syncResult && (
+            <div className="rounded-lg border border-green-800/40 bg-green-900/10 px-3 py-2 text-xs text-green-400">
+              Synced: {syncResult.events} events → {syncResult.inserted} new, {syncResult.updated} updated
+            </div>
+          )}
+          {error && (
+            <div className="rounded-lg border border-red-800/40 bg-red-900/10 px-3 py-2 text-xs text-red-400">{error}</div>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleSyncNow}
+              disabled={syncing || !status?.configured}
+              title={!status?.configured ? "Add a device in Setup > IT > ZKTeco Integration" : undefined}
+              className="flex items-center gap-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+            >
+              {syncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              Sync Now
+            </button>
+            <button onClick={loadStatus} className="flex items-center gap-1.5 rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+              <RefreshCw size={12} /> Refresh Status
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Attendance Ratio Dashboard ─────────────────────────────────────────────────
 function AttendanceRateSection() {
   const { token }  = useAuthStore();
@@ -5003,6 +5111,7 @@ function AttendanceRateSection() {
       {activeTab === "upload" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <HikCentralIntegration />
+          <ZKTecoIntegrationHR />
           <AttendanceUpload kind="intercom" />
           <AttendanceUpload kind="talenta" />
           <AttendanceUpload kind="plant" />

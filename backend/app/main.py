@@ -33,12 +33,14 @@ import app.models.document_glossary  # noqa: F401
 from app.models.ebs_backup import init_ebs_db
 from app.models.vpn_monitor import init_vpn_db
 from app.models.hikcentral import init_hikcentral_db
+from app.models.zkteco import init_zkteco_db
 
 # ── Dashboard Routers ──
 from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement, general
 from app.routers.dashboard import ebs_backup
 from app.routers.dashboard import vpn_monitor
 from app.routers.dashboard import it_hikcentral
+from app.routers.dashboard import it_zkteco
 from app.routers.dashboard import it_etl_admin
 from app.routers.dashboard import (
     eis_summary, eis_performance, eis_production, eis_expansion, eis_administration,
@@ -108,8 +110,18 @@ async def lifespan(app: FastAPI):
     from app.services import hikcentral_scheduler
     hikcentral_scheduler.start()
 
+    # ZKTeco Plant Attendance Integration — dedicated sync table
+    # (zkteco_devices, up to 8 Plant terminals, editable from the IT
+    # dashboard tab) + 15-minute pull of every device's attendance log
+    # into AttendanceRecord (source="zkteco"). No-ops until at least one
+    # device is added.
+    init_zkteco_db()
+    from app.services import zkteco_scheduler
+    zkteco_scheduler.start()
+
     yield
 
+    zkteco_scheduler.stop()
     hikcentral_scheduler.stop()
     vpn_monitor_scheduler.stop()
     ebs_backup_scheduler.stop()
@@ -197,6 +209,11 @@ app.include_router(
 app.include_router(
     it_hikcentral.router, prefix=f"{API_PREFIX}/dashboard/it/hikcentral",
     tags=["Dashboard - IT - HikCentral Integration"],
+    dependencies=[Depends(require_role(Roles.IT))],
+)
+app.include_router(
+    it_zkteco.router, prefix=f"{API_PREFIX}/dashboard/it/zkteco",
+    tags=["Dashboard - IT - ZKTeco Plant Integration"],
     dependencies=[Depends(require_role(Roles.IT))],
 )
 app.include_router(

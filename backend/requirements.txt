@@ -81,3 +81,11 @@ playwright>=1.44.0
 apscheduler==3.10.4
 minio==7.2.9
 croniter==3.0.3
+
+# Plant attendance terminals (ZKTeco protocol, port 4370 — the "Solution"
+# branded X606-S terminals at Plant are ZKTeco-compatible clones). ommit_ping
+# must be passed True when connecting — pyzk's own OS-level ping precheck
+# fails inside this app's container (confirmed live 2026-08-28: no `ping`
+# binary / no raw-socket capability), the actual protocol connection works
+# fine once that precheck is skipped. See zkteco_client.py.
+pyzk==0.9

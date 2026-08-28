@@ -1,15 +1,18 @@
 import { useState } from "react";
-import { ScanFace, Workflow } from "lucide-react";
+import { ScanFace, Fingerprint, Workflow } from "lucide-react";
 import HikCentralIntegration from "@/pages/setup/it/HikCentralIntegration";
+import ZKTecoIntegration from "@/pages/setup/it/ZKTecoIntegration";
 import EtlAdmin from "@/pages/setup/it/EtlAdmin";
 
 // HikCentral Integration and ETL Admin — moved here from Dashboard > IT
 // (2026-08-19 user request). Both components moved as-is; this page just
 // adds a small tab switcher between the two, since Setup > IT is a single
-// flat nav entry (unlike Dashboard's per-module sidebar tree).
+// flat nav entry (unlike Dashboard's per-module sidebar tree). ZKTeco
+// Integration (Plant terminals) added 2026-08-28 alongside them.
 const TABS = [
-  { id: "hikcentral", icon: ScanFace, label: "HikCentral Integration" },
-  { id: "etl-admin",  icon: Workflow, label: "ETL Admin" },
+  { id: "hikcentral", icon: ScanFace,    label: "HikCentral Integration" },
+  { id: "zkteco",     icon: Fingerprint, label: "ZKTeco Integration" },
+  { id: "etl-admin",  icon: Workflow,    label: "ETL Admin" },
 ];
 
 export default function ITSetupPage() {
@@ -30,6 +33,7 @@ export default function ITSetupPage() {
         ))}
       </div>
       {activeId === "hikcentral" && <HikCentralIntegration />}
+      {activeId === "zkteco"     && <ZKTecoIntegration />}
       {activeId === "etl-admin"  && <EtlAdmin />}
     </div>
   );

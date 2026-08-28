@@ -1074,6 +1074,29 @@ def trigger_hikcentral_sync(user: CurrentUser = Depends(require_role(Roles.HR)))
         raise HTTPException(status_code=502, detail=str(e))
 
 
+# ── ZKTeco integration (Plant "Solution" X606-S terminals) ─────────────────────
+# Same convention as the HikCentral pair above — backs the status card +
+# manual "Sync Now" button for Plant's attendance devices.
+
+@router.get("/zkteco/status")
+def get_zkteco_status(user: CurrentUser = Depends(require_role(Roles.HR))):
+    from app.services import zkteco_scheduler as zk
+    return {
+        "configured": zk.is_configured(),
+        "last_sync": zk.get_last_sync(),
+    }
+
+
+@router.post("/zkteco/sync-now")
+def trigger_zkteco_sync(user: CurrentUser = Depends(require_role(Roles.HR))):
+    from app.services import zkteco_scheduler as zk
+    from app.services.zkteco_client import ZKTecoError
+    try:
+        return zk.run_sync(uploaded_by=user.username or "manual")
+    except ZKTecoError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @router.get("/late-this-month")
 async def get_late_this_month(
     db:   AsyncSession = Depends(get_db),

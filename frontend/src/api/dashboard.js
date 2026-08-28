@@ -74,6 +74,17 @@ export const hikcentralApi = {
   recomputeLate: (startDate, endDate, employeeId) => api.post("/dashboard/it/hikcentral/recompute-late", { start_date: startDate, end_date: endDate || undefined, employee_id: employeeId || undefined }),
 };
 
+export const zktecoApi = {
+  getDevices:    ()          => api.get("/dashboard/it/zkteco/devices"),
+  createDevice:  (body)      => api.post("/dashboard/it/zkteco/devices", body),
+  updateDevice:  (id, body)  => api.put(`/dashboard/it/zkteco/devices/${id}`, body),
+  deleteDevice:  (id)        => api.delete(`/dashboard/it/zkteco/devices/${id}`),
+  testDevice:    (id)        => api.post(`/dashboard/it/zkteco/devices/${id}/test`),
+  getSyncStatus: ()          => api.get("/dashboard/it/zkteco/sync/status"),
+  syncNow:       ()          => api.post("/dashboard/it/zkteco/sync/now"),
+  getSyncHistory:(limit)     => api.get("/dashboard/it/zkteco/sync/history", { params: { limit } }),
+};
+
 export const hrApi = {
   getSummary: () => api.get("/dashboard/hr/summary"),
   getEmployees: (params) => api.get("/dashboard/hr/employees", { params }),
