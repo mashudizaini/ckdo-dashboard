@@ -47,7 +47,7 @@ class ZKTecoError(Exception):
 
 
 class ZKTecoClient:
-    def __init__(self, ip: str, port: int = 4370, password: int = 0, timeout: int = 15):
+    def __init__(self, ip: str, port: int = 4370, password: int = 0, timeout: int = 8):
         self.ip = ip
         self.port = port
         self.password = password or 0

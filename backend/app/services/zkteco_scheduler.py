@@ -41,7 +41,9 @@ recognizes).
 import logging
 import re
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, date
+from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import select, update
@@ -97,23 +99,39 @@ def _build_employee_id_map(db) -> dict[str, str]:
     return mapping
 
 
+def _poll_one_device(dev: dict) -> tuple[str, dict, list, Optional[str]]:
+    client = ZKTecoClient(dev["ip"], port=dev["port"], password=dev["password"])
+    try:
+        dev_names, dev_atts = client.fetch()
+        return dev["name"], dev_names, dev_atts, None
+    except ZKTecoError as e:
+        return dev["name"], {}, [], str(e)
+
+
 def _fetch_all_devices(devices: list[dict]) -> tuple[list[tuple[str, datetime]], dict, list[str]]:
-    """Polls every device, merging results. Returns (events:
+    """Polls every device IN PARALLEL (each is an independent network
+    call — a broken/unreachable device otherwise makes the whole sync
+    wait out its full timeout before moving to the next one; sequentially
+    that's `sum` of every device's timeout, easily exceeding the HTTP/
+    reverse-proxy timeout on the manual "Sync Now" request once more than
+    a couple of devices are down at once — confirmed live 2026-08-28 with
+    5 of 8 Plant devices unreachable). In parallel, total wall-clock time
+    is bounded by the SLOWEST single device instead. Returns (events:
     [(device_user_id, timestamp), ...], name_by_device_id: {device_user_id:
     name} merged across devices, errors: ["<device name>: <error>", ...])
     — one device failing doesn't stop the others from being polled."""
     events: list[tuple[str, datetime]] = []
     names: dict[str, str] = {}
     errors: list[str] = []
-    for dev in devices:
-        client = ZKTecoClient(dev["ip"], port=dev["port"], password=dev["password"])
-        try:
-            dev_names, dev_atts = client.fetch()
-        except ZKTecoError as e:
-            errors.append(f"{dev['name']}: {e}")
-            continue
-        names.update({k: v for k, v in dev_names.items() if v})
-        events.extend(dev_atts)
+    if not devices:
+        return events, names, errors
+    with ThreadPoolExecutor(max_workers=len(devices)) as pool:
+        for dev_name, dev_names, dev_atts, err in pool.map(_poll_one_device, devices):
+            if err:
+                errors.append(f"{dev_name}: {err}")
+                continue
+            names.update({k: v for k, v in dev_names.items() if v})
+            events.extend(dev_atts)
     return events, names, errors
 
 
