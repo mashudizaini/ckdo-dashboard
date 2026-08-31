@@ -7,6 +7,7 @@ import {
 import { useAuthStore } from "@/store/authStore";
 import * as recoveryDb from "./meetingRecordingRecovery";
 import ApiKeyModal from "@/components/ai/ApiKeyModal";
+import SpeakersModal from "@/components/ai/SpeakersModal";
 
 function fmtElapsed(sec) {
   const m = Math.floor(sec / 60).toString().padStart(2, "0");
@@ -146,6 +147,7 @@ export default function MeetingNotes() {
   const [transcribeProgress, setTranscribeProgress] = useState(null); // { pct, etaSeconds } | null
   const transcribeTimerRef = useRef(null);
   const [loadingRecording, setLoadingRecording] = useState(false);
+  const [transcribingStoredId, setTranscribingStoredId] = useState(null); // id of a server-stored recording currently being transcribed from History
 
   // Alternate ways into a transcript, alongside Record & Upload -> Whisper:
   // paste it directly, or upload an already-transcribed file (.txt/.srt/
@@ -162,9 +164,16 @@ export default function MeetingNotes() {
   const [mom, setMom] = useState(null); // { departments: [...] }
   const [momProvider, setMomProvider] = useState("onprem");
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [showSpeakersModal, setShowSpeakersModal] = useState(false);
   const [savingMom, setSavingMom] = useState(false);
   const [saveMomMsg, setSaveMomMsg] = useState(null);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
+
+  // Speaker identification — diarize + match the current transcript's
+  // recording against enrolled voices (see SpeakersModal / speaker_id_service.py)
+  const [speakerSegments, setSpeakerSegments] = useState(null); // [{start, end, text, speaker}, ...] | null
+  const [identifyingSpeakers, setIdentifyingSpeakers] = useState(false);
+  const [identifySpeakersError, setIdentifySpeakersError] = useState(null);
 
   const [copied, setCopied] = useState(false);
 
@@ -178,6 +187,19 @@ export default function MeetingNotes() {
   const streamRef = useRef(null);
   const timerRef = useRef(null);
   const recordingSessionIdRef = useRef(null);
+  const recordingSecondsRef = useRef(0); // mirrors recordingSeconds state for use inside
+  // the onstop closure, which is defined once at recorder-creation time and would
+  // otherwise see recordingSeconds frozen at 0 (classic stale-closure trap).
+
+  // Server-side id for the recording currently being captured — set once
+  // POST /recordings/start confirms the draft row exists, so ondataavailable
+  // can stream each chunk up immediately (server storage is large enough to
+  // hold full audio as it's captured, not just after Stop). null whenever
+  // recordedBlobInfo did NOT come from this live-streamed path (a picked
+  // file, or a locally-recovered IndexedDB session) — those still upload in
+  // one shot via POST /transcribe as before.
+  const currentRecordingIdRef = useRef(null);
+  const [serverBackupOk, setServerBackupOk] = useState(true); // false = chunk upload(s) failing; local IndexedDB backup is still active regardless
 
   // A recording found in IndexedDB left over from an interrupted previous
   // attempt (crash, closed tab, forced logout mid-meeting) — offered for
@@ -318,6 +340,7 @@ export default function MeetingNotes() {
   const resetResults = () => {
     setTranscript(null); setTranscribeError(null);
     setMom(null); setGenerateError(null); setSaveMomMsg(null);
+    setSpeakerSegments(null); setIdentifySpeakersError(null);
   };
 
   const handlePickFile = (f) => {
@@ -328,6 +351,7 @@ export default function MeetingNotes() {
     }
     setFile(f);
     setRecordedBlobInfo(null);
+    currentRecordingIdRef.current = null;
     resetResults();
   };
 
@@ -362,10 +386,46 @@ export default function MeetingNotes() {
       const sessionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       recordingSessionIdRef.current = sessionId;
       recoveryDb.startSession(sessionId, { mimeType: recorder.mimeType || mimeType || "audio/webm", title });
+
+      // Also stream this recording to the server as it happens (server
+      // storage has headroom for this now) — creates a draft row + empty
+      // file immediately, so the meeting is safely recoverable from History
+      // on ANY device/login even if this browser/tab never comes back, not
+      // only from this browser's own local IndexedDB backup above. Fired
+      // without awaiting so it can't delay the actual recorder.start() below
+      // on network latency — any chunk that fires before this resolves is
+      // simply skipped for server upload (still safe locally) until the id
+      // arrives, then uploads resume normally.
+      currentRecordingIdRef.current = null;
+      setServerBackupOk(true);
+      fetch("/api/v1/ai/meeting-notes/recordings/start", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: "recorded", meeting_title: title, participants,
+          mime_type: recorder.mimeType || mimeType || "audio/webm",
+        }),
+      })
+        .then(async (startRes) => {
+          const startData = await startRes.json();
+          if (startRes.ok) currentRecordingIdRef.current = startData.id;
+          else setServerBackupOk(false);
+        })
+        .catch(() => setServerBackupOk(false));
+
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
           audioChunksRef.current.push(e.data);
           recoveryDb.saveChunk(sessionId, e.data);
+          if (currentRecordingIdRef.current) {
+            const fd = new FormData();
+            fd.append("file", e.data, "chunk");
+            fetch(`/api/v1/ai/meeting-notes/recordings/${currentRecordingIdRef.current}/chunk`, {
+              method: "POST", headers, body: fd,
+            })
+              .then((r) => { if (!r.ok) setServerBackupOk(false); })
+              .catch(() => setServerBackupOk(false));
+          }
         }
       };
       recorder.onstop = () => {
@@ -384,6 +444,13 @@ export default function MeetingNotes() {
         // component state — the IndexedDB backup has served its purpose.
         recoveryDb.clearSession(sessionId);
         recordingSessionIdRef.current = null;
+        if (currentRecordingIdRef.current) {
+          fetch(`/api/v1/ai/meeting-notes/recordings/${currentRecordingIdRef.current}/finalize`, {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({ audio_duration_seconds: recordingSecondsRef.current }),
+          }).catch(() => {});
+        }
       };
       mediaRecorderRef.current = recorder;
       // 30s timeslice — without it, MediaRecorder never fires
@@ -393,7 +460,8 @@ export default function MeetingNotes() {
       recorder.start(30000);
       setRecording(true);
       setRecordingSeconds(0);
-      timerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
+      recordingSecondsRef.current = 0;
+      timerRef.current = setInterval(() => setRecordingSeconds((s) => { recordingSecondsRef.current = s + 1; return s + 1; }), 1000);
     } catch (e) {
       if (e.name === "NotAllowedError") {
         setRecordError({ message: "Microphone access denied. Allow microphone access in your browser settings, then try again." });
@@ -422,6 +490,11 @@ export default function MeetingNotes() {
       const recoveredFile = new File([blob], filename, { type: mimeType });
       setFile(recoveredFile);
       setRecordedBlobInfo({ blob, filename });
+      // A locally-recovered blob may include chunks the server never
+      // received before the interruption — always re-upload the complete
+      // local copy via /transcribe rather than trusting a possibly-shorter
+      // server-side file.
+      currentRecordingIdRef.current = null;
       resetResults();
       await recoveryDb.clearSession(recoverableSession.sessionId);
       setRecoverableSession(null);
@@ -468,15 +541,32 @@ export default function MeetingNotes() {
     }
 
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("source", recordedBlobInfo ? "recorded" : "uploaded");
-      fd.append("meeting_title", title);
-      fd.append("participants", participants);
-      if (transcribeLanguage) fd.append("language", transcribeLanguage);
-      const res = await fetch("/api/v1/ai/meeting-notes/transcribe", { method: "POST", headers, body: fd });
+      // A live recording whose chunks already streamed to the server (see
+      // handleStartRecording) is already fully stored there — transcribe it
+      // in place instead of re-uploading the whole file a second time.
+      const res = currentRecordingIdRef.current
+        ? await fetch(`/api/v1/ai/meeting-notes/recordings/${currentRecordingIdRef.current}/transcribe`, {
+            method: "POST",
+            headers: { ...headers, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              language: transcribeLanguage || null, meeting_title: title, participants,
+            }),
+          })
+        : await fetch("/api/v1/ai/meeting-notes/transcribe", {
+            method: "POST", headers,
+            body: (() => {
+              const fd = new FormData();
+              fd.append("file", file);
+              fd.append("source", recordedBlobInfo ? "recorded" : "uploaded");
+              fd.append("meeting_title", title);
+              fd.append("participants", participants);
+              if (transcribeLanguage) fd.append("language", transcribeLanguage);
+              return fd;
+            })(),
+          });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.detail || "Transcription failed");
+      currentRecordingIdRef.current = null;
       setTranscribeProgress({ pct: 100, etaSeconds: 0 });
       setTranscript(data);
       setStep("transcript");
@@ -550,6 +640,24 @@ export default function MeetingNotes() {
       setGenerateError(e.message || String(e));
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleIdentifySpeakers = async () => {
+    if (!transcript?.id) return;
+    setIdentifyingSpeakers(true); setIdentifySpeakersError(null);
+    try {
+      const res = await fetch(`/api/v1/ai/meeting-notes/recordings/${transcript.id}/identify-speakers`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail || "Speaker identification failed");
+      setSpeakerSegments(data.speaker_segments);
+    } catch (e) {
+      setIdentifySpeakersError(e.message || String(e));
+    } finally {
+      setIdentifyingSpeakers(false);
     }
   };
 
@@ -627,11 +735,37 @@ export default function MeetingNotes() {
       if (data.mom_meta?.venue) setVenue(data.mom_meta.venue);
       if (data.mom_meta?.agenda) setAgenda(data.mom_meta.agenda);
       setMom(data.mom_json || null);
+      setSpeakerSegments(data.speaker_segments || null);
       setStep("transcript");
     } catch (e) {
       setTranscribeError(e.message || String(e));
     } finally {
       setLoadingRecording(false);
+    }
+  };
+
+  // For a recording that reached the server (status "recording" or
+  // "uploaded") but never got transcribed — e.g. an interrupted live
+  // recording recovered from History on a different device/login than the
+  // one it was captured on, where the local IndexedDB backup isn't
+  // available at all. Transcribes the audio already sitting on the server,
+  // no re-upload needed.
+  const handleTranscribeStored = async (recordingId) => {
+    setTranscribingStoredId(recordingId);
+    try {
+      const res = await fetch(`/api/v1/ai/meeting-notes/recordings/${recordingId}/transcribe`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.detail || "Transcription failed");
+      await fetchHistory();
+      window.open(`/ai/meeting-notes/view/${recordingId}`, "_blank");
+    } catch (e) {
+      setHistoryError(e.message || String(e));
+    } finally {
+      setTranscribingStoredId(null);
     }
   };
 
@@ -822,6 +956,13 @@ export default function MeetingNotes() {
                   "Record directly from your microphone"
                 )}
               </p>
+              {recording && (
+                <p className={`text-[10px] mb-3 -mt-2 ${serverBackupOk ? "text-gray-600" : "text-amber-400 font-medium"}`}>
+                  {serverBackupOk
+                    ? "Auto-saving to server as you record"
+                    : "Cloud backup unavailable — relying on local backup only (this browser)"}
+                </p>
+              )}
 
               {!recording && (
                 <div className="mb-3 text-left">
@@ -1003,7 +1144,10 @@ export default function MeetingNotes() {
               <div className="px-4 py-6 text-center text-xs text-gray-600">Belum ada recording.</div>
             ) : (
               <div className="divide-y divide-gray-800 overflow-y-auto" style={{ maxHeight: 5 * 52 }}>
-                {history.map((item) => (
+                {history.map((item) => {
+                  const needsTranscribe = !item.transcript_preview && item.status !== "error";
+                  const transcribingThis = transcribingStoredId === item.id;
+                  return (
                   <div key={item.id} className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-gray-800/40 transition-colors">
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-medium text-gray-200 truncate">{item.meeting_title || "(Tanpa judul)"}</p>
@@ -1014,11 +1158,17 @@ export default function MeetingNotes() {
                         }`}>
                           {item.source === "recorded" ? "Recorded" : "Uploaded"}
                         </span>
+                        {item.status === "recording" && <span className="text-[9px] font-semibold rounded-full px-1.5 py-0.5 bg-amber-500/10 text-amber-400">Interrupted</span>}
                         {item.has_mom && <span className="text-[9px] font-semibold rounded-full px-1.5 py-0.5 bg-green-500/10 text-green-400">MOM ready</span>}
                       </div>
                     </div>
                     <div className="shrink-0 flex items-center gap-2">
-                      {item.status !== "error" && (
+                      {needsTranscribe ? (
+                        <button onClick={() => handleTranscribeStored(item.id)} disabled={transcribingThis}
+                          className="text-blue-400 hover:text-blue-300 transition-colors disabled:opacity-50" title="Transcribe (audio already saved on the server)">
+                          {transcribingThis ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                        </button>
+                      ) : (
                         <button onClick={() => handleLoadRecording(item.id)} disabled={loadingRecording}
                           className="text-gray-500 hover:text-purple-400 transition-colors disabled:opacity-50" title="Reprocess (regenerate MOM with a different model)">
                           <Sparkles size={13} />
@@ -1034,7 +1184,8 @@ export default function MeetingNotes() {
                       </button>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1142,6 +1293,45 @@ export default function MeetingNotes() {
                 </div>
               )}
           </div>
+
+          {/* Speaker identification */}
+          <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-3">
+                <Users size={18} className="text-purple-400" />
+                <h3 className="text-sm font-semibold text-gray-200">Identify Speakers</h3>
+              </div>
+              <button onClick={() => setShowSpeakersModal(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-700 hover:border-gray-500 text-gray-400 hover:text-gray-200 text-xs font-medium px-3 py-2 transition-colors">
+                <Users size={13} /> Manage Enrolled Speakers
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">Matches voices in this recording against enrolled speakers to label who said what.</p>
+            <button onClick={handleIdentifySpeakers} disabled={identifyingSpeakers}
+              className="flex items-center gap-2 rounded-lg bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium px-4 py-2 transition-colors">
+              {identifyingSpeakers ? <Loader2 size={14} className="animate-spin" /> : <Mic size={14} />}
+              {identifyingSpeakers ? "Identifying… (may take a while for long meetings)" : speakerSegments ? "Re-run Identify Speakers" : "Identify Speakers"}
+            </button>
+            {identifySpeakersError && (
+              <div className="mt-3 flex items-start gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                <AlertTriangle size={13} className="shrink-0 mt-0.5" />{identifySpeakersError}
+              </div>
+            )}
+            {speakerSegments && speakerSegments.length > 0 && (
+              <div className="mt-4 max-h-72 overflow-y-auto space-y-2 bg-gray-800/50 rounded-lg p-3">
+                {speakerSegments.map((seg, i) => (
+                  <div key={i} className="text-sm">
+                    <span className={`font-semibold ${seg.speaker?.startsWith("Unknown") ? "text-amber-400" : "text-purple-300"}`}>
+                      {seg.speaker || "Unknown speaker"}
+                    </span>
+                    <span className="text-gray-600 text-xs ml-1.5">{fmtElapsed(Math.round(seg.start))}</span>
+                    <span className="text-gray-300">{seg.text ? `: ${seg.text}` : " (audio segment — no aligned text available)"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          {showSpeakersModal && <SpeakersModal onClose={() => setShowSpeakersModal(false)} />}
 
           {/* Generate MOM */}
           <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-5">
@@ -1320,7 +1510,15 @@ export default function MeetingNotes() {
             <div className="px-5 py-10 text-center text-sm text-gray-600">Belum ada recording.</div>
           ) : (
             <div className="divide-y divide-gray-800">
-              {history.map((item) => (
+              {history.map((item) => {
+                // No transcript yet — either still mid-capture (an interrupted
+                // live recording, streamed to the server but never finalized)
+                // or cleanly stopped but not transcribed yet. Either way the
+                // audio is already safely on the server; offer to transcribe
+                // it in place from here, from any device/login.
+                const needsTranscribe = !item.transcript_preview && item.status !== "error";
+                const transcribingThis = transcribingStoredId === item.id;
+                return (
                 <div key={item.id} className="flex items-center justify-between px-5 py-4 hover:bg-gray-800/40 transition-colors">
                   <div className="flex items-center gap-4 min-w-0">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-purple-500/10 border border-purple-500/20">
@@ -1348,16 +1546,26 @@ export default function MeetingNotes() {
                           {item.source === "recorded" ? "Recorded" : "Uploaded"}
                         </span>
                         {item.status === "error" && <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-red-500/10 text-red-400">Error</span>}
+                        {item.status === "recording" && <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-amber-500/10 text-amber-400">Interrupted — audio saved</span>}
+                        {item.status === "uploaded" && <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-gray-500/10 text-gray-400">Not transcribed yet</span>}
                         {item.has_mom && <span className="text-[10px] font-semibold rounded-full px-2 py-0.5 bg-green-500/10 text-green-400">MOM ready</span>}
                       </div>
                     </div>
                   </div>
                   <div className="flex gap-2 shrink-0">
-                    <button onClick={() => window.open(`/ai/meeting-notes/view/${item.id}`, "_blank")}
-                      className="flex items-center gap-1 rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
-                      <ExternalLink size={12} />Transcript
-                    </button>
-                    {item.status !== "error" && (
+                    {needsTranscribe ? (
+                      <button onClick={() => handleTranscribeStored(item.id)} disabled={transcribingThis}
+                        className="flex items-center gap-1 rounded-md bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-2.5 py-1.5 text-xs text-white transition-colors">
+                        {transcribingThis ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                        {transcribingThis ? "Transcribing…" : "Transcribe"}
+                      </button>
+                    ) : (
+                      <button onClick={() => window.open(`/ai/meeting-notes/view/${item.id}`, "_blank")}
+                        className="flex items-center gap-1 rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors">
+                        <ExternalLink size={12} />Transcript
+                      </button>
+                    )}
+                    {item.status !== "error" && !needsTranscribe && (
                       <button onClick={() => handleLoadRecording(item.id)} disabled={loadingRecording}
                         title="Reprocess (regenerate MOM with a different model)"
                         className="flex items-center gap-1 rounded-md border border-purple-700/50 bg-purple-500/10 px-2.5 py-1.5 text-xs text-purple-300 hover:bg-purple-500/20 transition-colors disabled:opacity-50">
@@ -1380,7 +1588,8 @@ export default function MeetingNotes() {
                     </button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

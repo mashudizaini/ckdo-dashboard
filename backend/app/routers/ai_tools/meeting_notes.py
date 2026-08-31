@@ -8,6 +8,13 @@ Endpoints:
   POST   /transcribe                  — Upload/recorded audio -> saved permanently + transcribed
                                          (remote GPU Whisper, ai-engine 172.21.2.27; no provider
                                          choice — Claude has no audio transcription capability)
+  POST   /recordings/start             — Create a draft recording row + empty file, before any
+                                         audio exists — the live in-browser recorder streams into
+                                         it via the two endpoints below instead of one big upload
+                                         at the end, so it's safe on the server from second one.
+  POST   /recordings/{id}/chunk        — Append one MediaRecorder chunk to the recording's file
+  POST   /recordings/{id}/finalize     — Mark a live recording's audio as fully captured
+  POST   /recordings/{id}/transcribe   — Transcribe audio already on the server (no re-upload)
   POST   /transcript/manual            — Paste a transcript directly -> saved (skips Whisper)
   POST   /transcript/upload-file       — Upload a transcript file (.txt/.srt/.vtt/.docx) -> saved
   GET    /recordings                  — List all recordings (recorded + uploaded, unified)
@@ -19,6 +26,10 @@ Endpoints:
                                          key when set, see user_api_key_service.py)
   PUT    /recordings/{id}/mom          — Save user-edited MOM JSON back onto the recording
   GET    /recordings/{id}/mom/docx     — Render the (possibly edited) MOM as a .docx download
+  POST   /speakers                     — Enroll a person's voice (clip -> embedding, via ai-engine)
+  GET    /speakers                     — List enrolled speakers
+  DELETE /speakers/{id}                — Remove an enrolled speaker
+  POST   /recordings/{id}/identify-speakers — Diarize + match speakers against enrolled voiceprints
 """
 import os
 from datetime import datetime
@@ -31,8 +42,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import get_current_user, CurrentUser
 from app.models.meeting_recording import MeetingRecording
+from app.models.speaker_voiceprint import SpeakerVoiceprint
 from app.services.meeting_notes_service import MeetingNotesService, MomProviderCreditError
-from app.services import user_api_key_service
+from app.services import user_api_key_service, speaker_id_service
+from app.services.speaker_id_service import SpeakerIdError
 import structlog
 
 logger = structlog.get_logger()
@@ -48,6 +61,40 @@ async def _get_recording_or_404(db: AsyncSession, recording_id: int) -> MeetingR
     if not rec:
         raise HTTPException(404, "Recording tidak ditemukan")
     return rec
+
+
+async def _run_transcription(db: AsyncSession, rec: MeetingRecording, content: bytes, filename: str, language: str | None) -> dict:
+    """Shared by POST /transcribe (fresh upload) and POST /recordings/{id}/transcribe
+    (audio already stored server-side) — same Whisper call, same status/error handling,
+    so the two entry points behave identically once the bytes are in hand."""
+    try:
+        result = await MeetingNotesService().transcribe(content, filename, language)
+    except httpx.TimeoutException:
+        rec.status = "error"
+        rec.error_message = "Transcription timed out — the ai-engine GPU service took too long to respond."
+        await db.commit()
+        raise HTTPException(504, rec.error_message)
+    except httpx.HTTPStatusError as e:
+        rec.status = "error"
+        rec.error_message = f"Whisper service error: {e.response.text[:300]}"
+        await db.commit()
+        logger.error("whisper_service_error", status=e.response.status_code, body=e.response.text[:500])
+        raise HTTPException(502, rec.error_message)
+    except httpx.ConnectError:
+        rec.status = "error"
+        rec.error_message = "Cannot reach the Whisper transcription service (ai-engine 172.21.2.27:9500) — is it running?"
+        await db.commit()
+        raise HTTPException(503, rec.error_message)
+
+    rec.status = "transcribed"
+    rec.transcript = result.get("text", "")
+    rec.transcript_language = result.get("language")
+    rec.transcript_segments = result.get("segments")  # None if the Whisper service doesn't return per-segment timestamps
+    rec.audio_duration_seconds = result.get("audio_duration_seconds")
+    rec.processing_time_seconds = result.get("processing_time_seconds")
+    await db.commit()
+    await db.refresh(rec)
+    return result
 
 
 @router.post("/transcribe")
@@ -86,33 +133,137 @@ async def transcribe_audio(
     await db.commit()
     await db.refresh(rec)
 
-    try:
-        result = await MeetingNotesService().transcribe(content, file.filename or stored_name, language)
-    except httpx.TimeoutException:
-        rec.status = "error"
-        rec.error_message = "Transcription timed out — the ai-engine GPU service took too long to respond."
-        await db.commit()
-        raise HTTPException(504, rec.error_message)
-    except httpx.HTTPStatusError as e:
-        rec.status = "error"
-        rec.error_message = f"Whisper service error: {e.response.text[:300]}"
-        await db.commit()
-        logger.error("whisper_service_error", status=e.response.status_code, body=e.response.text[:500])
-        raise HTTPException(502, rec.error_message)
-    except httpx.ConnectError:
-        rec.status = "error"
-        rec.error_message = "Cannot reach the Whisper transcription service (ai-engine 172.21.2.27:9500) — is it running?"
-        await db.commit()
-        raise HTTPException(503, rec.error_message)
+    result = await _run_transcription(db, rec, content, file.filename or stored_name, language)
+    return {"success": True, "id": rec.id, **result}
 
-    rec.status = "transcribed"
-    rec.transcript = result.get("text", "")
-    rec.transcript_language = result.get("language")
-    rec.audio_duration_seconds = result.get("audio_duration_seconds")
-    rec.processing_time_seconds = result.get("processing_time_seconds")
+
+def _ext_for_mime(mime_type: str) -> str:
+    m = (mime_type or "").lower()
+    if "mp4" in m:
+        return ".m4a"
+    if "ogg" in m:
+        return ".ogg"
+    return ".webm"
+
+
+class StartRecordingRequest(BaseModel):
+    source: str = "recorded"
+    meeting_title: str = ""
+    participants: str = ""
+    mime_type: str = "audio/webm"
+
+
+@router.post("/recordings/start")
+async def start_recording(
+    body: StartRecordingRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a draft recording row + an empty file on disk *before* any audio
+    exists. MediaRecorder chunks then stream in via POST .../chunk as they're
+    produced (same 30s cadence as the local IndexedDB backup, see
+    meetingRecordingRecovery.js), so the meeting is safe on the server from
+    its first second — recoverable from History on any device/login, not
+    only the browser that recorded it."""
+    ext = _ext_for_mime(body.mime_type)
+    stored_name = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}{ext}"
+    stored_path = os.path.join(_UPLOAD_DIR, stored_name)
+    open(stored_path, "wb").close()
+
+    rec = MeetingRecording(
+        filename=stored_name,
+        original_name=stored_name,
+        source=body.source if body.source in ("recorded", "uploaded") else "recorded",
+        status="recording",
+        meeting_title=body.meeting_title,
+        participants=body.participants,
+        created_by=user.username,
+    )
+    db.add(rec)
     await db.commit()
     await db.refresh(rec)
+    return {"id": rec.id, "filename": rec.filename}
 
+
+@router.post("/recordings/{recording_id}/chunk")
+async def upload_recording_chunk(
+    recording_id: int,
+    file: UploadFile = File(...),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Append one MediaRecorder chunk to the recording's file on disk. Chunks
+    arrive in order, so appending them here is equivalent to the client's own
+    Blob(chunks) concatenation on stop — the resulting file is playable the
+    same way a normally-stopped recording's file is."""
+    rec = await _get_recording_or_404(db, recording_id)
+    if rec.status != "recording":
+        raise HTTPException(409, f"Recording is not in progress (status={rec.status})")
+    content = await file.read()
+    path = os.path.join(_UPLOAD_DIR, rec.filename)
+    with open(path, "ab") as f:
+        f.write(content)
+    rec.updated_at = datetime.utcnow()
+    await db.commit()
+    return {"ok": True, "bytes_received": len(content)}
+
+
+class FinalizeRecordingRequest(BaseModel):
+    audio_duration_seconds: float | None = None
+
+
+@router.post("/recordings/{recording_id}/finalize")
+async def finalize_recording(
+    recording_id: int,
+    body: FinalizeRecordingRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a live recording's audio as fully captured. Kept separate from
+    transcription so the recording is durably saved — and shows up in
+    History as ready to transcribe — whether or not the user transcribes it
+    right away, or ever gets back to this browser at all."""
+    rec = await _get_recording_or_404(db, recording_id)
+    if rec.status == "recording":
+        rec.status = "uploaded"
+    if body.audio_duration_seconds is not None:
+        rec.audio_duration_seconds = body.audio_duration_seconds
+    await db.commit()
+    return {"ok": True}
+
+
+class TranscribeExistingRequest(BaseModel):
+    language: str | None = None
+    meeting_title: str | None = None
+    participants: str | None = None
+
+
+@router.post("/recordings/{recording_id}/transcribe")
+async def transcribe_existing_recording(
+    recording_id: int,
+    body: TranscribeExistingRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Transcribe audio that's already sitting on the server — streamed in via
+    .../chunk, or any past recording's stored file — without re-uploading it,
+    unlike POST /transcribe which expects the full file in the request body."""
+    rec = await _get_recording_or_404(db, recording_id)
+    path = os.path.join(_UPLOAD_DIR, rec.filename) if rec.filename else None
+    if not path or not os.path.exists(path) or os.path.getsize(path) == 0:
+        raise HTTPException(400, "No audio file found on the server for this recording")
+
+    if body.meeting_title is not None:
+        rec.meeting_title = body.meeting_title
+    if body.participants is not None:
+        rec.participants = body.participants
+    rec.status = "transcribing"
+    await db.commit()
+
+    with open(path, "rb") as f:
+        content = f.read()
+
+    result = await _run_transcription(db, rec, content, rec.filename, body.language)
     return {"success": True, "id": rec.id, **result}
 
 
@@ -232,6 +383,7 @@ async def get_recording(
         "transcript_language": rec.transcript_language,
         "audio_duration_seconds": rec.audio_duration_seconds,
         "processing_time_seconds": rec.processing_time_seconds,
+        "speaker_segments": rec.speaker_segments,
         "mom_json": rec.mom_json,
         "mom_meta": rec.mom_meta,
         "created_by": rec.created_by,
@@ -376,3 +528,129 @@ async def download_mom_docx(
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ── Speaker identification ──────────────────────────────────────────────
+# Enroll a person's voice once (a short solo clip -> one embedding vector,
+# computed by the ai-engine diarization service), then match it against
+# speaker clusters detected in future recordings. See speaker_id_service.py.
+
+@router.post("/speakers")
+async def enroll_speaker(
+    file: UploadFile = File(...),
+    name: str = Form(...),
+    gender: str = Form(""),
+    position: str = Form(""),
+    team: str = Form(""),
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enroll one person's voice from a short (ideally single-speaker,
+    20s+) clip. Re-enrolling the same name overwrites their embedding
+    (e.g. a better/cleaner sample recorded later)."""
+    if not name.strip():
+        raise HTTPException(400, "Nama tidak boleh kosong")
+    content = await file.read()
+    try:
+        embedding = await speaker_id_service.embed_clip(content, file.filename or "clip.wav")
+    except SpeakerIdError as e:
+        raise HTTPException(502, str(e))
+
+    result = await db.execute(select(SpeakerVoiceprint).where(SpeakerVoiceprint.name == name.strip()))
+    existing = result.scalar_one_or_none()
+    if existing:
+        existing.gender = gender
+        existing.position = position
+        existing.team = team
+        existing.embedding = embedding
+        existing.sample_filename = file.filename
+        existing.updated_at = datetime.utcnow()
+    else:
+        db.add(SpeakerVoiceprint(
+            name=name.strip(), gender=gender, position=position, team=team,
+            embedding=embedding, sample_filename=file.filename, created_by=user.username,
+        ))
+    await db.commit()
+    return {"success": True, "name": name.strip()}
+
+
+@router.get("/speakers")
+async def list_speakers(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(SpeakerVoiceprint).order_by(SpeakerVoiceprint.name))
+    rows = result.scalars().all()
+    return [
+        {
+            "id": r.id, "name": r.name, "gender": r.gender, "position": r.position, "team": r.team,
+            "sample_filename": r.sample_filename, "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+
+
+@router.delete("/speakers/{speaker_id}")
+async def delete_speaker(
+    speaker_id: int,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(SpeakerVoiceprint).where(SpeakerVoiceprint.id == speaker_id))
+    vp = result.scalar_one_or_none()
+    if not vp:
+        raise HTTPException(404, "Speaker tidak ditemukan")
+    await db.delete(vp)
+    await db.commit()
+    return {"message": "Deleted"}
+
+
+@router.post("/recordings/{recording_id}/identify-speakers")
+async def identify_speakers(
+    recording_id: int,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Diarize this recording's stored audio, match each detected speaker
+    cluster against enrolled voiceprints, and save the result. Requires the
+    recording to already be transcribed (needs the audio file on disk;
+    per-line text alignment additionally needs transcript_segments — falls
+    back to un-aligned per-turn speaker labels if the transcription service
+    didn't return per-segment timestamps)."""
+    rec = await _get_recording_or_404(db, recording_id)
+    if not rec.filename:
+        raise HTTPException(400, "Recording ini tidak punya file audio")
+    path = os.path.join(_UPLOAD_DIR, rec.filename)
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        raise HTTPException(400, "File audio tidak ditemukan di server")
+
+    result = await db.execute(select(SpeakerVoiceprint))
+    voiceprints = result.scalars().all()
+    if not voiceprints:
+        raise HTTPException(400, "Belum ada speaker yang di-enroll — tambahkan lewat POST /speakers dulu")
+
+    with open(path, "rb") as f:
+        content = f.read()
+
+    try:
+        diarization = await speaker_id_service.diarize_audio(content, rec.filename)
+    except SpeakerIdError as e:
+        raise HTTPException(502, str(e))
+
+    speaker_names = speaker_id_service.match_speakers(diarization["speaker_embeddings"], voiceprints)
+
+    if rec.transcript_segments:
+        merged = speaker_id_service.merge_transcript_with_speakers(
+            rec.transcript_segments, diarization["segments"], speaker_names
+        )
+    else:
+        # No per-line transcript timestamps available — still useful as a
+        # "who spoke when" breakdown, just not aligned to specific text.
+        merged = [
+            {"start": d["start"], "end": d["end"], "text": None, "speaker": speaker_names.get(d["speaker"], "Unknown speaker")}
+            for d in diarization["segments"]
+        ]
+
+    rec.speaker_segments = merged
+    await db.commit()
+    return {"success": True, "speaker_segments": merged, "speakers_detected": list(speaker_names.values())}

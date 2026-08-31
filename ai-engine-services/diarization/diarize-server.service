@@ -1,0 +1,17 @@
+[Unit]
+Description=CKDO Speaker Diarization Service
+After=network.target
+
+[Service]
+Type=simple
+# Edit these three to match this box's actual setup (mirror whichever
+# user/paths whisper-server.service already uses):
+User=REPLACE_ME
+WorkingDirectory=/path/to/ai-engine-services/diarization
+Environment="HF_TOKEN=REPLACE_ME"
+ExecStart=/path/to/ai-engine-services/diarization/venv/bin/uvicorn diarize_server:app --host 0.0.0.0 --port 9600
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

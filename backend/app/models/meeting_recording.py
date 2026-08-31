@@ -27,8 +27,11 @@ class MeetingRecording(Base):
 
     transcript               = Column(Text)
     transcript_language      = Column(String(10))
+    transcript_segments      = Column(JSONB)  # [{start, end, text}, ...] from Whisper, if the transcription service returns them — needed to align speaker labels (see speaker_segments) onto specific lines
     audio_duration_seconds   = Column(Float)
     processing_time_seconds  = Column(Float)
+
+    speaker_segments         = Column(JSONB)  # [{start, end, speaker, text}, ...] — diarization + voiceprint matching result, see speaker_id_service.py
 
     mom_meta                 = Column(JSONB)  # {date, time, venue, agenda}
     mom_json                 = Column(JSONB)  # {departments: [...]}  — the editable MOM structure, persisted so it can be reopened

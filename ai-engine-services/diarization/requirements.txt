@@ -1,0 +1,12 @@
+# Speaker diarization microservice — see diarize_server.py for setup notes.
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Install torch separately with the CUDA build matching this box's driver
+# (see https://pytorch.org/get-started/locally/), or reuse the environment
+# whisper-server.service already has if it's shared. Not pinned here since
+# the correct wheel depends on this specific machine's CUDA version.
+# torch
+
+pyannote.audio>=3.1

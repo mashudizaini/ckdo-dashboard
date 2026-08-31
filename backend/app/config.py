@@ -79,6 +79,14 @@ class Settings(BaseSettings):
     # slower-than-realtime on CPU, which matters for 1-2 hour meeting audio.
     whisper_api_url: str = "http://172.21.2.27:9500"
 
+    # Speaker diarization + voice-embedding — separate pure-inference
+    # microservice on the same "ai-engine" VM (172.21.2.27:9600), colocated
+    # with Whisper for GPU access. See ai-engine-services/diarization/
+    # for the service source + deployment instructions. Only turns audio
+    # into segments/embeddings — enrollment storage and name-matching live
+    # in this backend (see speaker_id_service.py).
+    diarization_api_url: str = "http://172.21.2.27:9600"
+
     # Gemini API (Google AI Studio) — third chat provider, opt-in alongside
     # "onprem" (Ollama) for the AI Chatbot's 3 modes (Company Policy / Oracle
     # ERP / General). Company already has paid Gemini access via Google
