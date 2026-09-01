@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { FileBarChart2, TrendingUp, CalendarDays, Wallet, Loader2, RefreshCw, AlertTriangle, Download, Upload, Database, FileSpreadsheet, Square, Info, X } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, ResponsiveContainer,
+  ComposedChart, Line, LabelList,
 } from "recharts";
 import { financialStatementApi } from "@/api/dashboard";
 
@@ -967,42 +968,98 @@ function BalanceSheetPanel({ periods, fromYear, setFromYear, fromMonth, setFromM
 
 /* ── Profit or Loss ───────────────────────────────────────────────────── */
 
-// Trend chart shown above the table — Gross Profit / Profit (Loss) Before
-// Tax / Total Comprehensive Income (Loss), one grouped bar per selected
-// fiscal year. A ReferenceLine at 0 matters here since any of the three
-// can go negative (a loss year).
-function ProfitLossChart({ data }) {
+// Hollow-ring marker on the growth line — matching the reference chart's
+// "○" style rather than a plain filled dot, which would read as noise
+// against the bars behind it.
+function GrowthDot({ cx, cy, payload }) {
+  if (payload?.growthPct == null || cx == null || cy == null) return null;
+  return <circle cx={cx} cy={cy} r={11} fill="#ffffff" stroke="#0f172a" strokeWidth={2.5} />;
+}
+
+function GrowthLabel({ x, y, value }) {
+  if (value == null || x == null || y == null) return null;
+  const sign = value >= 0 ? "+" : "";
+  return (
+    <text x={x} y={y - 18} textAnchor="middle" fontSize={11} fontWeight={700} fill="#0f172a">
+      {sign}{value.toFixed(1)}%
+    </text>
+  );
+}
+
+// One category's own bar+growth-line combo chart — reference layout (value
+// bars with the amount labeled on top, a hollow-circle growth line floating
+// above them with its own % labels), one panel per category instead of the
+// old single grouped-bar chart, since Gross Profit / PBT / TCI don't share
+// a meaningful common scale (one can be a small loss while another is a
+// large profit in the same year).
+function CategoryTrendChart({ label, color, years, values }) {
   const chartData = useMemo(() => {
-    if (!data) return [];
-    return data.columns.map((label, i) => ({
-      label,
-      grossProfit: data.gross_profit[i],
-      pbt: data.profit_before_tax[i],
-      tci: data.total_comprehensive[i],
-    }));
-  }, [data]);
+    return years.map((year, i) => {
+      const raw = values?.[i] ?? 0;
+      const prev = i > 0 ? values?.[i - 1] : null;
+      const growthPct = (prev != null && prev !== 0) ? ((raw - prev) / Math.abs(prev)) * 100 : null;
+      return { year, valueBillion: raw / 1_000_000_000, growthPct };
+    });
+  }, [years, values]);
 
   if (!chartData.length) return null;
 
   return (
     <div style={{ borderRadius: 12, boxShadow: NEU.shadowOutSm, background: "#ffffff", padding: "14px 18px" }}>
-      <p style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>Gross Profit vs Profit (Loss) Before Tax vs Total Comprehensive Income (Loss) — IDR</p>
-      <ResponsiveContainer width="100%" height={280}>
-        <BarChart data={chartData} margin={{ top: 4, right: 16, left: 16, bottom: 4 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
-          <XAxis dataKey="label" tick={{ fill: "#64748b", fontSize: 11 }} />
-          <YAxis tickFormatter={fmtShort} tick={{ fill: "#64748b", fontSize: 10 }} />
-          <ReferenceLine y={0} stroke="#c3c2b7" />
+      <p style={{ fontSize: 12.5, fontWeight: 700, color: "#1e293b", marginBottom: 4 }}>
+        {label} <span style={{ fontWeight: 400, color: "#94a3b8" }}>— Rp miliar</span>
+      </p>
+      <ResponsiveContainer width="100%" height={220}>
+        <ComposedChart data={chartData} margin={{ top: 30, right: 24, left: 8, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" vertical={false} />
+          <XAxis dataKey="year" tick={{ fill: "#64748b", fontSize: 11 }} axisLine={{ stroke: "#e2e8f0" }} tickLine={false} />
+          <YAxis
+            yAxisId="value"
+            tickFormatter={v => v.toLocaleString("id-ID", { maximumFractionDigits: 0 })}
+            tick={{ fill: "#64748b", fontSize: 10 }} axisLine={false} tickLine={false}
+          />
+          {/* Hidden secondary axis for the growth line, deliberately domained
+              so the (usually small, single/double-digit %) growth values sit
+              in the upper portion of the chart — floating above the bars,
+              matching the reference — rather than sharing the bars' own
+              billion-rupiah scale, which would flatten the line to the
+              bottom edge. */}
+          <YAxis yAxisId="growth" orientation="right" hide domain={[(min) => Math.min(min - 15, -40), (max) => max + 12]} />
+          <ReferenceLine yAxisId="value" y={0} stroke="#c3c2b7" />
           <Tooltip
             contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, fontSize: 12, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
-            formatter={(v, name) => [fmtNum(v), name]}
+            formatter={(v, name) => name === "Growth %"
+              ? [v == null ? "n/a" : `${v.toFixed(1)}%`, name]
+              : [v.toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 }), "Rp miliar"]}
           />
-          <Legend wrapperStyle={{ fontSize: 11, color: "#64748b" }} />
-          <Bar dataKey="grossProfit" name="Gross Profit" fill={CHART_COLORS.grossProfit} radius={[4, 4, 0, 0]} />
-          <Bar dataKey="pbt" name="Profit (Loss) Before Tax" fill={CHART_COLORS.pbt} radius={[4, 4, 0, 0]} />
-          <Bar dataKey="tci" name="Total Comprehensive Income (Loss)" fill={CHART_COLORS.tci} radius={[4, 4, 0, 0]} />
-        </BarChart>
+          <Bar yAxisId="value" dataKey="valueBillion" name="Rp miliar" fill={color} radius={[5, 5, 0, 0]} barSize={46}>
+            <LabelList
+              dataKey="valueBillion" position="top"
+              formatter={v => v.toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+              style={{ fill: "#1e293b", fontSize: 11, fontWeight: 700 }}
+            />
+          </Bar>
+          <Line
+            yAxisId="growth" type="monotone" dataKey="growthPct" name="Growth %"
+            stroke="#0f172a" strokeWidth={2} dot={<GrowthDot />} label={<GrowthLabel />} connectNulls
+          />
+        </ComposedChart>
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+// Gross Profit / Profit (Loss) Before Tax / Total Comprehensive Income
+// (Loss), one panel per category, each showing value-per-fiscal-year bars
+// (Rp miliar) with a year-over-year growth-rate line overlaid — see
+// CategoryTrendChart above.
+function ProfitLossChart({ data }) {
+  if (!data?.columns?.length) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <CategoryTrendChart label="Gross Profit" color={CHART_COLORS.grossProfit} years={data.columns} values={data.gross_profit} />
+      <CategoryTrendChart label="Profit (Loss) Before Tax" color={CHART_COLORS.pbt} years={data.columns} values={data.profit_before_tax} />
+      <CategoryTrendChart label="Total Comprehensive Income (Loss)" color={CHART_COLORS.tci} years={data.columns} values={data.total_comprehensive} />
     </div>
   );
 }

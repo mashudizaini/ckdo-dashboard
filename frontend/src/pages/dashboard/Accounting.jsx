@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   FileText, DollarSign, FileBarChart2, RefreshCw,
   BarChart2, Package, Download, Search, Loader2, Layers, ClipboardList,
-  AlertTriangle, ChevronLeft, ChevronRight, RotateCcw,
+  AlertTriangle, ChevronLeft, ChevronRight, RotateCcw, ChevronDown,
 } from "lucide-react";
 import FinancialStatement from "./FinancialStatement";
 import APAutoInvoice from "./APAutoInvoice";
@@ -1000,10 +1000,18 @@ function ARAgingPanel() {
   const [loading,       setLoading]      = useState(false);
   const [error,         setError]        = useState(null);
 
+  // Drill-down — click a customer row to see the underlying invoices,
+  // fetched with the SAME as_of_date this aging report used (so the detail
+  // always matches what's on screen) via the same endpoint AR Outstanding's
+  // List view uses. Cached per customer name so re-expanding is instant.
+  const [expandedCustomer, setExpandedCustomer] = useState(null);
+  const [detailCache,      setDetailCache]      = useState({}); // { [customerName]: rows | "loading" | { error } }
+
   const INPUT = { padding: "7px 11px", borderRadius: 9, border: "none", fontSize: 12, background: NEU.bg, boxShadow: NEU.shadowIn, color: "#1e293b", outline: "none" };
 
   const loadData = useCallback(async () => {
     setLoading(true); setError(null);
+    setExpandedCustomer(null); setDetailCache({});
     try {
       const params = { limit: 500, as_of_date: asOfDate || todayIso(), ...(customerName && { customer_name: customerName }) };
       const res = await accountingApi.getArAging(params);
@@ -1014,6 +1022,29 @@ function ARAgingPanel() {
     } finally { setLoading(false); }
   }, [customerName, asOfDate]);
 
+  const toggleCustomer = async (custName) => {
+    if (expandedCustomer === custName) { setExpandedCustomer(null); return; }
+    setExpandedCustomer(custName);
+    if (detailCache[custName]) return;
+    setDetailCache(prev => ({ ...prev, [custName]: "loading" }));
+    try {
+      const res = await accountingApi.getArOutstanding({
+        customer_name: custName, status: "ALL", limit: 500,
+        as_of_date: data?.as_of_date || asOfDate || todayIso(),
+      });
+      if (res.success) {
+        // Aging only counts non-zero remaining — mirror that here so the
+        // drill-down lines up with the bucket totals it's expanding.
+        const rows = (res.data || []).filter(r => Math.round((r.remaining_amount_idr || 0) * 100) !== 0);
+        setDetailCache(prev => ({ ...prev, [custName]: rows }));
+      } else {
+        setDetailCache(prev => ({ ...prev, [custName]: { error: res.error || "Failed to load" } }));
+      }
+    } catch (e) {
+      setDetailCache(prev => ({ ...prev, [custName]: { error: e?.response?.data?.detail || String(e) } }));
+    }
+  };
+
   useEffect(() => { loadData(); }, [loadData]);
 
   const totals = data?.totals;
@@ -1022,7 +1053,7 @@ function ARAgingPanel() {
   return (
     <SectionCard
       title="AR Aging by Customer"
-      subtitle={`Invoices + Debit Memos + Credit Memos/Returns, Corporate-rate IDR, balances reconstructed as of ${data?.as_of_date || asOfDate}${isToday ? " (today)" : ""} by replaying receivable applications up to that date — not today's live remaining balance. Bucketed by due date. Returns net into whichever bucket their own due date falls into.`}
+      subtitle={`Invoices + Debit Memos + Credit Memos/Returns, Corporate-rate IDR. Balances as of ${data?.as_of_date || asOfDate}${isToday ? " (today, live Oracle balance)" : " (reconstructed by replaying receivable applications + adjustments up to that date)"}. Bucketed by due date. Credit memos/returns net into whichever bucket their own due date falls into — a customer's bucket can go negative when their credit memo in that bucket outweighs any invoice in the same bucket. Click a customer row to see the underlying invoices.`}
     >
       <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
         <div>
@@ -1052,60 +1083,117 @@ function ARAgingPanel() {
       ) : data ? (
         <>
           {/* Bucket summary cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10, marginBottom: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 10, marginBottom: 14 }}>
+            <div style={{ background: NEU.bg, borderRadius: 12, padding: "10px 14px", boxShadow: NEU.shadowOutSm }}>
+              <p style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>Total Amount</p>
+              <p style={{ fontSize: 13, fontWeight: 800, color: "#0891b2", fontFamily: "monospace" }}>Rp {fmtNumAp(totals?.total_amount_idr || 0)}</p>
+            </div>
             {AGING_BUCKETS.map(b => (
               <div key={b.key} style={{ background: NEU.bg, borderRadius: 12, padding: "10px 14px", boxShadow: NEU.shadowOutSm }}>
                 <p style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{b.label}</p>
-                <p style={{ fontSize: 13, fontWeight: 800, color: b.color, fontFamily: "monospace" }}>Rp {fmtIdr(totals?.[b.key] || 0)}</p>
+                <p style={{ fontSize: 13, fontWeight: 800, color: b.color, fontFamily: "monospace" }}>Rp {fmtNumAp(totals?.[b.key] || 0)}</p>
               </div>
             ))}
           </div>
 
           <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 960 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1060 }}>
                 <thead>
                   <tr style={{ background: "linear-gradient(135deg,#92400e,#78350f)" }}>
                     <th style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5 }}>Customer</th>
+                    <th style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5, textAlign: "right" }}>Total Amount</th>
                     {AGING_BUCKETS.map(b => (
                       <th key={b.key} style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5, textAlign: "right" }}>{b.label}</th>
                     ))}
-                    <th style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5, textAlign: "right" }}>Total</th>
+                    <th style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5, textAlign: "right" }}>Total Remaining</th>
                     <th style={{ ...TH, color: "#fef3c7", background: "transparent", fontSize: 9.5, textAlign: "right" }}>Items</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.data.length === 0 ? (
                     <tr>
-                      <td colSpan={AGING_BUCKETS.length + 3} style={{ padding: "40px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
+                      <td colSpan={AGING_BUCKETS.length + 4} style={{ padding: "40px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
                         No open items found
                       </td>
                     </tr>
-                  ) : data.data.map((r, i) => (
-                    <tr key={r.customer_name + r.account_number}
-                      style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9" }}
-                      onMouseEnter={e => e.currentTarget.style.background = "rgba(245,158,11,0.08)"}
-                      onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? "#f8fafc" : "#f1f5f9"}
+                  ) : data.data.map((r, i) => {
+                    const isExp = expandedCustomer === r.customer_name;
+                    const detail = detailCache[r.customer_name];
+                    return (
+                    <Fragment key={r.customer_name + r.account_number}>
+                    <tr
+                      onClick={() => toggleCustomer(r.customer_name)}
+                      style={{ background: isExp ? "rgba(245,158,11,0.12)" : (i % 2 === 0 ? "#f8fafc" : "#f1f5f9"), cursor: "pointer" }}
+                      onMouseEnter={e => { if (!isExp) e.currentTarget.style.background = "rgba(245,158,11,0.08)"; }}
+                      onMouseLeave={e => { if (!isExp) e.currentTarget.style.background = i % 2 === 0 ? "#f8fafc" : "#f1f5f9"; }}
                     >
-                      <td style={{ ...TD, fontWeight: 700, color: "#1e293b" }}>{r.customer_name}</td>
+                      <td style={{ ...TD, fontWeight: 700, color: "#1e293b", display: "flex", alignItems: "center", gap: 6 }}>
+                        <ChevronDown size={12} style={{ color: "#94a3b8", transform: isExp ? "rotate(180deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }} />
+                        {r.customer_name}
+                      </td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#0891b2" }}>{fmtNumAp(r.total_amount_idr)}</td>
                       {AGING_BUCKETS.map(b => (
                         <td key={b.key} style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: r[b.key] < 0 ? "#16a34a" : "#334155" }}>
-                          {fmtIdr(r[b.key])}
+                          {fmtNumAp(r[b.key])}
                         </td>
                       ))}
-                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#2563eb" }}>{fmtIdr(r.total_idr)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#2563eb" }}>{fmtNumAp(r.total_idr)}</td>
                       <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#94a3b8" }}>{r.item_count}</td>
                     </tr>
-                  ))}
+                    {isExp && (
+                      <tr>
+                        <td colSpan={AGING_BUCKETS.length + 4} style={{ padding: 0, background: "#0f172a" }}>
+                          {detail === "loading" ? (
+                            <div style={{ padding: 20, textAlign: "center" }}><Loader2 size={16} className="animate-spin" style={{ color: "#64748b" }} /></div>
+                          ) : detail?.error ? (
+                            <div style={{ padding: 14, fontSize: 12, color: "#f87171" }}>{detail.error}</div>
+                          ) : !detail?.length ? (
+                            <div style={{ padding: 14, fontSize: 12, color: "#94a3b8" }}>No underlying invoices found.</div>
+                          ) : (
+                            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                              <thead>
+                                <tr style={{ color: "#94a3b8", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                  <th style={{ padding: "6px 12px", textAlign: "left" }}>Invoice No</th>
+                                  <th style={{ padding: "6px 12px", textAlign: "left" }}>Type</th>
+                                  <th style={{ padding: "6px 12px", textAlign: "left" }}>Invoice Date</th>
+                                  <th style={{ padding: "6px 12px", textAlign: "left" }}>Due Date</th>
+                                  <th style={{ padding: "6px 12px", textAlign: "right" }}>Remaining (IDR)</th>
+                                  <th style={{ padding: "6px 12px", textAlign: "right" }}>Days Overdue</th>
+                                  <th style={{ padding: "6px 12px", textAlign: "left" }}>Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {detail.map((d, di) => (
+                                  <tr key={di} style={{ borderTop: "1px solid #1e293b", color: "#cbd5e1", fontSize: 11.5 }}>
+                                    <td style={{ padding: "6px 12px", fontFamily: "monospace", color: "#60a5fa" }}>{d.invoice_number}</td>
+                                    <td style={{ padding: "6px 12px" }}>{d.transaction_type}</td>
+                                    <td style={{ padding: "6px 12px", fontFamily: "monospace" }}>{d.invoice_date}</td>
+                                    <td style={{ padding: "6px 12px", fontFamily: "monospace" }}>{d.due_date}</td>
+                                    <td style={{ padding: "6px 12px", textAlign: "right", fontFamily: "monospace", color: d.remaining_amount_idr < 0 ? "#4ade80" : "#f87171" }}>{fmtNumAp(d.remaining_amount_idr)}</td>
+                                    <td style={{ padding: "6px 12px", textAlign: "right", fontFamily: "monospace" }}>{d.days_overdue ?? "—"}</td>
+                                    <td style={{ padding: "6px 12px" }}>{d.status === "OP" ? "Open" : "Closed"}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
+                    );
+                  })}
                 </tbody>
                 {data.data.length > 0 && (
                   <tfoot>
                     <tr style={{ background: "#D9E1F2" }}>
                       <td style={{ ...TD, fontWeight: 800, color: "#1e293b" }}>TOTAL</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#1e293b" }}>{fmtNumAp(totals?.total_amount_idr)}</td>
                       {AGING_BUCKETS.map(b => (
-                        <td key={b.key} style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#1e293b" }}>{fmtIdr(totals?.[b.key])}</td>
+                        <td key={b.key} style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#1e293b" }}>{fmtNumAp(totals?.[b.key])}</td>
                       ))}
-                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#1e293b" }}>{fmtIdr(totals?.total_idr)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#1e293b" }}>{fmtNumAp(totals?.total_idr)}</td>
                       <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 800, color: "#1e293b" }}>{totals?.item_count}</td>
                     </tr>
                   </tfoot>

@@ -37,7 +37,8 @@ const NAV_ITEMS = [
   ] },
   { label: "Accounting & Tax", path: "/dashboard/accounting", icon: Calculator, roles: ["accounting_staff"], children: [
     { label: "AP Autoinvoice", path: "/dashboard/accounting/ap-invoice" },
-    { label: "COGS Report", path: "/dashboard/accounting/cogs" },
+    // Temporarily hidden (2026-09-01 user request).
+    // { label: "COGS Report", path: "/dashboard/accounting/cogs" },
     { label: "AP Outstanding", path: "/dashboard/accounting/profit" },
     { label: "AR Outstanding", path: "/dashboard/accounting/ar" },
     { label: "Financial Statement", path: "/dashboard/accounting/financial-statement" },

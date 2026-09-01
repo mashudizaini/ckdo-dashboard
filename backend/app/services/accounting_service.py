@@ -1092,7 +1092,12 @@ class AccountingService:
         (trx_date <= as_of_date) and reconstructs each one's remaining
         balance as of that date. Defaults to the actual current date but
         can be overridden by the user to re-bucket the report as of any
-        past date.
+        past date. When as_of_date is today (the default), remaining comes
+        straight from Oracle's live aps.amount_due_remaining, same as
+        get_ar_outstanding's own default — only a genuine past date
+        triggers the replay-based reconstruction below. Without this,
+        Aging always reconstructed (even "as of today") while List
+        defaulted to live data, and the two disagreed.
 
         Like get_ar_outstanding's as_of_date, remaining balance is
         reconstructed by replaying AR_RECEIVABLE_APPLICATIONS_ALL
@@ -1127,24 +1132,37 @@ class AccountingService:
         params["as_of_date"] = as_of_date
         asof_expr = "TRUNC(TO_DATE(:as_of_date, 'YYYY-MM-DD'))"
 
-        applied_asof_expr = """
-            NVL((
-                SELECT SUM(araa.amount_applied)
-                FROM apps.ar_receivable_applications_all araa
-                WHERE araa.applied_payment_schedule_id = aps.payment_schedule_id
-                  AND araa.status = 'APP'
-                  AND araa.gl_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')
-            ), 0)
-            -
-            NVL((
-                SELECT SUM(adj.amount)
-                FROM apps.ar_adjustments_all adj
-                WHERE adj.payment_schedule_id = aps.payment_schedule_id
-                  AND adj.status = 'A'
-                  AND adj.gl_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')
-            ), 0)
-        """
-        remaining_asof_expr = f"(NVL(aps.amount_due_original, 0) - ({applied_asof_expr}))"
+        # Only reconstruct (replay applications+adjustments) for a genuine
+        # PAST date — for "today" (the default), use Oracle's own live
+        # amount_due_remaining directly, same as get_ar_outstanding's
+        # default (no as_of_date) branch. Without this, Aging ALWAYS
+        # reconstructed even at "today" while List defaulted to live Oracle
+        # data — two different code paths computing what should be the same
+        # number, confirmed live to disagree ("data di aging dengan data di
+        # list tidak sinkron"). Same "historical only if actually in the
+        # past" principle already used in exchange_rate_service.get_rates.
+        is_historical = as_of_date != date.today().isoformat()
+        if is_historical:
+            applied_asof_expr = """
+                NVL((
+                    SELECT SUM(araa.amount_applied)
+                    FROM apps.ar_receivable_applications_all araa
+                    WHERE araa.applied_payment_schedule_id = aps.payment_schedule_id
+                      AND araa.status = 'APP'
+                      AND araa.gl_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')
+                ), 0)
+                -
+                NVL((
+                    SELECT SUM(adj.amount)
+                    FROM apps.ar_adjustments_all adj
+                    WHERE adj.payment_schedule_id = aps.payment_schedule_id
+                      AND adj.status = 'A'
+                      AND adj.gl_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')
+                ), 0)
+            """
+            remaining_asof_expr = f"(NVL(aps.amount_due_original, 0) - ({applied_asof_expr}))"
+        else:
+            remaining_asof_expr = "NVL(aps.amount_due_remaining, 0)"
 
         params["legacy_paid_cutoff"] = self.LEGACY_PAID_CUTOFF
         legacy_cond = "rct.trx_date <= TO_DATE(:legacy_paid_cutoff, 'YYYY-MM-DD')"
@@ -1176,13 +1194,15 @@ class AccountingService:
                 ROUND(SUM(CASE WHEN days_overdue BETWEEN 61 AND 90   THEN remaining_idr ELSE 0 END), 2) AS d61_90,
                 ROUND(SUM(CASE WHEN days_overdue > 90                THEN remaining_idr ELSE 0 END), 2) AS over_90,
                 ROUND(SUM(remaining_idr), 2)                                                             AS total_idr,
+                ROUND(SUM(original_idr), 2)                                                              AS total_amount_idr,
                 COUNT(*)                                                                                 AS item_count
             FROM (
                 SELECT
                     hp.party_name                                    AS customer_name,
                     hca.account_number,
                     ({asof_expr} - aps.due_date)                     AS days_overdue,
-                    ({remaining_asof_expr}) * ({rate_case})          AS remaining_idr
+                    ({remaining_asof_expr}) * ({rate_case})          AS remaining_idr,
+                    NVL(aps.amount_due_original, 0) * ({rate_case})  AS original_idr
                 FROM apps.ar_payment_schedules_all  aps
                 JOIN apps.ra_customer_trx_all        rct
                     ON  rct.customer_trx_id  = aps.customer_trx_id
@@ -1208,13 +1228,14 @@ class AccountingService:
                     for k, v in r.items()
                 })
             totals = {
-                "current_amt": round(sum(r.get("current_amt", 0) for r in clean), 2),
-                "d1_30":       round(sum(r.get("d1_30", 0) for r in clean), 2),
-                "d31_60":      round(sum(r.get("d31_60", 0) for r in clean), 2),
-                "d61_90":      round(sum(r.get("d61_90", 0) for r in clean), 2),
-                "over_90":     round(sum(r.get("over_90", 0) for r in clean), 2),
-                "total_idr":   round(sum(r.get("total_idr", 0) for r in clean), 2),
-                "item_count":  sum(r.get("item_count", 0) for r in clean),
+                "current_amt":     round(sum(r.get("current_amt", 0) for r in clean), 2),
+                "d1_30":           round(sum(r.get("d1_30", 0) for r in clean), 2),
+                "d31_60":          round(sum(r.get("d31_60", 0) for r in clean), 2),
+                "d61_90":          round(sum(r.get("d61_90", 0) for r in clean), 2),
+                "over_90":         round(sum(r.get("over_90", 0) for r in clean), 2),
+                "total_idr":       round(sum(r.get("total_idr", 0) for r in clean), 2),
+                "total_amount_idr": round(sum(r.get("total_amount_idr", 0) for r in clean), 2),
+                "item_count":      sum(r.get("item_count", 0) for r in clean),
             }
             return {"success": True, "count": len(clean), "as_of_date": as_of_date, "data": clean, "totals": totals}
         except Exception as e:

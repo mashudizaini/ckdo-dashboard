@@ -291,9 +291,9 @@ tbody td {
    of its <tr>, which stays put and scrolls away normally, so without an
    explicit background here the tbody rows show through the "frozen"
    header as they scroll underneath it. Excludes pl-monthly-table: its
-   3-row grouped header would need a distinct top offset per row to stack
-   correctly, so it keeps the plain (non-frozen) header and only gets the
-   frozen first column below. */
+   3-row grouped header needs a distinct top offset per row to stack
+   correctly (see the dedicated rule further below) instead of this
+   single top:0 rule. */
 .fs-table:not(.pl-monthly-table) thead th {
   position: sticky;
   top: 0;
@@ -325,6 +325,36 @@ tbody td {
   border: 1px solid #ffffff !important;
   text-align: center !important;
   vertical-align: middle !important;
+  height: 32px;
+  box-sizing: border-box;
+}
+/* 3-row Excel-freeze-pane header — each row needs its OWN top offset
+   (stacked, not all top:0) since position:sticky doesn't auto-stack
+   multiple sticky elements. Relies on every header th sharing the same
+   fixed 32px height above so the offsets (0/32/64) line up exactly; the
+   ACCOUNT corner cell (rowSpan=3, lives in row 1's <tr>) inherits row 1's
+   top:0 and — from the shared :first-child rule above — left:0 too,
+   pinning it in both directions as a proper frozen corner. */
+.fs-table.pl-monthly-table thead tr:nth-child(1) th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #000000 !important;
+}
+.fs-table.pl-monthly-table thead tr:nth-child(2) th {
+  position: sticky;
+  top: 32px;
+  z-index: 2;
+  background: #000000 !important;
+}
+.fs-table.pl-monthly-table thead tr:nth-child(3) th {
+  position: sticky;
+  top: 64px;
+  z-index: 2;
+  background: #000000 !important;
+}
+.fs-table.pl-monthly-table thead th:first-child {
+  z-index: 3; /* corner cell — above the other sticky header cells AND the sticky column below */
 }
 
 .fs-table tbody tr[data-type] { background-color: transparent !important; }
