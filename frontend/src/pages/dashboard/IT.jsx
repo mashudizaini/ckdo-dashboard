@@ -17,8 +17,9 @@ import {
 import { itApi } from "@/api/dashboard";
 import EbsBackupRecovery from "@/pages/dashboard/it/EbsBackupRecovery";
 import VpnAccessMonitoring from "@/pages/dashboard/it/VpnAccessMonitoring";
-// HikCentral Integration and ETL Admin moved to Setup > IT (2026-08-19
-// user request) — see src/pages/setup/ITSetupPage.jsx.
+// HikCentral Integration, ZKTeco Integration and ETL Admin moved to
+// Setup > General (2026-09-01, previously Setup > IT as of 2026-08-19) —
+// see src/pages/setup/general/GeneralSetupPage.jsx.
 
 /* ─── Tab definitions ─────────────────────────────── */
 

@@ -740,12 +740,21 @@ class AccountingService:
         date had already closed the invoice by the time they looked, even
         though it was genuinely still open as of that date. Remaining is
         recomputed as amount_due_original minus every receivable
-        application with apply_date <= as_of_date (AR_RECEIVABLE_
+        application with gl_date <= as_of_date (AR_RECEIVABLE_
         APPLICATIONS_ALL, status='APP'); Status is derived from that
         reconstructed remaining (<=0 => CL, else OP). Only cash/credit-memo
         applications are replayed — manual adjustments/write-offs
         (AR_ADJUSTMENTS_ALL) are not, so a balance closed purely via
         write-off may still show as marginally open as of a past date.
+
+        Anchored on gl_date rather than apply_date deliberately (changed
+        2026-09-01) — apply_date is a free-text-entered business date and
+        confirmed live to contain outright data-entry typos (invoice
+        24110047 had a Rp 800,000,000 application entered with apply_date
+        year 2525 instead of 2025), which silently excluded that payment
+        from every as_of_date reconstruction from now until the year 2525.
+        gl_date is the GL-posting date and doesn't carry that risk.
+
         Invoices dated after as_of_date are excluded (they didn't exist
         yet), the days-overdue and Corporate-rate lookup are anchored to
         as_of_date too, and the `status` filter is evaluated against the
@@ -753,7 +762,7 @@ class AccountingService:
         behavior is unchanged from before (today's live status/remaining).
 
         Once a row is Closed, payment_date (the last receivable
-        application's apply_date — capped at as_of_date when given) is
+        application's gl_date — capped at as_of_date when given) is
         surfaced and days_overdue freezes as of that date instead of
         continuing to count against today/as_of_date, so a paid invoice
         stops accumulating overdue days the moment it was actually paid.
@@ -778,6 +787,24 @@ class AccountingService:
         tapi langsung mengurangi" (not shown as a line, but still directly
         reduces the totals). The Returns (CM) summary card is the only
         remaining visibility into them.
+
+        Summary totals are computed via a SEPARATE unlimited aggregate query
+        (see agg_sql below), not by summing the `limit`-capped display rows —
+        summing the capped rows understated the total whenever more than
+        `limit` invoices matched the filters (confirmed live: the card
+        stopped changing when narrowing filters that still left more than
+        `limit` matches, since it was really just re-summing whatever
+        happened to fall in the top-`limit` slice each time).
+
+        usd_rate no longer affects conversion_rate/original_amount_idr/
+        remaining_amount_idr at all — those three are now always Oracle's
+        own Corporate-rate lookup (unaffected by anything the user types),
+        matching how AP Outstanding's original_amount_idr/remaining_amount_idr
+        are untouched by its usd_rate/eur_rate override too. usd_rate now
+        drives ONLY the new after_revaluation_idr column below — a clean,
+        exclusively user-driven "what would this be worth at my rate"
+        figure, separate from Oracle's system rate rather than silently
+        blended into it.
         """
         limit = min(max(limit, 1), 2000)
         where_extra = ""
@@ -790,32 +817,83 @@ class AccountingService:
         if as_of_date:
             params["as_of_date"] = as_of_date
             today_expr = "TO_DATE(:as_of_date, 'YYYY-MM-DD')"
+            # amount "settled" as of the date = cash/credit-memo applications
+            # MINUS approved adjustments (AR_ADJUSTMENTS_ALL.amount is signed
+            # negative for a write-down that reduces the receivable — e.g. a
+            # PPh/withholding-tax adjustment — so subtracting it increases
+            # the settled total, same direction as an application would).
+            # Confirmed live (invoice 26130003): 3 applications summing
+            # 1,771,369,105 + one -32,502,185 PPh adjustment = exactly the
+            # 1,803,871,290 original amount, Oracle status already CL — but
+            # this reconstruction used to only replay applications, leaving
+            # the PPh portion looking permanently "still open" under any
+            # As of Date. AR_ADJUSTMENTS_ALL.status = 'A' is Approved
+            # (mirrors the 'APP' filter on applications — only count
+            # finalized adjustments, not pending/rejected ones).
             applied_asof_expr = """
                 NVL((
                     SELECT SUM(araa.amount_applied)
                     FROM apps.ar_receivable_applications_all araa
                     WHERE araa.applied_payment_schedule_id = aps.payment_schedule_id
                       AND araa.status = 'APP'
-                      AND araa.apply_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')
+                      AND araa.gl_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')
+                ), 0)
+                -
+                NVL((
+                    SELECT SUM(adj.amount)
+                    FROM apps.ar_adjustments_all adj
+                    WHERE adj.payment_schedule_id = aps.payment_schedule_id
+                      AND adj.status = 'A'
+                      AND adj.gl_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')
                 ), 0)
             """
             remaining_expr = f"ROUND(NVL(aps.amount_due_original, 0) - ({applied_asof_expr}), 2)"
             status_expr = f"CASE WHEN ({remaining_expr}) <= 0 THEN 'CL' ELSE 'OP' END"
             where_extra += " AND rct.trx_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')"
+            # Oracle's GREATEST returns NULL if EITHER argument is NULL (it
+            # doesn't skip nulls like some other databases), so a plain
+            # GREATEST(app_max, adj_max) would wrongly go blank whenever an
+            # invoice closed via only ONE of the two mechanisms — this CASE
+            # picks whichever side(s) actually has a value instead.
             payment_date_expr = """
-                (SELECT MAX(araa.apply_date) FROM apps.ar_receivable_applications_all araa
-                 WHERE araa.applied_payment_schedule_id = aps.payment_schedule_id
-                   AND araa.status = 'APP'
-                   AND araa.apply_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD'))
+                (SELECT CASE
+                    WHEN app_max IS NULL THEN adj_max
+                    WHEN adj_max IS NULL THEN app_max
+                    ELSE GREATEST(app_max, adj_max)
+                 END
+                 FROM (
+                    SELECT
+                        (SELECT MAX(araa.gl_date) FROM apps.ar_receivable_applications_all araa
+                         WHERE araa.applied_payment_schedule_id = aps.payment_schedule_id
+                           AND araa.status = 'APP'
+                           AND araa.gl_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')) AS app_max,
+                        (SELECT MAX(adj.gl_date) FROM apps.ar_adjustments_all adj
+                         WHERE adj.payment_schedule_id = aps.payment_schedule_id
+                           AND adj.status = 'A'
+                           AND adj.gl_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')) AS adj_max
+                    FROM dual
+                 ))
             """
         else:
             today_expr = "TRUNC(SYSDATE)"
             remaining_expr = "ROUND(NVL(aps.amount_due_remaining, 0), 2)"
             status_expr = "aps.status"
             payment_date_expr = """
-                (SELECT MAX(araa.apply_date) FROM apps.ar_receivable_applications_all araa
-                 WHERE araa.applied_payment_schedule_id = aps.payment_schedule_id
-                   AND araa.status = 'APP')
+                (SELECT CASE
+                    WHEN app_max IS NULL THEN adj_max
+                    WHEN adj_max IS NULL THEN app_max
+                    ELSE GREATEST(app_max, adj_max)
+                 END
+                 FROM (
+                    SELECT
+                        (SELECT MAX(araa.gl_date) FROM apps.ar_receivable_applications_all araa
+                         WHERE araa.applied_payment_schedule_id = aps.payment_schedule_id
+                           AND araa.status = 'APP') AS app_max,
+                        (SELECT MAX(adj.gl_date) FROM apps.ar_adjustments_all adj
+                         WHERE adj.payment_schedule_id = aps.payment_schedule_id
+                           AND adj.status = 'A') AS adj_max
+                    FROM dual
+                 ))
             """
 
         # LEGACY_PAID_CUTOFF override (see docstring) — forces old
@@ -858,17 +936,13 @@ class AccountingService:
             where_extra += " AND rct.trx_date <= TO_DATE(:date_to, 'YYYY-MM-DD')"
             params["date_to"] = date_to
 
-        # Corporate-rate IDR conversion — anchored to as_of_date when given,
-        # otherwise standardized on today's rate for every row (same as
-        # get_ar_aging). usd_rate, when given, substitutes this lookup for
-        # USD rows only, regardless of the anchor date.
-        usd_override = ""
-        if usd_rate:
-            usd_override = "WHEN rct.invoice_currency_code = 'USD' THEN :usd_rate\n            "
-            params["usd_rate"] = usd_rate
+        # Corporate-rate IDR conversion — Oracle's own rate, anchored to
+        # as_of_date when given, otherwise today (same as get_ar_aging).
+        # NOT affected by usd_rate — that only drives after_revaluation_idr
+        # below, kept deliberately separate (see docstring).
         rate_case = f"""
             CASE WHEN rct.invoice_currency_code = 'IDR' THEN 1
-            {usd_override}ELSE COALESCE((
+            ELSE COALESCE((
                 SELECT gdr.conversion_rate FROM apps.gl_daily_rates gdr
                 WHERE  gdr.from_currency   = rct.invoice_currency_code
                   AND  gdr.to_currency     = 'IDR'
@@ -883,7 +957,21 @@ class AccountingService:
             ), 1) END
         """
 
-        sql = f"""
+        # after_revaluation_idr — the ONLY figure usd_rate touches. USD rows
+        # use the user's rate when given; every other row (including USD
+        # when no override was given) falls back to the same Corporate rate
+        # rate_case already computes, so this column is never blank/zero
+        # relative to remaining_amount_idr, just potentially different for
+        # USD when an override is active.
+        reval_rate_case = "({rate_case})".format(rate_case=rate_case)
+        if usd_rate:
+            params["usd_rate"] = usd_rate
+            reval_rate_case = f"""
+                CASE WHEN rct.invoice_currency_code = 'USD' THEN :usd_rate
+                ELSE ({rate_case}) END
+            """
+
+        base_sql = f"""
             SELECT
                 hp.party_name                                        AS customer_name,
                 hca.account_number,
@@ -896,6 +984,7 @@ class AccountingService:
                 ({rate_case})                                        AS conversion_rate,
                 ROUND(NVL(aps.amount_due_original,  0) * ({rate_case}), 2) AS original_amount_idr,
                 ROUND(({remaining_expr}) * ({rate_case}), 2)         AS remaining_amount_idr,
+                ROUND(({remaining_expr}) * ({reval_rate_case}), 2)   AS after_revaluation_idr,
                 CASE WHEN {legacy_cond} THEN 0
                      ELSE ROUND(({days_overdue_anchor}) - aps.due_date, 0) END AS days_overdue,
                 CASE WHEN ({status_expr}) = 'CL' THEN TO_CHAR(({payment_date_expr}), 'YYYY-MM-DD') END AS payment_date,
@@ -918,42 +1007,53 @@ class AccountingService:
                 ON  hou.organization_id  = rct.org_id
             WHERE aps.class IN ('INV', 'DM', 'CM')
               {where_extra}
+        """
+        list_sql = f"""
+            {base_sql}
             ORDER BY
                 CASE WHEN ({status_expr}) = 'OP' THEN 0 ELSE 1 END,
                 aps.due_date ASC,
                 hp.party_name
             FETCH FIRST {limit} ROWS ONLY
         """
+        # Aggregate over the FULL matching set (no FETCH FIRST) — see
+        # docstring on why this can't be a Python sum() over the capped
+        # list_sql rows.
+        agg_sql = f"""
+            SELECT
+                SUM(CASE WHEN status = 'OP' THEN 1 ELSE 0 END)                                   AS open_invoice_count,
+                SUM(CASE WHEN status = 'OP' AND days_overdue > 0 THEN 1 ELSE 0 END)               AS overdue_count,
+                SUM(CASE WHEN status = 'OP' THEN remaining_amount ELSE 0 END)                     AS total_remaining,
+                SUM(CASE WHEN status = 'OP' AND days_overdue > 0 THEN remaining_amount ELSE 0 END) AS total_overdue,
+                SUM(CASE WHEN status = 'OP' THEN remaining_amount_idr ELSE 0 END)                 AS total_remaining_idr,
+                SUM(CASE WHEN status = 'OP' AND days_overdue > 0 THEN remaining_amount_idr ELSE 0 END) AS total_overdue_idr,
+                SUM(CASE WHEN status = 'OP' THEN after_revaluation_idr ELSE 0 END)                AS total_after_revaluation_idr,
+                SUM(CASE WHEN status = 'OP' AND class = 'CM' THEN 1 ELSE 0 END)                   AS returns_count,
+                SUM(CASE WHEN status = 'OP' AND class = 'CM' THEN remaining_amount_idr ELSE 0 END) AS returns_remaining_idr
+            FROM ({base_sql})
+        """
         try:
-            rows = await asyncio.to_thread(self._query, sql, params)
+            rows = await asyncio.to_thread(self._query, list_sql, params)
             clean = []
             for r in rows:
                 clean.append({
                     k: (float(v) if hasattr(v, "__float__") and not isinstance(v, (int, float, str, type(None), bool)) else v)
                     for k, v in r.items()
                 })
-            # Summary aggregates — now IDR-converted (total_remaining_idr /
-            # total_overdue_idr) since class='CM' (credit memos / sales
-            # returns) are included alongside INV/DM and some of those, plus
-            # a handful of invoices, aren't IDR — summing the native-
-            # currency remaining_amount as-is across mixed currencies (the
-            # old behavior) understated/overstated the total depending on
-            # which currencies happened to be outstanding. total_remaining/
-            # total_overdue (native-currency sum) are kept too, for
-            # backward compatibility with anything reading the old shape.
-            open_rows   = [r for r in clean if r.get("status") == "OP"]
-            overdue     = [r for r in open_rows if (r.get("days_overdue") or 0) > 0]
-            total_remaining     = sum(r.get("remaining_amount", 0) for r in open_rows)
-            total_overdue       = sum(r.get("remaining_amount", 0) for r in overdue)
-            total_remaining_idr = sum(r.get("remaining_amount_idr", 0) for r in open_rows)
-            total_overdue_idr   = sum(r.get("remaining_amount_idr", 0) for r in overdue)
-            returns_rows = [r for r in open_rows if r.get("class") == "CM"]
-            # Credit memos are queried and netted into every total above
-            # exactly like any other row, but aren't returned as their own
-            # line — "tidak ditampilkan tapi langsung mengurangi" (not
-            # shown, but still directly reduces the totals). The Returns
-            # (CM) summary card remains the only visibility into them.
+            # Credit memos are queried and netted into every summary total
+            # (via agg_sql, which sees the full base_sql result set) exactly
+            # like any other row, but aren't returned as their own line —
+            # "tidak ditampilkan tapi langsung mengurangi" (not shown, but
+            # still directly reduces the totals). The Returns (CM) summary
+            # card remains the only visibility into them.
             visible_rows = [r for r in clean if r.get("class") != "CM"]
+
+            agg_rows = await asyncio.to_thread(self._query, agg_sql, params)
+            agg = agg_rows[0] if agg_rows else {}
+            def _n(key):
+                v = agg.get(key)
+                return float(v) if v is not None else 0.0
+
             return {
                 "success":    True,
                 "count":      len(visible_rows),
@@ -961,14 +1061,15 @@ class AccountingService:
                 "usd_rate":   usd_rate,
                 "as_of_date": as_of_date,
                 "summary": {
-                    "open_invoice_count":    len(open_rows),
-                    "overdue_count":         len(overdue),
-                    "total_remaining":       round(total_remaining, 2),
-                    "total_overdue":         round(total_overdue, 2),
-                    "total_remaining_idr":   round(total_remaining_idr, 2),
-                    "total_overdue_idr":     round(total_overdue_idr, 2),
-                    "returns_count":         len(returns_rows),
-                    "returns_remaining_idr": round(sum(r.get("remaining_amount_idr", 0) for r in returns_rows), 2),
+                    "open_invoice_count":          int(_n("open_invoice_count")),
+                    "overdue_count":                int(_n("overdue_count")),
+                    "total_remaining":              round(_n("total_remaining"), 2),
+                    "total_overdue":                round(_n("total_overdue"), 2),
+                    "total_remaining_idr":          round(_n("total_remaining_idr"), 2),
+                    "total_overdue_idr":            round(_n("total_overdue_idr"), 2),
+                    "total_after_revaluation_idr":  round(_n("total_after_revaluation_idr"), 2),
+                    "returns_count":                int(_n("returns_count")),
+                    "returns_remaining_idr":         round(_n("returns_remaining_idr"), 2),
                 },
                 "data": visible_rows,
             }
@@ -995,15 +1096,19 @@ class AccountingService:
 
         Like get_ar_outstanding's as_of_date, remaining balance is
         reconstructed by replaying AR_RECEIVABLE_APPLICATIONS_ALL
-        (status='APP', apply_date <= as_of_date) against
-        amount_due_original — NOT by reading today's live
-        aps.status/amount_due_remaining — so a since-closed invoice that
-        was still genuinely open as of the chosen date is correctly
-        bucketed (see the MENSA 26110012 case that prompted this). Only
-        cash/credit-memo applications are replayed; manual write-offs/
-        adjustments (AR_ADJUSTMENTS_ALL) are not. due_date remains the
-        reference column for every bucket (days_overdue = as_of_date -
-        due_date), unchanged from before.
+        (status='APP', gl_date <= as_of_date — gl_date rather than
+        apply_date, see get_ar_outstanding's docstring on the 24110047
+        typo'd-apply_date case) AND AR_ADJUSTMENTS_ALL (status='A', same
+        gl_date cutoff — confirmed live via invoice 26130003, a PPh/
+        withholding-tax deduction is recorded as an approved adjustment
+        here, not a receivable application; skipping it left the invoice
+        looking permanently open under any As of Date even though Oracle's
+        live status was already CL) against amount_due_original — NOT by
+        reading today's live aps.status/amount_due_remaining — so a
+        since-closed invoice that was still genuinely open as of the chosen
+        date is correctly bucketed (see the MENSA 26110012 case that
+        prompted this). due_date remains the reference column for every
+        bucket (days_overdue = as_of_date - due_date), unchanged from before.
 
         LEGACY_PAID_CUTOFF (see get_ap_outstanding / get_ar_outstanding)
         applies here too — invoices dated on/before it are forced
@@ -1028,7 +1133,15 @@ class AccountingService:
                 FROM apps.ar_receivable_applications_all araa
                 WHERE araa.applied_payment_schedule_id = aps.payment_schedule_id
                   AND araa.status = 'APP'
-                  AND araa.apply_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')
+                  AND araa.gl_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')
+            ), 0)
+            -
+            NVL((
+                SELECT SUM(adj.amount)
+                FROM apps.ar_adjustments_all adj
+                WHERE adj.payment_schedule_id = aps.payment_schedule_id
+                  AND adj.status = 'A'
+                  AND adj.gl_date <= TO_DATE(:as_of_date, 'YYYY-MM-DD')
             ), 0)
         """
         remaining_asof_expr = f"(NVL(aps.amount_due_original, 0) - ({applied_asof_expr}))"

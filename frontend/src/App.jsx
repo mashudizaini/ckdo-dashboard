@@ -18,7 +18,7 @@ import EISDashboard from "@/pages/dashboard/EIS";
 // Setup Pages — one per team, same names as the DASHBOARD section
 import SetupPage from "@/pages/setup/SetupPage";
 import HRSetupPage from "@/pages/setup/HRSetupPage";
-import ITSetupPage from "@/pages/setup/ITSetupPage";
+import GeneralSetupPage from "@/pages/setup/general/GeneralSetupPage";
 
 // AI Tools Pages
 import Chatbot from "@/pages/ai-tools/Chatbot";
@@ -130,15 +130,18 @@ export default function App() {
 
       {/* SETUP — same team names as DASHBOARD, one placeholder page each
           (no per-team role gate yet — reachable by any authenticated
-          user, matching SETUP_ITEMS' roles: [] in Sidebar.jsx). */}
+          user, matching SETUP_ITEMS' roles: [] in Sidebar.jsx). Setup > IT
+          is now the generic placeholder — its 3 modules (HikCentral/ZKTeco/
+          ETL Admin) moved to Setup > General (2026-09-01), which is now
+          where the actual content lives; see GeneralSetupPage.jsx. */}
       <Route path="/setup" element={<Layout />}>
-        <Route index             element={<Navigate to="/setup/it" replace />} />
-        <Route path="it"          element={<ProtectedRoute><ITSetupPage /></ProtectedRoute>} />
+        <Route index             element={<Navigate to="/setup/general" replace />} />
+        <Route path="it"          element={<ProtectedRoute><SetupPage team="IT" /></ProtectedRoute>} />
         <Route path="hr"          element={<ProtectedRoute><HRSetupPage /></ProtectedRoute>} />
         <Route path="pac"         element={<ProtectedRoute><SetupPage team="PAC" /></ProtectedRoute>} />
         <Route path="accounting"  element={<ProtectedRoute><SetupPage team="Accounting & Tax" /></ProtectedRoute>} />
         <Route path="purchasing"  element={<ProtectedRoute><SetupPage team="Purchasing" /></ProtectedRoute>} />
-        <Route path="general"     element={<ProtectedRoute><SetupPage team="General" /></ProtectedRoute>} />
+        <Route path="general"     element={<ProtectedRoute><GeneralSetupPage /></ProtectedRoute>} />
       </Route>
 
       {/* Bare new-tab view (no sidebar chrome) — opened via window.open() after transcribing */}

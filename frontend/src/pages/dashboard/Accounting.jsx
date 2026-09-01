@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   FileText, DollarSign, FileBarChart2, RefreshCw,
   BarChart2, Package, Download, Search, Loader2, Layers, ClipboardList,
-  AlertTriangle, ChevronLeft, ChevronRight,
+  AlertTriangle, ChevronLeft, ChevronRight, RotateCcw,
 } from "lucide-react";
 import FinancialStatement from "./FinancialStatement";
 import APAutoInvoice from "./APAutoInvoice";
@@ -601,6 +601,7 @@ const AR_HEADERS = [
   { key: "remaining_amount",    label: "Remaining Amt",   width: 120, num: true },
   { key: "conversion_rate",     label: "Rate (Corp.)",    width: 90,  num: true },
   { key: "remaining_amount_idr", label: "Remaining (IDR)", width: 130, num: true },
+  { key: "after_revaluation_idr", label: "After Revaluation (IDR)", width: 150, num: true },
   { key: "days_overdue",        label: "Days Overdue",    width: 90,  num: true },
   { key: "status",              label: "Status",          width: 60  },
   { key: "payment_date",        label: "Payment Date",    width: 100 },
@@ -641,29 +642,37 @@ function AROutstandingPanel() {
   const [search,         setSearch]         = useState("");
   const [sort,           setSort]           = useState({ key: null, dir: "asc" });
 
-  const AR_NUMERIC_KEYS = ["original_amount", "remaining_amount", "conversion_rate", "remaining_amount_idr", "days_overdue"];
+  const AR_NUMERIC_KEYS = ["original_amount", "remaining_amount", "conversion_rate", "remaining_amount_idr", "after_revaluation_idr", "days_overdue"];
 
   const loadBiRate = useCallback(async () => {
     setRateLoading(true);
     try {
-      const res = await accountingApi.getExchangeRate();
+      const res = await accountingApi.getExchangeRate({ as_of_date: asOfDate });
       const usd = res?.rates?.find(r => r.code === "USD");
+      let usdStr = null;
       if (usd && (usd.sell || usd.buy)) {
         const denom = usd.denomination || 1;
         const mid = (usd.sell && usd.buy ? (usd.sell + usd.buy) / 2 : (usd.sell || usd.buy)) / denom;
-        setUsdRate(String(Math.round(mid * 100) / 100));
+        usdStr = String(Math.round(mid * 100) / 100);
+        setUsdRate(usdStr);
         setRateInfo({ date: res.date, source: res.source });
       }
+      // Returned so a caller needing the fresh value right away (the
+      // Refresh button below) doesn't read a stale usdRate closure from
+      // before this state update has actually re-rendered the component.
+      return usdStr;
     } catch (e) {
       // Silent — the field just stays editable/empty and the user can type a rate manually.
+      return null;
     } finally { setRateLoading(false); }
-  }, []);
+  }, [asOfDate]);
 
-  useEffect(() => { loadBiRate(); }, [loadBiRate]);
+  useEffect(() => { loadBiRate(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (overrides = {}) => {
     setLoading(true); setError(null);
     try {
+      const effUsdRate = overrides.usdRate ?? usdRate;
       const params = {
         status: statusFilter,
         limit,
@@ -671,7 +680,7 @@ function AROutstandingPanel() {
         ...(invoiceNumber && { invoice_number: invoiceNumber }),
         ...(dateFrom      && { date_from:       dateFrom      }),
         ...(dateTo        && { date_to:         dateTo        }),
-        ...(usdRate       && { usd_rate:        Number(usdRate) }),
+        ...(effUsdRate    && { usd_rate:        Number(effUsdRate) }),
         ...(asOfDate      && { as_of_date:      asOfDate      }),
       };
       const res = await accountingApi.getArOutstanding(params);
@@ -681,6 +690,26 @@ function AROutstandingPanel() {
       setError(e?.response?.data?.detail || String(e)); setData(null);
     } finally { setLoading(false); }
   }, [customerName, invoiceNumber, dateFrom, dateTo, statusFilter, limit, usdRate, asOfDate]);
+
+  // One click = fetch the fresh BI rate AND reload the list with it applied
+  // — same fix as AP Outstanding's Refresh button, which had the identical
+  // stale-closure bug (loadBiRate()+loadData() fired together read usdRate
+  // from before the fetch resolved).
+  const refreshRateAndReload = useCallback(async () => {
+    const usd = await loadBiRate();
+    loadData({ usdRate: usd ?? usdRate });
+  }, [loadBiRate, loadData, usdRate]);
+
+  const RESET_DEFAULTS = { customerName: "", invoiceNumber: "", dateFrom: "", dateTo: "", statusFilter: "OP", limit: 100, asOfDate: "" };
+  const resetFilters = () => {
+    setCustomerName(RESET_DEFAULTS.customerName);
+    setInvoiceNumber(RESET_DEFAULTS.invoiceNumber);
+    setDateFrom(RESET_DEFAULTS.dateFrom);
+    setDateTo(RESET_DEFAULTS.dateTo);
+    setStatusFilter(RESET_DEFAULTS.statusFilter);
+    setLimit(RESET_DEFAULTS.limit);
+    setAsOfDate(RESET_DEFAULTS.asOfDate);
+  };
 
   const toggleSort = (key) => {
     setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
@@ -819,7 +848,7 @@ function AROutstandingPanel() {
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input type="number" step="0.01" value={usdRate} onChange={e => setUsdRate(e.target.value)}
               placeholder="e.g. 16250" style={{ ...INPUT, width: 110 }} />
-            <button type="button" onClick={loadBiRate} disabled={rateLoading} title="Refresh from BI Kurs Tengah"
+            <button type="button" onClick={refreshRateAndReload} disabled={rateLoading} title="Refresh rate (as of the selected date) and reload the list"
               style={{ border: "none", borderRadius: 9, padding: "7px 8px", background: NEU.bg, boxShadow: NEU.shadowOutSm, cursor: rateLoading ? "default" : "pointer", color: "#64748b" }}>
               <RefreshCw size={13} className={rateLoading ? "animate-spin" : ""} />
             </button>
@@ -853,13 +882,14 @@ function AROutstandingPanel() {
           the 3 IDR-amount cards get the freed-up space; Load/Export CSV
           sit to the right of the row instead of in the filter bar. */}
       <div style={{ display: "flex", gap: 10, marginBottom: 14, alignItems: "stretch" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "110px 110px repeat(3, 1fr)", gap: 10, flex: 1 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "110px 110px repeat(4, 1fr)", gap: 10, flex: 1 }}>
           {[
             { label: "Open Invoices",     val: (sm?.open_invoice_count || 0).toLocaleString(),    color: "#f59e0b" },
             { label: "Overdue Count",      val: (sm?.overdue_count     || 0).toLocaleString(),    color: "#dc2626" },
-            { label: "Total Outstanding (IDR)", val: "Rp " + fmtNum(sm?.total_remaining_idr || 0), color: "#2563eb" },
-            { label: "Total Overdue (IDR)",     val: "Rp " + fmtNum(sm?.total_overdue_idr   || 0), color: "#dc2626" },
-            { label: "Returns (CM)",       val: `${sm?.returns_count || 0} · Rp ${fmtNum(sm?.returns_remaining_idr || 0)}`, color: "#7c3aed" },
+            { label: "Total Outstanding (IDR)", val: "Rp " + fmtNumAp(sm?.total_remaining_idr || 0), color: "#2563eb" },
+            { label: "Total Overdue (IDR)",     val: "Rp " + fmtNumAp(sm?.total_overdue_idr   || 0), color: "#dc2626" },
+            { label: "Total After Revaluation (IDR)", val: "Rp " + fmtNumAp(sm?.total_after_revaluation_idr || 0), color: "#0891b2" },
+            { label: "Returns (CM)",       val: `${sm?.returns_count || 0} · Rp ${fmtNumAp(sm?.returns_remaining_idr || 0)}`, color: "#7c3aed" },
           ].map(c => (
             <div key={c.label} style={{ background: NEU.bg, borderRadius: 12, padding: "10px 14px", boxShadow: NEU.shadowOutSm }}>
               <p style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>{c.label}</p>
@@ -868,7 +898,8 @@ function AROutstandingPanel() {
           ))}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, justifyContent: "center" }}>
-          <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#f59e0b" onClick={loadData} disabled={loading} />
+          <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#f59e0b" onClick={() => loadData()} disabled={loading} />
+          <ActionBtn icon={RotateCcw} label="Reset" color="#64748b" onClick={resetFilters} disabled={loading} />
           {data?.data?.length > 0 && (
             <ActionBtn icon={Download} label="Export CSV" color="#f59e0b" onClick={() => exportArCSV(data.data)} />
           )}
@@ -894,7 +925,7 @@ function AROutstandingPanel() {
               way down the page to reach it. */}
           <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
             <div style={{ maxHeight: "70vh", overflow: "auto" }}>
-              <table className="acct-outstanding-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 1620 }}>
+              <table className="acct-outstanding-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: 1770 }}>
                 <thead>
                   <tr style={{ background: "linear-gradient(135deg,#92400e,#78350f)" }}>
                     <th style={{ ...TH, color: "#fef3c7", background: "#92400e", fontSize: 9.5, position: "sticky", top: 0, zIndex: 1 }}>#</th>
@@ -926,10 +957,11 @@ function AROutstandingPanel() {
                       <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.invoice_date}</td>
                       <td style={{ ...TD, fontFamily: "monospace", fontSize: 11 }}>{r.due_date}</td>
                       <td style={{ ...TD, fontSize: 11, fontWeight: 600 }}>{r.currency}</td>
-                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace" }}>{fmtNum(r.original_amount)}</td>
-                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: r.remaining_amount > 0 ? "#dc2626" : "#16a34a" }}>{fmtNum(r.remaining_amount)}</td>
-                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontSize: 11, color: "#64748b" }}>{fmtNum(r.conversion_rate)}</td>
-                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: r.remaining_amount_idr > 0 ? "#dc2626" : "#16a34a" }}>{fmtNum(r.remaining_amount_idr)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace" }}>{fmtNumAp(r.original_amount, false)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: r.remaining_amount > 0 ? "#dc2626" : "#16a34a" }}>{fmtNumAp(r.remaining_amount, false)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontSize: 11, color: "#64748b" }}>{fmtNumAp(r.conversion_rate, false)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: r.remaining_amount_idr > 0 ? "#dc2626" : "#16a34a" }}>{fmtNumAp(r.remaining_amount_idr)}</td>
+                      <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", color: "#0891b2" }}>{fmtNumAp(r.after_revaluation_idr)}</td>
                       <td style={{ ...TD, textAlign: "right", fontFamily: "monospace", ...daysStyle(r.days_overdue) }}>
                         {r.days_overdue > 0 ? `+${r.days_overdue}d` : r.days_overdue === 0 ? "Today" : r.days_overdue < 0 ? `${Math.abs(r.days_overdue)}d left` : "—"}
                       </td>

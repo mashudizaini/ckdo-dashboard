@@ -963,7 +963,14 @@ els.searchInput.addEventListener("keydown", e => {
     CONFIG.editions = list.map(e => ({
       title:    e.title || e.filename,
       date:     e.date  || "",
-      file:     "magazines/" + encodeURIComponent(e.filename),
+      // Cache-busted by uploaded_at (changes only on a real re-upload) rather
+      // than Date.now() — a deleted-and-reuploaded edition keeps the exact
+      // same filename (see backend hr_emagazine.py's _safe_filename()), so
+      // without this the browser's HTTP cache would keep serving the OLD
+      // cached PDF bytes for that URL indefinitely, even after the file on
+      // disk was correctly overwritten. Falls back to Date.now() only for
+      // entries with no uploaded_at (e.g. an index.json rebuilt from disk).
+      file:     "magazines/" + encodeURIComponent(e.filename) + "?v=" + encodeURIComponent(e.uploaded_at || Date.now()),
       filename: e.filename,
     }));
   }catch(_){

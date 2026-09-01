@@ -27,6 +27,7 @@ import app.models.org_structure  # noqa: F401
 import app.models.user_api_key  # noqa: F401
 import app.models.meeting_recording  # noqa: F401
 import app.models.speaker_voiceprint  # noqa: F401
+import app.models.menu_access  # noqa: F401
 import app.models.outlook_material  # noqa: F401
 import app.models.financial_statement_upload  # noqa: F401
 import app.models.document_conversion_job  # noqa: F401
@@ -43,6 +44,7 @@ from app.routers.dashboard import vpn_monitor
 from app.routers.dashboard import it_hikcentral
 from app.routers.dashboard import it_zkteco
 from app.routers.dashboard import it_etl_admin
+from app.services import menu_access_service
 from app.routers.dashboard import (
     eis_summary, eis_performance, eis_production, eis_expansion, eis_administration,
     eis_business_plan, eis_daily_sales, eis_data_upload,
@@ -207,20 +209,26 @@ app.include_router(
     tags=["Dashboard - IT - VPN Monitoring"],
     dependencies=[Depends(require_role(Roles.IT))],
 )
+# These three moved from Setup > IT to Setup > General (2026-09-01) — no
+# longer blanket it_staff-gated. Access is now per-user via the new
+# menu_access_service (see Setup > General > Access Control), not tied to
+# Keycloak role membership; URL prefixes deliberately left unchanged (no
+# frontend caller needed updating, only who can reach them and where the
+# page lives moved).
 app.include_router(
     it_hikcentral.router, prefix=f"{API_PREFIX}/dashboard/it/hikcentral",
     tags=["Dashboard - IT - HikCentral Integration"],
-    dependencies=[Depends(require_role(Roles.IT))],
+    dependencies=[Depends(menu_access_service.require_menu_access("general.hikcentral"))],
 )
 app.include_router(
     it_zkteco.router, prefix=f"{API_PREFIX}/dashboard/it/zkteco",
     tags=["Dashboard - IT - ZKTeco Plant Integration"],
-    dependencies=[Depends(require_role(Roles.IT))],
+    dependencies=[Depends(menu_access_service.require_menu_access("general.zkteco"))],
 )
 app.include_router(
     it_etl_admin.router, prefix=f"{API_PREFIX}/dashboard/it/etl-admin",
     tags=["Dashboard - IT - ETL Admin"],
-    dependencies=[Depends(require_role(Roles.IT))],
+    dependencies=[Depends(menu_access_service.require_menu_access("general.etl-admin"))],
 )
 app.include_router(hr.router,         prefix=f"{API_PREFIX}/dashboard/hr",         tags=["Dashboard - HR"])
 app.include_router(pac.router,        prefix=f"{API_PREFIX}/dashboard/pac",        tags=["Dashboard - PAC"])
