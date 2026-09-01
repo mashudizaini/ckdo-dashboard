@@ -2143,6 +2143,12 @@ function ActiveSuppliersSection() {
 const LINE_COLORS = ["#06b6d4","#f59e0b","#10b981","#f43f5e","#8b5cf6","#3b82f6","#ec4899","#84cc16"];
 const fmtIDR2 = (v) => v == null ? "—" : new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 }).format(v);
 
+// Commodity Reference Price panel temporarily hidden (2026-09-01 user
+// request, "belum di perlukan") — flip back to true to restore it. Data
+// fetch itself is untouched, only the render is gated, same pattern as
+// FinancialStatement.jsx's SHOW_ORACLE_SOURCE.
+const SHOW_COMMODITY_REFERENCE = false;
+
 function PriceAnalysisSection() {
   const [filters, setFilters] = useState({
     item_code: "", item_desc: "", vendor_name: "",
@@ -2264,7 +2270,7 @@ function PriceAnalysisSection() {
   return (
     <div className="space-y-4">
       {/* Metals Reference Panel */}
-      {metals && (
+      {SHOW_COMMODITY_REFERENCE && metals && (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
           <p className="text-xs text-gray-400 font-semibold mb-3 uppercase tracking-wider">
             Commodity Reference Price (metals.dev · USD/troy oz)
