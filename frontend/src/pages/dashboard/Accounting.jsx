@@ -151,19 +151,29 @@ function APOutstandingPanel() {
       };
       const usd = midOf(res?.rates?.find(r => r.code === "USD"));
       const eur = midOf(res?.rates?.find(r => r.code === "EUR"));
-      if (usd != null) setUsdRate(String(Math.round(usd * 100) / 100));
-      if (eur != null) setEurRate(String(Math.round(eur * 100) / 100));
-      if (usd != null || eur != null) setRateInfo({ date: res.date, source: res.source });
+      const usdStr = usd != null ? String(Math.round(usd * 100) / 100) : null;
+      const eurStr = eur != null ? String(Math.round(eur * 100) / 100) : null;
+      if (usdStr != null) setUsdRate(usdStr);
+      if (eurStr != null) setEurRate(eurStr);
+      if (usdStr != null || eurStr != null) setRateInfo({ date: res.date, source: res.source });
+      // Returned (not just set as state) so a caller that needs the fresh
+      // rate immediately after — see the Refresh button below — doesn't
+      // read a stale usdRate/eurRate closure from before this state update
+      // has actually re-rendered the component.
+      return { usd: usdStr, eur: eurStr };
     } catch (e) {
+      return { usd: null, eur: null };
       // Silent — fields stay editable/empty and the user can type rates manually.
     } finally { setRateLoading(false); }
   }, [asOfDate]);
 
   useEffect(() => { loadBiRate(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (overrides = {}) => {
     setLoading(true); setError(null);
     try {
+      const effUsdRate = overrides.usdRate ?? usdRate;
+      const effEurRate = overrides.eurRate ?? eurRate;
       const params = {
         limit,
         ...(asOfDate      && { as_of_date:      asOfDate      }),
@@ -171,8 +181,8 @@ function APOutstandingPanel() {
         ...(dateTo        && { date_to:         dateTo        }),
         ...(supplierName  && { supplier_name:   supplierName  }),
         ...(payStatusFilter && payStatusFilter !== "ALL" && { payment_status: payStatusFilter }),
-        ...(usdRate       && { usd_rate:        Number(usdRate) }),
-        ...(eurRate       && { eur_rate:        Number(eurRate) }),
+        ...(effUsdRate    && { usd_rate:        Number(effUsdRate) }),
+        ...(effEurRate    && { eur_rate:        Number(effEurRate) }),
       };
       const res = await accountingApi.getApOutstanding(params);
       if (res.success) { setData(res); }
@@ -181,6 +191,15 @@ function APOutstandingPanel() {
       setError(e?.response?.data?.detail || String(e)); setData(null);
     } finally { setLoading(false); }
   }, [asOfDate, dateFrom, dateTo, supplierName, payStatusFilter, limit, usdRate, eurRate]);
+
+  // One click = fetch the fresh BI rate AND reload the list with it applied
+  // — passing the just-fetched rate straight into loadData() as an explicit
+  // override, instead of relying on state (which wouldn't have re-rendered
+  // yet), is what avoids needing a second click.
+  const refreshRateAndReload = useCallback(async () => {
+    const { usd, eur } = await loadBiRate();
+    loadData({ usdRate: usd ?? usdRate, eurRate: eur ?? eurRate });
+  }, [loadBiRate, loadData, usdRate, eurRate]);
 
   const toggleSort = (key) => {
     setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
@@ -309,7 +328,7 @@ function APOutstandingPanel() {
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input type="number" step="0.01" value={eurRate} onChange={e => setEurRate(e.target.value)}
               placeholder="e.g. 17800" style={{ ...INPUT, width: 100 }} />
-            <button type="button" onClick={() => { loadBiRate(); loadData(); }} disabled={rateLoading} title="Refresh rate (as of the selected date) and reload the list"
+            <button type="button" onClick={refreshRateAndReload} disabled={rateLoading} title="Refresh rate (as of the selected date) and reload the list"
               style={{ border: "none", borderRadius: 9, padding: "7px 8px", background: NEU.bg, boxShadow: NEU.shadowOutSm, cursor: rateLoading ? "default" : "pointer", color: "#64748b" }}>
               <RefreshCw size={13} className={rateLoading ? "animate-spin" : ""} />
             </button>

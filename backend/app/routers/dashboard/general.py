@@ -10,9 +10,14 @@ caller's own team (see general_budget.py / budget_access_service.py)
 rather than by role.
 """
 from fastapi import APIRouter
-from app.routers.dashboard import general_budget
+from app.routers.dashboard import general_budget, general_ap_payment
 
 router = APIRouter()
 
 # Sub-router: budget monitoring (moved here from HRGA — see general_budget.py)
 router.include_router(general_budget.router, prefix="/budget", tags=["Dashboard - General Budget"])
+
+# Sub-router: AP Outstanding with Payment (see general_ap_payment.py) —
+# same Oracle data as Accounting & Tax > AP Outstanding, deliberately placed
+# here instead so it's visible company-wide, not gated to accounting_staff.
+router.include_router(general_ap_payment.router, prefix="/ap-payment", tags=["Dashboard - General AP Outstanding with Payment"])

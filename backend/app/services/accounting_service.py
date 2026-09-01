@@ -276,9 +276,11 @@ class AccountingService:
 
         usd_rate/eur_rate (typically Bank Indonesia's Kurs Tengah as of
         as_of_date) drive the "Total After Revaluation" summary figure —
-        SUM over Not Paid invoices of original_amount_orig * the matching
-        override rate for USD/EUR rows, falling back to the existing
-        base_amount-derived original_amount_idr for every other currency
+        SUM over Not Paid invoices of remaining_amount_orig (the OUTSTANDING
+        balance in foreign currency, not the original invoice amount — a
+        partially-paid invoice's revaluation should reflect what's still
+        owed) * the matching override rate for USD/EUR rows, falling back to
+        the existing remaining_amount_idr for every other currency
         (including IDR itself, and USD/EUR when no override was given).
         This only affects that one summary number — the per-row
         original_amount_idr/remaining_amount_idr columns are untouched.
@@ -409,10 +411,10 @@ class AccountingService:
 
         def _revalued(r):
             ccy = r.get("currency")
-            orig_fc = r.get("original_amount_orig")
-            if ccy in reval_override and orig_fc is not None:
-                return orig_fc * reval_override[ccy]
-            return r.get("original_amount_idr") or 0
+            remaining_fc = r.get("remaining_amount_orig")
+            if ccy in reval_override and remaining_fc is not None:
+                return remaining_fc * reval_override[ccy]
+            return r.get("remaining_amount_idr") or 0
 
         try:
             rows = await asyncio.to_thread(self._query, sql, params)
@@ -453,6 +455,179 @@ class AccountingService:
             }
         except Exception as e:
             logger.error("ap_outstanding_error", error=str(e))
+            return {"success": False, "error": str(e), "data": []}
+
+    async def get_ap_outstanding_with_payment(
+        self,
+        as_of_date: str = None,
+        date_from: str = None,
+        date_to: str = None,
+        supplier_name: str = None,
+        payment_status: str = None,
+        limit: int = 500,
+    ) -> dict:
+        """
+        AP Outstanding + payment application history — same scope/filters as
+        get_ap_outstanding above (NOT a refactor of it — the base query is
+        deliberately duplicated rather than shared, so a change to one
+        report can never silently break the other), extended with one row
+        per (invoice, payment applied against it) via
+        AP_INVOICE_PAYMENTS_ALL + AP_CHECKS_ALL (LEFT JOIN, so a "Not Paid"
+        invoice with nothing applied yet still appears — once, with
+        payment_number/payment_date/payment_amount all NULL — instead of
+        being dropped). An invoice with 3 partial payments applied appears
+        as 3 rows here, sharing the same AP Outstanding columns and
+        differing only in the payment_* columns.
+
+        NOTE: AP_INVOICE_PAYMENTS_ALL / AP_CHECKS_ALL column names follow
+        the standard Oracle EBS R12 AP schema — this has NOT been validated
+        against this specific instance's live data (no direct Oracle access
+        from where this was written). If it errors, the fix is almost
+        certainly a column/table name mismatch here, not the surrounding logic.
+        """
+        limit = min(max(limit, 1), 2000)
+
+        date_expr = "TO_DATE(:as_of_date, 'YYYY-MM-DD')" if as_of_date else "TRUNC(SYSDATE)"
+        params: dict = {}
+        if as_of_date:
+            params["as_of_date"] = as_of_date
+
+        params["legacy_paid_cutoff"] = self.LEGACY_PAID_CUTOFF
+        legacy_cond = "ai2.invoice_date <= TO_DATE(:legacy_paid_cutoff, 'YYYY-MM-DD')"
+
+        coa_binds = {f"coa{i}": code for i, code in enumerate(self.AP_COA_WHITELIST)}
+        params.update(coa_binds)
+        coa_filter = "gcc.segment4 IN (" + ", ".join(f":{k}" for k in coa_binds) + ")"
+
+        extra_where = ""
+        if supplier_name:
+            extra_where += " AND UPPER(pv.vendor_name) LIKE UPPER(:supplier_name)"
+            params["supplier_name"] = f"%{supplier_name}%"
+        if date_from:
+            extra_where += " AND ai.invoice_date >= TO_DATE(:date_from, 'YYYY-MM-DD')"
+            params["date_from"] = date_from
+        if date_to:
+            extra_where += " AND ai.invoice_date <= TO_DATE(:date_to, 'YYYY-MM-DD')"
+            params["date_to"] = date_to
+        if payment_status and payment_status != "ALL":
+            extra_where += (
+                " AND CASE"
+                "   WHEN NVL(sched_summary.total_remaining, 0) = 0 THEN 'Paid'"
+                "   WHEN NVL(sched_summary.total_remaining, 0) < NVL(sched_summary.total_gross, 0) THEN 'Partially Paid'"
+                "   ELSE 'Not Paid'"
+                " END = :pay_status"
+            )
+            params["pay_status"] = payment_status
+
+        sql = f"""
+            SELECT *
+            FROM (
+                SELECT
+                    ai.org_id,
+                    pv.vendor_name                                                 AS supplier_name,
+                    SUBSTR(NVL(ai.description, '-'), 1, 100)                       AS description,
+                    gcc.segment1||'.'||gcc.segment2||'.'||gcc.segment3||'.'||
+                    gcc.segment4||'.'||gcc.segment5||'.'||gcc.segment6             AS coa,
+                    gcc.segment4                                                   AS coa_number,
+                    SUBSTR(NVL(ffvl.description, '-'), 1, 80)                      AS coa_descpt,
+                    ai.invoice_type_lookup_code                                    AS transaction_type,
+                    ai.invoice_num                                                 AS transaction_number,
+                    ai.invoice_id,
+                    TO_CHAR(ai.invoice_date, 'YYYY-MM-DD')                         AS invoice_date,
+                    TO_CHAR(ai.gl_date,      'YYYY-MM-DD')                         AS gl_date,
+                    ai.invoice_currency_code                                       AS currency,
+                    CASE
+                        WHEN NVL(sched_summary.total_remaining, 0) = 0
+                             THEN 'Paid'
+                        WHEN NVL(sched_summary.total_remaining, 0) <
+                             NVL(sched_summary.total_gross, 0)
+                             THEN 'Partially Paid'
+                        ELSE 'Not Paid'
+                    END                                                            AS payment_status,
+                    CASE WHEN ai.invoice_currency_code <> 'IDR'
+                         THEN ai.invoice_amount        END                         AS original_amount_orig,
+                    CASE WHEN ai.invoice_currency_code <> 'IDR'
+                         THEN sched_summary.total_remaining_orig END               AS remaining_amount_orig,
+                    NVL(ai.base_amount, ai.invoice_amount)                         AS original_amount_idr,
+                    sched_summary.total_remaining                                  AS remaining_amount_idr,
+                    cks.check_number                                               AS payment_number,
+                    TO_CHAR(NVL(apn.accounting_date, cks.check_date), 'YYYY-MM-DD') AS payment_date,
+                    apn.amount                                                     AS payment_amount,
+                    cks.payment_method_code                                        AS payment_method
+                FROM apps.ap_invoices_all              ai
+                   , apps.ap_suppliers                 pv
+                   , apps.gl_code_combinations         gcc
+                   , apps.fnd_flex_values_vl           ffvl
+                   , apps.fnd_flex_value_sets          ffvs
+                   , ( SELECT aps.invoice_id
+                            , SUM(aps.gross_amount)                                AS total_gross
+                            , SUM(CASE WHEN {legacy_cond} THEN 0 ELSE aps.amount_remaining END)
+                                                                                   AS total_remaining_orig
+                            , SUM(CASE WHEN {legacy_cond} THEN 0 ELSE
+                                   aps.amount_remaining *
+                                   NVL(ai2.base_amount, ai2.invoice_amount) /
+                                   DECODE(ai2.invoice_amount, 0, 1, ai2.invoice_amount)
+                              END)
+                                                                                   AS total_remaining
+                         FROM apps.ap_payment_schedules_all aps
+                            , apps.ap_invoices_all          ai2
+                        WHERE aps.invoice_id            = ai2.invoice_id
+                          AND aps.payment_status_flag  IN ('N', 'P')
+                          AND ai2.gl_date              <= {date_expr}
+                        GROUP BY aps.invoice_id
+                     ) sched_summary
+                   , apps.ap_invoice_payments_all apn
+                   , apps.ap_checks_all           cks
+                WHERE ai.invoice_id                       = sched_summary.invoice_id
+                  AND ai.vendor_id                        = pv.vendor_id
+                  AND ai.accts_pay_code_combination_id    = gcc.code_combination_id
+                  AND ai.gl_date                         <= {date_expr}
+                  AND ffvl.flex_value_set_id              = ffvs.flex_value_set_id
+                  AND ffvl.flex_value                     = gcc.segment4
+                  AND {coa_filter}
+                  AND apn.invoice_id (+)                  = ai.invoice_id
+                  AND cks.check_id (+)                    = apn.check_id
+                  AND CASE
+                          WHEN NVL(sched_summary.total_remaining, 0) = 0
+                               THEN 'Paid'
+                          WHEN NVL(sched_summary.total_remaining, 0) <
+                               NVL(sched_summary.total_gross, 0)
+                               THEN 'Partially Paid'
+                          ELSE 'Not Paid'
+                      END != 'Paid'
+                  {extra_where}
+                ORDER BY pv.vendor_name, ai.invoice_date, ai.invoice_num, payment_date
+            )
+            WHERE ROWNUM <= {limit}
+        """
+
+        try:
+            rows = await asyncio.to_thread(self._query, sql, params)
+            clean = [
+                {
+                    k: (float(v) if hasattr(v, "__float__") and not isinstance(v, (int, float, str, type(None), bool)) else v)
+                    for k, v in r.items()
+                }
+                for r in rows
+            ]
+            not_paid_ids     = {r.get("invoice_id") for r in clean if r.get("payment_status") == "Not Paid"}
+            partial_paid_ids = {r.get("invoice_id") for r in clean if r.get("payment_status") == "Partially Paid"}
+            total_payment_applied = sum(r.get("payment_amount") or 0 for r in clean)
+
+            return {
+                "success":       True,
+                "count":         len(clean),
+                "invoice_count": len({r.get("invoice_id") for r in clean}),
+                "as_of_date":    as_of_date or "today",
+                "summary": {
+                    "not_paid_count":            len(not_paid_ids),
+                    "partial_paid_count":        len(partial_paid_ids),
+                    "total_payment_applied_idr": round(total_payment_applied, 2),
+                },
+                "data": clean,
+            }
+        except Exception as e:
+            logger.error("ap_outstanding_with_payment_error", error=str(e))
             return {"success": False, "error": str(e), "data": []}
 
     async def get_ap_aging(self, supplier_name: str = None, base_date: str = None, limit: int = 500) -> dict:

@@ -59,6 +59,7 @@ const NAV_ITEMS = [
     { label: "Budget Monitoring", path: "/dashboard/general/budget" },
     // Temporarily hidden — not in active use yet.
     // { label: "Budget Usage Report", path: "/dashboard/general/budget-usage" },
+    { label: "AP Outstanding with Payment", path: "/dashboard/general/ap-payment" },
   ] },
 ];
 

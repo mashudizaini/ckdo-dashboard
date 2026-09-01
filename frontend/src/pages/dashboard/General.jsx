@@ -11,11 +11,11 @@
  * duplicated from HR.jsx rather than shared/imported, matching this
  * codebase's convention for self-contained dashboard sections.
  */
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { RefreshCw, Download, Wallet, ChevronDown, Loader2, X, Lock } from "lucide-react";
+import { RefreshCw, Download, Wallet, ChevronDown, Loader2, X, Lock, AlertTriangle } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
-import { toggleSort, sortRows } from "@/components/SortableTH";
+import { toggleSort, sortRows, SortableTH } from "@/components/SortableTH";
 
 const BUDGET_API = "/api/v1/dashboard/general/budget";
 const MONTHS_ID = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -746,9 +746,226 @@ function BudgetMonitoringSection() {
   );
 }
 
+/* ── AP Outstanding with Payment ─────────────────────────────────────────
+   Same Oracle data/filters as Accounting & Tax > AP Outstanding (AP_INVOICES_ALL
+   + AP_PAYMENT_SCHEDULES_ALL), deliberately duplicated on the backend rather
+   than shared so a change to one report can't silently break the other —
+   extended with one row per (invoice, payment applied against it) via
+   AP_INVOICE_PAYMENTS_ALL + AP_CHECKS_ALL. Placed under General (not gated
+   to accounting_staff) per the request that payment visibility be
+   company-wide. No revaluation/kurs columns here — this report is scoped to
+   payment history, not currency revaluation (see AP Outstanding for that). */
+
+const AP_PAYMENT_API = "/api/v1/dashboard/general/ap-payment";
+
+const AP_PAYMENT_HEADERS = [
+  { key: "supplier_name",        label: "Supplier" },
+  { key: "transaction_type",     label: "Type" },
+  { key: "transaction_number",   label: "Invoice No" },
+  { key: "invoice_date",         label: "Invoice Date" },
+  { key: "currency",             label: "Cur" },
+  { key: "coa_number",           label: "Account" },
+  { key: "coa_descpt",           label: "Account Desc" },
+  { key: "payment_status",       label: "Status" },
+  { key: "original_amount_idr",  label: "Orig Amt (IDR)",   num: true },
+  { key: "remaining_amount_idr", label: "Remaining (IDR)",  num: true },
+  { key: "payment_number",       label: "Payment No" },
+  { key: "payment_date",         label: "Payment Date" },
+  { key: "payment_amount",       label: "Payment Amount",   num: true },
+  { key: "payment_method",       label: "Payment Method" },
+  { key: "description",          label: "Description" },
+];
+
+function exportApPaymentCSV(rows) {
+  if (!rows?.length) return;
+  const lines = [
+    "﻿" + AP_PAYMENT_HEADERS.map(h => h.label).join(","),
+    ...rows.map(r => AP_PAYMENT_HEADERS.map(h => `"${String(r[h.key] ?? "").replace(/"/g, '""')}"`).join(",")),
+  ];
+  const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "ap_outstanding_with_payment.csv"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function APOutstandingWithPaymentSection() {
+  const { token } = useAuthStore();
+  const hdrs = { Authorization: `Bearer ${token}` };
+  const today = new Date().toISOString().slice(0, 10);
+
+  const [asOfDate,        setAsOfDate]        = useState(today);
+  const [dateFrom,        setDateFrom]        = useState("");
+  const [dateTo,          setDateTo]          = useState("");
+  const [supplierName,    setSupplierName]    = useState("");
+  const [payStatusFilter, setPayStatusFilter] = useState("ALL");
+  const [limit,           setLimit]           = useState(500);
+  const [data,            setData]            = useState(null);
+  const [loading,         setLoading]         = useState(false);
+  const [error,           setError]           = useState(null);
+  const [search,          setSearch]          = useState("");
+  const [sortBy,          setSortBy]          = useState(null);
+  const [sortDir,         setSortDir]         = useState("asc");
+
+  const NUMERIC_KEYS = ["original_amount_idr", "remaining_amount_idr", "payment_amount"];
+
+  const loadData = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const params = new URLSearchParams({ limit });
+      if (asOfDate) params.set("as_of_date", asOfDate);
+      if (dateFrom) params.set("date_from", dateFrom);
+      if (dateTo) params.set("date_to", dateTo);
+      if (supplierName) params.set("supplier_name", supplierName);
+      if (payStatusFilter && payStatusFilter !== "ALL") params.set("payment_status", payStatusFilter);
+      const res = await fetch(`${AP_PAYMENT_API}?${params}`, { headers: hdrs });
+      const j = await res.json();
+      if (res.ok && j.success) setData(j);
+      else { setError(j.error || j.detail || "Failed to load"); setData(null); }
+    } catch (e) {
+      setError(e?.message || String(e)); setData(null);
+    } finally { setLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asOfDate, dateFrom, dateTo, supplierName, payStatusFilter, limit]);
+
+  useEffect(() => { loadData(); }, []); // eslint-disable-line
+
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
+
+  const filteredRows = (data?.data || []).filter(r => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (r.supplier_name       || "").toLowerCase().includes(q)
+        || (r.transaction_number  || "").toLowerCase().includes(q)
+        || (r.payment_number      || "").toLowerCase().includes(q)
+        || (r.coa_descpt          || "").toLowerCase().includes(q);
+  });
+  const rows = useMemo(() => sortRows(filteredRows, sortBy, sortDir, NUMERIC_KEYS),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data, search, sortBy, sortDir]);
+
+  const fmtNum = (v) => v == null ? "" : Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const payBadge = (s) => {
+    const cfg = {
+      "Not Paid":       "bg-red-500/10 text-red-400",
+      "Partially Paid": "bg-amber-500/10 text-amber-400",
+    }[s] || "bg-gray-500/10 text-gray-400";
+    return <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap ${cfg}`}>{s}</span>;
+  };
+
+  const sm = data?.summary;
+  const INPUT = "rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500";
+  const LBL = "block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className={LBL}>As of Date</label>
+          <input type="date" value={asOfDate} onChange={e => setAsOfDate(e.target.value)} className={INPUT} />
+        </div>
+        <div>
+          <label className={LBL}>Period From</label>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className={INPUT} />
+        </div>
+        <div>
+          <label className={LBL}>Period To</label>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className={INPUT} />
+        </div>
+        <div>
+          <label className={LBL}>Supplier</label>
+          <input value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder="Search supplier…"
+            onKeyDown={e => e.key === "Enter" && loadData()} className={`${INPUT} w-48`} />
+        </div>
+        <div>
+          <label className={LBL}>Pay Status</label>
+          <select value={payStatusFilter} onChange={e => setPayStatusFilter(e.target.value)} className={`${INPUT} cursor-pointer`}>
+            <option value="ALL">All Outstanding</option>
+            <option value="Not Paid">Not Paid</option>
+            <option value="Partially Paid">Partially Paid</option>
+          </select>
+        </div>
+        <div>
+          <label className={LBL}>Limit</label>
+          <select value={limit} onChange={e => setLimit(Number(e.target.value))} className={`${INPUT} cursor-pointer`}>
+            {[200, 500, 1000, 2000].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+        <button onClick={loadData} disabled={loading}
+          className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 hover:border-gray-600 disabled:opacity-40 transition-colors">
+          <RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Load
+        </button>
+        <div className="flex-1" />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter loaded rows…" className={`${INPUT} w-56`} />
+        <button onClick={() => exportApPaymentCSV(rows)} disabled={!rows.length}
+          className="flex items-center gap-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 px-3 py-1.5 text-xs text-white disabled:opacity-40 transition-colors">
+          <Download size={12} /> Export CSV
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-lg px-4 py-2.5 text-xs flex items-center gap-2 bg-red-500/10 text-red-400 border border-red-500/20">
+          <AlertTriangle size={13} /> {error}
+        </div>
+      )}
+
+      {sm && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <BudgetSummaryCard label="Not Paid"        value={String(sm.not_paid_count)}     color="text-red-400"   bg="bg-red-500/10 border-red-500/20" />
+          <BudgetSummaryCard label="Partially Paid"  value={String(sm.partial_paid_count)} color="text-amber-400" bg="bg-amber-500/10 border-amber-500/20" />
+          <BudgetSummaryCard label="Invoices Shown"  value={String(data.invoice_count)}    color="text-blue-400"  bg="bg-blue-500/10 border-blue-500/20" />
+          <BudgetSummaryCard label="Total Payment Applied (IDR)" value={`Rp ${fmtNum(sm.total_payment_applied_idr)}`} color="text-green-400" bg="bg-green-500/10 border-green-500/20" />
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex justify-center py-16"><Loader2 size={22} className="animate-spin text-gray-600" /></div>
+      ) : !data ? (
+        <div className="py-16 text-center text-xs text-gray-600">Click Load to fetch data.</div>
+      ) : rows.length === 0 ? (
+        <div className="py-16 text-center text-xs text-gray-600">No rows match the current filters.</div>
+      ) : (
+        <div className="rounded-lg border border-gray-800 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-gray-800/60">
+                {AP_PAYMENT_HEADERS.map(h => (
+                  <SortableTH key={h.key} label={h.label} field={h.key} sortBy={sortBy} sortDir={sortDir} onSort={handleSort} align={h.num ? "right" : "left"} />
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800/60">
+              {rows.map((r, i) => (
+                <tr key={`${r.invoice_id}-${r.payment_number || "none"}-${i}`} className="hover:bg-gray-800/30">
+                  <td className="px-3 py-2 text-gray-300 whitespace-nowrap">{r.supplier_name}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.transaction_type}</td>
+                  <td className="px-3 py-2 text-gray-300 whitespace-nowrap">{r.transaction_number}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.invoice_date}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.currency}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.coa_number}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.coa_descpt}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{payBadge(r.payment_status)}</td>
+                  <td className="px-3 py-2 text-right text-gray-300 tabular-nums whitespace-nowrap">{fmtNum(r.original_amount_idr)}</td>
+                  <td className="px-3 py-2 text-right text-gray-300 tabular-nums whitespace-nowrap">{fmtNum(r.remaining_amount_idr)}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.payment_number || "—"}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.payment_date || "—"}</td>
+                  <td className="px-3 py-2 text-right text-green-400 tabular-nums whitespace-nowrap">{r.payment_amount != null ? fmtNum(r.payment_amount) : "—"}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.payment_method || "—"}</td>
+                  <td className="px-3 py-2 text-gray-500">{r.description}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Root ─────────────────────────────────────────────────────────────── */
 
-const GENERAL_TABS = ["budget"];
+const GENERAL_TABS = ["budget", "ap-payment"];
 
 export default function General() {
   const navigate = useNavigate();
@@ -767,6 +984,11 @@ export default function General() {
       {activeSection === "budget" && (
         <SectionCard>
           <BudgetMonitoringSection />
+        </SectionCard>
+      )}
+      {activeSection === "ap-payment" && (
+        <SectionCard title="AP Outstanding with Payment">
+          <APOutstandingWithPaymentSection />
         </SectionCard>
       )}
     </div>
