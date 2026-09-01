@@ -659,13 +659,25 @@ function BalanceSheetPanel({ periods, fromYear, setFromYear, fromMonth, setFromM
 
   // Natural-account detail always queries Oracle directly (no Excel
   // equivalent — the manual file has no natural-account granularity), so
-  // when the summary is in excel mode its bare years get resolved to their
-  // Oracle December period_name equivalents before an inline expansion can
-  // fetch them. Years with no matching Oracle period (e.g. history older
-  // than Oracle's GL calendar) are simply dropped.
+  // when the summary is in excel mode its bare years get resolved to an
+  // Oracle period_name before an inline expansion can fetch them. Uses
+  // fyColumnPeriods' existing "closed year -> December, still-open current
+  // year -> latest posted period" logic (same helper Profit or Loss's own
+  // column resolution already relies on) rather than insisting on December
+  // outright — that insistence meant clicking ANY line for the current,
+  // not-yet-closed fiscal year always failed with "No matching Oracle GL
+  // period for the selected years" (confirmed live 2026-09-01: FY2026's
+  // December obviously hasn't posted yet). Years with no posted Oracle
+  // period at all (e.g. history older than Oracle's GL calendar) are still
+  // simply dropped.
   const detailPeriodList = useMemo(() => {
     if (source !== "excel") return periodList;
-    return periodList.map(y => periodNameForMonthYear(periods, "DEC", y)).filter(Boolean);
+    return periodList
+      .map(y => {
+        const cols = fyColumnPeriods(periods, y);
+        return cols.length ? cols[cols.length - 1] : null;
+      })
+      .filter(Boolean);
   }, [periodList, source, periods]);
 
   // Any expanded line's cached detail is only valid for the exact period
