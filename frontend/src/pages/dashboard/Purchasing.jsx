@@ -2141,7 +2141,14 @@ function ActiveSuppliersSection() {
 /* ─── Section: PO Price Analysis ────────────────────── */
 
 const LINE_COLORS = ["#06b6d4","#f59e0b","#10b981","#f43f5e","#8b5cf6","#3b82f6","#ec4899","#84cc16"];
-const fmtIDR2 = (v) => v == null ? "—" : new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 }).format(v);
+// No rounding to whole numbers here on purpose (2026-09-01 user request) —
+// unit prices for raw materials/chemicals are routinely sub-1 or a few
+// dollars with real decimal precision (matches the backend's own
+// ROUND(pol.unit_price, 4)/ROUND(SUM(pol.quantity), 2)); showing "6"
+// instead of "5.7" silently threw that precision away. Only caps at 4
+// decimals so a value that's already a whole number still prints as a
+// whole number, not padded with trailing zeros.
+const fmtIDR2 = (v) => v == null ? "—" : new Intl.NumberFormat("id-ID", { maximumFractionDigits: 4 }).format(v);
 
 // Commodity Reference Price panel temporarily hidden (2026-09-01 user
 // request, "belum di perlukan") — flip back to true to restore it. Data
