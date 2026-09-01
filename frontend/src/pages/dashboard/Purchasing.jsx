@@ -10,7 +10,7 @@ import {
   LineChart, Line, BarChart, Bar, Cell,
   PieChart, Pie,
   XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer,
+  Tooltip, Legend, ResponsiveContainer, LabelList,
 } from "recharts";
 import { purchasingApi } from "@/api/dashboard";
 import { SortableTH, toggleSort, sortRows } from "@/components/SortableTH";
@@ -2362,7 +2362,7 @@ function PriceAnalysisSection() {
             Prices shown as-invoiced per supplier — not converted to IDR, so values aren't directly comparable across suppliers using different currencies (see "Curr" column below).
           </p>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={chartData} margin={{ top: 4, right: 20, left: 10, bottom: 4 }}>
+            <LineChart data={chartData} margin={{ top: 24, right: 20, left: 10, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.06)" />
               <XAxis dataKey="year" tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: "#9ca3af" }} axisLine={false} tickLine={false}
@@ -2376,7 +2376,10 @@ function PriceAnalysisSection() {
               {suppliers.map((s, i) => (
                 <Line key={s} type="monotone" dataKey={s}
                   stroke={LINE_COLORS[i % LINE_COLORS.length]}
-                  strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} connectNulls />
+                  strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} connectNulls>
+                  <LabelList dataKey={s} position="top" formatter={v => v == null ? "" : fmtIDR2(v)}
+                    style={{ fontSize: 10, fill: LINE_COLORS[i % LINE_COLORS.length], fontWeight: 600 }} />
+                </Line>
               ))}
             </LineChart>
           </ResponsiveContainer>

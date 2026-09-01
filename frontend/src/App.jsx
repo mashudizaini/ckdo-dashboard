@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
 import Layout from "@/components/layout/Layout";
 import ProtectedRoute from "@/components/layout/ProtectedRoute";
@@ -27,11 +27,22 @@ import MeetingNotes from "@/pages/ai-tools/MeetingNotes";
 import MeetingTranscriptView from "@/pages/ai-tools/MeetingTranscriptView";
 
 export default function App() {
-  const { init, isLoading, isAuthenticated } = useAuthStore();
+  const { init, isLoading, isAuthenticated, returnPath, clearReturnPath } = useAuthStore();
+  const navigate = useNavigate();
 
   useEffect(() => {
     init();
   }, []);
+
+  // After a fresh login, jump back to whatever page the user was on right
+  // before the logout that preceded it (idle timeout, a failed token
+  // refresh, or a manual logout) — see authStore.js's logout()/returnPath.
+  useEffect(() => {
+    if (isAuthenticated && returnPath) {
+      navigate(returnPath, { replace: true });
+      clearReturnPath();
+    }
+  }, [isAuthenticated, returnPath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading) {
     return (

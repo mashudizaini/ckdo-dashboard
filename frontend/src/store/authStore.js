@@ -55,6 +55,13 @@ const IDLE_CHECK_INTERVAL_MS = 15 * 1000;
 const ACTIVITY_EVENTS = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"];
 const LAST_ACTIVITY_KEY = "ckdo_last_activity_at";
 
+// Path to return to after the NEXT successful login — set right before any
+// logout() call (idle timeout, token-refresh failure, or a manual logout
+// button) and consumed once by App.jsx. Survives the full-page redirect
+// kc.logout()/kc.login() do (in-memory state doesn't) since it's written to
+// localStorage, not component state.
+const RETURN_PATH_KEY = "ckdo_return_path";
+
 const markActivity = () => {
   try { localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now())); } catch (_) {}
 };
@@ -74,6 +81,7 @@ export const useAuthStore = create((set, get) => ({
   user: null,
   token: null,
   roles: [],
+  returnPath: null, // set once after a fresh login if a pre-logout path was saved — App.jsx consumes it via clearReturnPath()
 
   init: async () => {
     if (kcInitialized) return;
@@ -103,11 +111,21 @@ export const useAuthStore = create((set, get) => ({
           kc.tokenParsed?.realm_access?.roles ||
           [];
 
+        // Consumed once here — whatever page the user was on right before
+        // this login's preceding logout (idle timeout, a failed token
+        // refresh, or a manual logout), if any was saved.
+        let returnPath = null;
+        try {
+          returnPath = localStorage.getItem(RETURN_PATH_KEY);
+          if (returnPath) localStorage.removeItem(RETURN_PATH_KEY);
+        } catch (_) {}
+
         set({
           isAuthenticated: true,
           isLoading: false,
           token: kc.token,
           roles,
+          returnPath,
           user: {
             id: kc.subject,
             username: kc.tokenParsed?.preferred_username,
@@ -119,12 +137,27 @@ export const useAuthStore = create((set, get) => ({
           },
         });
 
-        // Auto-refresh token 60s sebelum expire
+        // Auto-refresh token 60s sebelum expire. No .catch() here before was
+        // a real bug: if Keycloak's OWN server-side session settings (SSO
+        // Session Idle / SSO Session Max, configured in Keycloak Admin
+        // Console — separate from and possibly shorter than this app's own
+        // 10-minute idle timer below) expire the session first, this
+        // rejects, and the failure was silently swallowed — token quietly
+        // went stale, API calls started failing 401 with no clean logout or
+        // explanation. Logging out cleanly here (through the same logout()
+        // path, so the return-path save below still applies) turns that
+        // into a normal "please log in again" instead of a confusing broken
+        // state, AND the console.error makes it possible to tell, from a
+        // browser console, whether a premature logout is actually coming
+        // from Keycloak's session settings rather than this file's own timer.
         setInterval(() => {
           kc.updateToken(60).then((refreshed) => {
             if (refreshed) {
               set({ token: kc.token });
             }
+          }).catch((err) => {
+            console.error("Token refresh failed — Keycloak session likely expired server-side:", err);
+            get().logout();
           });
         }, 30000);
 
@@ -148,9 +181,22 @@ export const useAuthStore = create((set, get) => ({
   },
 
   logout: () => {
+    // Save wherever the user currently is (unless it's already the bare
+    // root) so the next successful login can return them there — kc.logout
+    // itself always redirects to window.location.origin (a full-page
+    // navigation, no in-memory state survives it), which is why this needs
+    // localStorage rather than component/store state.
+    try {
+      const path = window.location.pathname + window.location.search;
+      if (path && path !== "/") localStorage.setItem(RETURN_PATH_KEY, path);
+    } catch (_) {}
     kc.logout({ redirectUri: window.location.origin });
     set({ isAuthenticated: false, user: null, token: null, roles: [] });
   },
+
+  // Consumes the returnPath set by init() above — call once after
+  // navigating there so it doesn't fire again on a later re-render.
+  clearReturnPath: () => set({ returnPath: null }),
 
   // Explicit "this counts as activity too" for pages with a long
   // unattended-but-legitimately-busy operation (e.g. Meeting Notes recording
