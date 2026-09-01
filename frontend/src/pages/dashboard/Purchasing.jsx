@@ -391,7 +391,7 @@ function OpenPRSection() {
 
 const CY = new Date().getFullYear();
 const PAGE_SIZE = 10;
-const BUYER_ALL = "MARIA|DEWI";
+const BUYER_MARIA_DEWI = "MARIA|DEWI";
 const VIEWS = [
   { id: "detail",      label: "Detail View" },
   { id: "detail-qty",  label: "Detail View (Qty)" },
@@ -424,7 +424,7 @@ function PurchaseHistorySection() {
     date_from: firstOfYear, date_to: toISO(today),
     item_code: "", item_desc: "", vendor_name: "", manufacturer: "",
     country_of_origin: "", category: [], currency_code: "", material_type: "",
-    po_number: "", buyer: BUYER_ALL,
+    po_number: "", buyer: BUYER_MARIA_DEWI,
   });
 
   useEffect(() => {
@@ -473,7 +473,7 @@ function PurchaseHistorySection() {
     setF({ org_id: "", exchange_rate_type: "Corporate", date_from: firstOfYear, date_to: toISO(today),
            item_code: "", item_desc: "", vendor_name: "", manufacturer: "",
            country_of_origin: "", category: [], currency_code: "", material_type: "",
-           po_number: "", buyer: BUYER_ALL });
+           po_number: "", buyer: BUYER_MARIA_DEWI });
     setSearched(false); setResults({ detail: null, "by-item": null, "by-supplier": null }); setFilterErr(null);
   };
 
@@ -529,8 +529,10 @@ function PurchaseHistorySection() {
           </Field>
           <Field label="Purchase Order Number">{inp("po_number", { placeholder: "e.g. 2510…" })}</Field>
           <Field label="Buyer">
-            <select className={SELECT} value={f.buyer} onChange={e => setF(p => ({ ...p, buyer: e.target.value }))}>
-              <option value={BUYER_ALL}>All (Ms Maria &amp; Ms Dewi)</option>
+            <select className={SELECT} value={f.buyer} onChange={e => setF(p => ({ ...p, buyer: e.target.value }))}
+              title="Defaults to Maria & Dewi only — pick All Buyers to search without any buyer restriction (a PO raised by a different buyer, e.g. PO 20400123, only shows up under All Buyers).">
+              <option value="">All Buyers (no restriction)</option>
+              <option value={BUYER_MARIA_DEWI}>Maria &amp; Dewi Only</option>
               <option value="MARIA">Ms Maria</option>
               <option value="DEWI">Ms Dewi</option>
             </select>
