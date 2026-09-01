@@ -126,7 +126,7 @@ ATURAN:
 - Setiap poin di discussion_points/action_plans sebaiknya diawali label singkat dalam **bold** (mis. "**Recruitment**: ...", "**Annual MCU**: ...") kalau poin itu membahas sub-topik/item yang jelas — ini mengikuti gaya laporan MOM resmi perusahaan.
 - Gunakan bahasa formal, abaikan basa-basi/obrolan yang benar-benar tidak substantif (candaan, sapaan) — tapi JANGAN buang detail substantif hanya demi keringkasan.
 - SELALU tulis seluruh isi JSON (nama departemen, judul topik, discussion_points, action_plans) dalam BAHASA INGGRIS, apa pun bahasa transkripnya — kalau transkrip berbahasa Indonesia, terjemahkan ke Bahasa Inggris profesional untuk laporan ini.
-- Jangan mengarang informasi yang tidak ada di transkrip.
+- Jangan mengarang informasi yang tidak ada di transkrip. Kalau ada "Agenda yang direncanakan" di atas, pakai itu HANYA sebagai konteks untuk memahami latar belakang topik — jangan menambahkan topik/poin dari agenda yang ternyata tidak benar-benar dibahas di transkrip.
 
 Balas HANYA dengan JSON valid (tanpa markdown code fence, tanpa teks lain), struktur PERSIS seperti ini:
 {{
@@ -208,19 +208,25 @@ class MeetingNotesService:
 
     async def generate_mom(
         self, transcript: str, meeting_title: str = "", participants: str = "",
-        provider: str = "onprem", api_key: str | None = None,
+        provider: str = "onprem", api_key: str | None = None, agenda: str = "",
     ) -> dict:
         """Transcript -> {"departments": [...]}. provider: "onprem" (default,
         local Ollama), "anthropic" (Claude), "gemini", "deepseek", "openai"
         (ChatGPT), or "kimi" (Moonshot AI). api_key, when given, overrides
         the shared company key for that provider (resolved by the router
         from the calling user's own saved key, if any) — ignored for
-        "onprem" since that's a free local model with no key at all."""
+        "onprem" since that's a free local model with no key at all. agenda,
+        when given, is passed as analysis context (what topics were planned)
+        — not just stored for the document header the way date/time/venue
+        are, since it actually helps the model organize/validate what was
+        discussed against what was planned."""
         meta_lines = []
         if meeting_title:
             meta_lines.append(f"Judul rapat: {meeting_title}")
         if participants:
             meta_lines.append(f"Peserta: {participants}")
+        if agenda:
+            meta_lines.append(f"Agenda yang direncanakan: {agenda}")
         meta = ("\n".join(meta_lines) + "\n\n") if meta_lines else ""
 
         prompt = MOM_PROMPT_TEMPLATE.format(meta=meta, transcript=transcript)

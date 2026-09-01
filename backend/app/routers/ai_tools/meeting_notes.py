@@ -461,7 +461,7 @@ async def generate_mom(
 
     try:
         mom_json = await MeetingNotesService().generate_mom(
-            rec.transcript, rec.meeting_title or "", rec.participants or "", body.provider, api_key
+            rec.transcript, rec.meeting_title or "", rec.participants or "", body.provider, api_key, body.agenda
         )
     except MomProviderCreditError as e:
         logger.warning("mom_generation_credit_error", error=str(e), provider=body.provider)
