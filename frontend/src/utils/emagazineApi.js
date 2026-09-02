@@ -1,6 +1,12 @@
 import axios from 'axios';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001/api';
+// Relative, same-origin path — matches api/client.js's convention. The
+// previous default (an absolute http://localhost:8001/api) only ever
+// worked on the original developer's own machine; through nginx's reverse
+// proxy (any other deployment, including this app's normal dev/prod
+// servers) that hostname:port doesn't exist, so every request failed with
+// a network error before it even left the browser.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
 
 const emagazineAPI = {
   // Get all editions
