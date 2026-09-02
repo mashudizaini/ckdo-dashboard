@@ -55,7 +55,19 @@ class Settings(BaseSettings):
     # + RAG embeddings for the AI Chatbot, and the default ("Standard") text
     # provider for CV Screening / JD Generator.
     ollama_api_url: str = "http://172.21.2.27:11434"
-    ollama_chat_model: str = "qwen2.5:14b-instruct"
+    # qwen3:30b (MoE, "30B-A3B") over qwen2.5:14b-instruct — deeper reasoning
+    # for large/complex documents (e.g. the 211-chunk company regulation),
+    # chosen deliberately despite a measured ~3x slower response (15s vs 5.3s
+    # warm, identical 16-chunk RAG prompt) since it doesn't fully fit ai-
+    # engine's 16GB VRAM (18GB model -> 59%/41% GPU/CPU split, confirmed via
+    # `ollama ps`). Model storage was migrated ai-engine-side from the 72GB
+    # root disk (was 78% full) to /mnt/ollama-data (984GB, was unused) to
+    # make room — see ai-engine's /etc/systemd/system/ollama.service.d/
+    # override.conf (OLLAMA_MODELS). The context_k=16 cap in ai_service.py's
+    # stream_chat (see retrieve_context's docstring) was validated against
+    # qwen2.5:14b-instruct's hallucination threshold specifically — not
+    # re-validated for this model, kept as the known-safe starting point.
+    ollama_chat_model: str = "qwen3:30b"
     ollama_tool_model: str = "qwen2.5:7b-instruct"  # Oracle EBS tool-calling chat — smaller/faster is fine for tool selection
     # Vision-capable model for AP Invoice OCR's default ("Standard") provider
     # — qwen2.5:14b-instruct is text-only, so document/image extraction needs

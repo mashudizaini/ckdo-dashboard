@@ -10,6 +10,7 @@ Flow: embed user question (local Ollama, nomic-embed-text) -> find similar
 chunks (pgvector cosine similarity, filtered by allowed departments) -> build
 context -> chat model answers grounded in company docs.
 """
+import re
 from urllib.parse import urlsplit, unquote
 import psycopg2
 from psycopg2.extras import RealDictCursor, Json
@@ -272,36 +273,91 @@ def delete_document(source: str, title: str) -> int:
 
 # ── Retrieval + RAG answer ────────────────────────────────────────
 
-def search_similar(query_embedding: list, top_k: int = 5, department_filter: list[str] = None) -> list[dict]:
+# Blend weight for the keyword/full-text signal in the combined ranking
+# score; vector similarity keeps the remaining (1 - this) share. Semantic
+# search stays dominant — this is a nudge for the case where the user's
+# wording diverges from the document's exact terms (e.g. a question asking
+# about "uang masuk" when the document's table says "biaya masuk"/"entrance
+# fee"), not a replacement for embedding-based search.
+KEYWORD_MATCH_WEIGHT = 0.25
+
+# Sentinel tsquery for a question with no extractable words — matches
+# nothing real, so the keyword term of the blend simply contributes 0 and
+# ranking falls back to pure vector similarity, without needing a whole
+# separate query path just for that edge case.
+_NO_KEYWORD_SENTINEL = "zzz_no_keyword_match_zzz"
+
+
+def _keyword_tsquery(question: str) -> str:
+    """OR-joined (not AND) tsquery built from the question's words, so a
+    chunk containing even ONE matching word gets partial credit —
+    plainto_tsquery's default AND-all-words behavior would score a chunk 0
+    unless it happened to contain every single word in the question, which
+    defeats the purpose for exactly the case this exists to catch. 'simple'
+    text-search config (no stemming) is used rather than 'english', since
+    this KB's content is a bilingual English/Indonesian mix and Postgres
+    has no built-in Indonesian config — plain tokenization/lowercasing
+    still catches exact-term overlaps like "masuk" without risking wrong
+    stemming assumptions in either language. Only \\w+ tokens are used, so
+    no tsquery syntax characters can leak in from user input."""
+    words = re.findall(r"\w+", question.lower())
+    return " | ".join(words) if words else _NO_KEYWORD_SENTINEL
+
+
+def search_similar(query_embedding: list, question: str = "", top_k: int = 5, department_filter: list[str] = None, per_doc_cap: int = 4) -> list[dict]:
     """
     department_filter: list of allowed departments, or None/empty for no restriction (IT/Admin).
+
+    question: original question text, blended in as a keyword/full-text
+    signal alongside vector similarity — see KEYWORD_MATCH_WEIGHT.
+
+    per_doc_cap: max candidate chunks any single (source, title) document may
+    contribute to the pool BEFORE the final top_k cut. Without this, a large
+    document (e.g. a 200+ chunk company-wide regulation) can flood every
+    slot in a plain top-k similarity search purely by chunk-count — its many
+    chunks all scoring "pretty relevant" can out-rank a small, specific
+    document's one genuinely-best chunk, even when that chunk is the actual
+    answer. Root-caused on a real case: a 12-chunk scholarship-allowance memo
+    never reached the local model's 16-chunk context window because a
+    211-chunk general regulation document dominated the ranking, even though
+    the allowance memo's table chunk was a near-exact match for the question.
+    Capping candidates per document first guarantees every document gets a
+    fair shot at its best chunk being seen, regardless of how many chunks it
+    has — final ordering/truncation to top_k is still by the combined score.
     """
+    tsquery = _keyword_tsquery(question)
+    vector_weight = 1 - KEYWORD_MATCH_WEIGHT
     conn = _get_pg()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            scored_select = """
+                SELECT id, source, title, content, department, metadata,
+                       1 - (embedding <=> %s::vector) AS similarity,
+                       (
+                           %s * (1 - (embedding <=> %s::vector))
+                           + %s * COALESCE(ts_rank_cd(to_tsvector('simple', content), to_tsquery('simple', %s), 32), 0)
+                       ) AS score
+                FROM company_documents
+            """
+            scored_params = [query_embedding, vector_weight, query_embedding, KEYWORD_MATCH_WEIGHT, tsquery]
             if department_filter:
-                cur.execute(
-                    """
-                    SELECT id, source, title, content, department, metadata,
-                           1 - (embedding <=> %s::vector) AS similarity
-                    FROM company_documents
-                    WHERE department = ANY(%s)
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT %s
-                    """,
-                    (query_embedding, department_filter, query_embedding, top_k),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT id, source, title, content, department, metadata,
-                           1 - (embedding <=> %s::vector) AS similarity
-                    FROM company_documents
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT %s
-                    """,
-                    (query_embedding, query_embedding, top_k),
-                )
+                scored_select += " WHERE department = ANY(%s)"
+                scored_params.append(department_filter)
+
+            cur.execute(
+                f"""
+                SELECT id, source, title, content, department, metadata, similarity
+                FROM (
+                    SELECT id, source, title, content, department, metadata, similarity, score,
+                           ROW_NUMBER() OVER (PARTITION BY source, title ORDER BY score DESC) AS rn
+                    FROM ({scored_select}) scored
+                ) ranked
+                WHERE rn <= %s
+                ORDER BY score DESC
+                LIMIT %s
+                """,
+                scored_params + [per_doc_cap, top_k],
+            )
             return [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
@@ -359,6 +415,19 @@ def retrieve_context(question: str, department_filter: list[str] = None, top_k: 
     chunk) at 18+ — classic "lost in the middle" context overload for a smaller
     model — while Gemini handles the full top_k=30 correctly. Callers should pass
     a smaller context_k for local-model providers.
+
+    The top_k FETCH itself is per-document-capped (see search_similar's
+    per_doc_cap) before this global top_k cut, so a single large document
+    can't monopolize the candidate pool purely by chunk count — a small,
+    specific document's best-matching chunk still gets a fair shot even
+    against a much bigger document in the same knowledge base. Ranking
+    within that pool blends vector similarity with a keyword/full-text
+    signal (see search_similar's KEYWORD_MATCH_WEIGHT), so a chunk sharing
+    exact words with the question ranks higher even when the question is
+    phrased differently enough to weaken pure embedding similarity — the
+    min_similarity floor below still filters on pure vector similarity
+    only, so a keyword-only coincidental match can't sneak in as "relevant"
+    on its own.
     """
     if not is_configured():
         return {"context": None, "sources": []}
@@ -366,7 +435,7 @@ def retrieve_context(question: str, department_filter: list[str] = None, top_k: 
         context_k = top_k
     try:
         query_embedding = emb.embed_text(question, input_type="query")
-        results = search_similar(query_embedding, top_k=top_k, department_filter=department_filter)
+        results = search_similar(query_embedding, question=question, top_k=top_k, department_filter=department_filter)
         results = [r for r in results if r["similarity"] >= min_similarity][:context_k]
         if not results:
             return {"context": None, "sources": []}
