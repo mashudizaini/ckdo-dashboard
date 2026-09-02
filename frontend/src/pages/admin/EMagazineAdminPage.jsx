@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/Tabs';
-import { BarChart3, Zap, BookOpen, Upload } from 'lucide-react';
+import { BarChart3, Zap, BookOpen, Upload, Trash2 } from 'lucide-react';
 import emagazineAPI from '../../utils/emagazineApi';
 import HotspotManager from '../../components/admin/HotspotManager';
 import AnalyticsDashboard from '../../components/admin/AnalyticsDashboard';
@@ -22,7 +22,14 @@ export default function EMagazineAdminPage() {
       const data = await emagazineAPI.getEditions();
       setEditions(data || []);
       if (data && data.length > 0) {
-        setSelectedEditionId(data[0].id);
+        // Keep the current selection if it still exists (e.g. after
+        // uploading a second edition, don't yank focus away from what the
+        // admin was editing) — only fall back to the first edition if the
+        // previously-selected one is gone (deleted) or nothing was
+        // selected yet.
+        setSelectedEditionId((prev) => (data.some((e) => e.id === prev) ? prev : data[0].id));
+      } else {
+        setSelectedEditionId(null);
       }
     } catch (error) {
       console.error('Error loading editions:', error);
@@ -33,6 +40,16 @@ export default function EMagazineAdminPage() {
 
   const handleEditionUpload = async () => {
     await loadEditions();
+  };
+
+  const handleDeleteEdition = async (edition) => {
+    if (!confirm(`Delete "${edition.title}" (Edition ${edition.edition_number})? This removes its pages, hotspots, and analytics too — this cannot be undone.`)) return;
+    try {
+      await emagazineAPI.deleteEdition(edition.id);
+      await loadEditions();
+    } catch (error) {
+      alert(`Failed to delete edition: ${error.response?.data?.detail || error.message}`);
+    }
   };
 
   return (
@@ -107,8 +124,41 @@ export default function EMagazineAdminPage() {
           </TabsContent>
 
           {/* Editions Tab */}
-          <TabsContent value="editions" className="p-6">
-            <EditionUploader onUploadSuccess={handleEditionUpload} />
+          <TabsContent value="editions" className="p-6 space-y-8">
+            {editions.length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 mb-3">Uploaded Editions</h3>
+                <div className="space-y-2">
+                  {editions.map((ed) => (
+                    <div
+                      key={ed.id}
+                      className="flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg"
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">
+                          {ed.title} <span className="text-gray-500">(Edition {ed.edition_number})</span>
+                        </p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {ed.total_pages} pages • Published {ed.published_date}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteEdition(ed)}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded transition"
+                        title="Delete edition"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Upload New Edition</h3>
+              <EditionUploader onUploadSuccess={handleEditionUpload} />
+            </div>
           </TabsContent>
         </Tabs>
       </div>

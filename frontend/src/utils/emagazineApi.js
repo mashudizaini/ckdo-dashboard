@@ -171,6 +171,17 @@ const emagazineAPI = {
     }
   },
 
+  // Delete an edition (and its content/hotspots/analytics/files, server-side)
+  deleteEdition: async (editionId) => {
+    try {
+      const res = await axios.delete(`${API_BASE}/emagazine/editions/${editionId}`);
+      return res.data;
+    } catch (error) {
+      console.error('Error deleting edition:', error);
+      throw error;
+    }
+  },
+
   // Upload new edition PDF
   uploadEdition: async (formData) => {
     try {

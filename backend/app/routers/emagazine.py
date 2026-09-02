@@ -4,7 +4,7 @@ Provides endpoints for e-magazine content, search, and analytics
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
 from pydantic import BaseModel
@@ -25,6 +25,7 @@ from app.utils.pdf_parser import (
     render_pdf_pages,
     populate_database,
     check_edition_exists,
+    PAGE_IMAGES_ROOT,
 )
 
 
@@ -311,6 +312,45 @@ async def upload_edition(
         except:
             pass
         raise HTTPException(status_code=500, detail=f"Failed to process PDF: {str(e)}")
+
+
+@router.delete("/editions/{edition_id}")
+async def delete_edition(edition_id: int, db: AsyncSession = Depends(get_db)):
+    """Delete an edition: its content/hotspot/analytics rows, the uploaded
+    PDF, and its rendered page images. No cascade is configured at the
+    DB/ORM level (models are plain Columns, no relationship()s), so child
+    rows have to be deleted explicitly before the edition row itself, or
+    the FK constraints on edition_id would reject the delete."""
+    stmt = select(EMagazineEdition).where(EMagazineEdition.id == edition_id)
+    result = await db.execute(stmt)
+    edition = result.scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    title = edition.title
+    pdf_path = edition.pdf_path
+
+    await db.execute(delete(EMagazineAnalytics).where(EMagazineAnalytics.edition_id == edition_id))
+    await db.execute(delete(EMagazineHotspot).where(EMagazineHotspot.edition_id == edition_id))
+    await db.execute(delete(EMagazineContent).where(EMagazineContent.edition_id == edition_id))
+    await db.delete(edition)
+    await db.commit()
+
+    # File cleanup is best-effort — the DB rows are already gone, so a
+    # leftover file on disk isn't worth failing the request over.
+    try:
+        if pdf_path and Path(pdf_path).exists():
+            Path(pdf_path).unlink()
+    except Exception:
+        pass
+    try:
+        images_dir = PAGE_IMAGES_ROOT / f"edition_{edition_id}"
+        if images_dir.exists():
+            shutil.rmtree(images_dir)
+    except Exception:
+        pass
+
+    return {"message": f"Edition '{title}' deleted successfully"}
 
 
 @router.post("/analytics")
