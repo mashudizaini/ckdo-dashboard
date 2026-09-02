@@ -1,5 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { X, Move } from 'lucide-react';
+import React, { useState, useRef } from 'react';
 
 const ACTION_TYPES = [
   { value: 'contact', label: 'Contact' },
@@ -9,113 +8,114 @@ const ACTION_TYPES = [
   { value: 'qrcode', label: 'QR Code' },
 ];
 
+const ACTION_COLORS = {
+  contact: '#a855f7',
+  link: '#3b82f6',
+  video: '#ef4444',
+  form: '#22c55e',
+  qrcode: '#f97316',
+};
+
+/**
+ * Admin visual hotspot placement tool. Shows the actual rendered page image
+ * as the background so placement is WYSIWYG, and positions/creates
+ * hotspots as plain percentage-based <div>s (not SVG viewBox shapes) — the
+ * same x_pos/y_pos/width/height-as-percent convention HotspotLayer.jsx (the
+ * reader-facing overlay) uses, so a hotspot placed here lands in the exact
+ * same spot there. The container's aspect ratio comes from the image's own
+ * natural size (no forced CSS ratio), which is what a fixed viewBox used to
+ * silently disagree with.
+ */
 export default function HotspotEditor({
   hotspots = [],
   editionId,
   pageNumber,
+  imageUrl,
   onCreateHotspot,
   onUpdateHotspot,
   onDeleteHotspot,
-  disabled = false
+  disabled = false,
 }) {
-  const svgRef = useRef(null);
+  const containerRef = useRef(null);
   const [isCreating, setIsCreating] = useState(false);
   const [startPos, setStartPos] = useState(null);
+  const [previewPos, setPreviewPos] = useState(null);
   const [draggingId, setDraggingId] = useState(null);
   const [draggingCorner, setDraggingCorner] = useState(null);
   const [dragStart, setDragStart] = useState(null);
   const [editingId, setEditingId] = useState(null);
 
-  const handleSvgMouseDown = (e) => {
-    if (disabled) return;
+  const posFromEvent = (e) => {
+    const rect = containerRef.current.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100)),
+      y: Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100)),
+    };
+  };
 
-    const svg = svgRef.current;
-    if (!svg) return;
-
-    const rect = svg.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
-
+  const handleContainerMouseDown = (e) => {
+    if (disabled || !containerRef.current) return;
     setIsCreating(true);
-    setStartPos({ x, y });
+    const pos = posFromEvent(e);
+    setStartPos(pos);
+    setPreviewPos(pos);
     setEditingId(null);
   };
 
-  const handleSvgMouseMove = (e) => {
-    if (!svgRef.current) return;
-
-    const svg = svgRef.current;
-    const rect = svg.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
+  const handleContainerMouseMove = (e) => {
+    if (!containerRef.current) return;
+    const pos = posFromEvent(e);
 
     if (isCreating && startPos) {
-      // Visual feedback for creating hotspot - handled by canvas
+      setPreviewPos(pos);
     }
 
     if (draggingId && dragStart) {
-      const deltaX = x - dragStart.x;
-      const deltaY = y - dragStart.y;
-      const hotspot = hotspots.find(h => h.id === draggingId);
+      const deltaX = pos.x - dragStart.x;
+      const deltaY = pos.y - dragStart.y;
+      const hotspot = hotspots.find((h) => h.id === draggingId);
+      if (!hotspot) return;
 
       if (draggingCorner === 'resize') {
-        // Resize mode - only update for SE corner
-        const newWidth = Math.max(5, hotspot.width + deltaX);
-        const newHeight = Math.max(5, hotspot.height + deltaY);
-        updateHotspotPosition(draggingId, {
-          ...hotspot,
-          width: newWidth,
-          height: newHeight,
-        });
+        const newWidth = Math.max(2, Math.min(100 - hotspot.x_pos, hotspot.width + deltaX));
+        const newHeight = Math.max(2, Math.min(100 - hotspot.y_pos, hotspot.height + deltaY));
+        onUpdateHotspot(draggingId, { ...hotspot, width: newWidth, height: newHeight });
       } else {
-        // Move mode
-        const newX = Math.max(0, Math.min(100, hotspot.x_pos + deltaX));
-        const newY = Math.max(0, Math.min(100, hotspot.y_pos + deltaY));
-        updateHotspotPosition(draggingId, {
-          ...hotspot,
-          x_pos: newX,
-          y_pos: newY,
-        });
+        const newX = Math.max(0, Math.min(100 - hotspot.width, hotspot.x_pos + deltaX));
+        const newY = Math.max(0, Math.min(100 - hotspot.height, hotspot.y_pos + deltaY));
+        onUpdateHotspot(draggingId, { ...hotspot, x_pos: newX, y_pos: newY });
       }
 
-      setDragStart({ x, y });
+      setDragStart(pos);
     }
   };
 
-  const handleSvgMouseUp = (e) => {
+  const handleContainerMouseUp = (e) => {
     if (isCreating && startPos) {
-      const svg = svgRef.current;
-      if (!svg) return;
+      const pos = posFromEvent(e);
+      const width = Math.abs(pos.x - startPos.x);
+      const height = Math.abs(pos.y - startPos.y);
 
-      const rect = svg.getBoundingClientRect();
-      const endX = ((e.clientX - rect.left) / rect.width) * 100;
-      const endY = ((e.clientY - rect.top) / rect.height) * 100;
+      if (width > 1.5 && height > 1.5) {
+        const x = Math.min(startPos.x, pos.x);
+        const y = Math.min(startPos.y, pos.y);
 
-      const width = Math.abs(endX - startPos.x);
-      const height = Math.abs(endY - startPos.y);
-
-      // Only create if hotspot is large enough
-      if (width > 2 && height > 2) {
-        const x = Math.min(startPos.x, endX);
-        const y = Math.min(startPos.y, endY);
-
-        const newHotspot = {
+        onCreateHotspot({
           edition_id: editionId,
           page_number: pageNumber,
           x_pos: x,
           y_pos: y,
-          width: width,
-          height: height,
+          width,
+          height,
           action_type: 'contact',
           action_data: {},
           tooltip: 'New hotspot',
-        };
-
-        onCreateHotspot(newHotspot);
+        });
       }
 
       setIsCreating(false);
       setStartPos(null);
+      setPreviewPos(null);
     }
 
     if (draggingId) {
@@ -125,49 +125,28 @@ export default function HotspotEditor({
     }
   };
 
-  const updateHotspotPosition = (hotspotId, updatedHotspot) => {
-    if (onUpdateHotspot) {
-      onUpdateHotspot(hotspotId, updatedHotspot);
-    }
-  };
-
   const handleHotspotMouseDown = (e, hotspotId, corner = null) => {
     if (disabled) return;
     e.stopPropagation();
-
-    const svg = svgRef.current;
-    if (!svg) return;
-
-    const rect = svg.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
-
     setDraggingId(hotspotId);
     setDraggingCorner(corner);
-    setDragStart({ x, y });
+    setDragStart(posFromEvent(e));
     setEditingId(hotspotId);
   };
 
   const handleDeleteHotspot = (e, hotspotId) => {
     e.stopPropagation();
-    if (onDeleteHotspot) {
-      onDeleteHotspot(hotspotId);
-    }
+    onDeleteHotspot?.(hotspotId);
   };
 
-  // Calculate bounding box for creation preview
-  const getBoundingBox = () => {
-    if (!isCreating || !startPos) return null;
-
-    const svg = svgRef.current;
-    if (!svg) return null;
-
-    const rect = svg.getBoundingClientRect();
-
-    // Get current mouse position from SVG by finding it from event
-    // For now, we'll use startPos to show a preview
-    return startPos;
-  };
+  const previewBox = isCreating && startPos && previewPos
+    ? {
+        left: Math.min(startPos.x, previewPos.x),
+        top: Math.min(startPos.y, previewPos.y),
+        width: Math.abs(previewPos.x - startPos.x),
+        height: Math.abs(previewPos.y - startPos.y),
+      }
+    : null;
 
   return (
     <div className="space-y-4">
@@ -178,106 +157,96 @@ export default function HotspotEditor({
         </p>
       </div>
 
-      <div className="relative border border-gray-300 rounded-lg overflow-hidden bg-white">
-        <svg
-          ref={svgRef}
-          viewBox="0 0 100 140"
-          className="w-full aspect-video bg-gray-50 cursor-crosshair"
-          onMouseDown={handleSvgMouseDown}
-          onMouseMove={handleSvgMouseMove}
-          onMouseUp={handleSvgMouseUp}
-          onMouseLeave={handleSvgMouseUp}
-          style={{ minHeight: '300px' }}
-        >
-          {/* Page background */}
-          <rect width="100" height="140" fill="white" stroke="#ddd" strokeWidth="0.5" />
+      <div
+        ref={containerRef}
+        onMouseDown={handleContainerMouseDown}
+        onMouseMove={handleContainerMouseMove}
+        onMouseUp={handleContainerMouseUp}
+        onMouseLeave={handleContainerMouseUp}
+        className="relative border border-gray-300 rounded-lg overflow-hidden bg-gray-100"
+        style={{ cursor: disabled ? 'default' : 'crosshair', userSelect: 'none' }}
+      >
+        {imageUrl ? (
+          <img src={imageUrl} alt={`Page ${pageNumber}`} className="w-full h-auto block pointer-events-none" draggable={false} />
+        ) : (
+          <div className="flex items-center justify-center text-gray-400 text-sm" style={{ minHeight: 300 }}>
+            Loading page image...
+          </div>
+        )}
 
-          {/* Hotspots */}
-          {hotspots.map((hotspot) => (
-            <g key={hotspot.id}>
-              {/* Main hotspot rectangle */}
-              <rect
-                x={hotspot.x_pos}
-                y={hotspot.y_pos}
-                width={hotspot.width}
-                height={hotspot.height}
-                fill={editingId === hotspot.id ? '#3b82f6' : '#60a5fa'}
-                opacity={editingId === hotspot.id ? 0.3 : 0.15}
-                stroke={editingId === hotspot.id ? '#1e40af' : '#3b82f6'}
-                strokeWidth="0.3"
-                className="cursor-move"
-                onMouseDown={(e) => handleHotspotMouseDown(e, hotspot.id)}
-              />
-
-              {/* Show resize handle and close button only when editing */}
-              {editingId === hotspot.id && (
+        {hotspots.map((hotspot) => {
+          const isEditing = editingId === hotspot.id;
+          return (
+            <div
+              key={hotspot.id}
+              onMouseDown={(e) => handleHotspotMouseDown(e, hotspot.id)}
+              style={{
+                position: 'absolute',
+                left: `${hotspot.x_pos}%`,
+                top: `${hotspot.y_pos}%`,
+                width: `${hotspot.width}%`,
+                height: `${hotspot.height}%`,
+                background: ACTION_COLORS[hotspot.action_type] || '#60a5fa',
+                opacity: isEditing ? 0.35 : 0.18,
+                border: `2px solid ${isEditing ? '#1e40af' : ACTION_COLORS[hotspot.action_type] || '#3b82f6'}`,
+                borderRadius: 4,
+                cursor: 'move',
+              }}
+            >
+              {isEditing && (
                 <>
-                  {/* Resize handle (bottom-right corner) */}
-                  <circle
-                    cx={hotspot.x_pos + hotspot.width}
-                    cy={hotspot.y_pos + hotspot.height}
-                    r="1"
-                    fill="#ef4444"
-                    className="cursor-se-resize"
+                  <div
                     onMouseDown={(e) => handleHotspotMouseDown(e, hotspot.id, 'resize')}
+                    style={{
+                      position: 'absolute', right: -6, bottom: -6, width: 12, height: 12,
+                      borderRadius: '50%', background: '#ef4444', cursor: 'se-resize',
+                    }}
                   />
-
-                  {/* Delete button (top-right corner) */}
-                  <g
-                    className="cursor-pointer"
+                  <div
                     onMouseDown={(e) => handleDeleteHotspot(e, hotspot.id)}
+                    style={{
+                      position: 'absolute', right: -8, top: -8, width: 18, height: 18,
+                      borderRadius: '50%', background: '#ef4444', color: 'white',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 11, cursor: 'pointer', lineHeight: 1,
+                    }}
                   >
-                    <circle
-                      cx={hotspot.x_pos + hotspot.width}
-                      cy={hotspot.y_pos}
-                      r="1.2"
-                      fill="#ef4444"
-                    />
-                    <text
-                      x={hotspot.x_pos + hotspot.width}
-                      y={hotspot.y_pos + 0.4}
-                      fontSize="1"
-                      fill="white"
-                      textAnchor="middle"
-                      pointerEvents="none"
+                    ✕
+                  </div>
+                  {hotspot.tooltip && (
+                    <span
+                      style={{
+                        position: 'absolute', bottom: '100%', left: 0, marginBottom: 4,
+                        fontSize: 11, fontWeight: 600, color: '#1e40af',
+                        background: 'white', padding: '1px 4px', borderRadius: 3,
+                        whiteSpace: 'nowrap',
+                      }}
                     >
-                      ✕
-                    </text>
-                  </g>
-
-                  {/* Tooltip text */}
-                  <text
-                    x={hotspot.x_pos}
-                    y={hotspot.y_pos - 0.5}
-                    fontSize="0.8"
-                    fill="#1e40af"
-                    className="pointer-events-none"
-                  >
-                    {hotspot.tooltip || 'Hotspot'}
-                  </text>
+                      {hotspot.tooltip}
+                    </span>
+                  )}
                 </>
               )}
-            </g>
-          ))}
+            </div>
+          );
+        })}
 
-          {/* Creation preview */}
-          {isCreating && startPos && (
-            <rect
-              x={startPos.x}
-              y={startPos.y}
-              width="5"
-              height="5"
-              fill="#10b981"
-              opacity="0.3"
-              stroke="#059669"
-              strokeWidth="0.3"
-              strokeDasharray="1,1"
-            />
-          )}
-        </svg>
+        {previewBox && (
+          <div
+            style={{
+              position: 'absolute',
+              left: `${previewBox.left}%`,
+              top: `${previewBox.top}%`,
+              width: `${previewBox.width}%`,
+              height: `${previewBox.height}%`,
+              background: 'rgba(16, 185, 129, 0.25)',
+              border: '2px dashed #059669',
+              pointerEvents: 'none',
+            }}
+          />
+        )}
       </div>
 
-      {/* Hotspot list */}
       {hotspots.length > 0 && (
         <div className="bg-gray-50 rounded-lg p-4">
           <h4 className="font-semibold text-sm text-gray-900 mb-2">
@@ -287,7 +256,7 @@ export default function HotspotEditor({
             {hotspots.map((hotspot) => (
               <div
                 key={hotspot.id}
-                className={`flex items-center justify-between px-3 py-2 rounded text-sm ${
+                className={`flex items-center justify-between px-3 py-2 rounded text-sm cursor-pointer ${
                   editingId === hotspot.id
                     ? 'bg-blue-100 border border-blue-300'
                     : 'bg-white border border-gray-200'
@@ -297,11 +266,11 @@ export default function HotspotEditor({
                 <div>
                   <span className="font-medium">{hotspot.tooltip || 'Untitled'}</span>
                   <span className="text-xs text-gray-500 ml-2">
-                    ({hotspot.x_pos.toFixed(1)}, {hotspot.y_pos.toFixed(1)})
+                    ({hotspot.x_pos.toFixed(1)}%, {hotspot.y_pos.toFixed(1)}%)
                   </span>
                 </div>
                 <span className="text-xs bg-gray-200 px-2 py-1 rounded">
-                  {ACTION_TYPES.find(t => t.value === hotspot.action_type)?.label || hotspot.action_type}
+                  {ACTION_TYPES.find((t) => t.value === hotspot.action_type)?.label || hotspot.action_type}
                 </span>
               </div>
             ))}

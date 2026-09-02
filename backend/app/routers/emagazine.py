@@ -22,8 +22,7 @@ from app.models.emagazine import (
     EMagazineAnalytics,
 )
 from app.utils.pdf_parser import (
-    extract_text_from_pdf,
-    split_text_by_pages,
+    render_pdf_pages,
     populate_database,
     check_edition_exists,
 )
@@ -44,6 +43,7 @@ class ContentResponse(BaseModel):
     title: str
     content_type: str
     searchable_text: Optional[str]
+    image_path: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -273,25 +273,22 @@ async def upload_edition(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
 
-    # Extract and parse PDF
+    # Extract text + render page images
     try:
-        extract_result = extract_text_from_pdf(str(file_path))
-        if not extract_result["success"]:
+        render_result = render_pdf_pages(str(file_path))
+        if not render_result["success"]:
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to extract PDF text: {extract_result['error']}"
+                detail=f"Failed to extract PDF text: {render_result['error']}"
             )
 
-        # Split text by pages
-        pages_content = split_text_by_pages(extract_result["text"])
-
-        # Populate database
+        # Populate database (text + saved page images)
         edition = await populate_database(
             title,
             edition_number,
             published_date,
             str(file_path),
-            pages_content,
+            render_result["pages"],
             db,
         )
 

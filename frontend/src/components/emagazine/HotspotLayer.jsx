@@ -1,14 +1,18 @@
 import React, { useState, useCallback } from 'react';
 
-export default function HotspotLayer({
-  hotspots = [],
-  pageWidth = 800,
-  pageHeight = 1000,
-  onHotspotClick = () => {},
-}) {
+/**
+ * Reader-facing hotspot overlay — plain percentage-positioned <div>s over
+ * the page image, not SVG viewBox math. x_pos/y_pos/width/height are all
+ * 0-100 percentages of the page container, matching HotspotEditor.jsx's
+ * (the admin placement tool) convention exactly, so a hotspot placed there
+ * lands in the same spot here. Percentages track the actual rendered
+ * <img> size automatically regardless of viewport/zoom, sidestepping the
+ * SVG viewBox/aspect-ratio class of bug entirely.
+ */
+export default function HotspotLayer({ hotspots = [], onHotspotClick = () => {} }) {
   const [hoveredId, setHoveredId] = useState(null);
 
-  const handleHotspotClick = useCallback(
+  const handleClick = useCallback(
     (e, hotspot) => {
       e.preventDefault();
       onHotspotClick(hotspot);
@@ -19,85 +23,68 @@ export default function HotspotLayer({
   if (hotspots.length === 0) return null;
 
   return (
-    <svg
-      className="absolute inset-0 w-full h-full cursor-pointer"
-      preserveAspectRatio="xMidYMid meet"
-      viewBox={`0 0 ${pageWidth} ${pageHeight}`}
-      style={{ pointerEvents: 'auto' }}
-    >
-      {hotspots.map((hotspot) => (
-        <g key={hotspot.id}>
-          {/* Invisible larger hitbox for easier clicking */}
-          <rect
-            x={hotspot.x_pos - 5}
-            y={hotspot.y_pos - 5}
-            width={hotspot.width + 10}
-            height={hotspot.height + 10}
-            fill="transparent"
+    <div className="absolute inset-0">
+      {hotspots.map((hotspot) => {
+        const hovered = hoveredId === hotspot.id;
+        return (
+          <div
+            key={hotspot.id}
             onMouseEnter={() => setHoveredId(hotspot.id)}
             onMouseLeave={() => setHoveredId(null)}
-            onClick={(e) => handleHotspotClick(e, hotspot)}
-            style={{ cursor: 'pointer' }}
-          />
-
-          {/* Visible hotspot box (shown on hover) */}
-          {hoveredId === hotspot.id && (
-            <>
-              {/* Highlight rectangle */}
-              <rect
-                x={hotspot.x_pos}
-                y={hotspot.y_pos}
-                width={hotspot.width}
-                height={hotspot.height}
-                fill="rgba(59, 130, 246, 0.2)"
-                stroke="rgb(59, 130, 246)"
-                strokeWidth="2"
-                rx="4"
-                pointerEvents="none"
-              />
-
-              {/* Tooltip background */}
-              {hotspot.tooltip && (
-                <>
-                  {/* Tooltip box */}
-                  <rect
-                    x={hotspot.x_pos}
-                    y={Math.max(0, hotspot.y_pos - 40)}
-                    width={Math.max(100, hotspot.tooltip.length * 6)}
-                    height="32"
-                    fill="rgb(0, 0, 0)"
-                    rx="4"
-                    pointerEvents="none"
-                  />
-
-                  {/* Tooltip text */}
-                  <text
-                    x={hotspot.x_pos + 8}
-                    y={Math.max(0, hotspot.y_pos - 40) + 20}
-                    fill="white"
-                    fontSize="12"
-                    fontWeight="500"
-                    pointerEvents="none"
+            onClick={(e) => handleClick(e, hotspot)}
+            style={{
+              position: 'absolute',
+              left: `${hotspot.x_pos}%`,
+              top: `${hotspot.y_pos}%`,
+              width: `${hotspot.width}%`,
+              height: `${hotspot.height}%`,
+              cursor: 'pointer',
+              borderRadius: 4,
+              background: hovered ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+              border: hovered ? '2px solid rgb(59, 130, 246)' : '2px solid transparent',
+              transition: 'background 0.1s, border-color 0.1s',
+            }}
+          >
+            {hovered && (
+              <>
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: -8,
+                    right: -8,
+                    width: 12,
+                    height: 12,
+                    borderRadius: '50%',
+                    background: getActionColor(hotspot.action_type),
+                    opacity: 0.9,
+                  }}
+                />
+                {hotspot.tooltip && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      bottom: '100%',
+                      left: 0,
+                      marginBottom: 6,
+                      background: 'rgb(0, 0, 0)',
+                      color: 'white',
+                      fontSize: 12,
+                      fontWeight: 500,
+                      padding: '6px 10px',
+                      borderRadius: 4,
+                      whiteSpace: 'nowrap',
+                      pointerEvents: 'none',
+                    }}
                   >
                     {hotspot.tooltip}
-                  </text>
-                </>
-              )}
-
-              {/* Action type indicator (small icon) */}
-              <circle
-                cx={hotspot.x_pos + hotspot.width - 8}
-                cy={hotspot.y_pos + 8}
-                r="6"
-                fill={getActionColor(hotspot.action_type)}
-                pointerEvents="none"
-                opacity="0.8"
-              />
-            </>
-          )}
-        </g>
-      ))}
-    </svg>
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

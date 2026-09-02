@@ -6,6 +6,7 @@ import Modal from './Modal';
 import ContactModal from './ContactModal';
 import LinkModal from './LinkModal';
 import VideoModal from './VideoModal';
+import QrCodeModal from './QrCodeModal';
 
 export default function PageViewer() {
   const { currentPage, currentEditionId } = useEMagazineStore();
@@ -106,34 +107,22 @@ export default function PageViewer() {
               </div>
             </div>
 
-            {/* Page Content with Hotspots Overlay */}
-            <div className="px-6 py-8 max-h-[70vh] overflow-y-auto relative">
-              {pageContent?.searchable_text ? (
-                <div className="prose prose-sm max-w-none relative">
-                  {/* Hotspot Layer */}
+            {/* Page Image with Hotspots Overlay */}
+            <div className="max-h-[70vh] overflow-y-auto">
+              {pageContent?.image_path ? (
+                <div className="relative">
+                  <img
+                    src={pageContent.image_path}
+                    alt={pageContent?.title || `Page ${currentPage}`}
+                    className="w-full h-auto block"
+                  />
                   {hotspots.length > 0 && (
-                    <div className="absolute inset-0">
-                      <HotspotLayer
-                        hotspots={hotspots}
-                        pageWidth={800}
-                        pageHeight={1000}
-                        onHotspotClick={handleHotspotClick}
-                      />
-                    </div>
+                    <HotspotLayer hotspots={hotspots} onHotspotClick={handleHotspotClick} />
                   )}
-
-                  {/* Content Text */}
-                  <div className="relative z-0">
-                    {pageContent.searchable_text.split('\n').map((line, idx) => (
-                      <p key={idx} className="text-gray-700 mb-2 leading-relaxed">
-                        {line || <br />}
-                      </p>
-                    ))}
-                  </div>
                 </div>
               ) : (
                 <div className="text-center text-gray-500 py-12">
-                  <p>No content available for this page</p>
+                  <p>Page image not available</p>
                 </div>
               )}
             </div>
@@ -179,14 +168,11 @@ export default function PageViewer() {
         <p className="text-gray-600">Form feature coming soon</p>
       </Modal>
 
-      <Modal
+      <QrCodeModal
         isOpen={activeModal === 'qrcode'}
         onClose={() => setActiveModal(null)}
-        title="QR Code"
-        size="sm"
-      >
-        <p className="text-gray-600">QR Code feature coming soon</p>
-      </Modal>
+        data={modalData?.actionType === 'qrcode' ? modalData?.data : null}
+      />
     </>
   );
 }

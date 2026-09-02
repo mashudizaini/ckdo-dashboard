@@ -19,10 +19,22 @@ export default function HotspotManager({ editionId }) {
   const [formData, setFormData] = useState(null);
   const [editorMode, setEditorMode] = useState('list'); // 'list' or 'visual'
   const [editorPage, setEditorPage] = useState(1);
+  const [editorImageUrl, setEditorImageUrl] = useState(null);
 
   useEffect(() => {
     loadHotspots();
   }, [editionId]);
+
+  // Visual editor needs the actual page image as its background — fetch
+  // it whenever the edition or the page being edited changes.
+  useEffect(() => {
+    if (editorMode !== 'visual' || !editionId) return;
+    setEditorImageUrl(null);
+    emagazineAPI
+      .getPage(editionId, editorPage)
+      .then((page) => setEditorImageUrl(page?.image_path || null))
+      .catch((error) => console.error('Error loading page image:', error));
+  }, [editorMode, editionId, editorPage]);
 
   const loadHotspots = async () => {
     if (!editionId) return;
@@ -157,6 +169,7 @@ export default function HotspotManager({ editionId }) {
             hotspots={hotspots.filter(h => h.page_number === editorPage)}
             editionId={editionId}
             pageNumber={editorPage}
+            imageUrl={editorImageUrl}
             onCreateHotspot={(hotspotData) => {
               setFormData(hotspotData);
               setEditingId('new');
@@ -443,6 +456,31 @@ function HotspotForm({ data, setData, onSave, onCancel }) {
               placeholder="Video ID (e.g., dQw4w9WgXcQ)"
               value={data.action_data.videoId || ''}
               onChange={(e) => handleActionDataChange('videoId', e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+            />
+            <textarea
+              placeholder="Description"
+              value={data.action_data.description || ''}
+              onChange={(e) => handleActionDataChange('description', e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+              rows="2"
+            />
+          </div>
+        )}
+        {data.action_type === 'qrcode' && (
+          <div className="space-y-3">
+            <input
+              type="text"
+              placeholder="Value to encode (URL or text)"
+              value={data.action_data.value || ''}
+              onChange={(e) => handleActionDataChange('value', e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+            />
+            <input
+              type="text"
+              placeholder="Label (modal title)"
+              value={data.action_data.label || ''}
+              onChange={(e) => handleActionDataChange('label', e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
             />
             <textarea

@@ -18,7 +18,13 @@ export const useEMagazineStore = create((set) => ({
   setCurrentEdition: (editionId, totalPages) =>
     set({ currentEditionId: editionId, totalPages, currentPage: 1 }),
 
-  setCurrentPage: (page) => set({ currentPage: Math.max(1, page) }),
+  // Clamps both bounds — NavigationBar's manual input already guarded
+  // against totalPages before calling this, but SearchBar's result-click
+  // path calls this directly with no such guard, so a stale/cross-edition
+  // result could otherwise set currentPage past the real total.
+  setCurrentPage: (page) => set((state) => ({
+    currentPage: Math.min(Math.max(1, page), state.totalPages || page),
+  })),
 
   nextPage: () =>
     set((state) => ({
