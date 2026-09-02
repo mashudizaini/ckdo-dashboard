@@ -324,7 +324,7 @@ async def track_analytics(
         page_number=track.page_number,
         hotspot_id=track.hotspot_id,
         search_query=track.search_query,
-        metadata=track.metadata or {},
+        event_metadata=track.metadata or {},
     )
 
     db.add(analytics)

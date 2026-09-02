@@ -72,5 +72,9 @@ class EMagazineAnalytics(Base):
     page_number = Column(Integer)
     hotspot_id = Column(Integer, ForeignKey("emagazine_hotspots.id"))
     search_query = Column(String(500))
-    metadata = Column(JSONB)  # Device info, session duration, etc
+    event_metadata = Column(JSONB)  # Device info, session duration, etc — named
+    # event_metadata (not metadata): SQLAlchemy's Declarative API reserves the
+    # `metadata` attribute name on every mapped class (it holds the table's
+    # own MetaData registry) — using it as a column name crashes the entire
+    # app at import time, before uvicorn can even start.
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
