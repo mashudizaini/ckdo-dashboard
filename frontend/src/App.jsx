@@ -170,9 +170,13 @@ export default function App() {
         <Route path="meeting-notes" element={<MeetingNotes />} />
       </Route>
 
-      {/* E-Magazine */}
-      <Route path="/e-magazine" element={<EMagazinePage />} />
-      <Route path="/e-magazine/admin" element={<EMagazineAdminPage />} />
+      {/* E-Magazine (new dynamic viewer) — deliberately NOT /e-magazine: nginx
+          already serves the old static PDF-based e-magazine directly from
+          disk at that exact prefix (location /e-magazine/ in nginx.dev.conf),
+          which wins over this SPA route since it's a more specific prefix
+          match. Temporary path while both versions coexist during testing. */}
+      <Route path="/e-magazine-viewer" element={<EMagazinePage />} />
+      <Route path="/e-magazine-viewer/admin" element={<EMagazineAdminPage />} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -33,7 +33,7 @@ export default function NavigationBar() {
   };
 
   const handleShare = () => {
-    const url = `${window.location.origin}/e-magazine?edition=${currentEditionId}&page=${currentPage}`;
+    const url = `${window.location.origin}/e-magazine-viewer?edition=${currentEditionId}&page=${currentPage}`;
     navigator.clipboard.writeText(url);
     alert('Link copied to clipboard!');
   };
