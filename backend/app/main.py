@@ -32,10 +32,14 @@ import app.models.outlook_material  # noqa: F401
 import app.models.financial_statement_upload  # noqa: F401
 import app.models.document_conversion_job  # noqa: F401
 import app.models.document_glossary  # noqa: F401
+import app.models.emagazine  # noqa: F401 — register emagazine models
 from app.models.ebs_backup import init_ebs_db
 from app.models.vpn_monitor import init_vpn_db
 from app.models.hikcentral import init_hikcentral_db
 from app.models.zkteco import init_zkteco_db
+
+# ── E-Magazine Routers ──
+from app.routers import emagazine, emagazine_hotspots
 
 # ── Dashboard Routers ──
 from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement, general
@@ -252,6 +256,10 @@ app.include_router(eis_administration.router, prefix=f"{API_PREFIX}/dashboard/ei
 app.include_router(eis_business_plan.router,  prefix=f"{API_PREFIX}/dashboard/eis/bp",          tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
 app.include_router(eis_daily_sales.router,    prefix=f"{API_PREFIX}/dashboard/eis/daily-sales", tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
 app.include_router(eis_data_upload.router,    prefix=f"{API_PREFIX}/dashboard/eis/data-upload", tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
+
+# E-Magazine
+app.include_router(emagazine.router, tags=["E-Magazine"])
+app.include_router(emagazine_hotspots.router, tags=["E-Magazine - Hotspots"])
 
 # AI Tools
 app.include_router(chatbot.router,       prefix=f"{API_PREFIX}/ai/chatbot",       tags=["AI - Chatbot"])
