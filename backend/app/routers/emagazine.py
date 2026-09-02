@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 import shutil
 import os
@@ -53,9 +53,16 @@ class EditionResponse(BaseModel):
     id: int
     title: str
     edition_number: int
-    published_date: str
+    # date/datetime (not str) — these endpoints return the ORM object
+    # directly and let from_attributes serialize it; with str fields,
+    # Pydantic v2 rejects the actual date/datetime values FastAPI hands it
+    # instead of silently stringifying them, which 500'd every call to
+    # list/get editions (upload's own response model avoided this only
+    # because it builds the response explicitly with str()/.isoformat()
+    # rather than serializing the ORM object directly).
+    published_date: date
     total_pages: int
-    created_at: str
+    created_at: datetime
 
     class Config:
         from_attributes = True
