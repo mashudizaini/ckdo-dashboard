@@ -24,6 +24,15 @@ settings = get_settings()
 RAG_TIMEOUT_SECONDS = 6.0
 OLLAMA_CHAT_TIMEOUT_SECONDS = 120.0
 
+# Default Claude model for the interactive chatbot (Policy Chat, General
+# Chat) when the user hasn't picked one via My API Key. Sonnet over Opus by
+# default: near-Opus quality for everyday Q&A at a fraction of the cost and
+# latency, which matters more here than on batch/analytical callers
+# elsewhere in the app (e.g. PAC's Business Plan Outlook, which stays on
+# Opus). Users who want Opus's extra reasoning power for their own chats can
+# select it when saving a personal API key.
+ANTHROPIC_CHAT_DEFAULT_MODEL = "claude-sonnet-5"
+
 GENERAL_CHAT_SYSTEM_PROMPT = (
     "Kamu adalah asisten AI internal PT CKD OTTO Pharmaceuticals bernama CKDO Assistant, "
     "untuk pertanyaan umum sehari-hari (di luar kebijakan perusahaan spesifik dan data ERP Oracle "
@@ -95,7 +104,10 @@ class AIService:
         answer_blocks = [b.text for b in response.content[last_tool_idx + 1:] if b.type == "text"]
         return "".join(answer_blocks).strip()
 
-    def _anthropic_complete_with_search_history(self, system: str, history: list[dict], message: str, max_tokens: int = 8192) -> tuple[str, list[dict]]:
+    def _anthropic_complete_with_search_history(
+        self, system: str, history: list[dict], message: str, max_tokens: int = 8192,
+        api_key: str = None, model: str = None,
+    ) -> tuple[str, list[dict]]:
         """Same web-search grounding as _anthropic_complete_with_search, but
         carries prior conversation turns too — General Chat's Claude option
         needs history the same way the other 2 providers there already get
@@ -109,8 +121,12 @@ class AIService:
         answer (deduplicated by URL, in first-cited order) — General Chat
         has no other grounding to show sources for, and surfacing them is
         what makes a web-searched answer verifiable instead of just an
-        unsourced claim."""
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        unsourced claim.
+
+        api_key/model: the caller's personal Claude key/model preference
+        (see My API Key), falling back to the shared company key and the
+        chatbot's default model when not set."""
+        client = anthropic.Anthropic(api_key=api_key or settings.anthropic_api_key)
         messages = [
             {"role": m.get("role") if m.get("role") in ("user", "assistant") else "user", "content": m.get("content", "")}
             for m in history if m.get("content")
@@ -119,7 +135,7 @@ class AIService:
         response = None
         for _ in range(3):
             response = client.messages.create(
-                model="claude-opus-5", max_tokens=max_tokens, system=system, messages=messages, tools=tools,
+                model=model or ANTHROPIC_CHAT_DEFAULT_MODEL, max_tokens=max_tokens, system=system, messages=messages, tools=tools,
             )
             if response.stop_reason != "pause_turn":
                 break
@@ -139,6 +155,45 @@ class AIService:
                 if url and url not in seen_urls:
                     seen_urls[url] = {"title": getattr(c, "title", None) or url, "url": url}
         return "".join(answer_blocks).strip(), list(seen_urls.values())
+
+    async def _generate_followups(self, question: str, answer: str) -> list[str]:
+        """3 short natural follow-up questions the user might ask next, for
+        Policy Chat's suggestion chips — always generated on the free local
+        Ollama model regardless of which provider produced the actual
+        answer, since this is a per-turn utility call outside the visible
+        chat and not worth billing to a paid API."""
+        if not answer.strip():
+            return []
+        prompt = (
+            "Given this question-and-answer exchange, suggest 3 short natural "
+            "follow-up questions the user might want to ask next, related to the "
+            "same topic. Reply in the SAME language as the question. Return ONLY "
+            "a JSON array of 3 short strings, nothing else — no markdown, no "
+            "explanation.\n\n"
+            f"Question: {question}\nAnswer: {answer[:1500]}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/api/chat",
+                    json={
+                        "model": self.model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "stream": False,
+                        "options": {"num_ctx": 2048},
+                    },
+                )
+                response.raise_for_status()
+                raw = response.json().get("message", {}).get("content", "").strip()
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:].strip()
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return [str(s).strip() for s in parsed if str(s).strip()][:3]
+        except Exception as e:
+            logger.warning("followup_suggestions_failed", error=str(e))
+        return []
 
     async def complete(self, system: str, message: str, num_ctx: int = 8192, provider: str = "onprem", gemini_api_key: str = None, web_search: bool = False) -> str:
         """One-shot, non-streaming completion — for batch/background tasks
@@ -172,7 +227,7 @@ class AIService:
                 raise RuntimeError(data["error"])
             return data.get("message", {}).get("content", "")
 
-    async def stream_chat(self, message: str, history: list[dict], user, department_filter: list[str] = None, provider: str = "onprem", gemini_api_key: str = None):
+    async def stream_chat(self, message: str, history: list[dict], user, department_filter: list[str] = None, provider: str = "onprem", gemini_api_key: str = None, anthropic_api_key: str = None, anthropic_model: str = None):
         """
         Stream chat response from the local Ollama server as SSE, grounded in company docs when available.
         department_filter: list of departments the user may see (None = unrestricted, e.g. IT/Admin).
@@ -281,10 +336,12 @@ class AIService:
         # browser reports it to fetch() as an opaque "network error" with no
         # indication of what went wrong. Catch it and emit a proper SSE
         # error event so the frontend can show a real message instead.
+        full_answer = []
         if provider == "gemini":
             contents = gemini_service.to_contents(history, message)
             try:
                 async for text in gemini_service.stream_generate(system, contents, gemini_api_key):
+                    full_answer.append(text)
                     yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
             except Exception as e:
                 logger.error("gemini_stream_error", error=str(e))
@@ -292,23 +349,22 @@ class AIService:
                 yield "data: [DONE]\n\n"
                 return
         elif provider == "anthropic":
-            # Shared company key only (no per-user override) — matches the
-            # convention already established by _anthropic_complete/
-            # _anthropic_complete_with_search above, not something new
-            # introduced here.
-            client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+            # Personal key/model if the user set one via My API Key,
+            # otherwise the shared company key on the default chat model.
+            client = anthropic.AsyncAnthropic(api_key=anthropic_api_key or settings.anthropic_api_key)
             anthropic_history = [
                 {"role": m.get("role") if m.get("role") in ("user", "assistant") else "user", "content": m.get("content", "")}
                 for m in history if m.get("content")
             ]
             try:
                 async with client.messages.stream(
-                    model="claude-opus-5",
+                    model=anthropic_model or ANTHROPIC_CHAT_DEFAULT_MODEL,
                     max_tokens=4096,
                     system=system,
                     messages=anthropic_history + [{"role": "user", "content": message}],
                 ) as stream:
                     async for text in stream.text_stream:
+                        full_answer.append(text)
                         yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
             except Exception as e:
                 logger.error("anthropic_stream_error", error=str(e))
@@ -335,6 +391,7 @@ class AIService:
                                 raise RuntimeError(chunk["error"])
                             text = chunk.get("message", {}).get("content", "")
                             if text:
+                                full_answer.append(text)
                                 yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
                             if chunk.get("done"):
                                 break
@@ -346,9 +403,22 @@ class AIService:
 
         if sources:
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
+
+        # Follow-up question chips for Policy Chat — always generated on the
+        # free local model regardless of which provider answered (a small
+        # per-turn utility call, not worth billing to a paid API), best-
+        # effort only: a failure or slow local model here must never break
+        # the actual answer that already streamed successfully.
+        try:
+            suggestions = await asyncio.wait_for(self._generate_followups(message, "".join(full_answer)), timeout=8.0)
+        except Exception:
+            suggestions = []
+        if suggestions:
+            yield f"data: {json.dumps({'type': 'suggestions', 'suggestions': suggestions})}\n\n"
+
         yield "data: [DONE]\n\n"
 
-    async def stream_general_chat(self, message: str, history: list[dict], user, provider: str = "onprem", gemini_api_key: str = None):
+    async def stream_general_chat(self, message: str, history: list[dict], user, provider: str = "onprem", gemini_api_key: str = None, anthropic_api_key: str = None, anthropic_model: str = None):
         """
         General-purpose chat — no RAG retrieval, no tools. Simplest of the
         3 chat modes; for questions that aren't about company policy docs
@@ -379,7 +449,8 @@ class AIService:
             # progressively like the other 2 providers.
             try:
                 text, sources = await asyncio.to_thread(
-                    self._anthropic_complete_with_search_history, GENERAL_CHAT_SYSTEM_PROMPT, history, message
+                    self._anthropic_complete_with_search_history, GENERAL_CHAT_SYSTEM_PROMPT, history, message,
+                    8192, anthropic_api_key, anthropic_model,
                 )
                 yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
                 if sources:

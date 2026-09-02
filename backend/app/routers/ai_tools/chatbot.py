@@ -16,8 +16,9 @@ Endpoints:
 
 All 3 chat endpoints take an optional `provider` field on the request body:
 "onprem" (default, local Ollama), "gemini" (Google Gemini API), or —
-/chat and /general-chat only — "anthropic" (Claude, shared company key
-only, same convention as every other Claude-backed tool in this app).
+/chat and /general-chat only — "anthropic" (Claude — shared company key by
+default, on claude-sonnet-5; or the user's own key + model choice if set
+via My API Key, see user_api_key_service.ALLOWED_MODELS).
 /oracle-chat doesn't support "anthropic" yet — it's a tool-calling pipeline
 with its own separate Ollama/Gemini implementations (see
 oracle_chat_service.py); adding Claude there means building a third
@@ -63,6 +64,20 @@ async def _resolve_gemini_key(db: AsyncSession, user: CurrentUser) -> str:
     return user_key or settings.gemini_api_key
 
 
+async def _resolve_anthropic(db: AsyncSession, user: CurrentUser) -> tuple[str | None, str | None]:
+    """(api_key, model) from the user's own saved Claude key/model preference
+    (see My API Key), or (None, None) to fall back to the shared company key
+    and default chat model — mirrors _resolve_gemini_key but returns None
+    instead of the shared key so ai_service can distinguish "no override"
+    from "here's the key to use", since unlike Gemini the model choice also
+    needs to fall through independently."""
+    row_key = await user_api_key_service.get_user_key(db, user.username, "anthropic")
+    if not row_key:
+        return None, None
+    model = await user_api_key_service.get_user_model(db, user.username, "anthropic")
+    return row_key, model
+
+
 @router.post("/chat")
 async def chat(
     request: ChatRequest,
@@ -80,10 +95,11 @@ async def chat(
     is_unrestricted = user.has_any_role("it_staff", "admin")
     department_filter = rag_service.departments_for_roles(user.roles, is_unrestricted)
     gemini_key = await _resolve_gemini_key(db, user) if request.provider == "gemini" else None
+    anthropic_key, anthropic_model = await _resolve_anthropic(db, user) if request.provider == "anthropic" else (None, None)
 
     service = AIService()
     return StreamingResponse(
-        service.stream_chat(request.message, request.conversation_history, user, department_filter, request.provider, gemini_key),
+        service.stream_chat(request.message, request.conversation_history, user, department_filter, request.provider, gemini_key, anthropic_key, anthropic_model),
         media_type="text/event-stream",
     )
 
@@ -135,10 +151,11 @@ async def general_chat(
         raise HTTPException(400, 'Invalid provider — use "onprem", "gemini", or "anthropic"')
 
     gemini_key = await _resolve_gemini_key(db, user) if request.provider == "gemini" else None
+    anthropic_key, anthropic_model = await _resolve_anthropic(db, user) if request.provider == "anthropic" else (None, None)
 
     service = AIService()
     return StreamingResponse(
-        service.stream_general_chat(request.message, request.conversation_history, user, request.provider, gemini_key),
+        service.stream_general_chat(request.message, request.conversation_history, user, request.provider, gemini_key, anthropic_key, anthropic_model),
         media_type="text/event-stream",
     )
 

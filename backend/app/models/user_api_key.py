@@ -16,5 +16,6 @@ class UserApiKey(Base):
     provider      = Column(String(30), nullable=False)  # e.g. "gemini"
     encrypted_key = Column(String(1000), nullable=False)
     key_hint      = Column(String(20))  # masked display, e.g. "••••vSXM" — never the full key
+    model         = Column(String(60))  # optional per-provider model override, e.g. "claude-sonnet-5"; NULL = provider default
     created_at    = Column(DateTime, default=datetime.utcnow)
     updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

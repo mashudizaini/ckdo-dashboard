@@ -23,6 +23,7 @@ router = APIRouter()
 
 class ApiKeyRequest(BaseModel):
     api_key: str
+    model: str | None = None
 
 
 def _check_provider(provider: str):
@@ -57,8 +58,17 @@ async def save_api_key(
     except ValueError as e:
         raise HTTPException(400, str(e))
 
-    hint = await svc.set_user_key(db, user.username, provider, key)
-    return {"message": "API key berhasil disimpan dan tervalidasi", "key_hint": hint}
+    try:
+        hint = await svc.set_user_key(db, user.username, provider, key, request.model)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"message": "API key berhasil disimpan dan tervalidasi", "key_hint": hint, "model": request.model}
+
+
+@router.get("/api-key/{provider}/models")
+async def get_available_models(provider: str, user: CurrentUser = Depends(get_current_user)):
+    _check_provider(provider)
+    return {"models": svc.ALLOWED_MODELS.get(provider, [])}
 
 
 @router.delete("/api-key/{provider}")

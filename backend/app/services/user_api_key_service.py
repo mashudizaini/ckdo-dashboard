@@ -19,6 +19,13 @@ settings = get_settings()
 
 ALLOWED_PROVIDERS = {"gemini", "anthropic", "openai", "kimi"}
 
+# Selectable models per provider — only providers listed here show a model
+# picker in the API key setup UI; the first entry is the recommended
+# default used when a user saves a key without picking a model.
+ALLOWED_MODELS = {
+    "anthropic": ["claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5-20251001"],
+}
+
 
 async def _get_row(db: AsyncSession, username: str, provider: str) -> UserApiKey | None:
     result = await db.execute(
@@ -29,12 +36,21 @@ async def _get_row(db: AsyncSession, username: str, provider: str) -> UserApiKey
 
 async def get_key_status(db: AsyncSession, username: str, provider: str) -> dict:
     row = await _get_row(db, username, provider)
-    return {"has_key": row is not None, "key_hint": row.key_hint if row else None}
+    return {
+        "has_key": row is not None,
+        "key_hint": row.key_hint if row else None,
+        "model": row.model if row else None,
+    }
 
 
 async def get_user_key(db: AsyncSession, username: str, provider: str) -> str | None:
     row = await _get_row(db, username, provider)
     return crypto.decrypt(row.encrypted_key) if row else None
+
+
+async def get_user_model(db: AsyncSession, username: str, provider: str) -> str | None:
+    row = await _get_row(db, username, provider)
+    return row.model if row else None
 
 
 async def validate_gemini_key(api_key: str) -> None:
@@ -119,16 +135,19 @@ VALIDATORS = {
 }
 
 
-async def set_user_key(db: AsyncSession, username: str, provider: str, plaintext: str) -> str:
+async def set_user_key(db: AsyncSession, username: str, provider: str, plaintext: str, model: str | None = None) -> str:
     encrypted = crypto.encrypt(plaintext)
     hint = f"••••{plaintext[-4:]}" if len(plaintext) >= 4 else "••••"
+    if model and provider in ALLOWED_MODELS and model not in ALLOWED_MODELS[provider]:
+        raise ValueError(f"Model tidak dikenali untuk {provider}: {model}")
 
     row = await _get_row(db, username, provider)
     if row:
         row.encrypted_key = encrypted
         row.key_hint = hint
+        row.model = model
     else:
-        row = UserApiKey(username=username, provider=provider, encrypted_key=encrypted, key_hint=hint)
+        row = UserApiKey(username=username, provider=provider, encrypted_key=encrypted, key_hint=hint, model=model)
         db.add(row)
     await db.commit()
     return hint

@@ -463,9 +463,19 @@ export default function Chatbot() {
                   {msg.text
                     ? <MdBlock text={msg.text} className={msg.role === "user" ? "md-user" : "md-bot"} />
                     : (chat.streaming && isLast ? <Loader2 size={14} className="animate-spin" /> : "")}
-                  {msg.sources?.length > 0 && (
+                  {activeTab !== "policy" && msg.sources?.length > 0 && (
                     <div className="mt-2 pt-2 border-t border-gray-700 flex flex-wrap gap-1.5">
                       {msg.sources.map((s, j) => renderSource(activeTab, s, j))}
+                    </div>
+                  )}
+                  {activeTab === "policy" && isBot && isLast && !chat.streaming && msg.suggestions?.length > 0 && (
+                    <div className="mt-3 pt-2 border-t border-gray-700 flex flex-wrap gap-1.5">
+                      {msg.suggestions.map((s, j) => (
+                        <button key={j} onClick={() => chat.sendMessage(s)}
+                          className="rounded-full border border-gray-700 bg-gray-900 px-2.5 py-1 text-xs text-gray-400 hover:border-blue-500 hover:text-blue-400 transition-colors">
+                          {s}
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>

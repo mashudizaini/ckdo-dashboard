@@ -23,6 +23,11 @@ const PROVIDER_META = {
       "Copy key yang muncul (diawali sk-ant-...)",
       "Paste di kolom bawah ini, lalu klik Simpan",
     ],
+    models: [
+      { id: "claude-sonnet-5", label: "Claude Sonnet 5", note: "Direkomendasikan — cepat & hemat, cukup untuk chat sehari-hari" },
+      { id: "claude-opus-5", label: "Claude Opus 5", note: "Paling capable — untuk pertanyaan/analisis yang lebih kompleks, tapi lebih mahal & lebih lambat" },
+      { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", note: "Tercepat & termurah — untuk pertanyaan simpel" },
+    ],
   },
   gemini: {
     label: "Gemini (Google)",
@@ -80,6 +85,8 @@ export default function ApiKeyModal({ provider, onClose }) {
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [msg, setMsg] = useState(null); // { type: "error"|"success", text }
+  const [model, setModel] = useState(meta?.models?.[0]?.id || null);
+  const [activeModel, setActiveModel] = useState(null);
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -88,6 +95,8 @@ export default function ApiKeyModal({ provider, onClose }) {
       const data = await res.json();
       setHasKey(!!data.has_key);
       setKeyHint(data.key_hint);
+      setActiveModel(data.model || null);
+      if (data.model) setModel(data.model);
     } catch (_) {} finally {
       setLoading(false);
     }
@@ -101,13 +110,14 @@ export default function ApiKeyModal({ provider, onClose }) {
     setSaving(true);
     setMsg(null);
     try {
-      const res = await fetch(url, { method: "PUT", headers, body: JSON.stringify({ api_key: key }) });
+      const res = await fetch(url, { method: "PUT", headers, body: JSON.stringify({ api_key: key, model }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Gagal menyimpan API key");
       setMsg({ type: "success", text: data.message });
       setInput("");
       setHasKey(true);
       setKeyHint(data.key_hint);
+      setActiveModel(data.model || null);
     } catch (e) {
       setMsg({ type: "error", text: e.message });
     } finally {
@@ -126,6 +136,8 @@ export default function ApiKeyModal({ provider, onClose }) {
       setMsg({ type: "success", text: data.message });
       setHasKey(false);
       setKeyHint(null);
+      setActiveModel(null);
+      setModel(meta?.models?.[0]?.id || null);
     } catch (e) {
       setMsg({ type: "error", text: e.message });
     } finally {
@@ -172,6 +184,7 @@ export default function ApiKeyModal({ provider, onClose }) {
             <div className="flex items-center justify-between rounded-lg border border-green-700/40 bg-green-500/10 px-3 py-2.5">
               <span className="flex items-center gap-2 text-xs text-green-400">
                 <CheckCircle2 size={14} /> API key pribadi aktif: <code>{keyHint}</code>
+                {activeModel && <span className="text-gray-500">· model: <code>{activeModel}</code></span>}
               </span>
               <button onClick={handleRemove} disabled={removing}
                 className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 border border-red-500/30 rounded px-2 py-1 hover:bg-red-500/10 transition-colors disabled:opacity-50">
@@ -180,7 +193,27 @@ export default function ApiKeyModal({ provider, onClose }) {
             </div>
           ) : (
             <div className="rounded-lg border border-gray-700 bg-gray-800/30 px-3 py-2.5 text-xs text-gray-500">
-              Belum ada API key pribadi — saat ini memakai key perusahaan (shared).
+              Belum ada API key pribadi — saat ini memakai key perusahaan (shared){meta.models ? `, model ${meta.models[0].id}` : ""}.
+            </div>
+          )}
+
+          {meta.models && (
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Model {meta.label} yang dipakai</label>
+              <div className="space-y-1.5">
+                {meta.models.map((m) => (
+                  <label key={m.id}
+                    className={`flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${
+                      model === m.id ? "border-orange-500/60 bg-orange-500/10" : "border-gray-700 bg-gray-800/30 hover:border-gray-600"
+                    }`}>
+                    <input type="radio" name="model" className="mt-0.5" checked={model === m.id} onChange={() => setModel(m.id)} />
+                    <span>
+                      <span className="text-xs font-semibold text-gray-200">{m.label}</span>
+                      <span className="block text-[11px] text-gray-500">{m.note}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
             </div>
           )}
 

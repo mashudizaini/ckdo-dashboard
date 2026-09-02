@@ -26,16 +26,6 @@ function renderWidgetSource(modeKey, s, j) {
       </span>
     );
   }
-  if (modeKey === "policy") {
-    const v = typeof s.similarity === "number" ? s.similarity : parseFloat(s.similarity);
-    const tier = Number.isNaN(v) ? null : v >= 0.5 ? { bg: "#dcfce7", color: "#16a34a" } : v >= 0.25 ? { bg: "#fef3c7", color: "#d97706" } : { bg: "#fee2e2", color: "#dc2626" };
-    return (
-      <span key={j} title={`${s.department} · similarity ${s.similarity}`}
-        style={{ fontSize: 9, borderRadius: 8, padding: "1px 6px", background: tier ? tier.bg : "#ede9fe", color: tier ? tier.color : "#6d28d9" }}>
-        📄 {s.title}
-      </span>
-    );
-  }
   if (modeKey === "general") {
     return (
       <a key={j} href={s.url} target="_blank" rel="noopener noreferrer" title={s.url}
@@ -352,9 +342,19 @@ export default function ChatWidget() {
                     ? <Loader2 size={12} className="animate-spin" />
                     : <MdBlock text={msg.text} isUser={msg.role === "user"} />
                   }
-                  {msg.sources?.length > 0 && (
+                  {activeTab !== "policy" && msg.sources?.length > 0 && (
                     <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(0,0,0,0.08)", display: "flex", flexWrap: "wrap", gap: 4 }}>
                       {msg.sources.map((s, j) => renderWidgetSource(activeTab, s, j))}
+                    </div>
+                  )}
+                  {activeTab === "policy" && msg.role !== "user" && i === messages.length - 1 && !streaming && msg.suggestions?.length > 0 && (
+                    <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(0,0,0,0.08)", display: "flex", flexWrap: "wrap", gap: 4 }}>
+                      {msg.suggestions.map((s, j) => (
+                        <button key={j} onClick={() => sendMessage(s)}
+                          style={{ fontSize: 9, borderRadius: 8, padding: "2px 8px", border: "1px solid #e2e8f0", background: "#fff", color: "#475569", cursor: "pointer" }}>
+                          {s}
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>

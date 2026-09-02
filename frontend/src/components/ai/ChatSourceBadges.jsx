@@ -35,19 +35,6 @@ export function ToolBadge({ source }) {
   );
 }
 
-/** Similarity score buckets to a confidence tier — surfaces at a glance
- * whether an answer leans on a strong document match or a weak one, instead
- * of only revealing the number on hover. Thresholds are heuristic (RAG
- * retrieval here uses a 0.15 floor - see rag_service.retrieve_context), not
- * a calibrated probability. */
-function similarityTier(similarity) {
-  const v = typeof similarity === "number" ? similarity : parseFloat(similarity);
-  if (Number.isNaN(v)) return null;
-  if (v >= 0.5) return { label: "strong", cls: "border-green-700/50 bg-green-500/10 text-green-400" };
-  if (v >= 0.25) return { label: "moderate", cls: "border-amber-700/50 bg-amber-500/10 text-amber-400" };
-  return { label: "weak", cls: "border-red-700/50 bg-red-500/10 text-red-400" };
-}
-
 export function WebSourceBadge({ source }) {
   return (
     <a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer" title={source.url}
@@ -57,18 +44,12 @@ export function WebSourceBadge({ source }) {
   );
 }
 
-/** modeKey: "policy" | "oracle" | "general" — dispatches to the right badge. */
+/** modeKey: "oracle" | "general" — dispatches to the right badge. Policy
+ * Chat doesn't show a source list (see Chatbot.jsx/ChatWidget.jsx — it
+ * shows follow-up suggestion chips instead), so this is never called with
+ * modeKey "policy". */
 export function renderSource(modeKey, s, j) {
   if (modeKey === "oracle") return <ToolBadge key={j} source={s} />;
-  if (modeKey === "policy") {
-    const tier = similarityTier(s.similarity);
-    return (
-      <span key={j} title={`${s.department} · similarity: ${s.similarity}`}
-        className={`text-[10px] rounded-full border px-2 py-0.5 ${tier ? tier.cls : "border-gray-600 bg-gray-900 text-gray-400"}`}>
-        📄 {s.title}
-      </span>
-    );
-  }
   if (modeKey === "general") return <WebSourceBadge key={j} source={s} />;
   return null;
 }

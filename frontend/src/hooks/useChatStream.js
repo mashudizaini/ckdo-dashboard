@@ -105,6 +105,12 @@ export function useChatStream(initialGreeting, storageKey = null, endpoint = "/a
                 next[next.length - 1] = { ...next[next.length - 1], sources: evt.sources };
                 return next;
               });
+            } else if (evt.type === "suggestions") {
+              setMessages((prev) => {
+                const next = [...prev];
+                next[next.length - 1] = { ...next[next.length - 1], suggestions: evt.suggestions };
+                return next;
+              });
             } else if (evt.type === "error") {
               setMessages((prev) => {
                 const next = [...prev];
