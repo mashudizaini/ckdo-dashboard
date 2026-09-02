@@ -8,7 +8,7 @@ import LinkModal from './LinkModal';
 import VideoModal from './VideoModal';
 
 export default function PageViewer() {
-  const { currentPage, currentEditionId, setLoading } = useEMagazineStore();
+  const { currentPage, currentEditionId } = useEMagazineStore();
   const [pageContent, setPageContent] = useState(null);
   const [hotspots, setHotspots] = useState([]);
   const [loading, setLoading] = useState(false);
