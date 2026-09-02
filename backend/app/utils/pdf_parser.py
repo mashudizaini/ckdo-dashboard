@@ -3,7 +3,7 @@ PDF Parser Utility for E-Magazine
 Shared functions for extracting and parsing PDF content.
 """
 
-import subprocess
+import fitz  # PyMuPDF
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Tuple
@@ -26,18 +26,18 @@ SECTIONS = {
 
 
 def extract_text_from_pdf(pdf_path: str) -> Dict:
-    """Extract text from PDF using pdftotext"""
+    """Extract text from PDF using PyMuPDF — already a dependency elsewhere
+    in this app (see chatbot.py's Knowledge Base PDF ingest) rather than
+    shelling out to the poppler-utils `pdftotext` binary, which isn't
+    installed in this image and would need a Docker rebuild to add.
+    Joins pages with a form-feed character to match split_text_by_pages()'s
+    expected page-separator convention (pdftotext's own output convention,
+    kept the same here so downstream parsing didn't need to change)."""
     try:
-        result = subprocess.run(
-            ["pdftotext", "-layout", pdf_path, "-"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        if result.returncode == 0:
-            return {"success": True, "text": result.stdout}
-        else:
-            return {"success": False, "error": result.stderr}
+        doc = fitz.open(pdf_path)
+        pages_text = [page.get_text() for page in doc]
+        doc.close()
+        return {"success": True, "text": "\f".join(pages_text)}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
