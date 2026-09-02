@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useLocation } from "react-router-dom";
-import { X, Send, User, Loader2, Trash2, KeyRound } from "lucide-react";
+import { X, Send, User, Loader2, Trash2, KeyRound, Copy, Check } from "lucide-react";
 import { useChatStream } from "@/hooks/useChatStream";
 import RobotIcon from "@/components/icons/RobotIcon";
 import { CHAT_MODES, CHAT_MODE_ORDER } from "@/config/chatModes";
-import GeminiApiKeyModal from "@/components/ai/GeminiApiKeyModal";
+import ApiKeyModal from "@/components/ai/ApiKeyModal";
+import { mdToHtml } from "@/components/ai/MarkdownLite";
 
 /* Inline-style color themes per mode — this widget uses inline styles
    throughout (not Tailwind classes), so it needs its own hex palette rather
@@ -26,11 +27,21 @@ function renderWidgetSource(modeKey, s, j) {
     );
   }
   if (modeKey === "policy") {
+    const v = typeof s.similarity === "number" ? s.similarity : parseFloat(s.similarity);
+    const tier = Number.isNaN(v) ? null : v >= 0.5 ? { bg: "#dcfce7", color: "#16a34a" } : v >= 0.25 ? { bg: "#fef3c7", color: "#d97706" } : { bg: "#fee2e2", color: "#dc2626" };
     return (
       <span key={j} title={`${s.department} · similarity ${s.similarity}`}
-        style={{ fontSize: 9, borderRadius: 8, padding: "1px 6px", background: "#ede9fe", color: "#6d28d9" }}>
+        style={{ fontSize: 9, borderRadius: 8, padding: "1px 6px", background: tier ? tier.bg : "#ede9fe", color: tier ? tier.color : "#6d28d9" }}>
         📄 {s.title}
       </span>
+    );
+  }
+  if (modeKey === "general") {
+    return (
+      <a key={j} href={s.url} target="_blank" rel="noopener noreferrer" title={s.url}
+        style={{ fontSize: 9, borderRadius: 8, padding: "1px 6px", background: "#ede9fe", color: "#6d28d9", textDecoration: "none", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", verticalAlign: "bottom" }}>
+        🔗 {s.title}
+      </a>
     );
   }
   return null;
@@ -42,91 +53,24 @@ const NEU = {
   shadowBtn: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
 };
 
-/* ── Lightweight markdown renderer ── */
-function mdToHtml(raw) {
-  if (!raw) return "";
-
-  const esc    = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const inline = (s) =>
-    esc(s)
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<em>$1</em>")
-      .replace(/`([^`]+)`/g, "<code>$1</code>");
-
-  const lines = raw.split("\n");
-  const out   = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    // Heading
-    const hm = line.match(/^(#{1,3})\s+(.+)/);
-    if (hm) {
-      out.push(`<h${hm[1].length}>${inline(hm[2])}</h${hm[1].length}>`);
-      i++; continue;
-    }
-
-    // Table
-    if (line.startsWith("|")) {
-      const tLines = [];
-      while (i < lines.length && lines[i].startsWith("|")) { tLines.push(lines[i]); i++; }
-      const isSep = (l) => l.split("|").slice(1, -1).every((c) => /^[\s\-:]+$/.test(c));
-      const rows  = tLines.filter((l) => !isSep(l));
-      if (rows.length) {
-        const cells    = (l) => l.split("|").slice(1, -1).map((c) => c.trim());
-        const [hdr, ...body] = rows;
-        const th = cells(hdr).map((c) => `<th>${inline(c)}</th>`).join("");
-        const tr = body.map((r) => `<tr>${cells(r).map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("");
-        out.push(`<table><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`);
-      }
-      continue;
-    }
-
-    // Unordered list
-    if (/^[-*]\s/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^[-*]\s/.test(lines[i]))
-        items.push(`<li>${inline(lines[i++].replace(/^[-*]\s/, ""))}</li>`);
-      out.push(`<ul>${items.join("")}</ul>`);
-      continue;
-    }
-
-    // Ordered list
-    if (/^\d+\.\s/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\d+\.\s/.test(lines[i]))
-        items.push(`<li>${inline(lines[i++].replace(/^\d+\.\s/, ""))}</li>`);
-      out.push(`<ol>${items.join("")}</ol>`);
-      continue;
-    }
-
-    // Blockquote
-    if (line.startsWith("> ")) {
-      const qLines = [];
-      while (i < lines.length && lines[i].startsWith("> ")) qLines.push(lines[i++].slice(2));
-      out.push(`<blockquote>${inline(qLines.join(" "))}</blockquote>`);
-      continue;
-    }
-
-    // Empty line
-    if (!line.trim()) { i++; continue; }
-
-    // Paragraph
-    const pLines = [];
-    while (
-      i < lines.length &&
-      lines[i].trim() &&
-      !lines[i].startsWith("|") &&
-      !/^[-*]\s/.test(lines[i]) &&
-      !/^\d+\.\s/.test(lines[i]) &&
-      !lines[i].startsWith("> ") &&
-      !/^#{1,3}\s/.test(lines[i])
-    ) pLines.push(lines[i++]);
-    if (pLines.length) out.push(`<p>${inline(pLines.join("<br>"))}</p>`);
-  }
-
-  return out.join("");
+function WidgetCopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={async (e) => {
+        e.stopPropagation();
+        try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch (_) {}
+      }}
+      title="Copy"
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "center",
+        width: 18, height: 18, borderRadius: 5, border: "none", background: "transparent",
+        color: copied ? "#16a34a" : "#94a3b8", cursor: "pointer", flexShrink: 0,
+      }}
+    >
+      {copied ? <Check size={11} /> : <Copy size={11} />}
+    </button>
+  );
 }
 
 function MdBlock({ text, isUser }) {
@@ -230,6 +174,9 @@ export default function ChatWidget() {
         .ai-fab-idle { animation: ai-ring 2.6s ease-out infinite; }
         .ai-fab-idle:hover { filter: brightness(1.12); }
 
+        .ckdo-msg-row .ckdo-copy-btn { opacity: 0; transition: opacity 0.12s; }
+        .ckdo-msg-row:hover .ckdo-copy-btn { opacity: 1; }
+
         /* ── Markdown styles ── */
         .md-msg { font-size: 12px; line-height: 1.55; }
         .md-msg p { margin: 0 0 6px; }
@@ -284,7 +231,9 @@ export default function ChatWidget() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ fontSize: 12, fontWeight: 700, color: "#fff", margin: 0 }}>{CHAT_MODES[activeTab].label}</p>
               <p style={{ fontSize: 10, color: "rgba(255,255,255,0.75)", margin: 0 }}>
-                {streaming ? "Typing…" : "Online · AI Assistant"}
+                {streaming
+                  ? (activeTab === "general" && provider === "anthropic" ? "Mencari di web…" : "Typing…")
+                  : "Online · AI Assistant"}
               </p>
             </div>
             {/* Clear history */}
@@ -352,20 +301,22 @@ export default function ChatWidget() {
               <option value="gemini">Gemini</option>
               <option value="anthropic" disabled={activeTab === "oracle"}>Claude</option>
             </select>
-            <button
-              onClick={() => setShowApiKey(true)}
-              title="API Key Gemini pribadi"
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: 22, height: 22, borderRadius: 6, border: "1px solid #e2e8f0",
-                background: "#fff", color: "#64748b", cursor: "pointer", flexShrink: 0,
-              }}
-            >
-              <KeyRound size={11} />
-            </button>
+            {provider !== "onprem" && (
+              <button
+                onClick={() => setShowApiKey(true)}
+                title={`API Key ${provider === "anthropic" ? "Claude" : "Gemini"} pribadi`}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 22, height: 22, borderRadius: 6, border: "1px solid #e2e8f0",
+                  background: "#fff", color: "#64748b", cursor: "pointer", flexShrink: 0,
+                }}
+              >
+                <KeyRound size={11} />
+              </button>
+            )}
           </div>
 
-          {showApiKey && <GeminiApiKeyModal onClose={() => setShowApiKey(false)} />}
+          {showApiKey && provider !== "onprem" && <ApiKeyModal provider={provider} onClose={() => setShowApiKey(false)} />}
 
           {/* Messages */}
           <div style={{
@@ -374,7 +325,7 @@ export default function ChatWidget() {
             background: "#fff",
           }}>
             {messages.map((msg, i) => (
-              <div key={i} style={{ display: "flex", gap: 6, flexDirection: msg.role === "user" ? "row-reverse" : "row", alignItems: "flex-start" }}>
+              <div key={i} className="ckdo-msg-row" style={{ display: "flex", gap: 6, flexDirection: msg.role === "user" ? "row-reverse" : "row", alignItems: "flex-start" }}>
                 {/* Avatar */}
                 <div style={{
                   width: 26, height: 26, borderRadius: "50%", flexShrink: 0, marginTop: 2,
@@ -407,6 +358,11 @@ export default function ChatWidget() {
                     </div>
                   )}
                 </div>
+                {msg.role !== "user" && msg.text && !msg.error && (
+                  <div className="ckdo-copy-btn" style={{ marginTop: 2 }}>
+                    <WidgetCopyButton text={msg.text} />
+                  </div>
+                )}
               </div>
             ))}
             <div ref={bottomRef} style={{ height: 4 }} />

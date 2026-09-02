@@ -95,7 +95,7 @@ class AIService:
         answer_blocks = [b.text for b in response.content[last_tool_idx + 1:] if b.type == "text"]
         return "".join(answer_blocks).strip()
 
-    def _anthropic_complete_with_search_history(self, system: str, history: list[dict], message: str, max_tokens: int = 8192) -> str:
+    def _anthropic_complete_with_search_history(self, system: str, history: list[dict], message: str, max_tokens: int = 8192) -> tuple[str, list[dict]]:
         """Same web-search grounding as _anthropic_complete_with_search, but
         carries prior conversation turns too — General Chat's Claude option
         needs history the same way the other 2 providers there already get
@@ -103,7 +103,13 @@ class AIService:
         _anthropic_complete_with_search was built for. Deliberately a
         separate method rather than adding a history param to that one, to
         avoid touching the already-working PAC Business Plan Outlook path
-        that calls it today."""
+        that calls it today.
+
+        Also returns the web pages Claude actually cited in the final
+        answer (deduplicated by URL, in first-cited order) — General Chat
+        has no other grounding to show sources for, and surfacing them is
+        what makes a web-searched answer verifiable instead of just an
+        unsourced claim."""
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         messages = [
             {"role": m.get("role") if m.get("role") in ("user", "assistant") else "user", "content": m.get("content", "")}
@@ -122,8 +128,17 @@ class AIService:
         for i, block in enumerate(response.content):
             if block.type != "text":
                 last_tool_idx = i
-        answer_blocks = [b.text for b in response.content[last_tool_idx + 1:] if b.type == "text"]
-        return "".join(answer_blocks).strip()
+        answer_blocks_raw = response.content[last_tool_idx + 1:]
+        answer_blocks = [b.text for b in answer_blocks_raw if b.type == "text"]
+        seen_urls = {}
+        for b in answer_blocks_raw:
+            if b.type != "text":
+                continue
+            for c in (getattr(b, "citations", None) or []):
+                url = getattr(c, "url", None)
+                if url and url not in seen_urls:
+                    seen_urls[url] = {"title": getattr(c, "title", None) or url, "url": url}
+        return "".join(answer_blocks).strip(), list(seen_urls.values())
 
     async def complete(self, system: str, message: str, num_ctx: int = 8192, provider: str = "onprem", gemini_api_key: str = None, web_search: bool = False) -> str:
         """One-shot, non-streaming completion — for batch/background tasks
@@ -363,10 +378,12 @@ class AIService:
             # answer arrives as one chunk once it's ready rather than
             # progressively like the other 2 providers.
             try:
-                text = await asyncio.to_thread(
+                text, sources = await asyncio.to_thread(
                     self._anthropic_complete_with_search_history, GENERAL_CHAT_SYSTEM_PROMPT, history, message
                 )
                 yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+                if sources:
+                    yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
             except Exception as e:
                 logger.error("anthropic_general_chat_error", error=str(e))
                 yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"

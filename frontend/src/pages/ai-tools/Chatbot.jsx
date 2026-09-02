@@ -1,10 +1,26 @@
 import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, BookOpen, Upload, Trash2, X, Loader2, FileText, AlignLeft, AlertTriangle, KeyRound, RotateCcw } from "lucide-react";
+import { Send, Bot, User, BookOpen, Upload, Trash2, X, Loader2, FileText, AlignLeft, AlertTriangle, KeyRound, RotateCcw, Copy, Check } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStream } from "@/hooks/useChatStream";
 import { CHAT_MODES, CHAT_MODE_ORDER } from "@/config/chatModes";
 import { DeptBadge, renderSource } from "@/components/ai/ChatSourceBadges";
-import GeminiApiKeyModal from "@/components/ai/GeminiApiKeyModal";
+import { MdBlock } from "@/components/ai/MarkdownLite";
+import ApiKeyModal from "@/components/ai/ApiKeyModal";
+
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={async () => {
+        try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch (_) {}
+      }}
+      title="Copy"
+      className="shrink-0 self-start p-1 rounded text-gray-600 hover:text-gray-300 hover:bg-gray-700/50 transition-colors"
+    >
+      {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+    </button>
+  );
+}
 
 function KnowledgeBasePanel({ onClose }) {
   const { token, hasAnyRole } = useAuthStore();
@@ -321,6 +337,24 @@ export default function Chatbot() {
 
   return (
     <div className="flex flex-col h-full p-6">
+      <style>{`
+        .md-msg { line-height: 1.6; }
+        .md-msg p { margin: 0 0 8px; }
+        .md-msg p:last-child { margin-bottom: 0; }
+        .md-msg ul, .md-msg ol { margin: 4px 0; padding-left: 20px; }
+        .md-msg li { margin: 2px 0; }
+        .md-msg strong { font-weight: 700; }
+        .md-msg em { font-style: italic; }
+        .md-msg h1 { font-size: 1.05em; font-weight: 700; margin: 8px 0 4px; }
+        .md-msg h2 { font-size: 1em; font-weight: 700; margin: 6px 0 3px; }
+        .md-msg h3 { font-size: 0.95em; font-weight: 700; margin: 5px 0 3px; }
+        .md-msg blockquote { border-left: 3px solid currentColor; margin: 6px 0; padding: 2px 10px; opacity: 0.8; font-style: italic; }
+        .md-msg table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 0.9em; }
+        .md-msg th, .md-msg td { padding: 6px 10px; text-align: left; border: 1px solid rgba(255,255,255,0.1); }
+        .md-msg th { font-weight: 700; background: rgba(255,255,255,0.06); }
+        .md-msg tr:nth-child(even) td { background: rgba(255,255,255,0.03); }
+        .md-msg code { background: rgba(255,255,255,0.1); padding: 1px 5px; border-radius: 4px; font-family: monospace; font-size: 0.9em; }
+      `}</style>
       {/* Header */}
       <div className="mb-4 flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -343,10 +377,12 @@ export default function Chatbot() {
               Claude{activeTab === "oracle" ? " (not available for Oracle ERP Data chat)" : ""}
             </option>
           </select>
-          <button onClick={() => setShowApiKey(true)} title="Pakai API key Gemini pribadi Anda sendiri"
-            className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs font-medium text-gray-300 hover:border-violet-500 hover:text-violet-400 transition-colors">
-            <KeyRound size={14} /> My API Key
-          </button>
+          {provider !== "onprem" && (
+            <button onClick={() => setShowApiKey(true)} title={`Pakai API key ${provider === "anthropic" ? "Claude" : "Gemini"} pribadi Anda sendiri`}
+              className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs font-medium text-gray-300 hover:border-violet-500 hover:text-violet-400 transition-colors">
+              <KeyRound size={14} /> My API Key
+            </button>
+          )}
           <button
             onClick={() => { if (confirm("Clear this conversation's history? This cannot be undone.")) chat.clearHistory(); }}
             title="Riwayat percakapan tersimpan di browser ini dan ikut dikirim sebagai konteks di setiap pertanyaan baru — kosongkan kalau jawaban lama masih 'nyangkut' meski Knowledge Base sudah diubah."
@@ -363,7 +399,7 @@ export default function Chatbot() {
       </div>
 
       {showKB && <KnowledgeBasePanel onClose={() => setShowKB(false)} />}
-      {showApiKey && <GeminiApiKeyModal onClose={() => setShowApiKey(false)} />}
+      {showApiKey && provider !== "onprem" && <ApiKeyModal provider={provider} onClose={() => setShowApiKey(false)} />}
 
       {/* Mode tabs */}
       <div className="mb-4 flex gap-1 border-b border-gray-800">
@@ -399,35 +435,48 @@ export default function Chatbot() {
           </div>
           <span className="ml-auto flex items-center gap-1.5 text-xs text-white/70">
             <span className={`h-2 w-2 rounded-full ${chat.streaming ? "bg-amber-400 animate-pulse" : "bg-green-400"}`} />
-            {chat.streaming ? mode.thinkingLabel : "Online"}
+            {chat.streaming
+              ? (activeTab === "general" && provider === "anthropic" ? "Mencari di web..." : mode.thinkingLabel)
+              : "Online"}
           </span>
         </div>
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {chat.messages.map((msg, i) => (
-            <div key={i} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                msg.role === "user" ? mode.userAvatar : "bg-gray-700"
-              }`}>
-                {msg.role === "user" ? <User size={14} className="text-white" /> : <Bot size={14} className="text-gray-300" />}
-              </div>
-              <div className={`max-w-md rounded-xl px-4 py-3 text-sm ${
-                msg.error
-                  ? "bg-red-500/10 border border-red-500/30 text-red-400"
-                  : msg.role === "user"
-                    ? `${mode.userBubble} text-white rounded-tr-sm`
-                    : "bg-gray-800 text-gray-200 rounded-tl-sm"
-              }`}>
-                {msg.text || (chat.streaming && i === chat.messages.length - 1 ? <Loader2 size={14} className="animate-spin" /> : "")}
-                {msg.sources?.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-gray-700 flex flex-wrap gap-1.5">
-                    {msg.sources.map((s, j) => renderSource(activeTab, s, j))}
+          {chat.messages.map((msg, i) => {
+            const isLast = i === chat.messages.length - 1;
+            const isBot = msg.role !== "user";
+            return (
+              <div key={i} className={`group flex gap-3 items-start ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
+                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                  msg.role === "user" ? mode.userAvatar : "bg-gray-700"
+                }`}>
+                  {msg.role === "user" ? <User size={14} className="text-white" /> : <Bot size={14} className="text-gray-300" />}
+                </div>
+                <div className={`max-w-md rounded-xl px-4 py-3 text-sm ${
+                  msg.error
+                    ? "bg-red-500/10 border border-red-500/30 text-red-400"
+                    : msg.role === "user"
+                      ? `${mode.userBubble} text-white rounded-tr-sm`
+                      : "bg-gray-800 text-gray-200 rounded-tl-sm"
+                }`}>
+                  {msg.text
+                    ? <MdBlock text={msg.text} className={msg.role === "user" ? "md-user" : "md-bot"} />
+                    : (chat.streaming && isLast ? <Loader2 size={14} className="animate-spin" /> : "")}
+                  {msg.sources?.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-gray-700 flex flex-wrap gap-1.5">
+                      {msg.sources.map((s, j) => renderSource(activeTab, s, j))}
+                    </div>
+                  )}
+                </div>
+                {isBot && msg.text && !msg.error && (
+                  <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                    <CopyButton text={msg.text} />
                   </div>
                 )}
               </div>
-            </div>
-          ))}
+            );
+          })}
           <div ref={bottomRef} />
         </div>
 
