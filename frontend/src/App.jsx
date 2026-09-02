@@ -26,6 +26,10 @@ import DocumentConverter from "@/pages/ai-tools/DocumentConverter";
 import MeetingNotes from "@/pages/ai-tools/MeetingNotes";
 import MeetingTranscriptView from "@/pages/ai-tools/MeetingTranscriptView";
 
+// E-Magazine Pages
+import EMagazinePage from "@/pages/EMagazinePage";
+import EMagazineAdminPage from "@/pages/admin/EMagazineAdminPage";
+
 export default function App() {
   const { init, isLoading, isAuthenticated, returnPath, clearReturnPath } = useAuthStore();
   const navigate = useNavigate();
@@ -165,6 +169,10 @@ export default function App() {
         <Route path="oracle-data" element={<Navigate to="/ai/chatbot" replace />} />
         <Route path="meeting-notes" element={<MeetingNotes />} />
       </Route>
+
+      {/* E-Magazine */}
+      <Route path="/e-magazine" element={<EMagazinePage />} />
+      <Route path="/e-magazine/admin" element={<EMagazineAdminPage />} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -27,7 +27,7 @@ const NAV_ITEMS = [
     { label: "Working Calendar", path: "/dashboard/hr/workingcalendar" },
     { label: "To Do List", path: "/dashboard/hr/todo" },
     { label: "E-Recruitment", path: "/dashboard/hr/cv" },
-    { label: "e-Magazine", path: "/dashboard/hr/emagazine" },
+    { label: "e-Magazine", path: "/e-magazine" },
   ] },
   { label: "PAC", path: "/dashboard/pac", icon: Factory, roles: ["pac_staff"], children: [
     { label: "Business Plan", path: "/dashboard/pac/bizplan" },
