@@ -15,7 +15,19 @@ Endpoints:
   GET    /status               — Whether RAG (local Ollama embeddings) is configured
 
 All 3 chat endpoints take an optional `provider` field on the request body:
-"onprem" (default, local Ollama) or "gemini" (Google Gemini API).
+"onprem" (default, local Ollama), "gemini" (Google Gemini API), or —
+/chat and /general-chat only — "anthropic" (Claude, shared company key
+only, same convention as every other Claude-backed tool in this app).
+/oracle-chat doesn't support "anthropic" yet — it's a tool-calling pipeline
+with its own separate Ollama/Gemini implementations (see
+oracle_chat_service.py); adding Claude there means building a third
+tool-calling path against Anthropic's own tool-use API, not just this
+plain-chat wiring.
+
+General Chat's "anthropic" additionally grounds every answer in Claude's
+live web_search tool (see ai_service.py's _anthropic_complete_with_search_
+history) — the one place in this interactive chatbot that isn't capped at
+a model's training-data cutoff.
 """
 import asyncio
 import os
@@ -58,12 +70,12 @@ async def chat(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    AI Chatbot — streaming response (local Ollama or Gemini), otomatis
-    grounded ke dokumen perusahaan jika relevan. Dokumen yang bisa diakses
-    dibatasi sesuai departemen user (IT/Admin bebas akses semua departemen).
+    AI Chatbot — streaming response (local Ollama, Gemini, or Claude),
+    otomatis grounded ke dokumen perusahaan jika relevan. Dokumen yang bisa
+    diakses dibatasi sesuai departemen user (IT/Admin bebas akses semua departemen).
     """
-    if request.provider not in ("onprem", "gemini"):
-        raise HTTPException(400, 'Invalid provider — use "onprem" or "gemini"')
+    if request.provider not in ("onprem", "gemini", "anthropic"):
+        raise HTTPException(400, 'Invalid provider — use "onprem", "gemini", or "anthropic"')
 
     is_unrestricted = user.has_any_role("it_staff", "admin")
     department_filter = rag_service.departments_for_roles(user.roles, is_unrestricted)
@@ -88,6 +100,11 @@ async def oracle_chat(
     (sales/production/budget/financial) instead of writing SQL itself; the
     query runs against Postgres EIS through a read-only DB role. See
     oracle_chat_service.py.
+
+    No "anthropic" here yet (unlike /chat and /general-chat) — this mode's
+    tool-calling has its own separate Ollama/Gemini implementations, and
+    adding Claude means a third path against Anthropic's own tool-use API,
+    not just re-pointing the plain-chat wiring the other 2 endpoints use.
     """
     if request.provider not in ("onprem", "gemini"):
         raise HTTPException(400, 'Invalid provider — use "onprem" or "gemini"')
@@ -108,12 +125,14 @@ async def general_chat(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    General-purpose chat — streaming response (local Ollama or Gemini), no
-    RAG retrieval, no tools. For questions outside company policy docs and
-    Oracle ERP data.
+    General-purpose chat — streaming response (local Ollama, Gemini, or
+    Claude), no RAG retrieval, no tools. For questions outside company
+    policy docs and Oracle ERP data. provider="anthropic" here is grounded
+    in live web search (see ai_service.py) — the only mode in this app's
+    interactive chatbot that isn't capped at a training-data cutoff.
     """
-    if request.provider not in ("onprem", "gemini"):
-        raise HTTPException(400, 'Invalid provider — use "onprem" or "gemini"')
+    if request.provider not in ("onprem", "gemini", "anthropic"):
+        raise HTTPException(400, 'Invalid provider — use "onprem", "gemini", or "anthropic"')
 
     gemini_key = await _resolve_gemini_key(db, user) if request.provider == "gemini" else None
 

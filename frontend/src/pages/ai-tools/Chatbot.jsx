@@ -295,6 +295,15 @@ export default function Chatbot() {
   const [showApiKey, setShowApiKey] = useState(false);
   const bottomRef = useRef(null);
 
+  // Claude isn't wired into Oracle EBS Data Chat's tool-calling pipeline
+  // yet (see chatbot.py) — the dropdown below disables selecting it while
+  // that tab is active, but if it was already selected on a different tab
+  // before switching here, fall back automatically instead of letting the
+  // next message hit the backend's 400.
+  useEffect(() => {
+    if (activeTab === "oracle" && provider === "anthropic") setProvider("gemini");
+  }, [activeTab, provider]);
+
   // All 3 modes stay mounted (via their own hook instance) at all times, so
   // switching tabs preserves each conversation's history instead of
   // resetting it — each has its own localStorage key too.
@@ -330,6 +339,9 @@ export default function Chatbot() {
           >
             <option value="onprem">Standard (On-Premise)</option>
             <option value="gemini">Gemini</option>
+            <option value="anthropic" disabled={activeTab === "oracle"}>
+              Claude{activeTab === "oracle" ? " (not available for Oracle ERP Data chat)" : ""}
+            </option>
           </select>
           <button onClick={() => setShowApiKey(true)} title="Pakai API key Gemini pribadi Anda sendiri"
             className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs font-medium text-gray-300 hover:border-violet-500 hover:text-violet-400 transition-colors">

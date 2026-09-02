@@ -95,6 +95,36 @@ class AIService:
         answer_blocks = [b.text for b in response.content[last_tool_idx + 1:] if b.type == "text"]
         return "".join(answer_blocks).strip()
 
+    def _anthropic_complete_with_search_history(self, system: str, history: list[dict], message: str, max_tokens: int = 8192) -> str:
+        """Same web-search grounding as _anthropic_complete_with_search, but
+        carries prior conversation turns too — General Chat's Claude option
+        needs history the same way the other 2 providers there already get
+        it, unlike the single-shot batch-report caller
+        _anthropic_complete_with_search was built for. Deliberately a
+        separate method rather than adding a history param to that one, to
+        avoid touching the already-working PAC Business Plan Outlook path
+        that calls it today."""
+        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        messages = [
+            {"role": m.get("role") if m.get("role") in ("user", "assistant") else "user", "content": m.get("content", "")}
+            for m in history if m.get("content")
+        ] + [{"role": "user", "content": message}]
+        tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 8}]
+        response = None
+        for _ in range(3):
+            response = client.messages.create(
+                model="claude-opus-5", max_tokens=max_tokens, system=system, messages=messages, tools=tools,
+            )
+            if response.stop_reason != "pause_turn":
+                break
+            messages = messages + [{"role": "assistant", "content": response.content}]
+        last_tool_idx = -1
+        for i, block in enumerate(response.content):
+            if block.type != "text":
+                last_tool_idx = i
+        answer_blocks = [b.text for b in response.content[last_tool_idx + 1:] if b.type == "text"]
+        return "".join(answer_blocks).strip()
+
     async def complete(self, system: str, message: str, num_ctx: int = 8192, provider: str = "onprem", gemini_api_key: str = None, web_search: bool = False) -> str:
         """One-shot, non-streaming completion — for batch/background tasks
         (e.g. summarizing an uploaded reference file into a structured
@@ -246,6 +276,30 @@ class AIService:
                 yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
+        elif provider == "anthropic":
+            # Shared company key only (no per-user override) — matches the
+            # convention already established by _anthropic_complete/
+            # _anthropic_complete_with_search above, not something new
+            # introduced here.
+            client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+            anthropic_history = [
+                {"role": m.get("role") if m.get("role") in ("user", "assistant") else "user", "content": m.get("content", "")}
+                for m in history if m.get("content")
+            ]
+            try:
+                async with client.messages.stream(
+                    model="claude-opus-5",
+                    max_tokens=4096,
+                    system=system,
+                    messages=anthropic_history + [{"role": "user", "content": message}],
+                ) as stream:
+                    async for text in stream.text_stream:
+                        yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+            except Exception as e:
+                logger.error("anthropic_stream_error", error=str(e))
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
         else:
             # Ollama takes the system prompt as a regular message in the list
             # (unlike Anthropic/Gemini, which have a separate top-level `system` param).
@@ -292,6 +346,29 @@ class AIService:
                     yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
             except Exception as e:
                 logger.error("gemini_general_chat_error", error=str(e))
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+        elif provider == "anthropic":
+            # Unlike Policy/Oracle Chat, General Chat's Claude option grounds
+            # every answer in live web search (Claude's server-side
+            # web_search tool — same mechanism PAC's Business Plan Outlook
+            # already uses) instead of plain model knowledge, since General
+            # Chat has no other grounding (no RAG/tools) and this is the one
+            # mode in this app's interactive chatbot that can answer with
+            # genuinely current information rather than being capped at
+            # training-data knowledge. Not true token-by-token streaming —
+            # web search is a multi-step server-side process (Claude decides
+            # what to search, reads results, then answers), so the full
+            # answer arrives as one chunk once it's ready rather than
+            # progressively like the other 2 providers.
+            try:
+                text = await asyncio.to_thread(
+                    self._anthropic_complete_with_search_history, GENERAL_CHAT_SYSTEM_PROMPT, history, message
+                )
+                yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+            except Exception as e:
+                logger.error("anthropic_general_chat_error", error=str(e))
                 yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
                 yield "data: [DONE]\n\n"
                 return

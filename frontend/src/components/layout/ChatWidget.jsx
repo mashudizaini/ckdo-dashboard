@@ -153,6 +153,13 @@ export default function ChatWidget() {
   const [provider, setProvider]       = useState("onprem");
   const [showApiKey, setShowApiKey]   = useState(false);
 
+  // Claude isn't wired into Oracle EBS Data Chat's tool-calling pipeline
+  // yet (see chatbot.py) — mirrors the same fallback in Chatbot.jsx (the
+  // full /ai/chatbot page).
+  useEffect(() => {
+    if (activeTab === "oracle" && provider === "anthropic") setProvider("gemini");
+  }, [activeTab, provider]);
+
   // Same localStorage keys/endpoints as the full /ai/chatbot page (see
   // config/chatModes.js) — so a conversation started in the widget
   // continues seamlessly if the user later opens the full page, and vice versa.
@@ -343,6 +350,7 @@ export default function ChatWidget() {
             >
               <option value="onprem">Standard</option>
               <option value="gemini">Gemini</option>
+              <option value="anthropic" disabled={activeTab === "oracle"}>Claude</option>
             </select>
             <button
               onClick={() => setShowApiKey(true)}
