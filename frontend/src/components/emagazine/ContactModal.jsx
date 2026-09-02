@@ -1,7 +1,7 @@
 import React from 'react';
 import { Mail, Phone, MapPin, Globe, QrCode } from 'lucide-react';
 import Modal from './Modal';
-import QRCode from 'qrcode.react';
+import { QRCodeSVG } from 'qrcode.react';
 
 export default function ContactModal({ isOpen, onClose, data }) {
   if (!data) return null;
@@ -88,7 +88,7 @@ export default function ContactModal({ isOpen, onClose, data }) {
               <p className="text-xs text-gray-600">Scan to contact</p>
             </div>
             <div className="flex justify-center p-4 bg-gray-50 rounded">
-              <QRCode
+              <QRCodeSVG
                 value={`mailto:${email}`}
                 size={120}
                 level="H"
