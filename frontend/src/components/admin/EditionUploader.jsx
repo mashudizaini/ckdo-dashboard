@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Upload, AlertCircle, CheckCircle } from 'lucide-react';
+import emagazineAPI from '../../utils/emagazineApi';
 
 export default function EditionUploader({ onUploadSuccess }) {
   const [formData, setFormData] = useState({

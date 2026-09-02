@@ -250,8 +250,12 @@ async def upload_edition(
             detail="Published date must be in YYYY-MM-DD format"
         )
 
-    # Create upload directory if it doesn't exist
-    upload_dir = Path("/home/user/mashudizaini/ckdo-dashboard/backend/emagazine_archive")
+    # Create upload directory if it doesn't exist — /app/magazine-uploads is
+    # the persistent bind mount for this (./e-magazine/magazines on the host,
+    # see docker-compose.yml), not an arbitrary path: anything saved outside
+    # a declared volume lives only in the container's own writable layer and
+    # is silently lost on the next rebuild/restart.
+    upload_dir = Path("/app/magazine-uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     # Save uploaded file
