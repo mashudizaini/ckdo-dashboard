@@ -9,7 +9,7 @@ import VideoModal from './VideoModal';
 import QrCodeModal from './QrCodeModal';
 
 export default function PageViewer() {
-  const { currentPage, currentEditionId } = useEMagazineStore();
+  const { currentPage, currentEditionId, setCurrentPage } = useEMagazineStore();
   const [pageContent, setPageContent] = useState(null);
   const [hotspots, setHotspots] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -58,11 +58,18 @@ export default function PageViewer() {
   }
 
   const handleHotspotClick = (hotspot) => {
-    setModalData({
-      actionType: hotspot.action_type,
-      data: hotspot.action_data,
-    });
-    setActiveModal(hotspot.action_type);
+    // page_jump navigates within the same edition (e.g. a printed table-of-
+    // contents page's entries) — no modal to open, just move the reader.
+    if (hotspot.action_type === 'page_jump') {
+      const targetPage = parseInt(hotspot.action_data?.page, 10);
+      if (targetPage) setCurrentPage(targetPage);
+    } else {
+      setModalData({
+        actionType: hotspot.action_type,
+        data: hotspot.action_data,
+      });
+      setActiveModal(hotspot.action_type);
+    }
 
     // Track analytics
     emagazineAPI.trackAnalytics(currentEditionId, 'hotspot_click', {

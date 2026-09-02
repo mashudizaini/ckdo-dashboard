@@ -96,6 +96,7 @@ function getActionColor(actionType) {
     form: 'rgb(34, 197, 94)', // green
     qrcode: 'rgb(249, 115, 22)', // orange
     profile: 'rgb(168, 85, 247)', // purple
+    page_jump: 'rgb(20, 184, 166)', // teal
   };
   return colors[actionType] || 'rgb(107, 114, 128)'; // gray default
 }

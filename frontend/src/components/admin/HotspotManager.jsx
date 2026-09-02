@@ -9,6 +9,7 @@ const ACTION_TYPES = [
   { value: 'video', label: 'Video', color: 'bg-red-100 text-red-700' },
   { value: 'form', label: 'Form', color: 'bg-green-100 text-green-700' },
   { value: 'qrcode', label: 'QR Code', color: 'bg-orange-100 text-orange-700' },
+  { value: 'page_jump', label: 'Go to Page', color: 'bg-teal-100 text-teal-700' },
 ];
 
 export default function HotspotManager({ editionId }) {
@@ -490,6 +491,24 @@ function HotspotForm({ data, setData, onSave, onCancel }) {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
               rows="2"
             />
+          </div>
+        )}
+        {data.action_type === 'page_jump' && (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Target page number</label>
+              <input
+                type="number"
+                min="1"
+                placeholder="e.g. 7"
+                value={data.action_data.page || ''}
+                onChange={(e) => handleActionDataChange('page', parseInt(e.target.value) || '')}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+              />
+            </div>
+            <p className="text-xs text-gray-500">
+              For table-of-contents style entries printed on the page — clicking jumps straight to that page instead of opening a popup.
+            </p>
           </div>
         )}
       </div>

@@ -6,6 +6,7 @@ const ACTION_TYPES = [
   { value: 'video', label: 'Video' },
   { value: 'form', label: 'Form' },
   { value: 'qrcode', label: 'QR Code' },
+  { value: 'page_jump', label: 'Go to Page' },
 ];
 
 const ACTION_COLORS = {
@@ -14,6 +15,7 @@ const ACTION_COLORS = {
   video: '#ef4444',
   form: '#22c55e',
   qrcode: '#f97316',
+  page_jump: '#14b8a6',
 };
 
 /**
