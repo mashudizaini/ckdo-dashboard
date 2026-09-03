@@ -154,6 +154,24 @@ EIS_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_sales_order_detail",
+            "description": "Cari data Sales Order individual — nomor order, item, customer, nilai — berdasarkan nama customer, kode item, nomor order, dan/atau tahun. Untuk pertanyaan 'total penjualan customer X', 'order apa saja dari customer Y', 'penjualan item Z ke customer mana saja' — bukan sekadar total/trend perusahaan (untuk itu pakai get_sales_performance). Kalau user tanya 'total' untuk satu customer/tahun, jumlahkan sendiri amount_idr dari baris-baris yang dikembalikan.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "customer_name": {"type": "string", "description": "Opsional. Nama customer (partial match), contoh SAIDAL"},
+                    "item_code": {"type": "string", "description": "Opsional. Kode item Oracle"},
+                    "order_number": {"type": "string", "description": "Opsional. Nomor Sales Order (partial match)"},
+                    "business_type": {"type": "string", "description": "Opsional. Salah satu dari: Local, Export, CMO"},
+                    "year": {"type": "integer", "description": "Opsional. Tahun fiskal 4 digit, contoh 2025 — untuk pertanyaan 'total setahun'"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_employee_directory",
             "description": "Cari daftar karyawan (nama, posisi, department, team, tanggal masuk, status) — untuk pertanyaan 'siapa saja di tim X' atau cari data karyawan tertentu, bukan sekadar jumlah headcount.",
             "parameters": {
@@ -385,6 +403,40 @@ def get_purchase_order_detail(
     )
 
 
+def get_sales_order_detail(
+    customer_name: str = None, item_code: str = None, order_number: str = None,
+    business_type: str = None, year: int = None,
+) -> list[dict]:
+    """Line-item Sales Order search — backed by eis.fact_sales_order
+    (etl_sales_orders), the same table the Open Sales Order dashboard
+    reads from. Added so the chatbot can answer "total sales for customer
+    X" questions that get_sales_performance's aggregate-only shape never
+    could (verified live: "total penjualan customer GROUPE INDUSTRIEL
+    SAIDAL SPA" came back not-found before this tool existed)."""
+    return _query(
+        """
+        SELECT order_number, line_num, item_code, item_description, customer_name,
+               business_type, currency_code, quantity, unit_selling_price,
+               amount_orig, amount_idr, flow_status_code, ordered_date
+        FROM eis.fact_sales_order
+        WHERE (%(customer_name)s  IS NULL OR customer_name ILIKE %(customer_like)s)
+          AND (%(item_code)s      IS NULL OR item_code = %(item_code)s)
+          AND (%(order_number)s   IS NULL OR order_number ILIKE %(order_like)s)
+          AND (%(business_type)s  IS NULL OR business_type = %(business_type)s)
+          AND (%(year)s IS NULL OR EXTRACT(YEAR FROM ordered_date) = %(year)s)
+        ORDER BY ordered_date DESC
+        LIMIT 100
+        """,
+        {
+            "customer_name": customer_name, "customer_like": f"%{customer_name}%" if customer_name else None,
+            "item_code": item_code,
+            "order_number": order_number, "order_like": f"%{order_number}%" if order_number else None,
+            "business_type": business_type,
+            "year": year,
+        },
+    )
+
+
 def get_employee_directory(department: str = None, team: str = None, full_name: str = None) -> list[dict]:
     return _query(
         """
@@ -431,6 +483,7 @@ _DISPATCH = {
     "get_employee_headcount": get_employee_headcount,
     "get_purchasing_performance": get_purchasing_performance,
     "get_purchase_order_detail": get_purchase_order_detail,
+    "get_sales_order_detail": get_sales_order_detail,
     "get_employee_directory": get_employee_directory,
 }
 
