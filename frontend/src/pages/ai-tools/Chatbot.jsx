@@ -145,7 +145,7 @@ export default function Chatbot() {
           <span className="ml-auto flex items-center gap-1.5 text-xs text-white/70">
             <span className={`h-2 w-2 rounded-full ${chat.streaming ? "bg-amber-400 animate-pulse" : "bg-green-400"}`} />
             {chat.streaming
-              ? (activeTab === "general" && provider === "anthropic" ? "Mencari di web..." : mode.thinkingLabel)
+              ? (activeTab === "general" && (provider === "anthropic" || provider === "gemini") ? "Mencari di web..." : mode.thinkingLabel)
               : "Online"}
           </span>
         </div>

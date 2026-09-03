@@ -222,7 +222,7 @@ export default function ChatWidget() {
               <p style={{ fontSize: 12, fontWeight: 700, color: "#fff", margin: 0 }}>{CHAT_MODES[activeTab].label}</p>
               <p style={{ fontSize: 10, color: "rgba(255,255,255,0.75)", margin: 0 }}>
                 {streaming
-                  ? (activeTab === "general" && provider === "anthropic" ? "Mencari di web…" : "Typing…")
+                  ? (activeTab === "general" && (provider === "anthropic" || provider === "gemini") ? "Mencari di web…" : "Typing…")
                   : "Online · AI Assistant"}
               </p>
             </div>

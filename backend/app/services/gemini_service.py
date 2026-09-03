@@ -168,6 +168,68 @@ def function_response_part(name: str, call_id: str | None, data: list[dict] | No
     }
 
 
+async def stream_generate_grounded(system_prompt: str, contents: list[dict], api_key: str = None):
+    """Same as stream_generate but with Gemini's native Google Search
+    grounding tool enabled (tools: [{"google_search": {}}]) — General
+    Chat's "search the web first" option for Gemini, the same role
+    Claude's web_search tool plays there (see ai_service.py's
+    _anthropic_complete_with_search_history). Verified against the live
+    API: a grounded request got a 429 quota error rather than a 400
+    invalid-argument, meaning the shape itself was accepted (full source-
+    citation extraction below wasn't exercised against a real successful
+    response since the shared key was out of quota at the time — the field
+    names follow Gemini's documented groundingMetadata shape).
+
+    Unlike Claude (whose search loop pauses/resumes non-streaming, so the
+    whole answer arrives at once), Gemini's grounding runs inside a single
+    streaming call — tokens still arrive progressively instead of one long
+    wait.
+
+    Yields ("token", text) for streamed text, then a final ("sources", [...])
+    with any pages Gemini actually grounded on (deduplicated by URL) —
+    same {"title", "url"} shape the RAG/Claude sources already use, so the
+    existing frontend source-badge rendering (WebSourceBadge, "general"
+    mode) needs no changes to display these too."""
+    payload = {
+        "contents": contents,
+        "tools": [{"google_search": {}}],
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "generationConfig": _GENERATION_CONFIG,
+    }
+    sources = {}
+    async with httpx.AsyncClient(timeout=STREAM_TIMEOUT_SECONDS) as client:
+        async with client.stream(
+            "POST",
+            f"{BASE_URL}/models/{settings.gemini_model}:streamGenerateContent",
+            params={"key": api_key or settings.gemini_api_key, "alt": "sse"},
+            json=payload,
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                raw = line[len("data: "):].strip()
+                if not raw:
+                    continue
+                chunk = json.loads(raw)
+                candidates = chunk.get("candidates") or []
+                if not candidates:
+                    continue
+                candidate = candidates[0]
+                for part in candidate.get("content", {}).get("parts", []):
+                    text = part.get("text")
+                    if text:
+                        yield ("token", text)
+                grounding = candidate.get("groundingMetadata") or {}
+                for gc in grounding.get("groundingChunks", []):
+                    web = gc.get("web") or {}
+                    url = web.get("uri")
+                    if url and url not in sources:
+                        sources[url] = {"title": web.get("title") or url, "url": url}
+    if sources:
+        yield ("sources", list(sources.values()))
+
+
 async def stream_generate(system_prompt: str, contents: list[dict], api_key: str = None):
     """
     Streams plain text tokens (not SSE-envelope-wrapped) from Gemini's native

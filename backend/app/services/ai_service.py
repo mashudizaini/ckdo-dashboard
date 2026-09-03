@@ -425,28 +425,38 @@ class AIService:
         or Oracle ERP data.
         """
         if provider == "gemini":
+            # Like the anthropic branch below, General Chat's Gemini option
+            # grounds every answer in live web search (Gemini's own native
+            # Google Search tool — see gemini_service.stream_generate_
+            # grounded) rather than plain model knowledge, since General
+            # Chat has no other grounding. Unlike Claude, Gemini's grounding
+            # runs inside a single streaming call, so this still streams
+            # token-by-token instead of waiting for the full answer.
             contents = gemini_service.to_contents(history, message)
             try:
-                async for text in gemini_service.stream_generate(GENERAL_CHAT_SYSTEM_PROMPT, contents, gemini_api_key):
-                    yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+                async for kind, data in gemini_service.stream_generate_grounded(GENERAL_CHAT_SYSTEM_PROMPT, contents, gemini_api_key):
+                    if kind == "token":
+                        yield f"data: {json.dumps({'type': 'token', 'text': data})}\n\n"
+                    elif kind == "sources":
+                        yield f"data: {json.dumps({'type': 'sources', 'sources': data})}\n\n"
             except Exception as e:
                 logger.error("gemini_general_chat_error", error=str(e))
                 yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
         elif provider == "anthropic":
-            # Unlike Policy/Oracle Chat, General Chat's Claude option grounds
-            # every answer in live web search (Claude's server-side
-            # web_search tool — same mechanism PAC's Business Plan Outlook
-            # already uses) instead of plain model knowledge, since General
-            # Chat has no other grounding (no RAG/tools) and this is the one
-            # mode in this app's interactive chatbot that can answer with
-            # genuinely current information rather than being capped at
-            # training-data knowledge. Not true token-by-token streaming —
-            # web search is a multi-step server-side process (Claude decides
-            # what to search, reads results, then answers), so the full
-            # answer arrives as one chunk once it's ready rather than
-            # progressively like the other 2 providers.
+            # General Chat's Claude option grounds every answer in live web
+            # search (Claude's server-side web_search tool — same
+            # mechanism PAC's Business Plan Outlook already uses) instead
+            # of plain model knowledge, since General Chat has no other
+            # grounding (no RAG/tools) — this is one of two modes in this
+            # app's interactive chatbot that can answer with genuinely
+            # current information rather than being capped at training-data
+            # knowledge (the other is the gemini branch above). Not true
+            # token-by-token streaming — web search is a multi-step
+            # server-side process (Claude decides what to search, reads
+            # results, then answers), so the full answer arrives as one
+            # chunk once it's ready rather than progressively.
             try:
                 text, sources = await asyncio.to_thread(
                     self._anthropic_complete_with_search_history, GENERAL_CHAT_SYSTEM_PROMPT, history, message,

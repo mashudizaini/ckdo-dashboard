@@ -25,10 +25,13 @@ oracle_chat_service.py); adding Claude there means building a third
 tool-calling path against Anthropic's own tool-use API, not just this
 plain-chat wiring.
 
-General Chat's "anthropic" additionally grounds every answer in Claude's
-live web_search tool (see ai_service.py's _anthropic_complete_with_search_
-history) — the one place in this interactive chatbot that isn't capped at
-a model's training-data cutoff.
+General Chat's "anthropic" and "gemini" both additionally ground every
+answer in that provider's own live web search (Claude's web_search tool,
+see ai_service.py's _anthropic_complete_with_search_history; Gemini's
+Google Search grounding tool, see gemini_service.stream_generate_grounded)
+— the two modes in this interactive chatbot that aren't capped at a
+model's training-data cutoff. "onprem" in General Chat has no such
+grounding (pure model knowledge only).
 """
 import asyncio
 import os
