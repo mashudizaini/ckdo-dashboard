@@ -63,7 +63,12 @@ const fmtRp = (v) => {
   if (v === undefined || v === null) return "Rp 0";
   return (v < 0 ? "-Rp " : "Rp ") + Math.abs(Math.round(v)).toLocaleString("id-ID");
 };
-const fmtAxis = (v) => Math.abs(v) >= 1e3 ? `${(v / 1e3).toFixed(0)}rb jt` : v;
+const fmtAxis = (v) => {
+  const abs = Math.abs(v);
+  if (abs >= 1e9) return `${(v / 1e9).toFixed(1)}M`; // miliar
+  if (abs >= 1e6) return `${(v / 1e6).toFixed(0)}jt`; // juta
+  return v;
+};
 
 /* ── Sales Trend + Sales vs Budget share one fetch (/trend) — same data,
    two different chart configurations. ── */

@@ -41,8 +41,15 @@ class SalesMarketingService:
         business_type), just charted differently on the frontend.
         WHERE product_id IS NULL is critical: fact_sales also carries a
         per-product breakdown (added earlier this session) — without this
-        filter, summing would double the real total."""
-        return self._query(
+        filter, summing would double the real total.
+
+        fact_sales stores amounts in MILLIONS IDR (established convention
+        across fact_sales/fact_cogs/fact_purchasing — unlike fact_po_line/
+        fact_sales_order, which store raw IDR). Multiplied by 1,000,000
+        here so the frontend's plain fmtRp()/chart formatting — already
+        correct for the raw-IDR tables — doesn't need a special case, and
+        doesn't understate these figures by 1,000,000x."""
+        rows = self._query(
             """
             SELECT per.period_num, per.period_name, fs.business_type,
                    fs.bp_amount, fs.actual_amount, fs.prior_year_actual
@@ -55,6 +62,10 @@ class SalesMarketingService:
             """,
             {"year": year, "business_type": business_type},
         )
+        for r in rows:
+            for k in ("bp_amount", "actual_amount", "prior_year_actual"):
+                r[k] = float(r[k] or 0) * 1_000_000
+        return rows
 
     async def get_open_orders(
         self, customer_name: str = None, business_type: str = None, item_code: str = None,
