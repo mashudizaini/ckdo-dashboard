@@ -1,7 +1,7 @@
 """
 Oracle EBS Data Chat — tool-calling over Postgres EIS
 
-Two-step flow against the local Ollama server:
+Same two-step flow for all 3 providers (onprem/Ollama, Gemini, Claude):
   1. Send the question + tool definitions (no tools executed yet) — the model
      decides which tool(s), if any, answer the question and with what
      arguments.
@@ -10,13 +10,21 @@ Two-step flow against the local Ollama server:
      model for a final natural-language answer, which is streamed to the
      client exactly like the Policy Chat.
 
+Each provider's tool-calling API has its own shape (Ollama/OpenAI-style for
+onprem, Gemini's functionDeclarations, Anthropic's tool_use/tool_result
+content blocks), so each gets its own _stream_chat_* method below rather
+than a shared abstraction — the two steps above are the only thing they
+share.
+
 See sumber/AI_Chat_Implementation_Guide.md section 5.
 """
 import json
 import httpx
+import anthropic
 from app.config import get_settings
 from app.services import eis_tools
 from app.services import gemini_service
+from app.services.ai_service import ANTHROPIC_CHAT_DEFAULT_MODEL
 import structlog
 
 logger = structlog.get_logger()
@@ -42,6 +50,22 @@ _INDONESIAN_HINTS = {
 def _detect_language(text: str) -> str:
     words = {w.strip(".,?!:;()").lower() for w in text.split()}
     return "id" if words & _INDONESIAN_HINTS else "en"
+
+
+def _to_anthropic_tools(ollama_tools: list[dict]) -> list[dict]:
+    """EIS_TOOLS' Ollama/OpenAI-style {"type":"function","function":{"name",
+    "description","parameters"}} -> Anthropic's {"name","description",
+    "input_schema"} — a straight field rename, no case conversion needed
+    (unlike gemini_service.to_gemini_tools(), Claude uses the same
+    lowercase JSON-schema types already in EIS_TOOLS)."""
+    return [
+        {
+            "name": t["function"]["name"],
+            "description": t["function"].get("description", ""),
+            "input_schema": t["function"].get("parameters", {"type": "object", "properties": {}}),
+        }
+        for t in ollama_tools
+    ]
 
 SYSTEM_PROMPT = (
     "Kamu adalah asisten data perusahaan PT CKD OTTO Pharmaceuticals bernama CKDO Data Assistant. "
@@ -72,9 +96,16 @@ class OracleChatService:
         self.base_url = settings.ollama_api_url.rstrip("/")
         self.model = settings.ollama_tool_model
 
-    async def stream_chat(self, message: str, history: list[dict], user, provider: str = "onprem", gemini_api_key: str = None):
+    async def stream_chat(
+        self, message: str, history: list[dict], user, provider: str = "onprem",
+        gemini_api_key: str = None, anthropic_api_key: str = None, anthropic_model: str = None,
+    ):
         if provider == "gemini":
             async for chunk in self._stream_chat_gemini(message, history, user, gemini_api_key):
+                yield chunk
+            return
+        if provider == "anthropic":
+            async for chunk in self._stream_chat_anthropic(message, history, user, anthropic_api_key, anthropic_model):
                 yield chunk
             return
 
@@ -204,6 +235,84 @@ class OracleChatService:
                 yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
         except Exception as e:
             logger.error("oracle_gemini_final_answer_error", error=str(e))
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        if sources:
+            yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    async def _stream_chat_anthropic(
+        self, message: str, history: list[dict], user,
+        anthropic_api_key: str = None, anthropic_model: str = None,
+    ):
+        client = anthropic.AsyncAnthropic(api_key=anthropic_api_key or settings.anthropic_api_key)
+        model = anthropic_model or ANTHROPIC_CHAT_DEFAULT_MODEL
+        messages = [
+            {"role": m.get("role") if m.get("role") in ("user", "assistant") else "user", "content": m.get("content", "")}
+            for m in history if m.get("content")
+        ] + [{"role": "user", "content": message}]
+
+        try:
+            response = await client.messages.create(
+                model=model,
+                max_tokens=1024,
+                system=SYSTEM_PROMPT,
+                messages=messages,
+                tools=_to_anthropic_tools(eis_tools.EIS_TOOLS),
+            )
+        except Exception as e:
+            logger.error("oracle_anthropic_tool_selection_error", error=str(e))
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        sources = []
+        tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
+        if tool_use_blocks:
+            # Echo the assistant turn back verbatim (text + tool_use blocks) —
+            # same pattern ai_service.py's web-search pause/resume loop already
+            # relies on for replaying response.content into the next turn.
+            messages.append({"role": "assistant", "content": response.content})
+            tool_result_blocks = []
+            for block in tool_use_blocks:
+                tool_name = block.name
+                arguments = block.input
+                try:
+                    data = eis_tools.execute_tool(tool_name, arguments)
+                    error = None
+                except Exception as e:
+                    data = []
+                    error = str(e)
+                    logger.warning("oracle_anthropic_tool_execution_error", tool=tool_name, arguments=arguments, error=error)
+
+                sources.append({"tool": tool_name, "arguments": arguments, "row_count": len(data), "error": error})
+                tool_result_blocks.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": json.dumps({"error": error} if error else {"data": data}, default=str),
+                })
+            messages.append({"role": "user", "content": tool_result_blocks})
+
+        lang = _detect_language(message)
+        final_system = SYSTEM_PROMPT + "\n\n" + (
+            "PENTING: Tulis balasan berikut dalam Bahasa Indonesia. Jangan gunakan Bahasa Inggris."
+            if lang == "id" else
+            "IMPORTANT: Write the following reply in English. Do not use Indonesian."
+        )
+
+        try:
+            async with client.messages.stream(
+                model=model,
+                max_tokens=4096,
+                system=final_system,
+                messages=messages,
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+        except Exception as e:
+            logger.error("oracle_anthropic_final_answer_error", error=str(e))
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
             yield "data: [DONE]\n\n"
             return

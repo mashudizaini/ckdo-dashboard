@@ -104,16 +104,13 @@ export default function ChatWidget() {
     })();
   }, []);
 
-  // Claude isn't wired into Oracle EBS Data Chat's tool-calling pipeline
-  // yet (see chatbot.py), and IT/admin can also disable a provider
-  // app-wide (Setup > AI > Model Access) — mirrors the same fallback in
-  // Chatbot.jsx (the full /ai/chatbot page).
+  // IT/admin can disable a provider app-wide (Setup > AI > Model Access) —
+  // mirrors the same fallback in Chatbot.jsx (the full /ai/chatbot page).
   useEffect(() => {
-    const disallowed = activeTab === "oracle" && provider === "anthropic";
     const disabled = enabledProviders && enabledProviders[provider] === false;
-    if (disallowed || disabled) {
+    if (disabled) {
       const fallback = ["onprem", "gemini", "anthropic"].find(
-        (p) => (!enabledProviders || enabledProviders[p] !== false) && !(activeTab === "oracle" && p === "anthropic")
+        (p) => !enabledProviders || enabledProviders[p] !== false
       ) || "onprem";
       setProvider(fallback);
     }
@@ -314,7 +311,7 @@ export default function ChatWidget() {
             >
               <option value="onprem" disabled={enabledProviders?.onprem === false}>Standard</option>
               <option value="gemini" disabled={enabledProviders?.gemini === false}>Gemini</option>
-              <option value="anthropic" disabled={activeTab === "oracle" || enabledProviders?.anthropic === false}>Claude</option>
+              <option value="anthropic" disabled={enabledProviders?.anthropic === false}>Claude</option>
             </select>
             {provider !== "onprem" && (
               <button

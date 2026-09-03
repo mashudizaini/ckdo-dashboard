@@ -47,18 +47,15 @@ export default function Chatbot() {
     })();
   }, []);
 
-  // Claude isn't wired into Oracle EBS Data Chat's tool-calling pipeline yet
-  // (see chatbot.py), and IT/admin can also disable a provider app-wide
-  // (Setup > AI > Model Access, ai_chat_provider_service.py) — the dropdown
-  // below reflects both, but if the current tab's provider becomes
-  // unavailable for either reason, fall back automatically instead of
-  // letting the next message hit the backend's 400/403.
+  // IT/admin can disable a provider app-wide (Setup > AI > Model Access,
+  // ai_chat_provider_service.py) — if the current tab's provider becomes
+  // unavailable, fall back automatically instead of letting the next
+  // message hit the backend's 403.
   useEffect(() => {
-    const disallowed = activeTab === "oracle" && provider === "anthropic";
     const disabled = enabledProviders && enabledProviders[provider] === false;
-    if (disallowed || disabled) {
+    if (disabled) {
       const fallback = ["onprem", "gemini", "anthropic"].find(
-        (p) => (!enabledProviders || enabledProviders[p] !== false) && !(activeTab === "oracle" && p === "anthropic")
+        (p) => !enabledProviders || enabledProviders[p] !== false
       ) || "onprem";
       setProvider(fallback);
     }
@@ -121,8 +118,8 @@ export default function Chatbot() {
             <option value="gemini" disabled={enabledProviders?.gemini === false}>
               Gemini{enabledProviders?.gemini === false ? " (disabled by admin)" : ""}
             </option>
-            <option value="anthropic" disabled={activeTab === "oracle" || enabledProviders?.anthropic === false}>
-              Claude{activeTab === "oracle" ? " (not available for Oracle ERP Data chat)" : enabledProviders?.anthropic === false ? " (disabled by admin)" : ""}
+            <option value="anthropic" disabled={enabledProviders?.anthropic === false}>
+              Claude{enabledProviders?.anthropic === false ? " (disabled by admin)" : ""}
             </option>
           </select>
           {provider !== "onprem" && (

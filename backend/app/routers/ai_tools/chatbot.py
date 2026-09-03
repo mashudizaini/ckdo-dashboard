@@ -151,26 +151,24 @@ async def oracle_chat(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Oracle EBS Data Chat — streaming response (local Ollama or Gemini,
-    tool-calling). The model picks a predefined, parameterized query
-    (sales/production/budget/financial) instead of writing SQL itself; the
-    query runs against Postgres EIS through a read-only DB role. See
-    oracle_chat_service.py.
-
-    No "anthropic" here yet (unlike /chat and /general-chat) — this mode's
-    tool-calling has its own separate Ollama/Gemini implementations, and
-    adding Claude means a third path against Anthropic's own tool-use API,
-    not just re-pointing the plain-chat wiring the other 2 endpoints use.
+    Oracle EBS Data Chat — streaming response (local Ollama, Gemini, or
+    Claude — tool-calling). The model picks a predefined, parameterized
+    query (sales/production/budget/financial) instead of writing SQL
+    itself; the query runs against Postgres EIS through a read-only DB
+    role. See oracle_chat_service.py — each provider has its own
+    tool-calling implementation there (Ollama/OpenAI-style, Gemini
+    functionDeclarations, Anthropic tool_use/tool_result blocks).
     """
-    if request.provider not in ("onprem", "gemini"):
-        raise HTTPException(400, 'Invalid provider — use "onprem" or "gemini"')
+    if request.provider not in ("onprem", "gemini", "anthropic"):
+        raise HTTPException(400, 'Invalid provider — use "onprem", "gemini", or "anthropic"')
     await _ensure_provider_enabled(db, request.provider)
 
     gemini_key = await _resolve_gemini_key(db, user) if request.provider == "gemini" else None
+    anthropic_key, anthropic_model = await _resolve_anthropic(db, user) if request.provider == "anthropic" else (None, None)
 
     service = OracleChatService()
     return StreamingResponse(
-        service.stream_chat(request.message, request.conversation_history, user, request.provider, gemini_key),
+        service.stream_chat(request.message, request.conversation_history, user, request.provider, gemini_key, anthropic_key, anthropic_model),
         media_type="text/event-stream",
     )
 
