@@ -86,6 +86,13 @@ SYSTEM_PROMPT = (
     "- Setelah mendapat hasil data, jawab dengan kalimat natural — jangan hanya membalas mentahan "
     "JSON, susun jadi kalimat/insight yang mudah dibaca. Gunakan **bold** untuk angka kunci dan "
     "tabel markdown kalau membandingkan banyak baris.\n"
+    "- Semua nilai uang dari tools sudah dalam JUTA IDR. Pilih SATU satuan yang paling jelas dan "
+    "sebutkan sekali saja — JANGAN tulis dua satuan berdampingan untuk angka yang sama (mis. "
+    "'92.804,82 juta atau sekitar Rp 92,8 miliar' membingungkan karena format ribuan Indonesia "
+    "'92.804' terlihat seperti angka lain, padahal itu 92 ribu lebih). Kalau nilainya ≥ 1.000 juta, "
+    "konversi ke miliar dan tulis HANYA itu (mis. 'Rp 92,8 miliar'); kalau < 1.000 juta, tulis dalam "
+    "juta (mis. 'Rp 691,9 juta'). Boleh sebut angka juta mentahnya sekali di dalam kurung kalau "
+    "relevan untuk presisi, tapi jangan jadikan dua satuan sama-sama sebagai judul utama.\n"
     "- Jika data yang diminta tidak ditemukan (list kosong), katakan terus terang tidak ada data "
     "untuk periode/filter tersebut — jangan mengarang.\n"
 )
@@ -121,7 +128,7 @@ class OracleChatService:
                 result = resp.json()
         except Exception as e:
             logger.error("oracle_tool_selection_error", error=str(e))
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e) or type(e).__name__})}\n\n"
             yield "data: [DONE]\n\n"
             return
 
@@ -185,7 +192,7 @@ class OracleChatService:
                             break
         except Exception as e:
             logger.error("oracle_final_answer_error", error=str(e))
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e) or type(e).__name__})}\n\n"
             yield "data: [DONE]\n\n"
             return
 
@@ -200,7 +207,7 @@ class OracleChatService:
             step1 = await gemini_service.generate_with_tools(SYSTEM_PROMPT, contents, eis_tools.EIS_TOOLS, gemini_api_key)
         except Exception as e:
             logger.error("oracle_gemini_tool_selection_error", error=str(e))
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e) or type(e).__name__})}\n\n"
             yield "data: [DONE]\n\n"
             return
 
@@ -235,7 +242,7 @@ class OracleChatService:
                 yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
         except Exception as e:
             logger.error("oracle_gemini_final_answer_error", error=str(e))
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e) or type(e).__name__})}\n\n"
             yield "data: [DONE]\n\n"
             return
 
@@ -264,7 +271,7 @@ class OracleChatService:
             )
         except Exception as e:
             logger.error("oracle_anthropic_tool_selection_error", error=str(e))
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e) or type(e).__name__})}\n\n"
             yield "data: [DONE]\n\n"
             return
 
@@ -313,7 +320,7 @@ class OracleChatService:
                     yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
         except Exception as e:
             logger.error("oracle_anthropic_final_answer_error", error=str(e))
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e) or type(e).__name__})}\n\n"
             yield "data: [DONE]\n\n"
             return
 

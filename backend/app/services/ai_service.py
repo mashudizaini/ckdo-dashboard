@@ -379,7 +379,7 @@ class AIService:
                     yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
             except Exception as e:
                 logger.error("gemini_stream_error", error=str(e))
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e) or type(e).__name__})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
         elif provider == "anthropic":
@@ -402,7 +402,7 @@ class AIService:
                         yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
             except Exception as e:
                 logger.error("anthropic_stream_error", error=str(e))
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e) or type(e).__name__})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
         else:
@@ -439,7 +439,7 @@ class AIService:
                                 break
             except Exception as e:
                 logger.error("ollama_stream_error", error=str(e))
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e) or type(e).__name__})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
 
@@ -487,7 +487,7 @@ class AIService:
                         yield f"data: {json.dumps({'type': 'sources', 'sources': data})}\n\n"
             except Exception as e:
                 logger.error("gemini_general_chat_error", error=str(e))
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e) or type(e).__name__})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
         elif provider == "anthropic":
@@ -513,7 +513,7 @@ class AIService:
                     yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
             except Exception as e:
                 logger.error("anthropic_general_chat_error", error=str(e))
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e) or type(e).__name__})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
         else:
@@ -543,7 +543,7 @@ class AIService:
                                 break
             except Exception as e:
                 logger.error("ollama_general_chat_error", error=str(e))
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e) or type(e).__name__})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
 
