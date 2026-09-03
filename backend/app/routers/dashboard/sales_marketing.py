@@ -32,6 +32,20 @@ async def get_trend(
     return {"success": True, "data": data}
 
 
+@router.get("/order-detail")
+async def get_order_detail(
+    year: int = Query(...),
+    month: int = Query(...),
+    business_type: Optional[str] = Query(None),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """Drill-down for a clicked Sales Trend bar — every order line for
+    that month/business_type, any status (see the service method's
+    docstring for why this differs from /open-orders)."""
+    data = await service.get_order_detail(year, month, business_type)
+    return {"success": True, "count": len(data), "data": data}
+
+
 @router.get("/open-orders")
 async def get_open_orders(
     customer_name: Optional[str] = Query(None),

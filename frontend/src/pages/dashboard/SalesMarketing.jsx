@@ -123,7 +123,7 @@ function SalesTrendSection() {
     const byPeriod = {};
     for (const r of data) {
       const key = r.period_num;
-      byPeriod[key] ||= { period: r.period_name, prior: 0 };
+      byPeriod[key] ||= { period: r.period_name, period_num: r.period_num, prior: 0 };
       byPeriod[key][r.business_type] = r.actual_amount;
       byPeriod[key].prior += r.prior_year_actual || 0;
     }
@@ -133,6 +133,29 @@ function SalesTrendSection() {
   const totalActual = (data || []).reduce((s, r) => s + (r.actual_amount || 0), 0);
   const totalPrior = (data || []).reduce((s, r) => s + (r.prior_year_actual || 0), 0);
   const yoyPct = totalPrior > 0 ? (((totalActual - totalPrior) / totalPrior) * 100).toFixed(1) : null;
+
+  const { token } = useAuthStore();
+  const [selected, setSelected] = useState(null); // { periodNum, periodLabel, businessType } | null
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const handleBarClick = (row, businessType) => {
+    setSelected({ periodNum: row.period_num, periodLabel: row.period, businessType });
+  };
+
+  useEffect(() => {
+    if (!selected) { setDetail(null); return; }
+    (async () => {
+      setDetailLoading(true);
+      try {
+        const params = new URLSearchParams({ year, month: selected.periodNum, business_type: selected.businessType });
+        const res = await fetch(`${SALES_API}/order-detail?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) setDetail((await res.json()).data);
+      } catch (_) {}
+      setDetailLoading(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, year]);
 
   return (
     <div className="space-y-4">
@@ -169,13 +192,64 @@ function SalesTrendSection() {
                   <RC.Tooltip contentStyle={{ borderRadius: 8, fontSize: 11 }} formatter={(v) => fmtRp(v)} />
                   <RC.Legend wrapperStyle={{ fontSize: 11, color: "#f1f5f9" }} />
                   {BUSINESS_TYPES.map((bt) => (
-                    <RC.Bar key={bt} dataKey={bt} stackId="a" fill={BIZ_COLOR[bt]} radius={[2, 2, 0, 0]} />
+                    <RC.Bar key={bt} dataKey={bt} stackId="a" fill={BIZ_COLOR[bt]} radius={[2, 2, 0, 0]}
+                      cursor="pointer" onClick={(row) => handleBarClick(row, bt)} />
                   ))}
                   <RC.Line type="monotone" dataKey="prior" name="Tahun Lalu" stroke="#94a3b8" strokeWidth={2} strokeDasharray="4 3" dot={{ r: 2, fill: "#94a3b8" }} />
                 </RC.ComposedChart>
               </RC.ResponsiveContainer>
             )}
+            {!RC ? null : chartData.length > 0 && (
+              <p className="text-[11px] text-gray-600 mt-2">Klik salah satu bar untuk lihat rincian order bulan tersebut.</p>
+            )}
           </div>
+
+          {selected && (
+            <div className="rounded-xl border border-gray-800 bg-gray-900">
+              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800">
+                <h4 className="text-xs font-semibold text-gray-200">
+                  Rincian Order — {selected.businessType}, {selected.periodLabel} {year}
+                </h4>
+                <button onClick={() => setSelected(null)} className="text-gray-500 hover:text-gray-300 text-xs">Tutup ✕</button>
+              </div>
+              <div className="p-0">
+                {detailLoading ? (
+                  <div className="flex justify-center py-10"><Loader2 size={18} className="animate-spin text-gray-600" /></div>
+                ) : !detail || detail.length === 0 ? (
+                  <div className="py-10 text-center text-xs text-gray-600">Tidak ada data order untuk periode ini.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-gray-800/60 text-gray-500 uppercase tracking-wider">
+                          <th className="px-3 py-2 text-left font-semibold">Order No</th>
+                          <th className="px-3 py-2 text-left font-semibold">Customer</th>
+                          <th className="px-3 py-2 text-left font-semibold">Item</th>
+                          <th className="px-3 py-2 text-left font-semibold">Status</th>
+                          <th className="px-3 py-2 text-right font-semibold">Amount (IDR)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-800/60">
+                        {detail.map((r, i) => (
+                          <tr key={`${r.order_number}-${r.line_num}-${i}`} className="hover:bg-gray-800/30">
+                            <td className="px-3 py-2 text-gray-300 whitespace-nowrap">{r.order_number}-{r.line_num}</td>
+                            <td className="px-3 py-2 text-gray-300 whitespace-nowrap">{r.customer_name || "—"}</td>
+                            <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.item_code} — {r.item_description}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                r.flow_status_code === "CLOSED" ? "bg-green-500/15 text-green-400" : "bg-amber-500/15 text-amber-400"
+                              }`}>{r.flow_status_code}</span>
+                            </td>
+                            <td className="px-3 py-2 text-right text-gray-300 tabular-nums whitespace-nowrap">{fmtRp(r.amount_idr)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

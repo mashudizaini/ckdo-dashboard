@@ -67,6 +67,28 @@ class SalesMarketingService:
                 r[k] = float(r[k] or 0) * 1_000_000
         return rows
 
+    async def get_order_detail(self, year: int, month: int, business_type: str = None) -> list[dict]:
+        """Drill-down for a clicked Sales Trend bar (one period + business
+        type) — every order line for that month, ANY status (unlike
+        get_open_orders, which is deliberately scoped to backlog only;
+        a Sales Trend bar represents total sales for the month, so its
+        drill-down needs to include CLOSED lines too, not just open
+        ones — see the CMO 2022 case that surfaced this exact
+        open-vs-total distinction)."""
+        return self._query(
+            """
+            SELECT order_number, line_num, item_code, item_description, business_type,
+                   customer_name, currency_code, quantity, unit_selling_price,
+                   amount_orig, amount_idr, flow_status_code, ordered_date
+            FROM eis.fact_sales_order
+            WHERE EXTRACT(YEAR FROM ordered_date) = %(year)s
+              AND EXTRACT(MONTH FROM ordered_date) = %(month)s
+              AND (%(business_type)s IS NULL OR business_type = %(business_type)s)
+            ORDER BY amount_idr DESC
+            """,
+            {"year": year, "month": month, "business_type": business_type},
+        )
+
     async def get_open_orders(
         self, customer_name: str = None, business_type: str = None, item_code: str = None,
     ) -> dict:
