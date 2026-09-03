@@ -24,6 +24,36 @@ settings = get_settings()
 RAG_TIMEOUT_SECONDS = 6.0
 OLLAMA_CHAT_TIMEOUT_SECONDS = 120.0
 
+# A "match the question's language" rule buried once in a long system
+# prompt isn't reliably followed, especially by the on-premise model
+# (verified empirically in Oracle EBS Data Chat — see oracle_chat_service.py,
+# where this exact pattern already fixed the same problem there). Detecting
+# the language ourselves and injecting an explicit, single-purpose
+# instruction as the LAST thing before generation — closest to where the
+# model actually writes its reply — is far more reliable than a rule stated
+# once up front, for every provider, not just onprem.
+_INDONESIAN_HINTS = {
+    "yang", "dan", "untuk", "dari", "dengan", "bagaimana", "apa", "apakah", "berapa",
+    "ini", "itu", "adalah", "tidak", "saya", "kita", "kami", "bulan", "tahun", "periode",
+    "bandingkan", "ringkasan", "kinerja", "penjualan", "produksi", "keuangan", "dibanding",
+    "terhadap", "pada", "atau", "juga", "sudah", "belum", "bisa", "tolong", "mohon",
+    "bagaimana", "apakah", "kenapa", "mengapa", "dimana", "kapan", "siapa", "berapa",
+    "cuti", "karyawan", "perusahaan", "kebijakan", "dokumen", "peraturan", "gaji",
+}
+
+
+def _detect_language(text: str) -> str:
+    words = {w.strip(".,?!:;()").lower() for w in text.split()}
+    return "id" if words & _INDONESIAN_HINTS else "en"
+
+
+def _lang_directive(lang: str) -> str:
+    return (
+        "PENTING: Tulis balasan berikut dalam Bahasa Indonesia. Jangan gunakan Bahasa Inggris."
+        if lang == "id" else
+        "IMPORTANT: Write the following reply in English. Do not use Indonesian."
+    )
+
 # Default Claude model for the interactive chatbot (Policy Chat, General
 # Chat) when the user hasn't picked one via My API Key. Sonnet over Opus by
 # default: near-Opus quality for everyday Q&A at a fraction of the cost and
@@ -337,10 +367,14 @@ class AIService:
         # indication of what went wrong. Catch it and emit a proper SSE
         # error event so the frontend can show a real message instead.
         full_answer = []
+        # Explicit, single-purpose language directive appended last — see
+        # _detect_language's module-level comment for why this is more
+        # reliable than the rule already stated once in `system` above.
+        final_system = system + "\n\n" + _lang_directive(_detect_language(message))
         if provider == "gemini":
             contents = gemini_service.to_contents(history, message)
             try:
-                async for text in gemini_service.stream_generate(system, contents, gemini_api_key):
+                async for text in gemini_service.stream_generate(final_system, contents, gemini_api_key):
                     full_answer.append(text)
                     yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
             except Exception as e:
@@ -360,7 +394,7 @@ class AIService:
                 async with client.messages.stream(
                     model=anthropic_model or ANTHROPIC_CHAT_DEFAULT_MODEL,
                     max_tokens=4096,
-                    system=system,
+                    system=final_system,
                     messages=anthropic_history + [{"role": "user", "content": message}],
                 ) as stream:
                     async for text in stream.text_stream:
@@ -373,8 +407,16 @@ class AIService:
                 return
         else:
             # Ollama takes the system prompt as a regular message in the list
-            # (unlike Anthropic/Gemini, which have a separate top-level `system` param).
-            messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": message}]
+            # (unlike Anthropic/Gemini, which have a separate top-level `system`
+            # param) — the language directive goes in as its own trailing
+            # system message, AFTER the user's turn, so it's the most recent
+            # instruction the model sees (matches oracle_chat_service.py's
+            # proven pattern for the same local model).
+            messages = (
+                [{"role": "system", "content": system}] + history
+                + [{"role": "user", "content": message}]
+                + [{"role": "system", "content": _lang_directive(_detect_language(message))}]
+            )
             try:
                 async with httpx.AsyncClient(timeout=OLLAMA_CHAT_TIMEOUT_SECONDS) as client:
                     async with client.stream(
@@ -424,6 +466,10 @@ class AIService:
         3 chat modes; for questions that aren't about company policy docs
         or Oracle ERP data.
         """
+        # Explicit, single-purpose language directive appended last — see
+        # _detect_language's module-level comment for why this is more
+        # reliable than the rule already stated once in GENERAL_CHAT_SYSTEM_PROMPT.
+        final_system = GENERAL_CHAT_SYSTEM_PROMPT + "\n\n" + _lang_directive(_detect_language(message))
         if provider == "gemini":
             # Like the anthropic branch below, General Chat's Gemini option
             # grounds every answer in live web search (Gemini's own native
@@ -434,7 +480,7 @@ class AIService:
             # token-by-token instead of waiting for the full answer.
             contents = gemini_service.to_contents(history, message)
             try:
-                async for kind, data in gemini_service.stream_generate_grounded(GENERAL_CHAT_SYSTEM_PROMPT, contents, gemini_api_key):
+                async for kind, data in gemini_service.stream_generate_grounded(final_system, contents, gemini_api_key):
                     if kind == "token":
                         yield f"data: {json.dumps({'type': 'token', 'text': data})}\n\n"
                     elif kind == "sources":
@@ -459,7 +505,7 @@ class AIService:
             # chunk once it's ready rather than progressively.
             try:
                 text, sources = await asyncio.to_thread(
-                    self._anthropic_complete_with_search_history, GENERAL_CHAT_SYSTEM_PROMPT, history, message,
+                    self._anthropic_complete_with_search_history, final_system, history, message,
                     8192, anthropic_api_key, anthropic_model,
                 )
                 yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
@@ -471,7 +517,11 @@ class AIService:
                 yield "data: [DONE]\n\n"
                 return
         else:
-            messages = [{"role": "system", "content": GENERAL_CHAT_SYSTEM_PROMPT}] + history + [{"role": "user", "content": message}]
+            messages = (
+                [{"role": "system", "content": GENERAL_CHAT_SYSTEM_PROMPT}] + history
+                + [{"role": "user", "content": message}]
+                + [{"role": "system", "content": _lang_directive(_detect_language(message))}]
+            )
             try:
                 async with httpx.AsyncClient(timeout=OLLAMA_CHAT_TIMEOUT_SECONDS) as client:
                     async with client.stream(
