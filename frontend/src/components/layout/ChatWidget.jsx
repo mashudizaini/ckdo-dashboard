@@ -78,21 +78,46 @@ const FAB_H     = 48;
 const POPUP_W   = 380;
 const POPUP_H   = 540;
 
+// Mirrors Chatbot.jsx's DEFAULT_PROVIDER_BY_TAB — kept identical so the
+// widget and the full page agree on what each mode starts on.
+const DEFAULT_PROVIDER_BY_TAB = { policy: "onprem", oracle: "onprem", general: "gemini" };
+
 export default function ChatWidget() {
   const location = useLocation();
   const [open, setOpen]               = useState(false);
   const [pos, setPos]                 = useState({ right: 20, bottom: 20 });
   const [confirmClear, setConfirmClear] = useState(false);
   const [activeTab, setActiveTab]     = useState("policy");
-  const [provider, setProvider]       = useState("onprem");
+  const [providerByTab, setProviderByTab] = useState(DEFAULT_PROVIDER_BY_TAB);
+  const [enabledProviders, setEnabledProviders] = useState(null); // null = still loading (assume all enabled)
   const [showApiKey, setShowApiKey]   = useState(false);
 
-  // Claude isn't wired into Oracle EBS Data Chat's tool-calling pipeline
-  // yet (see chatbot.py) — mirrors the same fallback in Chatbot.jsx (the
-  // full /ai/chatbot page).
+  const provider = providerByTab[activeTab];
+  const setProvider = (p) => setProviderByTab((prev) => ({ ...prev, [activeTab]: p }));
+
   useEffect(() => {
-    if (activeTab === "oracle" && provider === "anthropic") setProvider("gemini");
-  }, [activeTab, provider]);
+    (async () => {
+      try {
+        const res = await fetch("/api/v1/ai/chatbot/provider-status");
+        if (res.ok) setEnabledProviders(await res.json());
+      } catch (_) {}
+    })();
+  }, []);
+
+  // Claude isn't wired into Oracle EBS Data Chat's tool-calling pipeline
+  // yet (see chatbot.py), and IT/admin can also disable a provider
+  // app-wide (Setup > AI > Model Access) — mirrors the same fallback in
+  // Chatbot.jsx (the full /ai/chatbot page).
+  useEffect(() => {
+    const disallowed = activeTab === "oracle" && provider === "anthropic";
+    const disabled = enabledProviders && enabledProviders[provider] === false;
+    if (disallowed || disabled) {
+      const fallback = ["onprem", "gemini", "anthropic"].find(
+        (p) => (!enabledProviders || enabledProviders[p] !== false) && !(activeTab === "oracle" && p === "anthropic")
+      ) || "onprem";
+      setProvider(fallback);
+    }
+  }, [activeTab, provider, enabledProviders]);
 
   // Same localStorage keys/endpoints as the full /ai/chatbot page (see
   // config/chatModes.js) — so a conversation started in the widget
@@ -287,9 +312,9 @@ export default function ChatWidget() {
                 color: "#475569", cursor: "pointer",
               }}
             >
-              <option value="onprem">Standard</option>
-              <option value="gemini">Gemini</option>
-              <option value="anthropic" disabled={activeTab === "oracle"}>Claude</option>
+              <option value="onprem" disabled={enabledProviders?.onprem === false}>Standard</option>
+              <option value="gemini" disabled={enabledProviders?.gemini === false}>Gemini</option>
+              <option value="anthropic" disabled={activeTab === "oracle" || enabledProviders?.anthropic === false}>Claude</option>
             </select>
             {provider !== "onprem" && (
               <button

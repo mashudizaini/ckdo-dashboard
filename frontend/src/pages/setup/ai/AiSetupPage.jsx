@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { BookOpen, FileStack } from "lucide-react";
+import { BookOpen, FileStack, SlidersHorizontal } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import KnowledgeBaseManager from "@/pages/setup/ai/KnowledgeBaseManager";
 import DocumentConverter from "@/pages/ai-tools/DocumentConverter";
+import ModelAccessPanel from "@/pages/setup/ai/ModelAccessPanel";
 
 // Knowledge Base moved here from a button inside the AI Chatbot page, and
 // Document Converter from its own AI Tools nav entry (2026-09-03) — both
@@ -11,15 +12,23 @@ import DocumentConverter from "@/pages/ai-tools/DocumentConverter";
 // existing role gate (same roles that could already manage it); Document
 // Converter keeps its previous no-role-gate (any authenticated user) since
 // moving it here isn't meant to newly restrict who can use it.
+//
+// Model Access (2026-09-03) is a usage/cost control lever (which chat
+// providers users may pick at all) — gated tighter, IT/admin only, matching
+// the backend's PUT /provider-status/{provider} role gate.
 const TABS = [
-  { id: "knowledge-base",     icon: BookOpen,  label: "Knowledge Base",     requiresKBRole: true },
-  { id: "document-converter", icon: FileStack, label: "Document Converter", requiresKBRole: false },
+  { id: "knowledge-base",     icon: BookOpen,           label: "Knowledge Base",     visible: (r) => r.canManageKB },
+  { id: "document-converter", icon: FileStack,          label: "Document Converter", visible: () => true },
+  { id: "model-access",       icon: SlidersHorizontal,  label: "Model Access",       visible: (r) => r.isITorAdmin },
 ];
 
 export default function AiSetupPage() {
   const { hasAnyRole } = useAuthStore();
-  const canManageKB = hasAnyRole("it_staff", "hr_staff", "accounting_staff", "pac_staff", "purchasing_staff", "admin");
-  const tabs = TABS.filter(t => !t.requiresKBRole || canManageKB);
+  const roles = {
+    canManageKB: hasAnyRole("it_staff", "hr_staff", "accounting_staff", "pac_staff", "purchasing_staff", "admin"),
+    isITorAdmin: hasAnyRole("it_staff", "admin"),
+  };
+  const tabs = TABS.filter(t => t.visible(roles));
 
   const [activeId, setActiveId] = useState(tabs[0]?.id);
 
@@ -49,6 +58,7 @@ export default function AiSetupPage() {
       </div>
       {activeId === "knowledge-base"     && <KnowledgeBaseManager />}
       {activeId === "document-converter" && <DocumentConverter />}
+      {activeId === "model-access"       && <ModelAccessPanel />}
     </div>
   );
 }

@@ -21,20 +21,48 @@ function CopyButton({ text }) {
   );
 }
 
+// Per-tab default provider — General Chat defaults to Gemini (its live web-
+// search grounding makes it the "current info" mode; on-premise/Gemini's
+// ungrounded default elsewhere stays the safer/cheaper choice for Policy
+// and Oracle chat). Each tab still remembers whatever the user picks after
+// that, independently — this only sets the starting point.
+const DEFAULT_PROVIDER_BY_TAB = { policy: "onprem", oracle: "onprem", general: "gemini" };
+
 export default function Chatbot() {
   const [activeTab, setActiveTab] = useState("policy");
-  const [provider, setProvider] = useState("onprem");
+  const [providerByTab, setProviderByTab] = useState(DEFAULT_PROVIDER_BY_TAB);
+  const [enabledProviders, setEnabledProviders] = useState(null); // null = still loading (assume all enabled)
   const [showApiKey, setShowApiKey] = useState(false);
   const bottomRef = useRef(null);
 
-  // Claude isn't wired into Oracle EBS Data Chat's tool-calling pipeline
-  // yet (see chatbot.py) — the dropdown below disables selecting it while
-  // that tab is active, but if it was already selected on a different tab
-  // before switching here, fall back automatically instead of letting the
-  // next message hit the backend's 400.
+  const provider = providerByTab[activeTab];
+  const setProvider = (p) => setProviderByTab((prev) => ({ ...prev, [activeTab]: p }));
+
   useEffect(() => {
-    if (activeTab === "oracle" && provider === "anthropic") setProvider("gemini");
-  }, [activeTab, provider]);
+    (async () => {
+      try {
+        const res = await fetch("/api/v1/ai/chatbot/provider-status");
+        if (res.ok) setEnabledProviders(await res.json());
+      } catch (_) {}
+    })();
+  }, []);
+
+  // Claude isn't wired into Oracle EBS Data Chat's tool-calling pipeline yet
+  // (see chatbot.py), and IT/admin can also disable a provider app-wide
+  // (Setup > AI > Model Access, ai_chat_provider_service.py) — the dropdown
+  // below reflects both, but if the current tab's provider becomes
+  // unavailable for either reason, fall back automatically instead of
+  // letting the next message hit the backend's 400/403.
+  useEffect(() => {
+    const disallowed = activeTab === "oracle" && provider === "anthropic";
+    const disabled = enabledProviders && enabledProviders[provider] === false;
+    if (disallowed || disabled) {
+      const fallback = ["onprem", "gemini", "anthropic"].find(
+        (p) => (!enabledProviders || enabledProviders[p] !== false) && !(activeTab === "oracle" && p === "anthropic")
+      ) || "onprem";
+      setProvider(fallback);
+    }
+  }, [activeTab, provider, enabledProviders]);
 
   // All 3 modes stay mounted (via their own hook instance) at all times, so
   // switching tabs preserves each conversation's history instead of
@@ -87,10 +115,14 @@ export default function Chatbot() {
             title="AI provider"
             className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs font-medium text-gray-300 outline-none focus:border-blue-500 cursor-pointer"
           >
-            <option value="onprem">Standard (On-Premise)</option>
-            <option value="gemini">Gemini</option>
-            <option value="anthropic" disabled={activeTab === "oracle"}>
-              Claude{activeTab === "oracle" ? " (not available for Oracle ERP Data chat)" : ""}
+            <option value="onprem" disabled={enabledProviders?.onprem === false}>
+              Standard (On-Premise){enabledProviders?.onprem === false ? " (disabled by admin)" : ""}
+            </option>
+            <option value="gemini" disabled={enabledProviders?.gemini === false}>
+              Gemini{enabledProviders?.gemini === false ? " (disabled by admin)" : ""}
+            </option>
+            <option value="anthropic" disabled={activeTab === "oracle" || enabledProviders?.anthropic === false}>
+              Claude{activeTab === "oracle" ? " (not available for Oracle ERP Data chat)" : enabledProviders?.anthropic === false ? " (disabled by admin)" : ""}
             </option>
           </select>
           {provider !== "onprem" && (

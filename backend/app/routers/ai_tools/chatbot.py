@@ -47,6 +47,7 @@ from app.services.ai_service import AIService
 from app.services.oracle_chat_service import OracleChatService
 from app.services import rag_service
 from app.services import user_api_key_service
+from app.services import ai_chat_provider_service
 
 router = APIRouter()
 settings = get_settings()
@@ -67,6 +68,12 @@ async def _resolve_gemini_key(db: AsyncSession, user: CurrentUser) -> str:
     return user_key or settings.gemini_api_key
 
 
+async def _ensure_provider_enabled(db: AsyncSession, provider: str):
+    if not await ai_chat_provider_service.is_provider_enabled(db, provider):
+        label = ai_chat_provider_service.PROVIDERS.get(provider, provider)
+        raise HTTPException(403, f"{label} is currently disabled for the AI Chatbot — ask IT to re-enable it in Setup > AI.")
+
+
 async def _resolve_anthropic(db: AsyncSession, user: CurrentUser) -> tuple[str | None, str | None]:
     """(api_key, model) from the user's own saved Claude key/model preference
     (see My API Key), or (None, None) to fall back to the shared company key
@@ -79,6 +86,35 @@ async def _resolve_anthropic(db: AsyncSession, user: CurrentUser) -> tuple[str |
         return None, None
     model = await user_api_key_service.get_user_model(db, user.username, "anthropic")
     return row_key, model
+
+
+@router.get("/provider-status")
+async def get_provider_status(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Which of the 3 chat providers are currently enabled — any
+    authenticated user (the chatbot's own provider dropdown needs this to
+    decide what to show)."""
+    return await ai_chat_provider_service.list_provider_status(db)
+
+
+class ProviderStatusUpdate(BaseModel):
+    enabled: bool
+
+
+@router.put("/provider-status/{provider}")
+async def set_provider_status(
+    provider: str,
+    body: ProviderStatusUpdate,
+    user: CurrentUser = Depends(require_role(Roles.IT, Roles.ADMIN)),
+    db: AsyncSession = Depends(get_db),
+):
+    """IT/admin only — a usage/cost control lever, see ai_chat_provider_service.py."""
+    if provider not in ai_chat_provider_service.PROVIDERS:
+        raise HTTPException(400, f"Unknown provider: {provider}")
+    await ai_chat_provider_service.set_provider_enabled(db, provider, body.enabled, user.username)
+    return await ai_chat_provider_service.list_provider_status(db)
 
 
 @router.post("/chat")
@@ -94,6 +130,7 @@ async def chat(
     """
     if request.provider not in ("onprem", "gemini", "anthropic"):
         raise HTTPException(400, 'Invalid provider — use "onprem", "gemini", or "anthropic"')
+    await _ensure_provider_enabled(db, request.provider)
 
     is_unrestricted = user.has_any_role("it_staff", "admin")
     department_filter = rag_service.departments_for_roles(user.roles, is_unrestricted)
@@ -127,6 +164,7 @@ async def oracle_chat(
     """
     if request.provider not in ("onprem", "gemini"):
         raise HTTPException(400, 'Invalid provider — use "onprem" or "gemini"')
+    await _ensure_provider_enabled(db, request.provider)
 
     gemini_key = await _resolve_gemini_key(db, user) if request.provider == "gemini" else None
 
@@ -152,6 +190,7 @@ async def general_chat(
     """
     if request.provider not in ("onprem", "gemini", "anthropic"):
         raise HTTPException(400, 'Invalid provider — use "onprem", "gemini", or "anthropic"')
+    await _ensure_provider_enabled(db, request.provider)
 
     gemini_key = await _resolve_gemini_key(db, user) if request.provider == "gemini" else None
     anthropic_key, anthropic_model = await _resolve_anthropic(db, user) if request.provider == "anthropic" else (None, None)

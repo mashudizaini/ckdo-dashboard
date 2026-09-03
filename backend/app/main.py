@@ -28,6 +28,7 @@ import app.models.user_api_key  # noqa: F401
 import app.models.meeting_recording  # noqa: F401
 import app.models.speaker_voiceprint  # noqa: F401
 import app.models.menu_access  # noqa: F401
+import app.models.ai_chat_provider  # noqa: F401
 import app.models.outlook_material  # noqa: F401
 import app.models.financial_statement_upload  # noqa: F401
 import app.models.document_conversion_job  # noqa: F401
