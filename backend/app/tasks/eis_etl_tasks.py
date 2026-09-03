@@ -154,6 +154,30 @@ def etl_sales(year: int = None, month: int = None):
                 ELSE 'Local'
             END"""
 
+        # Export orders (SO-EXPORT) are priced in USD, not IDR — confirmed
+        # live: 100% of 2026 Export orders carry transactional_curr_code
+        # 'USD', Local is 100% 'IDR'. Without converting, Export revenue was
+        # being treated as if it were already IDR, understating it by the
+        # exchange rate (~17,000x — a 2026 export total of ~5.2M "IDR" was
+        # actually ~5.2M USD). Same per-line "latest Corporate rate on or
+        # before the transaction date" pattern etl_po already uses for
+        # non-IDR POs.
+        curr_conv_expr = """
+            CASE WHEN ooh.transactional_curr_code = 'IDR' THEN 1
+                 ELSE COALESCE((
+                     SELECT gdr.conversion_rate FROM gl_daily_rates gdr
+                     WHERE gdr.from_currency = ooh.transactional_curr_code
+                       AND gdr.to_currency = 'IDR'
+                       AND gdr.conversion_type = 'Corporate'
+                       AND gdr.conversion_date = (
+                           SELECT MAX(gdr2.conversion_date) FROM gl_daily_rates gdr2
+                           WHERE gdr2.from_currency = ooh.transactional_curr_code
+                             AND gdr2.to_currency = 'IDR'
+                             AND gdr2.conversion_type = 'Corporate'
+                             AND gdr2.conversion_date <= TRUNC(ooh.ordered_date)
+                       )
+                 ), 1) END"""
+
         # ── Step 3: main query — product-level grouping (same shape as
         # etl_cogs), so a single Oracle round-trip yields both the
         # per-product breakdown and (summed in Python below) the existing
@@ -171,6 +195,7 @@ def etl_sales(year: int = None, month: int = None):
                 SUM(
                     NVL(ool.shipped_quantity, ool.ordered_quantity)
                     * NVL(ool.unit_selling_price, 0)
+                    * ({curr_conv_expr})
                 ) AS actual_amount
             FROM oe_order_headers_all ooh
             JOIN oe_order_lines_all   ool ON ooh.header_id = ool.header_id
@@ -345,7 +370,9 @@ def etl_cogs(year: int = None, month: int = None):
     product_code = inventory_item_id (string)
     product_name = ordered_item (item number / description as entered in OE)
     EBIT         = sales_amount − cogs_amount  (unit_cost from OE line)
-    Amounts stored in millions IDR (Oracle OE raw IDR ÷ 1,000,000).
+    Export orders are priced in USD (Local is IDR) — converted to IDR using
+    gl_daily_rates (Corporate, latest rate on/before ordered_date), same as
+    etl_sales/etl_po. Amounts stored in millions IDR (÷ 1,000,000).
     """
     year = year or datetime.now().year
     pg = _get_pg()
@@ -393,6 +420,26 @@ def etl_cogs(year: int = None, month: int = None):
                 ELSE 'Local'
             END"""
 
+        # Same USD->IDR conversion as etl_sales — see its comment for the
+        # live-verified reasoning (Export orders are 100% USD, Local 100%
+        # IDR). Applied to both sales_amount and cogs_amount so this job's
+        # own product-level numbers stay consistent with fact_sales.
+        curr_conv_expr = """
+            CASE WHEN ooh.transactional_curr_code = 'IDR' THEN 1
+                 ELSE COALESCE((
+                     SELECT gdr.conversion_rate FROM gl_daily_rates gdr
+                     WHERE gdr.from_currency = ooh.transactional_curr_code
+                       AND gdr.to_currency = 'IDR'
+                       AND gdr.conversion_type = 'Corporate'
+                       AND gdr.conversion_date = (
+                           SELECT MAX(gdr2.conversion_date) FROM gl_daily_rates gdr2
+                           WHERE gdr2.from_currency = ooh.transactional_curr_code
+                             AND gdr2.to_currency = 'IDR'
+                             AND gdr2.conversion_type = 'Corporate'
+                             AND gdr2.conversion_date <= TRUNC(ooh.ordered_date)
+                       )
+                 ), 1) END"""
+
         # ── Step 3: product-level query (no TL join in main query) ─
         cur_ora.execute(f"""
             SELECT
@@ -402,9 +449,11 @@ def etl_cogs(year: int = None, month: int = None):
                          TO_CHAR(ool.inventory_item_id)))                       AS product_name,
                 {case_biz}                                                       AS business_type,
                 SUM(NVL(ool.shipped_quantity, ool.ordered_quantity)
-                    * NVL(ool.unit_selling_price, 0))                           AS sales_amount,
+                    * NVL(ool.unit_selling_price, 0)
+                    * ({curr_conv_expr}))                                       AS sales_amount,
                 SUM(NVL(ool.shipped_quantity, ool.ordered_quantity)
-                    * NVL(ool.unit_cost, 0))                                    AS cogs_amount
+                    * NVL(ool.unit_cost, 0)
+                    * ({curr_conv_expr}))                                       AS cogs_amount
             FROM oe_order_headers_all ooh
             JOIN oe_order_lines_all   ool ON ooh.header_id = ool.header_id
             WHERE ooh.order_type_id IN ({local_id}, {export_id})
