@@ -320,7 +320,7 @@ def _keyword_tsquery(question: str) -> str:
     return " | ".join(words) if words else _NO_KEYWORD_SENTINEL
 
 
-def search_similar(query_embedding: list, question: str = "", top_k: int = 5, department_filter: list[str] = None, per_doc_cap: int = 4) -> list[dict]:
+def search_similar(query_embedding: list, question: str = "", top_k: int = 5, department_filter: list[str] = None, per_doc_cap: int = 7) -> list[dict]:
     """
     department_filter: list of allowed departments, or None/empty for no restriction (IT/Admin).
 
