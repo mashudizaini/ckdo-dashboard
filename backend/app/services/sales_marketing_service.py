@@ -43,18 +43,38 @@ class SalesMarketingService:
         per-product breakdown (added earlier this session) — without this
         filter, summing would double the real total.
 
-        fact_sales stores amounts in MILLIONS IDR (established convention
-        across fact_sales/fact_cogs/fact_purchasing — unlike fact_po_line/
-        fact_sales_order, which store raw IDR). Multiplied by 1,000,000
-        here so the frontend's plain fmtRp()/chart formatting — already
-        correct for the raw-IDR tables — doesn't need a special case, and
-        doesn't understate these figures by 1,000,000x."""
+        actual_amount is derived from SUM(fact_sales_order.amount_idr) —
+        the same table the chart's click-through drill-down (get_order_
+        detail) reads from — rather than fact_sales.actual_amount, which
+        is computed independently by a separate ETL job (etl_sales) and
+        was found live to drift from the true per-line sum by a small
+        rounding amount (fact_sales rounds at million-scale; a real April
+        2026 Export case: chart showed Rp 18.529.730.000, the single
+        underlying order line summed to Rp 18.529.733.664 — same order,
+        just two independently-rounded aggregates). Deriving the chart
+        from the exact same rows the drill-down shows makes them agree by
+        construction, not by coincidence. Falls back to fact_sales.
+        actual_amount (×1,000,000 — that table's own millions-IDR
+        convention) only for a period/business_type fact_sales_order has
+        no rows for yet (e.g. before its backfill's effective range).
+        bp_amount/prior_year_actual still come from fact_sales — no
+        order-line equivalent exists for budget plan or last year's
+        closing figures."""
         rows = self._query(
             """
             SELECT per.period_num, per.period_name, fs.business_type,
-                   fs.bp_amount, fs.actual_amount, fs.prior_year_actual
+                   fs.bp_amount, fs.actual_amount AS fallback_actual, fs.prior_year_actual,
+                   so.actual_from_orders
             FROM eis.fact_sales fs
             JOIN eis.dim_period per ON per.id = fs.period_id
+            LEFT JOIN (
+                SELECT EXTRACT(YEAR FROM ordered_date)::int AS fiscal_year,
+                       EXTRACT(MONTH FROM ordered_date)::int AS period_num,
+                       business_type, SUM(amount_idr) AS actual_from_orders
+                FROM eis.fact_sales_order
+                GROUP BY 1, 2, 3
+            ) so ON so.fiscal_year = per.fiscal_year AND so.period_num = per.period_num
+                AND so.business_type = fs.business_type
             WHERE fs.product_id IS NULL
               AND per.fiscal_year = %(year)s
               AND (%(business_type)s IS NULL OR fs.business_type = %(business_type)s)
@@ -63,7 +83,13 @@ class SalesMarketingService:
             {"year": year, "business_type": business_type},
         )
         for r in rows:
-            for k in ("bp_amount", "actual_amount", "prior_year_actual"):
+            actual_from_orders = r.pop("actual_from_orders")
+            fallback_actual = r.pop("fallback_actual")
+            r["actual_amount"] = (
+                float(actual_from_orders) if actual_from_orders is not None
+                else float(fallback_actual or 0) * 1_000_000
+            )
+            for k in ("bp_amount", "prior_year_actual"):
                 r[k] = float(r[k] or 0) * 1_000_000
         return rows
 
