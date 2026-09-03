@@ -273,26 +273,50 @@ def delete_document(source: str, title: str) -> int:
 
 # ── Retrieval + RAG answer ────────────────────────────────────────
 
-# Sentinel tsquery for a question with no extractable words — matches
-# nothing real, so the keyword term of the blend simply contributes 0 and
-# ranking falls back to pure vector similarity, without needing a whole
-# separate query path just for that edge case.
+# Sentinel tsquery for a question with no extractable (non-stopword) words
+# — matches nothing real, so the keyword pool is simply empty and results
+# fall back to pure vector similarity, without needing a whole separate
+# query path just for that edge case.
 _NO_KEYWORD_SENTINEL = "zzz_no_keyword_match_zzz"
+
+# Common Indonesian/English connector words — excluded from the keyword
+# query. Root-caused empirically: "hadiah apa yang di dapat bagi karyawan
+# terbaik" (asking about the Best Employee reward) failed to rescue the
+# one chunk that actually had the reward amount, because the OR-joined
+# query included "yang"/"di"/"dapat"/"bagi"/"apa" — words common enough to
+# appear throughout most of the knowledge base — so the keyword-rank
+# ordering (used to pick the top candidates for rescue, see search_similar)
+# got dominated by chunks that happened to repeat those filler words most,
+# crowding out the chunk that actually matched the distinctive terms
+# ("karyawan", "terbaik"). Not exhaustive by design — just common enough
+# words that they carry ~no topical signal on their own.
+_STOPWORDS = {
+    "yang", "di", "ke", "dari", "dan", "atau", "untuk", "dengan", "pada",
+    "adalah", "akan", "ini", "itu", "apa", "apakah", "bagaimana", "dapat",
+    "bisa", "bagi", "oleh", "dalam", "atas", "karena", "jika", "tidak",
+    "juga", "saja", "saya", "anda", "kami", "kita", "mereka", "ada",
+    "sudah", "belum", "harus", "wajib", "sebagai", "secara", "para",
+    "seperti", "maka", "namun", "tetapi", "jadi", "yaitu", "serta",
+    "the", "is", "a", "an", "of", "to", "for", "and", "or", "in", "on",
+    "at", "by", "with", "this", "that", "what", "how", "does", "do",
+    "can", "will", "are", "was", "were", "be", "been", "as", "it", "its",
+}
 
 
 def _keyword_tsquery(question: str) -> str:
-    """OR-joined (not AND) tsquery built from the question's words, so a
-    chunk containing even ONE matching word gets partial credit —
-    plainto_tsquery's default AND-all-words behavior would score a chunk 0
-    unless it happened to contain every single word in the question, which
-    defeats the purpose for exactly the case this exists to catch. 'simple'
-    text-search config (no stemming) is used rather than 'english', since
-    this KB's content is a bilingual English/Indonesian mix and Postgres
-    has no built-in Indonesian config — plain tokenization/lowercasing
-    still catches exact-term overlaps like "masuk" without risking wrong
-    stemming assumptions in either language. Only \\w+ tokens are used, so
-    no tsquery syntax characters can leak in from user input."""
-    words = re.findall(r"\w+", question.lower())
+    """OR-joined (not AND) tsquery built from the question's meaningful
+    (non-stopword) words, so a chunk containing even ONE matching word
+    gets a shot at rescue — plainto_tsquery's default AND-all-words
+    behavior would score a chunk 0 unless it happened to contain every
+    single word in the question, which defeats the purpose for exactly the
+    case this exists to catch. 'simple' text-search config (no stemming)
+    is used rather than 'english', since this KB's content is a bilingual
+    English/Indonesian mix and Postgres has no built-in Indonesian config
+    — plain tokenization/lowercasing still catches exact-term overlaps
+    like "masuk" without risking wrong stemming assumptions in either
+    language. Only \\w+ tokens are used, so no tsquery syntax characters
+    can leak in from user input."""
+    words = [w for w in re.findall(r"\w+", question.lower()) if w not in _STOPWORDS and len(w) > 1]
     return " | ".join(words) if words else _NO_KEYWORD_SENTINEL
 
 
