@@ -65,6 +65,15 @@ CLOUD_MOM_TIMEOUT_SECONDS = 180.0
 # Cloud providers can run genuinely long, detailed MOMs — this is a JSON
 # structure with many departments/topics/points, not a short chat reply.
 MOM_MAX_OUTPUT_TOKENS = 8192
+# Claude specifically gets its own, higher ceiling: confirmed live (a real
+# meeting's MOM truncated exactly ~6-8K tokens in, matching 8192) that the
+# shared limit above is too tight for claude-opus-5's typically more
+# detailed/verbose output on a long, department-heavy meeting. Not raised
+# for the other 3 cloud providers sharing MOM_MAX_OUTPUT_TOKENS (deepseek/
+# openai/kimi) since their completion-endpoint ceilings aren't confirmed —
+# requesting more than a model supports there risks an outright 400
+# instead of Claude's graceful stop-at-limit behavior.
+ANTHROPIC_MOM_MAX_OUTPUT_TOKENS = 16384
 
 # Generous margin — ~17x realtime measured on the ai-engine GPU means even a
 # 5h meeting (the longest meetings are expected to run) takes under 20
@@ -236,7 +245,7 @@ class MeetingNotesService:
                 client = anthropic.AsyncAnthropic(api_key=api_key or settings.anthropic_api_key)
                 response = await client.messages.create(
                     model="claude-opus-5",
-                    max_tokens=MOM_MAX_OUTPUT_TOKENS,
+                    max_tokens=ANTHROPIC_MOM_MAX_OUTPUT_TOKENS,
                     messages=[{"role": "user", "content": prompt}],
                 )
             except anthropic.APIStatusError as e:
