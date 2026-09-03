@@ -23,6 +23,7 @@ Key quirks vs. Ollama/OpenAI-style chat APIs:
   - Use the "-latest" model alias, not a pinned dated model — dated IDs
     get deprecated for new API keys/projects (e.g. gemini-2.5-flash -> 404).
 """
+import asyncio
 import json
 import httpx
 from app.config import get_settings
@@ -37,6 +38,54 @@ STREAM_TIMEOUT_SECONDS = 120.0
 # overhead — matters for chat responsiveness. thinkingBudget:0 was tried
 # and rejected outright (400 invalid argument) on this model generation.
 _GENERATION_CONFIG = {"thinkingConfig": {"thinkingLevel": "low"}}
+
+# Gemini returns 503 ("This model is currently experiencing high demand...")
+# fairly often — a transient spike on Google's side, not anything wrong
+# with the request — and 429 for a momentary quota burst. Both usually
+# clear within a couple seconds, so retry a couple times with backoff
+# before giving up and surfacing a raw error to the user.
+_RETRYABLE_STATUS = {503, 429}
+_RETRY_BACKOFF_SECONDS = [1.0, 2.5]
+
+
+async def _post_with_retry(client: httpx.AsyncClient, url: str, params: dict, json_payload: dict) -> httpx.Response:
+    last_exc = None
+    for attempt, backoff in enumerate([*_RETRY_BACKOFF_SECONDS, None]):
+        resp = await client.post(url, params=params, json=json_payload)
+        if resp.status_code not in _RETRYABLE_STATUS:
+            resp.raise_for_status()
+            return resp
+        last_exc = httpx.HTTPStatusError(
+            f"Server error '{resp.status_code} {resp.reason_phrase}' for url '{resp.url}'",
+            request=resp.request, response=resp,
+        )
+        if backoff is not None:
+            await asyncio.sleep(backoff)
+    raise last_exc
+
+
+async def _stream_post_with_retry(client: httpx.AsyncClient, url: str, params: dict, json_payload: dict) -> httpx.Response:
+    """Same retry behaviour as _post_with_retry, but for a streaming call —
+    returns an already-open streaming Response (caller must aclose() it)
+    instead of using `client.stream()` as a context manager, since a retry
+    needs to close and re-send before any tokens are read."""
+    last_exc = None
+    for attempt, backoff in enumerate([*_RETRY_BACKOFF_SECONDS, None]):
+        response = await client.send(
+            client.build_request("POST", url, params=params, json=json_payload),
+            stream=True,
+        )
+        if response.status_code not in _RETRYABLE_STATUS:
+            response.raise_for_status()
+            return response
+        last_exc = httpx.HTTPStatusError(
+            f"Server error '{response.status_code} {response.reason_phrase}' for url '{response.url}'",
+            request=response.request, response=response,
+        )
+        await response.aclose()
+        if backoff is not None:
+            await asyncio.sleep(backoff)
+    raise last_exc
 
 
 def to_contents(history: list[dict], message: str) -> list[dict]:
@@ -91,12 +140,12 @@ async def generate(system_prompt: str, contents: list[dict], api_key: str = None
         "generationConfig": _GENERATION_CONFIG,
     }
     async with httpx.AsyncClient(timeout=STREAM_TIMEOUT_SECONDS) as client:
-        resp = await client.post(
+        resp = await _post_with_retry(
+            client,
             f"{BASE_URL}/models/{settings.gemini_model}:generateContent",
-            params={"key": api_key or settings.gemini_api_key},
-            json=payload,
+            {"key": api_key or settings.gemini_api_key},
+            payload,
         )
-        resp.raise_for_status()
         result = resp.json()
 
     candidates = result.get("candidates") or []
@@ -123,12 +172,12 @@ async def generate_with_tools(system_prompt: str, contents: list[dict], tools: l
         "generationConfig": _GENERATION_CONFIG,
     }
     async with httpx.AsyncClient(timeout=TOOL_SELECTION_TIMEOUT_SECONDS) as client:
-        resp = await client.post(
+        resp = await _post_with_retry(
+            client,
             f"{BASE_URL}/models/{settings.gemini_model}:generateContent",
-            params={"key": api_key or settings.gemini_api_key},
-            json=payload,
+            {"key": api_key or settings.gemini_api_key},
+            payload,
         )
-        resp.raise_for_status()
         result = resp.json()
 
     candidates = result.get("candidates") or []
@@ -198,13 +247,13 @@ async def stream_generate_grounded(system_prompt: str, contents: list[dict], api
     }
     sources = {}
     async with httpx.AsyncClient(timeout=STREAM_TIMEOUT_SECONDS) as client:
-        async with client.stream(
-            "POST",
+        response = await _stream_post_with_retry(
+            client,
             f"{BASE_URL}/models/{settings.gemini_model}:streamGenerateContent",
-            params={"key": api_key or settings.gemini_api_key, "alt": "sse"},
-            json=payload,
-        ) as response:
-            response.raise_for_status()
+            {"key": api_key or settings.gemini_api_key, "alt": "sse"},
+            payload,
+        )
+        try:
             async for line in response.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -226,6 +275,8 @@ async def stream_generate_grounded(system_prompt: str, contents: list[dict], api
                     url = web.get("uri")
                     if url and url not in sources:
                         sources[url] = {"title": web.get("title") or url, "url": url}
+        finally:
+            await response.aclose()
     if sources:
         yield ("sources", list(sources.values()))
 
@@ -242,13 +293,13 @@ async def stream_generate(system_prompt: str, contents: list[dict], api_key: str
         "generationConfig": _GENERATION_CONFIG,
     }
     async with httpx.AsyncClient(timeout=STREAM_TIMEOUT_SECONDS) as client:
-        async with client.stream(
-            "POST",
+        response = await _stream_post_with_retry(
+            client,
             f"{BASE_URL}/models/{settings.gemini_model}:streamGenerateContent",
-            params={"key": api_key or settings.gemini_api_key, "alt": "sse"},
-            json=payload,
-        ) as response:
-            response.raise_for_status()
+            {"key": api_key or settings.gemini_api_key, "alt": "sse"},
+            payload,
+        )
+        try:
             async for line in response.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -263,3 +314,5 @@ async def stream_generate(system_prompt: str, contents: list[dict], api_key: str
                     text = part.get("text")
                     if text:
                         yield text
+        finally:
+            await response.aclose()
