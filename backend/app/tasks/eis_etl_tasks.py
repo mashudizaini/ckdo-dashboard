@@ -628,7 +628,21 @@ def etl_ar_ap(year: int = None, month: int = None):
 
 @celery_app.task(name="app.tasks.etl_tasks.etl_inventory")
 def etl_inventory(year: int = None, month: int = None):
-    """Extract inventory valuation from Oracle and load into fact_financial_ratio."""
+    """Extract inventory valuation from Oracle and load into fact_financial_ratio.
+
+    mtl_onhand_quantities_detail is a CURRENT-balance table, not a ledger —
+    a row's last_update_date is whenever that on-hand row last had a
+    transaction, which for a slow-moving item can be years old even though
+    the balance it holds is still today's real balance. Filtering it by
+    "last_update_date falls in the requested year/month" (the original
+    approach) silently excludes the balance of every item that hasn't moved
+    recently — confirmed empirically: 100% of real cost-matched rows had
+    last_update_date in 2019-2022, so that filter produced 0 rows against
+    any 2026 period, every run. There's no historical on-hand ledger
+    available here, so instead: always extract the current full snapshot,
+    and load it against whichever period was requested (same "as of now"
+    semantics the rest of this job already used for choosing ora_month).
+    """
     year = year or datetime.now().year
     pg = _get_pg()
     job_id = _log_start(pg, "etl_inventory", year, month)
@@ -637,14 +651,7 @@ def etl_inventory(year: int = None, month: int = None):
         ora = get_oracle_connection()
         cur_ora = ora.cursor()
 
-        if month:
-            date_filter = "AND EXTRACT(YEAR FROM moq.last_update_date) = :year AND EXTRACT(MONTH FROM moq.last_update_date) = :month"
-            date_params = {"year": year, "month": month}
-        else:
-            date_filter = "AND EXTRACT(YEAR FROM moq.last_update_date) = :year"
-            date_params = {"year": year}
-
-        cur_ora.execute(f"""
+        cur_ora.execute("""
             SELECT
                 moq.organization_id,
                 SUM(moq.transaction_quantity * cic.item_cost) as inventory_value
@@ -652,17 +659,20 @@ def etl_inventory(year: int = None, month: int = None):
             JOIN cst_item_costs cic ON moq.inventory_item_id = cic.inventory_item_id
                 AND moq.organization_id = cic.organization_id
                 AND cic.cost_type_id = 2
-            WHERE 1=1
-              {date_filter}
             GROUP BY moq.organization_id
-        """, date_params)
+        """)
         rows = cur_ora.fetchall()
         records = len(rows)
         ora.close()
 
         # ── LOAD ──────────────────────────────────────────────────
-        # Sum all organizations → total inventory value for the period
-        total_inv = sum(float(r[1] or 0) for r in rows)
+        # Sum all organizations → total inventory value for the period.
+        # Oracle amounts are in full IDR; dashboard/other fact tables
+        # (fact_sales, fact_cogs) store amounts in millions IDR — match
+        # that unit so dio_days below isn't off by 1,000,000x against
+        # cogs_amt (which comes from fact_cogs/fact_financial/fact_sales,
+        # all already in millions).
+        total_inv = sum(float(r[1] or 0) for r in rows) / 1_000_000
 
         if total_inv > 0:
             cur_pg = pg.cursor()
