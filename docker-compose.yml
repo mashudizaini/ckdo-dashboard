@@ -92,6 +92,31 @@ services:
     command: celery -A app.tasks.celery_app worker --loglevel=info
 
   # ─────────────────────────────────────────
+  # CELERY BEAT — EIS ETL Scheduler
+  # ─────────────────────────────────────────
+  # Separate container from the worker (not `celery worker -B`) — matches
+  # the standalone eis-dashboard-v2 app's own beat+worker split this
+  # replaces, and keeps a beat restart/crash from taking the worker down
+  # with it. Schedule: app/tasks/celery_app.py's beat_schedule.
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ckdo_celery_beat
+    env_file: .env
+    volumes:
+      - ./backend:/app
+      - ./oracle_client:/opt/oracle/instantclient
+      - uploads_data:/app/uploads
+    depends_on:
+      - redis
+      - backend
+    networks:
+      - ckdo_net
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+
+  # ─────────────────────────────────────────
   # FRONTEND — React + Vite (dev server)
   # ─────────────────────────────────────────
   frontend:

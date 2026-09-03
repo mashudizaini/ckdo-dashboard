@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 from app.config import get_settings
 
 settings = get_settings()
@@ -18,3 +19,19 @@ celery_app.conf.update(
     enable_utc=True,
     task_track_started=True,
 )
+
+# EIS ETL schedule — ckdo-dashboard-v2 is the sole scheduler for these jobs
+# (migrated off the standalone eis-dashboard-v2 app's own celery beat, which
+# only ever ran 6 of these 9 and is now retired for ETL duty). Times match
+# the cadence already declared in it_etl_admin.py's _JOB_META.
+celery_app.conf.beat_schedule = {
+    "etl-sales":      {"task": "app.tasks.etl_tasks.etl_sales",      "schedule": crontab(hour=2, minute=0)},
+    "etl-cogs":       {"task": "app.tasks.etl_tasks.etl_cogs",       "schedule": crontab(hour=2, minute=15)},
+    "etl-ar-ap":      {"task": "app.tasks.etl_tasks.etl_ar_ap",      "schedule": crontab(hour=2, minute=30)},
+    "etl-inventory":  {"task": "app.tasks.etl_tasks.etl_inventory",  "schedule": crontab(hour=3, minute=0)},
+    "etl-production": {"task": "app.tasks.etl_tasks.etl_production", "schedule": crontab(hour=3, minute=15)},
+    "etl-employee":   {"task": "app.tasks.etl_tasks.etl_employee",   "schedule": crontab(hour=2, minute=0, day_of_week="monday")},
+    "etl-financial":  {"task": "app.tasks.etl_tasks.etl_financial",  "schedule": crontab(hour=4, minute=0)},
+    "etl-budget":     {"task": "app.tasks.etl_tasks.etl_budget",     "schedule": crontab(hour=4, minute=30)},
+    "etl-po":         {"task": "app.tasks.etl_tasks.etl_po",         "schedule": crontab(hour=5, minute=0)},
+}

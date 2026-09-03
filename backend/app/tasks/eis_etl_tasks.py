@@ -88,6 +88,16 @@ def etl_sales(year: int = None, month: int = None):
       CMO    : TRX_TYPE = 'SO-LOCAL'   LINE_TYPE = 'SO-TOLL IN-LOCAL'
       EXPORT : TRX_TYPE = 'SO-EXPORT'
 
+    Extracted product-level (same grouping/upsert pattern as etl_cogs, one
+    Oracle round-trip) so fact_sales carries BOTH:
+      - the existing period+business_type aggregate row (product_id NULL,
+        market='All', bp_amount from eis.business_plan) — unchanged
+        behaviour, still the sum of every line incl. ones with no resolved
+        inventory_item_id;
+      - one row per product actually resolved (product_id set, bp_amount=0
+        — no per-SKU budget plan exists), so "sales per product" questions
+        have real data instead of a single info-less aggregate row.
+
     BP amounts sourced from eis.business_plan (plan_type = 'Sales').
     Amounts stored in millions IDR (Oracle OE raw IDR ÷ 1,000,000).
     BP amounts from eis.business_plan are already in millions IDR.
@@ -144,11 +154,20 @@ def etl_sales(year: int = None, month: int = None):
                 ELSE 'Local'
             END"""
 
-        # ── Step 3: main query — no TL joins, uses index on ordered_date ──
+        # ── Step 3: main query — product-level grouping (same shape as
+        # etl_cogs), so a single Oracle round-trip yields both the
+        # per-product breakdown and (summed in Python below) the existing
+        # period+business_type aggregate. Rows with no resolved
+        # inventory_item_id collapse into one NULL-product_code group per
+        # period/business_type — still counted in the aggregate total,
+        # just not turned into a dim_product/fact_sales product row. ──
         cur_ora.execute(f"""
             SELECT
-                TO_CHAR(ooh.ordered_date, 'YYYY-MM') AS period,
-                {case_expr}                           AS business_type,
+                TO_CHAR(ooh.ordered_date, 'YYYY-MM')                            AS period,
+                TO_CHAR(ool.inventory_item_id)                                   AS product_code,
+                TRIM(NVL(MAX(ool.ordered_item),
+                         TO_CHAR(ool.inventory_item_id)))                        AS product_name,
+                {case_expr}                                                       AS business_type,
                 SUM(
                     NVL(ool.shipped_quantity, ool.ordered_quantity)
                     * NVL(ool.unit_selling_price, 0)
@@ -161,13 +180,14 @@ def etl_sales(year: int = None, month: int = None):
               AND ool.flow_status_code <> 'CANCELLED'
             GROUP BY
                 TO_CHAR(ooh.ordered_date, 'YYYY-MM'),
+                TO_CHAR(ool.inventory_item_id),
                 {case_expr}
             ORDER BY period
         """, {"date_from": d_from, "date_to": d_to})
 
         rows = cur_ora.fetchall()
         records = len(rows)
-        logger.info(f"[etl_sales] Extracted {records} rows from Oracle OE (year={year}, month={month})")
+        logger.info(f"[etl_sales] Extracted {records} product-level rows from Oracle OE (year={year}, month={month})")
         ora.close()
 
         # ── LOAD ──────────────────────────────────────────────────
@@ -223,7 +243,14 @@ def etl_sales(year: int = None, month: int = None):
             return 0.0
 
         loaded = 0
-        for period_str, biz_type, actual_amount in rows:
+        loaded_products = 0
+        # (fiscal_year, ora_month, business_type) -> summed actual (millions IDR),
+        # built from every row incl. ones with no resolved product_code —
+        # keeps the aggregate row's total identical to the pre-per-product
+        # behaviour.
+        agg_totals: dict[tuple[int, int, str], float] = defaultdict(float)
+
+        for period_str, product_code, product_name, biz_type, actual_amount in rows:
             try:
                 ora_year, ora_month = int(period_str[:4]), int(period_str[5:7])
             except (ValueError, IndexError):
@@ -235,10 +262,47 @@ def etl_sales(year: int = None, month: int = None):
                 logger.warning(f"[etl_sales] No dim_period for {period_str}")
                 continue
 
-            bp_amount = _get_bp(ora_year, ora_month, biz_type)
             # Oracle OE amounts are in full IDR; dashboard expects millions IDR
             act = float(actual_amount or 0) / 1_000_000
+            agg_totals[(ora_year, ora_month, biz_type)] += act
 
+            if product_code:
+                # Upsert dim_product (product_code is UNIQUE) — same pattern as etl_cogs.
+                cur_pg.execute(
+                    """INSERT INTO eis.dim_product
+                           (product_code, product_name, business_type, market)
+                       VALUES (%s, %s, %s, 'All')
+                       ON CONFLICT (product_code) DO UPDATE SET
+                           product_name  = EXCLUDED.product_name,
+                           business_type = EXCLUDED.business_type""",
+                    (product_code[:20], (product_name or product_code)[:150], biz_type),
+                )
+                cur_pg.execute(
+                    "SELECT id FROM eis.dim_product WHERE product_code = %s",
+                    (product_code[:20],),
+                )
+                product_id = cur_pg.fetchone()[0]
+
+                # No per-SKU budget plan exists — bp_amount stays 0 for product rows
+                # (matches fact_cogs, which doesn't carry a BP column at all).
+                cur_pg.execute(
+                    """INSERT INTO eis.fact_sales
+                           (period_id, product_id, business_type, market, bp_amount, actual_amount)
+                       VALUES (%s, %s, %s, 'All', 0, %s)
+                       ON CONFLICT (period_id, product_id, business_type, market) DO UPDATE SET
+                           actual_amount = EXCLUDED.actual_amount""",
+                    (period_id, product_id, biz_type, act),
+                )
+                loaded_products += 1
+
+        # Aggregate rows (product_id IS NULL) — DELETE-then-INSERT, not
+        # ON CONFLICT: Postgres UNIQUE treats NULL as distinct, so a NULL
+        # product_id can't be matched/deduped by ON CONFLICT.
+        for (ora_year, ora_month, biz_type), act_total in agg_totals.items():
+            period_id = _get_period_id(cur_pg, ora_year, ora_month)
+            if not period_id:
+                continue
+            bp_amount = _get_bp(ora_year, ora_month, biz_type)
             cur_pg.execute(
                 "DELETE FROM eis.fact_sales "
                 "WHERE period_id=%s AND business_type=%s AND market='All' AND product_id IS NULL",
@@ -248,12 +312,12 @@ def etl_sales(year: int = None, month: int = None):
                 """INSERT INTO eis.fact_sales
                        (period_id, product_id, business_type, market, bp_amount, actual_amount)
                    VALUES (%s, NULL, %s, 'All', %s, %s)""",
-                (period_id, biz_type, bp_amount, act),
+                (period_id, biz_type, bp_amount, act_total),
             )
             loaded += 1
 
         pg.commit()
-        logger.info(f"[etl_sales] Loaded {loaded} rows into fact_sales")
+        logger.info(f"[etl_sales] Loaded {loaded} aggregate rows + {loaded_products} product rows into fact_sales")
         # ──────────────────────────────────────────────────────────
 
         _log_end(pg, job_id, "success", records)
@@ -587,7 +651,7 @@ def etl_inventory(year: int = None, month: int = None):
             FROM mtl_onhand_quantities_detail moq
             JOIN cst_item_costs cic ON moq.inventory_item_id = cic.inventory_item_id
                 AND moq.organization_id = cic.organization_id
-                AND cic.cost_type_id = 1
+                AND cic.cost_type_id = 2
             WHERE 1=1
               {date_filter}
             GROUP BY moq.organization_id
