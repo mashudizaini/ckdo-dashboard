@@ -333,7 +333,7 @@ class MeetingNotesService:
                         # shows up as inconsistency/invention rather than useful
                         # variety. Low temperature + constrained top_p keep the smaller
                         # on-prem model closer to the transcript's actual content.
-                        "options": {"temperature": 0.15, "top_p": 0.9},
+                        "options": {"temperature": 0.15, "top_p": 0.9, "num_ctx": 16384},  # num_ctx: Ollama's 2048 default cut long transcripts off mid-JSON ("Unterminated string" downstream)
                         "format": MOM_JSON_SCHEMA,
                         # Harmless no-op for non-thinking models (confirmed empirically);
                         # required for qwen3-class hybrid-thinking models so the chain-
@@ -347,7 +347,17 @@ class MeetingNotesService:
 
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as e:
+            # Near-always means the model's output got cut off before the JSON
+            # closed (context/output limit reached on a long transcript) —
+            # the raw parser error ("Unterminated string...") means nothing to
+            # a user, so translate it into an actionable message instead.
+            raise ValueError(
+                "Model menghasilkan JSON yang terpotong (kemungkinan transkrip terlalu panjang). "
+                "Coba lagi, atau gunakan provider lain (Claude/Gemini) untuk rapat yang sangat panjang."
+            ) from e
 
     def build_mom_docx(self, mom_json: dict, meeting_title: str, participants: str, meta: dict) -> bytes:
         """Renders the (possibly user-edited) MOM structure into a .docx,
