@@ -5,7 +5,7 @@ import { useThemeStore } from "@/store/themeStore";
 import {
   Monitor, Users, Factory, Calculator,
   ShoppingCart, FileText, LogOut, LayoutGrid, TrendingUp,
-  ChevronDown, ChevronRight, Settings,
+  ChevronDown, ChevronRight, Settings, BarChart3,
 } from "lucide-react";
 import RobotIcon from "@/components/icons/RobotIcon";
 import logo from "@/assets/LOGO-ONLY.png";
@@ -51,6 +51,14 @@ const NAV_ITEMS = [
     // { label: "Monthly Spend", path: "/dashboard/purchasing/monthly-spend" },
     { label: "Active Suppliers", path: "/dashboard/purchasing/active-suppliers" },
     { label: "Manufacturer Master", path: "/dashboard/purchasing/manufacturer-master" },
+  ] },
+  // No dedicated role yet (2026-09-03) — no "sales_staff" exists in
+  // Keycloak, so this opens to any authenticated user like General below,
+  // until a real role is set up. Only one placeholder child for now —
+  // the actual module list is still being scoped (see the chat thread
+  // that added this entry for the full proposal).
+  { label: "Sales & Marketing", path: "/dashboard/sales", icon: BarChart3, roles: [], children: [
+    { label: "Overview", path: "/dashboard/sales/overview" },
   ] },
   // No roles — reachable by any authenticated user (matches AI_ITEMS'
   // convention below). Sub-modules apply their own access control instead

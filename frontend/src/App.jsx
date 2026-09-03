@@ -12,6 +12,7 @@ import HRDashboard from "@/pages/dashboard/HR";
 import PACDashboard from "@/pages/dashboard/PAC";
 import AccountingDashboard from "@/pages/dashboard/Accounting";
 import PurchasingDashboard from "@/pages/dashboard/Purchasing";
+import SalesMarketingDashboard from "@/pages/dashboard/SalesMarketing";
 import GeneralDashboard from "@/pages/dashboard/General";
 import EISDashboard from "@/pages/dashboard/EIS";
 
@@ -119,6 +120,15 @@ export default function App() {
           element={
             <ProtectedRoute roles={["purchasing_staff", "admin"]}>
               <PurchasingDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="sales/*"
+          element={
+            // No dedicated role yet — see Sidebar.jsx's NAV_ITEMS comment.
+            <ProtectedRoute>
+              <SalesMarketingDashboard />
             </ProtectedRoute>
           }
         />
