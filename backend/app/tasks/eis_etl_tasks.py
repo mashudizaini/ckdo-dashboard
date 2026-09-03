@@ -1865,3 +1865,169 @@ def etl_open_pr(year: int = None, month: int = None):
         pg.close()
 
     return {"status": "success", "records": records}
+
+
+@celery_app.task(name="app.tasks.etl_tasks.etl_sales_orders")
+def etl_sales_orders(year: int = None, month: int = None, full_refresh: bool = False):
+    """Extract sales order line-item detail from Oracle OM →
+    eis.fact_sales_order — foundation table for the Sales & Marketing
+    dashboard (Open Sales Order now; Top Customers, Price Realization,
+    On-Time Delivery etc. later per the blueprint, all reading from this
+    same table instead of each needing their own ETL). Mirrors
+    etl_po_lines's approach: same Local/Export/CMO classification and
+    USD->IDR conversion as etl_sales/etl_cogs (reused verbatim, not
+    reinvented), customer name resolved via hz_cust_accounts/hz_parties
+    (same join pattern accounting_service.py's AR reports already use).
+
+    Deliberately does NOT exclude CANCELLED/CLOSED rows at extraction
+    time (unlike etl_open_pr) — this table needs the full status
+    distribution for future modules (Order Status Funnel, Cancellation
+    Rate), not just "currently open"; the Open Sales Order endpoint
+    filters to open rows itself at read time.
+
+    Incremental by default (30-day lookback); pass year=<YYYY> (month
+    optional) for a full backfill from that year forward.
+    """
+    pg = _get_pg()
+    job_id = _log_start(pg, "etl_sales_orders", year, month)
+    records = 0
+    try:
+        ora = get_oracle_connection()
+        cur_ora = ora.cursor()
+
+        cur_ora.execute(
+            "SELECT transaction_type_id, name "
+            "FROM oe_transaction_types_tl "
+            "WHERE name IN ('SO-LOCAL', 'SO-EXPORT', 'SO-TOLL IN-LOCAL') "
+            "AND language = 'US'"
+        )
+        type_map = {name: tid for tid, name in cur_ora.fetchall()}
+        local_id  = type_map.get('SO-LOCAL')
+        export_id = type_map.get('SO-EXPORT')
+        cmo_ln_id = type_map.get('SO-TOLL IN-LOCAL')
+        if not local_id or not export_id:
+            raise ValueError(f"TRX_TYPE IDs not found — SO-LOCAL={local_id}, SO-EXPORT={export_id}")
+
+        from datetime import date as _date, timedelta as _timedelta
+        if full_refresh:
+            date_clause, date_params = "", {}
+        elif year:
+            d_from = _date(year, month or 1, 1)
+            date_clause = "AND ooh.ordered_date >= :d_from"
+            date_params = {"d_from": d_from}
+        else:
+            d_from = _date.today() - _timedelta(days=30)
+            date_clause = "AND ooh.ordered_date >= :d_from"
+            date_params = {"d_from": d_from}
+
+        cmo_when = f"WHEN ooh.order_type_id = {local_id} AND ool.line_type_id = {cmo_ln_id} THEN 'CMO'" if cmo_ln_id else ""
+        case_biz = f"""
+            CASE
+                WHEN ooh.order_type_id = {export_id} THEN 'Export'
+                {cmo_when}
+                ELSE 'Local'
+            END"""
+        curr_conv_expr = """
+            CASE WHEN ooh.transactional_curr_code = 'IDR' THEN 1
+                 ELSE COALESCE((
+                     SELECT gdr.conversion_rate FROM gl_daily_rates gdr
+                     WHERE gdr.from_currency = ooh.transactional_curr_code
+                       AND gdr.to_currency = 'IDR'
+                       AND gdr.conversion_type = 'Corporate'
+                       AND gdr.conversion_date = (
+                           SELECT MAX(gdr2.conversion_date) FROM gl_daily_rates gdr2
+                           WHERE gdr2.from_currency = ooh.transactional_curr_code
+                             AND gdr2.to_currency = 'IDR'
+                             AND gdr2.conversion_type = 'Corporate'
+                             AND gdr2.conversion_date <= TRUNC(ooh.ordered_date)
+                       )
+                 ), 1) END"""
+
+        cur_ora.execute(f"""
+            SELECT
+                TO_CHAR(ooh.order_number)                                AS order_number,
+                ool.line_number                                          AS line_num,
+                NVL(msi.segment1, TO_CHAR(ool.inventory_item_id))        AS item_code,
+                NVL(msi.description, ool.ordered_item)                   AS item_description,
+                {case_biz}                                                AS business_type,
+                hp.party_name                                             AS customer_name,
+                hou.name                                                  AS organization_name,
+                ooh.transactional_curr_code                               AS currency_code,
+                NVL(msi.primary_uom_code, ool.order_quantity_uom)         AS uom,
+                ool.ordered_quantity                                      AS quantity,
+                ool.unit_selling_price                                    AS unit_selling_price,
+                ool.unit_list_price                                       AS unit_list_price,
+                ROUND(ool.ordered_quantity * ool.unit_selling_price, 2)   AS amount_orig,
+                ROUND(ool.ordered_quantity * ool.unit_selling_price * ({curr_conv_expr}), 2) AS amount_idr,
+                ool.schedule_ship_date                                    AS schedule_ship_date,
+                ool.actual_shipment_date                                  AS actual_shipment_date,
+                ool.flow_status_code                                      AS flow_status_code,
+                ooh.ordered_date                                          AS ordered_date,
+                ooh.salesrep_id                                           AS salesrep_id,
+                ooh.sold_to_org_id                                        AS sold_to_org_id,
+                ool.ship_from_org_id                                      AS ship_from_org_id
+            FROM oe_order_headers_all ooh
+            JOIN oe_order_lines_all   ool ON ool.header_id = ooh.header_id
+            LEFT JOIN mtl_system_items_b msi ON msi.inventory_item_id = ool.inventory_item_id
+                                             AND msi.organization_id   = ool.ship_from_org_id
+            LEFT JOIN hz_cust_accounts hca ON hca.cust_account_id = ooh.sold_to_org_id
+            LEFT JOIN hz_parties       hp  ON hp.party_id = hca.party_id
+            LEFT JOIN hr_all_organization_units hou ON hou.organization_id = ool.ship_from_org_id
+            WHERE ooh.order_type_id IN ({local_id}, {export_id})
+              {date_clause}
+        """, date_params)
+
+        rows = cur_ora.fetchall()
+        records = len(rows)
+        logger.info(f"[etl_sales_orders] Extracted {records} sales order line rows from Oracle OM")
+        ora.close()
+
+        cur_pg = pg.cursor()
+        loaded = 0
+        for (order_number, line_num, item_code, item_description, business_type, customer_name,
+             organization_name, currency_code, uom, quantity, unit_selling_price, unit_list_price,
+             amount_orig, amount_idr, schedule_ship_date, actual_shipment_date, flow_status_code,
+             ordered_date, salesrep_id, sold_to_org_id, ship_from_org_id) in rows:
+            cur_pg.execute(
+                """INSERT INTO eis.fact_sales_order
+                       (order_number, line_num, item_code, item_description, business_type,
+                        customer_name, organization_name, currency_code, uom, quantity,
+                        unit_selling_price, unit_list_price, amount_orig, amount_idr,
+                        schedule_ship_date, actual_shipment_date, flow_status_code, ordered_date,
+                        salesrep_id, sold_to_org_id, ship_from_org_id)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (order_number, line_num) DO UPDATE SET
+                       item_code = EXCLUDED.item_code, item_description = EXCLUDED.item_description,
+                       business_type = EXCLUDED.business_type, customer_name = EXCLUDED.customer_name,
+                       organization_name = EXCLUDED.organization_name, currency_code = EXCLUDED.currency_code,
+                       uom = EXCLUDED.uom, quantity = EXCLUDED.quantity,
+                       unit_selling_price = EXCLUDED.unit_selling_price, unit_list_price = EXCLUDED.unit_list_price,
+                       amount_orig = EXCLUDED.amount_orig, amount_idr = EXCLUDED.amount_idr,
+                       schedule_ship_date = EXCLUDED.schedule_ship_date, actual_shipment_date = EXCLUDED.actual_shipment_date,
+                       flow_status_code = EXCLUDED.flow_status_code, salesrep_id = EXCLUDED.salesrep_id,
+                       sold_to_org_id = EXCLUDED.sold_to_org_id, ship_from_org_id = EXCLUDED.ship_from_org_id,
+                       updated_at = now()""",
+                (order_number, line_num, item_code, item_description, business_type, customer_name,
+                 organization_name, currency_code, uom, float(quantity or 0), float(unit_selling_price or 0),
+                 float(unit_list_price or 0), float(amount_orig or 0), float(amount_idr or 0),
+                 schedule_ship_date, actual_shipment_date, flow_status_code, ordered_date,
+                 float(salesrep_id) if salesrep_id is not None else None,
+                 float(sold_to_org_id) if sold_to_org_id is not None else None,
+                 float(ship_from_org_id) if ship_from_org_id is not None else None),
+            )
+            loaded += 1
+
+        pg.commit()
+        logger.info(f"[etl_sales_orders] Loaded {loaded} rows into fact_sales_order")
+
+        _log_end(pg, job_id, "success", records)
+
+    except Exception as e:
+        logger.error(f"[etl_sales_orders] Failed: {e}")
+        pg.rollback()
+        _log_end(pg, job_id, "failed", records, str(e))
+        raise
+    finally:
+        pg.close()
+
+    return {"status": "success", "records": records}

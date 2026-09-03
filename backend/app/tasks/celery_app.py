@@ -39,4 +39,5 @@ celery_app.conf.beat_schedule = {
     # see etl_open_pr's own docstring for why this one can't be a daily
     # batch like everything else here.
     "etl-open-pr":    {"task": "app.tasks.etl_tasks.etl_open_pr",    "schedule": crontab(minute="*/15")},
+    "etl-sales-orders": {"task": "app.tasks.etl_tasks.etl_sales_orders", "schedule": crontab(hour=5, minute=30)},
 }

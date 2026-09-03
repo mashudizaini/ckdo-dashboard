@@ -53,12 +53,13 @@ const NAV_ITEMS = [
     { label: "Manufacturer Master", path: "/dashboard/purchasing/manufacturer-master" },
   ] },
   // No dedicated role yet (2026-09-03) — no "sales_staff" exists in
-  // Keycloak, so this opens to any authenticated user like General below,
-  // until a real role is set up. Only one placeholder child for now —
-  // the actual module list is still being scoped (see the chat thread
-  // that added this entry for the full proposal).
+  // Keycloak, so this opens to any authenticated user like General below.
+  // Fase 1 + first 3 Fase-2 modules of the "Blueprint Sales & Marketing"
+  // plan — more will be added here as later phases land.
   { label: "Sales & Marketing", path: "/dashboard/sales", icon: BarChart3, roles: [], children: [
-    { label: "Overview", path: "/dashboard/sales/overview" },
+    { label: "Sales Trend", path: "/dashboard/sales/trend" },
+    { label: "Sales vs Budget", path: "/dashboard/sales/vs-budget" },
+    { label: "Open Sales Order", path: "/dashboard/sales/open-orders" },
   ] },
   // No roles — reachable by any authenticated user (matches AI_ITEMS'
   // convention below). Sub-modules apply their own access control instead

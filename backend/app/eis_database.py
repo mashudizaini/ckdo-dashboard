@@ -229,3 +229,53 @@ async def ensure_purchasing_migration_tables():
             "CREATE INDEX IF NOT EXISTS idx_fact_open_pr_requestor "
             "ON eis.fact_open_pr (requestor)"
         ))
+
+
+async def ensure_sales_order_table():
+    """Create eis.fact_sales_order if missing — foundation table for the
+    Sales & Marketing dashboard (see the "Blueprint Sales & Marketing"
+    plan: Open Sales Order now, Top Customers/Price Realization/On-Time
+    Delivery etc. later, all reading from this same table). Populated by
+    app.tasks.eis_etl_tasks.etl_sales_orders."""
+    from sqlalchemy import text
+    async with eis_async_engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eis.fact_sales_order (
+                id                    SERIAL PRIMARY KEY,
+                order_number          VARCHAR(30) NOT NULL,
+                line_num              INTEGER NOT NULL,
+                item_code             VARCHAR(60),
+                item_description      VARCHAR(500),
+                business_type         VARCHAR(20),
+                customer_name         VARCHAR(300),
+                organization_name     VARCHAR(200),
+                currency_code         VARCHAR(10),
+                uom                   VARCHAR(20),
+                quantity              NUMERIC(18,4),
+                unit_selling_price    NUMERIC(18,4),
+                unit_list_price       NUMERIC(18,4),
+                amount_orig           NUMERIC(18,2),
+                amount_idr            NUMERIC(18,2),
+                schedule_ship_date    DATE,
+                actual_shipment_date  DATE,
+                flow_status_code      VARCHAR(30),
+                ordered_date          DATE,
+                salesrep_id           NUMERIC,
+                sold_to_org_id        NUMERIC,
+                ship_from_org_id      NUMERIC,
+                updated_at            TIMESTAMPTZ DEFAULT now(),
+                UNIQUE (order_number, line_num)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_sales_order_ordered_date "
+            "ON eis.fact_sales_order (ordered_date)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_sales_order_status "
+            "ON eis.fact_sales_order (flow_status_code)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_sales_order_customer "
+            "ON eis.fact_sales_order (customer_name)"
+        ))

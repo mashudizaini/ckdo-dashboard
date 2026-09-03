@@ -56,7 +56,7 @@ async def trigger_etl(job_name: str, params: TriggerParams):
     valid_jobs = [
         "etl_sales", "etl_cogs", "etl_production", "etl_financial",
         "etl_employee", "etl_inventory", "etl_ar_ap", "etl_budget", "etl_po",
-        "etl_po_lines", "etl_open_pr",
+        "etl_po_lines", "etl_open_pr", "etl_sales_orders",
     ]
     if job_name not in valid_jobs:
         raise HTTPException(status_code=400, detail=f"Unknown job. Valid: {valid_jobs}")
@@ -248,6 +248,15 @@ async def get_job_data(
             ORDER BY creation_date DESC
             LIMIT 100
         """,
+        "etl_sales_orders": f"""
+            SELECT order_number, line_num, item_code, customer_name, business_type,
+                   ROUND(amount_idr::numeric, 2) AS amount_idr, flow_status_code, ordered_date
+            FROM eis.fact_sales_order
+            WHERE EXTRACT(YEAR FROM ordered_date) = :year
+              {"AND EXTRACT(MONTH FROM ordered_date) = :month" if month else ""}
+            ORDER BY ordered_date DESC
+            LIMIT 100
+        """,
     }
 
     sql = queries.get(job_name)
@@ -314,6 +323,10 @@ _JOB_META = {
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["po_requisition_headers_all", "po_requisition_lines_all", "po_action_history"],
                         "destination_table": "eis.fact_open_pr"},
+    "etl_sales_orders": {"frequency": "Daily", "schedule": "05:30 AM WIB", "source": "Oracle OM (Sales Order line-item)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["oe_order_headers_all", "oe_order_lines_all", "hz_cust_accounts", "hz_parties"],
+                        "destination_table": "eis.fact_sales_order"},
 }
 
 
