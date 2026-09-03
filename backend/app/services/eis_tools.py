@@ -137,6 +137,23 @@ EIS_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_purchase_order_detail",
+            "description": "Cari data PO (Purchase Order) individual — nomor PO, item, harga — berdasarkan supplier, kode item, dan/atau nomor PO. Untuk pertanyaan 'PO apa saja dari supplier X', 'PO nomor berapa untuk item Y', bukan sekadar total/trend (untuk itu pakai get_purchasing_performance).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "supplier_name": {"type": "string", "description": "Opsional. Nama supplier (partial match), contoh IFORTE"},
+                    "item_code": {"type": "string", "description": "Opsional. Kode item Oracle"},
+                    "po_number": {"type": "string", "description": "Opsional. Nomor PO (partial match)"},
+                    "period": {"type": "string", "description": "Opsional. Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_employee_directory",
             "description": "Cari daftar karyawan (nama, posisi, department, team, tanggal masuk, status) — untuk pertanyaan 'siapa saja di tim X' atau cari data karyawan tertentu, bukan sekadar jumlah headcount.",
             "parameters": {
@@ -335,6 +352,39 @@ def get_purchasing_performance(period: str, material_type: str = None) -> list[d
     )
 
 
+def get_purchase_order_detail(
+    supplier_name: str = None, item_code: str = None, po_number: str = None, period: str = None,
+) -> list[dict]:
+    """Line-item PO search — backed by eis.fact_po_line (etl_po_lines),
+    the same table Purchasing History/Price Analysis read from. Added so
+    the chatbot can answer "which POs from supplier X" questions that
+    get_purchasing_performance's aggregate-only shape never could."""
+    fy = pnum = None
+    if period:
+        fy, pnum = _parse_period(period)
+    return _query(
+        """
+        SELECT po_number, line_num, item_code, item_description, supplier_name,
+               material_type, currency_code, quantity, unit_price, amount_orig, amount_idr,
+               creation_date, closure_status
+        FROM eis.fact_po_line
+        WHERE (%(supplier_name)s IS NULL OR supplier_name ILIKE %(supplier_like)s)
+          AND (%(item_code)s    IS NULL OR item_code = %(item_code)s)
+          AND (%(po_number)s    IS NULL OR po_number ILIKE %(po_like)s)
+          AND (%(fy)s   IS NULL OR EXTRACT(YEAR FROM creation_date) = %(fy)s)
+          AND (%(pnum)s IS NULL OR EXTRACT(MONTH FROM creation_date) = %(pnum)s)
+        ORDER BY creation_date DESC
+        LIMIT 50
+        """,
+        {
+            "supplier_name": supplier_name, "supplier_like": f"%{supplier_name}%" if supplier_name else None,
+            "item_code": item_code,
+            "po_number": po_number, "po_like": f"%{po_number}%" if po_number else None,
+            "fy": fy, "pnum": pnum,
+        },
+    )
+
+
 def get_employee_directory(department: str = None, team: str = None, full_name: str = None) -> list[dict]:
     return _query(
         """
@@ -380,6 +430,7 @@ _DISPATCH = {
     "get_inventory_summary": get_inventory_summary,
     "get_employee_headcount": get_employee_headcount,
     "get_purchasing_performance": get_purchasing_performance,
+    "get_purchase_order_detail": get_purchase_order_detail,
     "get_employee_directory": get_employee_directory,
 }
 
