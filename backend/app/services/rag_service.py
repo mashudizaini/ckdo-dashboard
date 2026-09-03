@@ -273,14 +273,6 @@ def delete_document(source: str, title: str) -> int:
 
 # ── Retrieval + RAG answer ────────────────────────────────────────
 
-# Blend weight for the keyword/full-text signal in the combined ranking
-# score; vector similarity keeps the remaining (1 - this) share. Semantic
-# search stays dominant — this is a nudge for the case where the user's
-# wording diverges from the document's exact terms (e.g. a question asking
-# about "uang masuk" when the document's table says "biaya masuk"/"entrance
-# fee"), not a replacement for embedding-based search.
-KEYWORD_MATCH_WEIGHT = 0.25
-
 # Sentinel tsquery for a question with no extractable words — matches
 # nothing real, so the keyword term of the blend simply contributes 0 and
 # ranking falls back to pure vector similarity, without needing a whole
@@ -308,8 +300,21 @@ def search_similar(query_embedding: list, question: str = "", top_k: int = 5, de
     """
     department_filter: list of allowed departments, or None/empty for no restriction (IT/Admin).
 
-    question: original question text, blended in as a keyword/full-text
-    signal alongside vector similarity — see KEYWORD_MATCH_WEIGHT.
+    question: original question text — used for a keyword/full-text
+    *rescue*, not a blended score. Root-caused why it has to work this way,
+    not as a weighted average: a chunk can be the single most relevant one
+    for a question (e.g. the exact reward-amount table for "hadiah apa yang
+    didapat karyawan terbaik") while barely containing any of the
+    question's literal words itself — it inherits its topic from earlier
+    chunks in the same document (headings, intro) rather than repeating
+    "karyawan"/"terbaik" in its own text. A blended score (tried first,
+    replaced after finding this case) let a low keyword component drag a
+    chunk ranked #9 by pure vector similarity in a 418-chunk KB down past
+    the top-30 cutoff entirely. So: keyword match can only ADD a chunk to
+    the candidate pool (rescuing one that scored well on exact terms even
+    if vector similarity alone ranked it lower — the original "uang masuk"
+    vs "biaya masuk" motivation), never used to demote one already ranked
+    well by vector similarity. Final ordering is by vector similarity only.
 
     per_doc_cap: max candidate chunks any single (source, title) document may
     contribute to the pool BEFORE the final top_k cut. Without this, a large
@@ -322,42 +327,69 @@ def search_similar(query_embedding: list, question: str = "", top_k: int = 5, de
     211-chunk general regulation document dominated the ranking, even though
     the allowance memo's table chunk was a near-exact match for the question.
     Capping candidates per document first guarantees every document gets a
-    fair shot at its best chunk being seen, regardless of how many chunks it
-    has — final ordering/truncation to top_k is still by the combined score.
+    fair shot at its best chunk being seen. A keyword-rescued chunk (below)
+    is exempt from this cap, on the same reasoning as the top_k cap itself
+    doesn't apply to it: it wouldn't have made the per-document vector cut
+    either, and rescue can't do its job if it's still filtered right back out.
     """
     tsquery = _keyword_tsquery(question)
-    vector_weight = 1 - KEYWORD_MATCH_WEIGHT
+    keyword_pool_limit = max(top_k, 20)
     conn = _get_pg()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            scored_select = """
-                SELECT id, source, title, content, department, metadata,
-                       1 - (embedding <=> %s::vector) AS similarity,
-                       (
-                           %s * (1 - (embedding <=> %s::vector))
-                           + %s * COALESCE(ts_rank_cd(to_tsvector('simple', content), to_tsquery('simple', %s), 32), 0)
-                       ) AS score
-                FROM company_documents
-            """
-            scored_params = [query_embedding, vector_weight, query_embedding, KEYWORD_MATCH_WEIGHT, tsquery]
             if department_filter:
-                scored_select += " WHERE department = ANY(%s)"
-                scored_params.append(department_filter)
-
-            cur.execute(
-                f"""
-                SELECT id, source, title, content, department, metadata, similarity
-                FROM (
-                    SELECT id, source, title, content, department, metadata, similarity, score,
-                           ROW_NUMBER() OVER (PARTITION BY source, title ORDER BY score DESC) AS rn
-                    FROM ({scored_select}) scored
-                ) ranked
-                WHERE rn <= %s
-                ORDER BY score DESC
-                LIMIT %s
-                """,
-                scored_params + [per_doc_cap, top_k],
-            )
+                cur.execute(
+                    """
+                    WITH vector_pool AS (
+                        SELECT id, source, title, content, department, metadata,
+                               1 - (embedding <=> %s::vector) AS similarity,
+                               ROW_NUMBER() OVER (PARTITION BY source, title ORDER BY embedding <=> %s::vector) AS doc_rank
+                        FROM company_documents
+                        WHERE department = ANY(%s)
+                    ),
+                    keyword_pool AS (
+                        SELECT id
+                        FROM company_documents
+                        WHERE department = ANY(%s)
+                          AND to_tsvector('simple', content) @@ to_tsquery('simple', %s)
+                        ORDER BY ts_rank_cd(to_tsvector('simple', content), to_tsquery('simple', %s), 32) DESC
+                        LIMIT %s
+                    )
+                    SELECT id, source, title, content, department, metadata, similarity
+                    FROM vector_pool
+                    WHERE doc_rank <= %s OR id IN (SELECT id FROM keyword_pool)
+                    ORDER BY similarity DESC
+                    LIMIT %s
+                    """,
+                    (query_embedding, query_embedding, department_filter,
+                     department_filter, tsquery, tsquery, keyword_pool_limit,
+                     per_doc_cap, top_k),
+                )
+            else:
+                cur.execute(
+                    """
+                    WITH vector_pool AS (
+                        SELECT id, source, title, content, department, metadata,
+                               1 - (embedding <=> %s::vector) AS similarity,
+                               ROW_NUMBER() OVER (PARTITION BY source, title ORDER BY embedding <=> %s::vector) AS doc_rank
+                        FROM company_documents
+                    ),
+                    keyword_pool AS (
+                        SELECT id
+                        FROM company_documents
+                        WHERE to_tsvector('simple', content) @@ to_tsquery('simple', %s)
+                        ORDER BY ts_rank_cd(to_tsvector('simple', content), to_tsquery('simple', %s), 32) DESC
+                        LIMIT %s
+                    )
+                    SELECT id, source, title, content, department, metadata, similarity
+                    FROM vector_pool
+                    WHERE doc_rank <= %s OR id IN (SELECT id FROM keyword_pool)
+                    ORDER BY similarity DESC
+                    LIMIT %s
+                    """,
+                    (query_embedding, query_embedding, tsquery, tsquery,
+                     keyword_pool_limit, per_doc_cap, top_k),
+                )
             return [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
