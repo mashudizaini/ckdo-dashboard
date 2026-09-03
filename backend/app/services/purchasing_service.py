@@ -4,8 +4,9 @@ Purchasing Service
 Oracle EBS queries + Manufacturer Master CRUD (stored in Oracle).
 """
 import asyncio
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 import psycopg2
+from psycopg2.extras import RealDictCursor
 from app.database import get_oracle_connection
 from app.config import get_settings
 import structlog
@@ -22,6 +23,20 @@ class PurchasingService:
             cursor.execute(sql, params or {})
             columns = [col[0].lower() for col in cursor.description]
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def _query_eis(self, sql: str, params: dict = None) -> list[dict]:
+        """Same shape as _query() but against the eis_dashboard Postgres
+        warehouse (read-only role) instead of live Oracle — used by the
+        methods below that were migrated off Oracle to eliminate the
+        chatbot/dashboard drift risk (see eis_etl_tasks.py's etl_po_lines/
+        etl_open_pr, which populate the tables these read from)."""
+        conn = psycopg2.connect(settings.eis_database_url)
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(sql, params or {})
+                return [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
 
     def _fetch_holidays(self) -> set:
         """Company holiday calendar lives in this app's own Postgres DB (HR >
@@ -464,37 +479,84 @@ class PurchasingService:
             binds[key] = val
         return f"NVL(mcb.segment1,'-') IN ({','.join(placeholders)})", binds
 
+    # ── Purchase History / Price Analysis (Postgres — migrated 2026-09-03) ────
+    # eis.fact_po_line (etl_po_lines) replaces live Oracle for these 4
+    # reports — see the architecture note on eliminating dashboard/chatbot
+    # ETL drift. Filters below are the Postgres translation of _ph_where/
+    # _ph_params above (ILIKE for substring search, ~* for the buyer
+    # regex, = ANY(array) for multi-select category) — amount_idr/
+    # unit_price_idr are already converted at ETL time, so no rate-lookup
+    # subquery is needed here anymore.
+
+    def _pg_ph_where(self) -> str:
+        return """
+            (%(p_org_id)s      IS NULL OR organization_id = %(p_org_id)s)
+            AND (%(p_date_from)s   IS NULL OR creation_date >= %(p_date_from)s)
+            AND (%(p_date_to)s     IS NULL OR creation_date <= %(p_date_to)s)
+            AND (%(p_item_code)s   IS NULL OR item_code = %(p_item_code)s)
+            AND (%(p_item_desc)s   IS NULL OR item_description ILIKE %(p_item_desc_like)s)
+            AND (%(p_vendor_name)s IS NULL OR supplier_name ILIKE %(p_vendor_name_like)s)
+            AND (%(p_manufacturer)s IS NULL OR manufacturer_name ILIKE %(p_manufacturer_like)s)
+            AND (%(p_country)s     IS NULL OR country_of_origin = %(p_country)s)
+            AND (%(p_category)s::text[] IS NULL OR category = ANY(%(p_category)s))
+            AND (%(p_currency)s    IS NULL OR currency_code = %(p_currency)s)
+            AND (%(p_mat_type)s    IS NULL OR material_type = %(p_mat_type)s)
+            AND (%(p_po_number)s   IS NULL OR po_number ILIKE %(p_po_number_like)s)
+            AND (%(p_buyer)s       IS NULL OR buyer_name ~* %(p_buyer)s)
+        """
+
+    def _pg_ph_params(self, f: dict) -> dict:
+        date_from = f.get("date_from") or None
+        date_to   = f.get("date_to") or None
+        if not date_from and f.get("year_from"):
+            date_from = f"{int(f['year_from'])}-01-01"
+        if not date_to and f.get("year_to"):
+            date_to = f"{int(f['year_to'])}-12-31"
+
+        def _like(v):
+            return f"%{v}%" if v else None
+
+        category_list = [c.strip() for c in (f.get("category") or "").split(",") if c.strip()] or None
+        item_desc, vendor_name, manufacturer, po_number = (
+            f.get("item_desc") or None, f.get("vendor_name") or None,
+            f.get("manufacturer") or None, f.get("po_number") or None,
+        )
+        return {
+            "p_org_id":            f.get("org_id") or None,
+            "p_date_from":         date_from,
+            "p_date_to":           date_to,
+            "p_item_code":         f.get("item_code") or None,
+            "p_item_desc":         item_desc,
+            "p_item_desc_like":    _like(item_desc),
+            "p_vendor_name":       vendor_name,
+            "p_vendor_name_like":  _like(vendor_name),
+            "p_manufacturer":      manufacturer,
+            "p_manufacturer_like": _like(manufacturer),
+            "p_country":           f.get("country_of_origin") or None,
+            "p_category":          category_list,
+            "p_currency":          f.get("currency_code") or None,
+            "p_mat_type":          f.get("material_type") or None,
+            "p_po_number":         po_number,
+            "p_po_number_like":    _like(po_number),
+            "p_buyer":             f.get("buyer") or None,
+        }
+
     async def get_purchase_history_detail(self, filters: dict) -> dict:
-        """Output 1: Individual PO line detail (like Oracle PO report)."""
-        category_clause, category_binds = self._category_filter(filters)
+        """Output 1: Individual PO line detail (like Oracle PO report).
+        Reads eis.fact_po_line (Postgres) — see _pg_ph_where's docstring."""
+        params = self._pg_ph_params(filters)
         sql = f"""
-            SELECT
-                poh.segment1                                             AS po_number,
-                pol.line_num                                             AS line_num,
-                NVL(msi.segment1, TO_CHAR(pol.item_id))                  AS item_code,
-                NVL(pol.item_description, msi.description)               AS item_description,
-                NVL(mcb.segment1, '-')                                   AS category,
-                NVL(msi.item_type, '—')                                  AS item_type,
-                ({self._MAT_TYPE})                                       AS material_type,
-                aps.vendor_name                                          AS supplier_name,
-                poh.currency_code,
-                NVL(msi.primary_uom_code, pol.unit_meas_lookup_code)     AS uom,
-                pol.quantity                                             AS quantity,
-                pol.unit_price                                           AS unit_price,
-                ROUND(pol.quantity * pol.unit_price, 2)                  AS amount_orig,
-                ROUND(pol.quantity * pol.unit_price * ({self._RATE_CASE}), 2) AS amount_idr,
-                NVL(poll.quantity_received, 0)                           AS received_qty,
-                TO_CHAR(poh.creation_date, 'YYYY-MM-DD')                AS creation_date,
-                poh.closed_code                                          AS closure_status,
-                NVL(hou.name, TO_CHAR(poll.ship_to_organization_id))     AS organization_name,
-                COALESCE(mfr.country_of_origin,'UNKNOWN')                AS country_of_origin
-            FROM {self._PH_FROM}
-            WHERE {self._ph_where(category_clause)}
-            ORDER BY poh.creation_date DESC, poh.segment1, pol.line_num
+            SELECT po_number, line_num, item_code, item_description, category, item_type,
+                   material_type, supplier_name, currency_code, uom, quantity, unit_price,
+                   amount_orig, amount_idr, received_qty,
+                   TO_CHAR(creation_date, 'YYYY-MM-DD') AS creation_date,
+                   closure_status, organization_name, country_of_origin
+            FROM eis.fact_po_line
+            WHERE {self._pg_ph_where()}
+            ORDER BY creation_date DESC, po_number, line_num
         """
         try:
-            params = {**self._ph_params(filters), **category_binds}
-            rows = await asyncio.to_thread(self._query, sql, params)
+            rows = await asyncio.to_thread(self._query_eis, sql, params)
             return {"success": True, "count": len(rows), "data": rows}
         except Exception as e:
             logger.error("ph_detail_error", error=str(e))
@@ -503,44 +565,27 @@ class PurchasingService:
     async def get_purchase_history_by_item(self, filters: dict) -> dict:
         """Output 2: Per-item pivot by year — Value IDR + Qty per year."""
         year_from, year_to = self._ph_year_range(filters)
-        years     = list(range(year_from, year_to + 1))
-        category_clause, category_binds = self._category_filter(filters)
-        pivot     = ",\n            ".join(
-            f"SUM(CASE WHEN trx_year={y} THEN line_amount_idr ELSE 0 END) AS value_idr_{y},"
-            f"\n            SUM(CASE WHEN trx_year={y} THEN line_qty ELSE 0 END) AS qty_{y}"
+        years  = list(range(year_from, year_to + 1))
+        params = self._pg_ph_params(filters)
+        pivot  = ",\n            ".join(
+            f"SUM(CASE WHEN EXTRACT(YEAR FROM creation_date)={y} THEN amount_idr ELSE 0 END) AS value_idr_{y},"
+            f"\n            SUM(CASE WHEN EXTRACT(YEAR FROM creation_date)={y} THEN quantity ELSE 0 END) AS qty_{y}"
             for y in years
         )
         sql = f"""
-            WITH base_data AS (
-                SELECT
-                    NVL(msi.organization_id, poll.ship_to_organization_id)   AS organization_id,
-                    NVL(hou.name, TO_CHAR(poll.ship_to_organization_id))     AS organization_name,
-                    NVL(msi.segment1, TO_CHAR(pol.item_id))                  AS item_code,
-                    NVL(pol.item_description, msi.description)               AS item_description,
-                    NVL(mcb.segment1, '-')                                   AS category,
-                    ({self._MAT_TYPE})                                       AS material_type,
-                    COALESCE(mfr.country_of_origin,'UNKNOWN')                AS country_of_origin,
-                    poh.currency_code,
-                    NVL(msi.primary_uom_code, pol.unit_meas_lookup_code)     AS uom,
-                    EXTRACT(YEAR FROM poh.creation_date)                     AS trx_year,
-                    pol.quantity * pol.unit_price * ({self._RATE_CASE})       AS line_amount_idr,
-                    pol.quantity                                              AS line_qty
-                FROM {self._PH_FROM}
-                WHERE {self._ph_where(category_clause)}
-            )
             SELECT
                 organization_id, organization_name,
                 item_code, item_description, category, material_type, country_of_origin, currency_code, uom,
                 {pivot},
-                SUM(line_amount_idr) AS total_value_idr,
-                SUM(line_qty)        AS total_qty
-            FROM base_data
+                SUM(amount_idr) AS total_value_idr,
+                SUM(quantity)   AS total_qty
+            FROM eis.fact_po_line
+            WHERE {self._pg_ph_where()}
             GROUP BY organization_id, organization_name, item_code, item_description, category, material_type, country_of_origin, currency_code, uom
             ORDER BY item_code
         """
         try:
-            params = {**self._ph_params(filters), **category_binds}
-            rows = await asyncio.to_thread(self._query, sql, params)
+            rows = await asyncio.to_thread(self._query_eis, sql, params)
             return {"success": True, "count": len(rows), "data": rows, "years": years}
         except Exception as e:
             logger.error("ph_by_item_error", error=str(e))
@@ -549,9 +594,9 @@ class PurchasingService:
     async def get_purchase_history_by_supplier(self, filters: dict) -> dict:
         """Output 3: Per supplier pivot by year."""
         year_from, year_to = self._ph_year_range(filters)
-        years     = list(range(year_from, year_to + 1))
-        category_clause, category_binds = self._category_filter(filters)
-        pivot     = ",\n            ".join(
+        years  = list(range(year_from, year_to + 1))
+        params = self._pg_ph_params(filters)
+        pivot  = ",\n            ".join(
             f"SUM(CASE WHEN trx_year={y} THEN line_amount_orig ELSE 0 END) AS value_orig_{y},"
             f"\n            SUM(CASE WHEN trx_year={y} THEN line_amount_idr  ELSE 0 END) AS value_idr_{y},"
             f"\n            SUM(CASE WHEN trx_year={y} THEN line_qty          ELSE 0 END) AS qty_{y}"
@@ -560,16 +605,15 @@ class PurchasingService:
         sql = f"""
             WITH base_data AS (
                 SELECT
-                    aps.vendor_name                                          AS supplier_name,
-                    poh.currency_code,
-                    EXTRACT(YEAR FROM poh.creation_date)                     AS trx_year,
-                    pol.quantity * pol.unit_price                            AS line_amount_orig,
-                    pol.quantity * pol.unit_price * ({self._RATE_CASE})       AS line_amount_idr,
-                    pol.quantity                                              AS line_qty,
-                    COUNT(DISTINCT NVL(msi.segment1, TO_CHAR(pol.item_id))) OVER (PARTITION BY aps.vendor_name)  AS item_count,
-                    COUNT(DISTINCT poh.po_header_id) OVER (PARTITION BY aps.vendor_name) AS po_count
-                FROM {self._PH_FROM}
-                WHERE {self._ph_where(category_clause)}
+                    supplier_name, currency_code,
+                    EXTRACT(YEAR FROM creation_date)                          AS trx_year,
+                    amount_orig                                               AS line_amount_orig,
+                    amount_idr                                                AS line_amount_idr,
+                    quantity                                                  AS line_qty,
+                    COUNT(DISTINCT item_code) OVER (PARTITION BY supplier_name) AS item_count,
+                    COUNT(DISTINCT po_number) OVER (PARTITION BY supplier_name) AS po_count
+                FROM eis.fact_po_line
+                WHERE {self._pg_ph_where()}
             )
             SELECT
                 supplier_name, currency_code,
@@ -584,8 +628,7 @@ class PurchasingService:
             ORDER BY supplier_name
         """
         try:
-            params = {**self._ph_params(filters), **category_binds}
-            rows = await asyncio.to_thread(self._query, sql, params)
+            rows = await asyncio.to_thread(self._query_eis, sql, params)
             return {"success": True, "count": len(rows), "data": rows, "years": years}
         except Exception as e:
             logger.error("ph_by_supplier_error", error=str(e))
@@ -712,11 +755,16 @@ class PurchasingService:
 
     async def get_open_pr(self, filters: dict) -> dict:
         """
-        PR Approval Status report from Oracle EBS.
-        Joins PO_REQUISITION_HEADERS_ALL + PO_REQUISITION_LINES_ALL.
-        Returns per-line detail with aging, status, and IDR conversion.
+        PR Approval Status report — reads eis.fact_open_pr (Postgres),
+        populated every 15 min by etl_open_pr (see its docstring in
+        eis_etl_tasks.py for why this one job runs far more often than
+        every other ETL job: "open" status is inherently live). All the
+        structural exclusions (cancelled/split/dummy-data rows) are
+        already applied at ETL time — only the user-adjustable filters
+        below run here. Surfaces "data_as_of" (the ETL's last run time)
+        so staleness between runs is visible rather than silent.
         """
-        mat_type = filters.get("material_type") or None
+        mat_type  = filters.get("material_type") or None
         pr_status = filters.get("pr_status") or None
         pr_number = filters.get("pr_number") or None
         item_code = filters.get("item_code") or None
@@ -724,209 +772,46 @@ class PurchasingService:
         currency  = filters.get("currency_code") or None
         date_from = filters.get("date_from") or None
         date_to   = filters.get("date_to") or None
-        ert       = filters.get("exchange_rate_type") or "Corporate"
 
-        # Requestor is now a multi-select checkbox list on the frontend
-        # (was free-text substring search) — arrives here as a
-        # comma-joined string, matched exactly (not LIKE) against each
-        # selected name.
-        requestor_list = [r.strip() for r in (filters.get("requestor") or "").split(",") if r.strip()]
-        requestor_binds: dict = {}
-        if requestor_list:
-            placeholders = []
-            for i, val in enumerate(requestor_list):
-                key = f"p_req_{i}"
-                placeholders.append(f":{key}")
-                requestor_binds[key] = val.upper()
-            requestor_clause = f"UPPER(fu.user_name) IN ({','.join(placeholders)})"
-        else:
-            requestor_clause = "1=1"
+        requestor_list = [r.strip() for r in (filters.get("requestor") or "").split(",") if r.strip()] or None
 
-        sql = f"""
-            SELECT
-                prh.segment1                                                AS pr_number,
-                po_link.po_number                                          AS po_number,
-                prl.line_num                                                AS line_num,
-                NVL(msi.segment1, '—')                                     AS item_code,
-                prl.item_description                                        AS item_description,
-                NVL(mcb.segment1, '—')                                      AS category_code,
-                NVL(mcb.description, prl.item_description)                  AS category_name,
-                ({self._MAT_TYPE})                                          AS material_type,
-                fu.user_name                                                AS requestor,
-                NVL(prl.unit_meas_lookup_code, '—')                        AS uom,
-                ROUND(prl.quantity, 4)                                      AS quantity,
-                NVL(prl.currency_code, 'IDR')                              AS currency_code,
-                ROUND(NVL(prl.unit_price, 0), 4)                           AS unit_price_orig,
-                ROUND(NVL(prl.unit_price, 0) * ({self._PR_RATE_CASE}), 4)  AS unit_price_idr,
-                ROUND(NVL(prl.quantity, 0) * NVL(prl.unit_price, 0), 2)    AS total_value_orig,
-                ROUND(NVL(prl.quantity, 0) * NVL(prl.unit_price, 0)
-                      * ({self._PR_RATE_CASE}), 2)                         AS total_value_idr,
-                prh.authorization_status                                    AS pr_status,
-                TO_CHAR(prh.creation_date, 'YYYY-MM-DD')                   AS creation_date,
-                TO_CHAR(prl.need_by_date, 'YYYY-MM-DD')                    AS due_date,
-                -- Aging basis: once a PO exists, age from when the PO was
-                -- approved (how long it's been open at the PO stage);
-                -- before that, fall back to when the PR itself was
-                -- approved, or its creation date if never separately
-                -- approved. Actual working-day count (excluding weekends
-                -- + company holidays) is computed in Python below — Oracle
-                -- doesn't have the holiday calendar, that lives in this
-                -- app's own Postgres DB (HR > Working Calendar).
-                TO_CHAR(NVL(po_appr.approved_date,
-                            NVL(appr.approved_date, prh.creation_date)),
-                        'YYYY-MM-DD')                                       AS aging_basis_date,
-                NVL(aps.vendor_name,
-                    NVL(lastpo.last_supplier_name,
-                        NVL(prl.suggested_vendor_name, '-')))              AS supplier_name,
-                NVL(trm.name, '-')                                         AS payment_terms,
-                lastpo.last_price                                          AS last_purchase_price,
-                lastpo.last_currency                                       AS last_purchase_currency
-            FROM po_requisition_headers_all prh
-            JOIN po_requisition_lines_all prl
-                ON prl.requisition_header_id = prh.requisition_header_id
-            LEFT JOIN mtl_system_items_b msi
-                ON  msi.inventory_item_id = prl.item_id
-                AND msi.organization_id   = prl.destination_organization_id
-            LEFT JOIN mtl_categories_b mcb
-                ON  mcb.category_id = prl.category_id
-            LEFT JOIN fnd_lookup_values_vl lv_mt
-                ON  lv_mt.lookup_code         = msi.item_type
-                AND lv_mt.view_application_id = 700
-                AND lv_mt.lookup_type         = 'CKDO_MTRL_TYPE_DIRECT_INDIRECT'
-            LEFT JOIN fnd_user fu
-                ON  fu.user_id = prh.created_by
-            LEFT JOIN ap_suppliers aps
-                ON  aps.vendor_id = prl.vendor_id
-            LEFT JOIN ap_terms_tl trm
-                ON  trm.term_id  = aps.terms_id
-                AND trm.language = USERENV('LANG')
-            LEFT JOIN (
-                SELECT pah.object_id, MAX(pah.action_date) AS approved_date
-                FROM po_action_history pah
-                WHERE pah.action_code      = 'APPROVE'
-                  AND pah.object_type_code = 'REQUISITION'
-                GROUP BY pah.object_id
-            ) appr ON appr.object_id = prh.requisition_header_id
-            LEFT JOIN (
-                -- Requisition line -> PO, via the real distribution linkage
-                -- (not the fuzzy item-description match "lastpo" below uses).
-                -- Picks the most recently created PO if a line was split
-                -- across more than one.
-                SELECT requisition_line_id, po_number, po_header_id
-                FROM (
-                    SELECT prd.requisition_line_id,
-                           poh2.segment1 AS po_number,
-                           poh2.po_header_id AS po_header_id,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY prd.requisition_line_id
-                               ORDER BY poh2.creation_date DESC
-                           ) AS rn
-                    FROM po_req_distributions_all prd
-                    JOIN po_distributions_all pd   ON pd.req_distribution_id = prd.distribution_id
-                    JOIN po_headers_all        poh2 ON poh2.po_header_id     = pd.po_header_id
-                    WHERE poh2.authorization_status NOT IN ('CANCELLED')
-                )
-                WHERE rn = 1
-            ) po_link ON po_link.requisition_line_id = prl.requisition_line_id
-            LEFT JOIN (
-                -- PO header approval date — object_type_code = 'PO' is the
-                -- standard EBS lookup for standard/blanket PO approvals in
-                -- PO_ACTION_HISTORY (mirrors the 'REQUISITION' one above).
-                -- Worst case if this code is off for this instance: aging
-                -- silently falls back to the PR-approved/creation date for
-                -- PO'd lines too (NULL join, not a wrong value) — flagged
-                -- for verification against a real approved PO.
-                SELECT pah.object_id, MAX(pah.action_date) AS approved_date
-                FROM po_action_history pah
-                WHERE pah.action_code      = 'APPROVE'
-                  AND pah.object_type_code = 'PO'
-                GROUP BY pah.object_id
-            ) po_appr ON po_appr.object_id = po_link.po_header_id
-            LEFT JOIN (
-                SELECT item_desc_key, unit_price AS last_price,
-                       currency_code AS last_currency, vendor_name AS last_supplier_name
-                FROM (
-                    SELECT UPPER(plx.item_description)                     AS item_desc_key,
-                           plx.unit_price, phx.currency_code, apsx.vendor_name,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY UPPER(plx.item_description)
-                               ORDER BY phx.creation_date DESC
-                           )                                               AS rn
-                    FROM po_lines_all plx
-                    JOIN po_headers_all phx  ON phx.po_header_id = plx.po_header_id
-                    JOIN ap_suppliers   apsx ON apsx.vendor_id   = phx.vendor_id
-                    WHERE phx.type_lookup_code      IN ('STANDARD','BLANKET','CONTRACT')
-                      AND phx.authorization_status  NOT IN ('CANCELLED','INCOMPLETE')
-                )
-                WHERE rn = 1
-            ) lastpo ON lastpo.item_desc_key = UPPER(prl.item_description)
-            WHERE NVL(prl.cancel_flag, 'N') = 'N'
-              AND prh.authorization_status NOT IN ('CANCELLED')
-              -- Excludes requisition lines superseded by a Split PO/Split
-              -- Requisition Line action. When a buyer splits a line during
-              -- AutoCreate, Oracle sets MODIFIED_BY_AGENT_FLAG='Y' on the
-              -- ORIGINAL line but leaves its full original QUANTITY intact
-              -- (no reduction, no cancel_flag) — the new split-child lines
-              -- carry the real remaining demand instead. Without this
-              -- filter, the original line's full quantity kept showing as
-              -- still-open (with no PO and full aging) even though it had
-              -- already been fully replaced by its split children —
-              -- verified directly against PO_REQUISITION_LINES_ALL for a
-              -- real split PR (25100080): original line qty 8000,
-              -- MODIFIED_BY_AGENT_FLAG='Y', vs. its 3 split children
-              -- (qty 2892.1 + 2886 + 2221.9 = 8000 exactly) each with
-              -- MODIFIED_BY_AGENT_FLAG NULL.
-              AND NVL(prl.modified_by_agent_flag, 'N') = 'N'
-              -- Known dummy/test data scrubbed from the report — not
-              -- user-adjustable filters, always excluded:
-              --   i.  Requestor SHERLIN + Supplier ELLVIN together
-              --   ii. Requestor ELLVIN (any supplier)
-              --   iii. Requestor AFNI (any supplier)
-              AND NOT (
-                  UPPER(fu.user_name) IN ('ELLVIN', 'AFNI')
-                  OR (
-                      UPPER(fu.user_name) = 'SHERLIN'
-                      AND UPPER(NVL(aps.vendor_name,
-                              NVL(lastpo.last_supplier_name,
-                                  NVL(prl.suggested_vendor_name, '-')))) = 'ELLVIN'
-                  )
-              )
-              AND (:p_pr_status IS NULL OR prh.authorization_status = :p_pr_status)
-              AND (:p_pr_number IS NULL OR UPPER(prh.segment1)
-                   LIKE UPPER('%' || :p_pr_number || '%'))
-              AND (:p_item_code IS NULL OR UPPER(NVL(msi.segment1,''))
-                   LIKE UPPER('%' || :p_item_code || '%'))
-              AND (:p_item_desc IS NULL OR UPPER(prl.item_description)
-                   LIKE UPPER('%' || :p_item_desc || '%'))
-              AND ({requestor_clause})
-              AND (:p_currency IS NULL OR prl.currency_code = :p_currency)
-              AND (:p_date_from IS NULL OR prh.creation_date
-                   >= TO_DATE(:p_date_from, 'YYYY-MM-DD'))
-              AND (:p_date_to IS NULL OR prh.creation_date
-                   < TO_DATE(:p_date_to, 'YYYY-MM-DD') + 1)
-              AND (:p_mat_type IS NULL OR ({self._MAT_TYPE}) = :p_mat_type)
-            ORDER BY prl.need_by_date ASC NULLS LAST, prh.segment1, prl.line_num
+        sql = """
+            SELECT pr_number, po_number, line_num, item_code, item_description,
+                   category_code, category_name, material_type, requestor, uom, quantity,
+                   currency_code, unit_price_orig, unit_price_idr, total_value_orig, total_value_idr,
+                   pr_status, creation_date, due_date, aging_basis_date, supplier_name,
+                   payment_terms, last_purchase_price, last_purchase_currency
+            FROM eis.fact_open_pr
+            WHERE (%(p_pr_status)s IS NULL OR pr_status = %(p_pr_status)s)
+              AND (%(p_pr_number)s IS NULL OR pr_number ILIKE %(p_pr_number_like)s)
+              AND (%(p_item_code)s IS NULL OR item_code ILIKE %(p_item_code_like)s)
+              AND (%(p_item_desc)s IS NULL OR item_description ILIKE %(p_item_desc_like)s)
+              AND (%(p_requestor)s::text[] IS NULL OR requestor = ANY(%(p_requestor)s))
+              AND (%(p_currency)s IS NULL OR currency_code = %(p_currency)s)
+              AND (%(p_date_from)s IS NULL OR creation_date >= %(p_date_from)s)
+              AND (%(p_date_to)s   IS NULL OR creation_date <= %(p_date_to)s)
+              AND (%(p_mat_type)s  IS NULL OR material_type = %(p_mat_type)s)
+            ORDER BY due_date ASC NULLS LAST, pr_number, line_num
         """
         params = {
-            "p_ert":       ert,
             "p_pr_status": pr_status,
-            "p_pr_number": pr_number,
-            "p_item_code": item_code,
-            "p_item_desc": item_desc,
-            "p_currency":  currency,
+            "p_pr_number": pr_number, "p_pr_number_like": f"%{pr_number}%" if pr_number else None,
+            "p_item_code": item_code, "p_item_code_like": f"%{item_code}%" if item_code else None,
+            "p_item_desc": item_desc, "p_item_desc_like": f"%{item_desc}%" if item_desc else None,
+            "p_requestor": requestor_list,
+            "p_currency": currency,
             "p_date_from": date_from,
-            "p_date_to":   date_to,
-            "p_mat_type":  mat_type,
-            **requestor_binds,
+            "p_date_to": date_to,
+            "p_mat_type": mat_type,
         }
         try:
-            rows = await asyncio.to_thread(self._query, sql, params)
+            rows = await asyncio.to_thread(self._query_eis, sql, params)
             holidays = await asyncio.to_thread(self._fetch_holidays)
+            data_as_of = await asyncio.to_thread(self._fetch_open_pr_data_as_of)
 
             today = date.today()
             for r in rows:
-                basis_str = r.pop("aging_basis_date", None)
-                basis_date = datetime.strptime(basis_str, "%Y-%m-%d").date() if basis_str else None
+                basis_date = r.pop("aging_basis_date", None)
                 r["aging_days"] = self._working_days_between(basis_date, today, holidays)
 
             # KPIs computed server-side
@@ -938,6 +823,7 @@ class PurchasingService:
                 "success": True,
                 "count": len(rows),
                 "data": rows,
+                "data_as_of": data_as_of,
                 "kpi": {
                     "total_pr_headers": total_pr_headers,
                     "total_lines": len(rows),
@@ -948,6 +834,22 @@ class PurchasingService:
         except Exception as e:
             logger.error("open_pr_error", error=str(e))
             return {"success": False, "error": str(e), "data": [], "kpi": {}}
+
+    def _fetch_open_pr_data_as_of(self) -> str | None:
+        """Last successful etl_open_pr run's finish time — see get_open_pr's
+        docstring for why this needs to be visible to the user."""
+        conn = psycopg2.connect(settings.eis_database_url)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT finished_at FROM eis.etl_job_log "
+                "WHERE job_name = 'etl_open_pr' AND status = 'success' "
+                "ORDER BY finished_at DESC LIMIT 1"
+            )
+            row = cur.fetchone()
+            return row[0].isoformat() if row and row[0] else None
+        finally:
+            conn.close()
 
     # ── Price Analysis ────────────────────────────────────────────────────────
 
@@ -961,44 +863,34 @@ class PurchasingService:
         year_from = int(filters.get("year_from") or 2022)
         year_to   = int(filters.get("year_to")   or 2025)
         years     = list(range(year_from, year_to + 1))
-        category_clause, category_binds = self._category_filter(filters)
+        params    = self._pg_ph_params(filters)
 
         sql = f"""
             SELECT
-                NVL(msi.organization_id, poll.ship_to_organization_id)       AS organization_id,
-                NVL(hou.name, TO_CHAR(poll.ship_to_organization_id))         AS organization_name,
-                NVL(msi.segment1, TO_CHAR(pol.item_id))                      AS item_code,
-                NVL(msi.description, pol.item_description)                   AS item_desc,
-                NVL(msi.primary_uom_code, pol.unit_meas_lookup_code)         AS uom,
-                aps.vendor_name                                              AS supplier_name,
-                COALESCE(mfr.manufacturer_name, 'UNKNOWN')                  AS manufacturer_name,
-                COALESCE(mfr.country_of_origin, 'UNKNOWN')                  AS country_of_origin,
-                poh.currency_code,
-                EXTRACT(YEAR FROM poh.creation_date)                        AS trx_year,
-                COUNT(DISTINCT poh.po_header_id)                            AS po_count,
-                ROUND(SUM(pol.quantity), 2)                                 AS total_qty,
-                ROUND(MIN(pol.unit_price), 4)                               AS min_price_orig,
-                ROUND(MAX(pol.unit_price), 4)                               AS max_price_orig,
-                ROUND(MIN(pol.unit_price * ({self._RATE_CASE})), 4)         AS min_price_idr,
-                ROUND(MAX(pol.unit_price * ({self._RATE_CASE})), 4)         AS max_price_idr,
-                ROUND(AVG(pol.unit_price), 4)                               AS avg_price_orig,
-                ROUND(AVG(pol.unit_price * ({self._RATE_CASE})), 4)         AS avg_price_idr
-            FROM {self._PH_FROM}
-            WHERE {self._ph_where(category_clause)}
+                organization_id, organization_name, item_code,
+                item_description AS item_desc, uom, supplier_name,
+                COALESCE(manufacturer_name, 'UNKNOWN')  AS manufacturer_name,
+                COALESCE(country_of_origin, 'UNKNOWN')  AS country_of_origin,
+                currency_code,
+                EXTRACT(YEAR FROM creation_date)        AS trx_year,
+                COUNT(DISTINCT po_number)               AS po_count,
+                ROUND(SUM(quantity)::numeric, 2)        AS total_qty,
+                ROUND(MIN(unit_price)::numeric, 4)      AS min_price_orig,
+                ROUND(MAX(unit_price)::numeric, 4)      AS max_price_orig,
+                ROUND(MIN(unit_price_idr)::numeric, 4)  AS min_price_idr,
+                ROUND(MAX(unit_price_idr)::numeric, 4)  AS max_price_idr,
+                ROUND(AVG(unit_price)::numeric, 4)      AS avg_price_orig,
+                ROUND(AVG(unit_price_idr)::numeric, 4)  AS avg_price_idr
+            FROM eis.fact_po_line
+            WHERE {self._pg_ph_where()}
             GROUP BY
-                NVL(msi.organization_id, poll.ship_to_organization_id),
-                NVL(hou.name, TO_CHAR(poll.ship_to_organization_id)),
-                NVL(msi.segment1, TO_CHAR(pol.item_id)),
-                NVL(msi.description, pol.item_description),
-                NVL(msi.primary_uom_code, pol.unit_meas_lookup_code),
-                aps.vendor_name, mfr.manufacturer_name, mfr.country_of_origin,
-                poh.currency_code,
-                EXTRACT(YEAR FROM poh.creation_date)
-            ORDER BY aps.vendor_name, EXTRACT(YEAR FROM poh.creation_date)
+                organization_id, organization_name, item_code, item_description, uom,
+                supplier_name, manufacturer_name, country_of_origin, currency_code,
+                EXTRACT(YEAR FROM creation_date)
+            ORDER BY supplier_name, EXTRACT(YEAR FROM creation_date)
         """
-        params = {**self._ph_params(filters), **category_binds}
         try:
-            rows = await asyncio.to_thread(self._query, sql, params)
+            rows = await asyncio.to_thread(self._query_eis, sql, params)
 
             # Cap to the top N item+supplier combos by total spend (IDR) so the
             # trend chart stays readable — keeps every year for each combo kept,

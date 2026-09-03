@@ -34,4 +34,9 @@ celery_app.conf.beat_schedule = {
     "etl-financial":  {"task": "app.tasks.etl_tasks.etl_financial",  "schedule": crontab(hour=4, minute=0)},
     "etl-budget":     {"task": "app.tasks.etl_tasks.etl_budget",     "schedule": crontab(hour=4, minute=30)},
     "etl-po":         {"task": "app.tasks.etl_tasks.etl_po",         "schedule": crontab(hour=5, minute=0)},
+    "etl-po-lines":   {"task": "app.tasks.etl_tasks.etl_po_lines",   "schedule": crontab(hour=5, minute=15)},
+    # Every 15 min, not daily — "open" status changes throughout the day;
+    # see etl_open_pr's own docstring for why this one can't be a daily
+    # batch like everything else here.
+    "etl-open-pr":    {"task": "app.tasks.etl_tasks.etl_open_pr",    "schedule": crontab(minute="*/15")},
 }

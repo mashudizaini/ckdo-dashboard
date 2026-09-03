@@ -1460,3 +1460,406 @@ def etl_po(year: int = None, month: int = None):
         pg.close()
 
     return {"status": "success", "records": records}
+
+
+# Shared PO-line extraction SQL — ported verbatim from
+# purchasing_service.py's _PH_FROM/_ph_where/_RATE_CASE, which power
+# Purchase History (detail/by-item/by-supplier) and Price Analysis. Those
+# 4 live-Oracle report methods all query this exact same grain (one row
+# per PO line) with different GROUP BY/pivoting on top — so extracting it
+# once here into eis.fact_po_line lets the migrated Postgres versions of
+# all 4 reuse the same table instead of needing their own ETL jobs.
+# Structural filters only (type/status/cancel_flag) — user-adjustable
+# filters (item, vendor, category, date range, etc.) apply in Postgres at
+# read time, not here.
+_PO_LINE_FROM = """
+    po_headers_all poh
+    JOIN po_lines_all          pol  ON pol.po_header_id     = poh.po_header_id
+    JOIN po_line_locations_all poll ON poll.po_line_id      = pol.po_line_id
+    LEFT JOIN mtl_system_items_b msi ON msi.inventory_item_id = pol.item_id
+                                   AND msi.organization_id   = poll.ship_to_organization_id
+    LEFT JOIN (
+        SELECT miv2.inventory_item_id, miv2.organization_id,
+               MIN(mcb2.segment1) AS segment1
+        FROM mtl_item_categories_v miv2
+        JOIN mtl_categories_b      mcb2 ON mcb2.category_id = miv2.category_id
+        WHERE miv2.category_set_name = 'CKDO Inventory'
+        GROUP BY miv2.inventory_item_id, miv2.organization_id
+    ) mcb ON mcb.inventory_item_id = msi.inventory_item_id
+         AND mcb.organization_id   = msi.organization_id
+    JOIN ap_suppliers          aps  ON aps.vendor_id         = poh.vendor_id
+    LEFT JOIN per_all_people_f buyer_p
+                                    ON buyer_p.person_id     = poh.agent_id
+                                   AND SYSDATE BETWEEN buyer_p.effective_start_date
+                                                    AND buyer_p.effective_end_date
+    LEFT JOIN (
+        SELECT item_id, manufacturer_name, country_of_origin
+        FROM (
+            SELECT item_id, manufacturer_name, country_of_origin,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY item_id
+                       ORDER BY NVL(last_update_date, creation_date) DESC
+                   ) AS rn
+            FROM xxckdo_manufacturer_master
+        )
+        WHERE rn = 1
+    ) mfr ON mfr.item_id = msi.inventory_item_id
+    LEFT JOIN hr_all_organization_units hou
+                                    ON hou.organization_id   = msi.organization_id
+    LEFT JOIN fnd_lookup_values_vl  lv_mt
+                                    ON  lv_mt.lookup_code         = msi.item_type
+                                    AND lv_mt.view_application_id = 700
+                                    AND lv_mt.lookup_type         = 'CKDO_MTRL_TYPE_DIRECT_INDIRECT'
+"""
+
+_PO_LINE_RATE_CASE = """
+    CASE WHEN poh.currency_code = 'IDR' THEN 1
+    ELSE COALESCE((
+        SELECT gdr.conversion_rate FROM gl_daily_rates gdr
+        WHERE  gdr.from_currency   = poh.currency_code
+          AND  gdr.to_currency     = 'IDR'
+          AND  gdr.conversion_type = 'Corporate'
+          AND  gdr.conversion_date = (
+              SELECT MAX(gdr2.conversion_date) FROM gl_daily_rates gdr2
+              WHERE  gdr2.from_currency   = poh.currency_code
+                AND  gdr2.to_currency     = 'IDR'
+                AND  gdr2.conversion_type = 'Corporate'
+                AND  gdr2.conversion_date <= TRUNC(poh.creation_date)
+          )
+    ), 1) END
+"""
+
+
+@celery_app.task(name="app.tasks.etl_tasks.etl_po_lines")
+def etl_po_lines(year: int = None, month: int = None, full_refresh: bool = False):
+    """Extract PO line-item detail from Oracle PO → eis.fact_po_line.
+
+    Feeds the migrated (Postgres-backed) Purchasing History and Price
+    Analysis reports in purchasing_service.py — see _PO_LINE_FROM's
+    docstring above. IDR conversion always uses the 'Corporate' rate
+    (matches every call site's actual default); the live report's
+    exchange_rate_type filter for a non-Corporate rate isn't reproduced
+    here — a known, deliberately accepted gap, since no observed caller
+    used anything else.
+
+    Incremental by default: only PO lines created in the last 30 days
+    (covers edits/new lines; older closed lines don't change). Pass
+    year=<YYYY> (month optional) to instead pull everything from that
+    year forward — used for the initial backfill.
+    """
+    pg = _get_pg()
+    job_id = _log_start(pg, "etl_po_lines", year, month)
+    records = 0
+    try:
+        ora = get_oracle_connection()
+        cur_ora = ora.cursor()
+
+        from datetime import date as _date, timedelta as _timedelta
+        if full_refresh:
+            date_clause, date_params = "", {}
+        elif year:
+            d_from = _date(year, month or 1, 1)
+            date_clause = "AND poh.creation_date >= :d_from"
+            date_params = {"d_from": d_from}
+        else:
+            d_from = _date.today() - _timedelta(days=30)
+            date_clause = "AND poh.creation_date >= :d_from"
+            date_params = {"d_from": d_from}
+
+        cur_ora.execute(f"""
+            SELECT
+                poh.segment1                                             AS po_number,
+                pol.line_num                                             AS line_num,
+                NVL(msi.segment1, TO_CHAR(pol.item_id))                  AS item_code,
+                NVL(pol.item_description, msi.description)               AS item_description,
+                NVL(mcb.segment1, '-')                                   AS category,
+                NVL(msi.item_type, '-')                                  AS item_type,
+                lv_mt.tag                                                AS material_type,
+                NVL(msi.organization_id, poll.ship_to_organization_id)   AS organization_id,
+                NVL(hou.name, TO_CHAR(poll.ship_to_organization_id))     AS organization_name,
+                aps.vendor_name                                          AS supplier_name,
+                buyer_p.full_name                                        AS buyer_name,
+                mfr.manufacturer_name                                    AS manufacturer_name,
+                COALESCE(mfr.country_of_origin, 'UNKNOWN')               AS country_of_origin,
+                poh.currency_code,
+                NVL(msi.primary_uom_code, pol.unit_meas_lookup_code)     AS uom,
+                pol.quantity                                             AS quantity,
+                pol.unit_price                                           AS unit_price,
+                ROUND(pol.unit_price * ({_PO_LINE_RATE_CASE}), 4)        AS unit_price_idr,
+                ROUND(pol.quantity * pol.unit_price, 2)                  AS amount_orig,
+                ROUND(pol.quantity * pol.unit_price * ({_PO_LINE_RATE_CASE}), 2) AS amount_idr,
+                NVL(poll.quantity_received, 0)                           AS received_qty,
+                poh.creation_date                                        AS creation_date,
+                poh.closed_code                                          AS closure_status
+            FROM {_PO_LINE_FROM}
+            WHERE poh.type_lookup_code IN ('STANDARD','BLANKET','CONTRACT')
+              AND poh.authorization_status NOT IN ('CANCELLED','INCOMPLETE')
+              AND NVL(pol.cancel_flag,'N') = 'N'
+              {date_clause}
+        """, date_params)
+
+        rows = cur_ora.fetchall()
+        records = len(rows)
+        logger.info(f"[etl_po_lines] Extracted {records} PO line rows from Oracle PO")
+        ora.close()
+
+        cur_pg = pg.cursor()
+        loaded = 0
+        for (po_number, line_num, item_code, item_description, category, item_type, material_type,
+             organization_id, organization_name, supplier_name, buyer_name, manufacturer_name,
+             country_of_origin, currency_code, uom, quantity, unit_price, unit_price_idr, amount_orig,
+             amount_idr, received_qty, creation_date, closure_status) in rows:
+            cur_pg.execute(
+                """INSERT INTO eis.fact_po_line
+                       (po_number, line_num, item_code, item_description, category, item_type,
+                        material_type, organization_id, organization_name, supplier_name, buyer_name,
+                        manufacturer_name, country_of_origin, currency_code, uom, quantity, unit_price,
+                        unit_price_idr, amount_orig, amount_idr, received_qty, creation_date, closure_status)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (po_number, line_num) DO UPDATE SET
+                       item_code = EXCLUDED.item_code, item_description = EXCLUDED.item_description,
+                       category = EXCLUDED.category, item_type = EXCLUDED.item_type,
+                       material_type = EXCLUDED.material_type, organization_id = EXCLUDED.organization_id,
+                       organization_name = EXCLUDED.organization_name, supplier_name = EXCLUDED.supplier_name,
+                       buyer_name = EXCLUDED.buyer_name, manufacturer_name = EXCLUDED.manufacturer_name,
+                       country_of_origin = EXCLUDED.country_of_origin, currency_code = EXCLUDED.currency_code,
+                       uom = EXCLUDED.uom, quantity = EXCLUDED.quantity, unit_price = EXCLUDED.unit_price,
+                       unit_price_idr = EXCLUDED.unit_price_idr,
+                       amount_orig = EXCLUDED.amount_orig, amount_idr = EXCLUDED.amount_idr,
+                       received_qty = EXCLUDED.received_qty, closure_status = EXCLUDED.closure_status,
+                       updated_at = now()""",
+                (po_number, line_num, item_code, item_description, category, item_type, material_type,
+                 float(organization_id) if organization_id is not None else None, organization_name,
+                 supplier_name, buyer_name, manufacturer_name, country_of_origin, currency_code, uom,
+                 float(quantity or 0), float(unit_price or 0), float(unit_price_idr or 0),
+                 float(amount_orig or 0), float(amount_idr or 0),
+                 float(received_qty or 0), creation_date, closure_status),
+            )
+            loaded += 1
+
+        pg.commit()
+        logger.info(f"[etl_po_lines] Loaded {loaded} rows into fact_po_line")
+
+        _log_end(pg, job_id, "success", records)
+
+    except Exception as e:
+        logger.error(f"[etl_po_lines] Failed: {e}")
+        _log_end(pg, job_id, "failed", records, str(e))
+        raise
+    finally:
+        pg.close()
+
+    return {"status": "success", "records": records}
+
+
+_PR_LINE_RATE_CASE = """
+    CASE WHEN prl.currency_code = 'IDR' THEN 1
+    ELSE COALESCE((
+        SELECT gdr.conversion_rate FROM gl_daily_rates gdr
+        WHERE  gdr.from_currency   = prl.currency_code
+          AND  gdr.to_currency     = 'IDR'
+          AND  gdr.conversion_type = 'Corporate'
+          AND  gdr.conversion_date = (
+              SELECT MAX(gdr2.conversion_date) FROM gl_daily_rates gdr2
+              WHERE  gdr2.from_currency   = prl.currency_code
+                AND  gdr2.to_currency     = 'IDR'
+                AND  gdr2.conversion_type = 'Corporate'
+                AND  gdr2.conversion_date <= TRUNC(prh.creation_date)
+          )
+    ), 1) END
+"""
+
+
+@celery_app.task(name="app.tasks.etl_tasks.etl_open_pr")
+def etl_open_pr(year: int = None, month: int = None):
+    """Extract PR Approval Status ("Open PR") from Oracle PO →
+    eis.fact_open_pr — ported verbatim from purchasing_service.py's
+    get_open_pr (approval-history joins, fuzzy+real PO linkage,
+    last-purchase-price lookup, split-PR/dummy-data exclusions all kept
+    exactly as documented there).
+
+    Unlike the other ETL jobs, this is a full TRUNCATE + reload every run,
+    not incremental — a PR that's no longer open must disappear from this
+    table, which an upsert alone wouldn't do. Scheduled every 15 minutes
+    (see celery_app.py) specifically because "open" status is a live,
+    fast-changing concept, unlike the daily-batch jobs — the migrated
+    get_open_pr() surfaces this run's finished_at as "data_as_of" so
+    staleness between runs is visible rather than silent. Working-day
+    aging is deliberately NOT stored here — computed at read time in
+    purchasing_service.py against today's date, so it stays accurate even
+    between ETL runs.
+
+    year/month accepted for trigger-API consistency with every other job
+    but unused — this job always does a full current-state refresh.
+    """
+    pg = _get_pg()
+    job_id = _log_start(pg, "etl_open_pr", year, month)
+    records = 0
+    try:
+        ora = get_oracle_connection()
+        cur_ora = ora.cursor()
+
+        cur_ora.execute(f"""
+            SELECT
+                prh.segment1                                                AS pr_number,
+                po_link.po_number                                          AS po_number,
+                prl.line_num                                                AS line_num,
+                NVL(msi.segment1, '-')                                     AS item_code,
+                prl.item_description                                        AS item_description,
+                NVL(mcb.segment1, '-')                                      AS category_code,
+                NVL(mcb.description, prl.item_description)                  AS category_name,
+                lv_mt.tag                                                   AS material_type,
+                fu.user_name                                                AS requestor,
+                NVL(prl.unit_meas_lookup_code, '-')                        AS uom,
+                ROUND(prl.quantity, 4)                                      AS quantity,
+                NVL(prl.currency_code, 'IDR')                              AS currency_code,
+                ROUND(NVL(prl.unit_price, 0), 4)                           AS unit_price_orig,
+                ROUND(NVL(prl.unit_price, 0) * ({_PR_LINE_RATE_CASE}), 4)  AS unit_price_idr,
+                ROUND(NVL(prl.quantity, 0) * NVL(prl.unit_price, 0), 2)    AS total_value_orig,
+                ROUND(NVL(prl.quantity, 0) * NVL(prl.unit_price, 0)
+                      * ({_PR_LINE_RATE_CASE}), 2)                         AS total_value_idr,
+                prh.authorization_status                                    AS pr_status,
+                prh.creation_date                                           AS creation_date,
+                prl.need_by_date                                            AS due_date,
+                NVL(po_appr.approved_date, NVL(appr.approved_date, prh.creation_date)) AS aging_basis_date,
+                NVL(aps.vendor_name,
+                    NVL(lastpo.last_supplier_name,
+                        NVL(prl.suggested_vendor_name, '-')))              AS supplier_name,
+                NVL(trm.name, '-')                                         AS payment_terms,
+                lastpo.last_price                                          AS last_purchase_price,
+                lastpo.last_currency                                       AS last_purchase_currency
+            FROM po_requisition_headers_all prh
+            JOIN po_requisition_lines_all prl
+                ON prl.requisition_header_id = prh.requisition_header_id
+            LEFT JOIN mtl_system_items_b msi
+                ON  msi.inventory_item_id = prl.item_id
+                AND msi.organization_id   = prl.destination_organization_id
+            LEFT JOIN mtl_categories_b mcb
+                ON  mcb.category_id = prl.category_id
+            LEFT JOIN fnd_lookup_values_vl lv_mt
+                ON  lv_mt.lookup_code         = msi.item_type
+                AND lv_mt.view_application_id = 700
+                AND lv_mt.lookup_type         = 'CKDO_MTRL_TYPE_DIRECT_INDIRECT'
+            LEFT JOIN fnd_user fu
+                ON  fu.user_id = prh.created_by
+            LEFT JOIN ap_suppliers aps
+                ON  aps.vendor_id = prl.vendor_id
+            LEFT JOIN ap_terms_tl trm
+                ON  trm.term_id  = aps.terms_id
+                AND trm.language = USERENV('LANG')
+            LEFT JOIN (
+                SELECT pah.object_id, MAX(pah.action_date) AS approved_date
+                FROM po_action_history pah
+                WHERE pah.action_code      = 'APPROVE'
+                  AND pah.object_type_code = 'REQUISITION'
+                GROUP BY pah.object_id
+            ) appr ON appr.object_id = prh.requisition_header_id
+            LEFT JOIN (
+                SELECT requisition_line_id, po_number, po_header_id
+                FROM (
+                    SELECT prd.requisition_line_id,
+                           poh2.segment1 AS po_number,
+                           poh2.po_header_id AS po_header_id,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY prd.requisition_line_id
+                               ORDER BY poh2.creation_date DESC
+                           ) AS rn
+                    FROM po_req_distributions_all prd
+                    JOIN po_distributions_all pd   ON pd.req_distribution_id = prd.distribution_id
+                    JOIN po_headers_all        poh2 ON poh2.po_header_id     = pd.po_header_id
+                    WHERE poh2.authorization_status NOT IN ('CANCELLED')
+                )
+                WHERE rn = 1
+            ) po_link ON po_link.requisition_line_id = prl.requisition_line_id
+            LEFT JOIN (
+                SELECT pah.object_id, MAX(pah.action_date) AS approved_date
+                FROM po_action_history pah
+                WHERE pah.action_code      = 'APPROVE'
+                  AND pah.object_type_code = 'PO'
+                GROUP BY pah.object_id
+            ) po_appr ON po_appr.object_id = po_link.po_header_id
+            LEFT JOIN (
+                SELECT item_desc_key, unit_price AS last_price,
+                       currency_code AS last_currency, vendor_name AS last_supplier_name
+                FROM (
+                    SELECT UPPER(plx.item_description)                     AS item_desc_key,
+                           plx.unit_price, phx.currency_code, apsx.vendor_name,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY UPPER(plx.item_description)
+                               ORDER BY phx.creation_date DESC
+                           )                                               AS rn
+                    FROM po_lines_all plx
+                    JOIN po_headers_all phx  ON phx.po_header_id = plx.po_header_id
+                    JOIN ap_suppliers   apsx ON apsx.vendor_id   = phx.vendor_id
+                    WHERE phx.type_lookup_code      IN ('STANDARD','BLANKET','CONTRACT')
+                      AND phx.authorization_status  NOT IN ('CANCELLED','INCOMPLETE')
+                )
+                WHERE rn = 1
+            ) lastpo ON lastpo.item_desc_key = UPPER(prl.item_description)
+            WHERE NVL(prl.cancel_flag, 'N') = 'N'
+              AND prh.authorization_status NOT IN ('CANCELLED')
+              AND NVL(prl.modified_by_agent_flag, 'N') = 'N'
+              AND NOT (
+                  UPPER(fu.user_name) IN ('ELLVIN', 'AFNI')
+                  OR (
+                      UPPER(fu.user_name) = 'SHERLIN'
+                      AND UPPER(NVL(aps.vendor_name,
+                              NVL(lastpo.last_supplier_name,
+                                  NVL(prl.suggested_vendor_name, '-')))) = 'ELLVIN'
+                  )
+              )
+        """)
+
+        rows = cur_ora.fetchall()
+        records = len(rows)
+        logger.info(f"[etl_open_pr] Extracted {records} open PR line rows from Oracle PO")
+        ora.close()
+
+        cur_pg = pg.cursor()
+        cur_pg.execute("TRUNCATE TABLE eis.fact_open_pr")
+        loaded = 0
+        for (pr_number, po_number, line_num, item_code, item_description, category_code, category_name,
+             material_type, requestor, uom, quantity, currency_code, unit_price_orig, unit_price_idr,
+             total_value_orig, total_value_idr, pr_status, creation_date, due_date, aging_basis_date,
+             supplier_name, payment_terms, last_purchase_price, last_purchase_currency) in rows:
+            cur_pg.execute(
+                """INSERT INTO eis.fact_open_pr
+                       (pr_number, po_number, line_num, item_code, item_description, category_code,
+                        category_name, material_type, requestor, uom, quantity, currency_code,
+                        unit_price_orig, unit_price_idr, total_value_orig, total_value_idr, pr_status,
+                        creation_date, due_date, aging_basis_date, supplier_name, payment_terms,
+                        last_purchase_price, last_purchase_currency)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (pr_number, line_num) DO UPDATE SET
+                       po_number = EXCLUDED.po_number, item_code = EXCLUDED.item_code,
+                       item_description = EXCLUDED.item_description, category_code = EXCLUDED.category_code,
+                       category_name = EXCLUDED.category_name, material_type = EXCLUDED.material_type,
+                       requestor = EXCLUDED.requestor, uom = EXCLUDED.uom, quantity = EXCLUDED.quantity,
+                       currency_code = EXCLUDED.currency_code, unit_price_orig = EXCLUDED.unit_price_orig,
+                       unit_price_idr = EXCLUDED.unit_price_idr, total_value_orig = EXCLUDED.total_value_orig,
+                       total_value_idr = EXCLUDED.total_value_idr, pr_status = EXCLUDED.pr_status,
+                       due_date = EXCLUDED.due_date, aging_basis_date = EXCLUDED.aging_basis_date,
+                       supplier_name = EXCLUDED.supplier_name, payment_terms = EXCLUDED.payment_terms,
+                       last_purchase_price = EXCLUDED.last_purchase_price,
+                       last_purchase_currency = EXCLUDED.last_purchase_currency, updated_at = now()""",
+                (pr_number, po_number, line_num, item_code, item_description, category_code, category_name,
+                 material_type, requestor, uom, float(quantity or 0), currency_code, float(unit_price_orig or 0),
+                 float(unit_price_idr or 0), float(total_value_orig or 0), float(total_value_idr or 0),
+                 pr_status, creation_date, due_date, aging_basis_date, supplier_name, payment_terms,
+                 float(last_purchase_price) if last_purchase_price is not None else None, last_purchase_currency),
+            )
+            loaded += 1
+
+        pg.commit()
+        logger.info(f"[etl_open_pr] Loaded {loaded} rows into fact_open_pr")
+
+        _log_end(pg, job_id, "success", records)
+
+    except Exception as e:
+        logger.error(f"[etl_open_pr] Failed: {e}")
+        _log_end(pg, job_id, "failed", records, str(e))
+        raise
+    finally:
+        pg.close()
+
+    return {"status": "success", "records": records}

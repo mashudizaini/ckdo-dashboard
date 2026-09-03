@@ -93,10 +93,11 @@ async def lifespan(app: FastAPI):
     rag_service.ensure_schema()
 
     # EIS Data Upload — upload-history log table (separate `eis_dashboard` DB)
-    from app.eis_database import ensure_upload_log_table, ensure_purchasing_table, ensure_employee_dim_table
+    from app.eis_database import ensure_upload_log_table, ensure_purchasing_table, ensure_employee_dim_table, ensure_purchasing_migration_tables
     await ensure_upload_log_table()
     await ensure_purchasing_table()
     await ensure_employee_dim_table()
+    await ensure_purchasing_migration_tables()
 
     # EBS Backup Recovery — dedicated sync tables (ebs_*) + its own 60s
     # schedule poller (ported from the standalone ebs-backup-dashboard app).

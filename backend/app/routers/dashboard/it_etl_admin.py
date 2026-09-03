@@ -56,6 +56,7 @@ async def trigger_etl(job_name: str, params: TriggerParams):
     valid_jobs = [
         "etl_sales", "etl_cogs", "etl_production", "etl_financial",
         "etl_employee", "etl_inventory", "etl_ar_ap", "etl_budget", "etl_po",
+        "etl_po_lines", "etl_open_pr",
     ]
     if job_name not in valid_jobs:
         raise HTTPException(status_code=400, detail=f"Unknown job. Valid: {valid_jobs}")
@@ -229,6 +230,24 @@ async def get_job_data(
             WHERE per.fiscal_year = :year {period_filter}
             ORDER BY per.period_num, p.material_type
         """,
+        # Not period-keyed like the fact_* tables above — filtered directly
+        # on creation_date instead of joining dim_period.
+        "etl_po_lines": f"""
+            SELECT po_number, line_num, item_code, supplier_name,
+                   ROUND(amount_idr::numeric, 2) AS amount_idr, creation_date, closure_status
+            FROM eis.fact_po_line
+            WHERE EXTRACT(YEAR FROM creation_date) = :year
+              {"AND EXTRACT(MONTH FROM creation_date) = :month" if month else ""}
+            ORDER BY creation_date DESC
+            LIMIT 100
+        """,
+        "etl_open_pr": """
+            SELECT pr_number, po_number, item_code, requestor, supplier_name,
+                   pr_status, creation_date, due_date
+            FROM eis.fact_open_pr
+            ORDER BY creation_date DESC
+            LIMIT 100
+        """,
     }
 
     sql = queries.get(job_name)
@@ -287,6 +306,14 @@ _JOB_META = {
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["po_headers_all", "po_lines_all", "po_line_locations_all"],
                         "destination_table": "eis.fact_purchasing"},
+    "etl_po_lines":   {"frequency": "Daily",  "schedule": "05:15 AM WIB", "source": "Oracle PO (line-item detail)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["po_headers_all", "po_lines_all", "po_line_locations_all", "mtl_system_items_b", "xxckdo_manufacturer_master"],
+                        "destination_table": "eis.fact_po_line"},
+    "etl_open_pr":    {"frequency": "Every 15 min", "schedule": "*/15 * * * *", "source": "Oracle PO (PR Approval Status)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["po_requisition_headers_all", "po_requisition_lines_all", "po_action_history"],
+                        "destination_table": "eis.fact_open_pr"},
 }
 
 

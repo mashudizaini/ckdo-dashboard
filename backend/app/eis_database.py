@@ -135,3 +135,91 @@ async def ensure_employee_dim_table():
             "CREATE INDEX IF NOT EXISTS idx_dim_employee_department "
             "ON eis.dim_employee (department)"
         ))
+
+
+async def ensure_purchasing_migration_tables():
+    """Create eis.fact_po_line and eis.fact_open_pr if missing — same
+    self-provisioning pattern as the others above. Backs the migrated
+    (Postgres-instead-of-live-Oracle) Purchasing History, Price Analysis
+    and Open PR reports in purchasing_service.py; populated by
+    app.tasks.eis_etl_tasks.etl_po_lines / etl_open_pr."""
+    from sqlalchemy import text
+    async with eis_async_engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eis.fact_po_line (
+                id                 SERIAL PRIMARY KEY,
+                po_number          VARCHAR(30) NOT NULL,
+                line_num           INTEGER NOT NULL,
+                item_code          VARCHAR(60),
+                item_description   VARCHAR(500),
+                category           VARCHAR(60),
+                item_type          VARCHAR(30),
+                material_type      VARCHAR(30),
+                organization_id    NUMERIC,
+                organization_name  VARCHAR(200),
+                supplier_name      VARCHAR(200),
+                buyer_name         VARCHAR(200),
+                manufacturer_name  VARCHAR(200),
+                country_of_origin  VARCHAR(100),
+                currency_code      VARCHAR(10),
+                uom                VARCHAR(20),
+                quantity           NUMERIC(18,4),
+                unit_price         NUMERIC(18,4),
+                unit_price_idr     NUMERIC(18,4),
+                amount_orig        NUMERIC(18,2),
+                amount_idr         NUMERIC(18,2),
+                received_qty       NUMERIC(18,4),
+                creation_date      DATE,
+                closure_status     VARCHAR(30),
+                updated_at         TIMESTAMPTZ DEFAULT now(),
+                UNIQUE (po_number, line_num)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_po_line_creation_date "
+            "ON eis.fact_po_line (creation_date)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_po_line_item_code "
+            "ON eis.fact_po_line (item_code)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_po_line_supplier "
+            "ON eis.fact_po_line (supplier_name)"
+        ))
+
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eis.fact_open_pr (
+                id                     SERIAL PRIMARY KEY,
+                pr_number              VARCHAR(30) NOT NULL,
+                line_num               INTEGER NOT NULL,
+                po_number              VARCHAR(30),
+                item_code              VARCHAR(60),
+                item_description       VARCHAR(500),
+                category_code          VARCHAR(60),
+                category_name          VARCHAR(200),
+                material_type          VARCHAR(30),
+                requestor              VARCHAR(200),
+                uom                    VARCHAR(20),
+                quantity               NUMERIC(18,4),
+                currency_code          VARCHAR(10),
+                unit_price_orig        NUMERIC(18,4),
+                unit_price_idr         NUMERIC(18,4),
+                total_value_orig       NUMERIC(18,2),
+                total_value_idr        NUMERIC(18,2),
+                pr_status              VARCHAR(30),
+                creation_date          DATE,
+                due_date               DATE,
+                aging_basis_date       DATE,
+                supplier_name          VARCHAR(200),
+                payment_terms          VARCHAR(100),
+                last_purchase_price    NUMERIC(18,4),
+                last_purchase_currency VARCHAR(10),
+                updated_at             TIMESTAMPTZ DEFAULT now(),
+                UNIQUE (pr_number, line_num)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_open_pr_requestor "
+            "ON eis.fact_open_pr (requestor)"
+        ))
