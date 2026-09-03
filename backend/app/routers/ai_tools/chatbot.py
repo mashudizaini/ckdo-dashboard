@@ -117,6 +117,37 @@ async def set_provider_status(
     return await ai_chat_provider_service.list_provider_status(db)
 
 
+@router.get("/default-providers")
+async def get_default_providers(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Which provider each of the 3 chat modes (Policy/Oracle/General)
+    starts on — any authenticated user (Chatbot.jsx/ChatWidget.jsx read
+    this on mount instead of a hardcoded default)."""
+    return await ai_chat_provider_service.list_default_providers(db)
+
+
+class DefaultProviderUpdate(BaseModel):
+    provider: str
+
+
+@router.put("/default-providers/{mode}")
+async def set_default_provider(
+    mode: str,
+    body: DefaultProviderUpdate,
+    user: CurrentUser = Depends(require_role(Roles.IT, Roles.ADMIN)),
+    db: AsyncSession = Depends(get_db),
+):
+    """IT/admin only — see ai_chat_provider_service.py."""
+    if mode not in ai_chat_provider_service.MODES:
+        raise HTTPException(400, f"Unknown chat mode: {mode}")
+    if body.provider not in ai_chat_provider_service.PROVIDERS:
+        raise HTTPException(400, f"Unknown provider: {body.provider}")
+    await ai_chat_provider_service.set_default_provider(db, mode, body.provider, user.username)
+    return await ai_chat_provider_service.list_default_providers(db)
+
+
 @router.post("/chat")
 async def chat(
     request: ChatRequest,

@@ -102,6 +102,15 @@ export default function ChatWidget() {
         if (res.ok) setEnabledProviders(await res.json());
       } catch (_) {}
     })();
+    // Admin-configured default per mode (Setup > AI > Model Access) —
+    // mirrors Chatbot.jsx's same fetch, overwrites the hardcoded fallback
+    // above once loaded.
+    (async () => {
+      try {
+        const res = await fetch("/api/v1/ai/chatbot/default-providers");
+        if (res.ok) setProviderByTab(await res.json());
+      } catch (_) {}
+    })();
   }, []);
 
   // IT/admin can disable a provider app-wide (Setup > AI > Model Access) —

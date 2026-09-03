@@ -27,3 +27,21 @@ class AiChatProviderSetting(Base):
     enabled    = Column(Boolean, nullable=False, default=True)
     updated_by = Column(String(100))
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AiChatDefaultProvider(Base):
+    """Which provider each of the AI Chatbot's 3 modes (Policy/Oracle/
+    General) starts on for a user who hasn't picked one yet this session —
+    admin-configurable via Setup > AI > Model Access instead of the
+    hardcoded DEFAULT_PROVIDER_BY_TAB constant that used to live in
+    Chatbot.jsx/ChatWidget.jsx. No row for a mode means the original
+    hardcoded default still applies (see ai_chat_provider_service.py's
+    DEFAULT_FALLBACK) — shipping this feature must not change anyone's
+    current experience until IT/admin actually changes a value."""
+    __tablename__ = "ai_chat_default_providers"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    mode       = Column(String(20), nullable=False, unique=True, index=True)
+    provider   = Column(String(30), nullable=False)
+    updated_by = Column(String(100))
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

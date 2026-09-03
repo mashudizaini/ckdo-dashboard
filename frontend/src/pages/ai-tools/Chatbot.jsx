@@ -21,11 +21,13 @@ function CopyButton({ text }) {
   );
 }
 
-// Per-tab default provider — General Chat defaults to Gemini (its live web-
-// search grounding makes it the "current info" mode; on-premise/Gemini's
-// ungrounded default elsewhere stays the safer/cheaper choice for Policy
-// and Oracle chat). Each tab still remembers whatever the user picks after
-// that, independently — this only sets the starting point.
+// Per-tab default provider — starting point until Setup > AI > Model
+// Access's admin-configured defaults load (see the fetch below); also the
+// fallback if that fetch fails. General Chat defaults to Gemini (its live
+// web-search grounding makes it the "current info" mode; on-premise/
+// Gemini's ungrounded default elsewhere stays the safer/cheaper choice for
+// Policy and Oracle chat). Each tab still remembers whatever the user
+// picks after that, independently — this only sets the starting point.
 const DEFAULT_PROVIDER_BY_TAB = { policy: "onprem", oracle: "onprem", general: "gemini" };
 
 export default function Chatbot() {
@@ -43,6 +45,15 @@ export default function Chatbot() {
       try {
         const res = await fetch("/api/v1/ai/chatbot/provider-status");
         if (res.ok) setEnabledProviders(await res.json());
+      } catch (_) {}
+    })();
+    // Admin-configured default per mode (Setup > AI > Model Access) —
+    // overwrites the hardcoded fallback above once loaded. Only runs once
+    // on mount, so it never clobbers a provider the user already picked.
+    (async () => {
+      try {
+        const res = await fetch("/api/v1/ai/chatbot/default-providers");
+        if (res.ok) setProviderByTab(await res.json());
       } catch (_) {}
     })();
   }, []);
