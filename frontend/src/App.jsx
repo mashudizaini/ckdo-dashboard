@@ -19,10 +19,10 @@ import EISDashboard from "@/pages/dashboard/EIS";
 import SetupPage from "@/pages/setup/SetupPage";
 import HRSetupPage from "@/pages/setup/HRSetupPage";
 import GeneralSetupPage from "@/pages/setup/general/GeneralSetupPage";
+import AiSetupPage from "@/pages/setup/ai/AiSetupPage";
 
 // AI Tools Pages
 import Chatbot from "@/pages/ai-tools/Chatbot";
-import DocumentConverter from "@/pages/ai-tools/DocumentConverter";
 import MeetingNotes from "@/pages/ai-tools/MeetingNotes";
 import MeetingTranscriptView from "@/pages/ai-tools/MeetingTranscriptView";
 
@@ -157,6 +157,7 @@ export default function App() {
         <Route path="accounting"  element={<ProtectedRoute><SetupPage team="Accounting & Tax" /></ProtectedRoute>} />
         <Route path="purchasing"  element={<ProtectedRoute><SetupPage team="Purchasing" /></ProtectedRoute>} />
         <Route path="general"     element={<ProtectedRoute><GeneralSetupPage /></ProtectedRoute>} />
+        <Route path="ai"          element={<ProtectedRoute><AiSetupPage /></ProtectedRoute>} />
       </Route>
 
       {/* Bare new-tab view (no sidebar chrome) — opened via window.open() after transcribing */}
@@ -165,7 +166,9 @@ export default function App() {
       {/* AI Tools */}
       <Route path="/ai" element={<Layout />}>
         <Route path="chatbot" element={<Chatbot />} />
-        <Route path="document-converter" element={<DocumentConverter />} />
+        {/* Moved to Setup > AI (2026-09-03) alongside Knowledge Base — kept
+            as a redirect so any existing bookmark/link still lands somewhere. */}
+        <Route path="document-converter" element={<Navigate to="/setup/ai" replace />} />
         <Route path="oracle-data" element={<Navigate to="/ai/chatbot" replace />} />
         <Route path="meeting-notes" element={<MeetingNotes />} />
       </Route>

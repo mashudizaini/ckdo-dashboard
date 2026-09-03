@@ -4,7 +4,7 @@ import { useAuthStore } from "@/store/authStore";
 import { useThemeStore } from "@/store/themeStore";
 import {
   Monitor, Users, Factory, Calculator,
-  ShoppingCart, FileText, LogOut, LayoutGrid, TrendingUp, FileStack,
+  ShoppingCart, FileText, LogOut, LayoutGrid, TrendingUp,
   ChevronDown, ChevronRight, Settings,
 } from "lucide-react";
 import RobotIcon from "@/components/icons/RobotIcon";
@@ -78,6 +78,7 @@ const SETUP_ITEMS = [
     { label: "Accounting & Tax", path: "/setup/accounting" },
     { label: "Purchasing", path: "/setup/purchasing" },
     { label: "General", path: "/setup/general" },
+    { label: "AI", path: "/setup/ai" },
   ] },
 ];
 
@@ -96,10 +97,12 @@ const EIS_ITEMS = [
   ] },
 ];
 
+// Document Converter moved to Setup > AI (2026-09-03, alongside Knowledge
+// Base) — it's a content-management tool, not something every AI Tools
+// visitor needs a standalone entry for.
 const AI_ITEMS = [
-  { label: "AI Chatbot",         path: "/ai/chatbot",             icon: RobotIcon,  roles: [] },
-  { label: "Document Converter", path: "/ai/document-converter",  icon: FileStack,  roles: [] },
-  { label: "Meeting Notes",      path: "/ai/meeting-notes",       icon: FileText,   roles: [] },
+  { label: "AI Chatbot",    path: "/ai/chatbot",        icon: RobotIcon, roles: [] },
+  { label: "Meeting Notes", path: "/ai/meeting-notes",  icon: FileText,  roles: [] },
 ];
 
 /* ── Leaf nav card — no children (AI Tools items, or a module with none) ── */
