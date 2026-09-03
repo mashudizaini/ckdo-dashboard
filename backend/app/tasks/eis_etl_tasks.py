@@ -1947,6 +1947,7 @@ def etl_sales_orders(year: int = None, month: int = None, full_refresh: bool = F
             SELECT
                 TO_CHAR(ooh.order_number)                                AS order_number,
                 ool.line_number                                          AS line_num,
+                NVL(ool.shipment_number, 1)                               AS shipment_num,
                 NVL(msi.segment1, TO_CHAR(ool.inventory_item_id))        AS item_code,
                 NVL(msi.description, ool.ordered_item)                   AS item_description,
                 {case_biz}                                                AS business_type,
@@ -1984,19 +1985,19 @@ def etl_sales_orders(year: int = None, month: int = None, full_refresh: bool = F
 
         cur_pg = pg.cursor()
         loaded = 0
-        for (order_number, line_num, item_code, item_description, business_type, customer_name,
+        for (order_number, line_num, shipment_num, item_code, item_description, business_type, customer_name,
              organization_name, currency_code, uom, quantity, unit_selling_price, unit_list_price,
              amount_orig, amount_idr, schedule_ship_date, actual_shipment_date, flow_status_code,
              ordered_date, salesrep_id, sold_to_org_id, ship_from_org_id) in rows:
             cur_pg.execute(
                 """INSERT INTO eis.fact_sales_order
-                       (order_number, line_num, item_code, item_description, business_type,
+                       (order_number, line_num, shipment_num, item_code, item_description, business_type,
                         customer_name, organization_name, currency_code, uom, quantity,
                         unit_selling_price, unit_list_price, amount_orig, amount_idr,
                         schedule_ship_date, actual_shipment_date, flow_status_code, ordered_date,
                         salesrep_id, sold_to_org_id, ship_from_org_id)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                   ON CONFLICT (order_number, line_num) DO UPDATE SET
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (order_number, line_num, shipment_num) DO UPDATE SET
                        item_code = EXCLUDED.item_code, item_description = EXCLUDED.item_description,
                        business_type = EXCLUDED.business_type, customer_name = EXCLUDED.customer_name,
                        organization_name = EXCLUDED.organization_name, currency_code = EXCLUDED.currency_code,
@@ -2007,7 +2008,7 @@ def etl_sales_orders(year: int = None, month: int = None, full_refresh: bool = F
                        flow_status_code = EXCLUDED.flow_status_code, salesrep_id = EXCLUDED.salesrep_id,
                        sold_to_org_id = EXCLUDED.sold_to_org_id, ship_from_org_id = EXCLUDED.ship_from_org_id,
                        updated_at = now()""",
-                (order_number, line_num, item_code, item_description, business_type, customer_name,
+                (order_number, line_num, shipment_num, item_code, item_description, business_type, customer_name,
                  organization_name, currency_code, uom, float(quantity or 0), float(unit_selling_price or 0),
                  float(unit_list_price or 0), float(amount_orig or 0), float(amount_idr or 0),
                  schedule_ship_date, actual_shipment_date, flow_status_code, ordered_date,

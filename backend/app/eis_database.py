@@ -244,6 +244,7 @@ async def ensure_sales_order_table():
                 id                    SERIAL PRIMARY KEY,
                 order_number          VARCHAR(30) NOT NULL,
                 line_num              INTEGER NOT NULL,
+                shipment_num          INTEGER NOT NULL DEFAULT 1,
                 item_code             VARCHAR(60),
                 item_description      VARCHAR(500),
                 business_type         VARCHAR(20),
@@ -264,9 +265,29 @@ async def ensure_sales_order_table():
                 sold_to_org_id        NUMERIC,
                 ship_from_org_id      NUMERIC,
                 updated_at            TIMESTAMPTZ DEFAULT now(),
-                UNIQUE (order_number, line_num)
+                UNIQUE (order_number, line_num, shipment_num)
             )
         """))
+        # Migration for tables created before shipment_num existed: Oracle
+        # OM splits one order line into multiple oe_order_lines_all rows
+        # sharing the same line_number when it ships in partial batches,
+        # distinguished only by shipment_number. The old (order_number,
+        # line_num) key collapsed those into one upserted row, silently
+        # discarding the other shipments' amount — found live as a ~25%
+        # undercount on Local orders for April 2026 vs fact_sales.
+        await conn.execute(text(
+            "ALTER TABLE eis.fact_sales_order "
+            "ADD COLUMN IF NOT EXISTS shipment_num INTEGER NOT NULL DEFAULT 1"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE eis.fact_sales_order "
+            "DROP CONSTRAINT IF EXISTS fact_sales_order_order_number_line_num_key"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE eis.fact_sales_order "
+            "ADD CONSTRAINT fact_sales_order_order_number_line_num_shipment_num_key "
+            "UNIQUE (order_number, line_num, shipment_num)"
+        ))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_fact_sales_order_ordered_date "
             "ON eis.fact_sales_order (ordered_date)"

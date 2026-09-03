@@ -140,18 +140,32 @@ function SalesTrendSection() {
   const [detailLoading, setDetailLoading] = useState(false);
 
   const handleBarClick = (row, businessType) => {
-    setSelected({ periodNum: row.period_num, periodLabel: row.period, businessType });
+    // Recharts' <Bar onClick> passes the clicked Rectangle's props, not the
+    // raw chartData row directly — the actual data lives at row.payload for
+    // some recharts versions/interactions, at the top level for others.
+    // Reading both defensively: without this, clicking any segment other
+    // than the first-rendered one silently got an undefined period_num
+    // (bad request -> fetch failed -> stale/empty detail table stayed on
+    // screen even though the header updated to the newly-clicked segment).
+    const source = row?.payload ?? row;
+    const periodNum = source?.period_num;
+    const periodLabel = source?.period;
+    if (periodNum == null) return; // couldn't resolve which bar was clicked — don't fetch garbage
+    setSelected({ periodNum, periodLabel, businessType });
   };
 
   useEffect(() => {
     if (!selected) { setDetail(null); return; }
     (async () => {
       setDetailLoading(true);
+      setDetail(null); // clear the previous segment's rows immediately — never show stale data under a newly-clicked segment's header
       try {
         const params = new URLSearchParams({ year, month: selected.periodNum, business_type: selected.businessType });
         const res = await fetch(`${SALES_API}/order-detail?${params}`, { headers: { Authorization: `Bearer ${token}` } });
-        if (res.ok) setDetail((await res.json()).data);
-      } catch (_) {}
+        setDetail(res.ok ? (await res.json()).data : []);
+      } catch (_) {
+        setDetail([]);
+      }
       setDetailLoading(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
