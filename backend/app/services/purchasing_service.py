@@ -602,30 +602,40 @@ class PurchasingService:
             f"\n            SUM(CASE WHEN trx_year={y} THEN line_qty          ELSE 0 END) AS qty_{y}"
             for y in years
         )
+        # Postgres, unlike Oracle, doesn't allow COUNT(DISTINCT x) inside a
+        # window function — item_count/po_count computed via a separate
+        # GROUP BY CTE instead of OVER (PARTITION BY ...), joined back in.
+        where = self._pg_ph_where()
         sql = f"""
             WITH base_data AS (
                 SELECT
                     supplier_name, currency_code,
-                    EXTRACT(YEAR FROM creation_date)                          AS trx_year,
-                    amount_orig                                               AS line_amount_orig,
-                    amount_idr                                                AS line_amount_idr,
-                    quantity                                                  AS line_qty,
-                    COUNT(DISTINCT item_code) OVER (PARTITION BY supplier_name) AS item_count,
-                    COUNT(DISTINCT po_number) OVER (PARTITION BY supplier_name) AS po_count
+                    EXTRACT(YEAR FROM creation_date) AS trx_year,
+                    amount_orig                      AS line_amount_orig,
+                    amount_idr                        AS line_amount_idr,
+                    quantity                           AS line_qty
                 FROM eis.fact_po_line
-                WHERE {self._pg_ph_where()}
+                WHERE {where}
+            ),
+            supplier_counts AS (
+                SELECT supplier_name,
+                       COUNT(DISTINCT item_code) AS item_count,
+                       COUNT(DISTINCT po_number)  AS po_count
+                FROM eis.fact_po_line
+                WHERE {where}
+                GROUP BY supplier_name
             )
             SELECT
-                supplier_name, currency_code,
-                MIN(item_count) AS item_count,
-                MIN(po_count)   AS po_count,
+                b.supplier_name, b.currency_code,
+                sc.item_count, sc.po_count,
                 {pivot},
-                SUM(line_amount_orig) AS total_value_orig,
-                SUM(line_amount_idr)  AS total_value_idr,
-                SUM(line_qty)         AS total_qty
-            FROM base_data
-            GROUP BY supplier_name, currency_code
-            ORDER BY supplier_name
+                SUM(b.line_amount_orig) AS total_value_orig,
+                SUM(b.line_amount_idr)  AS total_value_idr,
+                SUM(b.line_qty)         AS total_qty
+            FROM base_data b
+            JOIN supplier_counts sc ON sc.supplier_name = b.supplier_name
+            GROUP BY b.supplier_name, b.currency_code, sc.item_count, sc.po_count
+            ORDER BY b.supplier_name
         """
         try:
             rows = await asyncio.to_thread(self._query_eis, sql, params)
