@@ -197,9 +197,9 @@ async def ensure_purchasing_migration_tables():
                 item_code              VARCHAR(60),
                 item_description       VARCHAR(500),
                 category_code          VARCHAR(60),
-                category_name          VARCHAR(200),
+                category_name          VARCHAR(500),
                 material_type          VARCHAR(30),
-                requestor              VARCHAR(200),
+                requestor              VARCHAR(300),
                 uom                    VARCHAR(20),
                 quantity               NUMERIC(18,4),
                 currency_code          VARCHAR(10),
@@ -211,14 +211,20 @@ async def ensure_purchasing_migration_tables():
                 creation_date          DATE,
                 due_date               DATE,
                 aging_basis_date       DATE,
-                supplier_name          VARCHAR(200),
-                payment_terms          VARCHAR(100),
+                supplier_name          VARCHAR(300),
+                payment_terms          VARCHAR(300),
                 last_purchase_price    NUMERIC(18,4),
                 last_purchase_currency VARCHAR(10),
                 updated_at             TIMESTAMPTZ DEFAULT now(),
                 UNIQUE (pr_number, line_num)
             )
         """))
+        # Pre-existing deployments (created before these columns were
+        # widened, e.g. category_name past a real Oracle description
+        # exceeding 200 chars) need this applied explicitly — CREATE TABLE
+        # IF NOT EXISTS is a no-op once the table already exists.
+        for col, width in (("category_name", 500), ("requestor", 300), ("supplier_name", 300), ("payment_terms", 300)):
+            await conn.execute(text(f"ALTER TABLE eis.fact_open_pr ALTER COLUMN {col} TYPE VARCHAR({width})"))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_fact_open_pr_requestor "
             "ON eis.fact_open_pr (requestor)"

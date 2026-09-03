@@ -1644,6 +1644,7 @@ def etl_po_lines(year: int = None, month: int = None, full_refresh: bool = False
 
     except Exception as e:
         logger.error(f"[etl_po_lines] Failed: {e}")
+        pg.rollback()  # a failed INSERT mid-loop leaves the connection unusable until rolled back
         _log_end(pg, job_id, "failed", records, str(e))
         raise
     finally:
@@ -1857,6 +1858,7 @@ def etl_open_pr(year: int = None, month: int = None):
 
     except Exception as e:
         logger.error(f"[etl_open_pr] Failed: {e}")
+        pg.rollback()  # a failed INSERT mid-loop leaves the connection unusable until rolled back
         _log_end(pg, job_id, "failed", records, str(e))
         raise
     finally:
