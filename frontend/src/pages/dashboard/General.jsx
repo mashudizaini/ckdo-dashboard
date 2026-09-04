@@ -1023,6 +1023,7 @@ function APListSection() {
 
   const [glDateFrom,      setGlDateFrom]      = useState(yearStart);
   const [glDateTo,        setGlDateTo]        = useState(todayStr);
+  const [paymentCutoff,   setPaymentCutoff]   = useState(todayStr);
   const [supplierName,    setSupplierName]    = useState("");
   const [payStatusFilter, setPayStatusFilter] = useState("ALL");
   const [limit,           setLimit]           = useState(500);
@@ -1044,6 +1045,7 @@ function APListSection() {
       const params = new URLSearchParams({ limit });
       if (glDateFrom) params.set("gl_date_from", glDateFrom);
       if (glDateTo) params.set("gl_date_to", glDateTo);
+      if (paymentCutoff) params.set("payment_date_cutoff", paymentCutoff);
       if (supplierName) params.set("supplier_name", supplierName);
       if (payStatusFilter && payStatusFilter !== "ALL") params.set("payment_status", payStatusFilter);
       const res = await fetch(`${AP_LIST_API}?${params}`, { headers: hdrs });
@@ -1054,7 +1056,7 @@ function APListSection() {
       setError(e?.message || String(e)); setData(null);
     } finally { setLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [glDateFrom, glDateTo, supplierName, payStatusFilter, limit]);
+  }, [glDateFrom, glDateTo, paymentCutoff, supplierName, payStatusFilter, limit]);
 
   useEffect(() => { loadData(); }, []); // eslint-disable-line
 
@@ -1097,6 +1099,10 @@ function APListSection() {
         <div>
           <label className={LBL}>GL Date To</label>
           <input type="date" value={glDateTo} onChange={e => setGlDateTo(e.target.value)} className={INPUT} />
+        </div>
+        <div>
+          <label className={LBL} title="Pembayaran setelah tanggal ini tidak dihitung sebagai Payment">Payment Date Cutoff</label>
+          <input type="date" value={paymentCutoff} onChange={e => setPaymentCutoff(e.target.value)} className={INPUT} />
         </div>
         <div>
           <label className={LBL}>Supplier</label>

@@ -645,6 +645,7 @@ class AccountingService:
         self,
         gl_date_from: str = None,
         gl_date_to: str = None,
+        payment_date_cutoff: str = None,
         supplier_name: str = None,
         payment_status: str = None,
         limit: int = 500,
@@ -690,35 +691,55 @@ class AccountingService:
                   line_type_lookup_code = 'AWT') — this one IS real Oracle
                   data, already negative in Oracle so no sign-flip needed
           total = dpp + vat + NVL(wht, 0)
-          remaining_ap = 0 when Oracle's real payment-schedule state says
-                  Paid, else (total - NVL(payment, 0)) — verified live that
-                  Oracle's actual AP_INVOICE_PAYMENTS_ALL.amount reflects
-                  the real cash paid (~= dpp, not dpp+vat, since the 11%
-                  gross-up above was never a real separately-paid amount),
-                  so the naive subtraction alone would show a nonzero
-                  "remaining" on invoices Oracle considers fully Paid.
-                  Confirmed with the user: force 0 in that case rather than
-                  show a misleading residual.
+          remaining_ap = 0 when payment_status = 'Paid' (see below), else
+                  (total - NVL(payment, 0)) — verified live that Oracle's
+                  actual AP_INVOICE_PAYMENTS_ALL.amount reflects the real
+                  cash paid (~= dpp, not dpp+vat, since the 11% gross-up
+                  above was never a real separately-paid amount), so the
+                  naive subtraction alone would show a nonzero "remaining"
+                  on invoices that are actually fully paid. Confirmed with
+                  the user: force 0 in that case rather than show a
+                  misleading residual.
 
-        payment_status, by contrast, is NOT derived from the above — it
-        reuses the exact same AP_PAYMENT_SCHEDULES_ALL-sourced CASE logic as
-        get_ap_outstanding/get_ap_outstanding_with_payment (Oracle's real
-        payment-schedule remaining balance), because the reference file's
-        own Payment Status labels were found to be internally inconsistent
-        with its own Total/Payment/Remaining columns in several rows (e.g.
-        a row with Payment == Total and Remaining == 0 still labeled "Not
-        Paid") — not a formula worth replicating.
+        payment (and therefore payment_status/remaining_ap/payment_rate)
+        respects `payment_date_cutoff` (default: today) — a payment applied
+        AFTER the cutoff does not count. Requested by the user: "jika
+        tanggal parameter Jan 1 - Dec 31 2025 dan payment date diisi 31 Dec
+        2025, maka data yang diambil adalah yang pembayarannya maksimal 31
+        Dec 2025" — an invoice genuinely paid in, say, January 2026 must
+        still show as outstanding when the cutoff is Dec 31 2025, i.e. this
+        report can answer "what did AP look like as of a past payment
+        cutoff," not just "what does it look like today."
+
+        This is why payment_status here is NOT the same
+        AP_PAYMENT_SCHEDULES_ALL.amount_remaining-based CASE logic
+        get_ap_outstanding/get_ap_outstanding_with_payment use above —
+        amount_remaining is a live/current-only Oracle field with no
+        historical snapshot, so it can't answer "was this Paid as of a past
+        cutoff." Instead: payment_status = 'Paid' when the cutoff-filtered
+        payment sum >= the invoice's total scheduled amount
+        (AP_PAYMENT_SCHEDULES_ALL.gross_amount, summed per invoice — an
+        immutable figure set when the schedule is created, unlike
+        amount_remaining which mutates as payments post — so comparing
+        against it works for any cutoff date, not just "now"),
+        'Partially Paid' when partially covered, else 'Not Paid'. (Also
+        incidentally fixes the reference file's own internal
+        inconsistency noted in an earlier version of this docstring — a
+        row with Payment == Total and Remaining == 0 still labeled "Not
+        Paid" — since status is now derived from the same Payment figure
+        shown in the report, not a separate live Oracle flag.)
 
         payment_rate is AP_INVOICE_PAYMENTS_ALL.EXCHANGE_RATE from the most
-        recent payment applied (NULL/blank for unpaid invoices, or IDR
-        payments where Oracle doesn't populate it — confirmed live this is
-        sparse-but-real, ~23% of payments, exactly matching the reference
-        file's own blank-for-IDR pattern).
+        recent payment applied ON OR BEFORE the cutoff (NULL/blank for
+        invoices unpaid as of the cutoff, or IDR payments where Oracle
+        doesn't populate it — confirmed live this is sparse-but-real, ~23%
+        of payments, exactly matching the reference file's own
+        blank-for-IDR pattern).
 
-        Unlike the as_of_date-anchored AP Outstanding reports, this report
-        always evaluates payment_status as of today (TRUNC(SYSDATE)) —
-        gl_date_from/gl_date_to only scope WHICH invoices appear, not the
-        payment-status snapshot date.
+        gl_date_from/gl_date_to scope WHICH invoices appear (by GL Date);
+        payment_date_cutoff separately scopes which of THOSE invoices'
+        payments count — the two are independent, per the user's example
+        (a full-year GL Date range with a Dec 31 payment cutoff).
 
         Response carries `count` (rows actually in `data`, capped by
         `limit`) separately from `total_count` (the true unbounded row
@@ -732,14 +753,30 @@ class AccountingService:
         limit = min(max(limit, 1), 20000)
 
         params: dict = {}
-        params["legacy_paid_cutoff"] = self.LEGACY_PAID_CUTOFF
-        legacy_cond = "ai2.invoice_date <= TO_DATE(:legacy_paid_cutoff, 'YYYY-MM-DD')"
+        params["payment_date_cutoff"] = payment_date_cutoff or date.today().isoformat()
+        cutoff_expr = "TO_DATE(:payment_date_cutoff, 'YYYY-MM-DD')"
 
         coa_binds = {f"coa{i}": code for i, code in enumerate(self.AP_COA_WHITELIST)}
         params.update(coa_binds)
         coa_filter = "gcc.segment4 IN (" + ", ".join(f":{k}" for k in coa_binds) + ")"
 
         params["vat_input_coa"] = self.AP_VAT_INPUT_COA_SEGMENT4
+
+        # 'Paid'/'Partially Paid'/'Not Paid' derived from the SAME
+        # cutoff-filtered payment_summary.total_payment shown as the
+        # report's own Payment column, compared against
+        # sched_summary.total_gross (the invoice's immutable total
+        # scheduled amount) — NOT Oracle's live amount_remaining, which has
+        # no historical snapshot and can't answer "as of a past cutoff."
+        # See the docstring for the full reasoning.
+        payment_status_expr = """CASE
+                                      WHEN NVL(sched_summary.total_gross, 0) <> 0
+                                           AND NVL(payment_summary.total_payment, 0) >= sched_summary.total_gross
+                                           THEN 'Paid'
+                                      WHEN NVL(payment_summary.total_payment, 0) > 0
+                                           THEN 'Partially Paid'
+                                      ELSE 'Not Paid'
+                                  END"""
 
         # Two distinct real-tax signals, in priority order:
         #  1. Oracle-native REC_TAX/NONREC_TAX distribution present -> VAT
@@ -774,13 +811,7 @@ class AccountingService:
             extra_where += " AND ai.gl_date <= TO_DATE(:gl_date_to, 'YYYY-MM-DD')"
             params["gl_date_to"] = gl_date_to
         if payment_status and payment_status != "ALL":
-            extra_where += (
-                " AND CASE"
-                "   WHEN NVL(sched_summary.total_remaining, 0) = 0 THEN 'Paid'"
-                "   WHEN NVL(sched_summary.total_remaining, 0) < NVL(sched_summary.total_gross, 0) THEN 'Partially Paid'"
-                "   ELSE 'Not Paid'"
-                " END = :pay_status"
-            )
+            extra_where += f" AND {payment_status_expr} = :pay_status"
             params["pay_status"] = payment_status
 
         inner_sql = f"""
@@ -799,14 +830,7 @@ class AccountingService:
                     TO_CHAR(ai.invoice_date, 'YYYY-MM-DD')                         AS invoice_date,
                     TO_CHAR(ai.gl_date,      'YYYY-MM-DD')                         AS gl_date,
                     ai.invoice_currency_code                                       AS currency,
-                    CASE
-                        WHEN NVL(sched_summary.total_remaining, 0) = 0
-                             THEN 'Paid'
-                        WHEN NVL(sched_summary.total_remaining, 0) <
-                             NVL(sched_summary.total_gross, 0)
-                             THEN 'Partially Paid'
-                        ELSE 'Not Paid'
-                    END                                                            AS payment_status,
+                    {payment_status_expr}                                         AS payment_status,
                     CASE WHEN ai.invoice_currency_code <> 'IDR'
                          THEN ai.invoice_amount        END                         AS original_amount_orig,
                     NVL(ai.base_amount, ai.invoice_amount)                         AS dpp,
@@ -817,14 +841,14 @@ class AccountingService:
                         + NVL(wht_summary.wht_amount, 0)                          AS total_ap,
                     NVL(payment_summary.total_payment, 0)                         AS payment,
                     payment_summary.latest_rate                                   AS payment_rate,
-                    -- Forced to 0 when Oracle's real payment-schedule state
-                    -- says Paid, even though (total_ap - payment) alone
-                    -- would rarely land exactly on 0: the computed 11% VAT
-                    -- gross-up above is a reporting figure, not a real
-                    -- amount anyone actually paid separately, so the naive
-                    -- subtraction leaves a residual ~= vat on Paid invoices.
-                    -- Confirmed with the user before applying this guard.
-                    CASE WHEN NVL(sched_summary.total_remaining, 0) = 0 THEN 0
+                    -- Forced to 0 when payment_status_expr says Paid, even
+                    -- though (total_ap - payment) alone would rarely land
+                    -- exactly on 0: the computed 11% VAT gross-up above is
+                    -- a reporting figure, not a real amount anyone actually
+                    -- paid separately, so the naive subtraction leaves a
+                    -- residual ~= vat on fully-paid invoices. Confirmed
+                    -- with the user before applying this guard.
+                    CASE WHEN {payment_status_expr} = 'Paid' THEN 0
                          ELSE (NVL(ai.base_amount, ai.invoice_amount)
                                  + {vat_expr}
                                  + NVL(wht_summary.wht_amount, 0))
@@ -838,13 +862,7 @@ class AccountingService:
                    , apps.fnd_flex_value_sets          ffvs
                    , ( SELECT aps.invoice_id
                             , SUM(aps.gross_amount)                                AS total_gross
-                            , SUM(CASE WHEN {legacy_cond} THEN 0 ELSE aps.amount_remaining END)
-                                                                                   AS total_remaining
                          FROM apps.ap_payment_schedules_all aps
-                            , apps.ap_invoices_all          ai2
-                        WHERE aps.invoice_id            = ai2.invoice_id
-                          AND aps.payment_status_flag  IN ('N', 'P')
-                          AND ai2.gl_date              <= TRUNC(SYSDATE)
                         GROUP BY aps.invoice_id
                      ) sched_summary
                    , ( SELECT aid.invoice_id
@@ -872,6 +890,7 @@ class AccountingService:
                          FROM apps.ap_invoice_payments_all apn
                             , apps.ap_checks_all           cks
                         WHERE cks.check_id (+)            = apn.check_id
+                          AND NVL(apn.accounting_date, cks.check_date) <= {cutoff_expr}
                         GROUP BY apn.invoice_id
                      ) payment_summary
                 WHERE ai.invoice_id                       = sched_summary.invoice_id (+)
