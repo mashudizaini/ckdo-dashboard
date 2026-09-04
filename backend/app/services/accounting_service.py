@@ -659,17 +659,36 @@ class AccountingService:
         "FORMAT LIST AP 2025.xlsx" (see the AP List plan for the full
         verification trail behind each column below).
 
-        DPP/VAT/WHT/Total are a REPORT-LEVEL calculation, confirmed against
-        the reference file and the user — NOT Oracle's real tax posting:
-          dpp   = NVL(ai.base_amount, ai.invoice_amount)  — same expression
-                  get_ap_outstanding already uses for original_amount_idr
+        DPP/VAT/WHT/Total are a REPORT-LEVEL calculation, refined twice
+        against real live data (not Oracle's real tax posting for VAT
+        specifically, but real distribution-level amounts for DPP):
+          dpp   = SUM of the invoice's ITEM/ACCRUAL distributions,
+                  excluding any line coded to the VAT-INPUT COA (see
+                  dpp_expr in the code below) — falls back to
+                  NVL(ai.base_amount, ai.invoice_amount) only when an
+                  invoice has no distributions yet (not validated).
+                  Deliberately NOT the header ai.base_amount/invoice_amount
+                  as the primary source, even though that was this
+                  column's original definition — user-reported and
+                  verified live for VISION SCIENTIFIC (2025VS3486): the
+                  header invoice_amount (34,765,200) already IS base+tax
+                  (ACCRUAL 31,320,000 + REC_TAX 3,445,200), so treating the
+                  header as dpp and then adding another fresh 11% on top
+                  double-counted VAT. The same pattern was quietly present
+                  in the AGRU FARMA example originally used to confirm the
+                  header-based formula — that confirmation only checked
+                  against the reference file's own (also double-counted)
+                  numbers, not real Oracle math, so this correction
+                  supersedes it.
           vat   = one of three cases, in priority order (see vat_expr in
                   the code below):
                   1. Oracle-native REC_TAX/NONREC_TAX distribution present
-                     -> ROUND(dpp * 0.11, 2), computed fresh (NOT Oracle's
-                     exact REC_TAX/NONREC_TAX amount; verified live those
-                     two numbers differ, e.g. dpp 23,088,000 * 11% =
-                     2,539,680 matches the reference file exactly).
+                     -> ROUND(dpp * 0.11, 2), computed fresh against the
+                     distribution-level dpp above (in practice this now
+                     lands within rounding of Oracle's own REC_TAX amount,
+                     since REC_TAX is itself ~11% of ACCRUAL in this
+                     company's data — verified on both AGRU FARMA and
+                     VISION SCIENTIFIC).
                   2. No REC_TAX/NONREC_TAX, but a manual distribution line
                      was posted straight to the VAT-INPUT GL account
                      (AP_VAT_INPUT_COA_SEGMENT4) -> use that line's REAL
@@ -799,10 +818,33 @@ class AccountingService:
                                       ELSE 'Not Paid'
                                   END"""
 
+        # dpp = the invoice's true pre-tax base — SUM of its ITEM/ACCRUAL
+        # distributions (excluding any line coded to the VAT-INPUT COA,
+        # which IS the tax portion, not base), falling back to the header
+        # ai.base_amount/invoice_amount only when an invoice has no
+        # distributions to read yet (e.g. not validated in Oracle). NOT
+        # ai.base_amount/invoice_amount as the primary source — verified
+        # live for VISION SCIENTIFIC (2025VS3486): header invoice_amount is
+        # 34,765,200, but that already IS base+tax (ACCRUAL 31,320,000 +
+        # REC_TAX 3,445,200 — REC_TAX being exactly 11% of ACCRUAL). Taking
+        # the header as dpp and then adding another fresh 11% on top (the
+        # bug the user reported) double-counts VAT and inflates Total past
+        # what the invoice is actually worth. Same root cause was quietly
+        # present in the AGRU FARMA case used to confirm the original
+        # formula (4,042,250 ACCRUAL + 444,648 REC_TAX = 4,486,898 header,
+        # 444,648 also being ~11% of 4,042,250) — that earlier
+        # confirmation only compared against the reference file's own
+        # (also double-counted) numbers, not real Oracle math, so this fix
+        # supersedes it.
+        dpp_expr = "NVL(NULLIF(tax_summary.base_amount, 0), NVL(ai.base_amount, ai.invoice_amount))"
+
         # Two distinct real-tax signals, in priority order:
         #  1. Oracle-native REC_TAX/NONREC_TAX distribution present -> VAT
         #     is computed fresh as 11% of DPP (confirmed formula, see
-        #     docstring — Oracle's own REC_TAX amount is NOT used directly).
+        #     docstring — Oracle's own REC_TAX amount is NOT used directly,
+        #     though on the true distribution-level dpp above the two now
+        #     agree almost exactly since REC_TAX already IS ~11% of ACCRUAL
+        #     in practice).
         #  2. No REC_TAX/NONREC_TAX, but a manual line was posted straight
         #     to the VAT-INPUT GL account (confirmed live for Rentokil's
         #     EXPENSE REPORT invoices: line_type_lookup_code='ITEM',
@@ -813,9 +855,9 @@ class AccountingService:
         #     di hitung sebagai VAT."
         #  3. Neither -> VAT = 0 (e.g. Agus Suprianto/Jiangsu, no tax at
         #     all posted anywhere on the invoice).
-        vat_expr = """CASE
+        vat_expr = f"""CASE
                           WHEN NVL(tax_summary.rec_tax_amount, 0) <> 0
-                               THEN ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)
+                               THEN ROUND({dpp_expr} * 0.11, 2)
                           WHEN NVL(tax_summary.manual_vat_amount, 0) <> 0
                                THEN tax_summary.manual_vat_amount
                           ELSE 0
@@ -854,10 +896,10 @@ class AccountingService:
                     {payment_status_expr}                                         AS payment_status,
                     CASE WHEN ai.invoice_currency_code <> 'IDR'
                          THEN ai.invoice_amount        END                         AS original_amount_orig,
-                    NVL(ai.base_amount, ai.invoice_amount)                         AS dpp,
+                    {dpp_expr}                                                     AS dpp,
                     {vat_expr}                                                     AS vat,
                     NVL(wht_summary.wht_amount, 0)                                 AS wht,
-                    NVL(ai.base_amount, ai.invoice_amount)
+                    {dpp_expr}
                         + {vat_expr}
                         + NVL(wht_summary.wht_amount, 0)                          AS total_ap,
                     NVL(payment_summary.total_payment, 0)                         AS payment,
@@ -871,7 +913,7 @@ class AccountingService:
                     -- residual ~= vat on fully-paid invoices. Confirmed
                     -- with the user before applying this guard.
                     CASE WHEN {payment_status_expr} = 'Paid' THEN 0
-                         ELSE (NVL(ai.base_amount, ai.invoice_amount)
+                         ELSE ({dpp_expr}
                                  + {vat_expr}
                                  + NVL(wht_summary.wht_amount, 0))
                                - NVL(payment_summary.total_payment, 0)
@@ -899,6 +941,14 @@ class AccountingService:
                             , SUM(CASE WHEN aid.line_type_lookup_code NOT IN ('REC_TAX', 'NONREC_TAX')
                                             AND aid_gcc.segment4 = :vat_input_coa
                                        THEN aid.amount ELSE 0 END)                    AS manual_vat_amount
+                            -- True pre-tax base: ITEM/ACCRUAL lines only,
+                            -- excluding any line coded to the VAT-INPUT COA
+                            -- (that's the manual_vat_amount above, not base
+                            -- — a line can be line_type_lookup_code='ITEM'
+                            -- and still BE the VAT line, per Rentokil).
+                            , SUM(CASE WHEN aid.line_type_lookup_code IN ('ITEM', 'ACCRUAL')
+                                            AND NVL(aid_gcc.segment4, 'X') <> :vat_input_coa
+                                       THEN aid.amount ELSE 0 END)                    AS base_amount
                          FROM apps.ap_invoice_distributions_all aid
                             , apps.gl_code_combinations         aid_gcc
                         WHERE aid.dist_code_combination_id     = aid_gcc.code_combination_id (+)
