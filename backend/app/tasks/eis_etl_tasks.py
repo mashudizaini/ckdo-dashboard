@@ -2149,3 +2149,139 @@ def etl_inventory_txn(year: int = None, month: int = None, full_refresh: bool = 
         pg.close()
 
     return {"status": "success", "records": records}
+
+
+_BATCH_STATUS_NAMES = {-1: "Cancelled", 1: "Pending", 2: "WIP", 3: "Completed", 4: "Closed"}
+
+
+@celery_app.task(name="app.tasks.etl_tasks.etl_batches")
+def etl_batches(year: int = None, month: int = None, full_refresh: bool = False):
+    """Extract OPM batch production detail from Oracle
+    (gme_batch_header + its produced-item line from gme_material_details)
+    -> eis.fact_batch — foundation table for the Production dashboard
+    (Batch Status, Batch Yield, Schedule Adherence).
+
+    This company runs Oracle Process Manufacturing (OPM), not discrete
+    WIP — confirmed live: gme_batch_header has rows, wip_discrete_jobs
+    does not. gme_batch_steps' native yield columns (planned_step_yield/
+    actual_step_yield) were checked and found unpopulated (always 0) in
+    this instance, so yield is derived instead from
+    gme_material_details WHERE line_type = 1 (the produced/output line,
+    confirmed live against a real batch: plan_qty 1500, actual_qty 1070
+    matched exactly what this query extracts) vs line_type = -1
+    (consumed ingredients/components — not extracted here, out of scope
+    for these 3 batch-level modules).
+
+    Incremental filters on last_update_date (not plan_start_date) so a
+    batch that started weeks ago but only closes/changes status today
+    still gets re-synced. Incremental by default (30-day lookback); pass
+    year=<YYYY> (month optional) for a full backfill from that year
+    forward.
+    """
+    pg = _get_pg()
+    job_id = _log_start(pg, "etl_batches", year, month)
+    records = 0
+    try:
+        ora = get_oracle_connection()
+        cur_ora = ora.cursor()
+
+        from datetime import date as _date, timedelta as _timedelta
+        if full_refresh:
+            date_clause, date_params = "", {}
+        elif year:
+            d_from = _date(year, month or 1, 1)
+            date_clause = "AND gbh.last_update_date >= :d_from"
+            date_params = {"d_from": d_from}
+        else:
+            d_from = _date.today() - _timedelta(days=30)
+            date_clause = "AND gbh.last_update_date >= :d_from"
+            date_params = {"d_from": d_from}
+
+        cur_ora.execute(f"""
+            SELECT
+                gbh.batch_id                AS batch_id,
+                TO_CHAR(gbh.batch_no)       AS batch_no,
+                gbh.organization_id         AS organization_id,
+                hou.name                    AS organization_name,
+                gbh.batch_status            AS batch_status,
+                gbh.formula_id              AS formula_id,
+                gbh.plan_start_date         AS plan_start_date,
+                gbh.actual_start_date       AS actual_start_date,
+                gbh.due_date                AS due_date,
+                gbh.plan_cmplt_date         AS plan_cmplt_date,
+                gbh.actual_cmplt_date       AS actual_cmplt_date,
+                prod.item_code              AS item_code,
+                prod.item_description       AS item_description,
+                prod.uom                    AS uom,
+                prod.plan_qty               AS plan_qty,
+                prod.actual_qty             AS actual_qty
+            FROM gme_batch_header gbh
+            LEFT JOIN hr_all_organization_units hou ON hou.organization_id = gbh.organization_id
+            LEFT JOIN (
+                SELECT gmd.batch_id,
+                       MIN(msi.segment1) KEEP (DENSE_RANK FIRST ORDER BY gmd.line_no)    AS item_code,
+                       MIN(msi.description) KEEP (DENSE_RANK FIRST ORDER BY gmd.line_no) AS item_description,
+                       MIN(gmd.item_um) KEEP (DENSE_RANK FIRST ORDER BY gmd.line_no)     AS uom,
+                       SUM(gmd.plan_qty)   AS plan_qty,
+                       SUM(gmd.actual_qty) AS actual_qty
+                FROM gme_material_details gmd
+                LEFT JOIN mtl_system_items_b msi ON msi.inventory_item_id = gmd.inventory_item_id
+                                                 AND msi.organization_id   = gmd.organization_id
+                WHERE gmd.line_type = 1
+                GROUP BY gmd.batch_id
+            ) prod ON prod.batch_id = gbh.batch_id
+            WHERE gbh.delete_mark = 0
+              {date_clause}
+        """, date_params)
+
+        rows = cur_ora.fetchall()
+        records = len(rows)
+        logger.info(f"[etl_batches] Extracted {records} batch rows from Oracle OPM")
+        ora.close()
+
+        cur_pg = pg.cursor()
+        loaded = 0
+        for (batch_id, batch_no, organization_id, organization_name, batch_status, formula_id,
+             plan_start_date, actual_start_date, due_date, plan_cmplt_date, actual_cmplt_date,
+             item_code, item_description, uom, plan_qty, actual_qty) in rows:
+            batch_status_name = _BATCH_STATUS_NAMES.get(int(batch_status) if batch_status is not None else None, "Unknown")
+            cur_pg.execute(
+                """INSERT INTO eis.fact_batch
+                       (batch_id, batch_no, organization_id, organization_name, batch_status,
+                        batch_status_name, formula_id, product_item_code, product_item_description,
+                        product_uom, product_plan_qty, product_actual_qty, plan_start_date,
+                        actual_start_date, due_date, plan_cmplt_date, actual_cmplt_date)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (batch_id) DO UPDATE SET
+                       batch_no = EXCLUDED.batch_no, organization_id = EXCLUDED.organization_id,
+                       organization_name = EXCLUDED.organization_name, batch_status = EXCLUDED.batch_status,
+                       batch_status_name = EXCLUDED.batch_status_name, formula_id = EXCLUDED.formula_id,
+                       product_item_code = EXCLUDED.product_item_code,
+                       product_item_description = EXCLUDED.product_item_description,
+                       product_uom = EXCLUDED.product_uom, product_plan_qty = EXCLUDED.product_plan_qty,
+                       product_actual_qty = EXCLUDED.product_actual_qty, plan_start_date = EXCLUDED.plan_start_date,
+                       actual_start_date = EXCLUDED.actual_start_date, due_date = EXCLUDED.due_date,
+                       plan_cmplt_date = EXCLUDED.plan_cmplt_date, actual_cmplt_date = EXCLUDED.actual_cmplt_date,
+                       updated_at = now()""",
+                (float(batch_id), batch_no, float(organization_id) if organization_id is not None else None,
+                 organization_name, float(batch_status) if batch_status is not None else None, batch_status_name,
+                 float(formula_id) if formula_id is not None else None, item_code, item_description, uom,
+                 float(plan_qty) if plan_qty is not None else None, float(actual_qty) if actual_qty is not None else None,
+                 plan_start_date, actual_start_date, due_date, plan_cmplt_date, actual_cmplt_date),
+            )
+            loaded += 1
+
+        pg.commit()
+        logger.info(f"[etl_batches] Loaded {loaded} rows into fact_batch")
+
+        _log_end(pg, job_id, "success", records)
+
+    except Exception as e:
+        logger.error(f"[etl_batches] Failed: {e}")
+        pg.rollback()
+        _log_end(pg, job_id, "failed", records, str(e))
+        raise
+    finally:
+        pg.close()
+
+    return {"status": "success", "records": records}

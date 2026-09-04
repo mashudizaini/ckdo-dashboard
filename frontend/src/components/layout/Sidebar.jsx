@@ -5,7 +5,7 @@ import { useThemeStore } from "@/store/themeStore";
 import {
   Monitor, Users, Factory, Calculator,
   ShoppingCart, FileText, LogOut, LayoutGrid, TrendingUp,
-  ChevronDown, ChevronRight, Settings, BarChart3, Warehouse,
+  ChevronDown, ChevronRight, Settings, BarChart3, Warehouse, FlaskConical,
 } from "lucide-react";
 import RobotIcon from "@/components/icons/RobotIcon";
 import logo from "@/assets/LOGO-ONLY.png";
@@ -67,6 +67,14 @@ const NAV_ITEMS = [
     { label: "Inventory In", path: "/dashboard/ppwh/inbound" },
     { label: "Inventory Out", path: "/dashboard/ppwh/outbound" },
     { label: "Kartu Stok", path: "/dashboard/ppwh/stock-card" },
+  ] },
+  // No dedicated role yet, same as PPWH/Sales & Marketing above — OPM
+  // batch production tracking from gme_batch_header (this company runs
+  // Process Manufacturing, not discrete WIP jobs).
+  { label: "Production", path: "/dashboard/production", icon: FlaskConical, roles: [], children: [
+    { label: "Batch Status", path: "/dashboard/production/status" },
+    { label: "Batch Yield", path: "/dashboard/production/yield" },
+    { label: "Schedule Adherence", path: "/dashboard/production/schedule" },
   ] },
   // No roles — reachable by any authenticated user (matches AI_ITEMS'
   // convention below). Sub-modules apply their own access control instead

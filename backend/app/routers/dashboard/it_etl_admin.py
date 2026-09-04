@@ -56,7 +56,7 @@ async def trigger_etl(job_name: str, params: TriggerParams):
     valid_jobs = [
         "etl_sales", "etl_cogs", "etl_production", "etl_financial",
         "etl_employee", "etl_inventory", "etl_ar_ap", "etl_budget", "etl_po",
-        "etl_po_lines", "etl_open_pr", "etl_sales_orders", "etl_inventory_txn",
+        "etl_po_lines", "etl_open_pr", "etl_sales_orders", "etl_inventory_txn", "etl_batches",
     ]
     if job_name not in valid_jobs:
         raise HTTPException(status_code=400, detail=f"Unknown job. Valid: {valid_jobs}")
@@ -266,6 +266,16 @@ async def get_job_data(
             ORDER BY transaction_date DESC
             LIMIT 100
         """,
+        "etl_batches": f"""
+            SELECT batch_id, batch_no, organization_name, batch_status_name,
+                   product_item_code, product_plan_qty, product_actual_qty,
+                   plan_start_date, actual_cmplt_date
+            FROM eis.fact_batch
+            WHERE EXTRACT(YEAR FROM plan_start_date) = :year
+              {"AND EXTRACT(MONTH FROM plan_start_date) = :month" if month else ""}
+            ORDER BY plan_start_date DESC
+            LIMIT 100
+        """,
     }
 
     sql = queries.get(job_name)
@@ -340,6 +350,10 @@ _JOB_META = {
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["mtl_material_transactions", "mtl_transaction_types", "mtl_system_items_b"],
                         "destination_table": "eis.fact_inventory_txn"},
+    "etl_batches": {"frequency": "Daily", "schedule": "06:00 AM WIB", "source": "Oracle OPM (Process Batch)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["gme_batch_header", "gme_material_details", "mtl_system_items_b"],
+                        "destination_table": "eis.fact_batch"},
 }
 
 

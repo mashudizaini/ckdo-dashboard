@@ -14,6 +14,7 @@ import AccountingDashboard from "@/pages/dashboard/Accounting";
 import PurchasingDashboard from "@/pages/dashboard/Purchasing";
 import SalesMarketingDashboard from "@/pages/dashboard/SalesMarketing";
 import PPWHDashboard from "@/pages/dashboard/PPWH";
+import ProductionDashboard from "@/pages/dashboard/Production";
 import GeneralDashboard from "@/pages/dashboard/General";
 import EISDashboard from "@/pages/dashboard/EIS";
 
@@ -139,6 +140,15 @@ export default function App() {
             // No dedicated role yet — see Sidebar.jsx's NAV_ITEMS comment.
             <ProtectedRoute>
               <PPWHDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="production/*"
+          element={
+            // No dedicated role yet — see Sidebar.jsx's NAV_ITEMS comment.
+            <ProtectedRoute>
+              <ProductionDashboard />
             </ProtectedRoute>
           }
         />

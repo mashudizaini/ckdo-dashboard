@@ -356,3 +356,47 @@ async def ensure_inventory_txn_table():
             "CREATE INDEX IF NOT EXISTS idx_fact_inventory_txn_direction "
             "ON eis.fact_inventory_txn (direction)"
         ))
+
+
+async def ensure_batch_table():
+    """Create eis.fact_batch if missing — foundation table for the
+    Production dashboard (Batch Status, Batch Yield, Schedule Adherence).
+    Populated by app.tasks.eis_etl_tasks.etl_batches. Keys on Oracle's
+    own batch_id — no composite-key grain risk."""
+    from sqlalchemy import text
+    async with eis_async_engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eis.fact_batch (
+                id                         SERIAL PRIMARY KEY,
+                batch_id                   NUMERIC NOT NULL UNIQUE,
+                batch_no                   VARCHAR(50),
+                organization_id            NUMERIC,
+                organization_name          VARCHAR(200),
+                batch_status               NUMERIC,
+                batch_status_name          VARCHAR(30),
+                formula_id                 NUMERIC,
+                product_item_code          VARCHAR(60),
+                product_item_description   VARCHAR(500),
+                product_uom                VARCHAR(20),
+                product_plan_qty           NUMERIC(18,4),
+                product_actual_qty         NUMERIC(18,4),
+                plan_start_date            TIMESTAMP,
+                actual_start_date          TIMESTAMP,
+                due_date                   TIMESTAMP,
+                plan_cmplt_date            TIMESTAMP,
+                actual_cmplt_date          TIMESTAMP,
+                updated_at                 TIMESTAMPTZ DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_batch_plan_start "
+            "ON eis.fact_batch (plan_start_date)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_batch_status "
+            "ON eis.fact_batch (batch_status)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_batch_product "
+            "ON eis.fact_batch (product_item_code)"
+        ))
