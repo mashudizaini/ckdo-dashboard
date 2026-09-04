@@ -661,7 +661,15 @@ class AccountingService:
                   line_type_lookup_code = 'AWT') — this one IS real Oracle
                   data, already negative in Oracle so no sign-flip needed
           total = dpp + vat + NVL(wht, 0)
-          remaining_ap = total - NVL(payment, 0)
+          remaining_ap = 0 when Oracle's real payment-schedule state says
+                  Paid, else (total - NVL(payment, 0)) — verified live that
+                  Oracle's actual AP_INVOICE_PAYMENTS_ALL.amount reflects
+                  the real cash paid (~= dpp, not dpp+vat, since the 11%
+                  gross-up above was never a real separately-paid amount),
+                  so the naive subtraction alone would show a nonzero
+                  "remaining" on invoices Oracle considers fully Paid.
+                  Confirmed with the user: force 0 in that case rather than
+                  show a misleading residual.
 
         payment_status, by contrast, is NOT derived from the above — it
         reuses the exact same AP_PAYMENT_SCHEDULES_ALL-sourced CASE logic as
@@ -749,10 +757,19 @@ class AccountingService:
                         + NVL(wht_summary.wht_amount, 0)                          AS total_ap,
                     NVL(payment_summary.total_payment, 0)                         AS payment,
                     payment_summary.latest_rate                                   AS payment_rate,
-                    (NVL(ai.base_amount, ai.invoice_amount)
-                        + ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)
-                        + NVL(wht_summary.wht_amount, 0))
-                        - NVL(payment_summary.total_payment, 0)                   AS remaining_ap
+                    -- Forced to 0 when Oracle's real payment-schedule state
+                    -- says Paid, even though (total_ap - payment) alone
+                    -- would rarely land exactly on 0: the computed 11% VAT
+                    -- gross-up above is a reporting figure, not a real
+                    -- amount anyone actually paid separately, so the naive
+                    -- subtraction leaves a residual ~= vat on Paid invoices.
+                    -- Confirmed with the user before applying this guard.
+                    CASE WHEN NVL(sched_summary.total_remaining, 0) = 0 THEN 0
+                         ELSE (NVL(ai.base_amount, ai.invoice_amount)
+                                 + ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)
+                                 + NVL(wht_summary.wht_amount, 0))
+                               - NVL(payment_summary.total_payment, 0)
+                    END                                                          AS remaining_ap
                 FROM apps.ap_invoices_all              ai
                    , apps.ap_suppliers                 pv
                    , apps.hz_parties                   hp
