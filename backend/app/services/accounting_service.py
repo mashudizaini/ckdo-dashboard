@@ -717,17 +717,24 @@ class AccountingService:
         amount_remaining is a live/current-only Oracle field with no
         historical snapshot, so it can't answer "was this Paid as of a past
         cutoff." Instead: payment_status = 'Paid' when the cutoff-filtered
-        payment sum >= the invoice's total scheduled amount
-        (AP_PAYMENT_SCHEDULES_ALL.gross_amount, summed per invoice — an
+        payment sum >= (the invoice's total scheduled amount,
+        AP_PAYMENT_SCHEDULES_ALL.gross_amount summed per invoice — an
         immutable figure set when the schedule is created, unlike
-        amount_remaining which mutates as payments post — so comparing
-        against it works for any cutoff date, not just "now"),
-        'Partially Paid' when partially covered, else 'Not Paid'. (Also
-        incidentally fixes the reference file's own internal
-        inconsistency noted in an earlier version of this docstring — a
-        row with Payment == Total and Remaining == 0 still labeled "Not
-        Paid" — since status is now derived from the same Payment figure
-        shown in the report, not a separate live Oracle flag.)
+        amount_remaining which mutates as payments post, so comparing
+        against it works for any cutoff date, not just "now" — PLUS wht,
+        which is negative: gross_amount is the invoice's full face amount
+        and does NOT itself reflect that WHT is remitted to the tax office
+        rather than paid to the vendor, so without netting it out here an
+        invoice with real withholding would never reach 'Paid' even once
+        genuinely fully settled — verified live: MCD/INV-08/2020.II has
+        gross_amount 800,000 but only 780,000 was ever paid to the vendor,
+        the other 20,000 being AWT), 'Partially Paid' when partially
+        covered, else 'Not Paid'. (Also incidentally fixes the reference
+        file's own internal inconsistency noted in an earlier version of
+        this docstring — a row with Payment == Total and Remaining == 0
+        still labeled "Not Paid" — since status is now derived from the
+        same Payment figure shown in the report, not a separate live
+        Oracle flag.)
 
         payment_rate is AP_INVOICE_PAYMENTS_ALL.EXCHANGE_RATE from the most
         recent payment applied ON OR BEFORE the cutoff (NULL/blank for
@@ -769,9 +776,21 @@ class AccountingService:
         # scheduled amount) — NOT Oracle's live amount_remaining, which has
         # no historical snapshot and can't answer "as of a past cutoff."
         # See the docstring for the full reasoning.
+        #
+        # net_payable = total_gross + wht (wht already negative in Oracle):
+        # total_gross is the invoice's FULL face amount before withholding
+        # — it does NOT reflect that WHT is remitted to the tax office, not
+        # paid to the vendor. Verified live: MCD/INV-08/2020.II has
+        # total_gross=800,000 but only 780,000 was ever actually paid to
+        # the vendor (the other 20,000 is the AWT withholding) — comparing
+        # against total_gross alone wrongly showed "Partially Paid" for an
+        # invoice that is, in Oracle's real accounting sense, fully
+        # cleared. Same for Rentokil's 26.89764939 (4,895,100 gross vs.
+        # 4,806,900 real payment, exactly netting its 88,200 AWT).
         payment_status_expr = """CASE
-                                      WHEN NVL(sched_summary.total_gross, 0) <> 0
-                                           AND NVL(payment_summary.total_payment, 0) >= sched_summary.total_gross
+                                      WHEN NVL(sched_summary.total_gross, 0) + NVL(wht_summary.wht_amount, 0) <> 0
+                                           AND NVL(payment_summary.total_payment, 0) >=
+                                               (NVL(sched_summary.total_gross, 0) + NVL(wht_summary.wht_amount, 0))
                                            THEN 'Paid'
                                       WHEN NVL(payment_summary.total_payment, 0) > 0
                                            THEN 'Partially Paid'
