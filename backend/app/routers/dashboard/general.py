@@ -10,7 +10,7 @@ caller's own team (see general_budget.py / budget_access_service.py)
 rather than by role.
 """
 from fastapi import APIRouter
-from app.routers.dashboard import general_budget, general_ap_payment, general_access_control
+from app.routers.dashboard import general_budget, general_ap_payment, general_ap_list, general_access_control
 
 router = APIRouter()
 
@@ -21,6 +21,12 @@ router.include_router(general_budget.router, prefix="/budget", tags=["Dashboard 
 # same Oracle data as Accounting & Tax > AP Outstanding, deliberately placed
 # here instead so it's visible company-wide, not gated to accounting_staff.
 router.include_router(general_ap_payment.router, prefix="/ap-payment", tags=["Dashboard - General AP Outstanding with Payment"])
+
+# Sub-router: AP List (see general_ap_list.py) — every AP transaction by GL
+# Date, Paid and unpaid alike, with DPP/VAT/WHT breakdown and NPWP, format
+# matching sumber/FORMAT LIST AP 2025.xlsx. Placed here for the same
+# company-wide-visibility reason as ap-payment above.
+router.include_router(general_ap_list.router, prefix="/ap-list", tags=["Dashboard - General AP List"])
 
 # Sub-router: per-user menu access control (see general_access_control.py /
 # menu_access_service.py) — gated per-endpoint inside that router, not here,

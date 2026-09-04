@@ -963,9 +963,239 @@ function APOutstandingWithPaymentSection() {
   );
 }
 
+/* ── AP List ──────────────────────────────────────────────────────────────
+   Every AP transaction by GL Date, Paid and unpaid alike (unlike AP
+   Outstanding with Payment above, which excludes Paid) — one row per
+   invoice, format matching sumber/FORMAT LIST AP 2025.xlsx. DPP/VAT/WHT are
+   a report-level calculation (DPP = invoice base, VAT = 11% of DPP computed
+   fresh, WHT = real Oracle AWT distribution) confirmed against the
+   reference file during planning — see AccountingService.get_ap_list's
+   docstring for the full verification trail. Payment Status, by contrast,
+   still comes from Oracle's real AP_PAYMENT_SCHEDULES_ALL state, same CASE
+   logic as AP Outstanding with Payment, not derived from this report's own
+   Total/Payment columns (the reference file's own status labels were found
+   inconsistent with those). */
+
+const AP_LIST_API = "/api/v1/dashboard/general/ap-list";
+
+const AP_LIST_HEADERS = [
+  { key: "row_no",            label: "No" },
+  { key: "supplier_name",     label: "Supplier" },
+  { key: "npwp",              label: "NPWP" },
+  { key: "description",       label: "Description" },
+  { key: "coa_number",        label: "COA" },
+  { key: "coa_descpt",        label: "COA Desc" },
+  { key: "transaction_type",  label: "Type" },
+  { key: "transaction_number",label: "Transaction No" },
+  { key: "invoice_date",      label: "Invoice Date" },
+  { key: "gl_date",           label: "GL Date" },
+  { key: "currency",          label: "Cur" },
+  { key: "original_amount_orig", label: "Original Amount",  num: true },
+  { key: "dpp",                label: "DPP",                num: true },
+  { key: "vat",                label: "VAT",                num: true },
+  { key: "wht",                label: "WHT",                num: true },
+  { key: "total_ap",           label: "Total",              num: true },
+  { key: "payment",            label: "Payment",            num: true },
+  { key: "payment_rate",       label: "Payment Rate",       num: true },
+  { key: "remaining_ap",       label: "Remaining AP",       num: true },
+  { key: "payment_status",     label: "Status" },
+];
+
+function exportApListCSV(rows) {
+  if (!rows?.length) return;
+  const lines = [
+    "﻿" + AP_LIST_HEADERS.map(h => h.label).join(","),
+    ...rows.map(r => AP_LIST_HEADERS.map(h => `"${String(r[h.key] ?? "").replace(/"/g, '""')}"`).join(",")),
+  ];
+  const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "ap_list.csv"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function APListSection() {
+  const { token } = useAuthStore();
+  const hdrs = { Authorization: `Bearer ${token}` };
+  const today = new Date();
+  const yearStart = `${today.getFullYear()}-01-01`;
+  const todayStr = today.toISOString().slice(0, 10);
+
+  const [glDateFrom,      setGlDateFrom]      = useState(yearStart);
+  const [glDateTo,        setGlDateTo]        = useState(todayStr);
+  const [supplierName,    setSupplierName]    = useState("");
+  const [payStatusFilter, setPayStatusFilter] = useState("ALL");
+  const [limit,           setLimit]           = useState(500);
+  const [data,            setData]            = useState(null);
+  const [loading,         setLoading]         = useState(false);
+  const [error,           setError]           = useState(null);
+  const [search,          setSearch]          = useState("");
+  const [sortBy,          setSortBy]          = useState(null);
+  const [sortDir,         setSortDir]         = useState("asc");
+
+  const NUMERIC_KEYS = ["original_amount_orig", "dpp", "vat", "wht", "total_ap", "payment", "payment_rate", "remaining_ap"];
+
+  const loadData = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const params = new URLSearchParams({ limit });
+      if (glDateFrom) params.set("gl_date_from", glDateFrom);
+      if (glDateTo) params.set("gl_date_to", glDateTo);
+      if (supplierName) params.set("supplier_name", supplierName);
+      if (payStatusFilter && payStatusFilter !== "ALL") params.set("payment_status", payStatusFilter);
+      const res = await fetch(`${AP_LIST_API}?${params}`, { headers: hdrs });
+      const j = await res.json();
+      if (res.ok && j.success) setData(j);
+      else { setError(j.error || j.detail || "Failed to load"); setData(null); }
+    } catch (e) {
+      setError(e?.message || String(e)); setData(null);
+    } finally { setLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [glDateFrom, glDateTo, supplierName, payStatusFilter, limit]);
+
+  useEffect(() => { loadData(); }, []); // eslint-disable-line
+
+  const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
+
+  const filteredRows = (data?.data || []).filter(r => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (r.supplier_name       || "").toLowerCase().includes(q)
+        || (r.transaction_number  || "").toLowerCase().includes(q)
+        || (r.npwp                || "").toLowerCase().includes(q)
+        || (r.coa_descpt          || "").toLowerCase().includes(q);
+  });
+  const rows = useMemo(() => sortRows(filteredRows, sortBy, sortDir, NUMERIC_KEYS),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data, search, sortBy, sortDir]);
+
+  const fmtNum = (v) => v == null ? "" : Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const payBadge = (s) => {
+    const cfg = {
+      "Not Paid":       "bg-red-500/10 text-red-400",
+      "Partially Paid": "bg-amber-500/10 text-amber-400",
+      "Paid":           "bg-green-500/10 text-green-400",
+    }[s] || "bg-gray-500/10 text-gray-400";
+    return <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap ${cfg}`}>{s}</span>;
+  };
+
+  const sm = data?.summary;
+  const INPUT = "rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500";
+  const LBL = "block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className={LBL}>GL Date From</label>
+          <input type="date" value={glDateFrom} onChange={e => setGlDateFrom(e.target.value)} className={INPUT} />
+        </div>
+        <div>
+          <label className={LBL}>GL Date To</label>
+          <input type="date" value={glDateTo} onChange={e => setGlDateTo(e.target.value)} className={INPUT} />
+        </div>
+        <div>
+          <label className={LBL}>Supplier</label>
+          <input value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder="Search supplier…"
+            onKeyDown={e => e.key === "Enter" && loadData()} className={`${INPUT} w-48`} />
+        </div>
+        <div>
+          <label className={LBL}>Pay Status</label>
+          <select value={payStatusFilter} onChange={e => setPayStatusFilter(e.target.value)} className={`${INPUT} cursor-pointer`}>
+            <option value="ALL">All</option>
+            <option value="Not Paid">Not Paid</option>
+            <option value="Partially Paid">Partially Paid</option>
+            <option value="Paid">Paid</option>
+          </select>
+        </div>
+        <div>
+          <label className={LBL}>Limit</label>
+          <select value={limit} onChange={e => setLimit(Number(e.target.value))} className={`${INPUT} cursor-pointer`}>
+            {[200, 500, 1000, 2000].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+        <button onClick={loadData} disabled={loading}
+          className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 hover:border-gray-600 disabled:opacity-40 transition-colors">
+          <RefreshCw size={12} className={loading ? "animate-spin" : ""} /> Load
+        </button>
+        <div className="flex-1" />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Filter loaded rows…" className={`${INPUT} w-56`} />
+        <button onClick={() => exportApListCSV(rows)} disabled={!rows.length}
+          className="flex items-center gap-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 px-3 py-1.5 text-xs text-white disabled:opacity-40 transition-colors">
+          <Download size={12} /> Export CSV
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-lg px-4 py-2.5 text-xs flex items-center gap-2 bg-red-500/10 text-red-400 border border-red-500/20">
+          <AlertTriangle size={13} /> {error}
+        </div>
+      )}
+
+      {sm && (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <BudgetSummaryCard label="Total DPP (IDR)"       value={`Rp ${fmtNum(sm.total_dpp)}`}       color="text-blue-400"   bg="bg-blue-500/10 border-blue-500/20" />
+          <BudgetSummaryCard label="Total VAT (IDR)"       value={`Rp ${fmtNum(sm.total_vat)}`}       color="text-violet-400" bg="bg-violet-500/10 border-violet-500/20" />
+          <BudgetSummaryCard label="Total WHT (IDR)"       value={`Rp ${fmtNum(sm.total_wht)}`}       color="text-amber-400"  bg="bg-amber-500/10 border-amber-500/20" />
+          <BudgetSummaryCard label="Total AP (IDR)"        value={`Rp ${fmtNum(sm.total_ap)}`}        color="text-gray-200"   bg="bg-gray-800/40 border-gray-700" />
+          <BudgetSummaryCard label="Total Payment (IDR)"   value={`Rp ${fmtNum(sm.total_payment)}`}   color="text-green-400"  bg="bg-green-500/10 border-green-500/20" />
+          <BudgetSummaryCard label="Remaining AP (IDR)"    value={`Rp ${fmtNum(sm.total_remaining_ap)}`} color="text-red-400" bg="bg-red-500/10 border-red-500/20" />
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex justify-center py-16"><Loader2 size={22} className="animate-spin text-gray-600" /></div>
+      ) : !data ? (
+        <div className="py-16 text-center text-xs text-gray-600">Click Load to fetch data.</div>
+      ) : rows.length === 0 ? (
+        <div className="py-16 text-center text-xs text-gray-600">No rows match the current filters.</div>
+      ) : (
+        <div className="rounded-lg border border-gray-800 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-gray-800/60">
+                {AP_LIST_HEADERS.map(h => (
+                  <SortableTH key={h.key} label={h.label} field={h.key} sortBy={sortBy} sortDir={sortDir} onSort={handleSort} align={h.num ? "right" : "left"} />
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800/60">
+              {rows.map((r, i) => (
+                <tr key={`${r.invoice_id}-${i}`} className="hover:bg-gray-800/30">
+                  <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{r.row_no}</td>
+                  <td className="px-3 py-2 text-gray-300 whitespace-nowrap">{r.supplier_name}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.npwp || "—"}</td>
+                  <td className="px-3 py-2 text-gray-500">{r.description}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.coa_number}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.coa_descpt}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.transaction_type}</td>
+                  <td className="px-3 py-2 text-gray-300 whitespace-nowrap">{r.transaction_number}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.invoice_date}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.gl_date}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.currency}</td>
+                  <td className="px-3 py-2 text-right text-gray-400 tabular-nums whitespace-nowrap">{r.original_amount_orig != null ? fmtNum(r.original_amount_orig) : "—"}</td>
+                  <td className="px-3 py-2 text-right text-gray-300 tabular-nums whitespace-nowrap">{fmtNum(r.dpp)}</td>
+                  <td className="px-3 py-2 text-right text-gray-300 tabular-nums whitespace-nowrap">{fmtNum(r.vat)}</td>
+                  <td className="px-3 py-2 text-right text-gray-300 tabular-nums whitespace-nowrap">{fmtNum(r.wht)}</td>
+                  <td className="px-3 py-2 text-right text-gray-200 tabular-nums font-semibold whitespace-nowrap">{fmtNum(r.total_ap)}</td>
+                  <td className="px-3 py-2 text-right text-green-400 tabular-nums whitespace-nowrap">{fmtNum(r.payment)}</td>
+                  <td className="px-3 py-2 text-right text-gray-400 tabular-nums whitespace-nowrap">{r.payment_rate != null ? fmtNum(r.payment_rate) : "—"}</td>
+                  <td className="px-3 py-2 text-right text-red-400 tabular-nums whitespace-nowrap">{fmtNum(r.remaining_ap)}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{payBadge(r.payment_status)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Root ─────────────────────────────────────────────────────────────── */
 
-const GENERAL_TABS = ["budget", "ap-payment"];
+const GENERAL_TABS = ["budget", "ap-payment", "ap-list"];
 
 export default function General() {
   const navigate = useNavigate();
@@ -989,6 +1219,11 @@ export default function General() {
       {activeSection === "ap-payment" && (
         <SectionCard title="AP Outstanding with Payment">
           <APOutstandingWithPaymentSection />
+        </SectionCard>
+      )}
+      {activeSection === "ap-list" && (
+        <SectionCard title="AP List">
+          <APListSection />
         </SectionCard>
       )}
     </div>

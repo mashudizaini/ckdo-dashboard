@@ -630,6 +630,214 @@ class AccountingService:
             logger.error("ap_outstanding_with_payment_error", error=str(e))
             return {"success": False, "error": str(e), "data": []}
 
+    async def get_ap_list(
+        self,
+        gl_date_from: str = None,
+        gl_date_to: str = None,
+        supplier_name: str = None,
+        payment_status: str = None,
+        limit: int = 500,
+    ) -> dict:
+        """
+        AP List — every AP transaction by GL Date, Paid and unpaid alike
+        (deliberately NOT excluding Paid, unlike get_ap_outstanding/
+        get_ap_outstanding_with_payment above — this report's whole point).
+        One row per invoice (payments aggregated into a single Payment
+        total), not one row per payment application. Format follows
+        "FORMAT LIST AP 2025.xlsx" (see the AP List plan for the full
+        verification trail behind each column below).
+
+        DPP/VAT/WHT/Total are a REPORT-LEVEL calculation, confirmed against
+        the reference file and the user — NOT Oracle's real tax posting:
+          dpp   = NVL(ai.base_amount, ai.invoice_amount)  — same expression
+                  get_ap_outstanding already uses for original_amount_idr
+          vat   = ROUND(dpp * 0.11, 2)                    — computed fresh,
+                  standard Indonesian PPN rate, NOT Oracle's actual
+                  REC_TAX/NONREC_TAX distribution (verified live: those two
+                  numbers differ — the reference file uses the computed
+                  11%-of-dpp figure, confirmed exactly across every sample
+                  row, e.g. dpp 23,088,000 * 11% = vat 2,539,680)
+          wht   = SUM(AP_INVOICE_DISTRIBUTIONS_ALL.amount WHERE
+                  line_type_lookup_code = 'AWT') — this one IS real Oracle
+                  data, already negative in Oracle so no sign-flip needed
+          total = dpp + vat + NVL(wht, 0)
+          remaining_ap = total - NVL(payment, 0)
+
+        payment_status, by contrast, is NOT derived from the above — it
+        reuses the exact same AP_PAYMENT_SCHEDULES_ALL-sourced CASE logic as
+        get_ap_outstanding/get_ap_outstanding_with_payment (Oracle's real
+        payment-schedule remaining balance), because the reference file's
+        own Payment Status labels were found to be internally inconsistent
+        with its own Total/Payment/Remaining columns in several rows (e.g.
+        a row with Payment == Total and Remaining == 0 still labeled "Not
+        Paid") — not a formula worth replicating.
+
+        payment_rate is AP_INVOICE_PAYMENTS_ALL.EXCHANGE_RATE from the most
+        recent payment applied (NULL/blank for unpaid invoices, or IDR
+        payments where Oracle doesn't populate it — confirmed live this is
+        sparse-but-real, ~23% of payments, exactly matching the reference
+        file's own blank-for-IDR pattern).
+
+        Unlike the as_of_date-anchored AP Outstanding reports, this report
+        always evaluates payment_status as of today (TRUNC(SYSDATE)) —
+        gl_date_from/gl_date_to only scope WHICH invoices appear, not the
+        payment-status snapshot date.
+        """
+        limit = min(max(limit, 1), 2000)
+
+        params: dict = {}
+        params["legacy_paid_cutoff"] = self.LEGACY_PAID_CUTOFF
+        legacy_cond = "ai2.invoice_date <= TO_DATE(:legacy_paid_cutoff, 'YYYY-MM-DD')"
+
+        coa_binds = {f"coa{i}": code for i, code in enumerate(self.AP_COA_WHITELIST)}
+        params.update(coa_binds)
+        coa_filter = "gcc.segment4 IN (" + ", ".join(f":{k}" for k in coa_binds) + ")"
+
+        extra_where = ""
+        if supplier_name:
+            extra_where += " AND UPPER(pv.vendor_name) LIKE UPPER(:supplier_name)"
+            params["supplier_name"] = f"%{supplier_name}%"
+        if gl_date_from:
+            extra_where += " AND ai.gl_date >= TO_DATE(:gl_date_from, 'YYYY-MM-DD')"
+            params["gl_date_from"] = gl_date_from
+        if gl_date_to:
+            extra_where += " AND ai.gl_date <= TO_DATE(:gl_date_to, 'YYYY-MM-DD')"
+            params["gl_date_to"] = gl_date_to
+        if payment_status and payment_status != "ALL":
+            extra_where += (
+                " AND CASE"
+                "   WHEN NVL(sched_summary.total_remaining, 0) = 0 THEN 'Paid'"
+                "   WHEN NVL(sched_summary.total_remaining, 0) < NVL(sched_summary.total_gross, 0) THEN 'Partially Paid'"
+                "   ELSE 'Not Paid'"
+                " END = :pay_status"
+            )
+            params["pay_status"] = payment_status
+
+        sql = f"""
+            SELECT *
+            FROM (
+                SELECT
+                    ai.org_id,
+                    pv.vendor_name                                                 AS supplier_name,
+                    hp.tax_reference                                               AS npwp,
+                    SUBSTR(NVL(ai.description, '-'), 1, 100)                       AS description,
+                    gcc.segment1||'.'||gcc.segment2||'.'||gcc.segment3||'.'||
+                    gcc.segment4||'.'||gcc.segment5||'.'||gcc.segment6             AS coa,
+                    gcc.segment4                                                   AS coa_number,
+                    SUBSTR(NVL(ffvl.description, '-'), 1, 80)                      AS coa_descpt,
+                    ai.invoice_type_lookup_code                                    AS transaction_type,
+                    ai.invoice_num                                                 AS transaction_number,
+                    ai.invoice_id,
+                    TO_CHAR(ai.invoice_date, 'YYYY-MM-DD')                         AS invoice_date,
+                    TO_CHAR(ai.gl_date,      'YYYY-MM-DD')                         AS gl_date,
+                    ai.invoice_currency_code                                       AS currency,
+                    CASE
+                        WHEN NVL(sched_summary.total_remaining, 0) = 0
+                             THEN 'Paid'
+                        WHEN NVL(sched_summary.total_remaining, 0) <
+                             NVL(sched_summary.total_gross, 0)
+                             THEN 'Partially Paid'
+                        ELSE 'Not Paid'
+                    END                                                            AS payment_status,
+                    CASE WHEN ai.invoice_currency_code <> 'IDR'
+                         THEN ai.invoice_amount        END                         AS original_amount_orig,
+                    NVL(ai.base_amount, ai.invoice_amount)                         AS dpp,
+                    ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)        AS vat,
+                    NVL(wht_summary.wht_amount, 0)                                 AS wht,
+                    NVL(ai.base_amount, ai.invoice_amount)
+                        + ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)
+                        + NVL(wht_summary.wht_amount, 0)                          AS total_ap,
+                    NVL(payment_summary.total_payment, 0)                         AS payment,
+                    payment_summary.latest_rate                                   AS payment_rate,
+                    (NVL(ai.base_amount, ai.invoice_amount)
+                        + ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)
+                        + NVL(wht_summary.wht_amount, 0))
+                        - NVL(payment_summary.total_payment, 0)                   AS remaining_ap
+                FROM apps.ap_invoices_all              ai
+                   , apps.ap_suppliers                 pv
+                   , apps.hz_parties                   hp
+                   , apps.gl_code_combinations         gcc
+                   , apps.fnd_flex_values_vl           ffvl
+                   , apps.fnd_flex_value_sets          ffvs
+                   , ( SELECT aps.invoice_id
+                            , SUM(aps.gross_amount)                                AS total_gross
+                            , SUM(CASE WHEN {legacy_cond} THEN 0 ELSE aps.amount_remaining END)
+                                                                                   AS total_remaining
+                         FROM apps.ap_payment_schedules_all aps
+                            , apps.ap_invoices_all          ai2
+                        WHERE aps.invoice_id            = ai2.invoice_id
+                          AND aps.payment_status_flag  IN ('N', 'P')
+                          AND ai2.gl_date              <= TRUNC(SYSDATE)
+                        GROUP BY aps.invoice_id
+                     ) sched_summary
+                   , ( SELECT aid.invoice_id
+                            , SUM(aid.amount)                                     AS wht_amount
+                         FROM apps.ap_invoice_distributions_all aid
+                        WHERE aid.line_type_lookup_code = 'AWT'
+                        GROUP BY aid.invoice_id
+                     ) wht_summary
+                   , ( SELECT apn.invoice_id
+                            , SUM(apn.amount)                                     AS total_payment
+                            , MAX(apn.exchange_rate) KEEP (
+                                  DENSE_RANK LAST ORDER BY NVL(apn.accounting_date, cks.check_date)
+                              )                                                   AS latest_rate
+                         FROM apps.ap_invoice_payments_all apn
+                            , apps.ap_checks_all           cks
+                        WHERE cks.check_id (+)            = apn.check_id
+                        GROUP BY apn.invoice_id
+                     ) payment_summary
+                WHERE ai.invoice_id                       = sched_summary.invoice_id (+)
+                  AND ai.invoice_id                       = wht_summary.invoice_id (+)
+                  AND ai.invoice_id                       = payment_summary.invoice_id (+)
+                  AND ai.vendor_id                        = pv.vendor_id
+                  AND pv.party_id                         = hp.party_id (+)
+                  AND ai.accts_pay_code_combination_id    = gcc.code_combination_id
+                  AND ffvl.flex_value_set_id              = ffvs.flex_value_set_id
+                  AND ffvl.flex_value                     = gcc.segment4
+                  AND {coa_filter}
+                  {extra_where}
+                ORDER BY ai.gl_date, pv.vendor_name, ai.invoice_num
+            )
+            WHERE ROWNUM <= {limit}
+        """
+
+        try:
+            rows = await asyncio.to_thread(self._query, sql, params)
+            clean = [
+                {
+                    k: (float(v) if hasattr(v, "__float__") and not isinstance(v, (int, float, str, type(None), bool)) else v)
+                    for k, v in r.items()
+                }
+                for r in rows
+            ]
+            for i, r in enumerate(clean, start=1):
+                r["row_no"] = i
+
+            def _sum(key):
+                return round(sum(r.get(key) or 0 for r in clean), 2)
+
+            return {
+                "success": True,
+                "count": len(clean),
+                "gl_date_from": gl_date_from,
+                "gl_date_to": gl_date_to,
+                "summary": {
+                    "not_paid_count": sum(1 for r in clean if r.get("payment_status") == "Not Paid"),
+                    "partial_paid_count": sum(1 for r in clean if r.get("payment_status") == "Partially Paid"),
+                    "paid_count": sum(1 for r in clean if r.get("payment_status") == "Paid"),
+                    "total_dpp": _sum("dpp"),
+                    "total_vat": _sum("vat"),
+                    "total_wht": _sum("wht"),
+                    "total_ap": _sum("total_ap"),
+                    "total_payment": _sum("payment"),
+                    "total_remaining_ap": _sum("remaining_ap"),
+                },
+                "data": clean,
+            }
+        except Exception as e:
+            logger.error("ap_list_error", error=str(e))
+            return {"success": False, "error": str(e), "data": []}
+
     async def get_ap_aging(self, supplier_name: str = None, base_date: str = None, limit: int = 500) -> dict:
         """
         AP Aging — open items grouped by supplier into 5 buckets (Current,
