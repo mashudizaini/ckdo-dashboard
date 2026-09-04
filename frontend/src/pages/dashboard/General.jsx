@@ -996,6 +996,7 @@ const AP_LIST_HEADERS = [
   { key: "wht",                label: "WHT",                num: true },
   { key: "total_ap",           label: "Total",              num: true },
   { key: "payment",            label: "Payment",            num: true },
+  { key: "payment_date",       label: "Payment Date" },
   { key: "payment_rate",       label: "Payment Rate",       num: true },
   { key: "remaining_ap",       label: "Remaining AP",       num: true },
   { key: "payment_status",     label: "Status" },
@@ -1217,6 +1218,7 @@ function APListSection() {
                   <td className="px-3 py-2 text-right text-gray-300 tabular-nums whitespace-nowrap">{fmtNum(r.wht)}</td>
                   <td className="px-3 py-2 text-right text-gray-200 tabular-nums font-semibold whitespace-nowrap">{fmtNum(r.total_ap)}</td>
                   <td className="px-3 py-2 text-right text-green-400 tabular-nums whitespace-nowrap">{fmtNum(r.payment)}</td>
+                  <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.payment_date || "—"}</td>
                   <td className="px-3 py-2 text-right text-gray-400 tabular-nums whitespace-nowrap">{r.payment_rate != null ? fmtNum(r.payment_rate) : "—"}</td>
                   <td className="px-3 py-2 text-right text-red-400 tabular-nums whitespace-nowrap">{fmtNum(r.remaining_ap)}</td>
                   <td className="px-3 py-2 whitespace-nowrap">{payBadge(r.payment_status)}</td>

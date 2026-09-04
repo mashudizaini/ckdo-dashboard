@@ -736,12 +736,14 @@ class AccountingService:
         same Payment figure shown in the report, not a separate live
         Oracle flag.)
 
-        payment_rate is AP_INVOICE_PAYMENTS_ALL.EXCHANGE_RATE from the most
-        recent payment applied ON OR BEFORE the cutoff (NULL/blank for
-        invoices unpaid as of the cutoff, or IDR payments where Oracle
-        doesn't populate it — confirmed live this is sparse-but-real, ~23%
-        of payments, exactly matching the reference file's own
-        blank-for-IDR pattern).
+        payment_date/payment_rate both come from that same most-recent
+        payment applied ON OR BEFORE the cutoff — payment_date is
+        NVL(AP_INVOICE_PAYMENTS_ALL.accounting_date, AP_CHECKS_ALL.
+        check_date) (NULL for invoices unpaid as of the cutoff),
+        payment_rate is that payment's EXCHANGE_RATE (also NULL/blank for
+        IDR payments, where Oracle doesn't populate it — confirmed live
+        this is sparse-but-real, ~23% of payments, exactly matching the
+        reference file's own blank-for-IDR pattern).
 
         gl_date_from/gl_date_to scope WHICH invoices appear (by GL Date);
         payment_date_cutoff separately scopes which of THOSE invoices'
@@ -859,6 +861,7 @@ class AccountingService:
                         + {vat_expr}
                         + NVL(wht_summary.wht_amount, 0)                          AS total_ap,
                     NVL(payment_summary.total_payment, 0)                         AS payment,
+                    TO_CHAR(payment_summary.latest_payment_date, 'YYYY-MM-DD')    AS payment_date,
                     payment_summary.latest_rate                                   AS payment_rate,
                     -- Forced to 0 when payment_status_expr says Paid, even
                     -- though (total_ap - payment) alone would rarely land
@@ -906,6 +909,9 @@ class AccountingService:
                             , MAX(apn.exchange_rate) KEEP (
                                   DENSE_RANK LAST ORDER BY NVL(apn.accounting_date, cks.check_date)
                               )                                                   AS latest_rate
+                            , MAX(NVL(apn.accounting_date, cks.check_date)) KEEP (
+                                  DENSE_RANK LAST ORDER BY NVL(apn.accounting_date, cks.check_date)
+                              )                                                   AS latest_payment_date
                          FROM apps.ap_invoice_payments_all apn
                             , apps.ap_checks_all           cks
                         WHERE cks.check_id (+)            = apn.check_id
