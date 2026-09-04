@@ -651,12 +651,21 @@ class AccountingService:
         the reference file and the user — NOT Oracle's real tax posting:
           dpp   = NVL(ai.base_amount, ai.invoice_amount)  — same expression
                   get_ap_outstanding already uses for original_amount_idr
-          vat   = ROUND(dpp * 0.11, 2)                    — computed fresh,
-                  standard Indonesian PPN rate, NOT Oracle's actual
-                  REC_TAX/NONREC_TAX distribution (verified live: those two
-                  numbers differ — the reference file uses the computed
-                  11%-of-dpp figure, confirmed exactly across every sample
-                  row, e.g. dpp 23,088,000 * 11% = vat 2,539,680)
+          vat   = ROUND(dpp * 0.11, 2) IF the invoice actually has a real
+                  REC_TAX/NONREC_TAX distribution in Oracle, ELSE 0 — the
+                  11% itself is computed fresh (not Oracle's exact
+                  REC_TAX/NONREC_TAX amount; verified live those two
+                  numbers differ, e.g. dpp 23,088,000 * 11% = vat 2,539,680
+                  matches the reference file exactly), but whether to apply
+                  it at all is gated on real tax presence. Without this
+                  gate, a tax-exempt invoice (individual/non-PKP supplier,
+                  e.g. an expense report) would wrongly show a computed
+                  VAT — confirmed live for Agus Suprianto: every one of his
+                  invoices has only ACCRUAL/AWT distributions, never
+                  REC_TAX/NONREC_TAX, matching Oracle's own invoice Tax
+                  field being 0.00 (user-reported, with a screenshot) and
+                  the reference file's row 8 showing VAT = 0 for exactly
+                  this supplier/transaction type.
           wht   = SUM(AP_INVOICE_DISTRIBUTIONS_ALL.amount WHERE
                   line_type_lookup_code = 'AWT') — this one IS real Oracle
                   data, already negative in Oracle so no sign-flip needed
@@ -750,10 +759,27 @@ class AccountingService:
                     CASE WHEN ai.invoice_currency_code <> 'IDR'
                          THEN ai.invoice_amount        END                         AS original_amount_orig,
                     NVL(ai.base_amount, ai.invoice_amount)                         AS dpp,
-                    ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)        AS vat,
+                    -- 11% VAT applies ONLY when Oracle actually has a real
+                    -- tax distribution on this invoice (tax_summary below,
+                    -- from REC_TAX/NONREC_TAX) — an invoice with no tax
+                    -- line (e.g. an individual/non-PKP supplier's expense
+                    -- report, confirmed live for Agus Suprianto: only
+                    -- ACCRUAL/AWT lines, no REC_TAX/NONREC_TAX at all) must
+                    -- show VAT = 0, matching Oracle's own Tax field being
+                    -- 0.00 for that invoice. Confirmed against the
+                    -- reference file too: row 8 (Agus Suprianto, expense
+                    -- report) shows VAT = 0 there, unlike rows 7/12 (real
+                    -- REC_TAX present) which do show 11%.
+                    CASE WHEN NVL(tax_summary.tax_amount, 0) <> 0
+                         THEN ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)
+                         ELSE 0
+                    END                                                          AS vat,
                     NVL(wht_summary.wht_amount, 0)                                 AS wht,
                     NVL(ai.base_amount, ai.invoice_amount)
-                        + ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)
+                        + CASE WHEN NVL(tax_summary.tax_amount, 0) <> 0
+                               THEN ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)
+                               ELSE 0
+                          END
                         + NVL(wht_summary.wht_amount, 0)                          AS total_ap,
                     NVL(payment_summary.total_payment, 0)                         AS payment,
                     payment_summary.latest_rate                                   AS payment_rate,
@@ -766,7 +792,10 @@ class AccountingService:
                     -- Confirmed with the user before applying this guard.
                     CASE WHEN NVL(sched_summary.total_remaining, 0) = 0 THEN 0
                          ELSE (NVL(ai.base_amount, ai.invoice_amount)
-                                 + ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)
+                                 + CASE WHEN NVL(tax_summary.tax_amount, 0) <> 0
+                                        THEN ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)
+                                        ELSE 0
+                                   END
                                  + NVL(wht_summary.wht_amount, 0))
                                - NVL(payment_summary.total_payment, 0)
                     END                                                          AS remaining_ap
@@ -793,6 +822,12 @@ class AccountingService:
                         WHERE aid.line_type_lookup_code = 'AWT'
                         GROUP BY aid.invoice_id
                      ) wht_summary
+                   , ( SELECT aid.invoice_id
+                            , SUM(aid.amount)                                     AS tax_amount
+                         FROM apps.ap_invoice_distributions_all aid
+                        WHERE aid.line_type_lookup_code IN ('REC_TAX', 'NONREC_TAX')
+                        GROUP BY aid.invoice_id
+                     ) tax_summary
                    , ( SELECT apn.invoice_id
                             , SUM(apn.amount)                                     AS total_payment
                             , MAX(apn.exchange_rate) KEEP (
@@ -805,6 +840,7 @@ class AccountingService:
                      ) payment_summary
                 WHERE ai.invoice_id                       = sched_summary.invoice_id (+)
                   AND ai.invoice_id                       = wht_summary.invoice_id (+)
+                  AND ai.invoice_id                       = tax_summary.invoice_id (+)
                   AND ai.invoice_id                       = payment_summary.invoice_id (+)
                   AND ai.vendor_id                        = pv.vendor_id
                   AND pv.party_id                         = hp.party_id (+)
