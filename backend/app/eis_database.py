@@ -283,11 +283,24 @@ async def ensure_sales_order_table():
             "ALTER TABLE eis.fact_sales_order "
             "DROP CONSTRAINT IF EXISTS fact_sales_order_order_number_line_num_key"
         ))
-        await conn.execute(text(
-            "ALTER TABLE eis.fact_sales_order "
-            "ADD CONSTRAINT fact_sales_order_order_number_line_num_shipment_num_key "
-            "UNIQUE (order_number, line_num, shipment_num)"
-        ))
+        # Plain ADD CONSTRAINT has no IF NOT EXISTS form in Postgres — a
+        # bare version of this crashed app startup on the second restart
+        # after it was first added, since the constraint already existed
+        # by then (DuplicateTableError, non-idempotent = the whole
+        # backend went down). Guard it explicitly instead.
+        await conn.execute(text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'fact_sales_order_order_number_line_num_shipment_num_key'
+                ) THEN
+                    ALTER TABLE eis.fact_sales_order
+                    ADD CONSTRAINT fact_sales_order_order_number_line_num_shipment_num_key
+                    UNIQUE (order_number, line_num, shipment_num);
+                END IF;
+            END $$;
+        """))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_fact_sales_order_ordered_date "
             "ON eis.fact_sales_order (ordered_date)"
