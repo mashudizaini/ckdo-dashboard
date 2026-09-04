@@ -719,6 +719,15 @@ class AccountingService:
         always evaluates payment_status as of today (TRUNC(SYSDATE)) —
         gl_date_from/gl_date_to only scope WHICH invoices appear, not the
         payment-status snapshot date.
+
+        Response carries `count` (rows actually in `data`, capped by
+        `limit`) separately from `total_count` (the true unbounded row
+        count for the filter) and `monthly` (a YYYY-MM breakdown, also
+        unbounded) — a user hitting `limit` should still see accurate
+        totals/chart, not a silently truncated sum. Found live: a full
+        year (2025) has 4,418 matching rows, well past the old 2000 cap,
+        and the summary cards were being computed from the capped `data`
+        list until this fix.
         """
         limit = min(max(limit, 1), 20000)
 
@@ -774,9 +783,7 @@ class AccountingService:
             )
             params["pay_status"] = payment_status
 
-        sql = f"""
-            SELECT *
-            FROM (
+        inner_sql = f"""
                 SELECT
                     ai.org_id,
                     pv.vendor_name                                                 AS supplier_name,
@@ -879,12 +886,48 @@ class AccountingService:
                   AND {coa_filter}
                   {extra_where}
                 ORDER BY ai.gl_date, pv.vendor_name, ai.invoice_num
-            )
-            WHERE ROWNUM <= {limit}
+        """
+
+        detail_sql = f"SELECT * FROM ( {inner_sql} ) WHERE ROWNUM <= {limit}"
+
+        # Monthly totals — a SEPARATE, unbounded aggregate over the exact
+        # same filtered row set (same inner_sql, no ROWNUM cap), so the
+        # chart above the table always reflects the true per-month totals
+        # even when `limit` caps how many detail rows are actually
+        # returned/displayed. Grouped by YYYY-MM (not just month-of-year)
+        # so a multi-year gl_date range never conflates e.g. Jan-2024 with
+        # Jan-2025.
+        monthly_sql = f"""
+            SELECT TO_CHAR(TO_DATE(t.gl_date, 'YYYY-MM-DD'), 'YYYY-MM') AS period,
+                   COUNT(*)              AS cnt,
+                   SUM(t.dpp)            AS total_dpp,
+                   SUM(t.vat)            AS total_vat,
+                   SUM(t.wht)            AS total_wht,
+                   SUM(t.total_ap)       AS total_ap,
+                   SUM(t.payment)        AS total_payment,
+                   SUM(t.remaining_ap)   AS total_remaining_ap
+            FROM ( {inner_sql} ) t
+            GROUP BY TO_CHAR(TO_DATE(t.gl_date, 'YYYY-MM-DD'), 'YYYY-MM')
+            ORDER BY period
+        """
+
+        # Payment-status counts, same unbounded-over-inner_sql idea as
+        # monthly_sql above — kept as their own tiny query rather than
+        # folded into monthly_sql, since a status breakdown grouped ALSO by
+        # month isn't needed anywhere yet and would just add columns unused
+        # by the current UI.
+        status_sql = f"""
+            SELECT t.payment_status, COUNT(*) AS cnt
+            FROM ( {inner_sql} ) t
+            GROUP BY t.payment_status
         """
 
         try:
-            rows = await asyncio.to_thread(self._query, sql, params)
+            rows, monthly_rows, status_rows = await asyncio.gather(
+                asyncio.to_thread(self._query, detail_sql, params),
+                asyncio.to_thread(self._query, monthly_sql, params),
+                asyncio.to_thread(self._query, status_sql, params),
+            )
             clean = [
                 {
                     k: (float(v) if hasattr(v, "__float__") and not isinstance(v, (int, float, str, type(None), bool)) else v)
@@ -895,24 +938,48 @@ class AccountingService:
             for i, r in enumerate(clean, start=1):
                 r["row_no"] = i
 
-            def _sum(key):
-                return round(sum(r.get(key) or 0 for r in clean), 2)
+            # monthly/status figures come from monthly_sql/status_sql, NOT
+            # from summing `clean` — `clean` is capped at `limit`, so an
+            # AP List spanning more rows than `limit` (confirmed live: a
+            # full 2025 has 4,418 rows, well past the old 2000 cap) would
+            # otherwise silently understate every summary card, not just
+            # the detail table below it.
+            monthly = [
+                {
+                    "period": r.get("period"),
+                    "count": int(r.get("cnt") or 0),
+                    "total_dpp": round(float(r.get("total_dpp") or 0), 2),
+                    "total_vat": round(float(r.get("total_vat") or 0), 2),
+                    "total_wht": round(float(r.get("total_wht") or 0), 2),
+                    "total_ap": round(float(r.get("total_ap") or 0), 2),
+                    "total_payment": round(float(r.get("total_payment") or 0), 2),
+                    "total_remaining_ap": round(float(r.get("total_remaining_ap") or 0), 2),
+                }
+                for r in monthly_rows
+            ]
+            status_counts = {r.get("payment_status"): int(r.get("cnt") or 0) for r in status_rows}
+            true_count = sum(m["count"] for m in monthly)
+
+            def _msum(key):
+                return round(sum(m.get(key) or 0 for m in monthly), 2)
 
             return {
                 "success": True,
                 "count": len(clean),
+                "total_count": true_count,
                 "gl_date_from": gl_date_from,
                 "gl_date_to": gl_date_to,
+                "monthly": monthly,
                 "summary": {
-                    "not_paid_count": sum(1 for r in clean if r.get("payment_status") == "Not Paid"),
-                    "partial_paid_count": sum(1 for r in clean if r.get("payment_status") == "Partially Paid"),
-                    "paid_count": sum(1 for r in clean if r.get("payment_status") == "Paid"),
-                    "total_dpp": _sum("dpp"),
-                    "total_vat": _sum("vat"),
-                    "total_wht": _sum("wht"),
-                    "total_ap": _sum("total_ap"),
-                    "total_payment": _sum("payment"),
-                    "total_remaining_ap": _sum("remaining_ap"),
+                    "not_paid_count": status_counts.get("Not Paid", 0),
+                    "partial_paid_count": status_counts.get("Partially Paid", 0),
+                    "paid_count": status_counts.get("Paid", 0),
+                    "total_dpp": _msum("total_dpp"),
+                    "total_vat": _msum("total_vat"),
+                    "total_wht": _msum("total_wht"),
+                    "total_ap": _msum("total_ap"),
+                    "total_payment": _msum("total_payment"),
+                    "total_remaining_ap": _msum("total_remaining_ap"),
                 },
                 "data": clean,
             }

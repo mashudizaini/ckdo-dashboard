@@ -1032,6 +1032,9 @@ function APListSection() {
   const [search,          setSearch]          = useState("");
   const [sortBy,          setSortBy]          = useState(null);
   const [sortDir,         setSortDir]         = useState("asc");
+  const [RC,              setRC]              = useState(null);
+
+  useEffect(() => { import("recharts").then((mod) => setRC(mod)).catch(() => {}); }, []);
 
   const NUMERIC_KEYS = ["original_amount_orig", "dpp", "vat", "wht", "total_ap", "payment", "payment_rate", "remaining_ap"];
 
@@ -1130,6 +1133,34 @@ function APListSection() {
       {error && (
         <div className="rounded-lg px-4 py-2.5 text-xs flex items-center gap-2 bg-red-500/10 text-red-400 border border-red-500/20">
           <AlertTriangle size={13} /> {error}
+        </div>
+      )}
+
+      {data && data.total_count > data.count && (
+        <div className="rounded-lg px-4 py-2.5 text-xs flex items-center gap-2 bg-amber-500/10 text-amber-400 border border-amber-500/20">
+          <AlertTriangle size={13} />
+          Menampilkan {data.count.toLocaleString("id-ID")} dari total {data.total_count.toLocaleString("id-ID")} baris yang cocok dengan filter —
+          naikkan Limit untuk menampilkan semuanya di tabel. Grafik &amp; kartu ringkasan di bawah selalu menghitung total sebenarnya, tidak dibatasi Limit.
+        </div>
+      )}
+
+      {data?.monthly?.length > 0 && (
+        <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
+          <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider mb-3">Total AP per Bulan (sesuai filter, tidak dibatasi Limit)</p>
+          {!RC ? (
+            <div className="py-10 text-center text-xs text-gray-500">Loading chart…</div>
+          ) : (
+            <RC.ResponsiveContainer width="100%" height={260}>
+              <RC.BarChart data={data.monthly} margin={{ top: 4, right: 16, bottom: 0, left: -10 }}>
+                <RC.CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <RC.XAxis dataKey="period" tick={{ fill: "#cbd5e1", fontSize: 10 }} />
+                <RC.YAxis tick={{ fill: "#cbd5e1", fontSize: 10 }} tickFormatter={(v) => `${(v / 1e6).toFixed(0)}jt`} />
+                <RC.Tooltip contentStyle={{ borderRadius: 8, fontSize: 11 }} formatter={(v) => `Rp ${fmtNum(v)}`} />
+                <RC.Legend wrapperStyle={{ fontSize: 11, color: "#f1f5f9" }} />
+                <RC.Bar dataKey="total_ap" name="Total AP" fill="#60a5fa" radius={[3, 3, 0, 0]} />
+              </RC.BarChart>
+            </RC.ResponsiveContainer>
+          )}
         </div>
       )}
 
