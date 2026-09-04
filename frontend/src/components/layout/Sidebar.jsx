@@ -5,7 +5,7 @@ import { useThemeStore } from "@/store/themeStore";
 import {
   Monitor, Users, Factory, Calculator,
   ShoppingCart, FileText, LogOut, LayoutGrid, TrendingUp,
-  ChevronDown, ChevronRight, Settings, BarChart3,
+  ChevronDown, ChevronRight, Settings, BarChart3, Warehouse,
 } from "lucide-react";
 import RobotIcon from "@/components/icons/RobotIcon";
 import logo from "@/assets/LOGO-ONLY.png";
@@ -60,6 +60,13 @@ const NAV_ITEMS = [
     { label: "Sales Trend", path: "/dashboard/sales/trend" },
     { label: "Sales vs Budget", path: "/dashboard/sales/vs-budget" },
     { label: "Open Sales Order", path: "/dashboard/sales/open-orders" },
+  ] },
+  // No dedicated role yet, same as Sales & Marketing above — inventory
+  // in/out tracking from Oracle INV (mtl_material_transactions).
+  { label: "PPWH", path: "/dashboard/ppwh", icon: Warehouse, roles: [], children: [
+    { label: "Inventory In", path: "/dashboard/ppwh/inbound" },
+    { label: "Inventory Out", path: "/dashboard/ppwh/outbound" },
+    { label: "Kartu Stok", path: "/dashboard/ppwh/stock-card" },
   ] },
   // No roles — reachable by any authenticated user (matches AI_ITEMS'
   // convention below). Sub-modules apply their own access control instead

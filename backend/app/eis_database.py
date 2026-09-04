@@ -300,3 +300,46 @@ async def ensure_sales_order_table():
             "CREATE INDEX IF NOT EXISTS idx_fact_sales_order_customer "
             "ON eis.fact_sales_order (customer_name)"
         ))
+
+
+async def ensure_inventory_txn_table():
+    """Create eis.fact_inventory_txn if missing — foundation table for the
+    PPWH dashboard (Inventory In, Inventory Out, Kartu Stok). Populated by
+    app.tasks.eis_etl_tasks.etl_inventory_txn. Keys on Oracle's own
+    transaction_id — no composite-key grain risk like fact_sales_order
+    had before its shipment_num fix."""
+    from sqlalchemy import text
+    async with eis_async_engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eis.fact_inventory_txn (
+                id                     SERIAL PRIMARY KEY,
+                transaction_id         NUMERIC NOT NULL UNIQUE,
+                transaction_date       TIMESTAMP,
+                direction              VARCHAR(3),
+                transaction_type_name  VARCHAR(100),
+                item_code              VARCHAR(60),
+                item_description       VARCHAR(500),
+                organization_code      VARCHAR(20),
+                organization_name      VARCHAR(200),
+                subinventory_code      VARCHAR(30),
+                subinventory_name      VARCHAR(200),
+                quantity               NUMERIC(18,4),
+                uom                    VARCHAR(20),
+                transaction_reference  VARCHAR(300),
+                source_type_id         NUMERIC,
+                source_id              NUMERIC,
+                updated_at             TIMESTAMPTZ DEFAULT now()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_inventory_txn_date "
+            "ON eis.fact_inventory_txn (transaction_date)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_inventory_txn_item "
+            "ON eis.fact_inventory_txn (item_code)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_inventory_txn_direction "
+            "ON eis.fact_inventory_txn (direction)"
+        ))

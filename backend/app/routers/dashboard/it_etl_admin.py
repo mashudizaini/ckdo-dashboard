@@ -56,7 +56,7 @@ async def trigger_etl(job_name: str, params: TriggerParams):
     valid_jobs = [
         "etl_sales", "etl_cogs", "etl_production", "etl_financial",
         "etl_employee", "etl_inventory", "etl_ar_ap", "etl_budget", "etl_po",
-        "etl_po_lines", "etl_open_pr", "etl_sales_orders",
+        "etl_po_lines", "etl_open_pr", "etl_sales_orders", "etl_inventory_txn",
     ]
     if job_name not in valid_jobs:
         raise HTTPException(status_code=400, detail=f"Unknown job. Valid: {valid_jobs}")
@@ -257,6 +257,15 @@ async def get_job_data(
             ORDER BY ordered_date DESC
             LIMIT 100
         """,
+        "etl_inventory_txn": f"""
+            SELECT transaction_id, transaction_date, direction, transaction_type_name,
+                   item_code, organization_code, subinventory_code, quantity, uom
+            FROM eis.fact_inventory_txn
+            WHERE EXTRACT(YEAR FROM transaction_date) = :year
+              {"AND EXTRACT(MONTH FROM transaction_date) = :month" if month else ""}
+            ORDER BY transaction_date DESC
+            LIMIT 100
+        """,
     }
 
     sql = queries.get(job_name)
@@ -327,6 +336,10 @@ _JOB_META = {
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["oe_order_headers_all", "oe_order_lines_all", "hz_cust_accounts", "hz_parties"],
                         "destination_table": "eis.fact_sales_order"},
+    "etl_inventory_txn": {"frequency": "Daily", "schedule": "05:45 AM WIB", "source": "Oracle INV (Material Transactions)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["mtl_material_transactions", "mtl_transaction_types", "mtl_system_items_b"],
+                        "destination_table": "eis.fact_inventory_txn"},
 }
 
 

@@ -2032,3 +2032,120 @@ def etl_sales_orders(year: int = None, month: int = None, full_refresh: bool = F
         pg.close()
 
     return {"status": "success", "records": records}
+
+
+@celery_app.task(name="app.tasks.etl_tasks.etl_inventory_txn")
+def etl_inventory_txn(year: int = None, month: int = None, full_refresh: bool = False):
+    """Extract inventory movement detail from Oracle INV
+    (mtl_material_transactions) -> eis.fact_inventory_txn — foundation
+    table for the PPWH dashboard (Inventory In, Inventory Out, Kartu
+    Stok). Unlike Sales Orders/PO Lines, this table keys on Oracle's own
+    single-column transaction_id, so there's no composite-key grain risk
+    (see the shipment_number bug found and fixed in etl_sales_orders).
+
+    direction ('IN'/'OUT') is derived from the sign of
+    transaction_quantity, not from a hardcoded transaction-type list —
+    some types (e.g. Subinventory Transfer) legitimately appear on either
+    side depending on which leg of the movement a row represents.
+
+    Incremental by default (30-day lookback); pass year=<YYYY> (month
+    optional) for a full backfill from that year forward.
+    """
+    pg = _get_pg()
+    job_id = _log_start(pg, "etl_inventory_txn", year, month)
+    records = 0
+    try:
+        ora = get_oracle_connection()
+        cur_ora = ora.cursor()
+
+        from datetime import date as _date, timedelta as _timedelta
+        if full_refresh:
+            date_clause, date_params = "", {}
+        elif year:
+            d_from = _date(year, month or 1, 1)
+            date_clause = "AND mmt.transaction_date >= :d_from"
+            date_params = {"d_from": d_from}
+        else:
+            d_from = _date.today() - _timedelta(days=30)
+            date_clause = "AND mmt.transaction_date >= :d_from"
+            date_params = {"d_from": d_from}
+
+        cur_ora.execute(f"""
+            SELECT
+                mmt.transaction_id                                       AS transaction_id,
+                mmt.transaction_date                                     AS transaction_date,
+                CASE WHEN mmt.transaction_quantity >= 0 THEN 'IN' ELSE 'OUT' END AS direction,
+                mtt.transaction_type_name                                AS transaction_type_name,
+                NVL(msi.segment1, TO_CHAR(mmt.inventory_item_id))        AS item_code,
+                msi.description                                          AS item_description,
+                mp.organization_code                                     AS organization_code,
+                hou.name                                                 AS organization_name,
+                mmt.subinventory_code                                    AS subinventory_code,
+                msub.description                                         AS subinventory_name,
+                mmt.transaction_quantity                                 AS quantity,
+                mmt.transaction_uom                                      AS uom,
+                mmt.transaction_reference                                AS transaction_reference,
+                mmt.transaction_source_type_id                           AS source_type_id,
+                mmt.transaction_source_id                                AS source_id
+            FROM mtl_material_transactions mmt
+            JOIN mtl_transaction_types mtt ON mtt.transaction_type_id = mmt.transaction_type_id
+            LEFT JOIN mtl_system_items_b msi ON msi.inventory_item_id = mmt.inventory_item_id
+                                             AND msi.organization_id   = mmt.organization_id
+            LEFT JOIN mtl_parameters mp ON mp.organization_id = mmt.organization_id
+            LEFT JOIN hr_all_organization_units hou ON hou.organization_id = mmt.organization_id
+            LEFT JOIN mtl_secondary_inventories msub ON msub.secondary_inventory_name = mmt.subinventory_code
+                                                      AND msub.organization_id = mmt.organization_id
+            WHERE mmt.transaction_quantity IS NOT NULL
+              AND mmt.transaction_quantity <> 0
+              {date_clause}
+        """, date_params)
+
+        rows = cur_ora.fetchall()
+        records = len(rows)
+        logger.info(f"[etl_inventory_txn] Extracted {records} inventory transaction rows from Oracle INV")
+        ora.close()
+
+        cur_pg = pg.cursor()
+        loaded = 0
+        for (transaction_id, transaction_date, direction, transaction_type_name, item_code,
+             item_description, organization_code, organization_name, subinventory_code,
+             subinventory_name, quantity, uom, transaction_reference, source_type_id,
+             source_id) in rows:
+            cur_pg.execute(
+                """INSERT INTO eis.fact_inventory_txn
+                       (transaction_id, transaction_date, direction, transaction_type_name,
+                        item_code, item_description, organization_code, organization_name,
+                        subinventory_code, subinventory_name, quantity, uom,
+                        transaction_reference, source_type_id, source_id)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (transaction_id) DO UPDATE SET
+                       transaction_date = EXCLUDED.transaction_date, direction = EXCLUDED.direction,
+                       transaction_type_name = EXCLUDED.transaction_type_name, item_code = EXCLUDED.item_code,
+                       item_description = EXCLUDED.item_description, organization_code = EXCLUDED.organization_code,
+                       organization_name = EXCLUDED.organization_name, subinventory_code = EXCLUDED.subinventory_code,
+                       subinventory_name = EXCLUDED.subinventory_name, quantity = EXCLUDED.quantity,
+                       uom = EXCLUDED.uom, transaction_reference = EXCLUDED.transaction_reference,
+                       source_type_id = EXCLUDED.source_type_id, source_id = EXCLUDED.source_id,
+                       updated_at = now()""",
+                (float(transaction_id), transaction_date, direction, transaction_type_name, item_code,
+                 item_description, organization_code, organization_name, subinventory_code,
+                 subinventory_name, float(quantity or 0), uom, transaction_reference,
+                 float(source_type_id) if source_type_id is not None else None,
+                 float(source_id) if source_id is not None else None),
+            )
+            loaded += 1
+
+        pg.commit()
+        logger.info(f"[etl_inventory_txn] Loaded {loaded} rows into fact_inventory_txn")
+
+        _log_end(pg, job_id, "success", records)
+
+    except Exception as e:
+        logger.error(f"[etl_inventory_txn] Failed: {e}")
+        pg.rollback()
+        _log_end(pg, job_id, "failed", records, str(e))
+        raise
+    finally:
+        pg.close()
+
+    return {"status": "success", "records": records}

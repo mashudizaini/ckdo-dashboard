@@ -43,7 +43,7 @@ from app.models.zkteco import init_zkteco_db
 from app.routers import emagazine, emagazine_hotspots
 
 # ── Dashboard Routers ──
-from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement, general, sales_marketing
+from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement, general, sales_marketing, ppwh
 from app.routers.dashboard import ebs_backup
 from app.routers.dashboard import vpn_monitor
 from app.routers.dashboard import it_hikcentral
@@ -93,12 +93,13 @@ async def lifespan(app: FastAPI):
     rag_service.ensure_schema()
 
     # EIS Data Upload — upload-history log table (separate `eis_dashboard` DB)
-    from app.eis_database import ensure_upload_log_table, ensure_purchasing_table, ensure_employee_dim_table, ensure_purchasing_migration_tables, ensure_sales_order_table
+    from app.eis_database import ensure_upload_log_table, ensure_purchasing_table, ensure_employee_dim_table, ensure_purchasing_migration_tables, ensure_sales_order_table, ensure_inventory_txn_table
     await ensure_upload_log_table()
     await ensure_purchasing_table()
     await ensure_employee_dim_table()
     await ensure_purchasing_migration_tables()
     await ensure_sales_order_table()
+    await ensure_inventory_txn_table()
 
     # EBS Backup Recovery — dedicated sync tables (ebs_*) + its own 60s
     # schedule poller (ported from the standalone ebs-backup-dashboard app).
@@ -245,6 +246,7 @@ app.include_router(financial_statement.router, prefix=f"{API_PREFIX}/dashboard/a
 app.include_router(purchasing.router, prefix=f"{API_PREFIX}/dashboard/purchasing", tags=["Dashboard - Purchasing"])
 app.include_router(general.router,    prefix=f"{API_PREFIX}/dashboard/general",    tags=["Dashboard - General"])
 app.include_router(sales_marketing.router, prefix=f"{API_PREFIX}/dashboard/sales", tags=["Dashboard - Sales & Marketing"])
+app.include_router(ppwh.router,            prefix=f"{API_PREFIX}/dashboard/ppwh",  tags=["Dashboard - PPWH"])
 
 # EIS Dashboard — ported from the standalone eis-dashboard-v2 app.
 # Viewing/editing gated to management (+ admin, always implicitly allowed by

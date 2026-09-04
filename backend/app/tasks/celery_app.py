@@ -40,4 +40,5 @@ celery_app.conf.beat_schedule = {
     # batch like everything else here.
     "etl-open-pr":    {"task": "app.tasks.etl_tasks.etl_open_pr",    "schedule": crontab(minute="*/15")},
     "etl-sales-orders": {"task": "app.tasks.etl_tasks.etl_sales_orders", "schedule": crontab(hour=5, minute=30)},
+    "etl-inventory-txn": {"task": "app.tasks.etl_tasks.etl_inventory_txn", "schedule": crontab(hour=5, minute=45)},
 }
