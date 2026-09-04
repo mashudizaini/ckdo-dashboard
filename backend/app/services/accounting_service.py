@@ -252,6 +252,17 @@ class AccountingService:
     # of Oracle's live status/remaining figures.
     LEGACY_PAID_CUTOFF = "2021-12-31"
 
+    # GL account (segment4) for "VAT-INPUT" — used by get_ap_list. Some AP
+    # invoices (confirmed live: Rentokil's EXPENSE REPORT-type invoices)
+    # never get Oracle's native REC_TAX/NONREC_TAX line_type_lookup_code at
+    # all — whoever enters the invoice instead adds a plain manual line
+    # (line_type_lookup_code='ITEM', description literally "VAT") coded
+    # straight to this GL account. Oracle's own invoice-summary Tax field
+    # shows 0.00 for these (since REC_TAX/NONREC_TAX is what that field
+    # reads), even though a real VAT amount was posted. get_ap_list treats
+    # a distribution against this account as real VAT too.
+    AP_VAT_INPUT_COA_SEGMENT4 = "114207"
+
     async def get_ap_outstanding(
         self,
         as_of_date: str = None,
@@ -651,21 +662,30 @@ class AccountingService:
         the reference file and the user — NOT Oracle's real tax posting:
           dpp   = NVL(ai.base_amount, ai.invoice_amount)  — same expression
                   get_ap_outstanding already uses for original_amount_idr
-          vat   = ROUND(dpp * 0.11, 2) IF the invoice actually has a real
-                  REC_TAX/NONREC_TAX distribution in Oracle, ELSE 0 — the
-                  11% itself is computed fresh (not Oracle's exact
-                  REC_TAX/NONREC_TAX amount; verified live those two
-                  numbers differ, e.g. dpp 23,088,000 * 11% = vat 2,539,680
-                  matches the reference file exactly), but whether to apply
-                  it at all is gated on real tax presence. Without this
-                  gate, a tax-exempt invoice (individual/non-PKP supplier,
-                  e.g. an expense report) would wrongly show a computed
-                  VAT — confirmed live for Agus Suprianto: every one of his
-                  invoices has only ACCRUAL/AWT distributions, never
-                  REC_TAX/NONREC_TAX, matching Oracle's own invoice Tax
-                  field being 0.00 (user-reported, with a screenshot) and
-                  the reference file's row 8 showing VAT = 0 for exactly
-                  this supplier/transaction type.
+          vat   = one of three cases, in priority order (see vat_expr in
+                  the code below):
+                  1. Oracle-native REC_TAX/NONREC_TAX distribution present
+                     -> ROUND(dpp * 0.11, 2), computed fresh (NOT Oracle's
+                     exact REC_TAX/NONREC_TAX amount; verified live those
+                     two numbers differ, e.g. dpp 23,088,000 * 11% =
+                     2,539,680 matches the reference file exactly).
+                  2. No REC_TAX/NONREC_TAX, but a manual distribution line
+                     was posted straight to the VAT-INPUT GL account
+                     (AP_VAT_INPUT_COA_SEGMENT4) -> use that line's REAL
+                     posted amount as-is. Confirmed live for Rentokil's
+                     EXPENSE REPORT invoices: a line_type_lookup_code=
+                     'ITEM' row, description literally "VAT", coded to
+                     that account — Oracle's own invoice Tax field shows
+                     0.00 for these (it only reads REC_TAX/NONREC_TAX),
+                     but the VAT is real and posted, just not tagged the
+                     way Oracle usually tags tax. Per the user: "walaupun
+                     ini sebagai LINE tapi tetap di hitung sebagai VAT."
+                  3. Neither -> 0. Confirmed live for Agus Suprianto/
+                     Jiangsu: only ACCRUAL/AWT distributions, no tax
+                     anywhere on the invoice, matching Oracle's own Tax
+                     field being 0.00 (user-reported, with a screenshot)
+                     and the reference file's row 8 (Agus Suprianto)
+                     showing VAT = 0.
           wht   = SUM(AP_INVOICE_DISTRIBUTIONS_ALL.amount WHERE
                   line_type_lookup_code = 'AWT') — this one IS real Oracle
                   data, already negative in Oracle so no sign-flip needed
@@ -709,6 +729,30 @@ class AccountingService:
         coa_binds = {f"coa{i}": code for i, code in enumerate(self.AP_COA_WHITELIST)}
         params.update(coa_binds)
         coa_filter = "gcc.segment4 IN (" + ", ".join(f":{k}" for k in coa_binds) + ")"
+
+        params["vat_input_coa"] = self.AP_VAT_INPUT_COA_SEGMENT4
+
+        # Two distinct real-tax signals, in priority order:
+        #  1. Oracle-native REC_TAX/NONREC_TAX distribution present -> VAT
+        #     is computed fresh as 11% of DPP (confirmed formula, see
+        #     docstring — Oracle's own REC_TAX amount is NOT used directly).
+        #  2. No REC_TAX/NONREC_TAX, but a manual line was posted straight
+        #     to the VAT-INPUT GL account (confirmed live for Rentokil's
+        #     EXPENSE REPORT invoices: line_type_lookup_code='ITEM',
+        #     description "VAT", coded to AP_VAT_INPUT_COA_SEGMENT4) -> use
+        #     that line's REAL posted amount as-is, not a recomputed 11% —
+        #     it's an actual figure someone entered, not a reporting
+        #     gross-up. Per the user: "walaupun ini sebagai LINE tapi tetap
+        #     di hitung sebagai VAT."
+        #  3. Neither -> VAT = 0 (e.g. Agus Suprianto/Jiangsu, no tax at
+        #     all posted anywhere on the invoice).
+        vat_expr = """CASE
+                          WHEN NVL(tax_summary.rec_tax_amount, 0) <> 0
+                               THEN ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)
+                          WHEN NVL(tax_summary.manual_vat_amount, 0) <> 0
+                               THEN tax_summary.manual_vat_amount
+                          ELSE 0
+                      END"""
 
         extra_where = ""
         if supplier_name:
@@ -759,27 +803,10 @@ class AccountingService:
                     CASE WHEN ai.invoice_currency_code <> 'IDR'
                          THEN ai.invoice_amount        END                         AS original_amount_orig,
                     NVL(ai.base_amount, ai.invoice_amount)                         AS dpp,
-                    -- 11% VAT applies ONLY when Oracle actually has a real
-                    -- tax distribution on this invoice (tax_summary below,
-                    -- from REC_TAX/NONREC_TAX) — an invoice with no tax
-                    -- line (e.g. an individual/non-PKP supplier's expense
-                    -- report, confirmed live for Agus Suprianto: only
-                    -- ACCRUAL/AWT lines, no REC_TAX/NONREC_TAX at all) must
-                    -- show VAT = 0, matching Oracle's own Tax field being
-                    -- 0.00 for that invoice. Confirmed against the
-                    -- reference file too: row 8 (Agus Suprianto, expense
-                    -- report) shows VAT = 0 there, unlike rows 7/12 (real
-                    -- REC_TAX present) which do show 11%.
-                    CASE WHEN NVL(tax_summary.tax_amount, 0) <> 0
-                         THEN ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)
-                         ELSE 0
-                    END                                                          AS vat,
+                    {vat_expr}                                                     AS vat,
                     NVL(wht_summary.wht_amount, 0)                                 AS wht,
                     NVL(ai.base_amount, ai.invoice_amount)
-                        + CASE WHEN NVL(tax_summary.tax_amount, 0) <> 0
-                               THEN ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)
-                               ELSE 0
-                          END
+                        + {vat_expr}
                         + NVL(wht_summary.wht_amount, 0)                          AS total_ap,
                     NVL(payment_summary.total_payment, 0)                         AS payment,
                     payment_summary.latest_rate                                   AS payment_rate,
@@ -792,10 +819,7 @@ class AccountingService:
                     -- Confirmed with the user before applying this guard.
                     CASE WHEN NVL(sched_summary.total_remaining, 0) = 0 THEN 0
                          ELSE (NVL(ai.base_amount, ai.invoice_amount)
-                                 + CASE WHEN NVL(tax_summary.tax_amount, 0) <> 0
-                                        THEN ROUND(NVL(ai.base_amount, ai.invoice_amount) * 0.11, 2)
-                                        ELSE 0
-                                   END
+                                 + {vat_expr}
                                  + NVL(wht_summary.wht_amount, 0))
                                - NVL(payment_summary.total_payment, 0)
                     END                                                          AS remaining_ap
@@ -823,9 +847,14 @@ class AccountingService:
                         GROUP BY aid.invoice_id
                      ) wht_summary
                    , ( SELECT aid.invoice_id
-                            , SUM(aid.amount)                                     AS tax_amount
+                            , SUM(CASE WHEN aid.line_type_lookup_code IN ('REC_TAX', 'NONREC_TAX')
+                                       THEN aid.amount ELSE 0 END)                    AS rec_tax_amount
+                            , SUM(CASE WHEN aid.line_type_lookup_code NOT IN ('REC_TAX', 'NONREC_TAX')
+                                            AND aid_gcc.segment4 = :vat_input_coa
+                                       THEN aid.amount ELSE 0 END)                    AS manual_vat_amount
                          FROM apps.ap_invoice_distributions_all aid
-                        WHERE aid.line_type_lookup_code IN ('REC_TAX', 'NONREC_TAX')
+                            , apps.gl_code_combinations         aid_gcc
+                        WHERE aid.dist_code_combination_id     = aid_gcc.code_combination_id (+)
                         GROUP BY aid.invoice_id
                      ) tax_summary
                    , ( SELECT apn.invoice_id
