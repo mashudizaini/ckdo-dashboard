@@ -305,7 +305,7 @@ class AccountingService:
         genuinely collected but missing/incomplete payment-application
         records in Oracle), Oracle itself untouched.
         """
-        limit = min(max(limit, 1), 2000)
+        limit = min(max(limit, 1), 20000)
 
         date_expr = "TO_DATE(:as_of_date, 'YYYY-MM-DD')" if as_of_date else "TRUNC(SYSDATE)"
         params: dict = {}
@@ -496,7 +496,7 @@ class AccountingService:
         from where this was written). If it errors, the fix is almost
         certainly a column/table name mismatch here, not the surrounding logic.
         """
-        limit = min(max(limit, 1), 2000)
+        limit = min(max(limit, 1), 20000)
 
         date_expr = "TO_DATE(:as_of_date, 'YYYY-MM-DD')" if as_of_date else "TRUNC(SYSDATE)"
         params: dict = {}
@@ -720,7 +720,7 @@ class AccountingService:
         gl_date_from/gl_date_to only scope WHICH invoices appear, not the
         payment-status snapshot date.
         """
-        limit = min(max(limit, 1), 2000)
+        limit = min(max(limit, 1), 20000)
 
         params: dict = {}
         params["legacy_paid_cutoff"] = self.LEGACY_PAID_CUTOFF
@@ -1096,7 +1096,7 @@ class AccountingService:
         figure, separate from Oracle's system rate rather than silently
         blended into it.
         """
-        limit = min(max(limit, 1), 2000)
+        limit = min(max(limit, 1), 20000)
         where_extra = ""
         params: dict = {}
 

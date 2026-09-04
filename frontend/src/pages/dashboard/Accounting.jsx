@@ -315,7 +315,7 @@ function APOutstandingPanel() {
         <div>
           <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Limit</p>
           <select value={limit} onChange={e => setLimit(Number(e.target.value))} style={{ ...INPUT, width: 90, cursor: "pointer" }}>
-            {[200, 500, 1000, 2000].map(n => <option key={n} value={n}>{n}</option>)}
+            {[200, 500, 1000, 2000, 5000, 10000, 15000, 20000].map(n => <option key={n} value={n}>{n}</option>)}
           </select>
         </div>
         <div>
@@ -840,7 +840,7 @@ function AROutstandingPanel() {
         <div>
           <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Limit</p>
           <select value={limit} onChange={e => setLimit(Number(e.target.value))} style={{ ...INPUT, width: 90, cursor: "pointer" }}>
-            {[200, 500, 1000, 2000].map(n => <option key={n} value={n}>{n}</option>)}
+            {[200, 500, 1000, 2000, 5000, 10000, 15000, 20000].map(n => <option key={n} value={n}>{n}</option>)}
           </select>
         </div>
         <div>

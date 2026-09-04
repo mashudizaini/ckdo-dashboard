@@ -24,7 +24,7 @@ async def get_ap_outstanding_with_payment(
     date_to:        str  = Query(None, description="Period To — invoice date YYYY-MM-DD"),
     supplier_name:  str  = Query(None, description="Partial supplier name filter"),
     payment_status: str  = Query(None, description="Not Paid | Partially Paid | ALL"),
-    limit:          int  = Query(500, ge=1, le=2000),
+    limit:          int  = Query(500, ge=1, le=20000),
     user: CurrentUser = Depends(get_current_user),
 ):
     """

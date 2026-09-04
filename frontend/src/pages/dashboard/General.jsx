@@ -889,7 +889,7 @@ function APOutstandingWithPaymentSection() {
         <div>
           <label className={LBL}>Limit</label>
           <select value={limit} onChange={e => setLimit(Number(e.target.value))} className={`${INPUT} cursor-pointer`}>
-            {[200, 500, 1000, 2000].map(n => <option key={n} value={n}>{n}</option>)}
+            {[200, 500, 1000, 2000, 5000, 10000, 15000, 20000].map(n => <option key={n} value={n}>{n}</option>)}
           </select>
         </div>
         <button onClick={loadData} disabled={loading}
@@ -1112,7 +1112,7 @@ function APListSection() {
         <div>
           <label className={LBL}>Limit</label>
           <select value={limit} onChange={e => setLimit(Number(e.target.value))} className={`${INPUT} cursor-pointer`}>
-            {[200, 500, 1000, 2000].map(n => <option key={n} value={n}>{n}</option>)}
+            {[200, 500, 1000, 2000, 5000, 10000, 15000, 20000].map(n => <option key={n} value={n}>{n}</option>)}
           </select>
         </div>
         <button onClick={loadData} disabled={loading}
