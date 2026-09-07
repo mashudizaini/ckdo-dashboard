@@ -291,6 +291,18 @@ export const pacApi = {
   },
   exportPurchasePlanReport: (planYear) => api.get("/dashboard/pac/purchase-plans/report/export", { params: { plan_year: planYear }, responseType: "blob" }),
 
+  // Purchase Plan Finished Good (Simulation) — parallel to Material above,
+  // different Excel template/content schema, kept in its own table.
+  listPurchasePlansFG:  (p)    => api.get("/dashboard/pac/purchase-plans-fg", { params: p }),
+  getPurchasePlanFG:    (id)   => api.get(`/dashboard/pac/purchase-plans-fg/${id}`),
+  upsertPurchasePlanFG: (body) => api.post("/dashboard/pac/purchase-plans-fg", body),
+  deletePurchasePlanFG: (id)   => api.delete(`/dashboard/pac/purchase-plans-fg/${id}`),
+  uploadPurchasePlanFGExcel: (file, planYear) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/dashboard/pac/purchase-plans-fg/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
+  },
+
   // Personnel Plan (Simulation)
   listPersonnelPlans:  (p)    => api.get("/dashboard/pac/personnel-plans", { params: p }),
   getPersonnelPlan:    (id)   => api.get(`/dashboard/pac/personnel-plans/${id}`),

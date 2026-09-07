@@ -2634,6 +2634,49 @@ const SIM_COLUMNS = {
     ],
   },
 
+  purchase_plan_fg: {
+    example: "Purchase Plan FG - 2026.xlsx",
+    signature: { cell: "A6", value: "[ Type ]", note: "checked per sheet, NOT cell A1 like Material's template — an \"_Export\" copy of this workbook often has a broken '#REF!' in A1 (a stale external-link artifact), but A6's label survives intact" },
+    metaFields: [
+      { cell: "C6",  name: "Type" },
+      { cell: "C9",  name: "Department" },
+      { cell: "C11", name: "Team Code" },
+      { cell: "D11", name: "Team Name" },
+      { cell: "T12", name: "Exchange Rate" },
+    ],
+    sections: [
+      {
+        label: "Item grid — Usage row",
+        startRow: 15,
+        columns: [
+          { col: "A",     name: "No", required: true },
+          { col: "B",     name: "Item Code", required: false },
+          { col: "C",     name: "Name", required: true },
+          { col: "D",     name: "Stock (as of Dec 31 prior year)", required: false },
+          { col: "E",     name: "(row label \"Usage\", not read)", required: false },
+          { col: "F – Q", name: "Jan – Dec Usage Quantity", required: false, note: "12 columns" },
+          { col: "R",     name: "1H Next Year Usage", required: false },
+          { col: "S",     name: "Usage Total", required: false },
+          { col: "T",     name: "Unit Price (Orig)", required: false },
+          { col: "U",     name: "Unit Price (IDR)", required: false },
+          { col: "V",     name: "Total Price (Rp)", required: false },
+        ],
+      },
+      {
+        label: "Order row (the row directly below each Usage row)",
+        columns: [
+          { col: "F – Q", name: "Jan – Dec Order Quantity", required: false, note: "12 columns" },
+          { col: "R",     name: "1H Next Year Order", required: false },
+          { col: "S",     name: "Order Total", required: false },
+        ],
+      },
+    ],
+    notes: [
+      "A row counts as the Order row only if its own No (A) AND Name (C) are BOTH blank — same position-based pairing as Material's Received row.",
+      "A row whose No (A) is the literal text \"Total\" (plus the Order row directly below it) is a grand-total summary, not a real item, and is skipped entirely.",
+    ],
+  },
+
   sales_plan: {
     example: "(S1) Sales plan_Value.xlsx / (S1) Sales plan_Value_CMO&Export.xlsx",
     signature: { cell: "A1", value: "[ S1 ]", note: "checked per sheet — a workbook can hold multiple data sheets (e.g. one per Type: CMO/Export/Service Agreement), each imported as its own plan. Sheets that aren't a data sheet (e.g. an \"Index_Team Code\" reference sheet some exports include as sheet 1) are skipped automatically." },
@@ -2841,6 +2884,7 @@ const SIM_COLUMNS = {
 /* ─── Section: Simulation ──────────────────────────── */
 const SIM_SUBTABS = [
   { id: "data_collection",  label: "Purchase Plan",     icon: FileText },
+  { id: "purchase_plan_fg", label: "Purchase Plan (FG)", icon: FileText },
   { id: "sales_plan",       label: "Sales Plan",        icon: BarChart },
   { id: "personnel_plan",   label: "Personnel Plan",    icon: Users },
   { id: "manufacture_plan", label: "Manufacture Plan",  icon: Factory },
@@ -2870,6 +2914,7 @@ function SimulationSection({ year }) {
         </div>
       </div>
       {subTab === "data_collection" && <PurchasePlanPanel year={year} />}
+      {subTab === "purchase_plan_fg" && <PurchasePlanFGPanel year={year} />}
       {subTab === "sales_plan"      && <SalesPlanPanel year={year} />}
       {subTab === "personnel_plan"  && <PersonnelPlanPanel year={year} />}
       {subTab === "manufacture_plan" && <ManufacturePlanPanel year={year} />}
@@ -3284,6 +3329,372 @@ function PurchasePlanTable({ items, editable, onUpdateItem, onUpdateMonth, onRem
                   </td>
                 ))}
                 <td className={`${TD} font-bold text-sky-400`}>{fmtNum(item.received_total)}</td>
+              </tr>
+          ]))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/* ══ Purchase Plan (Finished Good) Panel ══════════════════════════════════════ */
+/* Field set + Excel format reference: sumber/Purchase Plan FG - 2026.xlsx —
+   parallel to Purchase Plan (Material) above, but a genuinely different
+   template: meta values sit one column earlier (C not D), exchange rate is
+   at T12 not X12, and each item is a "Usage" row (demand forecast) paired
+   with an "Order" row (what to actually purchase) instead of Material's
+   "Order"/"Received". Kept as its own panel/table/backend table rather than
+   folded into the Material one — see purchase_plan_fg_service.py's
+   docstring for why (different content schema, and a real data-collision
+   risk if both shared plan_category/department/team_code keys). */
+
+const DEFAULT_PP_FG_ITEM = () => ({
+  no: 1, item_code: "", name: "New Item", stock: null,
+  usage: Array(12).fill(0), usage_1h_next: 0, usage_total: 0,
+  order: Array(12).fill(0), order_1h_next: 0, order_total: 0,
+  unit_price_orig: 0, unit_price_idr: 0, total_price: 0,
+});
+
+const DEFAULT_PP_FG_CONTENT = () => ({
+  meta: { type: "", department: "", team_code: "", team_name: "", exchange_rate: 0 },
+  items: [DEFAULT_PP_FG_ITEM()],
+});
+
+function PurchasePlanFGPanel({ year }) {
+  const [plans, setPlans] = useState([]);
+  const [selectedPlan, setSelectedPlan] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const [form, setForm] = useState({
+    id: null,
+    plan_year: year,
+    plan_category: "Local",
+    department: "",
+    team_code: "",
+    team_name: "",
+    content: DEFAULT_PP_FG_CONTENT(),
+    status: "draft",
+  });
+
+  const loadPlans = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await pacApi.listPurchasePlansFG({ plan_year: year });
+      if (res.success) setPlans(res.data || []);
+    } catch {
+      setPlans([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [year]);
+
+  useEffect(() => { loadPlans(); }, [loadPlans]);
+
+  useEffect(() => {
+    if (!showForm && plans.length > 0 && !plans.some(p => p.id === selectedPlan?.id)) {
+      setSelectedPlan(plans[0]);
+    }
+  }, [plans, showForm, selectedPlan]);
+
+  const resetForm = () => {
+    setForm({
+      id: null,
+      plan_year: year,
+      plan_category: "Local",
+      department: "",
+      team_code: "",
+      team_name: "",
+      content: DEFAULT_PP_FG_CONTENT(),
+      status: "draft",
+    });
+    setShowForm(false);
+  };
+
+  const openCreate = () => {
+    resetForm();
+    setShowForm(true);
+  };
+
+  const openEdit = (plan) => {
+    setForm({
+      id: plan.id,
+      plan_year: plan.plan_year,
+      plan_category: plan.plan_category,
+      department: plan.department,
+      team_code: plan.team_code,
+      team_name: plan.team_name,
+      content: plan.content || DEFAULT_PP_FG_CONTENT(),
+      status: plan.status,
+    });
+    setShowForm(true);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await pacApi.upsertPurchasePlanFG({ ...form });
+      if (res.success) {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+        await loadPlans();
+        setShowForm(false);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateItem = (idx, patch) => {
+    setForm(prev => {
+      const items = [...prev.content.items];
+      items[idx] = { ...items[idx], ...patch };
+      return { ...prev, content: { ...prev.content, items } };
+    });
+  };
+
+  const updateItemMonth = (idx, field, monthIdx, val) => {
+    setForm(prev => {
+      const items = [...prev.content.items];
+      const arr = [...items[idx][field]];
+      arr[monthIdx] = Number(val) || 0;
+      const total = arr.reduce((a, b) => a + (Number(b) || 0), 0);
+      items[idx] = { ...items[idx], [field]: arr, [`${field}_total`]: total };
+      return { ...prev, content: { ...prev.content, items } };
+    });
+  };
+
+  const addItem = () => {
+    setForm(prev => {
+      const items = [...prev.content.items];
+      items.push({ ...DEFAULT_PP_FG_ITEM(), no: items.length + 1 });
+      return { ...prev, content: { ...prev.content, items } };
+    });
+  };
+
+  const removeItem = (idx) => {
+    setForm(prev => ({
+      ...prev,
+      content: { ...prev.content, items: prev.content.items.filter((_, i) => i !== idx) },
+    }));
+  };
+
+  const handleUploadFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const res = await pacApi.uploadPurchasePlanFGExcel(file, year);
+      if (res.success) {
+        const summary = res.imported.map(x => `${x.category} (${x.items} items)`).join(", ");
+        alert(`Import successful: ${summary}`);
+        await loadPlans();
+      } else {
+        alert(res.error || "Import failed");
+      }
+    } catch (e) {
+      alert("Import error: " + (e?.detail || e?.message || e));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const fmtNum = (v) => Number(v || 0).toLocaleString();
+
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+      <div className="px-5 py-3 border-b border-gray-800 bg-gray-800/40 flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-200">Purchase Plan Data (Finished Good)</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Input Purchase Plan finished good · {year}</p>
+        </div>
+        <div className="flex gap-2">
+          {!showForm ? (
+            <>
+              <button onClick={openCreate} className={BTN_SM("violet")}><Plus size={11} /> New Plan</button>
+              <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleUploadFile} />
+              <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className={BTN_SM("teal")}>
+                {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                Upload Excel
+              </button>
+              {selectedPlan && (
+                <button onClick={() => openEdit(selectedPlan)} className={BTN_SM("indigo")}><Edit3 size={11} /> Edit</button>
+              )}
+            </>
+          ) : (
+            <>
+              <button onClick={save} disabled={saving} className={BTN_SM("green")}>
+                {saving ? <Loader2 size={11} className="animate-spin" /> : saved ? <CheckCircle size={11} /> : <Save size={11} />}
+                {saved ? "Saved!" : "Save"}
+              </button>
+              <button onClick={resetForm} className={BTN_SM("gray")}><X size={11} /> Cancel</button>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="p-5">
+        <SimColumnsReference cfg={SIM_COLUMNS.purchase_plan_fg} />
+        {loading ? (
+          <div className="flex justify-center py-16 text-gray-500 text-sm gap-2"><Loader2 size={16} className="animate-spin" /> Loading…</div>
+        ) : !showForm ? (
+          <>
+            <div className="mb-4">
+              <label className="text-xs text-gray-500 mb-1 block">Select Purchase Plan (FG):</label>
+              <select value={selectedPlan?.id || ""} onChange={e => {
+                const plan = plans.find(p => String(p.id) === e.target.value);
+                setSelectedPlan(plan || null);
+              }} className={`${SELECT} w-full max-w-md`}>
+                <option value="">-- Select Purchase Plan --</option>
+                {plans.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.plan_year} - {p.department || "(no dept)"} / {p.team_name || "(no team)"} [{p.plan_category}]
+                  </option>
+                ))}
+              </select>
+            </div>
+            {selectedPlan && selectedPlan.content && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3 text-xs text-gray-400">
+                  <span className="px-2 py-1 rounded bg-violet-500/10 border border-violet-500/30 text-violet-300 font-medium">{selectedPlan.plan_category}</span>
+                  {selectedPlan.content.meta?.type && <span className="px-2 py-1 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-medium">{selectedPlan.content.meta.type}</span>}
+                  <span className="text-gray-500">{selectedPlan.department} / {selectedPlan.team_code} - {selectedPlan.team_name}</span>
+                  {!!selectedPlan.content.meta?.exchange_rate && <span className="text-gray-500">Kurs: {fmtNum(selectedPlan.content.meta.exchange_rate)}</span>}
+                </div>
+                <PurchasePlanFGTable items={selectedPlan.content.items || []} editable={false} />
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+              <Field label="Plan Year">
+                <input type="number" className={`${INP}`} value={form.plan_year} onChange={e => setForm({ ...form, plan_year: Number(e.target.value) })} />
+              </Field>
+              <Field label="Category">
+                <select className={`${SELECT}`} value={form.plan_category} onChange={e => setForm({ ...form, plan_category: e.target.value })}>
+                  {PP_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </Field>
+              <Field label="Department">
+                <input className={`${INP}`} value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} placeholder="e.g. Strategy Development" />
+              </Field>
+              <Field label="Team Code">
+                <input className={`${INP}`} value={form.team_code} onChange={e => setForm({ ...form, team_code: e.target.value })} placeholder="e.g. 61" />
+              </Field>
+              <Field label="Team Name">
+                <input className={`${INP}`} value={form.team_name} onChange={e => setForm({ ...form, team_name: e.target.value })} placeholder="e.g. Global Business" />
+              </Field>
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="text-xs text-gray-500">Type:</label>
+              <input className={`${INP} max-w-xs`} value={form.content.meta?.type || ""}
+                onChange={e => setForm({ ...form, content: { ...form.content, meta: { ...form.content.meta, type: e.target.value } } })}
+                placeholder="e.g. Importation Product - Export" />
+              <label className="text-xs text-gray-500">Kurs USD/IDR:</label>
+              <input type="number" className={`${INP} max-w-[120px]`} value={form.content.meta?.exchange_rate || 0}
+                onChange={e => setForm({ ...form, content: { ...form.content, meta: { ...form.content.meta, exchange_rate: Number(e.target.value) || 0 } } })} />
+              <label className="text-xs text-gray-500">Status:</label>
+              <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className={`${SELECT}`}>
+                <option value="draft">Draft</option>
+                <option value="final">Final</option>
+              </select>
+            </div>
+            <PurchasePlanFGTable
+              items={form.content.items || []}
+              editable={true}
+              onUpdateItem={updateItem}
+              onUpdateMonth={updateItemMonth}
+              onRemove={removeItem}
+            />
+            <button onClick={addItem} className={BTN_SM("violet")}><Plus size={11} /> Add Item</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PurchasePlanFGTable({ items, editable, onUpdateItem, onUpdateMonth, onRemove }) {
+  const TH = "sticky top-0 z-10 bg-gray-800 px-2 py-1.5 text-left text-gray-400 border border-gray-700 font-semibold whitespace-nowrap text-center";
+  const TD = "px-2 py-1 border border-gray-700 text-right font-mono text-xs";
+  const fmtNum = (v) => Number(v || 0).toLocaleString();
+
+  return (
+    <div className="overflow-auto border border-gray-700 rounded-lg" style={{ maxHeight: "21rem" }}>
+      <table className="w-full border-collapse text-xs" style={{ minWidth: 1500 }}>
+        <thead>
+          <tr className="bg-gray-800/80">
+            <th className={`${TH} w-16`}>No</th>
+            <th className={TH}>Item Code</th>
+            <th className={TH}>Name</th>
+            <th className={TH}>Stock</th>
+            <th className={`${TH} w-14`}></th>
+            {PP_MONTHS.map(m => <th key={m} className={`${TH} w-14`}>{m}</th>)}
+            <th className={TH}>Total</th>
+            <th className={TH}>Unit Price (Orig)</th>
+            <th className={TH}>Unit Price (IDR)</th>
+            <th className={TH}>Total Price (Rp)</th>
+            {editable && <th className={`${TH} w-10`}></th>}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item, idx) => ([
+              <tr key={`${idx}-usage`} className="border-b border-gray-800 hover:bg-gray-800/30">
+                <td className={`${TD} text-center`} rowSpan={2}>{item.no}</td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input className={`${INP} !text-xs`} value={item.item_code} onChange={e => onUpdateItem(idx, { item_code: e.target.value })} />
+                            : <span className="text-gray-300">{item.item_code}</span>}
+                </td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input className={`${INP} !text-xs`} value={item.name} onChange={e => onUpdateItem(idx, { name: e.target.value })} />
+                            : <span className="text-gray-300">{item.name}</span>}
+                </td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input type="number" className={`${INP} !text-xs`} value={item.stock ?? ""} onChange={e => onUpdateItem(idx, { stock: e.target.value === "" ? null : Number(e.target.value) })} />
+                            : <span className="text-gray-400">{item.stock ?? "—"}</span>}
+                </td>
+                <td className="px-2 py-1 border border-gray-700 text-center text-violet-400 font-semibold">Usage</td>
+                {PP_MONTHS.map((m, mi) => (
+                  <td key={m} className={TD}>
+                    {editable
+                      ? <input type="number" className={`${INP} !text-center !text-xs font-mono`} value={item.usage[mi]} onChange={e => onUpdateMonth(idx, "usage", mi, e.target.value)} />
+                      : fmtNum(item.usage[mi])}
+                  </td>
+                ))}
+                <td className={`${TD} font-bold text-violet-400`}>{fmtNum(item.usage_total)}</td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input type="number" className={`${INP} !text-xs`} value={item.unit_price_orig} onChange={e => onUpdateItem(idx, { unit_price_orig: Number(e.target.value) || 0 })} />
+                            : <span className="text-gray-300 font-mono">{fmtNum(item.unit_price_orig)}</span>}
+                </td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input type="number" className={`${INP} !text-xs`} value={item.unit_price_idr} onChange={e => onUpdateItem(idx, { unit_price_idr: Number(e.target.value) || 0 })} />
+                            : <span className="text-gray-300 font-mono">{fmtNum(item.unit_price_idr)}</span>}
+                </td>
+                <td className="px-2 py-1 border border-gray-700" rowSpan={2}>
+                  {editable ? <input type="number" className={`${INP} !text-xs`} value={item.total_price} onChange={e => onUpdateItem(idx, { total_price: Number(e.target.value) || 0 })} />
+                            : <span className="text-sky-400 font-mono font-bold">{fmtNum(item.total_price)}</span>}
+                </td>
+                {editable && (
+                  <td className="px-2 py-1 border border-gray-700 text-center" rowSpan={2}>
+                    <button onClick={() => onRemove(idx)} className={BTN_SM("red")}><Trash2 size={9} /></button>
+                  </td>
+                )}
+              </tr>,
+              <tr key={`${idx}-order`} className="border-b border-gray-800 hover:bg-gray-800/30">
+                <td className="px-2 py-1 border border-gray-700 text-center text-sky-400 font-semibold">Order</td>
+                {PP_MONTHS.map((m, mi) => (
+                  <td key={m} className={TD}>
+                    {editable
+                      ? <input type="number" className={`${INP} !text-center !text-xs font-mono`} value={item.order[mi]} onChange={e => onUpdateMonth(idx, "order", mi, e.target.value)} />
+                      : fmtNum(item.order[mi])}
+                  </td>
+                ))}
+                <td className={`${TD} font-bold text-sky-400`}>{fmtNum(item.order_total)}</td>
               </tr>
           ]))}
         </tbody>

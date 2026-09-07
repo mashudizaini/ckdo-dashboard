@@ -18,6 +18,7 @@ import app.models.business_plan  # noqa: F401
 import app.models.business_plan_setup  # noqa: F401
 import app.models.sales_plan  # noqa: F401
 import app.models.purchase_plan  # noqa: F401
+import app.models.purchase_plan_fg  # noqa: F401
 import app.models.personnel_plan  # noqa: F401
 import app.models.manufacture_plan  # noqa: F401
 import app.models.investment_plan  # noqa: F401
