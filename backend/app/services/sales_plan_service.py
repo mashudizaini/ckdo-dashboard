@@ -115,24 +115,26 @@ class SalesPlanService:
     async def import_excel(self, db: AsyncSession, file_bytes: bytes, plan_year: int, username: str,
                             sheets: Optional[str] = None) -> dict:
         """Parse an uploaded Excel matching the "(S1) Sales plan_Value.xlsx"
-        template family — sheet-agnostic, like every other PAC Simulation
-        upload: any worksheet whose A1 is "[ S1 ]" is read as one plan (one
-        sheet = one plan), everything else (e.g. an "Index_Team Code"
-        reference sheet some exports carry as sheet 1) is skipped. Blindly
-        reading wb.worksheets[0] used to be this file's behavior and broke
-        on any workbook where the first sheet isn't the data sheet — it
-        would silently parse a lookup table as sales figures and 500 trying
-        to save a numeric Team Code as the text `department` column.
+        OR "Sales plan_U_....xlsx" (S2/Unit) template families —
+        sheet-agnostic, like every other PAC Simulation upload: any
+        worksheet whose A1 is "[ S1 ]" (Value) or "[ S2 ]" (Unit) is read
+        as one plan (one sheet = one plan), everything else (e.g. an
+        "Index_Team Code" reference sheet some exports carry as sheet 1)
+        is skipped. Blindly reading wb.worksheets[0] used to be this file's
+        behavior and broke on any workbook where the first sheet isn't the
+        data sheet — it would silently parse a lookup table as sales
+        figures and 500 trying to save a numeric Team Code as the text
+        `department` column.
 
         `sheets` optionally narrows which tabs even get looked at — a
         1-based spec like "1", "1-2", or "1,3,5-7", counted among
-        *recognized* ("[ S1 ]") data sheets only, in tab order — a leading
-        non-data reference tab does NOT count as sheet 1. None/blank means
-        every recognized sheet is considered, same as before this
+        *recognized* ("[ S1 ]"/"[ S2 ]") data sheets only, in tab order — a
+        leading non-data reference tab does NOT count as sheet 1. None/blank
+        means every recognized sheet is considered, same as before this
         parameter existed.
 
-        Two header layouts exist in the wild, detected per-sheet from
-        row 14 col B:
+        Value ("[ S1 ]") — two header layouts exist in the wild, detected
+        per-sheet from row 14 col B:
           - "Local" layout (col B is anything other than "Country"):
             No, Product, Jan-Dec (D-O), Total Value (P), Total Unit (Q),
             Price (R) — one currency.
@@ -143,7 +145,28 @@ class SalesPlanService:
             priced in USD converted to IDR.
         Both normalize to the same stored row shape: [no, country, customer,
         product, jan..dec, total_value, total_unit, price_usd, price_idr]
-        (20 items) — Local rows carry "" for country/customer/price_usd."""
+        (20 items) — Local rows carry "" for country/customer/price_usd.
+
+        Unit ("[ S2 ]") — a genuinely different, simpler template (no
+        Value/Price columns at all, monthly cells are a plain unit
+        quantity), verified live against "Sales plan_U_National_Private.
+        xlsx". Meta cell positions are identical to Value's (C6/C8/C10/C12/
+        D12), but the grid is shifted one column right vs Value's Local
+        layout by an extra "Unit (Vial/Box)" column right after Product:
+          - "Local" layout: No(A), Product(B), [C blank], Unit(D),
+            Jan-Dec (E-P), Total (Q).
+          - "Export/CMO" layout (col B == "Country", same detection cell as
+            Value): No(A), Country(B), Customer(C), Product(D), Unit(E),
+            Jan-Dec (F-Q), Total (R). NOT verified against a real file
+            (only a Local-layout Unit file was available) — extrapolated
+            from the same one-column insertion pattern confirmed for the
+            Local layout; revisit if a real Export/CMO Unit upload ever
+            errors here.
+        Normalizes to [no, country, customer, product, unit, jan..dec,
+        total] (17 items) — a deliberately different, narrower shape than
+        Value's 20-item row (no value/price concept exists in this
+        template), so get_gross_sales_report_data (which only ever reads
+        plan_type == "value" rows) is unaffected."""
         import io
         from openpyxl import load_workbook
 
@@ -152,15 +175,21 @@ class SalesPlanService:
         except Exception as e:
             return {"success": False, "error": f"Could not read Excel file: {e}"}
 
+        SHEET_MARKERS = {"[ s1 ]": "value", "[ s2 ]": "unit"}
+
         # `sheets` numbers count among *recognized* Sales Plan tabs only
-        # (A1 == "[ S1 ]"), not raw tab position — these workbooks commonly
-        # carry a leading non-data reference tab (e.g. "Index_Team Code")
-        # that a user counting tabs by eye would naturally skip too, so
-        # numbering against raw tab position was off by however many such
-        # tabs came first (reported: "sheets 2-3" requested, "sheets 1-2"
-        # — i.e. the two data sheets right after the skipped leading
-        # tab — actually processed).
-        data_sheets = [ws for ws in wb.worksheets if str(ws.cell(row=1, column=1).value or "").strip() == "[ S1 ]"]
+        # (A1 == "[ S1 ]" or "[ S2 ]"), not raw tab position — these
+        # workbooks commonly carry a leading non-data reference tab (e.g.
+        # "Index_Team Code") that a user counting tabs by eye would
+        # naturally skip too, so numbering against raw tab position was off
+        # by however many such tabs came first (reported: "sheets 2-3"
+        # requested, "sheets 1-2" — i.e. the two data sheets right after the
+        # skipped leading tab — actually processed).
+        data_sheets = []
+        for ws in wb.worksheets:
+            plan_type = SHEET_MARKERS.get(str(ws.cell(row=1, column=1).value or "").strip().lower())
+            if plan_type:
+                data_sheets.append((ws, plan_type))
 
         try:
             allowed_sheet_nums = self._parse_sheet_range(sheets, len(data_sheets))
@@ -184,11 +213,13 @@ class SalesPlanService:
             except (TypeError, ValueError):
                 return 0
 
-        headers = ["No", "Country", "Customer", "Product", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total Value", "Total Unit", "Price (USD)", "Price (IDR)"]
+        VALUE_HEADERS = ["No", "Country", "Customer", "Product", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total Value", "Total Unit", "Price (USD)", "Price (IDR)"]
+        UNIT_HEADERS = ["No", "Country", "Customer", "Product", "Unit", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Total"]
 
         imported = []
-        for sheet_num, ws in enumerate(data_sheets, start=1):
+        for sheet_num, (ws, plan_type) in enumerate(data_sheets, start=1):
             if allowed_sheet_nums is not None and sheet_num not in allowed_sheet_nums:
                 continue
 
@@ -208,56 +239,84 @@ class SalesPlanService:
             is_export_layout = str(ws.cell(row=14, column=2).value or "").strip() == "Country"
 
             rows = []
-            for r in range(16, ws.max_row + 1):
-                no = ws.cell(row=r, column=1).value
-                if is_export_layout:
-                    country  = ws.cell(row=r, column=2).value
-                    customer = ws.cell(row=r, column=3).value
-                    product  = ws.cell(row=r, column=4).value
-                    if no is None or product is None:
-                        continue
-                    months = [_num(ws.cell(row=r, column=c).value) for c in range(5, 17)]  # E-P
-                    total_value = _num(ws.cell(row=r, column=17).value)
-                    total_unit  = _num(ws.cell(row=r, column=18).value)
-                    price_usd   = ws.cell(row=r, column=19).value
-                    price_usd   = price_usd if isinstance(price_usd, (int, float)) else ""
-                    price_idr   = ws.cell(row=r, column=20).value
-                    price_idr   = price_idr if isinstance(price_idr, (int, float)) else ""
-                    rows.append([no, str(country or ""), str(customer or ""), str(product),
-                                 *months, total_value, total_unit, price_usd, price_idr])
-                else:
-                    product = ws.cell(row=r, column=2).value
-                    if no is None or product is None:
-                        continue
-                    months = [_num(ws.cell(row=r, column=c).value) for c in range(4, 16)]  # D-O
-                    total_value = _num(ws.cell(row=r, column=16).value)
-                    total_unit  = _num(ws.cell(row=r, column=17).value)
-                    price       = ws.cell(row=r, column=18).value
-                    price       = price if isinstance(price, (int, float)) else ""
-                    rows.append([no, "", "", str(product), *months, total_value, total_unit, "", price])
+            if plan_type == "unit":
+                # Verified live against "Sales plan_U_National_Private.
+                # xlsx" (Local layout only — Export/CMO branch below is
+                # extrapolated by the same one-column-shift pattern, not
+                # independently verified).
+                for r in range(16, ws.max_row + 1):
+                    no = ws.cell(row=r, column=1).value
+                    if is_export_layout:
+                        country  = ws.cell(row=r, column=2).value
+                        customer = ws.cell(row=r, column=3).value
+                        product  = ws.cell(row=r, column=4).value
+                        if no is None or product is None:
+                            continue
+                        unit    = ws.cell(row=r, column=5).value or ""
+                        months  = [_num(ws.cell(row=r, column=c).value) for c in range(6, 18)]  # F-Q
+                        total   = _num(ws.cell(row=r, column=18).value)
+                        rows.append([no, str(country or ""), str(customer or ""), str(product),
+                                     str(unit), *months, total])
+                    else:
+                        product = ws.cell(row=r, column=2).value
+                        if no is None or product is None:
+                            continue
+                        unit   = ws.cell(row=r, column=4).value or ""
+                        months = [_num(ws.cell(row=r, column=c).value) for c in range(5, 17)]  # E-P
+                        total  = _num(ws.cell(row=r, column=17).value)
+                        rows.append([no, "", "", str(product), str(unit), *months, total])
+            else:
+                for r in range(16, ws.max_row + 1):
+                    no = ws.cell(row=r, column=1).value
+                    if is_export_layout:
+                        country  = ws.cell(row=r, column=2).value
+                        customer = ws.cell(row=r, column=3).value
+                        product  = ws.cell(row=r, column=4).value
+                        if no is None or product is None:
+                            continue
+                        months = [_num(ws.cell(row=r, column=c).value) for c in range(5, 17)]  # E-P
+                        total_value = _num(ws.cell(row=r, column=17).value)
+                        total_unit  = _num(ws.cell(row=r, column=18).value)
+                        price_usd   = ws.cell(row=r, column=19).value
+                        price_usd   = price_usd if isinstance(price_usd, (int, float)) else ""
+                        price_idr   = ws.cell(row=r, column=20).value
+                        price_idr   = price_idr if isinstance(price_idr, (int, float)) else ""
+                        rows.append([no, str(country or ""), str(customer or ""), str(product),
+                                     *months, total_value, total_unit, price_usd, price_idr])
+                    else:
+                        product = ws.cell(row=r, column=2).value
+                        if no is None or product is None:
+                            continue
+                        months = [_num(ws.cell(row=r, column=c).value) for c in range(4, 16)]  # D-O
+                        total_value = _num(ws.cell(row=r, column=16).value)
+                        total_unit  = _num(ws.cell(row=r, column=17).value)
+                        price       = ws.cell(row=r, column=18).value
+                        price       = price if isinstance(price, (int, float)) else ""
+                        rows.append([no, "", "", str(product), *months, total_value, total_unit, "", price])
 
             if not rows:
                 continue
 
+            headers = UNIT_HEADERS if plan_type == "unit" else VALUE_HEADERS
             content = {"headers": headers, "rows": rows, "meta": meta}
             payload = {
                 "plan_year":  plan_year,
                 "department": meta["department"],
                 "team_code":  str(meta["team_code"]),
                 "team_name":  meta["team_name"],
-                "plan_type":  "value",
+                "plan_type":  plan_type,
                 "content":    content,
                 "status":     "draft",
             }
             result = await self.upsert_sales_plan(db, payload, username)
             if result["success"]:
-                imported.append({"sheet": ws.title, "rows": len(rows), "id": result["data"]["id"]})
+                imported.append({"sheet": ws.title, "plan_type": plan_type, "rows": len(rows), "id": result["data"]["id"]})
 
         if not imported:
             scope = f" in the selected sheet(s) ({sheets})" if allowed_sheet_nums is not None else ""
             return {"success": False, "error": f"No recognizable data sheets found{scope} — none match the Sales "
-                                                 "Plan template layout (expected '[ S1 ]' in cell A1 of each data "
-                                                 "sheet)."}
+                                                 "Plan template layout (expected '[ S1 ]' Value or '[ S2 ]' Unit in "
+                                                 "cell A1 of each data sheet)."}
         return {"success": True, "imported": imported, "rows_imported": sum(x["rows"] for x in imported)}
 
     @staticmethod
