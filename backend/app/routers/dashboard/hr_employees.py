@@ -699,16 +699,26 @@ def _apply_employee_filters(
             Employee.job_title.ilike(term)
         )
     if department:
-        if department in DEPT_GROUPS:
-            # One of the 4 canonical Employee Summary groups (e.g. drilling
+        if department == "Board of Directors":
+            # Not a raw Employee.department value at all — this group is
+            # routed by team == "Director" (see _group_department). Drilling
+            # down from the Summary's "Board of Directors" row must match the
+            # same 3 people it counted, not zero rows.
+            q = q.where(Employee.team == "Director")
+        elif department in DEPT_GROUPS:
+            # One of the canonical Employee Summary groups (e.g. drilling
             # down from the summary view) — match every raw department value
             # that rolls up into this group, not just an exact string match.
             # Needed both for case-duplicates ("Plant"/"PLANT") and for
-            # misfiled raw values ("Director", "Validation", ...) that group
-            # display labels don't literally match (e.g. "Strategy &
-            # Development" vs the raw "Strategy Development").
+            # misfiled raw values ("Validation", ...) that group display
+            # labels don't literally match. Also excludes team == "Director"
+            # rows even when their raw department is this group, since those
+            # now belong to "Board of Directors" instead.
             raw_uppers = [k for k, v in _DEPT_GROUP_MAP.items() if v == department]
-            q = q.where(func.upper(Employee.department).in_(raw_uppers))
+            q = q.where(
+                func.upper(Employee.department).in_(raw_uppers),
+                (Employee.team.is_(None) | (Employee.team != "Director")),
+            )
         else:
             # Case-insensitive — the source Excel has case duplicates for the
             # same department ("Plant" / "PLANT"); an exact match would
@@ -1298,11 +1308,22 @@ def _normalize_dept(raw: Optional[str]) -> str:
 # dropped out of every DEPT_GROUPS-based query (Summary headcount, drill-down
 # filters) — always add a canonical-label self-mapping key here, don't rely
 # solely on the misfiled-value aliases.
-DEPT_GROUPS = ["Administration", "Sales & Marketing", "Strategy & Development", "Plant"]
+#
+# "Board of Directors" (2026-09-08): President Director / Plant Director are
+# stored with team="Director" and a business-unit department (Administration/
+# Plant) inherited from the earlier migration above — but per the Organization
+# Chart (org_structure_nodes), the President Director sits at the very top,
+# above every department (only the Board of Commissioners outranks them), and
+# department Directors (e.g. Plant's Jin Wook Moon) are peers of that
+# department's General Manager, not its subordinates. Employee Summary used
+# to fold all 3 Director-team rows into "Administration"/"Plant" by raw
+# department, burying the company's top position inside a department
+# headcount — _group_department now special-cases team == "Director" to its
+# own canonical group, listed first so it renders above the 4 departments.
+DEPT_GROUPS = ["Board of Directors", "Administration", "Sales & Marketing", "Strategy & Development", "Plant"]
 
 _DEPT_GROUP_MAP = {
     "ADMINISTRATION":         "Administration",
-    "DIRECTOR":               "Administration",
     "SALES & MARKETING":      "Sales & Marketing",
     "MKT & BD":               "Sales & Marketing",
     "STRATEGY DEVELOPMENT":   "Strategy & Development",
@@ -1319,10 +1340,14 @@ def _team_sort_key(team: str):
     return (0, "") if team == "General Manager" else (1, team)
 
 
-def _group_department(raw: Optional[str]) -> Optional[str]:
-    """Raw Employee.department value -> one of the 4 canonical DEPT_GROUPS,
+def _group_department(raw: Optional[str], team: Optional[str] = None) -> Optional[str]:
+    """Raw Employee.department/team -> one of the canonical DEPT_GROUPS,
     or None to exclude (blank/numeric-corrupted rows — same exclusion
-    _normalize_dept already applied)."""
+    _normalize_dept already applied). team == "Director" always routes to
+    "Board of Directors" regardless of the raw department value — see the
+    "Board of Directors" note above DEPT_GROUPS."""
+    if team and team.strip() == "Director":
+        return "Board of Directors"
     if not raw or raw.strip().isdigit():
         return None
     return _DEPT_GROUP_MAP.get(raw.strip().upper())
@@ -1333,7 +1358,7 @@ async def get_summary_by_year(
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Headcount by department (grouped into the 4 canonical DEPT_GROUPS) >
+    """Headcount by department (grouped into the canonical DEPT_GROUPS) >
     division > team, Beginning/Ending per year — same "active as of a date"
     windowing used by /turnover-summary and /monthly-summary. Division/team
     rows mirror /summary/by-month's tree (only some departments have them)."""
@@ -1343,7 +1368,7 @@ async def get_summary_by_year(
         .where(Employee.date_of_joining.isnot(None))
     )
     emps = [
-        (_group_department(d), (v or "").strip() or None, (t or "").strip() or None, j, r)
+        (_group_department(d, t), (v or "").strip() or None, (t or "").strip() or None, j, r)
         for d, v, t, j, r in rows_q.fetchall()
     ]
     emps = [(d, v, t, j, r) for d, v, t, j, r in emps if d is not None]
@@ -1429,7 +1454,7 @@ async def get_summary_by_month(
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Headcount by department (grouped into the 4 canonical DEPT_GROUPS) >
+    """Headcount by department (grouped into the canonical DEPT_GROUPS) >
     division > team, end-of-month snapshot for each month of the given year
     (default: current year). Division is only populated for some departments
     (currently just Plant) — departments without it go straight from
@@ -1443,7 +1468,7 @@ async def get_summary_by_month(
         .where(Employee.date_of_joining.isnot(None))
     )
     emps = [
-        (_group_department(d), (v or "").strip() or None, (t or "").strip() or None, j, r)
+        (_group_department(d, t), (v or "").strip() or None, (t or "").strip() or None, j, r)
         for d, v, t, j, r in rows_q.fetchall()
     ]
     emps = [(d, v, t, j, r) for d, v, t, j, r in emps if d is not None]
