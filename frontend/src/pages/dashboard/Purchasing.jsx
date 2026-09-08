@@ -481,6 +481,19 @@ function PurchaseHistorySection() {
     <input className={INPUT} value={f[key]} onChange={e => setF(p => ({ ...p, [key]: e.target.value }))} {...extra} />
   );
 
+  // Report title + the filters that scope the data — written as a header
+  // block into every Purchase History Excel export, so a downloaded file
+  // is self-describing even after it's been detached from the dashboard.
+  const phMeta = useMemo(() => ({
+    title: "Purchase History",
+    params: [
+      ["Date From", f.date_from || "All"],
+      ["Date To", f.date_to || "All"],
+      ["Organization", f.org_id ? (orgs.find(o => String(o.organization_id) === String(f.org_id))?.name || f.org_id) : "All"],
+      ["Material Type", f.material_type || "All"],
+    ],
+  }), [f, orgs]);
+
   return (
     <div className="space-y-3">
       {/* Filter Panel — no title/subtitle */}
@@ -566,14 +579,14 @@ function PurchaseHistorySection() {
       {/* Results */}
       {searched && (
         <div className="space-y-3">
-          {view === "detail"      && <PHDetailTable      data={results.detail?.data ?? []}           loading={loadingMap.detail}           error={results.detail?.error} />}
-          {view === "detail-qty"  && <PHDetailByQtyTable data={results["by-item"]?.data ?? []}       loading={loadingMap["by-item"]}       error={results["by-item"]?.error}       years={results["by-item"]?.years ?? []} />}
+          {view === "detail"      && <PHDetailTable      data={results.detail?.data ?? []}           loading={loadingMap.detail}           error={results.detail?.error} meta={phMeta} />}
+          {view === "detail-qty"  && <PHDetailByQtyTable data={results["by-item"]?.data ?? []}       loading={loadingMap["by-item"]}       error={results["by-item"]?.error}       years={results["by-item"]?.years ?? []} meta={phMeta} />}
           {view === "summary"     && <PHSummaryView      data={results.detail?.data ?? []}           loading={loadingMap.detail}           error={results.detail?.error} />}
           {view === "graph"       && <PHGraphView        data={results.detail?.data ?? []}           loading={loadingMap.detail}           error={results.detail?.error}
                                                          byItemData={results["by-item"]?.data ?? []}  byItemYears={results["by-item"]?.years ?? []}
                                                          bySupData={results["by-supplier"]?.data ?? []} bySupYears={results["by-supplier"]?.years ?? []} />}
-          {view === "by-item"     && <PHByItemTable      data={results["by-item"]?.data ?? []}       loading={loadingMap["by-item"]}       error={results["by-item"]?.error}       years={results["by-item"]?.years ?? []} />}
-          {view === "by-supplier" && <PHBySupplierTable  data={results["by-supplier"]?.data ?? []}   loading={loadingMap["by-supplier"]}   error={results["by-supplier"]?.error}   years={results["by-supplier"]?.years ?? []} />}
+          {view === "by-item"     && <PHByItemTable      data={results["by-item"]?.data ?? []}       loading={loadingMap["by-item"]}       error={results["by-item"]?.error}       years={results["by-item"]?.years ?? []} meta={phMeta} />}
+          {view === "by-supplier" && <PHBySupplierTable  data={results["by-supplier"]?.data ?? []}   loading={loadingMap["by-supplier"]}   error={results["by-supplier"]?.error}   years={results["by-supplier"]?.years ?? []} meta={phMeta} />}
         </div>
       )}
     </div>
@@ -582,19 +595,48 @@ function PurchaseHistorySection() {
 
 /* ─── Shared: Excel download helper ─────────────── */
 
-function downloadExcel(filename, headers, rows, amountCols) {
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-  if (amountCols && amountCols.length > 0) {
-    const fmt = "#,##0.00";
-    for (let r = 1; r <= rows.length; r++) {
+// opts.meta = { title, params: [[label, value], ...] } — written as plain
+// rows above the header row (with a blank row as a buffer) so a PivotTable
+// built from the header row down doesn't accidentally swallow them.
+// opts.dateCols = column indices whose string values ("YYYY-MM-DD...")
+// get rewritten into real Excel date cells (type 'd', not text) — only a
+// true date cell lets Excel's PivotTable field list offer the Year/Month
+// date-grouping shown in the target screenshot; a text-formatted string
+// never does, no matter how it displays.
+function downloadExcel(filename, headers, rows, amountCols, opts = {}) {
+  const { meta = null, dateCols = [] } = opts;
+
+  const metaRows = meta
+    ? [[meta.title], ...meta.params.map(([label, value]) => [`${label}:`, value]), []]
+    : [];
+  const headerRowIdx = metaRows.length;
+
+  const ws = XLSX.utils.aoa_to_sheet([...metaRows, headers, ...rows]);
+
+  const numFmt  = "#,##0.00";
+  const dateFmt = "yyyy-mm-dd";
+  for (let i = 0; i < rows.length; i++) {
+    const r = headerRowIdx + 1 + i;
+    if (amountCols) {
       for (const c of amountCols) {
         const addr = XLSX.utils.encode_cell({ r, c });
         if (ws[addr] && typeof ws[addr].v === "number") {
-          ws[addr].z = fmt;
+          ws[addr].z = numFmt;
         }
       }
     }
+    for (const c of dateCols) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      const cell = ws[addr];
+      if (cell && typeof cell.v === "string" && /^\d{4}-\d{2}-\d{2}/.test(cell.v)) {
+        const [y, m, d] = cell.v.slice(0, 10).split("-").map(Number);
+        cell.v = new Date(y, m - 1, d);
+        cell.t = "d";
+        cell.z = dateFmt;
+      }
+    }
   }
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Data");
   XLSX.writeFile(wb, `${filename}.xlsx`);
@@ -698,7 +740,12 @@ const PH_DETAIL_COLS = [
 // reorder.
 const PH_DETAIL_AMOUNT_KEYS = ["quantity", "unit_price", "amount_orig", "amount_idr", "received_qty", "qty_outstanding"];
 
-function PHDetailTable({ data, loading, error }) {
+// Same index-by-key lookup as PH_DETAIL_AMOUNT_KEYS — these are the columns
+// rewritten into real Excel date cells (see downloadExcel's dateCols) so
+// Excel's PivotTable field list offers Year/Month grouping on them.
+const PH_DETAIL_DATE_KEYS = ["pr_date", "creation_date", "delivery_date", "receipt_date"];
+
+function PHDetailTable({ data, loading, error, meta }) {
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState({ key: null, dir: "asc" });
   const TH = "px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap cursor-pointer select-none hover:text-gray-300";
@@ -729,7 +776,8 @@ function PHDetailTable({ data, loading, error }) {
     // silently desync the export from the on-screen table again.
     const rows = sorted.map(r => PH_DETAIL_COLS.map(c => r[c.key]));
     const amountCols = PH_DETAIL_AMOUNT_KEYS.map(k => PH_DETAIL_COLS.findIndex(c => c.key === k));
-    downloadExcel("purchase_history_detail", PH_DETAIL_COLS.map(c => c.label), rows, amountCols);
+    const dateCols = PH_DETAIL_DATE_KEYS.map(k => PH_DETAIL_COLS.findIndex(c => c.key === k));
+    downloadExcel("purchase_history_detail", PH_DETAIL_COLS.map(c => c.label), rows, amountCols, { meta, dateCols });
   };
 
   return (
@@ -804,7 +852,7 @@ function PHDetailTable({ data, loading, error }) {
   );
 }
 
-function PHByItemTable({ data, years, loading, error }) {
+function PHByItemTable({ data, years, loading, error, meta }) {
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState(null);
   const [sortDir, setSortDir] = useState("asc");
@@ -845,7 +893,7 @@ function PHByItemTable({ data, years, loading, error }) {
     ]);
     const amtCols = [];
     for (let i = fixedCols.length; i < headers.length; i++) amtCols.push(i);
-    downloadExcel("purchase_history_by_item", headers, rows, amtCols);
+    downloadExcel("purchase_history_by_item", headers, rows, amtCols, { meta });
   };
 
   return (
@@ -916,7 +964,7 @@ function PHByItemTable({ data, years, loading, error }) {
   );
 }
 
-function PHBySupplierTable({ data, years, loading, error }) {
+function PHBySupplierTable({ data, years, loading, error, meta }) {
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState(null);
   const [sortDir, setSortDir] = useState("asc");
@@ -953,7 +1001,7 @@ function PHBySupplierTable({ data, years, loading, error }) {
     ]);
     const amtCols = [];
     for (let i = fixedCols.length; i < headers.length; i++) amtCols.push(i);
-    downloadExcel("purchase_history_by_supplier", headers, rows, amtCols);
+    downloadExcel("purchase_history_by_supplier", headers, rows, amtCols, { meta });
   };
 
   return (
@@ -1050,7 +1098,7 @@ function aggregatePHByQty(byItemData, years) {
   return [...map.values()];
 }
 
-function PHDetailByQtyTable({ data, years, loading, error }) {
+function PHDetailByQtyTable({ data, years, loading, error, meta }) {
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState(null);
   const [sortDir, setSortDir] = useState("asc");
@@ -1088,7 +1136,7 @@ function PHDetailByQtyTable({ data, years, loading, error }) {
     ]);
     const amtCols = [];
     for (let i = fixedCols.length; i < headers.length; i++) amtCols.push(i);
-    downloadExcel("purchase_history_detail_by_qty", headers, rows, amtCols);
+    downloadExcel("purchase_history_detail_by_qty", headers, rows, amtCols, { meta });
   };
 
   return (
