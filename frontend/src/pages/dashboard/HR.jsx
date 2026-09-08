@@ -2308,18 +2308,17 @@ function PieBlock({ items }) {
 
 // Ranked horizontal bar list — bar length + a bold value sit to the left,
 // the full category name (never truncated, unlike SummaryHBarList's fixed
-// label column) to the right, thin dashed rules between rows. One color
-// for every bar rather than per-category hues: these are ranked shares of
-// a single whole, not identities that need telling apart at a glance
-// (identity color lives in the legend-style charts instead).
+// label column) to the right, thin dashed rules between rows. Each bar
+// takes the same per-category hue as the donut/pie/legend views, so a
+// color stays tied to its category across all 3 chart types.
 function BarRankChart({ items }) {
   const max = Math.max(...items.map((it) => Number(it.total) || 0), 1);
-  const color = SUMMARY_COLORS[2]; // aqua
   return (
     <div className="w-full">
       {items.map((it, i) => {
         const value = Number(it.total) || 0;
         const widthPct = Math.round((value / max) * 100);
+        const color = SUMMARY_COLORS[i % SUMMARY_COLORS.length];
         return (
           <div key={i}
             className={`flex items-center gap-2 py-2 ${i < items.length - 1 ? "border-b border-dashed border-gray-700/60" : ""}`}>
