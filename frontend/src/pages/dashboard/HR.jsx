@@ -2104,14 +2104,23 @@ function useMonthlySummary(month, year) {
 
 const SUMMARY_COLORS = ["#6366f1","#34d399","#f59e0b","#f43f5e","#60a5fa","#a78bfa","#fb923c","#4ade80","#38bdf8","#c084fc"];
 
-function SummaryChartCard({ title, children }) {
+function SummaryChartCard({ title, total, children }) {
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
-      <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider mb-3">{title}</p>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider">{title}</p>
+        {total != null && (
+          <span className="shrink-0 rounded-full bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-300">
+            Total: {total}
+          </span>
+        )}
+      </div>
       {children}
     </div>
   );
 }
+
+const _sumTotal = (items) => items.reduce((acc, it) => acc + (it.total || 0), 0);
 
 function SummaryHBarList({ items, max }) {
   return (
@@ -2760,38 +2769,65 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
   );
 }
 
-// ── Employee Graph — semua chart (area/bar/pie) ─────────────────────────────────
+// ── Employee Graph — demographic breakdown charts, optionally "as of" a
+// given month/year snapshot (same windowing as Employee Summary/Turnover) ──
 function EmployeeGraphSection() {
-  const { data, loading, errMsg } = useMonthlySummary();
+  const curYear = new Date().getFullYear();
+  const [yearFilter, setYearFilter]   = useState("");
+  const [monthFilter, setMonthFilter] = useState("");
+  const { data, loading, errMsg } = useMonthlySummary(monthFilter || undefined, yearFilter || undefined);
   const [RC, setRC] = useState(null);
 
   useEffect(() => {
     import("recharts").then((mod) => setRC(mod)).catch(() => {});
   }, []);
 
-  if (loading) return <div className="py-20 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-300" /></div>;
+  const filterBar = (
+    <div className="flex flex-wrap items-end gap-2">
+      <div className="w-28">
+        <label className="mb-1 block text-[10px] font-medium text-gray-500">Year</label>
+        <select value={yearFilter} onChange={(e) => { setYearFilter(e.target.value); if (!e.target.value) setMonthFilter(""); }}
+          className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer">
+          <option value="">Current</option>
+          {[curYear, curYear - 1, curYear - 2, curYear - 3, curYear - 4].map((y) => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+      <div className="w-28">
+        <label className="mb-1 block text-[10px] font-medium text-gray-500">Month</label>
+        <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)} disabled={!yearFilter}
+          className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+          <option value="">Year-end</option>
+          {MONTHS_ID.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+        </select>
+      </div>
+    </div>
+  );
+
+  if (loading) return <div className="space-y-3 mt-2">{filterBar}<div className="py-16 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-300" /></div></div>;
   if (errMsg || !data) return (
-    <div className="py-10 text-center space-y-2">
-      <p className="text-xs text-red-400 font-semibold">Failed to load graph data</p>
-      {errMsg && <pre className="text-xs text-gray-300 max-w-xl mx-auto whitespace-pre-wrap text-left bg-gray-900 rounded p-3">{errMsg}</pre>}
+    <div className="space-y-3 mt-2">
+      {filterBar}
+      <div className="py-10 text-center space-y-2">
+        <p className="text-xs text-red-400 font-semibold">Failed to load graph data</p>
+        {errMsg && <pre className="text-xs text-gray-300 max-w-xl mx-auto whitespace-pre-wrap text-left bg-gray-900 rounded p-3">{errMsg}</pre>}
+      </div>
     </div>
   );
 
   const {
-    headcount_trend = [], monthly_joins = [],
-    by_marital = [], by_status = [], by_gender = [],
+    by_marital = [], by_status = [], by_gender = [], by_level = [], period = {},
   } = data;
 
-  const CHART_H = 200;
+  const levelMax = Math.max(...by_level.map((d) => d.total), 1);
+  const periodLabel = period.label || "Current";
 
-  const tickStyle = { fill: "#cbd5e1", fontSize: 10 };
   const tooltipStyle = {
     contentStyle: { borderRadius: 8, fontSize: 11 },
     labelStyle: { color: "#1e293b", fontWeight: 600 },
     itemStyle: { color: "#334155" },
     cursor: { fill: "rgba(0,0,0,0.04)" },
   };
-  if (!RC) return <div className="py-6 text-center text-xs text-gray-300">Loading charts…</div>;
+  if (!RC) return <div className="space-y-3 mt-2">{filterBar}<div className="py-6 text-center text-xs text-gray-300">Loading charts…</div></div>;
 
   // Recharts' default pie-slice label ignores the `style` prop and renders
   // dark text, which is unreadable on this dark background — render it manually.
@@ -2809,42 +2845,11 @@ function EmployeeGraphSection() {
 
   return (
     <div className="space-y-4 mt-2">
-      {/* Charts row 1: headcount trend + monthly joins */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SummaryChartCard title="Headcount Trend (36 Months)">
-          <RC.ResponsiveContainer width="100%" height={CHART_H}>
-            <RC.AreaChart data={headcount_trend} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
-              <defs>
-                <linearGradient id="hcGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#818cf8" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="#818cf8" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <RC.XAxis dataKey="label" tick={tickStyle} interval={5} />
-              <RC.YAxis tick={tickStyle} />
-              <RC.Tooltip {...tooltipStyle} formatter={(v) => [v, "Headcount"]} />
-              <RC.Area type="monotone" dataKey="count" stroke="#818cf8" strokeWidth={2} fill="url(#hcGrad)" dot={false} />
-            </RC.AreaChart>
-          </RC.ResponsiveContainer>
-        </SummaryChartCard>
+      {filterBar}
+      <p className="text-[10px] text-gray-500">Snapshot: {periodLabel} · as of {period.snapshot_date}</p>
 
-        <SummaryChartCard title="New Hires per Month (24 Months)">
-          <RC.ResponsiveContainer width="100%" height={CHART_H}>
-            <RC.BarChart data={monthly_joins} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
-              <RC.XAxis dataKey="label" tick={tickStyle} interval={3} />
-              <RC.YAxis tick={tickStyle} allowDecimals={false} />
-              <RC.Tooltip {...tooltipStyle} formatter={(v) => [v, "New Hires"]} />
-              <RC.Bar dataKey="joins" fill="#34d399" radius={[3, 3, 0, 0]}>
-                {monthly_joins.map((_, i) => <RC.Cell key={i} fill={i === monthly_joins.length - 1 ? "#818cf8" : "#34d399"} />)}
-              </RC.Bar>
-            </RC.BarChart>
-          </RC.ResponsiveContainer>
-        </SummaryChartCard>
-      </div>
-
-      {/* Charts row 2: status + gender + marital */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <SummaryChartCard title="Employee Status">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <SummaryChartCard title="Employee Status" total={_sumTotal(by_status)}>
           <RC.ResponsiveContainer width="100%" height={170}>
             <RC.PieChart>
               <RC.Pie data={by_status} cx="50%" cy="50%" outerRadius={65} dataKey="total" nameKey="name" label={renderPieLabel} labelLine={false}>
@@ -2856,7 +2861,7 @@ function EmployeeGraphSection() {
           </RC.ResponsiveContainer>
         </SummaryChartCard>
 
-        <SummaryChartCard title="Gender">
+        <SummaryChartCard title="Gender" total={_sumTotal(by_gender)}>
           <RC.ResponsiveContainer width="100%" height={170}>
             <RC.PieChart>
               <RC.Pie data={by_gender} cx="50%" cy="50%" outerRadius={65} dataKey="total" nameKey="name" label={renderPieLabel} labelLine={false}>
@@ -2869,7 +2874,7 @@ function EmployeeGraphSection() {
           </RC.ResponsiveContainer>
         </SummaryChartCard>
 
-        <SummaryChartCard title="Marital Status">
+        <SummaryChartCard title="Marital Status" total={_sumTotal(by_marital)}>
           <RC.ResponsiveContainer width="100%" height={170}>
             <RC.PieChart>
               <RC.Pie data={by_marital} cx="50%" cy="50%" outerRadius={65} dataKey="total" nameKey="name" label={renderPieLabel} labelLine={false}>
@@ -2879,6 +2884,10 @@ function EmployeeGraphSection() {
               <RC.Legend wrapperStyle={{ fontSize: 11, color: "#f1f5f9" }} />
             </RC.PieChart>
           </RC.ResponsiveContainer>
+        </SummaryChartCard>
+
+        <SummaryChartCard title="By Level" total={_sumTotal(by_level)}>
+          <SummaryHBarList items={by_level} max={levelMax} />
         </SummaryChartCard>
       </div>
     </div>
