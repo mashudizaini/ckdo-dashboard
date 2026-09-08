@@ -2229,6 +2229,83 @@ function DonutBlock({ items }) {
   );
 }
 
+// Flat 2D pie (full wedges from center, no ring hole) with straight
+// leader-line callouts — matches the requested reference layout, but
+// intentionally skips its true 3D extrusion: a beveled "wall" makes the
+// slices facing the viewer read as bigger than their real share, the same
+// distortion true-3D donuts have. Depth here is only a drop-shadow.
+// Leader labels are only drawn up to 8 slices — past that they start
+// overlapping (this is why By Level, with up to ~20 raw values, still
+// needs its own legend below every time, in both chart types).
+function PieWedges({ items, size = 240 }) {
+  const total = items.reduce((s, it) => s + (Number(it.total) || 0), 0);
+  const vbW = size, vbH = size * 0.82;
+  const cx = vbW / 2, cy = vbH / 2;
+  const r = size * 0.22;
+  const showLabels = items.length > 0 && items.length <= 8;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+
+  let angle = -90;
+  const wedges = [];
+  const labels = [];
+
+  items.forEach((it, i) => {
+    const value = Number(it.total) || 0;
+    const frac = total > 0 ? value / total : 0;
+    const sweep = frac * 360;
+    if (sweep <= 0) return;
+    const startAngle = angle;
+    const endAngle = angle + sweep;
+    const large = sweep > 180 ? 1 : 0;
+    const x1 = cx + r * Math.cos(toRad(startAngle));
+    const y1 = cy + r * Math.sin(toRad(startAngle));
+    const x2 = cx + r * Math.cos(toRad(endAngle));
+    const y2 = cy + r * Math.sin(toRad(endAngle));
+
+    wedges.push(
+      <path key={i} d={`M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`}
+        fill={SUMMARY_COLORS[i % SUMMARY_COLORS.length]} stroke="#111827" strokeWidth={1.5} />
+    );
+
+    if (showLabels) {
+      const mid = startAngle + sweep / 2;
+      const dotX = cx + r * Math.cos(toRad(mid));
+      const dotY = cy + r * Math.sin(toRad(mid));
+      const kinkX = cx + (r + 16) * Math.cos(toRad(mid));
+      const kinkY = cy + (r + 16) * Math.sin(toRad(mid));
+      const isRight = Math.cos(toRad(mid)) >= 0;
+      const endX = kinkX + (isRight ? 30 : -30);
+      const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+      labels.push(
+        <g key={`l${i}`}>
+          <circle cx={dotX} cy={dotY} r={2.5} fill="#94a3b8" />
+          <path d={`M ${dotX} ${dotY} L ${kinkX} ${kinkY} L ${endX} ${kinkY}`} fill="none" stroke="#475569" strokeWidth={1} />
+          <text x={endX + (isRight ? 4 : -4)} y={kinkY - 4} textAnchor={isRight ? "start" : "end"} fontSize={11} fontWeight={700} fill="#e2e8f0">{it.name}</text>
+          <text x={endX + (isRight ? 4 : -4)} y={kinkY + 9} textAnchor={isRight ? "start" : "end"} fontSize={10} fill="#94a3b8">{it.total} · {pct}%</text>
+        </g>
+      );
+    }
+
+    angle = endAngle;
+  });
+
+  return (
+    <svg viewBox={`0 0 ${vbW} ${vbH}`} className="w-full" style={{ overflow: "visible", filter: "drop-shadow(0 8px 12px rgba(0,0,0,0.45))" }}>
+      {wedges}
+      {labels}
+    </svg>
+  );
+}
+
+function PieBlock({ items }) {
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <PieWedges items={items} />
+      <DonutLegend items={items} />
+    </div>
+  );
+}
+
 function EmployeeSummarySection() {
   const [drillYear, setDrillYear] = useState(null); // null = Yearly Summary; a year = Monthly Summary for that year
   const [listModal, setListModal] = useState(null); // drill-down filter payload, or null
@@ -2865,6 +2942,7 @@ function EmployeeGraphSection() {
   const curYear = new Date().getFullYear();
   const [yearFilter, setYearFilter]   = useState("");
   const [monthFilter, setMonthFilter] = useState("");
+  const [chartType, setChartType]     = useState("donut"); // "donut" | "pie"
   const { data, loading, errMsg } = useMonthlySummary(monthFilter || undefined, yearFilter || undefined);
   const filterBar = (
     <div className="flex flex-wrap items-end gap-2">
@@ -2883,6 +2961,19 @@ function EmployeeGraphSection() {
           <option value="">Year-end</option>
           {MONTHS_ID.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
         </select>
+      </div>
+      <div>
+        <label className="mb-1 block text-[10px] font-medium text-gray-500">Chart Type</label>
+        <div className="flex rounded-lg border border-gray-700 bg-gray-900 p-0.5">
+          {[["donut", "Donut"], ["pie", "Pie"]].map(([id, label]) => (
+            <button key={id} type="button" onClick={() => setChartType(id)}
+              className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                chartType === id ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-gray-200"
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -2904,6 +2995,7 @@ function EmployeeGraphSection() {
 
   const by_level = sortByLevel(by_level_raw);
   const periodLabel = period.label || "Current";
+  const ChartBlock = chartType === "pie" ? PieBlock : DonutBlock;
 
   return (
     <div className="space-y-4 mt-2">
@@ -2912,19 +3004,19 @@ function EmployeeGraphSection() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <SummaryChartCard title="Employee Status">
-          <DonutBlock items={by_status} />
+          <ChartBlock items={by_status} />
         </SummaryChartCard>
 
         <SummaryChartCard title="Gender">
-          <DonutBlock items={by_gender} />
+          <ChartBlock items={by_gender} />
         </SummaryChartCard>
 
         <SummaryChartCard title="Marital Status">
-          <DonutBlock items={by_marital} />
+          <ChartBlock items={by_marital} />
         </SummaryChartCard>
 
         <SummaryChartCard title="By Level">
-          <DonutBlock items={by_level} />
+          <ChartBlock items={by_level} />
         </SummaryChartCard>
       </div>
     </div>
