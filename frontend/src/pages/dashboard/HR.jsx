@@ -2322,6 +2322,7 @@ function BarRankChart({ items }) {
       {items.map((it, i) => {
         const value = Number(it.total) || 0;
         const widthPct = Math.round((value / max) * 100);
+        const pct = total > 0 ? Math.round((value / total) * 100) : 0;
         const color = SUMMARY_COLORS[i % SUMMARY_COLORS.length];
         return (
           <div key={i}
@@ -2330,6 +2331,7 @@ function BarRankChart({ items }) {
               <div className="h-4" style={{ width: `${widthPct}%`, background: color }} />
             </div>
             <span className="w-7 shrink-0 text-right text-xs font-extrabold" style={{ color }}>{value}</span>
+            <span className="w-9 shrink-0 text-xs text-gray-500">{pct}%</span>
             <span className="flex-1 text-xs text-gray-300">{it.name}</span>
           </div>
         );
