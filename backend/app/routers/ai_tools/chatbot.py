@@ -7,31 +7,29 @@ Required role: any authenticated user (chat) / any staff role (knowledge base)
 Endpoints:
   POST   /chat                — Policy chat: send message, get AI response (streaming, RAG-grounded)
   POST   /oracle-chat         — Oracle EBS data chat: tool-calling over Postgres EIS (streaming)
-  POST   /general-chat        — General-purpose chat: no RAG, no tools (streaming)
   GET    /documents           — List ingested knowledge base documents
   GET    /documents/content   — Full concatenated text of one document (for editing)
   POST   /documents           — Ingest a new document (paste text or upload file)
   DELETE /documents           — Delete a document by source+title
   GET    /status               — Whether RAG (local Ollama embeddings) is configured
 
-All 3 chat endpoints take an optional `provider` field on the request body:
+Both chat endpoints take an optional `provider` field on the request body:
 "onprem" (default, local Ollama), "gemini" (Google Gemini API), or —
-/chat and /general-chat only — "anthropic" (Claude — shared company key by
-default, on claude-sonnet-5; or the user's own key + model choice if set
-via My API Key, see user_api_key_service.ALLOWED_MODELS).
+/chat only — "anthropic" (Claude — shared company key by default, on
+claude-sonnet-5; or the user's own key + model choice if set via My API
+Key, see user_api_key_service.ALLOWED_MODELS).
 /oracle-chat doesn't support "anthropic" yet — it's a tool-calling pipeline
 with its own separate Ollama/Gemini implementations (see
 oracle_chat_service.py); adding Claude there means building a third
 tool-calling path against Anthropic's own tool-use API, not just this
 plain-chat wiring.
 
-General Chat's "anthropic" and "gemini" both additionally ground every
-answer in that provider's own live web search (Claude's web_search tool,
-see ai_service.py's _anthropic_complete_with_search_history; Gemini's
-Google Search grounding tool, see gemini_service.stream_generate_grounded)
-— the two modes in this interactive chatbot that aren't capped at a
-model's training-data cutoff. "onprem" in General Chat has no such
-grounding (pure model knowledge only).
+General Chat (a third, ungrounded "ask me anything" mode — no RAG, no
+tools) was removed: the company's internal Open WebUI instance (CoChat,
+linked from the Sidebar) already covers that use case, so keeping a
+second general-purpose chat surface in this app was redundant. See
+ai_chat_provider_service.py's MODES for the 2 modes that remain
+(Policy/Oracle).
 """
 import asyncio
 import os
@@ -122,9 +120,9 @@ async def get_default_providers(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Which provider each of the 3 chat modes (Policy/Oracle/General)
-    starts on — any authenticated user (Chatbot.jsx/ChatWidget.jsx read
-    this on mount instead of a hardcoded default)."""
+    """Which provider each chat mode (Policy/Oracle) starts on — any
+    authenticated user (Chatbot.jsx/ChatWidget.jsx read this on mount
+    instead of a hardcoded default)."""
     return await ai_chat_provider_service.list_default_providers(db)
 
 
@@ -200,33 +198,6 @@ async def oracle_chat(
     service = OracleChatService()
     return StreamingResponse(
         service.stream_chat(request.message, request.conversation_history, user, request.provider, gemini_key, anthropic_key, anthropic_model),
-        media_type="text/event-stream",
-    )
-
-
-@router.post("/general-chat")
-async def general_chat(
-    request: ChatRequest,
-    user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    General-purpose chat — streaming response (local Ollama, Gemini, or
-    Claude), no RAG retrieval, no tools. For questions outside company
-    policy docs and Oracle ERP data. provider="anthropic" here is grounded
-    in live web search (see ai_service.py) — the only mode in this app's
-    interactive chatbot that isn't capped at a training-data cutoff.
-    """
-    if request.provider not in ("onprem", "gemini", "anthropic"):
-        raise HTTPException(400, 'Invalid provider — use "onprem", "gemini", or "anthropic"')
-    await _ensure_provider_enabled(db, request.provider)
-
-    gemini_key = await _resolve_gemini_key(db, user) if request.provider == "gemini" else None
-    anthropic_key, anthropic_model = await _resolve_anthropic(db, user) if request.provider == "anthropic" else (None, None)
-
-    service = AIService()
-    return StreamingResponse(
-        service.stream_general_chat(request.message, request.conversation_history, user, request.provider, gemini_key, anthropic_key, anthropic_model),
         media_type="text/event-stream",
     )
 

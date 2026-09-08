@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Cpu, Sparkles, Gem, Loader2, MessageSquare, Database, MessagesSquare } from "lucide-react";
+import { Cpu, Sparkles, Gem, Loader2, MessageSquare, Database } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 
 // Matches ai_chat_provider_service.PROVIDERS exactly — id must be the
@@ -7,7 +7,7 @@ import { useAuthStore } from "@/store/authStore";
 // ("onprem"/"anthropic"/"gemini"), not a display-only slug.
 const MODELS = [
   { id: "onprem",    label: "On-Premise",  icon: Cpu,      desc: "Model lokal di server ai-engine — gratis, tanpa biaya per token." },
-  { id: "anthropic", label: "Claude",      icon: Sparkles, desc: "Anthropic Claude — berbayar per token, plus biaya pencarian web di General Chat." },
+  { id: "anthropic", label: "Claude",      icon: Sparkles, desc: "Anthropic Claude — berbayar per token." },
   { id: "gemini",    label: "Gemini",      icon: Gem,      desc: "Google Gemini — berbayar per token (jauh lebih murah dari Claude), pencarian web punya kuota gratis bulanan." },
 ];
 
@@ -15,7 +15,6 @@ const MODELS = [
 const MODES = [
   { id: "policy",  label: "Company Policy",   icon: MessageSquare },
   { id: "oracle",  label: "Oracle ERP Data",  icon: Database },
-  { id: "general", label: "General Chat",     icon: MessagesSquare },
 ];
 
 export default function ModelAccessPanel() {
@@ -23,7 +22,7 @@ export default function ModelAccessPanel() {
   const headers = { Authorization: `Bearer ${token}` };
 
   const [status, setStatus] = useState(null); // {onprem, anthropic, gemini} | null while loading
-  const [defaults, setDefaults] = useState(null); // {policy, oracle, general} | null while loading
+  const [defaults, setDefaults] = useState(null); // {policy, oracle} | null while loading
   const [saving, setSaving] = useState(null); // provider id, or `default-${mode}`, currently being saved
   const [error, setError] = useState(null);
 
@@ -93,7 +92,7 @@ export default function ModelAccessPanel() {
         <div className="px-5 py-4 border-b border-gray-800">
           <h3 className="text-sm font-semibold text-gray-200">Model Access</h3>
           <p className="text-xs text-gray-500 mt-1">
-            Kontrol model AI mana yang boleh dipilih user di AI Chatbot (Company Policy, Oracle ERP Data, dan General Chat). Tidak mempengaruhi fitur AI lain (CV Screening, Meeting Notes, dll).
+            Kontrol model AI mana yang boleh dipilih user di AI Chatbot (Company Policy dan Oracle ERP Data). Tidak mempengaruhi fitur AI lain (CV Screening, Meeting Notes, dll).
           </p>
         </div>
 

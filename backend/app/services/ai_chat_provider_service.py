@@ -2,9 +2,9 @@
 AI Chat Provider Service
 ─────────────────────────────────────────
 On/off switch per chat provider (onprem/anthropic/gemini) for the AI
-Chatbot's 3 modes (Policy/Oracle/General) — a usage/cost control lever for
-IT/admin (e.g. turning off Claude company-wide instead of relying on every
-user remembering not to pick it). Scoped to the chatbot only — see
+Chatbot's modes (Policy/Oracle) — a usage/cost control lever for IT/admin
+(e.g. turning off Claude company-wide instead of relying on every user
+remembering not to pick it). Scoped to the chatbot only — see
 app/models/ai_chat_provider.py for why this doesn't touch other features
 that also call these providers internally.
 
@@ -26,15 +26,16 @@ PROVIDERS: dict[str, str] = {
     "gemini": "Gemini",
 }
 
-# The 3 chat modes' original hardcoded defaults (was
-# DEFAULT_PROVIDER_BY_TAB in Chatbot.jsx/ChatWidget.jsx) — still the
-# fallback for any mode with no row in ai_chat_default_providers.
+# The chat modes' original hardcoded defaults (was DEFAULT_PROVIDER_BY_TAB
+# in Chatbot.jsx/ChatWidget.jsx) — still the fallback for any mode with no
+# row in ai_chat_default_providers. A third mode, "general" (an ungrounded
+# "ask me anything" chat), was removed once CoChat (the company's internal
+# Open WebUI instance, linked from the Sidebar) made it redundant.
 MODES: dict[str, str] = {
     "policy": "Company Policy",
     "oracle": "Oracle ERP Data",
-    "general": "General",
 }
-DEFAULT_FALLBACK: dict[str, str] = {"policy": "onprem", "oracle": "onprem", "general": "gemini"}
+DEFAULT_FALLBACK: dict[str, str] = {"policy": "onprem", "oracle": "onprem"}
 
 
 async def list_provider_status(db: AsyncSession) -> dict[str, bool]:

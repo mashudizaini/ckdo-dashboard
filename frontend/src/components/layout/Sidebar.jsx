@@ -6,6 +6,7 @@ import {
   Monitor, Users, Factory, Calculator,
   ShoppingCart, FileText, LogOut, LayoutGrid, TrendingUp,
   ChevronDown, ChevronRight, Settings, BarChart3, Warehouse, FlaskConical,
+  MessagesSquare, ExternalLink,
 } from "lucide-react";
 import RobotIcon from "@/components/icons/RobotIcon";
 import logo from "@/assets/LOGO-ONLY.png";
@@ -127,11 +128,29 @@ const EIS_ITEMS = [
 // visitor needs a standalone entry for.
 const AI_ITEMS = [
   { label: "AI Chatbot",    path: "/ai/chatbot",        icon: RobotIcon, roles: [] },
+  // Internal chat platform (Open WebUI) with SSO — plain external link,
+  // opens in a new tab (see NavCard's `item.external` branch).
+  { label: "CoChat",        path: "http://cochat.ckd-otto.com:3010", icon: MessagesSquare, roles: [], external: true },
   { label: "Meeting Notes", path: "/ai/meeting-notes",  icon: FileText,  roles: [] },
 ];
 
 /* ── Leaf nav card — no children (AI Tools items, or a module with none) ── */
 function NavCard({ item }) {
+  // External tools (e.g. CoChat) aren't app routes — NavLink's client-side
+  // routing doesn't apply to a cross-origin URL, so these render a plain
+  // anchor instead, opened in a new tab so the dashboard's own state isn't
+  // lost navigating away to a wholly separate application.
+  if (item.external) {
+    return (
+      <a href={item.path} target="_blank" rel="noopener noreferrer" className="nav-card">
+        <span className="nav-card__icon">
+          <item.icon size={15} color="#2563eb" />
+        </span>
+        <span className="nav-card__label" style={{ flex: 1 }}>{item.label}</span>
+        <ExternalLink size={12} color="#64748b" />
+      </a>
+    );
+  }
   return (
     <NavLink
       to={item.path}

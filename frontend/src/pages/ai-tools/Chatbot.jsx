@@ -23,12 +23,9 @@ function CopyButton({ text }) {
 
 // Per-tab default provider — starting point until Setup > AI > Model
 // Access's admin-configured defaults load (see the fetch below); also the
-// fallback if that fetch fails. General Chat defaults to Gemini (its live
-// web-search grounding makes it the "current info" mode; on-premise/
-// Gemini's ungrounded default elsewhere stays the safer/cheaper choice for
-// Policy and Oracle chat). Each tab still remembers whatever the user
+// fallback if that fetch fails. Each tab still remembers whatever the user
 // picks after that, independently — this only sets the starting point.
-const DEFAULT_PROVIDER_BY_TAB = { policy: "onprem", oracle: "onprem", general: "gemini" };
+const DEFAULT_PROVIDER_BY_TAB = { policy: "onprem", oracle: "onprem" };
 
 export default function Chatbot() {
   const [activeTab, setActiveTab] = useState("policy");
@@ -77,9 +74,8 @@ export default function Chatbot() {
   // resetting it — each has its own localStorage key too.
   const policyChat  = useChatStream(CHAT_MODES.policy.greeting,  CHAT_MODES.policy.storageKey,  CHAT_MODES.policy.endpoint,  provider);
   const oracleChat  = useChatStream(CHAT_MODES.oracle.greeting,  CHAT_MODES.oracle.storageKey,  CHAT_MODES.oracle.endpoint,  provider);
-  const generalChat = useChatStream(CHAT_MODES.general.greeting, CHAT_MODES.general.storageKey, CHAT_MODES.general.endpoint, provider);
 
-  const chats = { policy: policyChat, oracle: oracleChat, general: generalChat };
+  const chats = { policy: policyChat, oracle: oracleChat };
   const chat = chats[activeTab];
   const mode = CHAT_MODES[activeTab];
 
@@ -114,7 +110,7 @@ export default function Chatbot() {
             <Bot className="text-blue-400" size={26} />
             AI Chatbot
           </h1>
-          <p className="text-gray-500 text-sm mt-1">Company policy, Oracle ERP data, and general questions — all in one place</p>
+          <p className="text-gray-500 text-sm mt-1">Company policy and Oracle ERP data — all in one place</p>
         </div>
         <div className="flex items-center gap-2">
           <select
@@ -184,9 +180,7 @@ export default function Chatbot() {
           </div>
           <span className="ml-auto flex items-center gap-1.5 text-xs text-white/70">
             <span className={`h-2 w-2 rounded-full ${chat.streaming ? "bg-amber-400 animate-pulse" : "bg-green-400"}`} />
-            {chat.streaming
-              ? (activeTab === "general" && (provider === "anthropic" || provider === "gemini") ? "Mencari di web..." : mode.thinkingLabel)
-              : "Online"}
+            {chat.streaming ? mode.thinkingLabel : "Online"}
           </span>
         </div>
 
