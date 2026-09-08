@@ -2280,8 +2280,8 @@ function PieWedges({ items, size = 240 }) {
         <g key={`l${i}`}>
           <circle cx={dotX} cy={dotY} r={2.5} fill="#94a3b8" />
           <path d={`M ${dotX} ${dotY} L ${kinkX} ${kinkY} L ${endX} ${kinkY}`} fill="none" stroke="#475569" strokeWidth={1} />
-          <text x={endX + (isRight ? 4 : -4)} y={kinkY - 4} textAnchor={isRight ? "start" : "end"} fontSize={11} fontWeight={700} fill="#e2e8f0">{it.name}</text>
-          <text x={endX + (isRight ? 4 : -4)} y={kinkY + 9} textAnchor={isRight ? "start" : "end"} fontSize={10} fill="#94a3b8">{it.total} · {pct}%</text>
+          <text x={endX + (isRight ? 4 : -4)} y={kinkY - 4} textAnchor={isRight ? "start" : "end"} fontSize={11} fontWeight={700} fill="#1e293b">{it.name}</text>
+          <text x={endX + (isRight ? 4 : -4)} y={kinkY + 9} textAnchor={isRight ? "start" : "end"} fontSize={10} fill="#334155">{it.total} · {pct}%</text>
         </g>
       );
     }
@@ -2313,8 +2313,12 @@ function PieBlock({ items }) {
 // color stays tied to its category across all 3 chart types.
 function BarRankChart({ items }) {
   const max = Math.max(...items.map((it) => Number(it.total) || 0), 1);
+  const total = items.reduce((s, it) => s + (Number(it.total) || 0), 0);
   return (
     <div className="w-full">
+      <div className="mb-2 flex justify-end">
+        <span className="rounded-full bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-300">Total: {total}</span>
+      </div>
       {items.map((it, i) => {
         const value = Number(it.total) || 0;
         const widthPct = Math.round((value / max) * 100);
@@ -2322,8 +2326,8 @@ function BarRankChart({ items }) {
         return (
           <div key={i}
             className={`flex items-center gap-2 py-2 ${i < items.length - 1 ? "border-b border-dashed border-gray-700/60" : ""}`}>
-            <div className="h-4 w-20 shrink-0 overflow-hidden rounded-sm bg-gray-800/60">
-              <div className="h-4 rounded-sm" style={{ width: `${widthPct}%`, background: color }} />
+            <div className="h-4 w-20 shrink-0 overflow-hidden bg-gray-800/60">
+              <div className="h-4" style={{ width: `${widthPct}%`, background: color }} />
             </div>
             <span className="w-7 shrink-0 text-right text-xs font-extrabold" style={{ color }}>{value}</span>
             <span className="flex-1 text-xs text-gray-300">{it.name}</span>
