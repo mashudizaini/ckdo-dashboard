@@ -1083,29 +1083,27 @@ async def get_monthly_summary(
         key = f"{y}-{m:02d}"
         monthly_joins.append({"month": key, "label": f"{MN[m-1]} '{str(y)[2:]}", "joins": joins_map.get(key, 0)})
 
-    # Period filter — when month/year is given, breakdowns/KPIs reflect the
-    # active roster as of the end of that period instead of today's roster.
-    # Attribute values (department, status, ...) are still each employee's
-    # *current* value; only which employees get counted is period-aware.
-    active_ids = None
-    if year:
-        snapshot_date = date(year, month or 12, monthrange(year, month or 12)[1])
-        active_ids = {
-            uid for uid, join, resign in emps_full
-            if join <= snapshot_date and (resign is None or resign >= snapshot_date)
-        }
-    else:
-        snapshot_date = today
+    # Period filter — breakdowns/KPIs always reflect the *active* roster as
+    # of the end of the given period (or today, when no month/year is
+    # given) — never resigned employees. Attribute values (department,
+    # status, ...) are still each employee's *current* value; only which
+    # employees get counted is period-aware. Bug fixed 2026-09-08:
+    # active_ids used to stay None (no filter applied at all) for the
+    # default "Current" view, so by_status/by_level/by_marital/by_gender
+    # silently included every resigned employee too — only the year/month
+    # snapshot path was ever active-filtered.
+    snapshot_date = date(year, month or 12, monthrange(year, month or 12)[1]) if year else today
+    active_ids = {
+        uid for uid, join, resign in emps_full
+        if join <= snapshot_date and (resign is None or resign >= snapshot_date)
+    }
 
     # Generic breakdown helper — explicit AND to avoid any dialect issues
     async def _bd(col):
         try:
-            conditions = [col.isnot(None), col != ""]
-            if active_ids is not None:
-                conditions.append(Employee.user_id.in_(active_ids))
             q = await db.execute(
                 select(col, func.count().label("total"))
-                .where(and_(*conditions))
+                .where(and_(col.isnot(None), col != "", Employee.user_id.in_(active_ids)))
                 .group_by(col)
                 .order_by(func.count().desc())
             )
@@ -1122,10 +1120,11 @@ async def get_monthly_summary(
     by_religion= await _bd(Employee.religion)
 
     try:
-        sex_q = select(Employee.sex, func.count().label("t"))
-        if active_ids is not None:
-            sex_q = sex_q.where(Employee.user_id.in_(active_ids))
-        sex_q = sex_q.group_by(Employee.sex)
+        sex_q = (
+            select(Employee.sex, func.count().label("t"))
+            .where(Employee.user_id.in_(active_ids))
+            .group_by(Employee.sex)
+        )
         sex_result = await db.execute(sex_q)
         sex_map = {r[0]: r[1] for r in sex_result.fetchall()}
     except Exception:
@@ -1136,7 +1135,7 @@ async def get_monthly_summary(
         {"name": "Female", "total": sex_map.get("F", 0)},
     ]
 
-    period_total = len(active_ids) if active_ids is not None else headcount_trend[-1]["count"]
+    period_total = len(active_ids)
     if year and month:
         period_joins = joins_map.get(f"{year}-{month:02d}", 0)
     elif year:
