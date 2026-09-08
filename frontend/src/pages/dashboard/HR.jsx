@@ -2306,6 +2306,36 @@ function PieBlock({ items }) {
   );
 }
 
+// Ranked horizontal bar list — bar length + a bold value sit to the left,
+// the full category name (never truncated, unlike SummaryHBarList's fixed
+// label column) to the right, thin dashed rules between rows. One color
+// for every bar rather than per-category hues: these are ranked shares of
+// a single whole, not identities that need telling apart at a glance
+// (identity color lives in the legend-style charts instead).
+function BarRankChart({ items }) {
+  const max = Math.max(...items.map((it) => Number(it.total) || 0), 1);
+  const color = SUMMARY_COLORS[2]; // aqua
+  return (
+    <div className="w-full">
+      {items.map((it, i) => {
+        const value = Number(it.total) || 0;
+        const widthPct = Math.round((value / max) * 100);
+        return (
+          <div key={i}
+            className={`flex items-center gap-2 py-2 ${i < items.length - 1 ? "border-b border-dashed border-gray-700/60" : ""}`}>
+            <div className="h-4 w-20 shrink-0 overflow-hidden rounded-sm bg-gray-800/60">
+              <div className="h-4 rounded-sm" style={{ width: `${widthPct}%`, background: color }} />
+            </div>
+            <span className="w-7 shrink-0 text-right text-xs font-extrabold" style={{ color }}>{value}</span>
+            <span className="flex-1 text-xs text-gray-300">{it.name}</span>
+          </div>
+        );
+      })}
+      {items.length === 0 && <p className="text-xs text-gray-400">No data.</p>}
+    </div>
+  );
+}
+
 function EmployeeSummarySection() {
   const [drillYear, setDrillYear] = useState(null); // null = Yearly Summary; a year = Monthly Summary for that year
   const [listModal, setListModal] = useState(null); // drill-down filter payload, or null
@@ -2965,7 +2995,7 @@ function EmployeeGraphSection() {
       <div>
         <label className="mb-1 block text-[10px] font-medium text-gray-500">Chart Type</label>
         <div className="flex rounded-lg border border-gray-700 bg-gray-900 p-0.5">
-          {[["donut", "Donut"], ["pie", "Pie"]].map(([id, label]) => (
+          {[["donut", "Donut"], ["pie", "Pie"], ["bar", "Bar"]].map(([id, label]) => (
             <button key={id} type="button" onClick={() => setChartType(id)}
               className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
                 chartType === id ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-gray-200"
@@ -2995,7 +3025,7 @@ function EmployeeGraphSection() {
 
   const by_level = sortByLevel(by_level_raw);
   const periodLabel = period.label || "Current";
-  const ChartBlock = chartType === "pie" ? PieBlock : DonutBlock;
+  const ChartBlock = chartType === "pie" ? PieBlock : chartType === "bar" ? BarRankChart : DonutBlock;
 
   return (
     <div className="space-y-4 mt-2">
