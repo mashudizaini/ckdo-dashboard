@@ -2102,7 +2102,11 @@ function useMonthlySummary(month, year) {
   return { data, loading, errMsg };
 }
 
-const SUMMARY_COLORS = ["#6366f1","#34d399","#f59e0b","#f43f5e","#60a5fa","#a78bfa","#fb923c","#4ade80","#38bdf8","#c084fc"];
+// CVD-safe categorical order (blue/orange/aqua/yellow/magenta/green/violet/red),
+// stepped for a dark surface — worst adjacent pair clears both the
+// colorblind-safety and normal-vision separation floors, so no two
+// neighboring slices/bars are ever confusable.
+const SUMMARY_COLORS = ["#3987e5","#d95926","#199e70","#c98500","#d55181","#008300","#9085e9","#e66767"];
 
 // Seniority order for the Employee Graph's "By Level" chart — highest
 // first, so the ranking reads top-down instead of by headcount. Covers
@@ -2143,8 +2147,6 @@ function SummaryChartCard({ title, total, children }) {
   );
 }
 
-const _sumTotal = (items) => items.reduce((acc, it) => acc + (it.total || 0), 0);
-
 function SummaryHBarList({ items, max, limit = 15 }) {
   return (
     <div className="space-y-1.5">
@@ -2158,6 +2160,71 @@ function SummaryHBarList({ items, max, limit = 15 }) {
         </div>
       ))}
       {items.length === 0 && <p className="text-xs text-gray-400">No data.</p>}
+    </div>
+  );
+}
+
+// A flat 2D ring (no perspective/extrusion — a true 3D pie distorts how big
+// each slice reads) with a soft drop-shadow for lift, rounded segment ends
+// standing in for a gap between slices, and the grand total set directly in
+// the middle — the one number every donut in the reference image was built
+// around. Built as plain SVG stroke-dasharray arcs rather than a charting
+// library so segment gaps/rounding/center text stay under exact control.
+function DonutRing({ items, size = 132, thickness = 20 }) {
+  const total = items.reduce((s, it) => s + (Number(it.total) || 0), 0);
+  const r = (size - thickness) / 2;
+  const cx = size / 2, cy = size / 2;
+  const circumference = 2 * Math.PI * r;
+  const gap = items.length > 1 ? 3 : 0;
+
+  let offset = 0;
+  const arcs = items.map((it, i) => {
+    const value = Number(it.total) || 0;
+    const rawLen = total > 0 ? (value / total) * circumference : 0;
+    const len = Math.max(rawLen - gap, 0);
+    const dashoffset = -offset;
+    offset += rawLen;
+    if (len <= 0) return null;
+    return (
+      <circle key={i} cx={cx} cy={cy} r={r} fill="none"
+        stroke={SUMMARY_COLORS[i % SUMMARY_COLORS.length]} strokeWidth={thickness} strokeLinecap="round"
+        strokeDasharray={`${len} ${Math.max(circumference - len, 0)}`} strokeDashoffset={dashoffset}
+        transform={`rotate(-90 ${cx} ${cy})`} />
+    );
+  });
+
+  return (
+    <svg width={size} height={size} style={{ filter: "drop-shadow(0 8px 12px rgba(0,0,0,0.45))" }}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={thickness} />
+      {arcs}
+      <text x={cx} y={cy - 3} textAnchor="middle" fontSize={24} fontWeight={800} fill="#f8fafc">{total}</text>
+      <text x={cx} y={cy + 15} textAnchor="middle" fontSize={9} fontWeight={700} fill="#94a3b8" letterSpacing="0.06em">TOTAL</text>
+    </svg>
+  );
+}
+
+function DonutLegend({ items }) {
+  const total = items.reduce((s, it) => s + (Number(it.total) || 0), 0);
+  return (
+    <div className="w-full space-y-1">
+      {items.map((it, i) => (
+        <div key={i} className="flex items-center gap-2 text-xs">
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: SUMMARY_COLORS[i % SUMMARY_COLORS.length] }} />
+          <span className="flex-1 truncate text-gray-300" title={it.name}>{it.name}</span>
+          <span className="text-gray-500">{total > 0 ? `${Math.round((it.total / total) * 100)}%` : "0%"}</span>
+          <span className="w-7 text-right font-bold text-white">{it.total}</span>
+        </div>
+      ))}
+      {items.length === 0 && <p className="text-xs text-gray-400">No data.</p>}
+    </div>
+  );
+}
+
+function DonutBlock({ items }) {
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <DonutRing items={items} />
+      <DonutLegend items={items} />
     </div>
   );
 }
@@ -2837,7 +2904,6 @@ function EmployeeGraphSection() {
 
   const by_level = sortByLevel(by_level_raw);
   const periodLabel = period.label || "Current";
-  const maxOf = (items) => Math.max(...items.map((d) => d.total), 1);
 
   return (
     <div className="space-y-4 mt-2">
@@ -2845,20 +2911,20 @@ function EmployeeGraphSection() {
       <p className="text-[10px] text-gray-500">Snapshot: {periodLabel} · as of {period.snapshot_date}</p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <SummaryChartCard title="Employee Status" total={_sumTotal(by_status)}>
-          <SummaryHBarList items={by_status} max={maxOf(by_status)} limit={by_status.length} />
+        <SummaryChartCard title="Employee Status">
+          <DonutBlock items={by_status} />
         </SummaryChartCard>
 
-        <SummaryChartCard title="Gender" total={_sumTotal(by_gender)}>
-          <SummaryHBarList items={by_gender} max={maxOf(by_gender)} limit={by_gender.length} />
+        <SummaryChartCard title="Gender">
+          <DonutBlock items={by_gender} />
         </SummaryChartCard>
 
-        <SummaryChartCard title="Marital Status" total={_sumTotal(by_marital)}>
-          <SummaryHBarList items={by_marital} max={maxOf(by_marital)} limit={by_marital.length} />
+        <SummaryChartCard title="Marital Status">
+          <DonutBlock items={by_marital} />
         </SummaryChartCard>
 
-        <SummaryChartCard title="By Level" total={_sumTotal(by_level)}>
-          <SummaryHBarList items={by_level} max={maxOf(by_level)} limit={by_level.length} />
+        <SummaryChartCard title="By Level">
+          <DonutBlock items={by_level} />
         </SummaryChartCard>
       </div>
     </div>
