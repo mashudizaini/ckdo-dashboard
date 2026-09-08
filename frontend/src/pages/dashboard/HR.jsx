@@ -2799,12 +2799,6 @@ function EmployeeGraphSection() {
   const [yearFilter, setYearFilter]   = useState("");
   const [monthFilter, setMonthFilter] = useState("");
   const { data, loading, errMsg } = useMonthlySummary(monthFilter || undefined, yearFilter || undefined);
-  const [RC, setRC] = useState(null);
-
-  useEffect(() => {
-    import("recharts").then((mod) => setRC(mod)).catch(() => {});
-  }, []);
-
   const filterBar = (
     <div className="flex flex-wrap items-end gap-2">
       <div className="w-28">
@@ -2842,30 +2836,8 @@ function EmployeeGraphSection() {
   } = data;
 
   const by_level = sortByLevel(by_level_raw);
-  const levelMax = Math.max(...by_level.map((d) => d.total), 1);
   const periodLabel = period.label || "Current";
-
-  const tooltipStyle = {
-    contentStyle: { borderRadius: 8, fontSize: 11 },
-    labelStyle: { color: "#1e293b", fontWeight: 600 },
-    itemStyle: { color: "#334155" },
-    cursor: { fill: "rgba(0,0,0,0.04)" },
-  };
-  if (!RC) return <div className="space-y-3 mt-2">{filterBar}<div className="py-6 text-center text-xs text-gray-300">Loading charts…</div></div>;
-
-  // Recharts' default pie-slice label ignores the `style` prop and renders
-  // dark text, which is unreadable on this dark background — render it manually.
-  const renderPieLabel = ({ cx, cy, midAngle, outerRadius, percent, name }) => {
-    const RADIAN = Math.PI / 180;
-    const radius = outerRadius + 14;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
-    return (
-      <text x={x} y={y} fill="#f1f5f9" fontSize={10} fontWeight={600} textAnchor={x > cx ? "start" : "end"} dominantBaseline="central">
-        {`${name} ${(percent * 100).toFixed(0)}%`}
-      </text>
-    );
-  };
+  const maxOf = (items) => Math.max(...items.map((d) => d.total), 1);
 
   return (
     <div className="space-y-4 mt-2">
@@ -2874,44 +2846,19 @@ function EmployeeGraphSection() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <SummaryChartCard title="Employee Status" total={_sumTotal(by_status)}>
-          <RC.ResponsiveContainer width="100%" height={170}>
-            <RC.PieChart>
-              <RC.Pie data={by_status} cx="50%" cy="50%" outerRadius={65} dataKey="total" nameKey="name" label={renderPieLabel} labelLine={false}>
-                {by_status.map((_, i) => <RC.Cell key={i} fill={SUMMARY_COLORS[i % SUMMARY_COLORS.length]} />)}
-              </RC.Pie>
-              <RC.Tooltip {...tooltipStyle} />
-              <RC.Legend wrapperStyle={{ fontSize: 11, color: "#f1f5f9" }} />
-            </RC.PieChart>
-          </RC.ResponsiveContainer>
+          <SummaryHBarList items={by_status} max={maxOf(by_status)} limit={by_status.length} />
         </SummaryChartCard>
 
         <SummaryChartCard title="Gender" total={_sumTotal(by_gender)}>
-          <RC.ResponsiveContainer width="100%" height={170}>
-            <RC.PieChart>
-              <RC.Pie data={by_gender} cx="50%" cy="50%" outerRadius={65} dataKey="total" nameKey="name" label={renderPieLabel} labelLine={false}>
-                <RC.Cell fill="#60a5fa" />
-                <RC.Cell fill="#fb7185" />
-              </RC.Pie>
-              <RC.Tooltip {...tooltipStyle} />
-              <RC.Legend wrapperStyle={{ fontSize: 11, color: "#f1f5f9" }} />
-            </RC.PieChart>
-          </RC.ResponsiveContainer>
+          <SummaryHBarList items={by_gender} max={maxOf(by_gender)} limit={by_gender.length} />
         </SummaryChartCard>
 
         <SummaryChartCard title="Marital Status" total={_sumTotal(by_marital)}>
-          <RC.ResponsiveContainer width="100%" height={170}>
-            <RC.PieChart>
-              <RC.Pie data={by_marital} cx="50%" cy="50%" outerRadius={65} dataKey="total" nameKey="name" label={renderPieLabel} labelLine={false}>
-                {by_marital.map((_, i) => <RC.Cell key={i} fill={SUMMARY_COLORS[i % SUMMARY_COLORS.length]} />)}
-              </RC.Pie>
-              <RC.Tooltip {...tooltipStyle} />
-              <RC.Legend wrapperStyle={{ fontSize: 11, color: "#f1f5f9" }} />
-            </RC.PieChart>
-          </RC.ResponsiveContainer>
+          <SummaryHBarList items={by_marital} max={maxOf(by_marital)} limit={by_marital.length} />
         </SummaryChartCard>
 
         <SummaryChartCard title="By Level" total={_sumTotal(by_level)}>
-          <SummaryHBarList items={by_level} max={levelMax} limit={by_level.length} />
+          <SummaryHBarList items={by_level} max={maxOf(by_level)} limit={by_level.length} />
         </SummaryChartCard>
       </div>
     </div>
