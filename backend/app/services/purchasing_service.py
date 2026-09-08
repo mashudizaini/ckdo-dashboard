@@ -543,14 +543,25 @@ class PurchasingService:
 
     async def get_purchase_history_detail(self, filters: dict) -> dict:
         """Output 1: Individual PO line detail (like Oracle PO report).
-        Reads eis.fact_po_line (Postgres) — see _pg_ph_where's docstring."""
+        Reads eis.fact_po_line (Postgres) — see _pg_ph_where's docstring.
+
+        pr_number/pr_date/requestor, delivery_date, receipt_number/
+        receipt_date, qty_outstanding, payment_term, buyer_name added for
+        the Detail View's expanded column set — see etl_po_lines's
+        docstring/_PO_LINE_FROM comments for how each is sourced/verified
+        live. buyer_name was already being extracted into fact_po_line by
+        the ETL but never selected here before now."""
         params = self._pg_ph_params(filters)
         sql = f"""
             SELECT po_number, line_num, item_code, item_description, category, item_type,
                    material_type, supplier_name, currency_code, uom, quantity, unit_price,
                    amount_orig, amount_idr, received_qty,
                    TO_CHAR(creation_date, 'YYYY-MM-DD') AS creation_date,
-                   closure_status, organization_name, country_of_origin
+                   closure_status, organization_name, country_of_origin,
+                   pr_number, TO_CHAR(pr_date, 'YYYY-MM-DD') AS pr_date, requestor,
+                   TO_CHAR(delivery_date, 'YYYY-MM-DD') AS delivery_date,
+                   receipt_number, TO_CHAR(receipt_date, 'YYYY-MM-DD') AS receipt_date,
+                   qty_outstanding, payment_term, buyer_name
             FROM eis.fact_po_line
             WHERE {self._pg_ph_where()}
             ORDER BY creation_date DESC, po_number, line_num

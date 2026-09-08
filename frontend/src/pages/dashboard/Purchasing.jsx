@@ -660,8 +660,13 @@ function Pagination({ total, page, onPage, pageSize = PAGE_SIZE }) {
 const PH_DETAIL_PAGE_SIZE = 8;
 
 const PH_DETAIL_COLS = [
+  { key: "pr_number",         label: "Pr Number" },
+  { key: "pr_date",           label: "Pr Date" },
+  { key: "requestor",         label: "Requestor" },
   { key: "po_number",         label: "PO Number" },
   { key: "line_num",          label: "Line",       numeric: true },
+  { key: "creation_date",     label: "PO Date" },
+  { key: "closure_status",    label: "Status" },
   { key: "item_code",         label: "Item Code" },
   { key: "item_description",  label: "Item Description" },
   { key: "category",          label: "Category" },
@@ -672,14 +677,26 @@ const PH_DETAIL_COLS = [
   { key: "organization_name", label: "Org" },
   { key: "currency_code",     label: "Currency" },
   { key: "uom",                label: "UOM" },
+  { key: "delivery_date",     label: "Delivery Date" },
   { key: "quantity",          label: "Qty",         numeric: true },
   { key: "unit_price",        label: "Unit Price",  numeric: true },
   { key: "amount_orig",       label: "Amount",      numeric: true },
   { key: "amount_idr",        label: "Amount IDR",  numeric: true },
   { key: "received_qty",      label: "Rcvd Qty",    numeric: true },
-  { key: "creation_date",     label: "PO Date" },
-  { key: "closure_status",    label: "Status" },
+  { key: "receipt_number",    label: "Receipt Number" },
+  { key: "receipt_date",      label: "Receipt Date" },
+  { key: "qty_outstanding",   label: "Qty Outstanding", numeric: true },
+  { key: "payment_term",      label: "Payment Term" },
+  { key: "buyer_name",        label: "Buyer" },
 ];
+
+// Columns rendered with the same Rp-style 2-decimal number format in the
+// Excel export as the existing Qty/Unit Price/Amount/Amount IDR/Rcvd Qty
+// group — indices looked up by key (not hardcoded positions) so
+// reordering PH_DETAIL_COLS above can never silently misalign the
+// formatting, the way a hardcoded [12,13,14,15,16] would have after this
+// reorder.
+const PH_DETAIL_AMOUNT_KEYS = ["quantity", "unit_price", "amount_orig", "amount_idr", "received_qty", "qty_outstanding"];
 
 function PHDetailTable({ data, loading, error }) {
   const [page, setPage] = useState(1);
@@ -707,14 +724,12 @@ function PHDetailTable({ data, loading, error }) {
   const paged = sorted.slice((page - 1) * PH_DETAIL_PAGE_SIZE, page * PH_DETAIL_PAGE_SIZE);
 
   const handleDownload = () => {
-    const rows = sorted.map(r => [
-      r.po_number, r.line_num, r.item_code, r.item_description,
-      r.category, r.item_type, r.material_type, r.country_of_origin, r.supplier_name, r.organization_name,
-      r.currency_code, r.uom, r.quantity, r.unit_price,
-      r.amount_orig, r.amount_idr, r.received_qty,
-      r.creation_date, r.closure_status,
-    ]);
-    downloadExcel("purchase_history_detail", PH_DETAIL_COLS.map(c => c.label), rows, [12, 13, 14, 15, 16]);
+    // Row cells built by walking PH_DETAIL_COLS itself (not a hand-written
+    // positional array) — reordering/adding columns above can never
+    // silently desync the export from the on-screen table again.
+    const rows = sorted.map(r => PH_DETAIL_COLS.map(c => r[c.key]));
+    const amountCols = PH_DETAIL_AMOUNT_KEYS.map(k => PH_DETAIL_COLS.findIndex(c => c.key === k));
+    downloadExcel("purchase_history_detail", PH_DETAIL_COLS.map(c => c.label), rows, amountCols);
   };
 
   return (
@@ -751,8 +766,13 @@ function PHDetailTable({ data, loading, error }) {
               <tr><td colSpan={PH_DETAIL_COLS.length} className="px-3 py-10 text-center text-xs text-gray-600">No data found</td></tr>
             ) : paged.map((r, i) => (
               <tr key={i} className="border-t border-gray-800/60 hover:bg-gray-800/30 transition-colors">
+                <td className={`${TD} font-mono text-gray-300`}>{r.pr_number || "-"}</td>
+                <td className={`${TD} text-gray-500`}>{r.pr_date || "-"}</td>
+                <td className={`${TD} text-gray-400`}>{r.requestor || "-"}</td>
                 <td className={`${TD} font-mono text-blue-400 font-medium`}>{r.po_number || "-"}</td>
                 <td className={`${TD} text-gray-400 text-center`}>{r.line_num ?? "-"}</td>
+                <td className={`${TD} text-gray-500`}>{r.creation_date || "-"}</td>
+                <td className={`${TD} text-gray-400`}>{r.closure_status || "Open"}</td>
                 <td className={`${TD} font-mono text-gray-300`}>{r.item_code || "-"}</td>
                 <td className={`${TD} text-gray-300 max-w-[180px] truncate`} title={r.item_description}>{r.item_description || "-"}</td>
                 <td className={`${TD} text-gray-400`}>{r.category || "-"}</td>
@@ -763,13 +783,17 @@ function PHDetailTable({ data, loading, error }) {
                 <td className={`${TD} text-gray-400 max-w-[120px] truncate`} title={r.organization_name}>{r.organization_name || "-"}</td>
                 <td className={`${TD} text-yellow-400`}>{r.currency_code || "-"}</td>
                 <td className={`${TD} text-gray-500`}>{r.uom || "-"}</td>
+                <td className={`${TD} text-gray-500`}>{r.delivery_date || "-"}</td>
                 <td className={`${TD} text-right text-gray-300`}>{fmtQty(r.quantity)}</td>
                 <td className={`${TD} text-right text-gray-300`}>{fmtIDR(r.unit_price)}</td>
                 <td className={`${TD} text-right text-gray-300 font-medium`}>{fmtIDR(r.amount_orig)}</td>
                 <td className={`${TD} text-right text-green-400 font-medium`}>{fmtIDR(r.amount_idr)}</td>
                 <td className={`${TD} text-right text-gray-400`}>{fmtQty(r.received_qty)}</td>
-                <td className={`${TD} text-gray-500`}>{r.creation_date || "-"}</td>
-                <td className={`${TD} text-gray-400`}>{r.closure_status || "Open"}</td>
+                <td className={`${TD} font-mono text-gray-300`}>{r.receipt_number || "-"}</td>
+                <td className={`${TD} text-gray-500`}>{r.receipt_date || "-"}</td>
+                <td className={`${TD} text-right text-gray-400`}>{fmtQty(r.qty_outstanding)}</td>
+                <td className={`${TD} text-gray-400`}>{r.payment_term || "-"}</td>
+                <td className={`${TD} text-gray-400 max-w-[120px] truncate`} title={r.buyer_name}>{r.buyer_name || "-"}</td>
               </tr>
             ))}
           </tbody>

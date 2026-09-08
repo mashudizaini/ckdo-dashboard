@@ -171,10 +171,32 @@ async def ensure_purchasing_migration_tables():
                 received_qty       NUMERIC(18,4),
                 creation_date      DATE,
                 closure_status     VARCHAR(30),
+                pr_number          VARCHAR(30),
+                pr_date            DATE,
+                requestor          VARCHAR(100),
+                delivery_date      DATE,
+                receipt_number     VARCHAR(30),
+                receipt_date       TIMESTAMP,
+                qty_outstanding    NUMERIC(18,4),
+                payment_term       VARCHAR(60),
                 updated_at         TIMESTAMPTZ DEFAULT now(),
                 UNIQUE (po_number, line_num)
             )
         """))
+        # Migration for tables created before the PR/receiving/payment-term
+        # columns existed (see etl_po_lines's docstring for the full
+        # sourcing/verification trail).
+        for _col_sql in (
+            "ADD COLUMN IF NOT EXISTS pr_number VARCHAR(30)",
+            "ADD COLUMN IF NOT EXISTS pr_date DATE",
+            "ADD COLUMN IF NOT EXISTS requestor VARCHAR(100)",
+            "ADD COLUMN IF NOT EXISTS delivery_date DATE",
+            "ADD COLUMN IF NOT EXISTS receipt_number VARCHAR(30)",
+            "ADD COLUMN IF NOT EXISTS receipt_date TIMESTAMP",
+            "ADD COLUMN IF NOT EXISTS qty_outstanding NUMERIC(18,4)",
+            "ADD COLUMN IF NOT EXISTS payment_term VARCHAR(60)",
+        ):
+            await conn.execute(text(f"ALTER TABLE eis.fact_po_line {_col_sql}"))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_fact_po_line_creation_date "
             "ON eis.fact_po_line (creation_date)"

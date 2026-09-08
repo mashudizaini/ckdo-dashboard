@@ -1510,6 +1510,58 @@ _PO_LINE_FROM = """
                                     ON  lv_mt.lookup_code         = msi.item_type
                                     AND lv_mt.view_application_id = 700
                                     AND lv_mt.lookup_type         = 'CKDO_MTRL_TYPE_DIRECT_INDIRECT'
+    -- Requisition (PR) that funded this PO shipment. Real fan-out exists
+    -- (confirmed live: 8/2221 shipment lines over 6 months have >1
+    -- distinct PR — a shipment split across requisitions) but is rare
+    -- (<0.4%); rather than duplicate the PO-line row for that sliver, this
+    -- picks the most-recently-created PR per shipment line
+    -- (ROW_NUMBER... rn=1). 19/2221 lines (0.86%) have no PR at all (PO
+    -- raised directly) — LEFT JOIN keeps those with NULL PR fields rather
+    -- than dropping the PO line. requestor reads fnd_user.user_name via
+    -- created_by (short, clean values, e.g. "MEGA") — same source
+    -- etl_open_pr already uses — NOT per_all_people_f.full_name, which was
+    -- checked and found to have a real data-quality defect for some
+    -- employees (a trailing comma when the first-name field is blank,
+    -- e.g. "MEGA UTAMI,").
+    LEFT JOIN (
+        SELECT lloc_id, pr_number, pr_date, requestor FROM (
+            SELECT pd.line_location_id                              AS lloc_id,
+                   prh.segment1                                      AS pr_number,
+                   prh.creation_date                                 AS pr_date,
+                   fu.user_name                                      AS requestor,
+                   ROW_NUMBER() OVER (PARTITION BY pd.line_location_id
+                                       ORDER BY prh.creation_date DESC) AS rn
+            FROM po_distributions_all pd
+            JOIN po_req_distributions_all   prd ON prd.distribution_id      = pd.req_distribution_id
+            JOIN po_requisition_lines_all   prl ON prl.requisition_line_id  = prd.requisition_line_id
+            JOIN po_requisition_headers_all prh ON prh.requisition_header_id = prl.requisition_header_id
+            LEFT JOIN fnd_user fu ON fu.user_id = prh.created_by
+        )
+        WHERE rn = 1
+    ) pr_info ON pr_info.lloc_id = poll.line_location_id
+    -- Most recent RECEIVE transaction per shipment line (partial receipts
+    -- over time are common — this is "the latest receipt", not every
+    -- receipt). Verified live: summing rcv_transactions.quantity
+    -- (RECEIVE minus RETURN TO VENDOR) by po_line_location_id reconciles
+    -- with poll.quantity_received for 1912/1913 sampled lines (99.95%),
+    -- confirming quantity_received is a trustworthy running total and
+    -- this join targets the right transaction set.
+    LEFT JOIN (
+        SELECT rct.po_line_location_id                                   AS lloc_id,
+               MAX(rsh.receipt_num) KEEP (
+                   DENSE_RANK LAST ORDER BY rct.transaction_date, rct.transaction_id
+               )                                                          AS receipt_number,
+               MAX(rct.transaction_date) KEEP (
+                   DENSE_RANK LAST ORDER BY rct.transaction_date, rct.transaction_id
+               )                                                          AS receipt_date
+        FROM rcv_transactions rct
+        JOIN rcv_shipment_headers rsh ON rsh.shipment_header_id = rct.shipment_header_id
+        WHERE rct.transaction_type = 'RECEIVE'
+        GROUP BY rct.po_line_location_id
+    ) recv_info ON recv_info.lloc_id = poll.line_location_id
+    -- Same ap_terms_tl join etl_open_pr already uses (see below), just
+    -- keyed off the PO header's own terms_id instead of the requisition's.
+    LEFT JOIN ap_terms_tl trm ON trm.term_id = poh.terms_id AND trm.language = USERENV('LANG')
 """
 
 _PO_LINE_RATE_CASE = """
@@ -1546,6 +1598,14 @@ def etl_po_lines(year: int = None, month: int = None, full_refresh: bool = False
     (covers edits/new lines; older closed lines don't change). Pass
     year=<YYYY> (month optional) to instead pull everything from that
     year forward — used for the initial backfill.
+
+    PR/receiving/payment-term columns (pr_number/pr_date/requestor,
+    delivery_date, receipt_number/receipt_date, qty_outstanding,
+    payment_term) added for Purchase History's Detail View — see
+    _PO_LINE_FROM's pr_info/recv_info subquery comments above for the
+    live-verified join paths, fan-out handling, and known data-quality
+    caveats (rare PR fan-out, a small requestor-name defect avoided by
+    using fnd_user over per_all_people_f).
     """
     pg = _get_pg()
     job_id = _log_start(pg, "etl_po_lines", year, month)
@@ -1590,7 +1650,16 @@ def etl_po_lines(year: int = None, month: int = None, full_refresh: bool = False
                 ROUND(pol.quantity * pol.unit_price * ({_PO_LINE_RATE_CASE}), 2) AS amount_idr,
                 NVL(poll.quantity_received, 0)                           AS received_qty,
                 poh.creation_date                                        AS creation_date,
-                poh.closed_code                                          AS closure_status
+                poh.closed_code                                          AS closure_status,
+                pr_info.pr_number                                        AS pr_number,
+                pr_info.pr_date                                          AS pr_date,
+                pr_info.requestor                                        AS requestor,
+                NVL(poll.promised_date, poll.need_by_date)                AS delivery_date,
+                recv_info.receipt_number                                 AS receipt_number,
+                recv_info.receipt_date                                   AS receipt_date,
+                (NVL(poll.quantity, 0) - NVL(poll.quantity_received, 0)
+                     - NVL(poll.quantity_cancelled, 0))                  AS qty_outstanding,
+                trm.name                                                 AS payment_term
             FROM {_PO_LINE_FROM}
             WHERE poh.type_lookup_code IN ('STANDARD','BLANKET','CONTRACT')
               AND poh.authorization_status NOT IN ('CANCELLED','INCOMPLETE')
@@ -1608,14 +1677,17 @@ def etl_po_lines(year: int = None, month: int = None, full_refresh: bool = False
         for (po_number, line_num, item_code, item_description, category, item_type, material_type,
              organization_id, organization_name, supplier_name, buyer_name, manufacturer_name,
              country_of_origin, currency_code, uom, quantity, unit_price, unit_price_idr, amount_orig,
-             amount_idr, received_qty, creation_date, closure_status) in rows:
+             amount_idr, received_qty, creation_date, closure_status, pr_number, pr_date, requestor,
+             delivery_date, receipt_number, receipt_date, qty_outstanding, payment_term) in rows:
             cur_pg.execute(
                 """INSERT INTO eis.fact_po_line
                        (po_number, line_num, item_code, item_description, category, item_type,
                         material_type, organization_id, organization_name, supplier_name, buyer_name,
                         manufacturer_name, country_of_origin, currency_code, uom, quantity, unit_price,
-                        unit_price_idr, amount_orig, amount_idr, received_qty, creation_date, closure_status)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        unit_price_idr, amount_orig, amount_idr, received_qty, creation_date, closure_status,
+                        pr_number, pr_date, requestor, delivery_date, receipt_number, receipt_date,
+                        qty_outstanding, payment_term)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                    ON CONFLICT (po_number, line_num) DO UPDATE SET
                        item_code = EXCLUDED.item_code, item_description = EXCLUDED.item_description,
                        category = EXCLUDED.category, item_type = EXCLUDED.item_type,
@@ -1627,13 +1699,19 @@ def etl_po_lines(year: int = None, month: int = None, full_refresh: bool = False
                        unit_price_idr = EXCLUDED.unit_price_idr,
                        amount_orig = EXCLUDED.amount_orig, amount_idr = EXCLUDED.amount_idr,
                        received_qty = EXCLUDED.received_qty, closure_status = EXCLUDED.closure_status,
+                       pr_number = EXCLUDED.pr_number, pr_date = EXCLUDED.pr_date,
+                       requestor = EXCLUDED.requestor, delivery_date = EXCLUDED.delivery_date,
+                       receipt_number = EXCLUDED.receipt_number, receipt_date = EXCLUDED.receipt_date,
+                       qty_outstanding = EXCLUDED.qty_outstanding, payment_term = EXCLUDED.payment_term,
                        updated_at = now()""",
                 (po_number, line_num, item_code, item_description, category, item_type, material_type,
                  float(organization_id) if organization_id is not None else None, organization_name,
                  supplier_name, buyer_name, manufacturer_name, country_of_origin, currency_code, uom,
                  float(quantity or 0), float(unit_price or 0), float(unit_price_idr or 0),
                  float(amount_orig or 0), float(amount_idr or 0),
-                 float(received_qty or 0), creation_date, closure_status),
+                 float(received_qty or 0), creation_date, closure_status,
+                 pr_number, pr_date, requestor, delivery_date, receipt_number, receipt_date,
+                 float(qty_outstanding) if qty_outstanding is not None else None, payment_term),
             )
             loaded += 1
 
