@@ -2104,6 +2104,29 @@ function useMonthlySummary(month, year) {
 
 const SUMMARY_COLORS = ["#6366f1","#34d399","#f59e0b","#f43f5e","#60a5fa","#a78bfa","#fb923c","#4ade80","#38bdf8","#c084fc"];
 
+// Seniority order for the Employee Graph's "By Level" chart — highest
+// first, so the ranking reads top-down instead of by headcount. Covers
+// every Employee.level value seen in production data (checked 2026-09-08);
+// anything not listed here (a future/typo value) sorts after all of these,
+// in whatever order the backend returned it (headcount desc), rather than
+// silently disappearing.
+const LEVEL_ORDER = [
+  "President Director", "Director", "Driver Dir",
+  "General Manager", "Driver Gm",
+  "Senior Manager", "Manager", "Assistant Manager", "Project Control Assistant Manager",
+  "Supervisor", "HR & GA Spv", "Production Supervisor",
+  "Senior Staff", "Officer", "Staff", "Product Specialis", "Secretary",
+  "Operator", "Operator / Clerk", "Clerk", "Driver",
+].map((l) => l.toLowerCase());
+
+function sortByLevel(items) {
+  const rank = (name) => {
+    const i = LEVEL_ORDER.indexOf((name || "").trim().toLowerCase());
+    return i === -1 ? LEVEL_ORDER.length : i;
+  };
+  return [...items].sort((a, b) => rank(a.name) - rank(b.name));
+}
+
 function SummaryChartCard({ title, total, children }) {
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
@@ -2122,10 +2145,10 @@ function SummaryChartCard({ title, total, children }) {
 
 const _sumTotal = (items) => items.reduce((acc, it) => acc + (it.total || 0), 0);
 
-function SummaryHBarList({ items, max }) {
+function SummaryHBarList({ items, max, limit = 15 }) {
   return (
     <div className="space-y-1.5">
-      {items.slice(0, 15).map((it, i) => (
+      {items.slice(0, limit).map((it, i) => (
         <div key={i} className="flex items-center gap-2 text-xs">
           <div className="w-28 text-gray-300 truncate shrink-0" title={it.name}>{it.name}</div>
           <div className="flex-1 bg-gray-800 rounded-full h-3 overflow-hidden">
@@ -2815,9 +2838,10 @@ function EmployeeGraphSection() {
   );
 
   const {
-    by_marital = [], by_status = [], by_gender = [], by_level = [], period = {},
+    by_marital = [], by_status = [], by_gender = [], by_level: by_level_raw = [], period = {},
   } = data;
 
+  const by_level = sortByLevel(by_level_raw);
   const levelMax = Math.max(...by_level.map((d) => d.total), 1);
   const periodLabel = period.label || "Current";
 
@@ -2887,7 +2911,7 @@ function EmployeeGraphSection() {
         </SummaryChartCard>
 
         <SummaryChartCard title="By Level" total={_sumTotal(by_level)}>
-          <SummaryHBarList items={by_level} max={levelMax} />
+          <SummaryHBarList items={by_level} max={levelMax} limit={by_level.length} />
         </SummaryChartCard>
       </div>
     </div>
