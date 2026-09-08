@@ -754,11 +754,44 @@ def _apply_employee_filters(
         # list yields the exact same headcount.
         cutoff_month = snapshot_month or 12
         snapshot_date = date(snapshot_year, cutoff_month, monthrange(snapshot_year, cutoff_month)[1])
-        q = q.where(
-            Employee.date_of_joining.isnot(None), Employee.date_of_joining <= snapshot_date,
-            (Employee.resign_date.is_(None) | (Employee.resign_date >= snapshot_date)),
-        )
+        q = q.where(_active_as_of_expr(snapshot_date))
     return q
+
+
+def _active_as_of_expr(snapshot_date):
+    """SQLAlchemy WHERE-fragment: employee was part of the active roster as
+    of snapshot_date, based on join/resign dates. A NULL resign_date
+    normally means "still with the company" — but 3 records (found
+    2026-09-08 via the Employee Graph's By Level chart overcounting "HR &
+    GA Spv") have employment_status == "Resign" with no resign_date on
+    file, an HR data gap rather than a still-employed person. Falling back
+    to employment_status for exactly that combination stops such rows from
+    being silently counted as active forever; NULL employment_status is
+    treated as "not known to be resigned" (unrelated blank field, not a
+    resign signal). See _is_active for the equivalent in-memory version
+    used by endpoints that window over a fetched employee list instead of
+    filtering in SQL."""
+    return and_(
+        Employee.date_of_joining.isnot(None),
+        Employee.date_of_joining <= snapshot_date,
+        or_(
+            Employee.resign_date >= snapshot_date,
+            and_(
+                Employee.resign_date.is_(None),
+                or_(Employee.employment_status.is_(None), Employee.employment_status != "Resign"),
+            ),
+        ),
+    )
+
+
+def _is_active(join_date, resign_date, employment_status, snapshot_date) -> bool:
+    """In-memory equivalent of _active_as_of_expr — see its docstring for
+    the employment_status fallback rationale."""
+    if join_date is None or join_date > snapshot_date:
+        return False
+    if resign_date is not None:
+        return resign_date >= snapshot_date
+    return employment_status != "Resign"
 
 
 @router.get("")
@@ -1046,11 +1079,11 @@ async def get_monthly_summary(
     try:
         # All join/resign pairs for cumulative headcount
         emps_q = await db.execute(
-            select(Employee.user_id, Employee.date_of_joining, Employee.resign_date)
+            select(Employee.user_id, Employee.date_of_joining, Employee.resign_date, Employee.employment_status)
             .where(Employee.date_of_joining.isnot(None))
         )
-        emps_full = [(r[0], r[1], r[2]) for r in emps_q.fetchall()]
-        emps = [(join, resign) for _uid, join, resign in emps_full]
+        emps_full = [(r[0], r[1], r[2], r[3]) for r in emps_q.fetchall()]
+        emps = [(join, resign, es) for _uid, join, resign, es in emps_full]
     except Exception as e:
         raise HTTPException(500, f"emps_q error: {e}")
 
@@ -1071,8 +1104,8 @@ async def get_monthly_summary(
         last_day  = date(y, m, monthrange(y, m)[1])
         first_day = date(y, m, 1)
         cnt = sum(
-            1 for join, resign in emps
-            if join <= last_day and (resign is None or resign >= first_day)
+            1 for join, resign, es in emps
+            if join <= last_day and (resign >= first_day if resign is not None else es != "Resign")
         )
         headcount_trend.append({"month": f"{y}-{m:02d}", "label": f"{MN[m-1]} '{str(y)[2:]}", "count": cnt})
 
@@ -1094,8 +1127,8 @@ async def get_monthly_summary(
     # snapshot path was ever active-filtered.
     snapshot_date = date(year, month or 12, monthrange(year, month or 12)[1]) if year else today
     active_ids = {
-        uid for uid, join, resign in emps_full
-        if join <= snapshot_date and (resign is None or resign >= snapshot_date)
+        uid for uid, join, resign, es in emps_full
+        if _is_active(join, resign, es, snapshot_date)
     }
 
     # Generic breakdown helper — explicit AND to avoid any dialect issues
@@ -1191,7 +1224,8 @@ async def get_turnover_summary(
     target_year = year or today.year
 
     q = select(Employee.date_of_joining, Employee.resign_date, Employee.department,
-               Employee.level, Employee.status, Employee.team).where(Employee.date_of_joining.isnot(None))
+               Employee.level, Employee.status, Employee.team,
+               Employee.employment_status).where(Employee.date_of_joining.isnot(None))
     if department:
         q = q.where(Employee.department == department)
     if team:
@@ -1209,12 +1243,12 @@ async def get_turnover_summary(
             if resign is not None and first_day <= resign <= last_day
         )
         headcount_start = sum(
-            1 for join, resign, *_ in emps
-            if join < first_day and (resign is None or resign >= first_day)
+            1 for join, resign, _dept, _lvl, _st, _tm, es in emps
+            if join < first_day and (resign >= first_day if resign is not None else es != "Resign")
         )
         headcount_end = sum(
-            1 for join, resign, *_ in emps
-            if join <= last_day and (resign is None or resign >= first_day)
+            1 for join, resign, _dept, _lvl, _st, _tm, es in emps
+            if join <= last_day and (resign >= first_day if resign is not None else es != "Resign")
         )
         avg_headcount = (headcount_start + headcount_end) / 2 if (headcount_start + headcount_end) > 0 else 0
         rate = round((resigns_in_month / avg_headcount) * 100, 2) if avg_headcount > 0 else 0
@@ -1263,7 +1297,10 @@ async def get_turnover_summary(
     ]
     avg_tenure_years = round(sum(tenures) / len(tenures), 1) if tenures else 0
 
-    current_headcount = sum(1 for join, resign, *_ in emps if resign is None)
+    current_headcount = sum(
+        1 for join, resign, _dept, _lvl, _st, _tm, es in emps
+        if resign is None and es != "Resign"
+    )
 
     return {
         "year":                 target_year,
@@ -1363,25 +1400,25 @@ async def get_summary_by_year(
     rows mirror /summary/by-month's tree (only some departments have them)."""
     rows_q = await db.execute(
         select(Employee.department, Employee.division, Employee.team,
-               Employee.date_of_joining, Employee.resign_date)
+               Employee.date_of_joining, Employee.resign_date, Employee.employment_status)
         .where(Employee.date_of_joining.isnot(None))
     )
     emps = [
-        (_group_department(d, t), (v or "").strip() or None, (t or "").strip() or None, j, r)
-        for d, v, t, j, r in rows_q.fetchall()
+        (_group_department(d, t), (v or "").strip() or None, (t or "").strip() or None, j, r, es)
+        for d, v, t, j, r, es in rows_q.fetchall()
     ]
-    emps = [(d, v, t, j, r) for d, v, t, j, r in emps if d is not None]
+    emps = [(d, v, t, j, r, es) for d, v, t, j, r, es in emps if d is not None]
 
     today = date.today()
-    year_from = min((j.year for _d, _v, _t, j, _r in emps), default=today.year)
+    year_from = min((j.year for _d, _v, _t, j, _r, _es in emps), default=today.year)
     years = list(range(year_from, today.year + 1))
 
     departments = DEPT_GROUPS
 
     def active_count(snapshot, dept_filter=None, division_filter=None, team_filter=None):
         return sum(
-            1 for d, v, t, j, r in emps
-            if j <= snapshot and (r is None or r >= snapshot)
+            1 for d, v, t, j, r, es in emps
+            if _is_active(j, r, es, snapshot)
             and (dept_filter is None or d == dept_filter)
             and (division_filter is None or v == division_filter)
             and (team_filter is None or t == team_filter)
@@ -1402,8 +1439,8 @@ async def get_summary_by_year(
     for label in DEPT_GROUPS:
         rows.append({"department": label, "division": None, "team": None, "by_year": by_year_for(label)})
 
-        divisions_in_dept = sorted({v for d, v, _t, _j, _r in emps if d == label and v})
-        teams_direct = sorted({t for d, v, t, _j, _r in emps if d == label and not v and t}, key=_team_sort_key)
+        divisions_in_dept = sorted({v for d, v, _t, _j, _r, _es in emps if d == label and v})
+        teams_direct = sorted({t for d, v, t, _j, _r, _es in emps if d == label and not v and t}, key=_team_sort_key)
 
         # General Manager leads the whole department (row #1 after the
         # department total) even when the department also has divisions
@@ -1423,7 +1460,7 @@ async def get_summary_by_year(
                 "by_year": by_year_for(label, division),
             })
             teams_in_division = sorted({
-                t for d, v, t, _j, _r in emps
+                t for d, v, t, _j, _r, _es in emps
                 if d == label and v == division and t
             }, key=_team_sort_key)
             for team in teams_in_division:
@@ -1463,22 +1500,22 @@ async def get_summary_by_month(
     target_year = year or date.today().year
     rows_q = await db.execute(
         select(Employee.department, Employee.division, Employee.team,
-               Employee.date_of_joining, Employee.resign_date)
+               Employee.date_of_joining, Employee.resign_date, Employee.employment_status)
         .where(Employee.date_of_joining.isnot(None))
     )
     emps = [
-        (_group_department(d, t), (v or "").strip() or None, (t or "").strip() or None, j, r)
-        for d, v, t, j, r in rows_q.fetchall()
+        (_group_department(d, t), (v or "").strip() or None, (t or "").strip() or None, j, r, es)
+        for d, v, t, j, r, es in rows_q.fetchall()
     ]
-    emps = [(d, v, t, j, r) for d, v, t, j, r in emps if d is not None]
+    emps = [(d, v, t, j, r, es) for d, v, t, j, r, es in emps if d is not None]
 
     today = date.today()
     months = list(range(1, 13))
 
     def active_count(snapshot, dept_filter=None, division_filter=None, team_filter=None):
         return sum(
-            1 for d, v, t, j, r in emps
-            if j <= snapshot and (r is None or r >= snapshot)
+            1 for d, v, t, j, r, es in emps
+            if _is_active(j, r, es, snapshot)
             and (dept_filter is None or d == dept_filter)
             and (division_filter is None or v == division_filter)
             and (team_filter is None or t == team_filter)
@@ -1504,8 +1541,8 @@ async def get_summary_by_month(
     for label in DEPT_GROUPS:
         rows.append({"department": label, "division": None, "team": None, "by_month": by_month_for(label)})
 
-        divisions_in_dept = sorted({v for d, v, _t, _j, _r in emps if d == label and v})
-        teams_direct = sorted({t for d, v, t, _j, _r in emps if d == label and not v and t}, key=_team_sort_key)
+        divisions_in_dept = sorted({v for d, v, _t, _j, _r, _es in emps if d == label and v})
+        teams_direct = sorted({t for d, v, t, _j, _r, _es in emps if d == label and not v and t}, key=_team_sort_key)
 
         # General Manager leads the whole department (row #1 after the
         # department total) even when the department also has divisions
@@ -1525,7 +1562,7 @@ async def get_summary_by_month(
                 "by_month": by_month_for(label, division),
             })
             teams_in_division = sorted({
-                t for d, v, t, _j, _r in emps
+                t for d, v, t, _j, _r, _es in emps
                 if d == label and v == division and t
             }, key=_team_sort_key)
             for team in teams_in_division:
