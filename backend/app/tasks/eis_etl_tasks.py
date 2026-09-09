@@ -1632,7 +1632,16 @@ def etl_po_lines(year: int = None, month: int = None, full_refresh: bool = False
                 pol.line_num                                             AS line_num,
                 NVL(msi.segment1, TO_CHAR(pol.item_id))                  AS item_code,
                 NVL(pol.item_description, msi.description)               AS item_description,
-                NVL(mcb.segment1, '-')                                   AS category,
+                CASE
+                    WHEN mcb.segment1 IS NOT NULL THEN mcb.segment1
+                    -- Oracle inventory category is blank for some items —
+                    -- fall back to the item code's 3rd character, the
+                    -- company's own Primer/Sekunder packaging-tier marker
+                    -- (P/S), rather than showing '-' with no way to tell.
+                    WHEN UPPER(SUBSTR(msi.segment1, 3, 1)) = 'P' THEN 'Primer'
+                    WHEN UPPER(SUBSTR(msi.segment1, 3, 1)) = 'S' THEN 'Sekunder'
+                    ELSE '-'
+                END                                                       AS category,
                 NVL(msi.item_type, '-')                                  AS item_type,
                 lv_mt.tag                                                AS material_type,
                 NVL(msi.organization_id, poll.ship_to_organization_id)   AS organization_id,
@@ -1785,7 +1794,14 @@ def etl_open_pr(year: int = None, month: int = None):
                 prl.line_num                                                AS line_num,
                 NVL(msi.segment1, '-')                                     AS item_code,
                 prl.item_description                                        AS item_description,
-                NVL(mcb.segment1, '-')                                      AS category_code,
+                CASE
+                    WHEN mcb.segment1 IS NOT NULL THEN mcb.segment1
+                    -- Same Primer/Sekunder (P/S, item code's 3rd char)
+                    -- fallback as etl_po_lines — see its comment.
+                    WHEN UPPER(SUBSTR(msi.segment1, 3, 1)) = 'P' THEN 'Primer'
+                    WHEN UPPER(SUBSTR(msi.segment1, 3, 1)) = 'S' THEN 'Sekunder'
+                    ELSE '-'
+                END                                                         AS category_code,
                 NVL(mcb.description, prl.item_description)                  AS category_name,
                 lv_mt.tag                                                   AS material_type,
                 fu.user_name                                                AS requestor,
