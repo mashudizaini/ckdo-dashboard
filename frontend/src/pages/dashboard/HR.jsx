@@ -3205,7 +3205,7 @@ function TurnoverSection() {
 
   const {
     resign_trend = [], annual_turnover_rate = 0, total_resigns_period = 0,
-    avg_tenure_years = 0, current_headcount = 0,
+    current_headcount = 0,
     by_dept: by_dept_raw = [], by_level: by_level_raw = [], by_status = [], year = curYear, month = null,
   } = data;
 
@@ -3232,11 +3232,10 @@ function TurnoverSection() {
       {filterBar}
 
       {/* KPI Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {[
           { label: `Turnover Rate (${year})`,      val: `${annual_turnover_rate}%`, sub: "annualized",              color: "#fb7185" },
           { label: `Total Resigned (${periodLabel})`, val: total_resigns_period,     sub: "employees left",          color: "#fbbf24" },
-          { label: "Avg. Tenure",                  val: `${avg_tenure_years} yrs`,  sub: "of resigned employees",   color: "#818cf8" },
           { label: "Current Headcount",            val: current_headcount,          sub: "active employees",        color: "#34d399" },
         ].map(({ label, val, sub, color }) => (
           <div key={label} className="rounded-xl border border-gray-800 bg-gray-900 p-4">
