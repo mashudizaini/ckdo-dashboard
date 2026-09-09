@@ -2161,6 +2161,20 @@ function sortByLevel(items) {
   return [...items].sort((a, b) => rank(a.name) - rank(b.name));
 }
 
+// Same relative department order as the backend's DEPT_GROUPS (Employee
+// Summary), minus "Board of Directors" — that's a derived grouping (by
+// job_title, not a raw Employee.department value), so it never appears in
+// a breakdown taken straight from the department column, like this one.
+const DEPT_ORDER = ["Administration", "Sales & Marketing", "Strategy & Development", "Plant"].map((d) => d.toLowerCase());
+
+function sortByDept(items) {
+  const rank = (name) => {
+    const i = DEPT_ORDER.indexOf((name || "").trim().toLowerCase());
+    return i === -1 ? DEPT_ORDER.length : i;
+  };
+  return [...items].sort((a, b) => rank(a.name) - rank(b.name));
+}
+
 function SummaryChartCard({ title, total, children }) {
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
@@ -3100,7 +3114,7 @@ function TurnoverSection() {
   const [RC, setRC] = useState(null);
 
   const [yearFilter, setYearFilter] = useState(curYear);
-  const [monthFilter, setMonthFilter] = useState("");
+  const [monthFilter, setMonthFilter] = useState(() => String(new Date().getMonth() + 1));
   const [deptFilter, setDeptFilter] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
   const [departments, setDepartments] = useState([]);
@@ -3192,8 +3206,11 @@ function TurnoverSection() {
   const {
     resign_trend = [], annual_turnover_rate = 0, total_resigns_period = 0,
     avg_tenure_years = 0, current_headcount = 0,
-    by_dept = [], by_level = [], by_status = [], year = curYear, month = null,
+    by_dept: by_dept_raw = [], by_level: by_level_raw = [], by_status = [], year = curYear, month = null,
   } = data;
+
+  const by_dept = sortByDept(by_dept_raw);
+  const by_level = sortByLevel(by_level_raw);
 
   const CHART_H = 200;
   const periodLabel = month ? `${MONTHS_ID[month - 1]} ${year}` : `${year}`;
