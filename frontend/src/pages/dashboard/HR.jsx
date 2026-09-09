@@ -1210,6 +1210,8 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
 function ResignEmployeeModal({ employee, onClose, onSaved }) {
   const [resignDate, setResignDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [reason, setReason] = useState("");
+  const [resignDoc, setResignDoc] = useState(null);
+  const resignDocInputRef = useRef(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -1218,12 +1220,22 @@ function ResignEmployeeModal({ employee, onClose, onSaved }) {
     setSaving(true); setError("");
     try {
       await hrApi.resignEmployee(employee.user_id, { resign_date: resignDate, reason: reason.trim() || null });
-      onSaved?.();
     } catch (err) {
       setError(err?.detail || "Failed to save");
-    } finally {
       setSaving(false);
+      return;
     }
+    if (resignDoc) {
+      try {
+        await hrApi.uploadResignDocument(employee.user_id, resignDoc);
+      } catch (_) {
+        setError("Resign saved, but the attached document failed to upload — you can try attaching it again.");
+        setSaving(false);
+        return;
+      }
+    }
+    setSaving(false);
+    onSaved?.();
   };
 
   return (
@@ -1260,6 +1272,24 @@ function ResignEmployeeModal({ employee, onClose, onSaved }) {
               placeholder="Optional — reason for resignation..."
               className="w-full mt-1 rounded-lg border-none bg-white px-3 py-2 text-sm text-gray-800 outline-none resize-none"
             />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-gray-500">Attachment Document Resign</label>
+            <input
+              ref={resignDocInputRef}
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png"
+              onChange={(e) => setResignDoc(e.target.files?.[0] || null)}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => resignDocInputRef.current?.click()}
+              className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-3 py-2.5 text-xs font-semibold text-gray-600 hover:border-gray-400 hover:text-gray-800"
+            >
+              <FileText size={14} />
+              {resignDoc ? resignDoc.name : "Attach Resign Document (PDF/JPG/PNG, optional)"}
+            </button>
           </div>
 
           {error && <p style={{ fontSize: 11.5, color: "#dc2626", fontWeight: 600 }}>{error}</p>}

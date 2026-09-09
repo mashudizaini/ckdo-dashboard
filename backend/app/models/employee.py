@@ -49,6 +49,7 @@ class Employee(Base):
     personal_email  = Column(String(200))
     company_email   = Column(String(200))
     photo_filename  = Column(String(255))  # stored name on disk under uploads/employee_photos/
+    resign_document_filename = Column(String(255))  # scanned resignation letter/document — uploads/employee_resign_documents/
 
     # This employee's individual scheduled check-in time ("HH:MM", e.g.
     # "08:30" or "09:00") — some employees are permitted a later 09:00-18:00

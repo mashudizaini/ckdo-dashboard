@@ -121,6 +121,12 @@ export const hrApi = {
     return api.post(`/dashboard/hr/employees/${userId}/photo`, fd, { headers: { "Content-Type": undefined } });
   },
   deleteEmployeePhoto: (userId) => api.delete(`/dashboard/hr/employees/${userId}/photo`),
+  uploadResignDocument: (userId, file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return api.post(`/dashboard/hr/employees/${userId}/resign-document`, fd, { headers: { "Content-Type": undefined } });
+  },
+  deleteResignDocument: (userId) => api.delete(`/dashboard/hr/employees/${userId}/resign-document`),
   getEmployeeHistory: (userId) => api.get(`/dashboard/hr/employees/${userId}/history`),
   getOrgChart:     ()      => api.get("/dashboard/hr/employees/org-chart"),
   setSupervisor:   (userId, supervisorId) => api.patch(`/dashboard/hr/employees/${userId}/supervisor`, { supervisor_id: supervisorId }),
