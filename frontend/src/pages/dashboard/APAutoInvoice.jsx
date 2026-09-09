@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Upload, FileText, CheckCircle, Send, Loader2, AlertTriangle,
-  RefreshCw, ChevronDown, ChevronUp, X, Pencil, Trash2, Save, Search, Paperclip,
+  RefreshCw, ChevronDown, ChevronUp, X, Pencil, Trash2, Save, Search, Paperclip, Link2,
 } from "lucide-react";
 import { apInvoiceApi } from "@/api/dashboard";
 
@@ -178,6 +178,7 @@ export default function APAutoInvoice() {
         const preview = await apInvoiceApi.get(id);
         const header = {
           INVOICE_NUM: preview.invoice_num, INVOICE_DATE: preview.invoice_date,
+          RECEIVED_DATE: preview.received_date,
           VENDOR_ID: preview.vendor_id, VENDOR_SITE_ID: preview.vendor_site_id,
           INVOICE_AMOUNT: preview.invoice_amount,
           INVOICE_CURRENCY_CODE: preview.currency_code || "IDR",
@@ -334,6 +335,10 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
   const [editLines, setEditLines] = useState([]);
+  const [matchingLineIdx, setMatchingLineIdx] = useState(null);
+  const [poLines, setPoLines] = useState(null);
+  const [poLinesLoading, setPoLinesLoading] = useState(false);
+  const [poLinesError, setPoLinesError] = useState("");
 
   const d = detail;
   const s = d.status;
@@ -347,6 +352,7 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
     setForm({
       invoice_num: d.invoice_num,
       invoice_date: d.invoice_date || "",
+      received_date: d.received_date || "",
       vendor_name: d.vendor_name || "",
       po_number: d.po_number || "",
       so_number: d.so_number || "",
@@ -383,9 +389,37 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
     setEditLines(prev => prev.filter((_, i) => i !== idx));
   };
 
+  const openMatchPicker = async (idx) => {
+    setMatchingLineIdx(idx);
+    if (poLines) return; // already fetched for this po_number this session
+    setPoLinesLoading(true);
+    setPoLinesError("");
+    try {
+      const res = await apInvoiceApi.getPoLines(form.po_number || d.po_number);
+      setPoLines(res.lines || []);
+    } catch (e) {
+      setPoLinesError(e?.detail || e?.message || "Failed to load PO lines");
+    } finally {
+      setPoLinesLoading(false);
+    }
+  };
+
+  const applyMatch = (poLine, receipt) => {
+    updateLine(matchingLineIdx, "po_number", d.po_number);
+    updateLine(matchingLineIdx, "po_line_number", poLine.line_num);
+    updateLine(matchingLineIdx, "receipt_number", receipt ? receipt.receipt_number : null);
+    setMatchingLineIdx(null);
+  };
+
+  const clearMatch = (idx) => {
+    updateLine(idx, "po_line_number", null);
+    updateLine(idx, "receipt_number", null);
+  };
+
   const FIELDS = [
     { key: "invoice_num",    label: "Invoice Number" },
     { key: "invoice_date",   label: "Invoice Date" },
+    { key: "received_date",  label: "Received Date (Stamp)" },
     { key: "vendor_name",    label: "Vendor Name" },
     { key: "po_number",      label: "PO Number" },
     { key: "currency_code",  label: "Currency" },
@@ -396,6 +430,7 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
   ];
 
   return (
+    <>
     <div style={{ borderRadius: 18, boxShadow: NEU.shadowOut, background: NEU.bg, overflow: "hidden" }}>
       {/* Header */}
       <div style={{
@@ -445,6 +480,10 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                   onChange={v => setForm(p => ({ ...p, [f.key]: v }))}
                   type={f.type || "text"}
                 />
+              ) : f.key === "received_date" && !d[f.key] ? (
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#d97706" }}>
+                  Not read from stamp — click Edit to fill in
+                </div>
               ) : (
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b", wordBreak: "break-all" }}>
                   {f.fmt && d[f.key] ? `Rp ${Number(d[f.key]).toLocaleString("id-ID")}` : (d[f.key] || "—")}
@@ -478,7 +517,9 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
-                    {["#", "Description", "Qty", "Unit Price", "Amount", ...(editing ? [""] : [])].map(h => (
+                    {["#", "Description", "Qty", "Unit Price", "Amount",
+                      ...((editing ? form.po_number : d.po_number) ? ["PO Match"] : []),
+                      ...(editing ? [""] : [])].map(h => (
                       <th key={h} style={{
                         padding: "10px 12px", fontSize: 11, fontWeight: 700,
                         color: "#374151", textAlign: h === "Description" ? "left" : "right",
@@ -514,6 +555,33 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                           <EditInput value={ln.line_amount} onChange={v => updateLine(i, "line_amount", v)} type="number" align="right" />
                         ) : Number(ln.line_amount).toLocaleString("id-ID")}
                       </td>
+                      {(editing ? form.po_number : d.po_number) && (
+                        <td style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", width: 150 }}>
+                          {ln.po_line_number ? (
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <div style={{ fontWeight: 700, color: "#059669" }}>
+                                Line {ln.po_line_number}{ln.receipt_number ? ` · ${ln.receipt_number}` : ""}
+                              </div>
+                              {editing && (
+                                <button onClick={() => clearMatch(i)} title="Clear match"
+                                  style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 2 }}>
+                                  <X size={11} />
+                                </button>
+                              )}
+                            </div>
+                          ) : editing ? (
+                            <button onClick={() => openMatchPicker(i)} style={{
+                              display: "flex", alignItems: "center", gap: 4, background: "#fef3c7",
+                              color: "#d97706", border: "none", borderRadius: 8, padding: "4px 8px",
+                              fontSize: 11, fontWeight: 700, cursor: "pointer",
+                            }}>
+                              <Link2 size={11} /> Match to PO
+                            </button>
+                          ) : (
+                            <span style={{ color: "#d97706", fontWeight: 700 }}>Not matched</span>
+                          )}
+                        </td>
+                      )}
                       {editing && (
                         <td style={{ padding: "8px 6px", textAlign: "center", width: 36 }}>
                           <button onClick={() => removeLine(i)} style={{
@@ -609,5 +677,71 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
         )}
       </div>
     </div>
+
+    {matchingLineIdx !== null && (
+      <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
+        onClick={() => setMatchingLineIdx(null)}>
+        <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, width: 640, maxWidth: "90vw", maxHeight: "80vh", overflow: "auto", boxShadow: NEU.shadowOut }}>
+          <div style={{ padding: "14px 18px", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, background: "#fff" }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: "#1e293b" }}>Match to PO {d.po_number}</div>
+            <button onClick={() => setMatchingLineIdx(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#64748b" }}>
+              <X size={16} />
+            </button>
+          </div>
+          <div style={{ padding: 16 }}>
+            {poLinesLoading && (
+              <div style={{ textAlign: "center", padding: 30 }}><Loader2 size={20} className="animate-spin" /></div>
+            )}
+            {poLinesError && (
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#dc2626", marginBottom: 8 }}>{poLinesError}</div>
+            )}
+            {!poLinesLoading && !poLinesError && (poLines || []).length === 0 && (
+              <div style={{ fontSize: 12, color: "#64748b" }}>No lines found for this PO.</div>
+            )}
+            {!poLinesLoading && (poLines || []).map(pl => (
+              <div key={pl.line_num} style={{ borderRadius: 12, border: "1px solid #e2e8f0", padding: 12, marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#1e293b" }}>
+                      Line {pl.line_num} — {pl.item_code || "(no item code)"}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>{pl.description}</div>
+                    <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
+                      Qty {pl.quantity} · Rp {Number(pl.unit_price || 0).toLocaleString("id-ID")}/unit · Received {pl.quantity_received ?? 0}
+                      {" · "}{pl.match_option === "R" ? "Match to Receipt" : "Match to PO"}
+                      {pl.closed_code ? ` · ${pl.closed_code}` : ""}
+                    </div>
+                  </div>
+                  {pl.match_option !== "R" && (
+                    <NeuBtn small label="Select" color="#2563eb" onClick={() => applyMatch(pl, null)} />
+                  )}
+                </div>
+                {pl.match_option === "R" && (
+                  <div style={{ marginTop: 8 }}>
+                    {(pl.receipts || []).length === 0 ? (
+                      <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 600 }}>
+                        No receipt recorded yet for this line — can't be matched until goods are received.
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {pl.receipts.map(r => (
+                          <button key={r.receipt_number} onClick={() => applyMatch(pl, r)} style={{
+                            fontSize: 11, fontWeight: 700, padding: "5px 10px", borderRadius: 8, border: "none",
+                            background: "#dbeafe", color: "#1d4ed8", cursor: "pointer",
+                          }}>
+                            Receipt {r.receipt_number} · {r.transaction_date} · Qty {r.quantity}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

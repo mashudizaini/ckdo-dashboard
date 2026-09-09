@@ -443,6 +443,7 @@ export const apInvoiceApi = {
   runImport:       (id)       => api.post(`/dashboard/accounting/ap-invoice/run-import/${id}`),
   checkStatus:     (id)       => api.get(`/dashboard/accounting/ap-invoice/check-status/${id}`),
   attachPdf:       (id)       => api.post(`/dashboard/accounting/ap-invoice/attach/${id}`),
+  getPoLines:      (poNumber) => api.get(`/dashboard/accounting/ap-invoice/po-lines/${poNumber}`),
 };
 
 export const purchasingApi = {

@@ -171,7 +171,14 @@ def extract_pdf(file_path: str, filename: str, provider: str = "onprem") -> dict
     images = _pdf_to_images_base64(file_path)
     data = _call_claude_vision(images) if provider == "anthropic" else _call_ollama_vision(images)
 
-    invoice_date = data.get("received_date") or data.get("invoice_date") or datetime.today().strftime("%d/%m/%Y")
+    # invoice_date and received_date are two different dates (printed invoice
+    # date vs. the handwritten "RECEIVED BY" stamp) — kept as separate fields
+    # rather than one silently standing in for the other, since received_date
+    # is what GL_DATE gets computed from (see insert_to_interface). When the
+    # stamp can't be read, received_date stays None so the UI can prompt for
+    # a manual entry instead of masking the gap with invoice_date.
+    invoice_date = data.get("invoice_date") or datetime.today().strftime("%d/%m/%Y")
+    received_date = data.get("received_date") or None
 
     lines = []
     for i, ln in enumerate(data.get("lines", []), start=1):
@@ -195,6 +202,7 @@ def extract_pdf(file_path: str, filename: str, provider: str = "onprem") -> dict
     return {
         "invoice_num": data.get("invoice_num", "").strip(),
         "invoice_date": invoice_date,
+        "received_date": received_date,
         "vendor_name": data.get("vendor_name", "").strip(),
         "payment_terms": data.get("payment_terms") or "30 Days",
         "terms_date": data.get("terms_date"),
@@ -215,12 +223,12 @@ def save_to_staging(db_conn, invoice_data: dict) -> int:
     cur = db_conn.cursor()
     cur.execute("""
         INSERT INTO ap_invoice_stg (
-            invoice_num, invoice_date, vendor_name, payment_terms,
+            invoice_num, invoice_date, received_date, vendor_name, payment_terms,
             terms_date, po_number, so_number, currency_code,
             subtotal, tax_amount, invoice_amount, tax_serial_number,
             source_file, lines_json, status, created_date
         ) VALUES (
-            %(invoice_num)s, %(invoice_date)s, %(vendor_name)s, %(payment_terms)s,
+            %(invoice_num)s, %(invoice_date)s, %(received_date)s, %(vendor_name)s, %(payment_terms)s,
             %(terms_date)s, %(po_number)s, %(so_number)s, %(currency_code)s,
             %(subtotal)s, %(tax_amount)s, %(invoice_amount)s, %(tax_serial_number)s,
             %(source_file)s, %(lines_json)s, 'NEW', NOW()
@@ -257,7 +265,7 @@ def get_invoice_detail(db_conn, stg_id: int) -> Optional[dict]:
         SELECT stg_id, status, error_msg, source_file,
                TO_CHAR(created_date, 'DD/MM/YYYY HH24:MI:SS'),
                TO_CHAR(processed_date, 'DD/MM/YYYY HH24:MI:SS'),
-               invoice_num, invoice_date, vendor_name, vendor_id,
+               invoice_num, invoice_date, received_date, vendor_name, vendor_id,
                vendor_site_id, vendor_site_code, payment_terms,
                terms_date, po_number, so_number, currency_code,
                invoice_amount, subtotal, tax_amount,
@@ -270,7 +278,7 @@ def get_invoice_detail(db_conn, stg_id: int) -> Optional[dict]:
         return None
     cols = ["stg_id", "status", "error_msg", "source_file",
             "created_date", "processed_date",
-            "invoice_num", "invoice_date", "vendor_name", "vendor_id",
+            "invoice_num", "invoice_date", "received_date", "vendor_name", "vendor_id",
             "vendor_site_id", "vendor_site_code", "payment_terms",
             "terms_date", "po_number", "so_number", "currency_code",
             "invoice_amount", "subtotal", "tax_amount",
@@ -356,17 +364,126 @@ def validate_invoice(db_conn, ora_conn, stg_id: int) -> dict:
     return {"stg_id": stg_id, "status": "VALIDATED", "vendor": vendor_info, "warnings": warnings}
 
 
+def get_po_lines_for_matching(ora_conn, po_number: str) -> Optional[dict]:
+    """PO's lines + their receipts, for a human to manually pick which PO
+    line (and, when the shipment is receipt-matched, which receipt) each
+    invoice line corresponds to — populates AP_INVOICE_LINES_INTERFACE's
+    PO_LINE_NUMBER/RECEIPT_NUMBER. Deliberately NOT auto-matched: the
+    extraction's item_code is frequently null (OCR can't always read it),
+    and matching by description text alone is too unreliable for something
+    that posts real money against a specific PO line/receipt — see the
+    "No PO Line Num"/"Insufficient Receipt Information" APXIIMPT rejections
+    this exists to let a person resolve correctly."""
+    with ora_conn.cursor() as oc:
+        oc.execute("""
+            SELECT po_header_id FROM po_headers_all WHERE segment1 = :po
+            FETCH FIRST 1 ROWS ONLY
+        """, {"po": po_number})
+        hrow = oc.fetchone()
+        if not hrow:
+            return None
+        po_header_id = hrow[0]
+
+        oc.execute("""
+            SELECT pol.line_num, msi.segment1 AS item_code, pol.item_description,
+                   pol.quantity, pol.unit_price, poll.line_location_id,
+                   poll.match_option, poll.quantity_received, poll.closed_code
+            FROM po_lines_all pol
+            JOIN po_line_locations_all poll ON poll.po_line_id = pol.po_line_id
+            LEFT JOIN mtl_system_items_b msi
+                   ON msi.inventory_item_id = pol.item_id AND msi.organization_id = poll.ship_to_organization_id
+            WHERE pol.po_header_id = :hid
+            ORDER BY pol.line_num
+        """, {"hid": po_header_id})
+        line_rows = oc.fetchall()
+
+        line_location_ids = [r[5] for r in line_rows]
+        receipts_by_loc: dict = {}
+        if line_location_ids:
+            placeholders = ",".join(f":loc{i}" for i in range(len(line_location_ids)))
+            params = {f"loc{i}": v for i, v in enumerate(line_location_ids)}
+            oc.execute(f"""
+                SELECT rt.po_line_location_id, rsh.receipt_num, rt.transaction_date, rt.quantity
+                FROM rcv_transactions rt
+                JOIN rcv_shipment_headers rsh ON rsh.shipment_header_id = rt.shipment_header_id
+                WHERE rt.po_line_location_id IN ({placeholders})
+                  AND rt.transaction_type = 'RECEIVE'
+                ORDER BY rt.transaction_date
+            """, params)
+            for loc_id, receipt_num, txn_date, qty in oc.fetchall():
+                receipts_by_loc.setdefault(loc_id, []).append({
+                    "receipt_number": receipt_num,
+                    "transaction_date": txn_date.strftime("%d/%m/%Y") if txn_date else None,
+                    "quantity": float(qty) if qty is not None else None,
+                })
+
+    lines = [
+        {
+            "line_num": line_num,
+            "item_code": item_code,
+            "description": item_desc,
+            "quantity": float(qty) if qty is not None else None,
+            "unit_price": float(unit_price) if unit_price is not None else None,
+            "line_location_id": loc_id,
+            "match_option": match_option,
+            "quantity_received": float(qty_received) if qty_received is not None else None,
+            "closed_code": closed_code,
+            "receipts": receipts_by_loc.get(loc_id, []),
+        }
+        for (line_num, item_code, item_desc, qty, unit_price, loc_id,
+             match_option, qty_received, closed_code) in line_rows
+    ]
+    return {"po_number": po_number, "lines": lines}
+
+
+def _compute_gl_date(ora_conn, base_date: datetime) -> datetime:
+    """GL Date = base_date (the invoice's received_date, or invoice_date
+    when no received_date was captured/entered), rolled forward to the 1st
+    of the next month if that period is already closed in Payables
+    (gl_period_statuses.application_id = 200 = SQLAP) — repeats until an
+    open period is found. Capped at 12 tries so a long-closed stretch can't
+    loop forever; falls back to the last candidate if none opens up."""
+    candidate = base_date
+    with ora_conn.cursor() as oc:
+        for _ in range(12):
+            oc.execute("""
+                SELECT closing_status FROM gl_period_statuses
+                WHERE application_id = 200
+                  AND :d BETWEEN start_date AND end_date
+                FETCH FIRST 1 ROWS ONLY
+            """, {"d": candidate})
+            row = oc.fetchone()
+            if row and row[0] == 'O':
+                return candidate
+            if candidate.month == 12:
+                candidate = candidate.replace(year=candidate.year + 1, month=1, day=1)
+            else:
+                candidate = candidate.replace(month=candidate.month + 1, day=1)
+    return candidate
+
+
 def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: list) -> dict:
+    invoice_date = _parse_date(header["INVOICE_DATE"])
+    try:
+        terms_date = _parse_date(header.get("TERMS_DATE", "")) if header.get("TERMS_DATE") else invoice_date
+    except ValueError:
+        terms_date = invoice_date
+
+    # GL_DATE basis: the invoice's received_date (stamp date) when captured,
+    # else invoice_date — then rolled to an open Payables period. Fixes a
+    # real rejection risk: GL_DATE used to be plain datetime.today(), which
+    # posts to whatever period today falls in regardless of the invoice's
+    # own period, and does nothing if that period is closed.
+    received_date_str = header.get("RECEIVED_DATE")
+    try:
+        gl_base_date = _parse_date(received_date_str) if received_date_str else invoice_date
+    except ValueError:
+        gl_base_date = invoice_date
+    gl_date = _compute_gl_date(ora_conn, gl_base_date)
+
     with ora_conn.cursor() as oc:
         oc.execute("SELECT AP_INVOICES_INTERFACE_S.NEXTVAL FROM DUAL")
         iid = oc.fetchone()[0]
-
-        invoice_date = _parse_date(header["INVOICE_DATE"])
-        gl_date = datetime.today()
-        try:
-            terms_date = _parse_date(header.get("TERMS_DATE", "")) if header.get("TERMS_DATE") else invoice_date
-        except ValueError:
-            terms_date = invoice_date
 
         oc.execute("""
             INSERT INTO AP_INVOICES_INTERFACE (
@@ -397,16 +514,24 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
         })
 
         for line in lines:
+            # PO_NUMBER/PO_LINE_NUMBER/RECEIPT_NUMBER come from the manual
+            # PO-line picker in the line editor (see get_po_lines_for_matching)
+            # — a line's own PO_NUMBER falls back to the header's when the
+            # picker didn't set one explicitly, since AP_INVOICE_LINES_INTERFACE
+            # needs it per-line, not inherited from AP_INVOICES_INTERFACE.
+            po_ln_num = line.get("PO_LINE_NUMBER", line.get("po_line_number"))
+            receipt_num = line.get("RECEIPT_NUMBER", line.get("receipt_number"))
+            po_num_line = line.get("PO_NUMBER", line.get("po_number")) or header.get("PO_NUMBER")
             oc.execute("""
                 INSERT INTO AP_INVOICE_LINES_INTERFACE (
                     INVOICE_ID, INVOICE_LINE_ID, LINE_NUMBER,
                     LINE_TYPE_LOOKUP_CODE, AMOUNT, QUANTITY_INVOICED,
                     UNIT_PRICE, DESCRIPTION, PO_NUMBER, PO_LINE_NUMBER,
-                    ATTRIBUTE1, ATTRIBUTE2, ORG_ID
+                    RECEIPT_NUMBER, ATTRIBUTE1, ATTRIBUTE2, ORG_ID
                 ) VALUES (
                     :iid, AP_INVOICE_LINES_INTERFACE_S.NEXTVAL, :ln,
                     'ITEM', :amt, :qty, :price, :descr, :po, :po_ln,
-                    :batch, :item_code, :org_id
+                    :receipt_num, :batch, :item_code, :org_id
                 )
             """, {
                 "iid": iid, "ln": line.get("LINE_NUMBER", line.get("line_num")),
@@ -414,7 +539,7 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
                 "qty": float(line.get("QUANTITY_INVOICED", line.get("qty", 1))),
                 "price": float(line.get("UNIT_PRICE", line.get("unit_price", 0))),
                 "descr": line.get("DESCRIPTION", line.get("description", "")),
-                "po": line.get("PO_NUMBER"), "po_ln": line.get("PO_LINE_NUMBER"),
+                "po": po_num_line, "po_ln": po_ln_num, "receipt_num": receipt_num,
                 "batch": line.get("BATCH_NO", line.get("batch_no")),
                 "item_code": line.get("ITEM_CODE", line.get("item_code")),
                 "org_id": EBS_ORG_ID,

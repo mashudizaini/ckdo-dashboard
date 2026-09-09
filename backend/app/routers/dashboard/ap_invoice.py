@@ -42,6 +42,7 @@ def ensure_staging_table():
                 processed_date      TIMESTAMP,
                 invoice_num         VARCHAR(50) NOT NULL,
                 invoice_date        VARCHAR(20),
+                received_date       VARCHAR(20),
                 vendor_name         VARCHAR(240),
                 vendor_id           BIGINT,
                 vendor_site_id      BIGINT,
@@ -67,6 +68,13 @@ def ensure_staging_table():
                 cur.execute(f"ALTER TABLE ap_invoice_stg ALTER COLUMN {col} TYPE BIGINT")
             except Exception:
                 conn.rollback()
+        # received_date — the invoice's "RECEIVED BY" stamp date, extracted
+        # by AI vision or filled in manually when it can't be read; used as
+        # GL_DATE's basis (see insert_to_interface's _compute_gl_date).
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS received_date VARCHAR(20)")
+        except Exception:
+            conn.rollback()
         conn.commit()
         conn.close()
     except Exception:
@@ -112,6 +120,23 @@ async def upload_pdf(
     conn.close()
 
     return {"stg_id": stg_id, "status": "NEW", "preview": invoice_data}
+
+
+@router.get("/po-lines/{po_number}")
+async def get_po_lines(po_number: str):
+    """PO's lines + their receipts, for the manual PO-line/receipt matching
+    picker in the invoice line editor — see get_po_lines_for_matching's
+    docstring for why this has to be a human choice, not an auto-match."""
+    ora = get_oracle_connection()
+    try:
+        result = svc.get_po_lines_for_matching(ora, po_number)
+    except Exception as e:
+        raise HTTPException(500, f"Gagal ambil PO lines: {str(e)}")
+    finally:
+        ora.close()
+    if not result:
+        raise HTTPException(404, f"PO '{po_number}' tidak ditemukan di EBS")
+    return result
 
 
 @router.get("/invoices")
@@ -297,7 +322,7 @@ async def check_status(stg_id: int):
 
 @router.put("/invoices/{stg_id}")
 async def update_invoice(stg_id: int, payload: dict):
-    allowed = {"invoice_num", "invoice_date", "vendor_name", "terms_date",
+    allowed = {"invoice_num", "invoice_date", "received_date", "vendor_name", "terms_date",
                "po_number", "so_number", "currency_code", "invoice_amount",
                "subtotal", "tax_amount", "lines_json"}
     updates = {k: v for k, v in payload.items() if k in allowed}
