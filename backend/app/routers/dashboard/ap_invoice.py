@@ -56,6 +56,7 @@ def ensure_staging_table():
                 subtotal            NUMERIC,
                 tax_amount          NUMERIC,
                 tax_serial_number   VARCHAR(100),
+                faktur_pajak_date   VARCHAR(20),
                 lines_json          TEXT,
                 interface_invoice_id BIGINT,
                 ap_invoice_id       BIGINT,
@@ -73,6 +74,12 @@ def ensure_staging_table():
         # GL_DATE's basis (see insert_to_interface's _compute_gl_date).
         try:
             cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS received_date VARCHAR(20)")
+        except Exception:
+            conn.rollback()
+        # faktur_pajak_date — the Faktur Pajak page's own issue date, feeds
+        # Oracle's SUPPLIER_TAX_INVOICE_DATE (see insert_to_interface).
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS faktur_pajak_date VARCHAR(20)")
         except Exception:
             conn.rollback()
         conn.commit()
@@ -137,6 +144,25 @@ async def get_po_lines(po_number: str):
     if not result:
         raise HTTPException(404, f"PO '{po_number}' tidak ditemukan di EBS")
     return result
+
+
+@router.get("/gl-date-preview")
+async def gl_date_preview(received_date: str = Query(..., description="DD-MON-YYYY or any format normalize_date_str accepts")):
+    """Live preview of what GL_DATE insert_to_interface will actually use
+    for this received_date — the real computation always re-runs fresh at
+    insert time (a period can close between when this is viewed and when
+    the invoice is actually interfaced), this is purely informational so
+    staff aren't surprised by it."""
+    try:
+        base = svc._parse_date(received_date)
+    except ValueError:
+        raise HTTPException(400, f"Format tanggal tidak dikenali: '{received_date}'")
+    ora = get_oracle_connection()
+    try:
+        gl_date = svc._compute_gl_date(ora, base)
+    finally:
+        ora.close()
+    return {"gl_date": svc._format_oracle_date(gl_date)}
 
 
 @router.get("/invoices")
@@ -324,7 +350,7 @@ async def check_status(stg_id: int):
 async def update_invoice(stg_id: int, payload: dict):
     allowed = {"invoice_num", "invoice_date", "received_date", "vendor_name", "terms_date",
                "po_number", "so_number", "currency_code", "invoice_amount",
-               "subtotal", "tax_amount", "lines_json"}
+               "subtotal", "tax_amount", "tax_serial_number", "faktur_pajak_date", "lines_json"}
     updates = {k: v for k, v in payload.items() if k in allowed}
     if not updates:
         raise HTTPException(400, "Tidak ada field valid untuk diupdate")
@@ -333,7 +359,7 @@ async def update_invoice(stg_id: int, payload: dict):
     # when inserting to interface — so a bad format is caught immediately
     # with a clear error instead of surfacing later as "Insert interface
     # gagal", and so every date this module stores/displays is consistent.
-    for date_key in ("invoice_date", "received_date", "terms_date"):
+    for date_key in ("invoice_date", "received_date", "faktur_pajak_date", "terms_date"):
         if updates.get(date_key):
             normalized = svc.normalize_date_str(updates[date_key])
             if normalized is None:
@@ -342,6 +368,19 @@ async def update_invoice(stg_id: int, payload: dict):
 
     pg = _get_pg()
     cur = pg.cursor()
+
+    # TOP (terms_date) is always derived from received_date + the invoice's
+    # payment_terms (not directly user-editable) — recompute and override
+    # whenever received_date changes, rather than trusting a stale terms_date
+    # the client might still send alongside it.
+    if "received_date" in updates:
+        cur.execute("SELECT payment_terms FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
+        row = cur.fetchone()
+        payment_terms = row[0] if row else None
+        computed_terms_date = svc.compute_terms_date(updates["received_date"], payment_terms)
+        if computed_terms_date:
+            updates["terms_date"] = computed_terms_date
+
     sets = ", ".join(f"{k} = %({k})s" for k in updates)
     updates["stg_id"] = stg_id
     cur.execute(f"UPDATE ap_invoice_stg SET {sets}, status = 'NEW' WHERE stg_id = %(stg_id)s AND status IN ('NEW','VALIDATED','ERROR')", updates)

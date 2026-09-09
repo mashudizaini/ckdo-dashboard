@@ -444,6 +444,7 @@ export const apInvoiceApi = {
   checkStatus:     (id)       => api.get(`/dashboard/accounting/ap-invoice/check-status/${id}`),
   attachPdf:       (id)       => api.post(`/dashboard/accounting/ap-invoice/attach/${id}`),
   getPoLines:      (poNumber) => api.get(`/dashboard/accounting/ap-invoice/po-lines/${poNumber}`),
+  glDatePreview:   (receivedDate) => api.get("/dashboard/accounting/ap-invoice/gl-date-preview", { params: { received_date: receivedDate } }),
 };
 
 export const purchasingApi = {

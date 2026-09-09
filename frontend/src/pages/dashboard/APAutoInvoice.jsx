@@ -216,6 +216,7 @@ export default function APAutoInvoice() {
           TERMS_NAME: preview.payment_terms || "30 Days",
           TERMS_DATE: preview.terms_date, PO_NUMBER: preview.po_number,
           SO_NUMBER: preview.so_number, TAX_SERIAL_NUMBER: preview.tax_serial_number,
+          FAKTUR_PAJAK_DATE: preview.faktur_pajak_date,
         };
         res = await apInvoiceApi.insertInterface(id, { header, lines: preview.lines || [] });
         setMessage({ type: "success", text: `Successfully inserted to AP Interface (ID: ${res.interface_invoice_id})` });
@@ -389,6 +390,8 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
   const [poLines, setPoLines] = useState(null);
   const [poLinesLoading, setPoLinesLoading] = useState(false);
   const [poLinesError, setPoLinesError] = useState("");
+  const [glDatePreview, setGlDatePreview] = useState(null);
+  const [glDatePreviewLoading, setGlDatePreviewLoading] = useState(false);
 
   const d = detail;
   const s = d.status;
@@ -410,7 +413,8 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
       subtotal: d.subtotal || 0,
       tax_amount: d.tax_amount || 0,
       invoice_amount: d.invoice_amount || 0,
-      terms_date: d.terms_date || "",
+      tax_serial_number: d.tax_serial_number || "",
+      faktur_pajak_date: d.faktur_pajak_date || "",
     });
     setEditLines((d.lines || []).map(ln => ({ ...ln })));
     setEditing(true);
@@ -466,17 +470,37 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
     updateLine(idx, "receipt_number", null);
   };
 
+  // Live preview, re-fetched whenever the relevant Received Date changes —
+  // while editing that's the in-progress form value (so correcting the
+  // stamp date updates the preview immediately), otherwise the saved one.
+  const receivedDateForPreview = editing ? form.received_date : d.received_date;
+  useEffect(() => {
+    if (!receivedDateForPreview) { setGlDatePreview(null); return; }
+    let cancelled = false;
+    setGlDatePreviewLoading(true);
+    apInvoiceApi.glDatePreview(receivedDateForPreview)
+      .then(res => { if (!cancelled) setGlDatePreview(res.gl_date); })
+      .catch(() => { if (!cancelled) setGlDatePreview(null); })
+      .finally(() => { if (!cancelled) setGlDatePreviewLoading(false); });
+    return () => { cancelled = true; };
+  }, [receivedDateForPreview]);
+
   const FIELDS = [
     { key: "invoice_num",    label: "Invoice Number" },
-    { key: "invoice_date",   label: "Invoice Date" },
+    { key: "invoice_date",   label: "Date Invoice" },
     { key: "received_date",  label: "Received Date (Stamp)" },
     { key: "vendor_name",    label: "Vendor Name" },
     { key: "po_number",      label: "PO Number" },
+    { key: "tax_serial_number", label: "No Faktur" },
+    { key: "faktur_pajak_date", label: "Tgl Faktur Pajak" },
     { key: "currency_code",  label: "Currency" },
-    { key: "subtotal",       label: "Subtotal", type: "number", fmt: true },
-    { key: "tax_amount",     label: "Tax", type: "number", fmt: true },
+    { key: "subtotal",       label: "Taxbase", type: "number", fmt: true },
+    { key: "tax_amount",     label: "VAT", type: "number", fmt: true },
     { key: "invoice_amount", label: "Total", type: "number", fmt: true },
-    { key: "terms_date",     label: "Terms Date" },
+    // TOP is always derived from Received Date + payment terms (see
+    // compute_terms_date) — never directly typed, so it's shown read-only
+    // even while editing everything else.
+    { key: "terms_date",     label: "TOP (Term of Payment)", readOnly: true },
   ];
 
   return (
@@ -524,7 +548,7 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
               <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
                 {f.label}
               </div>
-              {editing ? (
+              {editing && !f.readOnly ? (
                 <EditInput
                   value={form[f.key]}
                   onChange={v => setForm(p => ({ ...p, [f.key]: v }))}
@@ -541,6 +565,19 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
               )}
             </div>
           ))}
+
+          {/* GL Date — computed live from Received Date (rolled to the next
+              open Payables period if that one's closed), not stored on the
+              record — always freshly recomputed at Insert-to-Interface time
+              too, so this is a preview, not the authoritative value. */}
+          <div style={{ padding: "10px 14px", borderRadius: 14, background: NEU.bg, boxShadow: NEU.shadowOutSm }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+              GL Date (Preview)
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>
+              {glDatePreviewLoading ? <Loader2 size={13} className="animate-spin" /> : (glDatePreview || "—")}
+            </div>
+          </div>
         </div>
 
         {/* Edit save/cancel bar */}

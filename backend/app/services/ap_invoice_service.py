@@ -14,7 +14,7 @@ import json
 import base64
 import re
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import fitz  # PyMuPDF
@@ -49,10 +49,10 @@ Required JSON structure:
   "received_date": "DD/MM/YYYY - the handwritten date inside a RECEIVED rubber stamp, or null",
   "vendor_name": "supplier company name issuing the invoice",
   "payment_terms": "payment terms from PURCHASE ORDER page (e.g. IMMEDIATE, 30 Days, Net 30, COD) or null",
-  "terms_date": "payment due date DD/MM/YYYY or null",
   "po_number": "PO/Purchase Order number or null",
   "so_number": "SO/Sales Order number or null",
-  "tax_serial_number": "nomor seri faktur pajak from FAKTUR PAJAK page or null",
+  "tax_serial_number": "nomor seri faktur pajak (No Faktur) from FAKTUR PAJAK page or null",
+  "faktur_pajak_date": "DD/MM/YYYY - the date printed on the FAKTUR PAJAK page itself, or null",
   "currency": "IDR",
   "subtotal": 0.0,
   "tax": 0.0,
@@ -74,8 +74,10 @@ IMPORTANT extraction rules:
 - vendor_name: the company ISSUING the invoice (usually top-left header), NOT PT. CKD OTTO Pharmaceuticals (the buyer)
 - received_date: Find a rubber ink stamp (cap) — usually a rectangular or oval outline containing printed text like "RECEIVED", "DITERIMA", "GOODS RECEIVED", or a company/warehouse name — stamped anywhere on any page (often near the top, a corner, or beside a signature). That stamp normally has a blank line, box, or open space INSIDE or directly below it that has been filled in BY HAND with a date. Read that handwritten date carefully even if it is small, slanted, faint, or partially overlapping the stamp's printed text or a signature — it is often squeezed into a tight space. This handwritten date is a DIFFERENT value from any printed/typed date elsewhere on the document (invoice_date, PO date, etc.) — do not confuse them. If a page has more than one stamp, use the handwritten date closest to the words "RECEIVED"/"DITERIMA". Only set null if, after checking every page, there truly is no stamp or no handwritten date anywhere.
 - payment_terms: look for "Payment Terms", "Terms", "Syarat Pembayaran" on the PURCHASE ORDER page. If not found, set null.
-- tax_serial_number: from FAKTUR PAJAK page, look for "Kode dan Nomor Seri Faktur Pajak". If no Faktur Pajak page, set null.
+- tax_serial_number: from FAKTUR PAJAK page, look for "Kode dan Nomor Seri Faktur Pajak" (a long numeric code, often formatted like "010.001-26.12345678"). If no Faktur Pajak page, set null.
+- faktur_pajak_date: the date printed near the top or bottom of the FAKTUR PAJAK page itself (its own issue date, not the invoice's or the stamp's). If no Faktur Pajak page, set null.
 - invoice_date: the printed/typed date on the invoice document itself
+- item_code: item codes are frequently missing or hard to read on the invoice/DO line itself, but if a PURCHASE ORDER (PO) page is included in this document bundle, it almost always prints each item's code/item number clearly next to its description. Match invoice lines to PO lines BY THEIR ITEM DESCRIPTION (they describe the same goods, even if worded slightly differently), and use the matching PO line's item code for that invoice line. Only set null if no PO page is present or no matching PO line can be found.
 - All numeric values as plain numbers without thousand separators
 - Return ONLY the JSON, no markdown, no explanation"""
 
@@ -214,6 +216,40 @@ def normalize_date_str(date_str: Optional[str], default: Optional[str] = None) -
         return default
 
 
+def _parse_payment_terms_days(payment_terms: Optional[str]) -> int:
+    """Day count implied by a payment-terms label. IMMEDIATE/COD/CASH mean
+    due on receipt (0 days); otherwise the first number found is the day
+    count ("30 Days" -> 30, "Net 45" -> 45). Falls back to 30 (this
+    module's own default payment_terms) when nothing recognizable is found,
+    rather than guessing 0 — an unrecognized label is far more likely to be
+    a garbled "30 Days" than a genuine on-receipt term."""
+    if not payment_terms:
+        return 30
+    s = payment_terms.strip().upper()
+    if s in ("IMMEDIATE", "COD", "CASH", "CASH ON DELIVERY", "CBD", "CIA"):
+        return 0
+    m = re.search(r"(\d+)", s)
+    return int(m.group(1)) if m else 30
+
+
+def compute_terms_date(received_date_str: Optional[str], payment_terms: Optional[str],
+                        fallback_date_str: Optional[str] = None) -> Optional[str]:
+    """TOP (Term of Payment / due date) = received_date + the payment-terms
+    day count — always derived this way per request, not read off the PDF
+    (payment terms are rarely printed on the invoice itself; when they are,
+    they're often for the vendor's own reference, not the actual due date
+    counted from receipt). Falls back to `fallback_date_str` (invoice_date)
+    only when received_date is unavailable."""
+    base_str = received_date_str or fallback_date_str
+    if not base_str:
+        return None
+    try:
+        base = _parse_date(base_str)
+    except ValueError:
+        return None
+    return _format_oracle_date(base + timedelta(days=_parse_payment_terms_days(payment_terms)))
+
+
 def _clean_vendor_name(name: str) -> str:
     name = name.upper().strip()
     name = re.sub(r'^(PT\.?|CV\.?|UD\.?|TB\.?)\s*', '', name)
@@ -241,7 +277,11 @@ def extract_pdf(file_path: str, filename: str, provider: str = "onprem") -> dict
     # vision model actually returned.
     invoice_date = normalize_date_str(data.get("invoice_date"), default=_format_oracle_date(datetime.today()))
     received_date = normalize_date_str(data.get("received_date"), default=_format_oracle_date(datetime.today().replace(day=1)))
-    terms_date = normalize_date_str(data.get("terms_date"))
+    faktur_pajak_date = normalize_date_str(data.get("faktur_pajak_date"))
+    payment_terms = data.get("payment_terms") or "30 Days"
+    # TOP (terms_date) is always derived from received_date + the payment
+    # terms' day count — never read off the PDF, see compute_terms_date.
+    terms_date = compute_terms_date(received_date, payment_terms, fallback_date_str=invoice_date)
 
     lines = []
     for i, ln in enumerate(data.get("lines", []), start=1):
@@ -267,7 +307,7 @@ def extract_pdf(file_path: str, filename: str, provider: str = "onprem") -> dict
         "invoice_date": invoice_date,
         "received_date": received_date,
         "vendor_name": data.get("vendor_name", "").strip(),
-        "payment_terms": data.get("payment_terms") or "30 Days",
+        "payment_terms": payment_terms,
         "terms_date": terms_date,
         "po_number": data.get("po_number"),
         "so_number": data.get("so_number"),
@@ -276,6 +316,7 @@ def extract_pdf(file_path: str, filename: str, provider: str = "onprem") -> dict
         "tax_amount": tax_amount,
         "invoice_amount": invoice_amount,
         "tax_serial_number": data.get("tax_serial_number"),
+        "faktur_pajak_date": faktur_pajak_date,
         "source_file": filename,
         "lines": lines,
     }
@@ -288,12 +329,12 @@ def save_to_staging(db_conn, invoice_data: dict) -> int:
         INSERT INTO ap_invoice_stg (
             invoice_num, invoice_date, received_date, vendor_name, payment_terms,
             terms_date, po_number, so_number, currency_code,
-            subtotal, tax_amount, invoice_amount, tax_serial_number,
+            subtotal, tax_amount, invoice_amount, tax_serial_number, faktur_pajak_date,
             source_file, lines_json, status, created_date
         ) VALUES (
             %(invoice_num)s, %(invoice_date)s, %(received_date)s, %(vendor_name)s, %(payment_terms)s,
             %(terms_date)s, %(po_number)s, %(so_number)s, %(currency_code)s,
-            %(subtotal)s, %(tax_amount)s, %(invoice_amount)s, %(tax_serial_number)s,
+            %(subtotal)s, %(tax_amount)s, %(invoice_amount)s, %(tax_serial_number)s, %(faktur_pajak_date)s,
             %(source_file)s, %(lines_json)s, 'NEW', NOW()
         ) RETURNING stg_id
     """, {
@@ -331,7 +372,7 @@ def get_invoice_detail(db_conn, stg_id: int) -> Optional[dict]:
                invoice_num, invoice_date, received_date, vendor_name, vendor_id,
                vendor_site_id, vendor_site_code, payment_terms,
                terms_date, po_number, so_number, currency_code,
-               invoice_amount, subtotal, tax_amount,
+               invoice_amount, subtotal, tax_amount, tax_serial_number, faktur_pajak_date,
                lines_json, interface_invoice_id, ap_invoice_id,
                conc_request_id
         FROM ap_invoice_stg WHERE stg_id = %s
@@ -344,7 +385,7 @@ def get_invoice_detail(db_conn, stg_id: int) -> Optional[dict]:
             "invoice_num", "invoice_date", "received_date", "vendor_name", "vendor_id",
             "vendor_site_id", "vendor_site_code", "payment_terms",
             "terms_date", "po_number", "so_number", "currency_code",
-            "invoice_amount", "subtotal", "tax_amount",
+            "invoice_amount", "subtotal", "tax_amount", "tax_serial_number", "faktur_pajak_date",
             "lines_json", "interface_invoice_id", "ap_invoice_id",
             "conc_request_id"]
     data = dict(zip(cols, row))
@@ -548,6 +589,12 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
         received_date_parsed = None
     gl_date = _compute_gl_date(ora_conn, received_date_parsed or invoice_date)
 
+    faktur_date_str = header.get("FAKTUR_PAJAK_DATE")
+    try:
+        faktur_date_parsed = _parse_date(faktur_date_str) if faktur_date_str else None
+    except ValueError:
+        faktur_date_parsed = None
+
     with ora_conn.cursor() as oc:
         oc.execute("SELECT AP_INVOICES_INTERFACE_S.NEXTVAL FROM DUAL")
         iid = oc.fetchone()[0]
@@ -559,7 +606,8 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
                 INVOICE_AMOUNT, INVOICE_CURRENCY_CODE,
                 TERMS_NAME, TERMS_DATE, GL_DATE, GOODS_RECEIVED_DATE, SOURCE, ORG_ID,
                 PO_NUMBER, DESCRIPTION,
-                ATTRIBUTE1, ATTRIBUTE2,
+                SUPPLIER_TAX_INVOICE_NUMBER, SUPPLIER_TAX_INVOICE_DATE,
+                ATTRIBUTE1,
                 CREATION_DATE, CREATED_BY
             ) VALUES (
                 :iid, :inv_num, 'STANDARD',
@@ -567,7 +615,8 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
                 :inv_amt, :curr,
                 :terms, :terms_date, :gl_date, :goods_recv_date, :source, :org_id,
                 :po, :descr,
-                :attr1, :attr2,
+                :tax_inv_num, :tax_inv_date,
+                :attr1,
                 SYSDATE, 1110
             )
         """, {
@@ -578,7 +627,10 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
             "gl_date": gl_date, "goods_recv_date": received_date_parsed,
             "source": EBS_SOURCE, "org_id": EBS_ORG_ID,
             "po": header.get("PO_NUMBER"), "descr": f"Import PDF: {header['INVOICE_NUM']}",
-            "attr1": header.get("SO_NUMBER"), "attr2": header.get("TAX_SERIAL_NUMBER"),
+            # No Faktur / Tgl Faktur Pajak — Oracle's own Indonesia-localization
+            # columns (confirmed live), not generic DFF attributes.
+            "tax_inv_num": header.get("TAX_SERIAL_NUMBER"), "tax_inv_date": faktur_date_parsed,
+            "attr1": header.get("SO_NUMBER"),
         })
 
         for line in lines:
