@@ -567,39 +567,52 @@ async def get_employee_summary(
 ):
     """Statistik ringkasan untuk KPI cards.
 
-    Accepts the same filter set as the list endpoint below it (search,
-    department, status, employment_status, team, join_month/join_year) so the
-    cards always match whatever the Employee List is currently showing —
-    otherwise the cards (unfiltered) silently disagree with the filtered list
-    (e.g. "Resign" card showing more than the list actually displays)."""
+    Accepts the same filter set as the list endpoint below it, but the 6
+    top KPI cards (Total/Active/Resign/Permanent/Contract/Probation) are
+    deliberately computed against `card_base` — search/department/team/
+    join-date applied, but NOT `status` or `employment_status` — instead
+    of the fully-filtered `base` used for by_dept/by_level/by_sex below.
+    Bug fixed 2026-09-09: these 6 cards used to be computed against the
+    fully-filtered `base`, so with the Employee List's default
+    employment_status=Active filter, "Resign" (and every `status` card
+    whenever any one of the 6 was selected) always read 0 — each card's
+    number was silently scoped by whichever *other* card the user had
+    already clicked, not a stable global breakdown. The `status` list
+    endpoint below still filters by employment_status/status as requested;
+    only these 6 summary counts stay independent of them so the cards
+    never contradict each other."""
+    card_base = _apply_employee_filters(
+        select(Employee), search=search, department=department, team=team,
+        join_month=join_month, join_year=join_year,
+    )
     base = _apply_employee_filters(
         select(Employee), search=search, department=department, status=status,
         employment_status=employment_status, team=team,
         join_month=join_month, join_year=join_year,
     )
 
-    def counted(*conditions):
-        q = base
+    def card_counted(*conditions):
+        q = card_base
         for c in conditions:
             q = q.where(c)
         return select(func.count()).select_from(q.subquery())
 
-    total_q   = await db.execute(counted())
+    total_q   = await db.execute(card_counted())
     total     = total_q.scalar() or 0
 
-    perm_q    = await db.execute(counted(Employee.status == "Permanent"))
+    perm_q    = await db.execute(card_counted(Employee.status == "Permanent"))
     permanent = perm_q.scalar() or 0
 
-    contract_q = await db.execute(counted(Employee.status == "Contract"))
+    contract_q = await db.execute(card_counted(Employee.status == "Contract"))
     contract  = contract_q.scalar() or 0
 
-    probation_q = await db.execute(counted(Employee.status == "Probation"))
+    probation_q = await db.execute(card_counted(Employee.status == "Probation"))
     probation = probation_q.scalar() or 0
 
-    active_q = await db.execute(counted(Employee.employment_status == "Active"))
+    active_q = await db.execute(card_counted(Employee.employment_status == "Active"))
     active_count = active_q.scalar() or 0
 
-    resign_q = await db.execute(counted(Employee.employment_status == "Resign"))
+    resign_q = await db.execute(card_counted(Employee.employment_status == "Resign"))
     resign_count = resign_q.scalar() or 0
 
     base_sq = base.subquery()
