@@ -20,6 +20,7 @@ export default function SupplierWhtMaster() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [activeBusyId, setActiveBusyId] = useState(null);
 
   const load = async (q) => {
     setLoading(true);
@@ -89,6 +90,18 @@ export default function SupplierWhtMaster() {
     }
   };
 
+  const toggleActive = async (r) => {
+    setActiveBusyId(r.id);
+    try {
+      await supplierWhtApi.setActive(r.id, !r.is_active);
+      setRows(prev => prev.map(row => row.id === r.id ? { ...row, is_active: !r.is_active } : row));
+    } catch (e) {
+      setError(e?.detail || e?.message || "Gagal update status aktif");
+    } finally {
+      setActiveBusyId(null);
+    }
+  };
+
   const remove = async (id) => {
     if (!window.confirm("Hapus data WHT supplier ini?")) return;
     setDeletingId(id);
@@ -114,7 +127,10 @@ export default function SupplierWhtMaster() {
         Master rate PPh (withholding tax) per supplier. "Sync from Oracle" membaca histori transaksi
         AP nyata di EBS — baris invoice bertipe AWT (Automatic Withholding Tax) — dan mengambil grup/rate
         PPh yang PALING TERAKHIR dipakai untuk tiap supplier. Baris hasil edit manual (source: manual)
-        tidak akan ditimpa oleh sync berikutnya.
+        tidak akan ditimpa oleh sync berikutnya. Jika satu supplier punya lebih dari satu vendor ID di
+        Oracle dengan grup/rate yang sama, hanya disimpan satu baris; jika grup/rate-nya beda, semua baris
+        tetap disimpan tapi hanya satu yang ditandai <strong className="text-gray-300">Aktif</strong> (default: yang paling
+        terakhir dipakai) — centang kolom Aktif bisa diubah manual kapan saja.
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -144,6 +160,8 @@ export default function SupplierWhtMaster() {
           {" "}{syncResult.upserted} baris diperbarui.
           {syncResult.internal_employee_suppliers_excluded > 0 &&
             ` ${syncResult.internal_employee_suppliers_excluded} supplier internal (karyawan) dikeluarkan.`}
+          {syncResult.duplicate_entries_collapsed > 0 &&
+            ` ${syncResult.duplicate_entries_collapsed} baris duplikat (grup/rate sama) digabung.`}
         </div>
       )}
 
@@ -178,12 +196,13 @@ export default function SupplierWhtMaster() {
                 <th className="text-right px-4 py-2.5 font-semibold">Rate</th>
                 <th className="text-left px-4 py-2.5 font-semibold">Terakhir Dipakai</th>
                 <th className="text-left px-4 py-2.5 font-semibold">Sumber</th>
+                <th className="text-center px-4 py-2.5 font-semibold">Aktif</th>
                 <th className="text-right px-4 py-2.5 font-semibold">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
               {rows.map(r => (
-                <tr key={r.id} className="hover:bg-gray-800/40 transition-colors">
+                <tr key={r.id} className={`hover:bg-gray-800/40 transition-colors ${r.is_active ? "" : "opacity-50"}`}>
                   <td className="px-4 py-2.5 text-gray-400 font-mono">{r.vendor_id}</td>
                   <td className="px-4 py-2.5 text-gray-200">{r.vendor_name}</td>
                   <td className="px-4 py-2.5 text-gray-400">{r.awt_group_name || "—"}</td>
@@ -199,6 +218,15 @@ export default function SupplierWhtMaster() {
                     }`}>
                       {r.source}
                     </span>
+                  </td>
+                  <td className="px-4 py-2.5 text-center">
+                    {activeBusyId === r.id ? (
+                      <Loader2 size={13} className="animate-spin text-gray-500 mx-auto" />
+                    ) : (
+                      <input type="checkbox" checked={!!r.is_active} onChange={() => toggleActive(r)}
+                        title="Baris ini yang dipakai kalau ada beberapa Vendor ID untuk supplier yang sama"
+                        className="w-3.5 h-3.5 cursor-pointer" />
+                    )}
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex justify-end gap-1">

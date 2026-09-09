@@ -453,6 +453,7 @@ export const supplierWhtApi = {
   upsert:     (data)     => api.post("/dashboard/accounting/supplier-wht", data),
   remove:     (id)       => api.delete(`/dashboard/accounting/supplier-wht/${id}`),
   getForVendor: (vendorId) => api.get(`/dashboard/accounting/supplier-wht/vendor/${vendorId}`),
+  setActive:  (id, isActive) => api.put(`/dashboard/accounting/supplier-wht/${id}/active`, { is_active: isActive }),
 };
 
 export const purchasingApi = {

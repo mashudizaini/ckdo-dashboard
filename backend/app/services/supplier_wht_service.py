@@ -54,6 +54,16 @@ def ensure_table():
                 updated_at      TIMESTAMP DEFAULT NOW()
             )
         """)
+        # is_active — some suppliers have more than one Oracle vendor_id for
+        # what's really the same company (duplicate/legacy registrations).
+        # Each still gets its own row here (AP Autoinvoice looks WHT up by
+        # the exact vendor_id an invoice matched to), but only one per
+        # duplicate group is flagged active by default — see
+        # seed_from_oracle()'s dedup/tie-break logic.
+        try:
+            cur.execute("ALTER TABLE supplier_wht_master ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE NOT NULL")
+        except Exception:
+            conn.rollback()
         conn.commit()
         conn.close()
     except Exception:
@@ -70,7 +80,17 @@ def seed_from_oracle(updated_by: str = "oracle-sync") -> dict:
     Excludes vendor_type_lookup_code='EMPLOYEE' — Oracle's own
     classification for employees registered as AP suppliers (expense
     reimbursements etc.), i.e. internal, not a commercial supplier subject
-    to the same PPh-on-purchase withholding this master tracks."""
+    to the same PPh-on-purchase withholding this master tracks.
+
+    Some real suppliers have more than one Oracle vendor_id (duplicate or
+    legacy registrations under the same company name). Two rules handle
+    that: if the duplicates' PPh group + rate are identical, they're pure
+    noise — keep just one (the most recently used). If they genuinely
+    differ, keep a row per vendor_id (AP Autoinvoice looks WHT up by the
+    exact vendor_id an invoice matched to) but flag only one — the most
+    recently used — as is_active, so the master's own list shows a single
+    clear default per supplier name rather than looking like unresolved
+    duplicates."""
     ora = get_oracle_connection()
     try:
         cur = ora.cursor()
@@ -98,16 +118,45 @@ def seed_from_oracle(updated_by: str = "oracle-sync") -> dict:
     finally:
         ora.close()
 
+    # Group by normalized supplier name to find duplicate vendor_id registrations.
+    by_name = {}
+    for vendor_id, vendor_name, awt_group_id, awt_group_name, tax_rate, last_used_date in rows:
+        key = (vendor_name or "").strip().upper()
+        by_name.setdefault(key, []).append({
+            "vendor_id": vendor_id, "vendor_name": vendor_name,
+            "awt_group_id": awt_group_id, "awt_group_name": awt_group_name,
+            "tax_rate": tax_rate, "last_used_date": last_used_date,
+        })
+
+    to_upsert = []       # (vendor_id, vendor_name, awt_group_id, awt_group_name, tax_rate, last_used_date, is_active)
+    collapsed_vendor_ids = []  # duplicate vendor_ids whose row we deliberately did NOT keep
+    for entries in by_name.values():
+        entries.sort(key=lambda e: e["last_used_date"] or datetime.min, reverse=True)
+        deduped = []
+        seen_group_rate = set()
+        for e in entries:
+            gr_key = (e["awt_group_id"], float(e["tax_rate"]) if e["tax_rate"] is not None else None)
+            if gr_key in seen_group_rate:
+                collapsed_vendor_ids.append(e["vendor_id"])  # same group+rate as one already kept — redundant
+                continue
+            seen_group_rate.add(gr_key)
+            deduped.append(e)
+        for i, e in enumerate(deduped):
+            to_upsert.append((
+                e["vendor_id"], e["vendor_name"], e["awt_group_id"], e["awt_group_name"],
+                e["tax_rate"], e["last_used_date"], i == 0,
+            ))
+
     pg = _get_pg()
     try:
         cur = pg.cursor()
         upserted = 0
-        for vendor_id, vendor_name, awt_group_id, awt_group_name, tax_rate, last_used_date in rows:
+        for vendor_id, vendor_name, awt_group_id, awt_group_name, tax_rate, last_used_date, is_active in to_upsert:
             cur.execute("""
                 INSERT INTO supplier_wht_master
                     (vendor_id, vendor_name, awt_group_id, awt_group_name, tax_rate,
-                     last_used_date, source, updated_by, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, 'oracle', %s, NOW())
+                     last_used_date, source, updated_by, is_active, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, 'oracle', %s, %s, NOW())
                 ON CONFLICT (vendor_id) DO UPDATE SET
                     vendor_name = EXCLUDED.vendor_name,
                     awt_group_id = EXCLUDED.awt_group_id,
@@ -115,9 +164,10 @@ def seed_from_oracle(updated_by: str = "oracle-sync") -> dict:
                     tax_rate = EXCLUDED.tax_rate,
                     last_used_date = EXCLUDED.last_used_date,
                     updated_by = EXCLUDED.updated_by,
+                    is_active = EXCLUDED.is_active,
                     updated_at = NOW()
                 WHERE supplier_wht_master.source = 'oracle'
-            """, (vendor_id, vendor_name, awt_group_id, awt_group_name, tax_rate, last_used_date, updated_by))
+            """, (vendor_id, vendor_name, awt_group_id, awt_group_name, tax_rate, last_used_date, updated_by, is_active))
             upserted += cur.rowcount
 
         removed_employees = 0
@@ -127,6 +177,14 @@ def seed_from_oracle(updated_by: str = "oracle-sync") -> dict:
                 WHERE source = 'oracle' AND vendor_id = ANY(%s)
             """, (employee_vendor_ids,))
             removed_employees = cur.rowcount
+
+        removed_duplicates = 0
+        if collapsed_vendor_ids:
+            cur.execute("""
+                DELETE FROM supplier_wht_master
+                WHERE source = 'oracle' AND vendor_id = ANY(%s)
+            """, (collapsed_vendor_ids,))
+            removed_duplicates = cur.rowcount
         pg.commit()
     finally:
         pg.close()
@@ -134,6 +192,7 @@ def seed_from_oracle(updated_by: str = "oracle-sync") -> dict:
     return {
         "suppliers_found_in_oracle": len(rows), "upserted": upserted,
         "internal_employee_suppliers_excluded": removed_employees,
+        "duplicate_entries_collapsed": removed_duplicates,
         "synced_at": datetime.utcnow().isoformat(),
     }
 
@@ -145,17 +204,17 @@ def list_wht_master(search: Optional[str] = None) -> list[dict]:
         sql = """
             SELECT id, vendor_id, vendor_name, awt_group_id, awt_group_name, tax_rate,
                    TO_CHAR(last_used_date, 'DD/MM/YYYY'), source, updated_by,
-                   TO_CHAR(updated_at, 'DD/MM/YYYY HH24:MI')
+                   TO_CHAR(updated_at, 'DD/MM/YYYY HH24:MI'), is_active
             FROM supplier_wht_master
         """
         params = ()
         if search:
             sql += " WHERE vendor_name ILIKE %s OR awt_group_name ILIKE %s"
             params = (f"%{search}%", f"%{search}%")
-        sql += " ORDER BY vendor_name"
+        sql += " ORDER BY vendor_name, is_active DESC"
         cur.execute(sql, params)
         cols = ["id", "vendor_id", "vendor_name", "awt_group_id", "awt_group_name", "tax_rate",
-                "last_used_date", "source", "updated_by", "updated_at"]
+                "last_used_date", "source", "updated_by", "updated_at", "is_active"]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         for r in rows:
             if r["tax_rate"] is not None:
@@ -190,6 +249,21 @@ def upsert_wht_master(vendor_id: int, vendor_name: str, awt_group_name: str,
         new_id = cur.fetchone()[0]
         pg.commit()
         return {"id": new_id, "vendor_id": vendor_id}
+    finally:
+        pg.close()
+
+
+def set_active(id_: int, is_active: bool) -> dict:
+    """Manually flip which of a duplicate-supplier group's rows is the
+    active one — e.g. an admin overriding seed_from_oracle()'s
+    most-recently-used tie-break."""
+    pg = _get_pg()
+    try:
+        cur = pg.cursor()
+        cur.execute("UPDATE supplier_wht_master SET is_active = %s, updated_at = NOW() WHERE id = %s", (is_active, id_))
+        updated = cur.rowcount
+        pg.commit()
+        return {"id": id_, "is_active": is_active, "updated": updated}
     finally:
         pg.close()
 

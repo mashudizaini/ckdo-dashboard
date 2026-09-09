@@ -21,6 +21,10 @@ class WhtUpsertRequest(BaseModel):
     updated_by: str = "manual"
 
 
+class ActiveRequest(BaseModel):
+    is_active: bool
+
+
 @router.get("")
 async def list_wht(search: Optional[str] = Query(None)):
     return {"items": svc.list_wht_master(search=search)}
@@ -44,6 +48,14 @@ async def upsert_wht(body: WhtUpsertRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Simpan gagal: {e}")
+
+
+@router.put("/{id_}/active")
+async def set_active(id_: int, body: ActiveRequest):
+    result = svc.set_active(id_, body.is_active)
+    if not result["updated"]:
+        raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+    return result
 
 
 @router.delete("/{id_}")
