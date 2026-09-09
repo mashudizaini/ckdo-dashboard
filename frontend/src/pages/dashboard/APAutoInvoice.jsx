@@ -84,6 +84,7 @@ export default function APAutoInvoice() {
   const [detail, setDetail] = useState(null);
   const [actionLoading, setActionLoading] = useState("");
   const [message, setMessage] = useState(null);
+  const [batchProgress, setBatchProgress] = useState(null); // { done, total, current } while a multi-file upload is running
   const fileRef = useRef(null);
 
   const refresh = async () => {
@@ -100,25 +101,55 @@ export default function APAutoInvoice() {
 
   useEffect(() => { refresh(); }, []);
 
+  // Multiple PDFs (one invoice each) are processed one at a time, not in
+  // parallel — the on-premise AI engine runs one Ollama vision instance, so
+  // firing several extractions at once would just queue up behind it while
+  // giving no progress feedback in the meantime. Each file succeeds or
+  // fails independently (a bad PDF partway through the batch doesn't stop
+  // the rest), and the list only refreshes once at the end.
   const handleUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
     setUploading(true);
     setMessage(null);
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await apInvoiceApi.upload(form, ocrProvider);
-      setMessage({ type: "success", text: `PDF extracted successfully! Invoice: ${res.preview?.invoice_num}` });
-      await refresh();
-      setSelectedId(res.stg_id);
-      loadDetail(res.stg_id);
-    } catch (e) {
-      setMessage({ type: "error", text: "Upload failed: " + (e?.detail || e?.message || String(e)) });
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
+    setBatchProgress({ done: 0, total: files.length, current: files[0].name });
+
+    const results = [];
+    let lastStgId = null;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      setBatchProgress({ done: i, total: files.length, current: file.name });
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await apInvoiceApi.upload(form, ocrProvider);
+        results.push({ file: file.name, success: true, invoice_num: res.preview?.invoice_num });
+        lastStgId = res.stg_id;
+      } catch (err) {
+        results.push({ file: file.name, success: false, error: err?.detail || err?.message || String(err) });
+      }
+      setBatchProgress({ done: i + 1, total: files.length, current: file.name });
     }
+
+    const okCount = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success);
+    if (files.length === 1) {
+      setMessage(okCount === 1
+        ? { type: "success", text: `PDF extracted successfully! Invoice: ${results[0].invoice_num}` }
+        : { type: "error", text: "Upload failed: " + failed[0].error });
+    } else {
+      setMessage({
+        type: failed.length === 0 ? "success" : okCount === 0 ? "error" : "warning",
+        text: `Processed ${files.length} file(s): ${okCount} succeeded` +
+          (failed.length ? `, ${failed.length} failed — ${failed.map(f => `${f.file} (${f.error})`).join("; ")}` : "."),
+      });
+    }
+
+    await refresh();
+    if (lastStgId) { setSelectedId(lastStgId); loadDetail(lastStgId); }
+    setUploading(false);
+    setBatchProgress(null);
+    if (fileRef.current) fileRef.current.value = "";
   };
 
   const loadDetail = async (id) => {
@@ -233,12 +264,31 @@ export default function APAutoInvoice() {
             <option value="anthropic">Premium (Anthropic Claude)</option>
           </select>
           <NeuBtn icon={RefreshCw} label="Refresh" color="#f1f5f9" textColor="#475569" onClick={refresh} loading={loading} />
-          <label style={{ cursor: "pointer" }}>
-            <input ref={fileRef} type="file" accept=".pdf" onChange={handleUpload} style={{ display: "none" }} />
-            <NeuBtn icon={Upload} label={uploading ? "Uploading..." : "Upload PDF"} color="#2563eb" onClick={() => fileRef.current?.click()} loading={uploading} />
+          <label style={{ cursor: "pointer" }} title="Select one or more PDFs — each becomes its own invoice, processed one at a time">
+            <input ref={fileRef} type="file" accept=".pdf" multiple onChange={handleUpload} style={{ display: "none" }} />
+            <NeuBtn icon={Upload} label={uploading ? "Uploading..." : "Upload PDF(s)"} color="#2563eb" onClick={() => fileRef.current?.click()} loading={uploading} />
           </label>
         </div>
       </div>
+
+      {/* Batch upload progress */}
+      {batchProgress && (
+        <div style={{
+          padding: "10px 16px", borderRadius: 12, fontSize: 12, fontWeight: 600,
+          display: "flex", alignItems: "center", gap: 10,
+          background: "#dbeafe", color: "#1d4ed8", boxShadow: NEU.shadowOutSm,
+        }}>
+          <Loader2 size={14} className="animate-spin" />
+          Processing {batchProgress.done + 1} of {batchProgress.total}: {batchProgress.current}
+          <div style={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(29,78,216,0.15)", overflow: "hidden" }}>
+            <div style={{
+              height: "100%", borderRadius: 3, background: "#2563eb",
+              width: `${Math.round((batchProgress.done / batchProgress.total) * 100)}%`,
+              transition: "width 0.2s ease",
+            }} />
+          </div>
+        </div>
+      )}
 
       {/* Message */}
       {message && (

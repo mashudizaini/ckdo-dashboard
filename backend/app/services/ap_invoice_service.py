@@ -46,7 +46,7 @@ Required JSON structure:
 {
   "invoice_num": "invoice number string",
   "invoice_date": "DD/MM/YYYY - printed date on the invoice page",
-  "received_date": "DD/MM/YYYY - handwritten date on RECEIVED stamp/cap, or null",
+  "received_date": "DD/MM/YYYY - the handwritten date inside a RECEIVED rubber stamp, or null",
   "vendor_name": "supplier company name issuing the invoice",
   "payment_terms": "payment terms from PURCHASE ORDER page (e.g. IMMEDIATE, 30 Days, Net 30, COD) or null",
   "terms_date": "payment due date DD/MM/YYYY or null",
@@ -72,7 +72,7 @@ Required JSON structure:
 
 IMPORTANT extraction rules:
 - vendor_name: the company ISSUING the invoice (usually top-left header), NOT PT. CKD OTTO Pharmaceuticals (the buyer)
-- received_date: look carefully for handwritten date near a rubber stamp that says "RECEIVED BY" or "DITERIMA". If not found, set null.
+- received_date: Find a rubber ink stamp (cap) — usually a rectangular or oval outline containing printed text like "RECEIVED", "DITERIMA", "GOODS RECEIVED", or a company/warehouse name — stamped anywhere on any page (often near the top, a corner, or beside a signature). That stamp normally has a blank line, box, or open space INSIDE or directly below it that has been filled in BY HAND with a date. Read that handwritten date carefully even if it is small, slanted, faint, or partially overlapping the stamp's printed text or a signature — it is often squeezed into a tight space. This handwritten date is a DIFFERENT value from any printed/typed date elsewhere on the document (invoice_date, PO date, etc.) — do not confuse them. If a page has more than one stamp, use the handwritten date closest to the words "RECEIVED"/"DITERIMA". Only set null if, after checking every page, there truly is no stamp or no handwritten date anywhere.
 - payment_terms: look for "Payment Terms", "Terms", "Syarat Pembayaran" on the PURCHASE ORDER page. If not found, set null.
 - tax_serial_number: from FAKTUR PAJAK page, look for "Kode dan Nomor Seri Faktur Pajak". If no Faktur Pajak page, set null.
 - invoice_date: the printed/typed date on the invoice document itself
@@ -175,10 +175,11 @@ def extract_pdf(file_path: str, filename: str, provider: str = "onprem") -> dict
     # date vs. the handwritten "RECEIVED BY" stamp) — kept as separate fields
     # rather than one silently standing in for the other, since received_date
     # is what GL_DATE gets computed from (see insert_to_interface). When the
-    # stamp can't be read, received_date stays None so the UI can prompt for
-    # a manual entry instead of masking the gap with invoice_date.
+    # stamp genuinely can't be read, default to the 1st of the current month
+    # (the month of processing, not the invoice's own month) rather than
+    # leaving it blank — still fully editable in the review step if it's wrong.
     invoice_date = data.get("invoice_date") or datetime.today().strftime("%d/%m/%Y")
-    received_date = data.get("received_date") or None
+    received_date = data.get("received_date") or datetime.today().replace(day=1).strftime("%d/%m/%Y")
 
     lines = []
     for i, ln in enumerate(data.get("lines", []), start=1):
