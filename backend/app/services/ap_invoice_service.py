@@ -349,18 +349,24 @@ def save_to_staging(db_conn, invoice_data: dict) -> int:
 def list_invoices(db_conn) -> list[dict]:
     cur = db_conn.cursor()
     cur.execute("""
-        SELECT stg_id, invoice_num, vendor_name, invoice_date,
-               invoice_amount, status, error_msg, source_file,
+        SELECT stg_id, invoice_num, vendor_name, vendor_id, invoice_date, po_number,
+               subtotal, invoice_amount, status, error_msg, source_file,
                TO_CHAR(created_date, 'DD/MM/YYYY HH24:MI:SS'),
                TO_CHAR(processed_date, 'DD/MM/YYYY HH24:MI:SS'),
-               ap_invoice_id
+               ap_invoice_id, wht_enabled, wht_amount, awt_group_id, awt_group_name
         FROM ap_invoice_stg
         ORDER BY created_date DESC
     """)
-    cols = ["stg_id", "invoice_num", "vendor_name", "invoice_date",
-            "invoice_amount", "status", "error_msg", "source_file",
-            "created_date", "processed_date", "ap_invoice_id"]
-    return [dict(zip(cols, r)) for r in cur.fetchall()]
+    cols = ["stg_id", "invoice_num", "vendor_name", "vendor_id", "invoice_date", "po_number",
+            "subtotal", "invoice_amount", "status", "error_msg", "source_file",
+            "created_date", "processed_date", "ap_invoice_id",
+            "wht_enabled", "wht_amount", "awt_group_id", "awt_group_name"]
+    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    for r in rows:
+        for key in ("subtotal", "invoice_amount", "wht_amount"):
+            if r.get(key) is not None:
+                r[key] = float(r[key])
+    return rows
 
 
 def get_invoice_detail(db_conn, stg_id: int) -> Optional[dict]:
@@ -374,7 +380,7 @@ def get_invoice_detail(db_conn, stg_id: int) -> Optional[dict]:
                terms_date, po_number, so_number, currency_code,
                invoice_amount, subtotal, tax_amount, tax_serial_number, faktur_pajak_date,
                lines_json, interface_invoice_id, ap_invoice_id,
-               conc_request_id
+               conc_request_id, wht_enabled, wht_amount, awt_group_id, awt_group_name
         FROM ap_invoice_stg WHERE stg_id = %s
     """, (stg_id,))
     row = cur.fetchone()
@@ -387,12 +393,12 @@ def get_invoice_detail(db_conn, stg_id: int) -> Optional[dict]:
             "terms_date", "po_number", "so_number", "currency_code",
             "invoice_amount", "subtotal", "tax_amount", "tax_serial_number", "faktur_pajak_date",
             "lines_json", "interface_invoice_id", "ap_invoice_id",
-            "conc_request_id"]
+            "conc_request_id", "wht_enabled", "wht_amount", "awt_group_id", "awt_group_name"]
     data = dict(zip(cols, row))
     if data.get("lines_json"):
         data["lines"] = json.loads(data["lines_json"])
     data.pop("lines_json", None)
-    for key in ("invoice_amount", "subtotal", "tax_amount"):
+    for key in ("invoice_amount", "subtotal", "tax_amount", "wht_amount"):
         if data.get(key) is not None:
             data[key] = float(data[key])
     return data
@@ -595,6 +601,18 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
     except ValueError:
         faktur_date_parsed = None
 
+    # WHT (withholding tax / PPh) — opt-in via the checkbox in the UI. When
+    # set, the header's INVOICE_AMOUNT goes to Oracle already net of WHT
+    # (per business decision: "total dikurangi wht"), and the deduction
+    # itself is posted as its own AWT-type line so the line sum still
+    # reconciles with the header total — the same shape AP staff's existing
+    # manual AWT-line entries already use in production (see
+    # supplier_wht_service.py's seed query), so it should pass the same
+    # Oracle validation those do.
+    wht_amount = float(header.get("WHT_AMOUNT") or 0)
+    gross_amount = float(header["INVOICE_AMOUNT"])
+    net_amount = gross_amount - wht_amount if wht_amount > 0 else gross_amount
+
     with ora_conn.cursor() as oc:
         oc.execute("SELECT AP_INVOICES_INTERFACE_S.NEXTVAL FROM DUAL")
         iid = oc.fetchone()[0]
@@ -622,7 +640,7 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
         """, {
             "iid": iid, "inv_num": header["INVOICE_NUM"],
             "inv_date": invoice_date, "vid": header["VENDOR_ID"], "vsid": header["VENDOR_SITE_ID"],
-            "inv_amt": float(header["INVOICE_AMOUNT"]), "curr": header.get("INVOICE_CURRENCY_CODE", "IDR"),
+            "inv_amt": net_amount, "curr": header.get("INVOICE_CURRENCY_CODE", "IDR"),
             "terms": header.get("TERMS_NAME", "30 Days"), "terms_date": terms_date,
             "gl_date": gl_date, "goods_recv_date": received_date_parsed,
             "source": EBS_SOURCE, "org_id": EBS_ORG_ID,
@@ -662,6 +680,27 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
                 "po": po_num_line, "po_ln": po_ln_num, "receipt_num": receipt_num,
                 "batch": line.get("BATCH_NO", line.get("batch_no")),
                 "item_code": line.get("ITEM_CODE", line.get("item_code")),
+                "org_id": EBS_ORG_ID,
+            })
+
+        if wht_amount > 0:
+            max_line_num = max((line.get("LINE_NUMBER", line.get("line_num")) or 0) for line in lines) if lines else 0
+            group_name = header.get("AWT_GROUP_NAME")
+            oc.execute("""
+                INSERT INTO AP_INVOICE_LINES_INTERFACE (
+                    INVOICE_ID, INVOICE_LINE_ID, LINE_NUMBER,
+                    LINE_TYPE_LOOKUP_CODE, AMOUNT, DESCRIPTION,
+                    AWT_GROUP_ID, ORG_ID
+                ) VALUES (
+                    :iid, AP_INVOICE_LINES_INTERFACE_S.NEXTVAL, :ln,
+                    'AWT', :amt, :descr,
+                    :awt_group_id, :org_id
+                )
+            """, {
+                "iid": iid, "ln": max_line_num + 1,
+                "amt": -wht_amount,
+                "descr": f"WHT/PPh - {group_name}" if group_name else "WHT/PPh",
+                "awt_group_id": header.get("AWT_GROUP_ID"),
                 "org_id": EBS_ORG_ID,
             })
 

@@ -65,7 +65,12 @@ def seed_from_oracle(updated_by: str = "oracle-sync") -> dict:
     straight from their real AWT-type invoice lines. Only touches rows
     whose source is 'oracle' — a manual override (source='manual') is left
     alone even if that supplier also has Oracle history, since a human
-    already made a deliberate call for them."""
+    already made a deliberate call for them.
+
+    Excludes vendor_type_lookup_code='EMPLOYEE' — Oracle's own
+    classification for employees registered as AP suppliers (expense
+    reimbursements etc.), i.e. internal, not a commercial supplier subject
+    to the same PPh-on-purchase withholding this master tracks."""
     ora = get_oracle_connection()
     try:
         cur = ora.cursor()
@@ -82,10 +87,14 @@ def seed_from_oracle(updated_by: str = "oracle-sync") -> dict:
                 LEFT JOIN AP.AP_AWT_GROUP_TAXES_ALL agt ON agt.group_id = ag.group_id AND agt.rank = 1
                 LEFT JOIN AP.AP_AWT_TAX_RATES_ALL tr ON tr.tax_name = agt.tax_name
                 WHERE ail.line_type_lookup_code = 'AWT'
+                  AND (aps.vendor_type_lookup_code IS NULL OR aps.vendor_type_lookup_code <> 'EMPLOYEE')
             )
             WHERE rn = 1
         """)
         rows = cur.fetchall()
+
+        cur.execute("SELECT vendor_id FROM ap_suppliers WHERE vendor_type_lookup_code = 'EMPLOYEE'")
+        employee_vendor_ids = [r[0] for r in cur.fetchall()]
     finally:
         ora.close()
 
@@ -110,11 +119,23 @@ def seed_from_oracle(updated_by: str = "oracle-sync") -> dict:
                 WHERE supplier_wht_master.source = 'oracle'
             """, (vendor_id, vendor_name, awt_group_id, awt_group_name, tax_rate, last_used_date, updated_by))
             upserted += cur.rowcount
+
+        removed_employees = 0
+        if employee_vendor_ids:
+            cur.execute("""
+                DELETE FROM supplier_wht_master
+                WHERE source = 'oracle' AND vendor_id = ANY(%s)
+            """, (employee_vendor_ids,))
+            removed_employees = cur.rowcount
         pg.commit()
     finally:
         pg.close()
 
-    return {"suppliers_found_in_oracle": len(rows), "upserted": upserted, "synced_at": datetime.utcnow().isoformat()}
+    return {
+        "suppliers_found_in_oracle": len(rows), "upserted": upserted,
+        "internal_employee_suppliers_excluded": removed_employees,
+        "synced_at": datetime.utcnow().isoformat(),
+    }
 
 
 def list_wht_master(search: Optional[str] = None) -> list[dict]:

@@ -142,6 +142,8 @@ export default function SupplierWhtMaster() {
         <div className="rounded-lg px-4 py-2.5 text-xs bg-green-500/10 text-green-400 border border-green-500/20">
           Sync selesai — {syncResult.suppliers_found_in_oracle} supplier ditemukan di Oracle,
           {" "}{syncResult.upserted} baris diperbarui.
+          {syncResult.internal_employee_suppliers_excluded > 0 &&
+            ` ${syncResult.internal_employee_suppliers_excluded} supplier internal (karyawan) dikeluarkan.`}
         </div>
       )}
 

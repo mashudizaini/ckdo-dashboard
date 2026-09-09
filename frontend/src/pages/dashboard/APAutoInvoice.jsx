@@ -3,7 +3,7 @@ import {
   Upload, FileText, CheckCircle, Send, Loader2, AlertTriangle,
   RefreshCw, ChevronDown, ChevronUp, X, Pencil, Trash2, Save, Search, Paperclip, Link2,
 } from "lucide-react";
-import { apInvoiceApi } from "@/api/dashboard";
+import { apInvoiceApi, supplierWhtApi } from "@/api/dashboard";
 
 const NEU = {
   bg: "#f1f5f9",
@@ -85,6 +85,8 @@ export default function APAutoInvoice() {
   const [actionLoading, setActionLoading] = useState("");
   const [message, setMessage] = useState(null);
   const [batchProgress, setBatchProgress] = useState(null); // { done, total, current } while a multi-file upload is running
+  const [whtDrafts, setWhtDrafts] = useState({}); // stg_id -> in-progress amount text while typing
+  const [whtBusy, setWhtBusy] = useState(null); // stg_id currently syncing a WHT change
   const fileRef = useRef(null);
 
   const refresh = async () => {
@@ -178,6 +180,53 @@ export default function APAutoInvoice() {
     }
   };
 
+  // Toggling WHT on for an invoice looks up its supplier in the WHT master
+  // (Setup > Accounting & Tax) and suggests an amount (rate% of Taxbase) —
+  // shown immediately and freely editable afterward, per the requirement
+  // that the value display but never be locked to the master's number.
+  const toggleWht = async (inv) => {
+    const next = !inv.wht_enabled;
+    setWhtBusy(inv.stg_id);
+    try {
+      let amount = inv.wht_amount;
+      let awtGroupId = inv.awt_group_id;
+      let awtGroupName = inv.awt_group_name;
+      if (next && !amount) {
+        try {
+          const m = await supplierWhtApi.getForVendor(inv.vendor_id);
+          const base = inv.subtotal || inv.invoice_amount || 0;
+          amount = m.tax_rate != null ? Math.round((base * m.tax_rate) / 100) : 0;
+          awtGroupId = m.awt_group_id;
+          awtGroupName = m.awt_group_name;
+        } catch (_) {
+          amount = 0; // no master entry for this supplier — leave editable at 0
+        }
+      }
+      await apInvoiceApi.update(inv.stg_id, {
+        wht_enabled: next, wht_amount: amount || 0,
+        awt_group_id: awtGroupId ?? null, awt_group_name: awtGroupName ?? null,
+      });
+      setWhtDrafts(prev => { const n = { ...prev }; delete n[inv.stg_id]; return n; });
+      await refresh();
+    } catch (e) {
+      setMessage({ type: "error", text: "Failed to update WHT: " + (e?.detail || e?.message || String(e)) });
+    } finally {
+      setWhtBusy(null);
+    }
+  };
+
+  const commitWhtAmount = async (inv, value) => {
+    setWhtBusy(inv.stg_id);
+    try {
+      await apInvoiceApi.update(inv.stg_id, { wht_enabled: true, wht_amount: Number(value) || 0 });
+      await refresh();
+    } catch (e) {
+      setMessage({ type: "error", text: "Failed to update WHT: " + (e?.detail || e?.message || String(e)) });
+    } finally {
+      setWhtBusy(null);
+    }
+  };
+
   const handleSave = async (id, payload) => {
     setActionLoading("save");
     setMessage(null);
@@ -217,6 +266,8 @@ export default function APAutoInvoice() {
           TERMS_DATE: preview.terms_date, PO_NUMBER: preview.po_number,
           SO_NUMBER: preview.so_number, TAX_SERIAL_NUMBER: preview.tax_serial_number,
           FAKTUR_PAJAK_DATE: preview.faktur_pajak_date,
+          WHT_AMOUNT: preview.wht_enabled ? preview.wht_amount : null,
+          AWT_GROUP_ID: preview.awt_group_id, AWT_GROUP_NAME: preview.awt_group_name,
         };
         res = await apInvoiceApi.insertInterface(id, { header, lines: preview.lines || [] });
         setMessage({ type: "success", text: `Successfully inserted to AP Interface (ID: ${res.interface_invoice_id})` });
@@ -308,75 +359,126 @@ export default function APAutoInvoice() {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 16 }}>
-        {/* Invoice List */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ borderRadius: 18, overflow: "hidden", boxShadow: NEU.shadowOut, background: NEU.bg }}>
-            <div style={{
-              padding: "14px 18px", background: "linear-gradient(135deg, #dfe5ed, #d8dee8)",
-              borderBottom: "2px solid rgba(0,0,0,0.06)",
-            }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
-                Invoice Staging ({invoices.length})
-              </span>
-            </div>
-            <div style={{ maxHeight: 500, overflowY: "auto" }}>
-              {invoices.length === 0 ? (
-                <div style={{ padding: "40px 20px", textAlign: "center", color: "#94a3b8", fontSize: 13 }}>
-                  {loading ? "Loading..." : "No invoices yet. Upload PDF to get started."}
-                </div>
-              ) : invoices.map((inv, i) => (
-                <div key={inv.stg_id}
-                  onClick={() => loadDetail(inv.stg_id)}
-                  style={{
-                    padding: "12px 18px", cursor: "pointer",
-                    background: selectedId === inv.stg_id ? "rgba(37,99,235,0.08)" : i % 2 === 0 ? "#f8fafc" : "#f1f5f9",
-                    borderLeft: selectedId === inv.stg_id ? "3px solid #2563eb" : "3px solid transparent",
-                    borderBottom: "1px solid rgba(0,0,0,0.04)",
-                    transition: "all 0.15s ease",
-                  }}
-                  onMouseEnter={e => { if (selectedId !== inv.stg_id) e.currentTarget.style.background = "rgba(37,99,235,0.04)"; }}
-                  onMouseLeave={e => { if (selectedId !== inv.stg_id) e.currentTarget.style.background = i % 2 === 0 ? "#f8fafc" : "#f1f5f9"; }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>{inv.invoice_num}</span>
-                    <StatusPill status={inv.status} />
-                  </div>
-                  <div style={{ fontSize: 11.5, color: "#64748b", fontWeight: 500 }}>{inv.vendor_name}</div>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-                    <span style={{ fontSize: 11, color: "#94a3b8" }}>{inv.invoice_date || "—"}</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>
-                      {inv.invoice_amount ? `Rp ${Number(inv.invoice_amount).toLocaleString("id-ID")}` : "—"}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+      {/* Invoice Staging — header data as a list, one row per invoice, since
+          a single upload batch can now produce several at once. WHT sits as
+          the second-to-last column (checkbox + editable amount), Delete as
+          the very last — both act directly on the row without opening the
+          detail panel below. */}
+      <div style={{ borderRadius: 18, overflow: "hidden", boxShadow: NEU.shadowOut, background: NEU.bg }}>
+        <div style={{
+          padding: "14px 18px", background: "linear-gradient(135deg, #dfe5ed, #d8dee8)",
+          borderBottom: "2px solid rgba(0,0,0,0.06)",
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
+            Invoice Staging ({invoices.length})
+          </span>
         </div>
-
-        {/* Detail Panel */}
-        <div style={{ flex: 1.5, minWidth: 0 }}>
-          {detail ? (
-            <DetailPanel
-              detail={detail}
-              onAction={doAction}
-              onDelete={handleDelete}
-              onSave={handleSave}
-              actionLoading={actionLoading}
-            />
-          ) : (
-            <div style={{
-              borderRadius: 18, padding: "60px 20px", textAlign: "center",
-              boxShadow: NEU.shadowOut, background: NEU.bg,
-              color: "#94a3b8", fontSize: 13, fontWeight: 500,
-            }}>
-              <FileText size={40} style={{ margin: "0 auto 12px", opacity: 0.3 }} />
-              Select an invoice from the list to view details
+        <div style={{ maxHeight: 460, overflow: "auto" }}>
+          {invoices.length === 0 ? (
+            <div style={{ padding: "40px 20px", textAlign: "center", color: "#94a3b8", fontSize: 13 }}>
+              {loading ? "Loading..." : "No invoices yet. Upload PDF to get started."}
             </div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 920 }}>
+              <thead>
+                <tr style={{ background: "linear-gradient(135deg, #eef1f5, #e7ebf1)" }}>
+                  {["Invoice / Vendor", "Date Invoice", "PO Number", "Amount", "Status", "WHT", ""].map((h, i) => (
+                    <th key={h || i} style={{
+                      padding: "9px 14px", fontSize: 10.5, fontWeight: 700, color: "#64748b",
+                      textAlign: h === "Amount" ? "right" : h === "WHT" || h === "" ? "center" : "left",
+                      textTransform: "uppercase", letterSpacing: "0.05em",
+                      borderBottom: "2px solid rgba(0,0,0,0.06)", whiteSpace: "nowrap",
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {invoices.map((inv, i) => {
+                  const canEditWht = ["NEW", "VALIDATED", "ERROR"].includes(inv.status);
+                  const draft = whtDrafts[inv.stg_id] ?? (inv.wht_amount || "");
+                  const busy = whtBusy === inv.stg_id;
+                  return (
+                    <tr key={inv.stg_id}
+                      onClick={() => loadDetail(inv.stg_id)}
+                      style={{
+                        cursor: "pointer",
+                        background: selectedId === inv.stg_id ? "rgba(37,99,235,0.08)" : i % 2 === 0 ? "#f8fafc" : "#f1f5f9",
+                        borderLeft: selectedId === inv.stg_id ? "3px solid #2563eb" : "3px solid transparent",
+                        borderBottom: "1px solid rgba(0,0,0,0.04)",
+                      }}>
+                      <td style={{ padding: "10px 14px" }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1e293b" }}>{inv.invoice_num}</div>
+                        <div style={{ fontSize: 11, color: "#64748b", fontWeight: 500 }}>{inv.vendor_name}</div>
+                      </td>
+                      <td style={{ padding: "10px 14px", fontSize: 12, color: "#475569", whiteSpace: "nowrap" }}>
+                        {inv.invoice_date || "—"}
+                      </td>
+                      <td style={{ padding: "10px 14px", fontSize: 12, color: "#475569", whiteSpace: "nowrap" }}>
+                        {inv.po_number || "—"}
+                      </td>
+                      <td style={{ padding: "10px 14px", fontSize: 12.5, fontWeight: 700, color: "#334155", textAlign: "right", whiteSpace: "nowrap" }}>
+                        {inv.invoice_amount ? `Rp ${Number(inv.invoice_amount).toLocaleString("id-ID")}` : "—"}
+                      </td>
+                      <td style={{ padding: "10px 14px" }}>
+                        <StatusPill status={inv.status} />
+                      </td>
+                      <td style={{ padding: "10px 10px", textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                          <input type="checkbox" checked={!!inv.wht_enabled} disabled={!canEditWht || busy}
+                            onChange={() => toggleWht(inv)}
+                            title={canEditWht ? "Apply WHT from Supplier WHT Master" : "Only editable while status is New/Validated/Error"}
+                            style={{ width: 15, height: 15, cursor: canEditWht ? "pointer" : "not-allowed" }} />
+                          {inv.wht_enabled && (
+                            busy ? <Loader2 size={13} className="animate-spin" style={{ color: "#94a3b8" }} /> : (
+                              <input type="number" value={draft}
+                                disabled={!canEditWht}
+                                onChange={e => setWhtDrafts(prev => ({ ...prev, [inv.stg_id]: e.target.value }))}
+                                onBlur={e => commitWhtAmount(inv, e.target.value)}
+                                style={{
+                                  width: 92, padding: "4px 6px", borderRadius: 6, border: "none",
+                                  background: NEU.bg, fontSize: 11.5, fontWeight: 600, color: "#1e293b",
+                                  boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)", outline: "none", textAlign: "right",
+                                }} />
+                            )
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ padding: "10px 10px", textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                        {["NEW", "VALIDATED", "ERROR"].includes(inv.status) && (
+                          <button onClick={() => handleDelete(inv.stg_id)} title="Delete"
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}>
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
         </div>
       </div>
+
+      {/* Detail Panel — line items, PO matching, and the action/status workflow for the selected invoice */}
+      {detail ? (
+        <DetailPanel
+          detail={detail}
+          onAction={doAction}
+          onDelete={handleDelete}
+          onSave={handleSave}
+          actionLoading={actionLoading}
+        />
+      ) : (
+        <div style={{
+          borderRadius: 18, padding: "60px 20px", textAlign: "center",
+          boxShadow: NEU.shadowOut, background: NEU.bg,
+          color: "#94a3b8", fontSize: 13, fontWeight: 500,
+        }}>
+          <FileText size={40} style={{ margin: "0 auto 12px", opacity: 0.3 }} />
+          Select an invoice from the list above to view details
+        </div>
+      )}
     </div>
   );
 }
@@ -578,6 +680,30 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
               {glDatePreviewLoading ? <Loader2 size={13} className="animate-spin" /> : (glDatePreview || "—")}
             </div>
           </div>
+
+          {/* WHT — toggled from the checkbox in the invoice list above (not
+              editable here); shown so the Net Total actually posted to
+              Oracle at Insert-to-Interface is never a surprise. */}
+          {d.wht_enabled && (
+            <div style={{ padding: "10px 14px", borderRadius: 14, background: NEU.bg, boxShadow: NEU.shadowOutSm }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+                WHT{d.awt_group_name ? ` (${d.awt_group_name})` : ""}
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#dc2626" }}>
+                – Rp {Number(d.wht_amount || 0).toLocaleString("id-ID")}
+              </div>
+            </div>
+          )}
+          {d.wht_enabled && (
+            <div style={{ padding: "10px 14px", borderRadius: 14, background: NEU.bg, boxShadow: NEU.shadowOutSm }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+                Net Total (to Oracle)
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#059669" }}>
+                Rp {Number((d.invoice_amount || 0) - (d.wht_amount || 0)).toLocaleString("id-ID")}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Edit save/cancel bar */}

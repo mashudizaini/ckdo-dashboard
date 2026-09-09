@@ -82,6 +82,28 @@ def ensure_staging_table():
             cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS faktur_pajak_date VARCHAR(20)")
         except Exception:
             conn.rollback()
+        # WHT (withholding tax / PPh) — opt-in per invoice via the checkbox
+        # in the UI. When enabled, wht_amount is subtracted from the gross
+        # Total at Insert-to-Interface time and posted as its own AWT-type
+        # line (see insert_to_interface) — awt_group_id/name is carried
+        # along purely for that line's description and Oracle grouping,
+        # sourced from supplier_wht_master (see supplier_wht_service.py).
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS wht_enabled BOOLEAN DEFAULT FALSE")
+        except Exception:
+            conn.rollback()
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS wht_amount NUMERIC")
+        except Exception:
+            conn.rollback()
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS awt_group_id BIGINT")
+        except Exception:
+            conn.rollback()
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS awt_group_name VARCHAR(240)")
+        except Exception:
+            conn.rollback()
         conn.commit()
         conn.close()
     except Exception:
@@ -350,7 +372,8 @@ async def check_status(stg_id: int):
 async def update_invoice(stg_id: int, payload: dict):
     allowed = {"invoice_num", "invoice_date", "received_date", "vendor_name", "terms_date",
                "po_number", "so_number", "currency_code", "invoice_amount",
-               "subtotal", "tax_amount", "tax_serial_number", "faktur_pajak_date", "lines_json"}
+               "subtotal", "tax_amount", "tax_serial_number", "faktur_pajak_date", "lines_json",
+               "wht_enabled", "wht_amount", "awt_group_id", "awt_group_name"}
     updates = {k: v for k, v in payload.items() if k in allowed}
     if not updates:
         raise HTTPException(400, "Tidak ada field valid untuk diupdate")
