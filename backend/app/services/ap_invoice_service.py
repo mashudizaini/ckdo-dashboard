@@ -148,13 +148,70 @@ def _call_ollama_vision(images: list[str]) -> dict:
     return json.loads(raw)
 
 
+_ORACLE_MONTH_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+
+# English + Indonesian month names/abbreviations — used for the "19 September
+# 2026" / "19-SEP-2026" style inputs Oracle's own Invoice Workbench displays
+# and staff naturally type, which strptime's locale-dependent %b/%B can't be
+# trusted to parse consistently regardless of the server's own locale.
+_MONTH_NAMES = {
+    "jan": 1, "january": 1, "januari": 1,
+    "feb": 2, "february": 2, "februari": 2,
+    "mar": 3, "march": 3, "maret": 3,
+    "apr": 4, "april": 4,
+    "may": 5, "mei": 5,
+    "jun": 6, "june": 6, "juni": 6,
+    "jul": 7, "july": 7, "juli": 7,
+    "aug": 8, "august": 8, "agt": 8, "agustus": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10, "okt": 10, "oktober": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12, "des": 12, "desember": 12,
+}
+
+
 def _parse_date(date_str: str) -> datetime:
+    """Accepts the AI extraction's own DD/MM/YYYY, ISO, and — since staff
+    edit these fields by hand — DD-MM-YYYY, DD-MON-YYYY ("19-SEP-2026",
+    matching Oracle's own display format) and "DD Month YYYY" in English or
+    Indonesian, with either a space or dash between the parts."""
+    s = date_str.strip()
     for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
         try:
-            return datetime.strptime(date_str.strip(), fmt)
+            return datetime.strptime(s, fmt)
         except ValueError:
             continue
+    m = re.match(r"^(\d{1,2})[\s\-]+([A-Za-z]+)\.?[\s\-]+(\d{4})$", s)
+    if m:
+        day, month_name, year = m.groups()
+        month = _MONTH_NAMES.get(month_name.lower())
+        if month:
+            try:
+                return datetime(int(year), month, int(day))
+            except ValueError:
+                pass
     raise ValueError(f"Format tanggal tidak dikenali: '{date_str}'")
+
+
+def _format_oracle_date(dt: datetime) -> str:
+    """Canonical display/storage format for every date field in this
+    module — matches Oracle's own DD-MON-RRRR (e.g. "19-SEP-2026"), so what
+    staff see here always matches the Invoice Workbench."""
+    return f"{dt.day:02d}-{_ORACLE_MONTH_ABBR[dt.month - 1]}-{dt.year}"
+
+
+def normalize_date_str(date_str: Optional[str], default: Optional[str] = None) -> Optional[str]:
+    """Parse (tolerating any of _parse_date's accepted formats) then
+    reformat to DD-MON-RRRR. Returns `default` — itself expected to already
+    be DD-MON-RRRR, or None — for a blank or unparseable input rather than
+    raising, since this is used both for the AI extraction's raw output
+    (which may be empty/malformed) and for validating a manual edit."""
+    if not date_str or not date_str.strip():
+        return default
+    try:
+        return _format_oracle_date(_parse_date(date_str))
+    except ValueError:
+        return default
 
 
 def _clean_vendor_name(name: str) -> str:
@@ -174,12 +231,17 @@ def extract_pdf(file_path: str, filename: str, provider: str = "onprem") -> dict
     # invoice_date and received_date are two different dates (printed invoice
     # date vs. the handwritten "RECEIVED BY" stamp) — kept as separate fields
     # rather than one silently standing in for the other, since received_date
-    # is what GL_DATE gets computed from (see insert_to_interface). When the
-    # stamp genuinely can't be read, default to the 1st of the current month
-    # (the month of processing, not the invoice's own month) rather than
-    # leaving it blank — still fully editable in the review step if it's wrong.
-    invoice_date = data.get("invoice_date") or datetime.today().strftime("%d/%m/%Y")
-    received_date = data.get("received_date") or datetime.today().replace(day=1).strftime("%d/%m/%Y")
+    # is what GL_DATE/GOODS_RECEIVED_DATE get computed from (see
+    # insert_to_interface). When the stamp genuinely can't be read, default
+    # to the 1st of the current month (the month of processing, not the
+    # invoice's own month) rather than leaving it blank — still fully
+    # editable in the review step if it's wrong. Both, like every date this
+    # module handles, are normalized to Oracle's own DD-MON-RRRR display
+    # format (see normalize_date_str) regardless of whatever format the
+    # vision model actually returned.
+    invoice_date = normalize_date_str(data.get("invoice_date"), default=_format_oracle_date(datetime.today()))
+    received_date = normalize_date_str(data.get("received_date"), default=_format_oracle_date(datetime.today().replace(day=1)))
+    terms_date = normalize_date_str(data.get("terms_date"))
 
     lines = []
     for i, ln in enumerate(data.get("lines", []), start=1):
@@ -206,7 +268,7 @@ def extract_pdf(file_path: str, filename: str, provider: str = "onprem") -> dict
         "received_date": received_date,
         "vendor_name": data.get("vendor_name", "").strip(),
         "payment_terms": data.get("payment_terms") or "30 Days",
-        "terms_date": data.get("terms_date"),
+        "terms_date": terms_date,
         "po_number": data.get("po_number"),
         "so_number": data.get("so_number"),
         "currency_code": data.get("currency", "IDR"),
@@ -470,17 +532,21 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
     except ValueError:
         terms_date = invoice_date
 
-    # GL_DATE basis: the invoice's received_date (stamp date) when captured,
-    # else invoice_date — then rolled to an open Payables period. Fixes a
-    # real rejection risk: GL_DATE used to be plain datetime.today(), which
-    # posts to whatever period today falls in regardless of the invoice's
-    # own period, and does nothing if that period is closed.
+    # received_date (the stamp date) feeds two separate Oracle columns:
+    # GOODS_RECEIVED_DATE on the header directly (the actual date, never
+    # adjusted), and GL_DATE's basis (which IS adjusted — rolled to an open
+    # Payables period below). Fixes two real gaps: GOODS_RECEIVED_DATE was
+    # never populated at all (shown as the Invoice Workbench's "*Dates
+    # Invoice" field, examine-field name GOODS_RECEIVED_DATE — confirmed
+    # blank on a live imported invoice), and GL_DATE used to be plain
+    # datetime.today(), which posts to whatever period today falls in
+    # regardless of the invoice's own period, and does nothing if closed.
     received_date_str = header.get("RECEIVED_DATE")
     try:
-        gl_base_date = _parse_date(received_date_str) if received_date_str else invoice_date
+        received_date_parsed = _parse_date(received_date_str) if received_date_str else None
     except ValueError:
-        gl_base_date = invoice_date
-    gl_date = _compute_gl_date(ora_conn, gl_base_date)
+        received_date_parsed = None
+    gl_date = _compute_gl_date(ora_conn, received_date_parsed or invoice_date)
 
     with ora_conn.cursor() as oc:
         oc.execute("SELECT AP_INVOICES_INTERFACE_S.NEXTVAL FROM DUAL")
@@ -491,7 +557,7 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
                 INVOICE_ID, INVOICE_NUM, INVOICE_TYPE_LOOKUP_CODE,
                 INVOICE_DATE, VENDOR_ID, VENDOR_SITE_ID,
                 INVOICE_AMOUNT, INVOICE_CURRENCY_CODE,
-                TERMS_NAME, TERMS_DATE, GL_DATE, SOURCE, ORG_ID,
+                TERMS_NAME, TERMS_DATE, GL_DATE, GOODS_RECEIVED_DATE, SOURCE, ORG_ID,
                 PO_NUMBER, DESCRIPTION,
                 ATTRIBUTE1, ATTRIBUTE2,
                 CREATION_DATE, CREATED_BY
@@ -499,7 +565,7 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
                 :iid, :inv_num, 'STANDARD',
                 :inv_date, :vid, :vsid,
                 :inv_amt, :curr,
-                :terms, :terms_date, :gl_date, :source, :org_id,
+                :terms, :terms_date, :gl_date, :goods_recv_date, :source, :org_id,
                 :po, :descr,
                 :attr1, :attr2,
                 SYSDATE, 1110
@@ -509,7 +575,8 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
             "inv_date": invoice_date, "vid": header["VENDOR_ID"], "vsid": header["VENDOR_SITE_ID"],
             "inv_amt": float(header["INVOICE_AMOUNT"]), "curr": header.get("INVOICE_CURRENCY_CODE", "IDR"),
             "terms": header.get("TERMS_NAME", "30 Days"), "terms_date": terms_date,
-            "gl_date": gl_date, "source": EBS_SOURCE, "org_id": EBS_ORG_ID,
+            "gl_date": gl_date, "goods_recv_date": received_date_parsed,
+            "source": EBS_SOURCE, "org_id": EBS_ORG_ID,
             "po": header.get("PO_NUMBER"), "descr": f"Import PDF: {header['INVOICE_NUM']}",
             "attr1": header.get("SO_NUMBER"), "attr2": header.get("TAX_SERIAL_NUMBER"),
         })

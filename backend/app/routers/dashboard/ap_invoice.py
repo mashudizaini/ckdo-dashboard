@@ -329,6 +329,17 @@ async def update_invoice(stg_id: int, payload: dict):
     if not updates:
         raise HTTPException(400, "Tidak ada field valid untuk diupdate")
 
+    # Normalize to Oracle's own DD-MON-RRRR here, at save time — not only
+    # when inserting to interface — so a bad format is caught immediately
+    # with a clear error instead of surfacing later as "Insert interface
+    # gagal", and so every date this module stores/displays is consistent.
+    for date_key in ("invoice_date", "received_date", "terms_date"):
+        if updates.get(date_key):
+            normalized = svc.normalize_date_str(updates[date_key])
+            if normalized is None:
+                raise HTTPException(400, f"Format tanggal tidak dikenali untuk {date_key}: '{updates[date_key]}'")
+            updates[date_key] = normalized
+
     pg = _get_pg()
     cur = pg.cursor()
     sets = ", ".join(f"{k} = %({k})s" for k in updates)
