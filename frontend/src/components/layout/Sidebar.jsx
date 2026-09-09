@@ -5,7 +5,7 @@ import { useThemeStore } from "@/store/themeStore";
 import {
   Monitor, Users, Factory, Calculator,
   ShoppingCart, FileText, LogOut, LayoutGrid, TrendingUp, FileStack,
-  ChevronDown, ChevronRight, Settings,
+  ChevronDown, ChevronRight, Settings, Clock,
 } from "lucide-react";
 import RobotIcon from "@/components/icons/RobotIcon";
 import logo from "@/assets/LOGO-ONLY.png";
@@ -21,13 +21,19 @@ const NAV_ITEMS = [
     { label: "Oracle EBS Backup Recovery", path: "/dashboard/it/ebs-backup-recovery" },
     { label: "VPN Access Monitoring", path: "/dashboard/it/vpn-monitoring" },
   ] },
-  { label: "HRGA", path: "/dashboard/hr", icon: Users, roles: ["hr_staff"], children: [
-    { label: "Employee Data", path: "/dashboard/hr/employees" },
-    { label: "Attendance Rate", path: "/dashboard/hr/attendance" },
-    { label: "Working Calendar", path: "/dashboard/hr/workingcalendar" },
-    { label: "To Do List", path: "/dashboard/hr/todo" },
-    { label: "E-Recruitment", path: "/dashboard/hr/cv" },
-    { label: "e-Magazine", path: "/dashboard/hr/emagazine" },
+  // No roles on the parent — the Overtime System child is open to every
+  // employee (they file their own overtime there), so HRGA has to appear in
+  // everyone's sidebar. The other children keep the hr_staff gate via their
+  // own `roles`, and a parent whose children are all filtered out is hidden
+  // entirely (see hasVisibleChildren in Sidebar below).
+  { label: "HRGA", path: "/dashboard/hr", icon: Users, roles: [], children: [
+    { label: "Employee Data", path: "/dashboard/hr/employees", roles: ["hr_staff"] },
+    { label: "Attendance Rate", path: "/dashboard/hr/attendance", roles: ["hr_staff"] },
+    { label: "Working Calendar", path: "/dashboard/hr/workingcalendar", roles: ["hr_staff"] },
+    { label: "Overtime System", path: "/dashboard/hr/overtime", icon: Clock },
+    { label: "To Do List", path: "/dashboard/hr/todo", roles: ["hr_staff"] },
+    { label: "E-Recruitment", path: "/dashboard/hr/cv", roles: ["hr_staff"] },
+    { label: "e-Magazine", path: "/dashboard/hr/emagazine", roles: ["hr_staff"] },
   ] },
   { label: "PAC", path: "/dashboard/pac", icon: Factory, roles: ["pac_staff"], children: [
     { label: "Business Plan", path: "/dashboard/pac/bizplan" },
@@ -129,7 +135,7 @@ function NavTreeItem({ item, isOpen, onToggle }) {
   return (
     <div>
       <NavLink
-        to={item.path}
+        to={item.children?.[0]?.path ?? item.path}
         className={`nav-card${isParentActive ? " nav-card--active" : ""}`}
         onClick={() => { if (!isOpen) onToggle(item.path); }}
       >
@@ -171,7 +177,16 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const isVisible = (roles) => roles.length === 0 || hasAnyRole(...roles, "admin");
+  const isVisible = (roles) => !roles || roles.length === 0 || hasAnyRole(...roles, "admin");
+
+  // A child may carry its own `roles` (only HRGA does today, so its Overtime
+  // System entry reaches every employee while the rest of the module stays
+  // hr_staff-only). A module left with no visible children is dropped rather
+  // than rendered as an expander with nothing inside it.
+  const visibleItems = (items) => items
+    .filter((item) => isVisible(item.roles))
+    .map((item) => (item.children ? { ...item, children: item.children.filter((c) => isVisible(c.roles)) } : item))
+    .filter((item) => !item.children || item.children.length > 0);
 
   // Whichever module matches the current URL starts expanded; user toggles freely afterward.
   const ALL_TREE_ITEMS = [...NAV_ITEMS, ...EIS_ITEMS, ...SETUP_ITEMS];
@@ -322,7 +337,7 @@ export default function Sidebar() {
             DASHBOARD
           </p>
           <div className="space-y-1.5">
-            {NAV_ITEMS.filter((item) => isVisible(item.roles)).map((item) => (
+            {visibleItems(NAV_ITEMS).map((item) => (
               item.children?.length
                 ? <NavTreeItem key={item.path} item={item} isOpen={expanded.has(item.path)} onToggle={toggle} />
                 : <NavCard key={item.path} item={item} />
@@ -331,13 +346,13 @@ export default function Sidebar() {
         </div>
 
         {/* EIS — standalone executive dashboard, not one of the DASHBOARD modules */}
-        {EIS_ITEMS.filter((item) => isVisible(item.roles)).length > 0 && (
+        {visibleItems(EIS_ITEMS).length > 0 && (
           <div>
             <p style={{ fontSize: 13, fontWeight: 800, color: "#334155", letterSpacing: "0.07em", marginBottom: 8, paddingLeft: 8 }}>
               EIS DASHBOARD
             </p>
             <div className="space-y-1.5">
-              {EIS_ITEMS.filter((item) => isVisible(item.roles)).map((item) => (
+              {visibleItems(EIS_ITEMS).map((item) => (
                 item.children?.length
                   ? <NavTreeItem key={item.path} item={item} isOpen={expanded.has(item.path)} onToggle={toggle} />
                   : <NavCard key={item.path} item={item} />
@@ -348,13 +363,13 @@ export default function Sidebar() {
 
         {/* SETUP — team names mirrored from DASHBOARD, one flat level of
             per-team configuration entries. */}
-        {SETUP_ITEMS.filter((item) => isVisible(item.roles)).length > 0 && (
+        {visibleItems(SETUP_ITEMS).length > 0 && (
           <div>
             <p style={{ fontSize: 13, fontWeight: 800, color: "#334155", letterSpacing: "0.07em", marginBottom: 8, paddingLeft: 8 }}>
               SETUP
             </p>
             <div className="space-y-1.5">
-              {SETUP_ITEMS.filter((item) => isVisible(item.roles)).map((item) => (
+              {visibleItems(SETUP_ITEMS).map((item) => (
                 item.children?.length
                   ? <NavTreeItem key={item.path} item={item} isOpen={expanded.has(item.path)} onToggle={toggle} />
                   : <NavCard key={item.path} item={item} />
@@ -369,7 +384,7 @@ export default function Sidebar() {
             AI TOOLS
           </p>
           <div className="space-y-1.5">
-            {AI_ITEMS.filter((item) => isVisible(item.roles)).map((item) => (
+            {visibleItems(AI_ITEMS).map((item) => (
               <NavCard key={item.path} item={item} />
             ))}
           </div>

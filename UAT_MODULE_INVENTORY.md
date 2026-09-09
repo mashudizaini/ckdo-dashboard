@@ -20,7 +20,7 @@ full matrix) — `admin` bypasses all role checks.
 ## Table of Contents
 
 1. [IT](#1-it--dashboardit--role-it_staff) — role `it_staff`
-2. [HRGA](#2-hrga--dashboardhr--role-hr_staff) — role `hr_staff`
+2. [HRGA](#2-hrga--dashboardhr--role-hr_staff) — role `hr_staff` (Overtime System sub-module: any authenticated employee)
 3. [PAC](#3-pac--dashboardpac--role-pac_staff) — role `pac_staff`
 4. [Accounting & Tax](#4-accounting--tax--dashboardaccounting--role-accounting_staff) — role `accounting_staff`
 5. [Purchasing](#5-purchasing--dashboardpurchasing--role-purchasing_staff) — role `purchasing_staff`
@@ -72,7 +72,9 @@ File: `frontend/src/pages/dashboard/IT.jsx` (single file, all 5 tabs) + `it_db_b
 
 ## 2. HRGA (`/dashboard/hr`) — role `hr_staff`
 
-Files: `HR.jsx` (main, 5 tabs) + `HRTodoList.jsx`, `HRCvScreening.jsx`, `EmployeeUpload.jsx`, `AttendanceUpload.jsx`, `LeaveUpload.jsx`.
+Files: `HR.jsx` (main, 5 tabs) + `HRTodoList.jsx`, `HRCvScreening.jsx`, `EmployeeUpload.jsx`, `AttendanceUpload.jsx`, `LeaveUpload.jsx`, `overtime/` (Overtime System, 8 role-aware tabs).
+
+> **Access exception:** every module below needs the `hr_staff` role *except* **2.7 Overtime System**, which is open to any authenticated user whose login matches an Employee record — employees file their own overtime there and their Team Head / Department Head approve it. Its HRGA-only screens (Calculation, Monitoring, System Setting) are gated separately, server-side.
 
 ### 2.1 Employee Data — 5 sub-tabs
 - **Employee Summary**: Yearly Summary table (headcount by Dept × Year) → click a year to drill into Monthly Summary (Dept/Division/Team hierarchy, collapsible, one column/month) → click a monthly cell opens an **Employee List modal** filtered to that dept/division/team/month/year (with its own Department/Team/Education/Level/Status/Marital/Sex/As-of-Month-Year filters, row click → Employee Detail modal, **Download Excel**).
@@ -110,6 +112,20 @@ Files: `HR.jsx` (main, 5 tabs) + `HRTodoList.jsx`, `HRCvScreening.jsx`, `Employe
 ### 2.6 e-Magazine
 - **Data:** upload form + edition list table (sortable).
 - **Actions:** **Upload New e-Magazine** (Edition Title + PDF required, PDF only, optional repeatable QR Code Label+URL rows), per-row **QR** (edit QR links inline), per-row **Delete** (`confirm()`), **Refresh**.
+
+### 2.7 Overtime System (`/dashboard/hr/overtime`) — any authenticated employee
+Which tabs appear depends on the caller's level in the Overtime Approval Matrix (returned by `GET /overtime/me`), **not** on a Keycloak role. Every right is re-checked server-side per request.
+
+- **Dashboard** (all): My Overtime Summary cards (This month hours / Pending order / Realization / Approved / Rejected, month picker), Upcoming Overtime table, Overtime Rules (read-only). Banners link to the realization queue and approval inbox when either has work waiting.
+- **Overtime Order** (all): status filter chips (All/Draft/Submitted/Revision Required/Approved/Rejected/Cancelled) with live counts. **Create Overtime Order** modal — Date, auto-detected Weekday/Weekend type (from the HRGA Working Calendar, public holidays included), Work Category (Ad Hoc/Routine), Working Time, Overtime start/finish with live Planned Duration, Task/Target Result. **Save as Draft** or **Submit to Team Head**. Per row: View detail, Edit (draft/revision only), Submit, Delete draft (`confirm()`), Cancel (modal, optional reason).
+- **Realization** (all): filter chips incl. **To Be Realized**. Daily Realization modal — actual start/finish with live Actual Duration and Gap vs plan, Reason (**required once the gap reaches 15 minutes**), hour-by-hour detail rows (**weekend/public-holiday overtime only, and mandatory there**), Work Evidence upload (**at least one file required to submit**; pdf/image/Office/text, 15 MB cap, uploads save immediately). **Save as Draft** / **Submit to Team Head**.
+- **Approvals** (Team Head / Dept Head / HRGA): one inbox across every level held, filterable Order vs Realization, badge count on the tab. Approve / **Request revision** / Reject — a note is **required** for the latter two. The HRGA final check adds an editable **Payable hours** field (defaults to actual, cannot exceed it). Also a **My decision history** view. Guards to UAT: a requester can never approve their own request, a level cannot be skipped, and only HRGA can perform the final check.
+- **Calculation** (HRGA): cut-off period picker, Department/Team filters, High↔Low sort, totals cards, and 4 views (Show All Detail / By Department / By Team / By Employee). Warns when realizations in the period are still in the approval chain. **Export to Excel** (4 sheets).
+- **Monitoring & Report** (HRGA): Weekday vs Weekend yearly (Y vs Y-1) and monthly, Planned vs Realized monthly trend, Overtime Cost monthly, Planned vs Realized by Department/Team/Employee, plus the **Exception Report** (over/under plan, never realized, approval overdue, HRGA-reduced payable).
+- **System Setting** (HRGA): **Approval Matrix** (every active employee joined to their matrix row, search/department/"incomplete only" filters, per-row edit, multi-select **bulk assign**, delete); **Working Calendar** (pointer to module 2.2 — the overtime module reads it, there is no second calendar); **Overtime Rules** CRUD; **Cut-Off Configuration** (day-of-month window, 1–28, edits create a superseding record with history); **Notification Setting** (per event: enabled / in-app / email — email is stored but no mail sender is wired up yet); **Overtime Rates** (hourly wage per employee grade, `DEFAULT` fallback, drives estimated cost only).
+- **Notification** (all): in-app inbox with unread badge, Unread-only toggle, **Mark all read**, click-through to the request.
+
+**Calculation basis to verify in UAT:** payable hours are the HRGA-approved `payable_minutes`, never the raw actual. Cost = statutory index × the grade's hourly rate, where the index follows Kepmenaker 102/2004 — weekday 1.5× the first hour then 2×; weekend/public holiday 2× up to 8 hours, 3× the 9th, 4× the 10th–11th.
 
 ---
 
@@ -315,7 +331,7 @@ Upload PDF/DOCX/image → structured Markdown (docling OCR + table recognition) 
 | Module | Sidebar/module-level role | Notable exceptions |
 |---|---|---|
 | IT | `it_staff` | — |
-| HRGA | `hr_staff` | — |
+| HRGA | `hr_staff` | **Overtime System** (`/dashboard/hr/overtime`) is open to any authenticated user whose login matches an Employee record — it appears under HRGA in the sidebar for everyone, and is the reason the HRGA nav parent itself is no longer `hr_staff`-gated. Inside it, approval rights come from the Overtime Approval Matrix and its Calculation / Monitoring / System Setting tabs need `hr_staff`, `admin`, or an `hrga_admin` matrix row |
 | PAC | `pac_staff` | — |
 | Accounting & Tax | `accounting_staff` | — |
 | Purchasing | `purchasing_staff` | — |
@@ -323,3 +339,5 @@ Upload PDF/DOCX/image → structured Markdown (docling OCR + table recognition) 
 | AI Tools | none (any authenticated user) | Knowledge Base management (add/delete documents, in both Chatbot and Document Converter) restricted to `it_staff, hr_staff, accounting_staff, pac_staff, purchasing_staff, admin`; bulk KB cleanup endpoints further restricted to `it_staff, admin` |
 
 `admin` bypasses every role check above. Suggested UAT pass: for each module, test with (a) a user holding exactly the required role, (b) a user with no roles / a different module's role (expect redirect or 403), and (c) `admin`.
+
+For the Overtime System specifically, add a fourth case: a user with **no** Keycloak role at all but a valid Employee record — they must reach `/dashboard/hr/overtime` and see only Dashboard / Overtime Order / Realization / Notification, and get 403s on every `/overtime/admin/*` call. A fifth: a login with no matching `company_email` on the Employee master, which should land on the "login is not linked to an employee record" screen rather than an error.

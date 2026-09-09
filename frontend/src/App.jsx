@@ -14,6 +14,7 @@ import AccountingDashboard from "@/pages/dashboard/Accounting";
 import PurchasingDashboard from "@/pages/dashboard/Purchasing";
 import GeneralDashboard from "@/pages/dashboard/General";
 import EISDashboard from "@/pages/dashboard/EIS";
+import OvertimeSystem from "@/pages/dashboard/overtime/OvertimeSystem";
 
 // Setup Pages — one per team, same names as the DASHBOARD section
 import SetupPage from "@/pages/setup/SetupPage";
@@ -83,6 +84,20 @@ export default function App() {
           element={
             <ProtectedRoute roles={["it_staff", "admin"]}>
               <ITDashboard />
+            </ProtectedRoute>
+          }
+        />
+        {/* Overtime is the one HRGA module open to every employee — they
+            file their own overtime here and their Team Head / Dept Head
+            approve it. Declared before hr/* and, being a static segment,
+            ranked above that splat by the router, so it escapes the
+            hr_staff gate below. Access is enforced server-side per request
+            from the employee master + approval matrix. */}
+        <Route
+          path="hr/overtime"
+          element={
+            <ProtectedRoute>
+              <OvertimeSystem />
             </ProtectedRoute>
           }
         />

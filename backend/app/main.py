@@ -32,6 +32,7 @@ import app.models.outlook_material  # noqa: F401
 import app.models.financial_statement_upload  # noqa: F401
 import app.models.document_conversion_job  # noqa: F401
 import app.models.document_glossary  # noqa: F401
+import app.models.overtime  # noqa: F401
 from app.models.ebs_backup import init_ebs_db
 from app.models.vpn_monitor import init_vpn_db
 from app.models.hikcentral import init_hikcentral_db
@@ -44,6 +45,7 @@ from app.routers.dashboard import vpn_monitor
 from app.routers.dashboard import it_hikcentral
 from app.routers.dashboard import it_zkteco
 from app.routers.dashboard import it_etl_admin
+from app.routers.dashboard import hr_overtime, hr_overtime_admin
 from app.services import menu_access_service
 from app.routers.dashboard import (
     eis_summary, eis_performance, eis_production, eis_expansion, eis_administration,
@@ -230,6 +232,15 @@ app.include_router(
     tags=["Dashboard - IT - ETL Admin"],
     dependencies=[Depends(menu_access_service.require_menu_access("general.etl-admin"))],
 )
+# Digital Overtime Management System. Registered as its own include rather
+# than a sub-router of hr.router because it is the one HRGA module that is
+# NOT hr_staff-only: every employee files their own overtime and their Team
+# Head / Department Head approve it, so access is resolved per-request from
+# the employee master + approval matrix (see overtime_service.get_actor).
+# The /admin half is gated separately by require_admin. Mounted before
+# hr.router so its paths are matched first.
+app.include_router(hr_overtime_admin.router, prefix=f"{API_PREFIX}/dashboard/hr/overtime/admin", tags=["Dashboard - HR Overtime Admin"])
+app.include_router(hr_overtime.router,       prefix=f"{API_PREFIX}/dashboard/hr/overtime",       tags=["Dashboard - HR Overtime"])
 app.include_router(hr.router,         prefix=f"{API_PREFIX}/dashboard/hr",         tags=["Dashboard - HR"])
 app.include_router(pac.router,        prefix=f"{API_PREFIX}/dashboard/pac",        tags=["Dashboard - PAC"])
 app.include_router(accounting.router, prefix=f"{API_PREFIX}/dashboard/accounting", tags=["Dashboard - Accounting"])
