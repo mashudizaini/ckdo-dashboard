@@ -26,9 +26,9 @@ export default function SupplierWhtMaster() {
     setError(null);
     try {
       const res = await supplierWhtApi.list(q);
-      setRows(res.data.items || []);
+      setRows(res.items || []);
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || "Gagal memuat data");
+      setError(e?.detail || e?.message || "Gagal memuat data");
     } finally {
       setLoading(false);
     }
@@ -48,10 +48,10 @@ export default function SupplierWhtMaster() {
     setError(null);
     try {
       const res = await supplierWhtApi.sync();
-      setSyncResult(res.data);
+      setSyncResult(res);
       await load(search || undefined);
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || "Sync gagal");
+      setError(e?.detail || e?.message || "Sync gagal");
     } finally {
       setSyncing(false);
     }
@@ -83,7 +83,7 @@ export default function SupplierWhtMaster() {
       setModalOpen(false);
       await load(search || undefined);
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || "Simpan gagal");
+      setError(e?.detail || e?.message || "Simpan gagal");
     } finally {
       setSaving(false);
     }
@@ -96,7 +96,7 @@ export default function SupplierWhtMaster() {
       await supplierWhtApi.remove(id);
       setRows(prev => prev.filter(r => r.id !== id));
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || "Hapus gagal");
+      setError(e?.detail || e?.message || "Hapus gagal");
     } finally {
       setDeletingId(null);
     }
