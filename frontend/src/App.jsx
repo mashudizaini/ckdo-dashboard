@@ -22,6 +22,7 @@ import EISDashboard from "@/pages/dashboard/EIS";
 import SetupPage from "@/pages/setup/SetupPage";
 import HRSetupPage from "@/pages/setup/HRSetupPage";
 import GeneralSetupPage from "@/pages/setup/general/GeneralSetupPage";
+import AccountingSetupPage from "@/pages/setup/accounting/AccountingSetupPage";
 import AiSetupPage from "@/pages/setup/ai/AiSetupPage";
 
 // AI Tools Pages
@@ -184,7 +185,7 @@ export default function App() {
         <Route path="it"          element={<ProtectedRoute><SetupPage team="IT" /></ProtectedRoute>} />
         <Route path="hr"          element={<ProtectedRoute><HRSetupPage /></ProtectedRoute>} />
         <Route path="pac"         element={<ProtectedRoute><SetupPage team="PAC" /></ProtectedRoute>} />
-        <Route path="accounting"  element={<ProtectedRoute><SetupPage team="Accounting & Tax" /></ProtectedRoute>} />
+        <Route path="accounting"  element={<ProtectedRoute><AccountingSetupPage /></ProtectedRoute>} />
         <Route path="purchasing"  element={<ProtectedRoute><SetupPage team="Purchasing" /></ProtectedRoute>} />
         <Route path="general"     element={<ProtectedRoute><GeneralSetupPage /></ProtectedRoute>} />
         <Route path="ai"          element={<ProtectedRoute><AiSetupPage /></ProtectedRoute>} />

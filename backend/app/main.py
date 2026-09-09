@@ -44,7 +44,7 @@ from app.models.zkteco import init_zkteco_db
 from app.routers import emagazine, emagazine_hotspots
 
 # ── Dashboard Routers ──
-from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement, general, sales_marketing, ppwh, production
+from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement, general, sales_marketing, ppwh, production, supplier_wht
 from app.routers.dashboard import ebs_backup
 from app.routers.dashboard import vpn_monitor
 from app.routers.dashboard import it_hikcentral
@@ -88,6 +88,10 @@ async def lifespan(app: FastAPI):
     # Create AP Invoice staging table (psycopg2 sync)
     from app.routers.dashboard.ap_invoice import ensure_staging_table
     ensure_staging_table()
+
+    # Create Supplier WHT master table (psycopg2 sync)
+    from app.services.supplier_wht_service import ensure_table as ensure_wht_table
+    ensure_wht_table()
 
     # Create RAG chatbot schema (pgvector extension + company_documents table)
     from app.services import rag_service
@@ -244,6 +248,7 @@ app.include_router(hr.router,         prefix=f"{API_PREFIX}/dashboard/hr",      
 app.include_router(pac.router,        prefix=f"{API_PREFIX}/dashboard/pac",        tags=["Dashboard - PAC"])
 app.include_router(accounting.router, prefix=f"{API_PREFIX}/dashboard/accounting", tags=["Dashboard - Accounting"])
 app.include_router(ap_invoice.router,  prefix=f"{API_PREFIX}/dashboard/accounting/ap-invoice", tags=["Dashboard - AP Invoice"])
+app.include_router(supplier_wht.router, prefix=f"{API_PREFIX}/dashboard/accounting/supplier-wht", tags=["Dashboard - Supplier WHT"])
 app.include_router(financial_statement.router, prefix=f"{API_PREFIX}/dashboard/accounting/financial-statement", tags=["Dashboard - Financial Statement"])
 app.include_router(purchasing.router, prefix=f"{API_PREFIX}/dashboard/purchasing", tags=["Dashboard - Purchasing"])
 app.include_router(general.router,    prefix=f"{API_PREFIX}/dashboard/general",    tags=["Dashboard - General"])

@@ -447,6 +447,14 @@ export const apInvoiceApi = {
   glDatePreview:   (receivedDate) => api.get("/dashboard/accounting/ap-invoice/gl-date-preview", { params: { received_date: receivedDate } }),
 };
 
+export const supplierWhtApi = {
+  list:       (search)   => api.get("/dashboard/accounting/supplier-wht", { params: search ? { search } : {} }),
+  sync:       (updatedBy = "oracle-sync") => api.post("/dashboard/accounting/supplier-wht/sync", null, { params: { updated_by: updatedBy } }),
+  upsert:     (data)     => api.post("/dashboard/accounting/supplier-wht", data),
+  remove:     (id)       => api.delete(`/dashboard/accounting/supplier-wht/${id}`),
+  getForVendor: (vendorId) => api.get(`/dashboard/accounting/supplier-wht/vendor/${vendorId}`),
+};
+
 export const purchasingApi = {
   getSummary:        () => api.get("/dashboard/purchasing/summary"),
   getOpenPR:         (p) => api.get("/dashboard/purchasing/open-pr", { params: p }),
