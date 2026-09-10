@@ -689,14 +689,17 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
           </div>
         )}
 
-        {/* Info Grid — view or edit mode */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+        {/* Info Grid — view or edit mode. 4 columns (not 3) and tighter
+            padding/gap so the mostly-narrow fields (dates especially)
+            don't waste width, and more of the header is visible without
+            scrolling. */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
           {FIELDS.map((f) => (
             <div key={f.key} style={{
-              padding: "10px 14px", borderRadius: 14,
+              padding: "7px 10px", borderRadius: 12,
               background: NEU.bg, boxShadow: NEU.shadowOutSm,
             }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>
                 {f.label}
               </div>
               {editing && !f.readOnly ? (
@@ -706,11 +709,11 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                   type={f.type || "text"}
                 />
               ) : f.key === "received_date" && !d[f.key] ? (
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#d97706" }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: "#d97706" }}>
                   Not read from stamp — click Edit to fill in
                 </div>
               ) : (
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b", wordBreak: "break-all" }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: "#1e293b", wordBreak: "break-all" }}>
                   {f.fmt && d[f.key] ? `Rp ${Number(d[f.key]).toLocaleString("id-ID")}` : (d[f.key] || "—")}
                 </div>
               )}
@@ -721,11 +724,11 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
               open Payables period if that one's closed), not stored on the
               record — always freshly recomputed at Insert-to-Interface time
               too, so this is a preview, not the authoritative value. */}
-          <div style={{ padding: "10px 14px", borderRadius: 14, background: NEU.bg, boxShadow: NEU.shadowOutSm }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+          <div style={{ padding: "7px 10px", borderRadius: 12, background: NEU.bg, boxShadow: NEU.shadowOutSm }}>
+            <div style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>
               GL Date (Preview)
             </div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, color: "#1e293b" }}>
               {glDatePreviewLoading ? <Loader2 size={13} className="animate-spin" /> : (glDatePreview || "—")}
             </div>
           </div>
@@ -738,11 +741,11 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
               is this name, and what's shown is this name too — the
               Rupiah figure below is a rough estimate for reference only. */}
           {d.wht_enabled && (
-            <div style={{ padding: "10px 14px", borderRadius: 14, background: NEU.bg, boxShadow: NEU.shadowOutSm }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+            <div style={{ padding: "7px 10px", borderRadius: 12, background: NEU.bg, boxShadow: NEU.shadowOutSm }}>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>
                 WHT Group (sent to Oracle)
               </div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1e293b" }}>
                 {d.awt_group_name || "—"}
               </div>
               <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
