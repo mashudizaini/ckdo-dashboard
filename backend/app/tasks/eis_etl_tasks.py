@@ -1633,12 +1633,18 @@ def etl_po_lines(year: int = None, month: int = None, full_refresh: bool = False
                 NVL(msi.segment1, TO_CHAR(pol.item_id))                  AS item_code,
                 NVL(pol.item_description, msi.description)               AS item_description,
                 CASE
-                    WHEN mcb.segment1 IS NOT NULL THEN mcb.segment1
-                    -- Oracle inventory category is blank for some items —
-                    -- fall back to the item code's own Primer/Sekunder
-                    -- packaging-tier marker: 2 leading digits then P/S
-                    -- (e.g. "01P0046-0100", "01S0116-0201") — verified
-                    -- live against all 484 real PRIMER/SEKUNDER-categorized
+                    -- A real, meaningful category wins outright — even if
+                    -- the item code happens to also match the P/S pattern
+                    -- below (live-verified: 40 real LIQUID-categorized
+                    -- items do, and must stay LIQUID, not get overwritten).
+                    WHEN mcb.segment1 IS NOT NULL AND UPPER(mcb.segment1) != 'NA' THEN mcb.segment1
+                    -- Oracle's category is either blank or the literal
+                    -- placeholder 'NA' (1,141 real items — not a real
+                    -- category, just "not categorized") — fall back to the
+                    -- item code's own Primer/Sekunder packaging-tier
+                    -- marker: 2 leading digits then P/S (e.g.
+                    -- "01P0046-0100", "01S0116-0201") — verified live
+                    -- against all 484 real PRIMER/SEKUNDER-categorized
                     -- items, 100% match, zero exceptions. Plain "3rd
                     -- character = P/S" (no digit-prefix check) was tried
                     -- first and wrongly tagged "EXPENSE SKI POM" as
@@ -1646,6 +1652,9 @@ def etl_po_lines(year: int = None, month: int = None, full_refresh: bool = False
                     -- packaging convention at all.
                     WHEN REGEXP_LIKE(UPPER(msi.segment1), '^[0-9]{2}P') THEN 'PRIMER'
                     WHEN REGEXP_LIKE(UPPER(msi.segment1), '^[0-9]{2}S') THEN 'SEKUNDER'
+                    -- Code doesn't match either marker — preserve Oracle's
+                    -- own 'NA' signal rather than losing it to a bare '-'.
+                    WHEN mcb.segment1 IS NOT NULL THEN mcb.segment1
                     ELSE '-'
                 END                                                       AS category,
                 NVL(msi.item_type, '-')                                  AS item_type,
@@ -1801,11 +1810,14 @@ def etl_open_pr(year: int = None, month: int = None):
                 NVL(msi.segment1, '-')                                     AS item_code,
                 prl.item_description                                        AS item_description,
                 CASE
-                    WHEN mcb.segment1 IS NOT NULL THEN mcb.segment1
+                    WHEN mcb.segment1 IS NOT NULL AND UPPER(mcb.segment1) != 'NA' THEN mcb.segment1
                     -- Same Primer/Sekunder (2-digit prefix + P/S) fallback
-                    -- as etl_po_lines — see its comment.
+                    -- as etl_po_lines — see its comment (a literal 'NA'
+                    -- category is treated as "not categorized", same as
+                    -- blank, since 1,141 real items carry it that way).
                     WHEN REGEXP_LIKE(UPPER(msi.segment1), '^[0-9]{2}P') THEN 'PRIMER'
                     WHEN REGEXP_LIKE(UPPER(msi.segment1), '^[0-9]{2}S') THEN 'SEKUNDER'
+                    WHEN mcb.segment1 IS NOT NULL THEN mcb.segment1
                     ELSE '-'
                 END                                                         AS category_code,
                 NVL(mcb.description, prl.item_description)                  AS category_name,
