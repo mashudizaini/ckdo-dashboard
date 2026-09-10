@@ -601,17 +601,18 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
     except ValueError:
         faktur_date_parsed = None
 
-    # WHT (withholding tax / PPh) — opt-in via the checkbox in the UI. When
-    # set, the header's INVOICE_AMOUNT goes to Oracle already net of WHT
-    # (per business decision: "total dikurangi wht"), and the deduction
-    # itself is posted as its own AWT-type line so the line sum still
-    # reconciles with the header total — the same shape AP staff's existing
-    # manual AWT-line entries already use in production (see
-    # supplier_wht_service.py's seed query), so it should pass the same
-    # Oracle validation those do.
-    wht_amount = float(header.get("WHT_AMOUNT") or 0)
-    gross_amount = float(header["INVOICE_AMOUNT"])
-    net_amount = gross_amount - wht_amount if wht_amount > 0 else gross_amount
+    # WHT (withholding tax / PPh) — opt-in via the checkbox in the UI.
+    # Earlier this manually inserted a LINE_TYPE_LOOKUP_CODE='AWT' line —
+    # Oracle rejects that outright ("LINE TYPE CANNOT BE AWT": AWT lines
+    # can only be system-generated, never created through the Open
+    # Interface). The correct — and only — supported hook is the WHT GROUP
+    # NAME on the invoice HEADER (AWT_GROUP_ID/AWT_GROUP_NAME on
+    # AP_INVOICES_INTERFACE, sourced from supplier_wht_master): Oracle's
+    # own withholding engine then calculates and creates the AWT deduction
+    # itself at Validation, so INVOICE_AMOUNT here stays the gross Total —
+    # never manually netted down — same as before WHT existed.
+    awt_group_id = header.get("AWT_GROUP_ID")
+    awt_group_name = header.get("AWT_GROUP_NAME")
 
     with ora_conn.cursor() as oc:
         oc.execute("SELECT AP_INVOICES_INTERFACE_S.NEXTVAL FROM DUAL")
@@ -625,6 +626,7 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
                 TERMS_NAME, TERMS_DATE, GL_DATE, GOODS_RECEIVED_DATE, SOURCE, ORG_ID,
                 PO_NUMBER, DESCRIPTION,
                 SUPPLIER_TAX_INVOICE_NUMBER, SUPPLIER_TAX_INVOICE_DATE,
+                AWT_GROUP_ID, AWT_GROUP_NAME,
                 ATTRIBUTE1,
                 CREATION_DATE, CREATED_BY
             ) VALUES (
@@ -634,13 +636,14 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
                 :terms, :terms_date, :gl_date, :goods_recv_date, :source, :org_id,
                 :po, :descr,
                 :tax_inv_num, :tax_inv_date,
+                :awt_group_id, :awt_group_name,
                 :attr1,
                 SYSDATE, 1110
             )
         """, {
             "iid": iid, "inv_num": header["INVOICE_NUM"],
             "inv_date": invoice_date, "vid": header["VENDOR_ID"], "vsid": header["VENDOR_SITE_ID"],
-            "inv_amt": net_amount, "curr": header.get("INVOICE_CURRENCY_CODE", "IDR"),
+            "inv_amt": float(header["INVOICE_AMOUNT"]), "curr": header.get("INVOICE_CURRENCY_CODE", "IDR"),
             "terms": header.get("TERMS_NAME", "30 Days"), "terms_date": terms_date,
             "gl_date": gl_date, "goods_recv_date": received_date_parsed,
             "source": EBS_SOURCE, "org_id": EBS_ORG_ID,
@@ -648,6 +651,7 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
             # No Faktur / Tgl Faktur Pajak — Oracle's own Indonesia-localization
             # columns (confirmed live), not generic DFF attributes.
             "tax_inv_num": header.get("TAX_SERIAL_NUMBER"), "tax_inv_date": faktur_date_parsed,
+            "awt_group_id": awt_group_id, "awt_group_name": awt_group_name,
             "attr1": header.get("SO_NUMBER"),
         })
 
@@ -680,27 +684,6 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
                 "po": po_num_line, "po_ln": po_ln_num, "receipt_num": receipt_num,
                 "batch": line.get("BATCH_NO", line.get("batch_no")),
                 "item_code": line.get("ITEM_CODE", line.get("item_code")),
-                "org_id": EBS_ORG_ID,
-            })
-
-        if wht_amount > 0:
-            max_line_num = max((line.get("LINE_NUMBER", line.get("line_num")) or 0) for line in lines) if lines else 0
-            group_name = header.get("AWT_GROUP_NAME")
-            oc.execute("""
-                INSERT INTO AP_INVOICE_LINES_INTERFACE (
-                    INVOICE_ID, INVOICE_LINE_ID, LINE_NUMBER,
-                    LINE_TYPE_LOOKUP_CODE, AMOUNT, DESCRIPTION,
-                    AWT_GROUP_ID, ORG_ID
-                ) VALUES (
-                    :iid, AP_INVOICE_LINES_INTERFACE_S.NEXTVAL, :ln,
-                    'AWT', :amt, :descr,
-                    :awt_group_id, :org_id
-                )
-            """, {
-                "iid": iid, "ln": max_line_num + 1,
-                "amt": -wht_amount,
-                "descr": f"WHT/PPh - {group_name}" if group_name else "WHT/PPh",
-                "awt_group_id": header.get("AWT_GROUP_ID"),
                 "org_id": EBS_ORG_ID,
             })
 

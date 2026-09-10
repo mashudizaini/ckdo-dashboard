@@ -85,7 +85,6 @@ export default function APAutoInvoice() {
   const [actionLoading, setActionLoading] = useState("");
   const [message, setMessage] = useState(null);
   const [batchProgress, setBatchProgress] = useState(null); // { done, total, current } while a multi-file upload is running
-  const [whtDrafts, setWhtDrafts] = useState({}); // stg_id -> in-progress amount text while typing
   const [whtBusy, setWhtBusy] = useState(null); // stg_id currently syncing a WHT change
   const fileRef = useRef(null);
 
@@ -182,46 +181,46 @@ export default function APAutoInvoice() {
 
   // Toggling WHT on for an invoice looks up its supplier in the WHT master
   // (Setup > Accounting & Tax) and suggests an amount (rate% of Taxbase) —
-  // shown immediately and freely editable afterward, per the requirement
-  // that the value display but never be locked to the master's number.
+  // Oracle only accepts WHT as a GROUP NAME on the invoice header
+  // (AWT_GROUP_ID/AWT_GROUP_NAME on AP_INVOICES_INTERFACE) — its own
+  // withholding engine then calculates and posts the actual deduction at
+  // Validation. A manually-inserted AWT-type line is rejected outright
+  // ("LINE TYPE CANNOT BE AWT"), so there is nothing here for the user to
+  // type an amount into: enabling WHT just pulls the group name from the
+  // Supplier WHT Master (Setup > Accounting & Tax) for this invoice's
+  // vendor_id. wht_amount is kept only as a rough estimate (rate% of
+  // Taxbase) for the AP team's own reference — never sent to Oracle.
   const toggleWht = async (inv) => {
     const next = !inv.wht_enabled;
-    setWhtBusy(inv.stg_id);
-    try {
-      let amount = inv.wht_amount;
-      let awtGroupId = inv.awt_group_id;
-      let awtGroupName = inv.awt_group_name;
-      if (next && !amount) {
-        try {
-          const m = await supplierWhtApi.getForVendor(inv.vendor_id);
-          const base = inv.subtotal || inv.invoice_amount || 0;
-          amount = m.tax_rate != null ? Math.round((base * m.tax_rate) / 100) : 0;
-          awtGroupId = m.awt_group_id;
-          awtGroupName = m.awt_group_name;
-        } catch (_) {
-          amount = 0; // no master entry for this supplier — leave editable at 0
-        }
+    if (!next) {
+      setWhtBusy(inv.stg_id);
+      try {
+        await apInvoiceApi.update(inv.stg_id, { wht_enabled: false });
+        await refresh();
+      } catch (e) {
+        setMessage({ type: "error", text: "Failed to update WHT: " + (e?.detail || e?.message || String(e)) });
+      } finally {
+        setWhtBusy(null);
       }
-      await apInvoiceApi.update(inv.stg_id, {
-        wht_enabled: next, wht_amount: amount || 0,
-        awt_group_id: awtGroupId ?? null, awt_group_name: awtGroupName ?? null,
-      });
-      setWhtDrafts(prev => { const n = { ...prev }; delete n[inv.stg_id]; return n; });
-      await refresh();
-    } catch (e) {
-      setMessage({ type: "error", text: "Failed to update WHT: " + (e?.detail || e?.message || String(e)) });
-    } finally {
-      setWhtBusy(null);
+      return;
     }
-  };
-
-  const commitWhtAmount = async (inv, value) => {
     setWhtBusy(inv.stg_id);
     try {
-      await apInvoiceApi.update(inv.stg_id, { wht_enabled: true, wht_amount: Number(value) || 0 });
+      const m = await supplierWhtApi.getForVendor(inv.vendor_id);
+      const base = inv.subtotal || inv.invoice_amount || 0;
+      const estimate = m.tax_rate != null ? Math.round((base * m.tax_rate) / 100) : 0;
+      await apInvoiceApi.update(inv.stg_id, {
+        wht_enabled: true, wht_amount: estimate,
+        awt_group_id: m.awt_group_id ?? null, awt_group_name: m.awt_group_name ?? null,
+      });
       await refresh();
     } catch (e) {
-      setMessage({ type: "error", text: "Failed to update WHT: " + (e?.detail || e?.message || String(e)) });
+      setMessage({
+        type: "error",
+        text: e?.detail
+          ? `Supplier "${inv.vendor_name}" belum ada di Supplier WHT Master — tambahkan dulu di Setup > Accounting & Tax.`
+          : "Failed to update WHT: " + (e?.message || String(e)),
+      });
     } finally {
       setWhtBusy(null);
     }
@@ -266,8 +265,12 @@ export default function APAutoInvoice() {
           TERMS_DATE: preview.terms_date, PO_NUMBER: preview.po_number,
           SO_NUMBER: preview.so_number, TAX_SERIAL_NUMBER: preview.tax_serial_number,
           FAKTUR_PAJAK_DATE: preview.faktur_pajak_date,
-          WHT_AMOUNT: preview.wht_enabled ? preview.wht_amount : null,
-          AWT_GROUP_ID: preview.awt_group_id, AWT_GROUP_NAME: preview.awt_group_name,
+          // WHT — Oracle only accepts a group NAME on the header; it
+          // calculates and posts the actual AWT deduction itself at
+          // Validation (see insert_to_interface's comment for why a
+          // manual AWT-type line is rejected outright).
+          AWT_GROUP_ID: preview.wht_enabled ? preview.awt_group_id : null,
+          AWT_GROUP_NAME: preview.wht_enabled ? preview.awt_group_name : null,
         };
         res = await apInvoiceApi.insertInterface(id, { header, lines: preview.lines || [] });
         setMessage({ type: "success", text: `Successfully inserted to AP Interface (ID: ${res.interface_invoice_id})` });
@@ -395,7 +398,6 @@ export default function APAutoInvoice() {
               <tbody>
                 {invoices.map((inv, i) => {
                   const canEditWht = ["NEW", "VALIDATED", "ERROR"].includes(inv.status);
-                  const draft = whtDrafts[inv.stg_id] ?? (inv.wht_amount || "");
                   const busy = whtBusy === inv.stg_id;
                   return (
                     <tr key={inv.stg_id}
@@ -426,20 +428,17 @@ export default function APAutoInvoice() {
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                           <input type="checkbox" checked={!!inv.wht_enabled} disabled={!canEditWht || busy}
                             onChange={() => toggleWht(inv)}
-                            title={canEditWht ? "Apply WHT from Supplier WHT Master" : "Only editable while status is New/Validated/Error"}
+                            title={canEditWht ? "Apply WHT group from Supplier WHT Master" : "Only editable while status is New/Validated/Error"}
                             style={{ width: 15, height: 15, cursor: canEditWht ? "pointer" : "not-allowed" }} />
-                          {inv.wht_enabled && (
-                            busy ? <Loader2 size={13} className="animate-spin" style={{ color: "#94a3b8" }} /> : (
-                              <input type="number" value={draft}
-                                disabled={!canEditWht}
-                                onChange={e => setWhtDrafts(prev => ({ ...prev, [inv.stg_id]: e.target.value }))}
-                                onBlur={e => commitWhtAmount(inv, e.target.value)}
-                                style={{
-                                  width: 92, padding: "4px 6px", borderRadius: 6, border: "none",
-                                  background: NEU.bg, fontSize: 11.5, fontWeight: 600, color: "#1e293b",
-                                  boxShadow: "inset 0 1px 3px rgba(15,23,42,0.07)", outline: "none", textAlign: "right",
-                                }} />
-                            )
+                          {busy ? (
+                            <Loader2 size={13} className="animate-spin" style={{ color: "#94a3b8" }} />
+                          ) : inv.wht_enabled && (
+                            <span title={`Estimasi: Rp ${Number(inv.wht_amount || 0).toLocaleString("id-ID")} (dihitung Oracle saat validasi)`} style={{
+                              fontSize: 11, fontWeight: 700, color: "#d97706",
+                              background: "#fef3c7", borderRadius: 6, padding: "2px 8px", whiteSpace: "nowrap",
+                            }}>
+                              {inv.awt_group_name || "?"}
+                            </span>
                           )}
                         </div>
                       </td>
@@ -682,25 +681,22 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
           </div>
 
           {/* WHT — toggled from the checkbox in the invoice list above (not
-              editable here); shown so the Net Total actually posted to
-              Oracle at Insert-to-Interface is never a surprise. */}
+              editable here). Oracle only accepts a WHT GROUP NAME on the
+              header (never an amount — a manually-inserted AWT-type line
+              is rejected outright); its own withholding engine calculates
+              and posts the actual deduction at Validation, so what's sent
+              is this name, and what's shown is this name too — the
+              Rupiah figure below is a rough estimate for reference only. */}
           {d.wht_enabled && (
             <div style={{ padding: "10px 14px", borderRadius: 14, background: NEU.bg, boxShadow: NEU.shadowOutSm }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
-                WHT{d.awt_group_name ? ` (${d.awt_group_name})` : ""}
+                WHT Group (sent to Oracle)
               </div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#dc2626" }}>
-                – Rp {Number(d.wht_amount || 0).toLocaleString("id-ID")}
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>
+                {d.awt_group_name || "—"}
               </div>
-            </div>
-          )}
-          {d.wht_enabled && (
-            <div style={{ padding: "10px 14px", borderRadius: 14, background: NEU.bg, boxShadow: NEU.shadowOutSm }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
-                Net Total (to Oracle)
-              </div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#059669" }}>
-                Rp {Number((d.invoice_amount || 0) - (d.wht_amount || 0)).toLocaleString("id-ID")}
+              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+                Estimasi: Rp {Number(d.wht_amount || 0).toLocaleString("id-ID")} (dihitung ulang oleh Oracle)
               </div>
             </div>
           )}
