@@ -1635,11 +1635,17 @@ def etl_po_lines(year: int = None, month: int = None, full_refresh: bool = False
                 CASE
                     WHEN mcb.segment1 IS NOT NULL THEN mcb.segment1
                     -- Oracle inventory category is blank for some items —
-                    -- fall back to the item code's 3rd character, the
-                    -- company's own Primer/Sekunder packaging-tier marker
-                    -- (P/S), rather than showing '-' with no way to tell.
-                    WHEN UPPER(SUBSTR(msi.segment1, 3, 1)) = 'P' THEN 'PRIMER'
-                    WHEN UPPER(SUBSTR(msi.segment1, 3, 1)) = 'S' THEN 'SEKUNDER'
+                    -- fall back to the item code's own Primer/Sekunder
+                    -- packaging-tier marker: 2 leading digits then P/S
+                    -- (e.g. "01P0046-0100", "01S0116-0201") — verified
+                    -- live against all 484 real PRIMER/SEKUNDER-categorized
+                    -- items, 100% match, zero exceptions. Plain "3rd
+                    -- character = P/S" (no digit-prefix check) was tried
+                    -- first and wrongly tagged "EXPENSE SKI POM" as
+                    -- Primer — coincidence from EX-P-ENSE, not the
+                    -- packaging convention at all.
+                    WHEN REGEXP_LIKE(UPPER(msi.segment1), '^[0-9]{2}P') THEN 'PRIMER'
+                    WHEN REGEXP_LIKE(UPPER(msi.segment1), '^[0-9]{2}S') THEN 'SEKUNDER'
                     ELSE '-'
                 END                                                       AS category,
                 NVL(msi.item_type, '-')                                  AS item_type,
@@ -1796,10 +1802,10 @@ def etl_open_pr(year: int = None, month: int = None):
                 prl.item_description                                        AS item_description,
                 CASE
                     WHEN mcb.segment1 IS NOT NULL THEN mcb.segment1
-                    -- Same Primer/Sekunder (P/S, item code's 3rd char)
-                    -- fallback as etl_po_lines — see its comment.
-                    WHEN UPPER(SUBSTR(msi.segment1, 3, 1)) = 'P' THEN 'PRIMER'
-                    WHEN UPPER(SUBSTR(msi.segment1, 3, 1)) = 'S' THEN 'SEKUNDER'
+                    -- Same Primer/Sekunder (2-digit prefix + P/S) fallback
+                    -- as etl_po_lines — see its comment.
+                    WHEN REGEXP_LIKE(UPPER(msi.segment1), '^[0-9]{2}P') THEN 'PRIMER'
+                    WHEN REGEXP_LIKE(UPPER(msi.segment1), '^[0-9]{2}S') THEN 'SEKUNDER'
                     ELSE '-'
                 END                                                         AS category_code,
                 NVL(mcb.description, prl.item_description)                  AS category_name,
