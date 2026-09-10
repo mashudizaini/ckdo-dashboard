@@ -494,6 +494,30 @@ function PurchaseHistorySection() {
     ],
   }), [f, orgs]);
 
+  // One workbook, 4 sheets — same data each view's own "Download Excel"
+  // button would export, just bundled together so a user doesn't have to
+  // click into every sub-tab individually to download all of them.
+  const handleDownloadAll = () => {
+    const detailData    = results.detail?.data ?? [];
+    const byItemData     = results["by-item"]?.data ?? [];
+    const byItemYears    = results["by-item"]?.years ?? [];
+    const bySupplierData = results["by-supplier"]?.data ?? [];
+    const bySupplierYears = results["by-supplier"]?.years ?? [];
+    const aggregatedQty  = aggregatePHByQty(byItemData, byItemYears);
+
+    const detail      = buildPHDetailSheetData(detailData);
+    const detailQty   = buildPHDetailQtySheetData(aggregatedQty, byItemYears);
+    const byItem       = buildPHByItemSheetData(byItemData, byItemYears);
+    const bySupplier   = buildPHBySupplierSheetData(bySupplierData, bySupplierYears);
+
+    downloadExcelMultiSheet("purchase_history_all", [
+      { name: "Detail View",        ...detail,    meta: phMeta },
+      { name: "Detail View (Qty)",  ...detailQty, meta: phMeta },
+      { name: "By Item (Pivot)",    ...byItem,    meta: phMeta },
+      { name: "By Supplier (Pivot)", ...bySupplier, meta: phMeta },
+    ]);
+  };
+
   return (
     <div className="space-y-3">
       {/* Filter Panel — no title/subtitle */}
@@ -573,6 +597,9 @@ function PurchaseHistorySection() {
         <div className="flex gap-2 shrink-0">
           <ActionBtn icon={RefreshCw} label="Reset"  color="bg-gray-700 hover:bg-gray-600"     onClick={handleReset} />
           <ActionBtn icon={Filter}    label="Search" color="bg-orange-600 hover:bg-orange-700" onClick={handleSearch} />
+          {searched && (
+            <ActionBtn icon={Download} label="Download All" color="bg-green-600 hover:bg-green-700" onClick={handleDownloadAll} />
+          )}
         </div>
       </div>
 
@@ -603,7 +630,7 @@ function PurchaseHistorySection() {
 // true date cell lets Excel's PivotTable field list offer the Year/Month
 // date-grouping shown in the target screenshot; a text-formatted string
 // never does, no matter how it displays.
-function downloadExcel(filename, headers, rows, amountCols, opts = {}) {
+function buildSheetAoa(headers, rows, amountCols, opts = {}) {
   const { meta = null, dateCols = [] } = opts;
 
   const metaRows = meta
@@ -636,10 +663,75 @@ function downloadExcel(filename, headers, rows, amountCols, opts = {}) {
       }
     }
   }
+  return ws;
+}
 
+function downloadExcel(filename, headers, rows, amountCols, opts = {}) {
+  const ws = buildSheetAoa(headers, rows, amountCols, opts);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Data");
   XLSX.writeFile(wb, `${filename}.xlsx`);
+}
+
+// "Download All" (Purchase History) — one workbook, one sheet per view.
+// Excel sheet names cap at 31 chars; all four labels here are well under.
+function downloadExcelMultiSheet(filename, sheets) {
+  const wb = XLSX.utils.book_new();
+  for (const s of sheets) {
+    const ws = buildSheetAoa(s.headers, s.rows, s.amountCols, { meta: s.meta, dateCols: s.dateCols });
+    XLSX.utils.book_append_sheet(wb, ws, s.name.slice(0, 31));
+  }
+  XLSX.writeFile(wb, `${filename}.xlsx`);
+}
+
+// Sheet-data builders shared between each view's own "Download Excel"
+// button and "Download All" — single source of truth for header/row shape.
+function buildPHDetailSheetData(data) {
+  const rows = data.map(r => PH_DETAIL_COLS.map(c => r[c.key]));
+  const amountCols = PH_DETAIL_AMOUNT_KEYS.map(k => PH_DETAIL_COLS.findIndex(c => c.key === k));
+  const dateCols = PH_DETAIL_DATE_KEYS.map(k => PH_DETAIL_COLS.findIndex(c => c.key === k));
+  return { headers: PH_DETAIL_COLS.map(c => c.label), rows, amountCols, dateCols };
+}
+
+function buildPHByItemSheetData(data, years) {
+  const headers = [...PH_BY_ITEM_COLS.map(c => c.label), ...years.flatMap(y => [`Value IDR ${y}`, `Qty ${y}`]), "Total Value IDR", "Total Qty"];
+  const rows = data.map(r => [
+    r.organization_id, r.organization_name, r.item_code, r.item_description,
+    r.category, r.material_type, r.country_of_origin, r.currency_code, r.uom,
+    ...years.flatMap(y => [r[`value_idr_${y}`] ?? 0, r[`qty_${y}`] ?? 0]),
+    r.total_value_idr, r.total_qty,
+  ]);
+  const amountCols = [];
+  for (let i = PH_BY_ITEM_COLS.length; i < headers.length; i++) amountCols.push(i);
+  return { headers, rows, amountCols };
+}
+
+function buildPHBySupplierSheetData(data, years) {
+  const headers = [...PH_BY_SUPPLIER_COLS.map(c => c.label), ...years.flatMap(y => [`Value Orig ${y}`, `Value IDR ${y}`, `Qty ${y}`]), "Total Orig", "Total IDR", "Total Qty"];
+  const rows = data.map(r => [
+    r.supplier_name, r.currency_code, r.item_count, r.po_count,
+    ...years.flatMap(y => [r[`value_orig_${y}`] ?? 0, r[`value_idr_${y}`] ?? 0, r[`qty_${y}`] ?? 0]),
+    r.total_value_orig, r.total_value_idr, r.total_qty,
+  ]);
+  const amountCols = [];
+  for (let i = PH_BY_SUPPLIER_COLS.length; i < headers.length; i++) amountCols.push(i);
+  return { headers, rows, amountCols };
+}
+
+// Expects already-aggregated rows (see aggregatePHByQty) — the table
+// component already computes that via useMemo, and "Download All" does
+// its own aggregation once up front, so this stays a pure formatter.
+function buildPHDetailQtySheetData(aggregatedRows, years) {
+  const headers = [...PH_DETAIL_QTY_COLS.map(c => c.label), ...years.map(y => `Qty ${y}`), "Total Qty"];
+  const rows = aggregatedRows.map(r => [
+    r.organization_id, r.organization_name, r.item_code, r.item_description,
+    r.category, r.material_type, r.uom,
+    ...years.map(y => r[`qty_${y}`] ?? 0),
+    r.total_qty,
+  ]);
+  const amountCols = [];
+  for (let i = PH_DETAIL_QTY_COLS.length; i < headers.length; i++) amountCols.push(i);
+  return { headers, rows, amountCols };
 }
 
 /* ─── Shared: Pagination controls ───────────────── */
@@ -745,6 +837,38 @@ const PH_DETAIL_AMOUNT_KEYS = ["quantity", "unit_price", "amount_orig", "amount_
 // Excel's PivotTable field list offers Year/Month grouping on them.
 const PH_DETAIL_DATE_KEYS = ["pr_date", "creation_date", "delivery_date", "receipt_date"];
 
+// Fixed (non-year) columns for the two pivot views and the qty-merged
+// detail view — hoisted to module scope so both each view's own
+// "Download Excel" button and PurchaseHistorySection's "Download All"
+// build from the exact same column list (see the buildPH*SheetData
+// helpers below downloadExcel), instead of two copies that could drift.
+const PH_BY_ITEM_COLS = [
+  { field: "organization_id",   label: "Org ID",       align: "left" },
+  { field: "organization_name", label: "Organization", align: "left" },
+  { field: "item_code",         label: "Item Code",    align: "left" },
+  { field: "item_description",  label: "Item Desc",    align: "left" },
+  { field: "category",          label: "Category",     align: "left" },
+  { field: "material_type",     label: "Type",         align: "left" },
+  { field: "country_of_origin", label: "Country of Origin", align: "left" },
+  { field: "currency_code",     label: "Currency",     align: "left" },
+  { field: "uom",               label: "UOM",          align: "left" },
+];
+const PH_BY_SUPPLIER_COLS = [
+  { field: "supplier_name", label: "Supplier", align: "left" },
+  { field: "currency_code", label: "Currency", align: "left" },
+  { field: "item_count",    label: "Items",     align: "center" },
+  { field: "po_count",      label: "POs",       align: "center" },
+];
+const PH_DETAIL_QTY_COLS = [
+  { field: "organization_id",   label: "Org ID",       align: "left" },
+  { field: "organization_name", label: "Organization", align: "left" },
+  { field: "item_code",         label: "Item Code",    align: "left" },
+  { field: "item_description",  label: "Item Desc",    align: "left" },
+  { field: "category",          label: "Category",     align: "left" },
+  { field: "material_type",     label: "Type",         align: "left" },
+  { field: "uom",               label: "UOM",          align: "left" },
+];
+
 function PHDetailTable({ data, loading, error, meta }) {
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState({ key: null, dir: "asc" });
@@ -771,13 +895,8 @@ function PHDetailTable({ data, loading, error, meta }) {
   const paged = sorted.slice((page - 1) * PH_DETAIL_PAGE_SIZE, page * PH_DETAIL_PAGE_SIZE);
 
   const handleDownload = () => {
-    // Row cells built by walking PH_DETAIL_COLS itself (not a hand-written
-    // positional array) — reordering/adding columns above can never
-    // silently desync the export from the on-screen table again.
-    const rows = sorted.map(r => PH_DETAIL_COLS.map(c => r[c.key]));
-    const amountCols = PH_DETAIL_AMOUNT_KEYS.map(k => PH_DETAIL_COLS.findIndex(c => c.key === k));
-    const dateCols = PH_DETAIL_DATE_KEYS.map(k => PH_DETAIL_COLS.findIndex(c => c.key === k));
-    downloadExcel("purchase_history_detail", PH_DETAIL_COLS.map(c => c.label), rows, amountCols, { meta, dateCols });
+    const { headers, rows, amountCols, dateCols } = buildPHDetailSheetData(sorted);
+    downloadExcel("purchase_history_detail", headers, rows, amountCols, { meta, dateCols });
   };
 
   return (
@@ -857,17 +976,7 @@ function PHByItemTable({ data, years, loading, error, meta }) {
   const [sortBy, setSortBy] = useState(null);
   const [sortDir, setSortDir] = useState("asc");
   const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
-  const fixedCols = [
-    { field: "organization_id",   label: "Org ID",       align: "left" },
-    { field: "organization_name", label: "Organization", align: "left" },
-    { field: "item_code",         label: "Item Code",    align: "left" },
-    { field: "item_description",  label: "Item Desc",    align: "left" },
-    { field: "category",          label: "Category",     align: "left" },
-    { field: "material_type",     label: "Type",         align: "left" },
-    { field: "country_of_origin", label: "Country of Origin", align: "left" },
-    { field: "currency_code",     label: "Currency",     align: "left" },
-    { field: "uom",               label: "UOM",          align: "left" },
-  ];
+  const fixedCols = PH_BY_ITEM_COLS;
   const totalCols = fixedCols.length + years.length * 2 + 2;
 
   const numericFields = useMemo(() => [
@@ -884,16 +993,8 @@ function PHByItemTable({ data, years, loading, error, meta }) {
   const paged = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const handleDownload = () => {
-    const headers = [...fixedCols.map(c => c.label), ...years.flatMap(y => [`Value IDR ${y}`, `Qty ${y}`]), "Total Value IDR", "Total Qty"];
-    const rows = sorted.map(r => [
-      r.organization_id, r.organization_name, r.item_code, r.item_description,
-      r.category, r.material_type, r.country_of_origin, r.currency_code, r.uom,
-      ...years.flatMap(y => [r[`value_idr_${y}`] ?? 0, r[`qty_${y}`] ?? 0]),
-      r.total_value_idr, r.total_qty,
-    ]);
-    const amtCols = [];
-    for (let i = fixedCols.length; i < headers.length; i++) amtCols.push(i);
-    downloadExcel("purchase_history_by_item", headers, rows, amtCols, { meta });
+    const { headers, rows, amountCols } = buildPHByItemSheetData(sorted, years);
+    downloadExcel("purchase_history_by_item", headers, rows, amountCols, { meta });
   };
 
   return (
@@ -969,12 +1070,7 @@ function PHBySupplierTable({ data, years, loading, error, meta }) {
   const [sortBy, setSortBy] = useState(null);
   const [sortDir, setSortDir] = useState("asc");
   const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
-  const fixedCols = [
-    { field: "supplier_name", label: "Supplier", align: "left" },
-    { field: "currency_code", label: "Currency", align: "left" },
-    { field: "item_count",    label: "Items",     align: "center" },
-    { field: "po_count",      label: "POs",       align: "center" },
-  ];
+  const fixedCols = PH_BY_SUPPLIER_COLS;
   const totalCols = fixedCols.length + years.length * 3 + 3;
 
   const numericFields = useMemo(() => [
@@ -993,15 +1089,8 @@ function PHBySupplierTable({ data, years, loading, error, meta }) {
   const paged = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const handleDownload = () => {
-    const headers = [...fixedCols.map(c => c.label), ...years.flatMap(y => [`Value Orig ${y}`, `Value IDR ${y}`, `Qty ${y}`]), "Total Orig", "Total IDR", "Total Qty"];
-    const rows = sorted.map(r => [
-      r.supplier_name, r.currency_code, r.item_count, r.po_count,
-      ...years.flatMap(y => [r[`value_orig_${y}`] ?? 0, r[`value_idr_${y}`] ?? 0, r[`qty_${y}`] ?? 0]),
-      r.total_value_orig, r.total_value_idr, r.total_qty,
-    ]);
-    const amtCols = [];
-    for (let i = fixedCols.length; i < headers.length; i++) amtCols.push(i);
-    downloadExcel("purchase_history_by_supplier", headers, rows, amtCols, { meta });
+    const { headers, rows, amountCols } = buildPHBySupplierSheetData(sorted, years);
+    downloadExcel("purchase_history_by_supplier", headers, rows, amountCols, { meta });
   };
 
   return (
@@ -1103,15 +1192,7 @@ function PHDetailByQtyTable({ data, years, loading, error, meta }) {
   const [sortBy, setSortBy] = useState(null);
   const [sortDir, setSortDir] = useState("asc");
   const TD = "px-3 py-2.5 text-xs whitespace-nowrap";
-  const fixedCols = [
-    { field: "organization_id",   label: "Org ID",       align: "left" },
-    { field: "organization_name", label: "Organization", align: "left" },
-    { field: "item_code",         label: "Item Code",    align: "left" },
-    { field: "item_description",  label: "Item Desc",    align: "left" },
-    { field: "category",          label: "Category",     align: "left" },
-    { field: "material_type",     label: "Type",         align: "left" },
-    { field: "uom",               label: "UOM",          align: "left" },
-  ];
+  const fixedCols = PH_DETAIL_QTY_COLS;
   const totalCols = fixedCols.length + years.length + 1;
 
   const aggregated = useMemo(() => aggregatePHByQty(data, years), [data, years]);
@@ -1127,16 +1208,8 @@ function PHDetailByQtyTable({ data, years, loading, error, meta }) {
   const paged = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const handleDownload = () => {
-    const headers = [...fixedCols.map(c => c.label), ...years.map(y => `Qty ${y}`), "Total Qty"];
-    const rows = sorted.map(r => [
-      r.organization_id, r.organization_name, r.item_code, r.item_description,
-      r.category, r.material_type, r.uom,
-      ...years.map(y => r[`qty_${y}`] ?? 0),
-      r.total_qty,
-    ]);
-    const amtCols = [];
-    for (let i = fixedCols.length; i < headers.length; i++) amtCols.push(i);
-    downloadExcel("purchase_history_detail_by_qty", headers, rows, amtCols, { meta });
+    const { headers, rows, amountCols } = buildPHDetailQtySheetData(sorted, years);
+    downloadExcel("purchase_history_detail_by_qty", headers, rows, amountCols, { meta });
   };
 
   return (
