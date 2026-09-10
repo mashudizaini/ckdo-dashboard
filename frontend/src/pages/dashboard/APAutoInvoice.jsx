@@ -75,6 +75,36 @@ function EditInput({ value, onChange, type = "text", align = "left", style: extr
   );
 }
 
+// Shared by the single-invoice "Insert to Interface" action and bulk
+// processing — Oracle only accepts WHT as a GROUP NAME on the header (see
+// insert_to_interface's comment for why a manual AWT-type line is
+// rejected outright).
+function buildInterfaceHeader(preview) {
+  return {
+    INVOICE_NUM: preview.invoice_num, INVOICE_DATE: preview.invoice_date,
+    RECEIVED_DATE: preview.received_date,
+    VENDOR_ID: preview.vendor_id, VENDOR_SITE_ID: preview.vendor_site_id,
+    INVOICE_AMOUNT: preview.invoice_amount,
+    INVOICE_CURRENCY_CODE: preview.currency_code || "IDR",
+    TERMS_NAME: preview.payment_terms || "30 Days",
+    TERMS_DATE: preview.terms_date, PO_NUMBER: preview.po_number,
+    SO_NUMBER: preview.so_number, TAX_SERIAL_NUMBER: preview.tax_serial_number,
+    FAKTUR_PAJAK_DATE: preview.faktur_pajak_date,
+    AWT_GROUP_ID: preview.wht_enabled ? preview.awt_group_id : null,
+    AWT_GROUP_NAME: preview.wht_enabled ? preview.awt_group_name : null,
+  };
+}
+
+// Bulk processing advances each selected invoice by exactly one step in
+// its own pipeline — never guesses which step an ERROR invoice failed at,
+// so those are skipped and left for one-at-a-time handling.
+function nextActionFor(status) {
+  if (status === "NEW") return "validate";
+  if (status === "VALIDATED" || status === "PROCESSING") return "interface";
+  if (status === "INTERFACED" || status === "SUBMITTED") return "import";
+  return null;
+}
+
 export default function APAutoInvoice() {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -85,9 +115,10 @@ export default function APAutoInvoice() {
   const [actionLoading, setActionLoading] = useState("");
   const [message, setMessage] = useState(null);
   const [batchProgress, setBatchProgress] = useState(null); // { done, total, current } while a multi-file upload is running
-  const [whtBusy, setWhtBusy] = useState(null); // stg_id currently syncing a WHT change
   const [listPage, setListPage] = useState(1);
   const LIST_PAGE_SIZE = 5;
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkProgress, setBulkProgress] = useState(null); // { done, total, current } while bulk-processing runs
   const fileRef = useRef(null);
 
   const refresh = async () => {
@@ -181,53 +212,6 @@ export default function APAutoInvoice() {
     }
   };
 
-  // Toggling WHT on for an invoice looks up its supplier in the WHT master
-  // (Setup > Accounting & Tax) and suggests an amount (rate% of Taxbase) —
-  // Oracle only accepts WHT as a GROUP NAME on the invoice header
-  // (AWT_GROUP_ID/AWT_GROUP_NAME on AP_INVOICES_INTERFACE) — its own
-  // withholding engine then calculates and posts the actual deduction at
-  // Validation. A manually-inserted AWT-type line is rejected outright
-  // ("LINE TYPE CANNOT BE AWT"), so there is nothing here for the user to
-  // type an amount into: enabling WHT just pulls the group name from the
-  // Supplier WHT Master (Setup > Accounting & Tax) for this invoice's
-  // vendor_id. wht_amount is kept only as a rough estimate (rate% of
-  // Taxbase) for the AP team's own reference — never sent to Oracle.
-  const toggleWht = async (inv) => {
-    const next = !inv.wht_enabled;
-    if (!next) {
-      setWhtBusy(inv.stg_id);
-      try {
-        await apInvoiceApi.update(inv.stg_id, { wht_enabled: false });
-        await refresh();
-      } catch (e) {
-        setMessage({ type: "error", text: "Failed to update WHT: " + (e?.detail || e?.message || String(e)) });
-      } finally {
-        setWhtBusy(null);
-      }
-      return;
-    }
-    setWhtBusy(inv.stg_id);
-    try {
-      const m = await supplierWhtApi.getForVendor(inv.vendor_id, inv.vendor_name);
-      const base = inv.subtotal || inv.invoice_amount || 0;
-      const estimate = m.tax_rate != null ? Math.round((base * m.tax_rate) / 100) : 0;
-      await apInvoiceApi.update(inv.stg_id, {
-        wht_enabled: true, wht_amount: estimate,
-        awt_group_id: m.awt_group_id ?? null, awt_group_name: m.awt_group_name ?? null,
-      });
-      await refresh();
-    } catch (e) {
-      setMessage({
-        type: "error",
-        text: e?.detail
-          ? `Supplier "${inv.vendor_name}" belum ada di Supplier WHT Master — tambahkan dulu di Setup > Accounting & Tax.`
-          : "Failed to update WHT: " + (e?.message || String(e)),
-      });
-    } finally {
-      setWhtBusy(null);
-    }
-  };
-
   const handleSave = async (id, payload) => {
     setActionLoading("save");
     setMessage(null);
@@ -257,23 +241,7 @@ export default function APAutoInvoice() {
         }
       } else if (action === "interface") {
         const preview = await apInvoiceApi.get(id);
-        const header = {
-          INVOICE_NUM: preview.invoice_num, INVOICE_DATE: preview.invoice_date,
-          RECEIVED_DATE: preview.received_date,
-          VENDOR_ID: preview.vendor_id, VENDOR_SITE_ID: preview.vendor_site_id,
-          INVOICE_AMOUNT: preview.invoice_amount,
-          INVOICE_CURRENCY_CODE: preview.currency_code || "IDR",
-          TERMS_NAME: preview.payment_terms || "30 Days",
-          TERMS_DATE: preview.terms_date, PO_NUMBER: preview.po_number,
-          SO_NUMBER: preview.so_number, TAX_SERIAL_NUMBER: preview.tax_serial_number,
-          FAKTUR_PAJAK_DATE: preview.faktur_pajak_date,
-          // WHT — Oracle only accepts a group NAME on the header; it
-          // calculates and posts the actual AWT deduction itself at
-          // Validation (see insert_to_interface's comment for why a
-          // manual AWT-type line is rejected outright).
-          AWT_GROUP_ID: preview.wht_enabled ? preview.awt_group_id : null,
-          AWT_GROUP_NAME: preview.wht_enabled ? preview.awt_group_name : null,
-        };
+        const header = buildInterfaceHeader(preview);
         res = await apInvoiceApi.insertInterface(id, { header, lines: preview.lines || [] });
         setMessage({ type: "success", text: `Successfully inserted to AP Interface (ID: ${res.interface_invoice_id})` });
       } else if (action === "import") {
@@ -301,6 +269,62 @@ export default function APAutoInvoice() {
     } finally {
       setActionLoading("");
     }
+  };
+
+  const toggleSelected = (stgId) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(stgId)) next.delete(stgId); else next.add(stgId);
+      return next;
+    });
+  };
+
+  // Advances each selected invoice one step (Validate / Insert to
+  // Interface / Run APXIIMPT) sequentially — one at a time, same reasoning
+  // as the multi-file upload above. ERROR invoices are skipped rather than
+  // guessed at, since which step actually failed isn't determinable here.
+  const handleBulkProcess = async () => {
+    const targets = invoices.filter(inv => selectedIds.has(inv.stg_id));
+    const runnable = targets.filter(inv => nextActionFor(inv.status));
+    const skipped = targets.length - runnable.length;
+    if (runnable.length === 0) {
+      setMessage({ type: "warning", text: "Tidak ada invoice terpilih yang bisa diproses otomatis (status ERROR ditangani satu per satu, IMPORTED sudah selesai)." });
+      return;
+    }
+    setBulkProgress({ done: 0, total: runnable.length, current: runnable[0].invoice_num });
+    setMessage(null);
+    const results = [];
+    for (let i = 0; i < runnable.length; i++) {
+      const inv = runnable[i];
+      const action = nextActionFor(inv.status);
+      setBulkProgress({ done: i, total: runnable.length, current: inv.invoice_num });
+      try {
+        if (action === "validate") {
+          await apInvoiceApi.validate(inv.stg_id);
+        } else if (action === "interface") {
+          const preview = await apInvoiceApi.get(inv.stg_id);
+          const header = buildInterfaceHeader(preview);
+          await apInvoiceApi.insertInterface(inv.stg_id, { header, lines: preview.lines || [] });
+        } else if (action === "import") {
+          await apInvoiceApi.runImport(inv.stg_id);
+        }
+        results.push({ invoice_num: inv.invoice_num, success: true });
+      } catch (err) {
+        results.push({ invoice_num: inv.invoice_num, success: false, error: err?.detail || err?.message || String(err) });
+      }
+      setBulkProgress({ done: i + 1, total: runnable.length, current: inv.invoice_num });
+    }
+    const okCount = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success);
+    setMessage({
+      type: failed.length === 0 ? "success" : okCount === 0 ? "error" : "warning",
+      text: `Bulk process: ${okCount}/${runnable.length} berhasil` +
+        (skipped ? `, ${skipped} dilewati (status ERROR/Imported)` : "") +
+        (failed.length ? ` — gagal: ${failed.map(f => `${f.invoice_num} (${f.error})`).join("; ")}` : "."),
+    });
+    setSelectedIds(new Set());
+    setBulkProgress(null);
+    await refresh();
   };
 
   const totalListPages = Math.max(1, Math.ceil(invoices.length / LIST_PAGE_SIZE));
@@ -351,6 +375,25 @@ export default function APAutoInvoice() {
         </div>
       )}
 
+      {/* Bulk-process progress */}
+      {bulkProgress && (
+        <div style={{
+          padding: "10px 16px", borderRadius: 12, fontSize: 12, fontWeight: 600,
+          display: "flex", alignItems: "center", gap: 10,
+          background: "#e0e7ff", color: "#4338ca", boxShadow: NEU.shadowOutSm,
+        }}>
+          <Loader2 size={14} className="animate-spin" />
+          Bulk processing {bulkProgress.done + 1} of {bulkProgress.total}: {bulkProgress.current}
+          <div style={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(67,56,202,0.15)", overflow: "hidden" }}>
+            <div style={{
+              height: "100%", borderRadius: 3, background: "#4338ca",
+              width: `${Math.round((bulkProgress.done / bulkProgress.total) * 100)}%`,
+              transition: "width 0.2s ease",
+            }} />
+          </div>
+        </div>
+      )}
+
       {/* Message */}
       {message && (
         <div style={{
@@ -369,18 +412,24 @@ export default function APAutoInvoice() {
       )}
 
       {/* Invoice Staging — header data as a list, one row per invoice, since
-          a single upload batch can now produce several at once. WHT sits as
-          the second-to-last column (checkbox + editable amount), Delete as
-          the very last — both act directly on the row without opening the
-          detail panel below. */}
+          a single upload batch can now produce several at once. A checkbox
+          column lets several be bulk-processed at once (advances each one
+          step); WHT is now shown as a line-level detail (see Line Items in
+          the panel below) rather than toggled per invoice here; Delete is
+          the last column. */}
       <div style={{ borderRadius: 18, overflow: "hidden", boxShadow: NEU.shadowOut, background: NEU.bg }}>
         <div style={{
           padding: "14px 18px", background: "linear-gradient(135deg, #dfe5ed, #d8dee8)",
           borderBottom: "2px solid rgba(0,0,0,0.06)",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
         }}>
           <span style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>
             Invoice Staging ({invoices.length})
           </span>
+          {selectedIds.size > 0 && (
+            <NeuBtn small icon={Send} label={`Process Selected (${selectedIds.size})`} color="#4338ca"
+              onClick={handleBulkProcess} loading={!!bulkProgress} />
+          )}
         </div>
         <div style={{ overflow: "auto" }}>
           {invoices.length === 0 ? (
@@ -388,9 +437,21 @@ export default function APAutoInvoice() {
               {loading ? "Loading..." : "No invoices yet. Upload PDF to get started."}
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 920 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 960 }}>
               <thead>
                 <tr style={{ background: "linear-gradient(135deg, #eef1f5, #e7ebf1)" }}>
+                  <th style={{ padding: "9px 10px", textAlign: "center", borderBottom: "2px solid rgba(0,0,0,0.06)", width: 34 }}>
+                    <input type="checkbox"
+                      checked={pagedInvoices.length > 0 && pagedInvoices.every(inv => selectedIds.has(inv.stg_id))}
+                      onChange={e => {
+                        setSelectedIds(prev => {
+                          const next = new Set(prev);
+                          pagedInvoices.forEach(inv => e.target.checked ? next.add(inv.stg_id) : next.delete(inv.stg_id));
+                          return next;
+                        });
+                      }}
+                      style={{ width: 14, height: 14, cursor: "pointer" }} />
+                  </th>
                   {["Invoice / Vendor", "Date Invoice", "PO Number", "Amount", "Status", "WHT", ""].map((h, i) => (
                     <th key={h || i} style={{
                       padding: "9px 14px", fontSize: 10.5, fontWeight: 700, color: "#64748b",
@@ -403,8 +464,6 @@ export default function APAutoInvoice() {
               </thead>
               <tbody>
                 {pagedInvoices.map((inv, i) => {
-                  const canEditWht = ["NEW", "VALIDATED", "ERROR"].includes(inv.status);
-                  const busy = whtBusy === inv.stg_id;
                   return (
                     <tr key={inv.stg_id}
                       onClick={() => loadDetail(inv.stg_id)}
@@ -414,6 +473,11 @@ export default function APAutoInvoice() {
                         borderLeft: selectedId === inv.stg_id ? "3px solid #2563eb" : "3px solid transparent",
                         borderBottom: "1px solid rgba(0,0,0,0.04)",
                       }}>
+                      <td style={{ padding: "10px 10px", textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={selectedIds.has(inv.stg_id)}
+                          onChange={() => toggleSelected(inv.stg_id)}
+                          style={{ width: 14, height: 14, cursor: "pointer" }} />
+                      </td>
                       <td style={{ padding: "10px 14px" }}>
                         <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1e293b" }}>{inv.invoice_num}</div>
                         <div style={{ fontSize: 11, color: "#64748b", fontWeight: 500 }}>{inv.vendor_name}</div>
@@ -430,23 +494,20 @@ export default function APAutoInvoice() {
                       <td style={{ padding: "10px 14px" }}>
                         <StatusPill status={inv.status} />
                       </td>
-                      <td style={{ padding: "10px 10px", textAlign: "center" }} onClick={e => e.stopPropagation()}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                          <input type="checkbox" checked={!!inv.wht_enabled} disabled={!canEditWht || busy}
-                            onChange={() => toggleWht(inv)}
-                            title={canEditWht ? "Apply WHT group from Supplier WHT Master" : "Only editable while status is New/Validated/Error"}
-                            style={{ width: 15, height: 15, cursor: canEditWht ? "pointer" : "not-allowed" }} />
-                          {busy ? (
-                            <Loader2 size={13} className="animate-spin" style={{ color: "#94a3b8" }} />
-                          ) : inv.wht_enabled && (
-                            <span title={`Estimasi: Rp ${Number(inv.wht_amount || 0).toLocaleString("id-ID")} (dihitung Oracle saat validasi)`} style={{
-                              fontSize: 11, fontWeight: 700, color: "#d97706",
-                              background: "#fef3c7", borderRadius: 6, padding: "2px 8px", whiteSpace: "nowrap",
-                            }}>
-                              {inv.awt_group_name || "?"}
-                            </span>
-                          )}
-                        </div>
+                      <td style={{ padding: "10px 10px", textAlign: "center" }}>
+                        {/* WHT is now set per line item (see Line Items in the
+                            detail panel below) — this just reflects the
+                            resulting header value once any line is flagged. */}
+                        {inv.wht_enabled ? (
+                          <span title={`Estimasi: Rp ${Number(inv.wht_amount || 0).toLocaleString("id-ID")} (dihitung Oracle saat validasi)`} style={{
+                            fontSize: 11, fontWeight: 700, color: "#d97706",
+                            background: "#fef3c7", borderRadius: 6, padding: "2px 8px", whiteSpace: "nowrap",
+                          }}>
+                            {inv.awt_group_name || "?"}
+                          </span>
+                        ) : (
+                          <span style={{ color: "#cbd5e1", fontSize: 12 }}>—</span>
+                        )}
                       </td>
                       <td style={{ padding: "10px 10px", textAlign: "center" }} onClick={e => e.stopPropagation()}>
                         {["NEW", "VALIDATED", "ERROR"].includes(inv.status) && (
@@ -530,6 +591,8 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
   const [poLinesError, setPoLinesError] = useState("");
   const [glDatePreview, setGlDatePreview] = useState(null);
   const [glDatePreviewLoading, setGlDatePreviewLoading] = useState(false);
+  const [whtMaster, setWhtMaster] = useState(null); // { awt_group_id, awt_group_name, tax_rate } | null once checked
+  const [whtChecking, setWhtChecking] = useState(false);
 
   const d = detail;
   const s = d.status;
@@ -539,7 +602,17 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
   const canInterface = s === "VALIDATED" || s === "PROCESSING" || s === "ERROR";
   const canImport    = s === "INTERFACED" || s === "SUBMITTED" || s === "ERROR";
 
-  const startEdit = () => {
+  // WHT is now a per-LINE decision (not every line in an invoice is
+  // necessarily subject to withholding, e.g. services vs. goods) — but
+  // Oracle only accepts one WHT GROUP for the whole header (see
+  // buildInterfaceHeader), so the line-level flags only decide the
+  // TAXBASE the rate applies to (see the recompute effect below), not a
+  // per-line Oracle submission. Checks the Supplier WHT Master first
+  // (tolerant of "PT" placement — see get_wht_for_vendor's fuzzy fallback);
+  // if a match exists, every line defaults to flagged UNLESS it already
+  // carries an explicit saved value from a prior edit (ln.wht_flag ?? true
+  // preserves an earlier manual uncheck instead of re-checking everything).
+  const startEdit = async () => {
     setForm({
       invoice_num: d.invoice_num,
       invoice_date: d.invoice_date || "",
@@ -554,8 +627,23 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
       invoice_amount: d.invoice_amount || 0,
       tax_serial_number: d.tax_serial_number || "",
       faktur_pajak_date: d.faktur_pajak_date || "",
+      wht_enabled: d.wht_enabled || false,
+      wht_amount: d.wht_amount || 0,
+      awt_group_id: d.awt_group_id ?? null,
+      awt_group_name: d.awt_group_name ?? null,
     });
-    setEditLines((d.lines || []).map(ln => ({ ...ln })));
+
+    setWhtChecking(true);
+    let master = null;
+    try {
+      master = await supplierWhtApi.getForVendor(d.vendor_id, d.vendor_name);
+    } catch (_) {
+      master = null; // no WHT master entry for this supplier — leave every line unflagged
+    }
+    setWhtMaster(master);
+    setWhtChecking(false);
+
+    setEditLines((d.lines || []).map(ln => ({ ...ln, wht_flag: ln.wht_flag ?? !!master })));
     setEditing(true);
   };
 
@@ -592,6 +680,30 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
     setForm(prev => ({ ...prev, subtotal: newSubtotal, tax_amount: newTax, invoice_amount: newSubtotal + newTax }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editLines, editing]);
+
+  // WHT estimate/group recompute from whichever lines are flagged — the
+  // taxbase is the sum of ONLY the WHT-flagged lines (e.g. service lines),
+  // not the whole invoice, since not every line is necessarily subject to
+  // withholding.
+  useEffect(() => {
+    if (!editing) return;
+    const whtBase = editLines.filter(ln => ln.wht_flag).reduce((sum, ln) => sum + (Number(ln.line_amount) || 0), 0);
+    if (whtMaster && whtBase > 0) {
+      const estimate = whtMaster.tax_rate != null ? Math.round((whtBase * whtMaster.tax_rate) / 100) : 0;
+      setForm(prev => ({
+        ...prev, wht_enabled: true, wht_amount: estimate,
+        awt_group_id: whtMaster.awt_group_id ?? null, awt_group_name: whtMaster.awt_group_name ?? null,
+      }));
+    } else {
+      setForm(prev => ({ ...prev, wht_enabled: false, wht_amount: 0, awt_group_id: null, awt_group_name: null }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editLines, whtMaster, editing]);
+
+  const toggleAllWht = () => {
+    const allChecked = editLines.length > 0 && editLines.every(ln => ln.wht_flag);
+    setEditLines(prev => prev.map(ln => ({ ...ln, wht_flag: !allChecked })));
+  };
 
   const openMatchPicker = async (idx) => {
     setMatchingLineIdx(idx);
@@ -648,10 +760,12 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
     { key: "tax_amount",     label: "VAT", type: "number", fmt: true },
     { key: "invoice_amount", label: "Total", type: "number", fmt: true },
     // TOP is the payment TERM itself (e.g. "30 Days", "COD"), OCR'd off
-    // the PDF's Purchase Order page — not a date. The actual due-date
-    // (terms_date, Received Date + this term's day count) is computed
-    // server-side for Oracle's TERMS_DATE only, never shown here.
+    // the PDF's Purchase Order page — not a date.
     { key: "payment_terms",  label: "TOP (Term of Payment)" },
+    // Terms Date is the actual computed due-date = Received Date + TOP's
+    // day count (see compute_terms_date) — server-computed, shown
+    // read-only so it's never confused with TOP itself.
+    { key: "terms_date",     label: "Terms Date", readOnly: true },
   ];
 
   return (
@@ -781,13 +895,26 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                   <tr style={{ background: "linear-gradient(135deg, #dfe5ed, #d8dee8)" }}>
                     {["#", "Description", "Qty", "Unit Price", "Amount",
                       ...((editing ? form.po_number : d.po_number) ? ["PO Match"] : []),
+                      "WHT",
                       ...(editing ? [""] : [])].map(h => (
                       <th key={h} style={{
                         padding: "10px 12px", fontSize: 11, fontWeight: 700,
-                        color: "#374151", textAlign: h === "Description" ? "left" : "right",
+                        color: "#374151", textAlign: h === "Description" ? "left" : h === "WHT" ? "center" : "right",
                         textTransform: "uppercase", letterSpacing: "0.06em",
                         borderBottom: "2px solid rgba(0,0,0,0.06)",
-                      }}>{h}</th>
+                      }}>
+                        {h === "WHT" ? (
+                          <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: editing && whtMaster ? "pointer" : "default" }}
+                            title={whtMaster ? "Centang/hapus semua baris" : "Tidak ada data WHT untuk supplier ini"}>
+                            <input type="checkbox"
+                              checked={editing ? editLines.length > 0 && editLines.every(ln => ln.wht_flag) : (d.lines || []).length > 0 && (d.lines || []).every(ln => ln.wht_flag)}
+                              disabled={!editing || !whtMaster}
+                              onChange={toggleAllWht}
+                              style={{ width: 12, height: 12, cursor: editing && whtMaster ? "pointer" : "not-allowed" }} />
+                            WHT {whtChecking && <Loader2 size={10} className="animate-spin" />}
+                          </label>
+                        ) : h}
+                      </th>
                     ))}
                   </tr>
                 </thead>
@@ -820,14 +947,17 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                       {(editing ? form.po_number : d.po_number) && (
                         <td style={{ padding: "8px 12px", fontSize: 11, textAlign: "left", width: 150 }}>
                           {ln.po_line_number ? (
-                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                               <div style={{ fontWeight: 700, color: "#059669" }}>
                                 Line {ln.po_line_number}{ln.receipt_number ? ` · ${ln.receipt_number}` : ""}
                               </div>
                               {editing && (
-                                <button onClick={() => clearMatch(i)} title="Clear match"
-                                  style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", padding: 2 }}>
-                                  <X size={11} />
+                                <button onClick={() => clearMatch(i)} style={{
+                                  display: "flex", alignItems: "center", gap: 3, background: "#fee2e2",
+                                  color: "#dc2626", border: "none", borderRadius: 6, padding: "3px 7px",
+                                  fontSize: 10, fontWeight: 700, cursor: "pointer",
+                                }}>
+                                  <X size={10} /> Unmatch
                                 </button>
                               )}
                             </div>
@@ -844,6 +974,18 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                           )}
                         </td>
                       )}
+                      <td style={{ padding: "8px 6px", textAlign: "center", width: 44 }}>
+                        {editing ? (
+                          <input type="checkbox" checked={!!ln.wht_flag} disabled={!whtMaster}
+                            title={whtMaster ? "Kenakan WHT pada baris ini" : "Tidak ada data WHT untuk supplier ini"}
+                            onChange={() => updateLine(i, "wht_flag", !ln.wht_flag)}
+                            style={{ width: 14, height: 14, cursor: whtMaster ? "pointer" : "not-allowed" }} />
+                        ) : ln.wht_flag ? (
+                          <CheckCircle size={14} style={{ color: "#059669" }} />
+                        ) : (
+                          <span style={{ color: "#cbd5e1" }}>—</span>
+                        )}
+                      </td>
                       {editing && (
                         <td style={{ padding: "8px 6px", textAlign: "center", width: 36 }}>
                           <button onClick={() => removeLine(i)} style={{
@@ -869,6 +1011,7 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                       {Number((editing ? editLines : d.lines).reduce((sum, ln) => sum + (Number(ln.line_amount) || 0), 0)).toLocaleString("id-ID")}
                     </td>
                     {(editing ? form.po_number : d.po_number) && <td />}
+                    <td />
                     {editing && <td />}
                   </tr>
                 </tfoot>
@@ -997,6 +1140,12 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
             )}
             {!poLinesLoading && (poLines || []).map(pl => {
               const usedByLine = editLines.find((ln, i) => i !== matchingLineIdx && ln.po_line_number === pl.line_num);
+              // receipts are already ordered by transaction_date ascending
+              // (see get_po_lines_for_matching) — last item is the most
+              // recent, same "Receive Date" Oracle EBS's own Receiving
+              // Transactions Summary shows for a line.
+              const receipts = pl.receipts || [];
+              const lastReceipt = receipts.length ? receipts[receipts.length - 1] : null;
               return (
               <div key={pl.line_num} style={{ borderRadius: 12, border: usedByLine ? "1px solid #fca5a5" : "1px solid #e2e8f0", padding: 12, marginBottom: 10, background: usedByLine ? "#fef2f2" : "transparent" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
@@ -1010,6 +1159,20 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                       {" · "}{pl.match_option === "R" ? "Match to Receipt" : "Match to PO"}
                       {pl.closed_code ? ` · ${pl.closed_code}` : ""}
                     </div>
+                    {/* Receive Date — same field Oracle EBS's own Receiving
+                        Transactions Summary shows, surfaced here for every
+                        line (not only receipt-matched ones) so it's clear
+                        at a glance whether/when goods actually arrived. */}
+                    {lastReceipt ? (
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#059669", marginTop: 4 }}>
+                        Receive Date: {lastReceipt.transaction_date} (Qty {lastReceipt.quantity})
+                        {receipts.length > 1 ? ` · ${receipts.length} penerimaan` : ""}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#dc2626", marginTop: 4 }}>
+                        Belum ada penerimaan barang (Belum di-Receiving)
+                      </div>
+                    )}
                     {usedByLine && (
                       <div style={{ fontSize: 11, fontWeight: 700, color: "#dc2626", marginTop: 4 }}>
                         Already matched to invoice Line {usedByLine.line_num}
@@ -1020,24 +1183,16 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                     <NeuBtn small label="Select" color="#2563eb" onClick={() => applyMatch(pl, null)} />
                   )}
                 </div>
-                {pl.match_option === "R" && (
-                  <div style={{ marginTop: 8 }}>
-                    {(pl.receipts || []).length === 0 ? (
-                      <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 600 }}>
-                        No receipt recorded yet for this line — can't be matched until goods are received.
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {pl.receipts.map(r => (
-                          <button key={r.receipt_number} onClick={() => applyMatch(pl, r)} style={{
-                            fontSize: 11, fontWeight: 700, padding: "5px 10px", borderRadius: 8, border: "none",
-                            background: "#dbeafe", color: "#1d4ed8", cursor: "pointer",
-                          }}>
-                            Receipt {r.receipt_number} · {r.transaction_date} · Qty {r.quantity}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                {pl.match_option === "R" && receipts.length > 0 && (
+                  <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {receipts.map(r => (
+                      <button key={r.receipt_number} onClick={() => applyMatch(pl, r)} style={{
+                        fontSize: 11, fontWeight: 700, padding: "5px 10px", borderRadius: 8, border: "none",
+                        background: "#dbeafe", color: "#1d4ed8", cursor: "pointer",
+                      }}>
+                        Receipt {r.receipt_number} · {r.transaction_date} · Qty {r.quantity}
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
