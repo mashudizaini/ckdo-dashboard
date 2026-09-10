@@ -10,7 +10,7 @@ caller's own team (see general_budget.py / budget_access_service.py)
 rather than by role.
 """
 from fastapi import APIRouter
-from app.routers.dashboard import general_budget, general_ap_payment, general_ap_list, general_access_control
+from app.routers.dashboard import general_budget, general_ap_payment, general_ap_list, general_access_control, general_oracle_env
 
 router = APIRouter()
 
@@ -32,3 +32,6 @@ router.include_router(general_ap_list.router, prefix="/ap-list", tags=["Dashboar
 # menu_access_service.py) — gated per-endpoint inside that router, not here,
 # since it mixes IT-only admin endpoints with one endpoint any user needs.
 router.include_router(general_access_control.router, prefix="/access-control", tags=["Dashboard - General Access Control"])
+
+# Sub-router: Oracle Production/Development toggle (see general_oracle_env.py)
+router.include_router(general_oracle_env.router, prefix="/oracle-env", tags=["Dashboard - Oracle Environment"])

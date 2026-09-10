@@ -22,12 +22,24 @@ class Settings(BaseSettings):
     keycloak_client_id: str
     keycloak_client_secret: str
 
-    # Oracle EBS
-    oracle_host: str = "172.21.2.201"
-    oracle_port: int = 1521
-    oracle_service: str = "PROD"
-    oracle_user: str = "apps"
-    oracle_password: str
+    # Oracle EBS — Production and Development, selectable at runtime via the
+    # environment toggle in the sidebar (see database.py's
+    # get_oracle_environment()/set_oracle_environment() and the
+    # oracle_env_setting table). A single shared flag, not per-user — the
+    # backend's Oracle connection is one shared resource, so switching
+    # applies to every user's next Oracle-backed request.
+    oracle_prod_host: str = "172.21.2.201"
+    oracle_prod_port: int = 1521
+    oracle_prod_service: str = "PROD"
+    oracle_prod_user: str = "apps"
+    oracle_prod_password: str = "apps"
+
+    oracle_dev_host: str = "172.21.2.197"
+    oracle_dev_port: int = 1525
+    oracle_dev_service: str = "DEV"
+    oracle_dev_user: str = "apps"
+    oracle_dev_password: str = "apps"
+
     oracle_instant_client: str = "/opt/oracle/instantclient"
 
     # Talenta HR API

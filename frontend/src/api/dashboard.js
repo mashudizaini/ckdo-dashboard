@@ -447,6 +447,11 @@ export const apInvoiceApi = {
   glDatePreview:   (receivedDate) => api.get("/dashboard/accounting/ap-invoice/gl-date-preview", { params: { received_date: receivedDate } }),
 };
 
+export const oracleEnvApi = {
+  get:    ()               => api.get("/dashboard/general/oracle-env"),
+  set:    (environment, updatedBy) => api.put("/dashboard/general/oracle-env", { environment, updated_by: updatedBy }),
+};
+
 export const supplierWhtApi = {
   list:       (search)   => api.get("/dashboard/accounting/supplier-wht", { params: search ? { search } : {} }),
   sync:       (updatedBy = "oracle-sync") => api.post("/dashboard/accounting/supplier-wht/sync", null, { params: { updated_by: updatedBy } }),

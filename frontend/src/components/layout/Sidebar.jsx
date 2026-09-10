@@ -6,10 +6,11 @@ import {
   Monitor, Users, Factory, Calculator,
   ShoppingCart, FileText, LogOut, LayoutGrid, TrendingUp,
   ChevronDown, ChevronRight, Settings, BarChart3, Warehouse, FlaskConical,
-  MessagesSquare, ExternalLink,
+  MessagesSquare, ExternalLink, Database, Loader2,
 } from "lucide-react";
 import RobotIcon from "@/components/icons/RobotIcon";
 import logo from "@/assets/LOGO-ONLY.png";
+import { oracleEnvApi } from "@/api/dashboard";
 
 // Each top-level module now expands into its own sections (formerly rendered
 // as an in-page tab bar) — clicking a section navigates straight to its URL.
@@ -338,6 +339,8 @@ export default function Sidebar() {
           </div>
         </div>
 
+        <OracleEnvToggle />
+
         {/* Back to portal */}
         <button
           onClick={() => navigate("/")}
@@ -461,5 +464,74 @@ export default function Sidebar() {
         </div>
       </div>
     </aside>
+  );
+}
+
+// Oracle Production/Development toggle — a single flag shared by every
+// user (the backend's Oracle connection is one resource, not per-user),
+// so switching here changes what every logged-in user's next Oracle-
+// backed request hits. Development is styled loudly (amber) on purpose —
+// it's the state most likely to cause confusion if missed.
+function OracleEnvToggle() {
+  const { user } = useAuthStore();
+  const [state, setState] = useState(null); // { environment, prod_label, dev_label }
+  const [switching, setSwitching] = useState(false);
+
+  const load = () => {
+    oracleEnvApi.get().then(setState).catch(() => {});
+  };
+  useEffect(() => { load(); }, []);
+
+  const switchTo = async (env) => {
+    if (!state || env === state.environment || switching) return;
+    setSwitching(true);
+    try {
+      const next = await oracleEnvApi.set(env, user?.email || user?.username || "unknown");
+      setState(prev => ({ ...prev, ...next }));
+    } catch (_) {
+      // ignore — UI just stays on the previous value, safest failure mode
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  if (!state) return null;
+  const isDev = state.environment === "development";
+
+  return (
+    <div className="mb-4" title={isDev ? state.dev_label : state.prod_label}>
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <Database size={11} style={{ color: "#94a3b8" }} />
+        <span style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em" }}>ORACLE DATABASE</span>
+        {switching && <Loader2 size={10} className="animate-spin" style={{ color: "#94a3b8" }} />}
+      </div>
+      <div className="flex rounded-lg overflow-hidden" style={{ border: "1px solid rgba(0,0,0,0.08)" }}>
+        <button
+          onClick={() => switchTo("production")}
+          disabled={switching}
+          style={{
+            flex: 1, padding: "5px 0", fontSize: 10.5, fontWeight: 700, border: "none", cursor: switching ? "default" : "pointer",
+            background: !isDev ? "#2563eb" : "#f8fafc",
+            color: !isDev ? "#ffffff" : "#94a3b8",
+          }}>
+          Production
+        </button>
+        <button
+          onClick={() => switchTo("development")}
+          disabled={switching}
+          style={{
+            flex: 1, padding: "5px 0", fontSize: 10.5, fontWeight: 700, border: "none", cursor: switching ? "default" : "pointer",
+            background: isDev ? "#d97706" : "#f8fafc",
+            color: isDev ? "#ffffff" : "#94a3b8",
+          }}>
+          Development
+        </button>
+      </div>
+      {isDev && (
+        <p style={{ fontSize: 9.5, color: "#d97706", fontWeight: 600, marginTop: 4 }}>
+          ⚠ Semua modul Oracle sedang mengarah ke Development
+        </p>
+      )}
+    </div>
   );
 }

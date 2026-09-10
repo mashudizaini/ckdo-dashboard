@@ -93,6 +93,10 @@ async def lifespan(app: FastAPI):
     from app.services.supplier_wht_service import ensure_table as ensure_wht_table
     ensure_wht_table()
 
+    # Create Oracle Production/Development toggle table
+    from app.database import ensure_oracle_env_table
+    ensure_oracle_env_table()
+
     # Create RAG chatbot schema (pgvector extension + company_documents table)
     from app.services import rag_service
     rag_service.ensure_schema()
