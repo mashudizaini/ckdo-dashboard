@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Upload, FileText, CheckCircle, Send, Loader2, AlertTriangle,
-  RefreshCw, ChevronDown, ChevronUp, X, Pencil, Trash2, Save, Search, Paperclip, Link2,
+  RefreshCw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, X, Pencil, Trash2, Save, Search, Paperclip, Link2,
 } from "lucide-react";
 import { apInvoiceApi, supplierWhtApi } from "@/api/dashboard";
 
@@ -86,6 +86,8 @@ export default function APAutoInvoice() {
   const [message, setMessage] = useState(null);
   const [batchProgress, setBatchProgress] = useState(null); // { done, total, current } while a multi-file upload is running
   const [whtBusy, setWhtBusy] = useState(null); // stg_id currently syncing a WHT change
+  const [listPage, setListPage] = useState(1);
+  const LIST_PAGE_SIZE = 10;
   const fileRef = useRef(null);
 
   const refresh = async () => {
@@ -301,6 +303,10 @@ export default function APAutoInvoice() {
     }
   };
 
+  const totalListPages = Math.max(1, Math.ceil(invoices.length / LIST_PAGE_SIZE));
+  const safeListPage = Math.min(listPage, totalListPages);
+  const pagedInvoices = invoices.slice((safeListPage - 1) * LIST_PAGE_SIZE, safeListPage * LIST_PAGE_SIZE);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Header + Upload */}
@@ -376,7 +382,7 @@ export default function APAutoInvoice() {
             Invoice Staging ({invoices.length})
           </span>
         </div>
-        <div style={{ maxHeight: 460, overflow: "auto" }}>
+        <div style={{ overflow: "auto" }}>
           {invoices.length === 0 ? (
             <div style={{ padding: "40px 20px", textAlign: "center", color: "#94a3b8", fontSize: 13 }}>
               {loading ? "Loading..." : "No invoices yet. Upload PDF to get started."}
@@ -396,7 +402,7 @@ export default function APAutoInvoice() {
                 </tr>
               </thead>
               <tbody>
-                {invoices.map((inv, i) => {
+                {pagedInvoices.map((inv, i) => {
                   const canEditWht = ["NEW", "VALIDATED", "ERROR"].includes(inv.status);
                   const busy = whtBusy === inv.stg_id;
                   return (
@@ -457,6 +463,37 @@ export default function APAutoInvoice() {
             </table>
           )}
         </div>
+        {totalListPages > 1 && (
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "10px 16px", borderTop: "1px solid rgba(0,0,0,0.06)", background: "#f1f5f9",
+          }}>
+            <span style={{ fontSize: 11.5, color: "#64748b", fontWeight: 600 }}>
+              {(safeListPage - 1) * LIST_PAGE_SIZE + 1}–{Math.min(safeListPage * LIST_PAGE_SIZE, invoices.length)} of {invoices.length}
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button onClick={() => setListPage(p => Math.max(1, p - 1))} disabled={safeListPage === 1}
+                style={{
+                  padding: 4, borderRadius: 6, border: "none", cursor: safeListPage === 1 ? "not-allowed" : "pointer",
+                  background: "#f1f5f9", color: safeListPage === 1 ? "#cbd5e1" : "#475569",
+                  boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
+                }}>
+                <ChevronLeft size={14} />
+              </button>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: "#334155" }}>
+                {safeListPage} / {totalListPages}
+              </span>
+              <button onClick={() => setListPage(p => Math.min(totalListPages, p + 1))} disabled={safeListPage === totalListPages}
+                style={{
+                  padding: 4, borderRadius: 6, border: "none", cursor: safeListPage === totalListPages ? "not-allowed" : "pointer",
+                  background: "#f1f5f9", color: safeListPage === totalListPages ? "#cbd5e1" : "#475569",
+                  boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
+                }}>
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Detail Panel — line items, PO matching, and the action/status workflow for the selected invoice */}
@@ -508,6 +545,7 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
       invoice_date: d.invoice_date || "",
       received_date: d.received_date || "",
       vendor_name: d.vendor_name || "",
+      payment_terms: d.payment_terms || "",
       po_number: d.po_number || "",
       so_number: d.so_number || "",
       currency_code: d.currency_code || "IDR",
@@ -543,6 +581,17 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
   const removeLine = (idx) => {
     setEditLines(prev => prev.filter((_, i) => i !== idx));
   };
+
+  // Taxbase/VAT/Total auto-recalculate from the line items — previously
+  // stayed stale after adding/editing a line (e.g. a 2nd line), so VAT
+  // never reflected the real 11% PPN on the updated Taxbase.
+  useEffect(() => {
+    if (!editing) return;
+    const newSubtotal = editLines.reduce((sum, ln) => sum + (Number(ln.line_amount) || 0), 0);
+    const newTax = Math.round(newSubtotal * 0.11);
+    setForm(prev => ({ ...prev, subtotal: newSubtotal, tax_amount: newTax, invoice_amount: newSubtotal + newTax }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editLines, editing]);
 
   const openMatchPicker = async (idx) => {
     setMatchingLineIdx(idx);
@@ -598,10 +647,11 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
     { key: "subtotal",       label: "Taxbase", type: "number", fmt: true },
     { key: "tax_amount",     label: "VAT", type: "number", fmt: true },
     { key: "invoice_amount", label: "Total", type: "number", fmt: true },
-    // TOP is always derived from Received Date + payment terms (see
-    // compute_terms_date) — never directly typed, so it's shown read-only
-    // even while editing everything else.
-    { key: "terms_date",     label: "TOP (Term of Payment)", readOnly: true },
+    // TOP is the payment TERM itself (e.g. "30 Days", "COD"), OCR'd off
+    // the PDF's Purchase Order page — not a date. The actual due-date
+    // (terms_date, Received Date + this term's day count) is computed
+    // server-side for Oracle's TERMS_DATE only, never shown here.
+    { key: "payment_terms",  label: "TOP (Term of Payment)" },
   ];
 
   return (
@@ -803,6 +853,22 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr style={{ background: "linear-gradient(135deg, #eef1f5, #e7ebf1)", borderTop: "2px solid rgba(0,0,0,0.08)" }}>
+                    <td colSpan={2} style={{ padding: "9px 12px", fontSize: 11.5, fontWeight: 800, color: "#374151" }}>
+                      TOTAL
+                    </td>
+                    <td style={{ padding: "9px 12px", fontSize: 12, fontWeight: 800, color: "#374151", textAlign: "right" }}>
+                      {(editing ? editLines : d.lines).reduce((sum, ln) => sum + (Number(ln.qty) || 0), 0).toLocaleString("id-ID")}
+                    </td>
+                    <td />
+                    <td style={{ padding: "9px 12px", fontSize: 12.5, fontWeight: 800, color: "#1e293b", textAlign: "right" }}>
+                      {Number((editing ? editLines : d.lines).reduce((sum, ln) => sum + (Number(ln.line_amount) || 0), 0)).toLocaleString("id-ID")}
+                    </td>
+                    {(editing ? form.po_number : d.po_number) && <td />}
+                    {editing && <td />}
+                  </tr>
+                </tfoot>
               </table>
             </div>
           )}
@@ -897,6 +963,25 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
               <X size={16} />
             </button>
           </div>
+
+          {/* Status of every invoice line — which are already matched vs
+              still pending, so it's clear at a glance without closing the
+              popup and checking the table underneath. */}
+          <div style={{ padding: "12px 18px", borderBottom: "1px solid #f1f5f9", display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {editLines.map((ln, i) => (
+              <span key={i} style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                padding: "4px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700,
+                background: i === matchingLineIdx ? "#dbeafe" : ln.po_line_number ? "#d1fae5" : "#fef3c7",
+                color: i === matchingLineIdx ? "#1d4ed8" : ln.po_line_number ? "#059669" : "#d97706",
+                border: i === matchingLineIdx ? "1px solid #93c5fd" : "none",
+              }}>
+                Line {ln.line_num}: {ln.po_line_number ? `✓ PO Line ${ln.po_line_number}` : "Not matched"}
+                {i === matchingLineIdx && " (editing)"}
+              </span>
+            ))}
+          </div>
+
           <div style={{ padding: 16 }}>
             {poLinesLoading && (
               <div style={{ textAlign: "center", padding: 30 }}><Loader2 size={20} className="animate-spin" /></div>
@@ -907,8 +992,10 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
             {!poLinesLoading && !poLinesError && (poLines || []).length === 0 && (
               <div style={{ fontSize: 12, color: "#64748b" }}>No lines found for this PO.</div>
             )}
-            {!poLinesLoading && (poLines || []).map(pl => (
-              <div key={pl.line_num} style={{ borderRadius: 12, border: "1px solid #e2e8f0", padding: 12, marginBottom: 10 }}>
+            {!poLinesLoading && (poLines || []).map(pl => {
+              const usedByLine = editLines.find((ln, i) => i !== matchingLineIdx && ln.po_line_number === pl.line_num);
+              return (
+              <div key={pl.line_num} style={{ borderRadius: 12, border: usedByLine ? "1px solid #fca5a5" : "1px solid #e2e8f0", padding: 12, marginBottom: 10, background: usedByLine ? "#fef2f2" : "transparent" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: "#1e293b" }}>
@@ -920,6 +1007,11 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                       {" · "}{pl.match_option === "R" ? "Match to Receipt" : "Match to PO"}
                       {pl.closed_code ? ` · ${pl.closed_code}` : ""}
                     </div>
+                    {usedByLine && (
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#dc2626", marginTop: 4 }}>
+                        Already matched to invoice Line {usedByLine.line_num}
+                      </div>
+                    )}
                   </div>
                   {pl.match_option !== "R" && (
                     <NeuBtn small label="Select" color="#2563eb" onClick={() => applyMatch(pl, null)} />
@@ -946,7 +1038,8 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>

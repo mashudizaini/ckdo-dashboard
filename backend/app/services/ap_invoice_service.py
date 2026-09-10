@@ -269,14 +269,13 @@ def extract_pdf(file_path: str, filename: str, provider: str = "onprem") -> dict
     # rather than one silently standing in for the other, since received_date
     # is what GL_DATE/GOODS_RECEIVED_DATE get computed from (see
     # insert_to_interface). When the stamp genuinely can't be read, default
-    # to the 1st of the current month (the month of processing, not the
-    # invoice's own month) rather than leaving it blank — still fully
-    # editable in the review step if it's wrong. Both, like every date this
-    # module handles, are normalized to Oracle's own DD-MON-RRRR display
+    # to the invoice's own printed date rather than leaving it blank — still
+    # fully editable in the review step if it's wrong. Both, like every date
+    # this module handles, are normalized to Oracle's own DD-MON-RRRR display
     # format (see normalize_date_str) regardless of whatever format the
     # vision model actually returned.
     invoice_date = normalize_date_str(data.get("invoice_date"), default=_format_oracle_date(datetime.today()))
-    received_date = normalize_date_str(data.get("received_date"), default=_format_oracle_date(datetime.today().replace(day=1)))
+    received_date = normalize_date_str(data.get("received_date"), default=invoice_date)
     faktur_pajak_date = normalize_date_str(data.get("faktur_pajak_date"))
     payment_terms = data.get("payment_terms") or "30 Days"
     # TOP (terms_date) is always derived from received_date + the payment

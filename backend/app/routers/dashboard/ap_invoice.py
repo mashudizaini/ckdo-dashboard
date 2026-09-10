@@ -371,12 +371,26 @@ async def check_status(stg_id: int):
 @router.put("/invoices/{stg_id}")
 async def update_invoice(stg_id: int, payload: dict):
     allowed = {"invoice_num", "invoice_date", "received_date", "vendor_name", "terms_date",
-               "po_number", "so_number", "currency_code", "invoice_amount",
+               "payment_terms", "po_number", "so_number", "currency_code", "invoice_amount",
                "subtotal", "tax_amount", "tax_serial_number", "faktur_pajak_date", "lines_json",
                "wht_enabled", "wht_amount", "awt_group_id", "awt_group_name"}
     updates = {k: v for k, v in payload.items() if k in allowed}
     if not updates:
         raise HTTPException(400, "Tidak ada field valid untuk diupdate")
+
+    pg = _get_pg()
+    cur = pg.cursor()
+
+    # received_date left blank on save falls back to invoice_date — same
+    # rule extract_pdf() applies when the stamp can't be OCR'd at all.
+    if "received_date" in updates and not updates["received_date"]:
+        updates["received_date"] = updates.get("invoice_date")
+        if not updates["received_date"]:
+            cur.execute("SELECT invoice_date FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
+            row = cur.fetchone()
+            updates["received_date"] = row[0] if row else None
+        if not updates["received_date"]:
+            del updates["received_date"]
 
     # Normalize to Oracle's own DD-MON-RRRR here, at save time — not only
     # when inserting to interface — so a bad format is caught immediately
@@ -389,17 +403,17 @@ async def update_invoice(stg_id: int, payload: dict):
                 raise HTTPException(400, f"Format tanggal tidak dikenali untuk {date_key}: '{updates[date_key]}'")
             updates[date_key] = normalized
 
-    pg = _get_pg()
-    cur = pg.cursor()
-
     # TOP (terms_date) is always derived from received_date + the invoice's
-    # payment_terms (not directly user-editable) — recompute and override
-    # whenever received_date changes, rather than trusting a stale terms_date
-    # the client might still send alongside it.
+    # payment_terms — recompute and override whenever received_date changes,
+    # rather than trusting a stale terms_date the client might still send
+    # alongside it. Prefers payment_terms from this same save (the field is
+    # now user-editable too) over what's already stored.
     if "received_date" in updates:
-        cur.execute("SELECT payment_terms FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
-        row = cur.fetchone()
-        payment_terms = row[0] if row else None
+        payment_terms = updates.get("payment_terms")
+        if not payment_terms:
+            cur.execute("SELECT payment_terms FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
+            row = cur.fetchone()
+            payment_terms = row[0] if row else None
         computed_terms_date = svc.compute_terms_date(updates["received_date"], payment_terms)
         if computed_terms_date:
             updates["terms_date"] = computed_terms_date
