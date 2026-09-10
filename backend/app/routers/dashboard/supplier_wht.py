@@ -67,8 +67,11 @@ async def delete_wht(id_: int):
 
 
 @router.get("/vendor/{vendor_id}")
-async def get_wht_for_vendor(vendor_id: int):
-    row = svc.get_wht_for_vendor(vendor_id)
+async def get_wht_for_vendor(vendor_id: int, vendor_name: Optional[str] = Query(None)):
+    # vendor_id=0 is the "not yet known" sentinel — an invoice that hasn't
+    # been Validated yet has no Oracle vendor_id at all, so the frontend
+    # falls back to this path with the OCR'd vendor_name as the only clue.
+    row = svc.get_wht_for_vendor(vendor_id if vendor_id else None, vendor_name)
     if not row:
         raise HTTPException(status_code=404, detail="Belum ada data WHT untuk supplier ini")
     return row

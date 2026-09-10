@@ -457,7 +457,7 @@ export const supplierWhtApi = {
   sync:       (updatedBy = "oracle-sync") => api.post("/dashboard/accounting/supplier-wht/sync", null, { params: { updated_by: updatedBy } }),
   upsert:     (data)     => api.post("/dashboard/accounting/supplier-wht", data),
   remove:     (id)       => api.delete(`/dashboard/accounting/supplier-wht/${id}`),
-  getForVendor: (vendorId) => api.get(`/dashboard/accounting/supplier-wht/vendor/${vendorId}`),
+  getForVendor: (vendorId, vendorName) => api.get(`/dashboard/accounting/supplier-wht/vendor/${vendorId || 0}`, { params: vendorName ? { vendor_name: vendorName } : {} }),
   setActive:  (id, isActive) => api.put(`/dashboard/accounting/supplier-wht/${id}/active`, { is_active: isActive }),
 };
 

@@ -87,7 +87,7 @@ export default function APAutoInvoice() {
   const [batchProgress, setBatchProgress] = useState(null); // { done, total, current } while a multi-file upload is running
   const [whtBusy, setWhtBusy] = useState(null); // stg_id currently syncing a WHT change
   const [listPage, setListPage] = useState(1);
-  const LIST_PAGE_SIZE = 10;
+  const LIST_PAGE_SIZE = 5;
   const fileRef = useRef(null);
 
   const refresh = async () => {
@@ -208,7 +208,7 @@ export default function APAutoInvoice() {
     }
     setWhtBusy(inv.stg_id);
     try {
-      const m = await supplierWhtApi.getForVendor(inv.vendor_id);
+      const m = await supplierWhtApi.getForVendor(inv.vendor_id, inv.vendor_name);
       const base = inv.subtotal || inv.invoice_amount || 0;
       const estimate = m.tax_rate != null ? Math.round((base * m.tax_rate) / 100) : 0;
       await apInvoiceApi.update(inv.stg_id, {

@@ -280,22 +280,60 @@ def delete_wht_master(id_: int):
         pg.close()
 
 
-def get_wht_for_vendor(vendor_id: int) -> Optional[dict]:
+_LEGAL_ENTITY_TOKENS = re.compile(r"\b(PT|CV|TBK|PERSERO|LTD|INC|CORP|LLC|CO)\b")
+_NON_ALNUM = re.compile(r"[^A-Z0-9]")
+
+
+def _normalize_company_name(name: Optional[str]) -> str:
+    """Strips legal-entity suffixes/prefixes (PT, CV, Tbk, ...) and all
+    punctuation/whitespace/case so "GOLD GRAFIKA INDONESIA" and "GOLD
+    GRAFIKA INDONESIA, PT" (or "PT GOLD GRAFIKA INDONESIA") normalize to
+    the same string, regardless of comma/word-order convention."""
+    if not name:
+        return ""
+    s = _LEGAL_ENTITY_TOKENS.sub(" ", name.upper())
+    return _NON_ALNUM.sub("", s)
+
+
+def get_wht_for_vendor(vendor_id: Optional[int], vendor_name: Optional[str] = None) -> Optional[dict]:
     """Lookup used by AP Autoinvoice to auto-suggest a WHT rate for a
-    matched vendor."""
+    matched vendor. Tries the exact vendor_id first (the normal case,
+    once Validate has resolved the invoice's real Oracle vendor_id) —
+    but an invoice not yet Validated has no vendor_id at all, and even a
+    validated one can carry a differently-registered vendor_id than
+    whichever one seed_from_oracle() happened to pick for the master (see
+    is_active — duplicate registrations under the same company name are a
+    known real case). Either way, fall back to matching on the OCR'd
+    vendor_name itself, tolerant of "PT" placement/punctuation, restricted
+    to is_active rows so a stale duplicate is never silently preferred."""
     pg = _get_pg()
     try:
         cur = pg.cursor()
-        cur.execute("""
-            SELECT vendor_id, vendor_name, awt_group_id, awt_group_name, tax_rate
-            FROM supplier_wht_master WHERE vendor_id = %s
-        """, (vendor_id,))
-        row = cur.fetchone()
-        if not row:
-            return None
-        return {
-            "vendor_id": row[0], "vendor_name": row[1], "awt_group_id": row[2],
-            "awt_group_name": row[3], "tax_rate": float(row[4]) if row[4] is not None else None,
-        }
+        if vendor_id:
+            cur.execute("""
+                SELECT vendor_id, vendor_name, awt_group_id, awt_group_name, tax_rate
+                FROM supplier_wht_master WHERE vendor_id = %s
+            """, (vendor_id,))
+            row = cur.fetchone()
+            if row:
+                return {
+                    "vendor_id": row[0], "vendor_name": row[1], "awt_group_id": row[2],
+                    "awt_group_name": row[3], "tax_rate": float(row[4]) if row[4] is not None else None,
+                }
+
+        if vendor_name:
+            target = _normalize_company_name(vendor_name)
+            if target:
+                cur.execute("""
+                    SELECT vendor_id, vendor_name, awt_group_id, awt_group_name, tax_rate
+                    FROM supplier_wht_master WHERE is_active = TRUE
+                """)
+                for row in cur.fetchall():
+                    if _normalize_company_name(row[1]) == target:
+                        return {
+                            "vendor_id": row[0], "vendor_name": row[1], "awt_group_id": row[2],
+                            "awt_group_name": row[3], "tax_rate": float(row[4]) if row[4] is not None else None,
+                        }
+        return None
     finally:
         pg.close()
