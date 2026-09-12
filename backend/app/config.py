@@ -145,6 +145,17 @@ class Settings(BaseSettings):
     kimi_model: str = "kimi-latest"
     kimi_api_base: str = "https://api.moonshot.ai/v1"
 
+    # Open WebUI ("CoChat", linked from the Sidebar) — pushes this app's own
+    # RAG Knowledge Base (company_documents, managed under Setup > AI >
+    # Knowledge Base) into CoChat's separate "Company Rules" Knowledge
+    # collection via its native sync API, so CoChat's own chat can also
+    # answer from these same documents. See openwebui_sync_service.py.
+    # Knowledge ID belongs to a collection owned by a dedicated
+    # "dashboard-integration" CoChat account, not a personal admin login.
+    openwebui_base_url: str = ""
+    openwebui_api_key: str = ""
+    openwebui_knowledge_id: str = ""
+
     # Field-level encryption for secrets stored at rest in Postgres —
     # currently only per-user Gemini API keys (see crypto.py). Distinct from
     # any auth secret; generate once per environment with

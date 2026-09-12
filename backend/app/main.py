@@ -97,6 +97,10 @@ async def lifespan(app: FastAPI):
     from app.database import ensure_oracle_env_table
     ensure_oracle_env_table()
 
+    # Create Open WebUI (CoChat) Knowledge Sync log table
+    from app.services.openwebui_sync_service import ensure_table as ensure_openwebui_sync_table
+    ensure_openwebui_sync_table()
+
     # Create RAG chatbot schema (pgvector extension + company_documents table)
     from app.services import rag_service
     rag_service.ensure_schema()

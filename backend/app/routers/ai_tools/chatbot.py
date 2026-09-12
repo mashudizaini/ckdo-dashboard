@@ -12,6 +12,8 @@ Endpoints:
   POST   /documents           — Ingest a new document (paste text or upload file)
   DELETE /documents           — Delete a document by source+title
   GET    /status               — Whether RAG (local Ollama embeddings) is configured
+  GET    /openwebui-sync/status — Whether CoChat sync is configured + last run summary
+  POST   /openwebui-sync        — Push this Knowledge Base into CoChat's "Company Rules" collection
 
 Both chat endpoints take an optional `provider` field on the request body:
 "onprem" (default, local Ollama), "gemini" (Google Gemini API), or —
@@ -43,6 +45,7 @@ from app.database import get_db
 from app.dependencies import get_current_user, require_role, CurrentUser, Roles
 from app.services.ai_service import AIService
 from app.services.oracle_chat_service import OracleChatService
+from app.services import openwebui_sync_service
 from app.services import rag_service
 from app.services import user_api_key_service
 from app.services import ai_chat_provider_service
@@ -366,3 +369,33 @@ async def cleanup_all(
     """IT/Admin only: wipe the entire knowledge base."""
     deleted = await asyncio.to_thread(rag_service.delete_all_documents)
     return {"message": f"Knowledge base wiped — {deleted} chunks removed", "deleted_chunks": deleted}
+
+
+# ── CoChat (Open WebUI) Knowledge Sync ──────────────────────────────────────
+
+@router.get("/openwebui-sync/status")
+async def openwebui_sync_status(
+    user: CurrentUser = Depends(require_role(Roles.IT, Roles.HR, Roles.ACCOUNTING, Roles.PAC, Roles.PURCHASING, Roles.ADMIN)),
+):
+    return {
+        "configured": openwebui_sync_service.is_configured(),
+        "last_run": openwebui_sync_service.get_last_run(),
+    }
+
+
+@router.post("/openwebui-sync")
+async def trigger_openwebui_sync(
+    user: CurrentUser = Depends(require_role(Roles.IT, Roles.HR, Roles.ACCOUNTING, Roles.PAC, Roles.PURCHASING, Roles.ADMIN)),
+):
+    # Dispatched to Celery, not run inline — live-verified that CoChat's
+    # own file-registration call can take minutes per document on this
+    # instance, far past any reasonable request/response window. Poll
+    # GET /openwebui-sync/status afterward for the result.
+    if not openwebui_sync_service.is_configured():
+        raise HTTPException(400, "CoChat sync belum dikonfigurasi (OPENWEBUI_BASE_URL/API_KEY/KNOWLEDGE_ID belum diset)")
+    from app.tasks.celery_app import celery_app
+    task = celery_app.send_task(
+        "app.tasks.openwebui_sync_tasks.sync_to_openwebui",
+        kwargs={"triggered_by": user.username or "manual"},
+    )
+    return {"message": "Sync ke CoChat dimulai di background — cek status beberapa menit lagi.", "task_id": task.id}

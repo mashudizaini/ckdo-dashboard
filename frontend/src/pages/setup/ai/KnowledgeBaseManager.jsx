@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { BookOpen, Upload, Trash2, Loader2, FileText, AlignLeft, AlertTriangle } from "lucide-react";
+import { BookOpen, Upload, Trash2, Loader2, FileText, AlignLeft, AlertTriangle, UploadCloud } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { DeptBadge } from "@/components/ai/ChatSourceBadges";
 
@@ -25,6 +25,9 @@ export default function KnowledgeBaseManager() {
   const [msg, setMsg] = useState(null);
   const fileRef = useRef(null);
   const msgTimerRef = useRef(null);
+  const [owStatus, setOwStatus] = useState(null); // { configured, last_run }
+  const [owTriggering, setOwTriggering] = useState(false);
+  const [owMsg, setOwMsg] = useState(null);
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -64,7 +67,41 @@ export default function KnowledgeBaseManager() {
     }
   };
 
-  useEffect(() => { fetchStatus(); fetchDocs(); }, []); // eslint-disable-line
+  const fetchOwStatus = async () => {
+    try {
+      const res = await fetch("/api/v1/ai/chatbot/openwebui-sync/status", { headers });
+      if (res.ok) setOwStatus(await res.json());
+    } catch (_) {}
+  };
+
+  useEffect(() => { fetchStatus(); fetchDocs(); fetchOwStatus(); }, []); // eslint-disable-line
+
+  // A sync run takes several minutes on CoChat's side (each new/changed
+  // document is embedded synchronously) — poll status every 15s after
+  // triggering instead of a single fetch, so "running" flips to
+  // "success"/"failed" without the user having to hit Refresh themselves.
+  useEffect(() => {
+    if (owStatus?.last_run?.status !== "running") return;
+    const t = setInterval(fetchOwStatus, 15000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [owStatus?.last_run?.status]);
+
+  const handleOwSync = async () => {
+    setOwTriggering(true);
+    setOwMsg(null);
+    try {
+      const res = await fetch("/api/v1/ai/chatbot/openwebui-sync", { method: "POST", headers });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail || "Sync gagal dimulai");
+      setOwMsg({ type: "success", text: d.message });
+      fetchOwStatus();
+    } catch (e) {
+      setOwMsg({ type: "error", text: e.message });
+    } finally {
+      setOwTriggering(false);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!form.source.trim() || !form.title.trim() || (!form.text.trim() && !file)) {
@@ -123,6 +160,46 @@ export default function KnowledgeBaseManager() {
           </div>
         ) : (
           <>
+            {/* CoChat (Open WebUI) Knowledge Sync */}
+            <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Sync to CoChat</p>
+                {owStatus && !owStatus.configured && (
+                  <span className="text-[11px] text-amber-400">Belum dikonfigurasi</span>
+                )}
+              </div>
+              <p className="text-xs text-gray-500">
+                Mendorong seluruh dokumen di atas ke Knowledge Base "Company Rules" milik CoChat, supaya chat CoChat juga bisa menjawab dari dokumen yang sama.
+              </p>
+              <div className="flex items-center gap-3 flex-wrap">
+                <button onClick={handleOwSync} disabled={owTriggering || !owStatus?.configured || owStatus?.last_run?.status === "running"}
+                  className="flex items-center gap-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white shrink-0">
+                  {owTriggering || owStatus?.last_run?.status === "running" ? <Loader2 size={13} className="animate-spin" /> : <UploadCloud size={13} />}
+                  {owStatus?.last_run?.status === "running" ? "Sedang sync..." : "Sync ke CoChat"}
+                </button>
+                {owStatus?.last_run && (
+                  <span className="text-xs text-gray-500">
+                    Terakhir: <span className={
+                      owStatus.last_run.status === "success" ? "text-green-400" :
+                      owStatus.last_run.status === "running" ? "text-amber-400" : "text-red-400"
+                    }>{owStatus.last_run.status}</span>
+                    {owStatus.last_run.finished_at && ` · ${new Date(owStatus.last_run.finished_at).toLocaleString("en-US", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}`}
+                    {owStatus.last_run.status === "success" && owStatus.last_run.summary && (
+                      ` · +${owStatus.last_run.summary.added ?? 0} / ~${owStatus.last_run.summary.modified ?? 0} / -${owStatus.last_run.summary.deleted ?? 0}`
+                    )}
+                    {owStatus.last_run.status === "failed" && owStatus.last_run.error_message && (
+                      <span className="text-red-400"> — {owStatus.last_run.error_message}</span>
+                    )}
+                  </span>
+                )}
+              </div>
+              {owMsg && (
+                <div className={`rounded-md px-3 py-2 text-xs font-medium ${owMsg.type === "error" ? "bg-red-500/10 border border-red-500/30 text-red-400" : "bg-green-500/10 border border-green-500/30 text-green-400"}`}>
+                  {owMsg.text}
+                </div>
+              )}
+            </div>
+
             {/* Upload Form */}
             <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-4 space-y-3">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Add New Document</p>

@@ -8,7 +8,7 @@ celery_app = Celery(
     "ckdo_dashboard",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.tasks.oracle_sync", "app.tasks.report_gen", "app.tasks.eis_etl_tasks", "app.tasks.document_converter_tasks", "app.tasks.document_translation_tasks"],
+    include=["app.tasks.oracle_sync", "app.tasks.report_gen", "app.tasks.eis_etl_tasks", "app.tasks.document_converter_tasks", "app.tasks.document_translation_tasks", "app.tasks.openwebui_sync_tasks"],
 )
 
 celery_app.conf.update(
@@ -42,4 +42,13 @@ celery_app.conf.beat_schedule = {
     "etl-sales-orders": {"task": "app.tasks.etl_tasks.etl_sales_orders", "schedule": crontab(hour=5, minute=30)},
     "etl-inventory-txn": {"task": "app.tasks.etl_tasks.etl_inventory_txn", "schedule": crontab(hour=5, minute=45)},
     "etl-batches": {"task": "app.tasks.etl_tasks.etl_batches", "schedule": crontab(hour=6, minute=0)},
+    # Nightly reconciliation for CoChat (Open WebUI) Knowledge Sync — the
+    # main trigger is event-driven (Setup > AI > Knowledge Base's "Sync to
+    # CoChat" button), this just catches anything missed (a doc edited
+    # without triggering a manual sync, a CoChat-side hiccup, etc.).
+    "openwebui-knowledge-sync": {
+        "task": "app.tasks.openwebui_sync_tasks.sync_to_openwebui",
+        "schedule": crontab(hour=1, minute=30),
+        "kwargs": {"triggered_by": "nightly-scheduler"},
+    },
 }
