@@ -409,7 +409,7 @@ export default function AppLauncher() {
               <img src={logo} alt="CKD Otto" style={{ width: 36, height: 36, objectFit: "contain" }} />
             </div>
             <div>
-              <p style={{ fontSize: 14, fontWeight: 700, color: "#1e293b", letterSpacing: "0.04em" }}>CKD OTTO PHARMACEUTICALS</p>
+              <p style={{ fontSize: 14, fontWeight: 700, color: "#1e293b", letterSpacing: "0.04em" }}>CKD OTTO Pharmaceuticals</p>
               <p style={{ fontSize: 9.5, color: "#2563eb", letterSpacing: "0.1em", fontWeight: 600 }}>INTERNAL APPLICATION PORTAL</p>
             </div>
           </div>
