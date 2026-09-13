@@ -173,6 +173,18 @@ class Settings(BaseSettings):
     # point of use (see eis_database.py), same convention as app/database.py.
     eis_database_url_rw: str = "postgresql://eis_user:eis_secret@172.21.2.209:5433/eis_dashboard"
 
+    # EBS Chat — CoChat (Open WebUI) <-> Oracle EBS integration (Track B).
+    # Separate, RLS-scoped role on the same eis_dashboard Postgres above:
+    # department-restricted callers get filtered rows enforced by Postgres
+    # itself (RLS policies on eis.dim_employee/fact_employee/fact_budget),
+    # not by trusting the LLM. See app/services/ebs_chat_service.py.
+    eis_ebs_chat_reader_url: str = "postgresql://ebs_chat_reader:N4YRkQnQmw7k3wm2nqShxFVutiY8fdav@172.21.2.209:5433/eis_dashboard"
+    # Shared secret CoChat's own Tool code sends as the X-Service-Key header
+    # on POST /api/v1/ai/ebs-chat/query — this is a service-to-service call
+    # (Open WebUI has its own separate login, not a Keycloak session), so
+    # there's no Dashboard JWT to validate instead.
+    ebs_chat_service_key: str = ""
+
     class Config:
         env_file = ".env"
         case_sensitive = False

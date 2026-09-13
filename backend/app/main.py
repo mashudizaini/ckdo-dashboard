@@ -60,7 +60,7 @@ from app.routers.dashboard import (
 from app.routers.coretax_router import coretax_router
 
 # ── AI Tools Routers ──
-from app.routers.ai_tools import chatbot, meeting_notes, user_settings, document_converter
+from app.routers.ai_tools import chatbot, meeting_notes, user_settings, document_converter, ebs_chat
 
 # ── Util Routers ──
 from app.routers import health
@@ -100,6 +100,10 @@ async def lifespan(app: FastAPI):
     # Create Open WebUI (CoChat) Knowledge Sync log table
     from app.services.openwebui_sync_service import ensure_table as ensure_openwebui_sync_table
     ensure_openwebui_sync_table()
+
+    # Create EBS Chat email -> department scope table
+    from app.services.ebs_chat_service import ensure_table as ensure_ebs_chat_scope_table
+    ensure_ebs_chat_scope_table()
 
     # Create RAG chatbot schema (pgvector extension + company_documents table)
     from app.services import rag_service
@@ -288,6 +292,7 @@ app.include_router(chatbot.router,       prefix=f"{API_PREFIX}/ai/chatbot",     
 app.include_router(meeting_notes.router, prefix=f"{API_PREFIX}/ai/meeting-notes", tags=["AI - Meeting Notes"])
 app.include_router(user_settings.router, prefix=f"{API_PREFIX}/ai/settings",       tags=["AI - User Settings"])
 app.include_router(document_converter.router, prefix=f"{API_PREFIX}/ai/document-converter", tags=["AI - Document Converter"])
+app.include_router(ebs_chat.router, prefix=f"{API_PREFIX}/ai/ebs-chat", tags=["AI - EBS Chat"])
 
 # Coretax Bulk Downloader (prefix already set in router: /api/coretax)
 app.include_router(coretax_router)

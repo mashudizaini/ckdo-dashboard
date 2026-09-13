@@ -7,13 +7,37 @@ schema `eis`, ETL'd from Oracle EBS) run as a dedicated `chat_readonly`
 role that only has SELECT on schema `eis` — even a prompt-injected or
 hallucinated argument can't turn into a write, because the DB user itself
 can't write. See sumber/AI_Chat_Implementation_Guide.md section 5.
+
+use_connection() below lets a caller (EBS Chat, see ebs_chat_service.py)
+route every tool call in this module through one caller-supplied connection
+instead of the default per-call chat_readonly connection — needed so a
+whole tool-calling turn runs on a single connection/transaction, which is
+required for Postgres RLS session variables (SET LOCAL app.*) to actually
+apply to the queries these tools issue. The Dashboard's own internal
+Oracle EBS chat (oracle_chat_service.py) never calls use_connection(), so
+its behavior is unchanged — every _query() there still opens/closes its
+own chat_readonly connection exactly as before.
 """
+import contextvars
 import re
+from contextlib import contextmanager
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from app.config import get_settings
 
 settings = get_settings()
+
+_scoped_conn: contextvars.ContextVar = contextvars.ContextVar("eis_tools_scoped_conn", default=None)
+
+
+@contextmanager
+def use_connection(conn):
+    token = _scoped_conn.set(conn)
+    try:
+        yield
+    finally:
+        _scoped_conn.reset(token)
 
 EIS_TOOLS = [
     {
@@ -216,17 +240,26 @@ def _parse_period(period: str) -> tuple[int, int]:
 
 
 def _get_conn():
+    override = _scoped_conn.get()
+    if override is not None:
+        return override
     return psycopg2.connect(settings.eis_database_url)
 
 
 def _query(sql: str, params: dict) -> list[dict]:
+    # Defense-in-depth independent of the DB role's own grants — every tool
+    # in this module is a predefined SELECT, so anything else here would
+    # mean a bug in this file, not a bad argument from the model.
+    assert sql.strip().upper().startswith("SELECT"), "eis_tools only issues SELECT statements"
     conn = _get_conn()
+    owns_conn = _scoped_conn.get() is None
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql, params)
             return [dict(r) for r in cur.fetchall()]
     finally:
-        conn.close()
+        if owns_conn:
+            conn.close()
 
 
 def get_sales_performance(period: str, product_code: str = None, business_type: str = None) -> list[dict]:
