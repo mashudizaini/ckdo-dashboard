@@ -2866,8 +2866,15 @@ function EmployeeYearSummaryTable({ onYearClick }) {
             // "<job title> - <team>" (e.g. "Department Head - General
             // Manager") to match the company's org chart image — falls back
             // to the plain team name when no one currently fills that role.
-            const label = row.team && row.lead_title ? `${row.lead_title} - ${row.team}` : (row.team || row.division || row.department);
-            const pad = level === 0 ? "" : level === 1 ? "pl-6" : "pl-9";
+            // "Director"/"Director" (e.g. Plant's own department head) would
+            // otherwise render as a redundant "Director - Director" — only
+            // combine when the two actually say something different, same
+            // treatment as President Director's own flat "President
+            // Director" label (job_title alone, no team suffix).
+            const label = row.team && row.lead_title && row.lead_title !== row.team
+              ? `${row.lead_title} - ${row.team}`
+              : (row.team || row.division || row.department);
+            const pad = level === 0 ? "" : level === 1 ? "pl-8" : "pl-16";
             const rowClass = level === 0 ? "bg-gray-800/30 font-semibold" : level === 1 ? "bg-gray-900/40 font-medium hover:bg-gray-800/30" : "hover:bg-gray-800/30";
             return (
             <tr key={`${row.department}-${row.division || ""}-${row.team || ""}`} className={rowClass}>
@@ -2985,8 +2992,10 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
                     : false;
                 const toggleKey = level === 0 ? row.department : divKey(row.department, row.division);
                 const isOpen = hasChildren && !(level === 0 ? collapsedDepts : collapsedDivisions).has(toggleKey);
-                const label = row.team && row.lead_title ? `${row.lead_title} - ${row.team}` : (row.team || row.division || row.department);
-                const pad = level === 0 ? "" : level === 1 ? "pl-6" : "pl-9";
+                const label = row.team && row.lead_title && row.lead_title !== row.team
+                  ? `${row.lead_title} - ${row.team}`
+                  : (row.team || row.division || row.department);
+                const pad = level === 0 ? "" : level === 1 ? "pl-8" : "pl-16";
                 const rowClass = level === 0 ? "bg-gray-800/30 font-semibold" : level === 1 ? "bg-gray-900/40 font-medium hover:bg-gray-800/30" : "hover:bg-gray-800/30";
                 return (
                 <tr key={`${row.department}-${row.division || ""}-${row.team || ""}`} className={rowClass}>
