@@ -718,15 +718,14 @@ def _apply_employee_filters(
             Employee.job_title.ilike(term)
         )
     if department:
-        if department == "Board of Directors":
+        if department == "President Director":
             # Not a raw Employee.department value at all — this group is
-            # routed by team == "Director" AND job_title containing
-            # "President Director" (see _group_department's docstring — a
-            # department-scoped Director like "Plant Director" stays with
-            # their own department instead). Drilling down from the
-            # Summary's "Board of Directors" row must match the same people
-            # it counted, not zero rows.
-            q = q.where(Employee.team == "Director", Employee.job_title.ilike("%president director%"))
+            # routed purely by job_title containing "President Director"
+            # (see _group_department's docstring — the raw department/team
+            # columns for this one role have proven unreliable to key off).
+            # Drilling down from the Summary's "President Director" row must
+            # match the same people it counted, not zero rows.
+            q = q.where(Employee.job_title.ilike("%president director%"))
         elif department in DEPT_GROUPS:
             # One of the canonical Employee Summary groups (e.g. drilling
             # down from the summary view) — match every raw department value
@@ -735,17 +734,14 @@ def _apply_employee_filters(
             # misfiled raw values ("Validation", ...) that group display
             # labels don't literally match. Also excludes President-Director
             # rows even when their raw department is this group, since those
-            # belong to "Board of Directors" instead — a department-scoped
+            # belong to "President Director" instead — a department-scoped
             # Director (job_title not matching "President Director", e.g.
             # "Plant Director") is NOT excluded, so they stay counted in
             # their own department.
             raw_uppers = [k for k, v in _DEPT_GROUP_MAP.items() if v == department]
             q = q.where(
                 func.upper(Employee.department).in_(raw_uppers),
-                or_(
-                    Employee.team.is_(None), Employee.team != "Director",
-                    Employee.job_title.is_(None), ~Employee.job_title.ilike("%president director%"),
-                ),
+                or_(Employee.job_title.is_(None), ~Employee.job_title.ilike("%president director%")),
             )
         else:
             # Case-insensitive — the source Excel has case duplicates for the
@@ -1373,21 +1369,27 @@ def _normalize_dept(raw: Optional[str]) -> str:
 # filters) — always add a canonical-label self-mapping key here, don't rely
 # solely on the misfiled-value aliases.
 #
-# "Board of Directors" (2026-09-08, refined 2026-09-09): President Director
-# is stored with team="Director" and a business-unit department inherited
-# from the earlier migration above — but per the Organization Chart
-# (org_structure_nodes), the President Director sits at the very top, above
-# every department (only the Board of Commissioners outranks them), so
-# Employee Summary pulls them into their own canonical group, listed first
-# so it renders above the 4 departments. A department-scoped Director (e.g.
-# Plant's Jin Wook Moon, job_title "Plant Director") is a peer of that
-# department's General Manager, not the company's top — they stay counted
-# in their own department instead, leading its team list (see
-# _team_sort_key) rather than being folded into Board of Directors. The
-# distinguishing signal is job_title containing "President Director", not
-# team == "Director" alone (both roles share that team value) — see
-# _group_department.
-DEPT_GROUPS = ["Board of Directors", "Administration", "Sales & Marketing", "Strategy & Development", "Plant"]
+# "President Director" (2026-09-08, renamed/refined 2026-09-15 to match the
+# company's own org chart image, which labels this row "President Director"
+# rather than "Board of Directors" and lists it first, then Sales &
+# Marketing / Strategy & Development / Plant / Administration in that exact
+# order): per the Organization Chart (org_structure_nodes), the President
+# Director sits at the very top, above every department (only the Board of
+# Commissioners outranks them), so Employee Summary pulls them into their
+# own canonical group. A department-scoped Director (e.g. Plant's own
+# department head) is a peer of that department's General Manager, not the
+# company's top — they stay counted in their own department instead,
+# leading its team list (see _team_sort_key) rather than being folded into
+# President Director.
+#
+# The distinguishing signal is job_title containing "President Director"
+# alone — NOT team == "Director" (dropped 2026-09-15): the raw
+# department/team columns for this one role have proven unreliable to key
+# off (seen live: the same person's department flipped between "Board Of
+# Director", "Administration" and blank, and team between "Director" and
+# blank, across successive manual data edits) while job_title has stayed
+# the one stable signal throughout. See _group_department.
+DEPT_GROUPS = ["President Director", "Sales & Marketing", "Strategy & Development", "Plant", "Administration"]
 
 _DEPT_GROUP_MAP = {
     "ADMINISTRATION":         "Administration",
@@ -1415,42 +1417,73 @@ def _team_sort_key(team: str):
 def _group_department(raw: Optional[str], team: Optional[str] = None, job_title: Optional[str] = None) -> Optional[str]:
     """Raw Employee.department/team/job_title -> one of the canonical
     DEPT_GROUPS, or None to exclude (blank/numeric-corrupted rows — same
-    exclusion _normalize_dept already applied). Only a President Director
-    (team == "Director" AND job_title contains "President Director") routes
-    to "Board of Directors" regardless of the raw department value — a
-    department-scoped Director (e.g. "Plant Director") shares the same team
-    value but stays grouped under their own department — see the "Board of
-    Directors" note above DEPT_GROUPS."""
-    if team and team.strip() == "Director" and job_title and "president director" in job_title.strip().lower():
-        return "Board of Directors"
+    exclusion _normalize_dept already applied). Anyone whose job_title
+    contains "President Director" routes to the "President Director" group
+    regardless of their raw department/team value — see the note above
+    DEPT_GROUPS for why job_title alone is the signal here. A
+    department-scoped Director (e.g. "Plant Director") doesn't match this
+    substring, so they stay grouped under their own department instead."""
+    if job_title and "president director" in job_title.strip().lower():
+        return "President Director"
     if not raw or raw.strip().isdigit():
         return None
     return _DEPT_GROUP_MAP.get(raw.strip().upper())
 
 
+def _lead_job_title(emps_with_title, dept_filter, division_filter, team_filter) -> Optional[str]:
+    """Representative job_title for a department-lead row ("Director" /
+    "General Manager") — the image this tree is meant to match labels these
+    rows "<job title> - <team>" (e.g. "Department Head - General Manager"),
+    but a summary row is a count, not one person, so this picks whichever
+    job_title to show. These are normally single-person buckets; when more
+    than one employee has ever held the slot (e.g. a resigned predecessor),
+    the currently-Active one wins, falling back to any if none is Active."""
+    candidates = [
+        (jt, es) for d, v, t, jt, _j, _r, es in emps_with_title
+        if d == dept_filter and v == division_filter and t == team_filter and jt
+    ]
+    if not candidates:
+        return None
+    active = [jt for jt, es in candidates if es == "Active"]
+    return active[0] if active else candidates[0][0]
+
+
 @router.get("/summary/by-year")
 async def get_summary_by_year(
+    years:    int           = Query(6, ge=1, le=30, description="How many of the most recent years to show"),
+    end_year: Optional[int] = Query(None, description="Last year of the window — defaults to the current year"),
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
     """Headcount by department (grouped into the canonical DEPT_GROUPS) >
     division > team, Beginning/Ending per year — same "active as of a date"
     windowing used by /turnover-summary and /monthly-summary. Division/team
-    rows mirror /summary/by-month's tree (only some departments have them)."""
+    rows mirror /summary/by-month's tree (only some departments have them).
+
+    Standardized to a fixed 6-year trailing window by default (was: every
+    year since the earliest date_of_joining on file, which only ever grew
+    and made the table wider every year) — `years`/`end_year` let the HR
+    page offer a period filter instead of always showing everything.
+    end_year is capped at the current year: a future end_year would make
+    by_year_for's `min(date(y, 12, 31), today)` clamp to `today` for every
+    such year, silently repeating the current year's count instead of
+    showing that year hasn't happened yet."""
+    today = date.today()
+    target_end_year = min(end_year, today.year) if end_year else today.year
+
     rows_q = await db.execute(
         select(Employee.department, Employee.division, Employee.team, Employee.job_title,
                Employee.date_of_joining, Employee.resign_date, Employee.employment_status)
         .where(Employee.date_of_joining.isnot(None))
     )
-    emps = [
-        (_group_department(d, t, jt), (v or "").strip() or None, (t or "").strip() or None, j, r, es)
+    emps_with_title = [
+        (_group_department(d, t, jt), (v or "").strip() or None, (t or "").strip() or None, jt, j, r, es)
         for d, v, t, jt, j, r, es in rows_q.fetchall()
     ]
-    emps = [(d, v, t, j, r, es) for d, v, t, j, r, es in emps if d is not None]
+    emps_with_title = [row for row in emps_with_title if row[0] is not None]
+    emps = [(d, v, t, j, r, es) for d, v, t, _jt, j, r, es in emps_with_title]
 
-    today = date.today()
-    year_from = min((j.year for _d, _v, _t, j, _r, _es in emps), default=today.year)
-    years = list(range(year_from, today.year + 1))
+    year_list = list(range(target_end_year - years + 1, target_end_year + 1))
 
     departments = DEPT_GROUPS
 
@@ -1465,7 +1498,7 @@ async def get_summary_by_year(
 
     def by_year_for(dept_filter=None, division_filter=None, team_filter=None):
         result = {}
-        for y in years:
+        for y in year_list:
             beg_snapshot = date(y, 1, 1)
             end_snapshot = min(date(y, 12, 31), today)
             result[y] = {
@@ -1490,6 +1523,7 @@ async def get_summary_by_year(
             if teams_direct and teams_direct[0] == lead_team:
                 rows.append({
                     "department": label, "division": None, "team": lead_team,
+                    "lead_title": _lead_job_title(emps_with_title, label, None, lead_team),
                     "by_year": by_year_for(label, None, lead_team),
                 })
                 teams_direct = teams_direct[1:]
@@ -1518,10 +1552,10 @@ async def get_summary_by_year(
     total = by_year_for()
 
     growth = {}
-    for i, y in enumerate(years):
-        growth[y] = None if i == 0 else total[y]["ending"] - total[years[i - 1]]["ending"]
+    for i, y in enumerate(year_list):
+        growth[y] = None if i == 0 else total[y]["ending"] - total[year_list[i - 1]]["ending"]
 
-    return {"years": years, "departments": departments, "rows": rows, "total": total, "growth": growth}
+    return {"years": year_list, "departments": departments, "rows": rows, "total": total, "growth": growth}
 
 
 @router.get("/summary/by-month")
@@ -1543,11 +1577,12 @@ async def get_summary_by_month(
                Employee.date_of_joining, Employee.resign_date, Employee.employment_status)
         .where(Employee.date_of_joining.isnot(None))
     )
-    emps = [
-        (_group_department(d, t, jt), (v or "").strip() or None, (t or "").strip() or None, j, r, es)
+    emps_with_title = [
+        (_group_department(d, t, jt), (v or "").strip() or None, (t or "").strip() or None, jt, j, r, es)
         for d, v, t, jt, j, r, es in rows_q.fetchall()
     ]
-    emps = [(d, v, t, j, r, es) for d, v, t, j, r, es in emps if d is not None]
+    emps_with_title = [row for row in emps_with_title if row[0] is not None]
+    emps = [(d, v, t, j, r, es) for d, v, t, _jt, j, r, es in emps_with_title]
 
     today = date.today()
     months = list(range(1, 13))
@@ -1593,6 +1628,7 @@ async def get_summary_by_month(
             if teams_direct and teams_direct[0] == lead_team:
                 rows.append({
                     "department": label, "division": None, "team": lead_team,
+                    "lead_title": _lead_job_title(emps_with_title, label, None, lead_team),
                     "by_month": by_month_for(label, None, lead_team),
                 })
                 teams_direct = teams_direct[1:]

@@ -2162,10 +2162,10 @@ function sortByLevel(items) {
 }
 
 // Same relative department order as the backend's DEPT_GROUPS (Employee
-// Summary), minus "Board of Directors" — that's a derived grouping (by
+// Summary), minus "President Director" — that's a derived grouping (by
 // job_title, not a raw Employee.department value), so it never appears in
 // a breakdown taken straight from the department column, like this one.
-const DEPT_ORDER = ["Administration", "Sales & Marketing", "Strategy & Development", "Plant"].map((d) => d.toLowerCase());
+const DEPT_ORDER = ["Sales & Marketing", "Strategy & Development", "Plant", "Administration"].map((d) => d.toLowerCase());
 
 function sortByDept(items) {
   const rank = (name) => {
@@ -2770,6 +2770,8 @@ function EmployeeListModal({ initialFilters, onClose }) {
 
 // ── Employee Summary: Summary per Year — headcount by dept, Beginning/Ending
 // per year (format reference: SUMMARY sheet, "Yearly" block) ──────────────
+const YEAR_WINDOW_SIZE = 6; // standardized trailing window — keep in sync with the backend's default `years`
+
 function EmployeeYearSummaryTable({ onYearClick }) {
   const { token } = useAuthStore();
   const headers = { Authorization: `Bearer ${token}` };
@@ -2777,14 +2779,15 @@ function EmployeeYearSummaryTable({ onYearClick }) {
   const [loading, setLoading] = useState(true);
   const [collapsedDepts, setCollapsedDepts] = useState(() => new Set());
   const [collapsedDivisions, setCollapsedDivisions] = useState(() => new Set());
+  const [endYear, setEndYear] = useState(() => new Date().getFullYear());
 
   useEffect(() => {
     setLoading(true);
-    fetch(`${API}/summary/by-year`, { headers })
+    fetch(`${API}/summary/by-year?years=${YEAR_WINDOW_SIZE}&end_year=${endYear}`, { headers })
       .then((r) => r.ok ? r.json() : null)
       .then(setD)
       .finally(() => setLoading(false));
-  }, []); // eslint-disable-line
+  }, [endYear]); // eslint-disable-line
 
   const toggleSet = (setFn) => (key) => setFn((prev) => {
     const next = new Set(prev);
@@ -2807,9 +2810,24 @@ function EmployeeYearSummaryTable({ onYearClick }) {
   const TH = "px-2.5 py-2 text-xs font-semibold uppercase tracking-wider text-gray-500 whitespace-nowrap text-center border-b border-gray-800";
   const TD = "px-2.5 py-2 text-xs text-right whitespace-nowrap";
 
+  const currentYear = new Date().getFullYear();
+  const endYearOptions = Array.from({ length: 15 }, (_, i) => currentYear - i);
+
   return (
     <div className="space-y-2">
-      <p className="text-[10px] text-gray-600">Click + to expand a department's teams · click a year to view its monthly breakdown</p>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-[10px] text-gray-600">Click + to expand a department's teams · click a year to view its monthly breakdown</p>
+        <label className="flex items-center gap-2 text-[11px] text-gray-500">
+          Periode s/d tahun
+          <select
+            value={endYear}
+            onChange={(e) => setEndYear(Number(e.target.value))}
+            className="rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+          >
+            {endYearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </label>
+      </div>
       <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 480 }}>
       <table className="text-sm" style={{ minWidth: 220 + d.years.length * 140 }}>
         <thead className="sticky top-0 z-10 bg-gray-800">
@@ -2844,7 +2862,11 @@ function EmployeeYearSummaryTable({ onYearClick }) {
                 : false;
             const toggleKey = level === 0 ? row.department : divKey(row.department, row.division);
             const isOpen = hasChildren && !(level === 0 ? collapsedDepts : collapsedDivisions).has(toggleKey);
-            const label = row.team || row.division || row.department;
+            // Department-lead rows ("Director"/"General Manager") show as
+            // "<job title> - <team>" (e.g. "Department Head - General
+            // Manager") to match the company's org chart image — falls back
+            // to the plain team name when no one currently fills that role.
+            const label = row.team && row.lead_title ? `${row.lead_title} - ${row.team}` : (row.team || row.division || row.department);
             const pad = level === 0 ? "" : level === 1 ? "pl-6" : "pl-9";
             const rowClass = level === 0 ? "bg-gray-800/30 font-semibold" : level === 1 ? "bg-gray-900/40 font-medium hover:bg-gray-800/30" : "hover:bg-gray-800/30";
             return (
@@ -2963,7 +2985,7 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
                     : false;
                 const toggleKey = level === 0 ? row.department : divKey(row.department, row.division);
                 const isOpen = hasChildren && !(level === 0 ? collapsedDepts : collapsedDivisions).has(toggleKey);
-                const label = row.team || row.division || row.department;
+                const label = row.team && row.lead_title ? `${row.lead_title} - ${row.team}` : (row.team || row.division || row.department);
                 const pad = level === 0 ? "" : level === 1 ? "pl-6" : "pl-9";
                 const rowClass = level === 0 ? "bg-gray-800/30 font-semibold" : level === 1 ? "bg-gray-900/40 font-medium hover:bg-gray-800/30" : "hover:bg-gray-800/30";
                 return (
