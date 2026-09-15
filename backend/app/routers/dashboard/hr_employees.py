@@ -1528,7 +1528,14 @@ async def get_summary_by_year(
         # department (rows #1/#2 after the department total) even when the
         # department also has divisions (e.g. Plant) — without this, they'd
         # otherwise land at the very bottom since teams_direct is normally
-        # rendered after every division block.
+        # rendered after every division block. `lead_team_label` tracks
+        # whichever one was found (Director takes precedence when both
+        # exist) — this department's OTHER direct teams (below) report to
+        # that person in the real org chart (e.g. Planning & Coordination
+        # reports to Administration's GM, not straight to "Administration"),
+        # so they're tagged `parent_team` to nest one level under the lead
+        # row instead of sitting as its siblings.
+        lead_team_label = None
         for lead_team in ("Director", "General Manager"):
             if teams_direct and teams_direct[0] == lead_team:
                 rows.append({
@@ -1536,6 +1543,7 @@ async def get_summary_by_year(
                     "lead_title": _lead_job_title(emps_with_title, label, None, lead_team),
                     "by_year": by_year_for(label, None, lead_team),
                 })
+                lead_team_label = lead_team_label or lead_team
                 teams_direct = teams_direct[1:]
 
         for division in divisions_in_dept:
@@ -1556,6 +1564,7 @@ async def get_summary_by_year(
         for team in teams_direct:
             rows.append({
                 "department": label, "division": None, "team": team,
+                "parent_team": lead_team_label,
                 "by_year": by_year_for(label, None, team),
             })
 
@@ -1639,7 +1648,9 @@ async def get_summary_by_month(
         # department (rows #1/#2 after the department total) even when the
         # department also has divisions (e.g. Plant) — without this, they'd
         # otherwise land at the very bottom since teams_direct is normally
-        # rendered after every division block.
+        # rendered after every division block. See the matching comment in
+        # /summary/by-year for `lead_team_label`/`parent_team`.
+        lead_team_label = None
         for lead_team in ("Director", "General Manager"):
             if teams_direct and teams_direct[0] == lead_team:
                 rows.append({
@@ -1647,6 +1658,7 @@ async def get_summary_by_month(
                     "lead_title": _lead_job_title(emps_with_title, label, None, lead_team),
                     "by_month": by_month_for(label, None, lead_team),
                 })
+                lead_team_label = lead_team_label or lead_team
                 teams_direct = teams_direct[1:]
 
         for division in divisions_in_dept:
@@ -1667,6 +1679,7 @@ async def get_summary_by_month(
         for team in teams_direct:
             rows.append({
                 "department": label, "division": None, "team": team,
+                "parent_team": lead_team_label,
                 "by_month": by_month_for(label, None, team),
             })
 
