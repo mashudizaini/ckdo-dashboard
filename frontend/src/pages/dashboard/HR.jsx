@@ -2760,7 +2760,6 @@ function EmployeeYearSummaryTable({ onYearClick }) {
   const [loading, setLoading] = useState(true);
   const [collapsedDepts, setCollapsedDepts] = useState(() => new Set());
   const [collapsedDivisions, setCollapsedDivisions] = useState(() => new Set());
-  const [collapsedLeads, setCollapsedLeads] = useState(() => new Set());
   const [endYear, setEndYear] = useState(() => new Date().getFullYear());
 
   useEffect(() => {
@@ -2778,20 +2777,17 @@ function EmployeeYearSummaryTable({ onYearClick }) {
   });
   const toggleDept = toggleSet(setCollapsedDepts);
   const toggleDivision = toggleSet(setCollapsedDivisions);
-  const toggleLead = toggleSet(setCollapsedLeads);
   const divKey = (dept, division) => `${dept}::${division}`;
   // A department's ordinary teams (no real division) report to that
   // department's own Director/General Manager row in the real org chart
   // (e.g. Planning & Coordination reports to Administration's GM) — the
-  // backend tags them with `parent_team` so they nest one level under that
-  // lead row instead of sitting beside it. `leadKey` is that row's own
-  // collapse-toggle identity, parallel to `divKey` for real divisions.
-  const leadKey = (dept, team) => `${dept}::lead::${team}`;
-
+  // backend tags them with `parent_team` so they render indented one level
+  // further right, under that lead row, instead of sitting beside it. This
+  // is display-only: the lead row itself has no expand/collapse of its
+  // own — its children show and hide together with the whole department.
   const visibleRows = d ? d.rows.filter((row) => {
     if (collapsedDepts.has(row.department)) return row.division == null && row.team == null;
     if (row.division && row.team && collapsedDivisions.has(divKey(row.department, row.division))) return false;
-    if (row.parent_team && collapsedLeads.has(leadKey(row.department, row.parent_team))) return false;
     return true;
   }) : [];
 
@@ -2857,23 +2853,22 @@ function EmployeeYearSummaryTable({ onYearClick }) {
               : row.division || isLeadRow ? 1
               : row.team ? 1
               : 0;
+            // Lead rows (Director/General Manager) are never independently
+            // collapsible — their children show and hide together with the
+            // whole department, not as their own expand/collapse target.
             const hasChildren = level === 0
               ? d.rows.some((r) => r.department === row.department && (r.division || r.team))
               : level === 1 && row.division
                 ? d.rows.some((r) => r.department === row.department && r.division === row.division && r.team)
-                : level === 1 && isLeadRow
-                  ? d.rows.some((r) => r.department === row.department && r.parent_team === row.team)
-                  : false;
+                : false;
             const toggleKey = level === 0 ? row.department
               : row.division ? divKey(row.department, row.division)
-              : isLeadRow ? leadKey(row.department, row.team)
               : null;
-            const collapsedSet = level === 0 ? collapsedDepts : row.division ? collapsedDivisions : collapsedLeads;
+            const collapsedSet = level === 0 ? collapsedDepts : collapsedDivisions;
             const isOpen = hasChildren && !collapsedSet.has(toggleKey);
             const toggle = () => {
               if (level === 0) toggleDept(toggleKey);
               else if (row.division) toggleDivision(toggleKey);
-              else if (isLeadRow) toggleLead(toggleKey);
             };
             // Department-lead rows ("Director"/"General Manager") show as
             // "<job title> - <team>" (e.g. "Department Head - General
@@ -2948,7 +2943,6 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
   const [loading, setLoading] = useState(true);
   const [collapsedDepts, setCollapsedDepts] = useState(() => new Set());
   const [collapsedDivisions, setCollapsedDivisions] = useState(() => new Set());
-  const [collapsedLeads, setCollapsedLeads] = useState(() => new Set());
 
   useEffect(() => {
     setLoading(true);
@@ -2965,16 +2959,14 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
   });
   const toggleDept = toggleSet(setCollapsedDepts);
   const toggleDivision = toggleSet(setCollapsedDivisions);
-  const toggleLead = toggleSet(setCollapsedLeads);
   const divKey = (dept, division) => `${dept}::${division}`;
   // See EmployeeYearSummaryTable's matching comment — a department's
-  // ordinary teams nest under its own Director/General Manager row.
-  const leadKey = (dept, team) => `${dept}::lead::${team}`;
-
+  // ordinary teams render indented under its own Director/General Manager
+  // row (parent_team), but that lead row has no expand/collapse of its
+  // own — its children show/hide together with the whole department.
   const visibleRows = d ? d.rows.filter((row) => {
     if (collapsedDepts.has(row.department)) return row.division == null && row.team == null; // dept row itself always shows
     if (row.division && row.team && collapsedDivisions.has(divKey(row.department, row.division))) return false;
-    if (row.parent_team && collapsedLeads.has(leadKey(row.department, row.parent_team))) return false;
     return true;
   }) : [];
 
@@ -3009,23 +3001,22 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
                   : row.division || isLeadRow ? 1
                   : row.team ? 1
                   : 0;
+                // Lead rows (Director/General Manager) are never
+                // independently collapsible — their children show/hide
+                // together with the whole department.
                 const hasChildren = level === 0
                   ? d.rows.some((r) => r.department === row.department && (r.division || r.team))
                   : level === 1 && row.division
                     ? d.rows.some((r) => r.department === row.department && r.division === row.division && r.team)
-                    : level === 1 && isLeadRow
-                      ? d.rows.some((r) => r.department === row.department && r.parent_team === row.team)
-                      : false;
+                    : false;
                 const toggleKey = level === 0 ? row.department
                   : row.division ? divKey(row.department, row.division)
-                  : isLeadRow ? leadKey(row.department, row.team)
                   : null;
-                const collapsedSet = level === 0 ? collapsedDepts : row.division ? collapsedDivisions : collapsedLeads;
+                const collapsedSet = level === 0 ? collapsedDepts : collapsedDivisions;
                 const isOpen = hasChildren && !collapsedSet.has(toggleKey);
                 const toggle = () => {
                   if (level === 0) toggleDept(toggleKey);
                   else if (row.division) toggleDivision(toggleKey);
-                  else if (isLeadRow) toggleLead(toggleKey);
                 };
                 const label = row.team && row.lead_title && row.lead_title !== row.team
                   ? `${row.lead_title} - ${row.team}`
