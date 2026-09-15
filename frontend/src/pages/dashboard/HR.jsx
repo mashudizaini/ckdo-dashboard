@@ -297,6 +297,13 @@ function EmployeeTable() {
   const [deptFilter, setDeptFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [employmentStatusFilter, setEmploymentStatusFilter] = useState("Active");
+  // Drives the 6 KPI cards ONLY — set exclusively by the "Employment
+  // State" filter dropdown, never by clicking a card. Clicking a card
+  // (e.g. Resign) narrows the table below without silently reinterpreting
+  // what the cards themselves mean; the cards stay a stable snapshot of
+  // "Employment State" as chosen in Filters until the user picks a
+  // different value there.
+  const [summaryEmploymentStatus, setSummaryEmploymentStatus] = useState("Active");
   const [joinMonthFilter, setJoinMonthFilter] = useState(() => String(new Date().getMonth() + 1));
   const [joinYearFilter, setJoinYearFilter] = useState(() => String(new Date().getFullYear()));
   const [teamFilter, setTeamFilter] = useState("");
@@ -347,7 +354,9 @@ function EmployeeTable() {
         ...(search       ? { search }                : {}),
         ...(deptFilter   ? { department: deptFilter } : {}),
         ...(statusFilter ? { status: statusFilter }   : {}),
-        ...(employmentStatusFilter ? { employment_status: employmentStatusFilter } : {}),
+        // Intentionally summaryEmploymentStatus, not employmentStatusFilter
+        // — see its declaration above for why.
+        ...(summaryEmploymentStatus ? { employment_status: summaryEmploymentStatus } : {}),
         ...(joinMonthFilter ? { join_month: joinMonthFilter } : {}),
         ...(joinYearFilter  ? { join_year: joinYearFilter }   : {}),
         ...(teamFilter   ? { team: teamFilter }        : {}),
@@ -355,7 +364,7 @@ function EmployeeTable() {
       const res = await fetch(`${API}/summary?${params}`, { headers });
       if (res.ok) setSummary(await res.json());
     } catch (_) {}
-  }, [search, deptFilter, statusFilter, employmentStatusFilter, joinMonthFilter, joinYearFilter, teamFilter]); // eslint-disable-line
+  }, [search, deptFilter, statusFilter, summaryEmploymentStatus, joinMonthFilter, joinYearFilter, teamFilter]); // eslint-disable-line
 
   const fetchJoinYears = useCallback(async () => {
     try {
@@ -407,6 +416,9 @@ function EmployeeTable() {
     setPage(1);
   };
 
+  // Only narrows the table (employmentStatusFilter/statusFilter) — never
+  // touches summaryEmploymentStatus, so the KPI cards themselves stay a
+  // stable snapshot of whatever "Employment State" is set in Filters.
   const handleCardClick = (id) => {
     if (activeCard === id) {
       setActiveCard(""); setStatusFilter(""); setEmploymentStatusFilter(""); setPage(1);
@@ -576,7 +588,13 @@ function EmployeeTable() {
                     <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Employment State</label>
                     <select
                       value={employmentStatusFilter}
-                      onChange={(e) => { setEmploymentStatusFilter(e.target.value); setActiveCard(""); setPage(1); }}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setEmploymentStatusFilter(v);
+                        setSummaryEmploymentStatus(v); // this dropdown is the one place the KPI cards' own scope changes
+                        setActiveCard("");
+                        setPage(1);
+                      }}
                       className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
                     >
                       <option value="">All</option>
@@ -796,7 +814,7 @@ const EMPLOYEE_DETAIL_FIELDS = [
   ] },
   { section: "Employment", fields: [
     ["level", "Level"], ["department", "Department"], ["division", "Division"], ["team", "Team"],
-    ["job_title", "Position"], ["supervisor_id", "Direct Supervisor"], ["work_placement", "Placement"], ["status", "Status"],
+    ["job_title", "Job Title"], ["supervisor_id", "Direct Supervisor"], ["work_placement", "Placement"], ["status", "Status"],
     ["employment_status", "Employment Status"], ["employee_grade", "Grade"], ["scheduled_checkin", "Scheduled Check-in"],
     ["date_of_joining", "Join Date"], ["pkwt_ke", "PKWT Ke"], ["starting_pkwt", "Starting PKWT"], ["end_pkwt", "End PKWT"],
     ["permanent_date", "Permanent Date"], ["resign_date", "Resign Date"], ["resign_reason", "Resign Reason"], ["retire_date", "Retire Date"],
