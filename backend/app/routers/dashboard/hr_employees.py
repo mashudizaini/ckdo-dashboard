@@ -567,22 +567,30 @@ async def get_employee_summary(
 ):
     """Statistik ringkasan untuk KPI cards.
 
-    Accepts the same filter set as the list endpoint below it, but the 6
-    top KPI cards (Total/Active/Resign/Permanent/Contract/Probation) are
-    deliberately computed against `card_base` — search/department/team/
-    join-date applied, but NOT `status` or `employment_status` — instead
-    of the fully-filtered `base` used for by_dept/by_level/by_sex below.
-    Bug fixed 2026-09-09: these 6 cards used to be computed against the
-    fully-filtered `base`, so with the Employee List's default
-    employment_status=Active filter, "Resign" (and every `status` card
-    whenever any one of the 6 was selected) always read 0 — each card's
-    number was silently scoped by whichever *other* card the user had
-    already clicked, not a stable global breakdown. The `status` list
-    endpoint below still filters by employment_status/status as requested;
-    only these 6 summary counts stay independent of them so the cards
-    never contradict each other."""
+    Accepts the same filter set as the list endpoint below it. The 6 top
+    KPI cards (Total/Active/Resign/Permanent/Contract/Probation) are
+    computed against `card_base` — search/department/team/join-date AND
+    `employment_status` applied, but NOT `status` — instead of the
+    fully-filtered `base` used for by_dept/by_level/by_sex below.
+
+    `employment_status` stays in card_base on purpose: it's the "which
+    population" toggle (Active roster vs Resign history), so with the
+    Employee List's default employment_status=Active, Total/Permanent/
+    Contract/Probation correctly count only active employees and Resign
+    correctly reads 0 — there's no contradiction in "0 of the active
+    population has resigned by definition."
+
+    `status` (Permanent/Contract/Probation) stays OUT of card_base because
+    those three values are mutually exclusive — bug fixed 2026-09-09: with
+    `status` included, clicking any one of those cards zeroed out the
+    other two (a Permanent employee can't also be Contract), so each
+    card's number was silently scoped by whichever *other* card the user
+    had already clicked instead of showing a stable breakdown. The list
+    endpoint below still filters by employment_status/status as
+    requested for the actual table."""
     card_base = _apply_employee_filters(
         select(Employee), search=search, department=department, team=team,
+        employment_status=employment_status,
         join_month=join_month, join_year=join_year,
     )
     base = _apply_employee_filters(

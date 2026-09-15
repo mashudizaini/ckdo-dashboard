@@ -316,7 +316,11 @@ function EmployeeTable() {
   const [resigningEmployee, setResigningEmployee] = useState(null);
   const [employeeNames, setEmployeeNames] = useState([]);
 
-  const PAGE_SIZE = 8;
+  // No pagination on this list — fetch everything matching the current
+  // filters in one call and let the page scroll, instead of "page 1 of N"
+  // controls. 5000 matches the backend's own max page_size (see hr_
+  // employees.py's GET "" docstring), comfortably above the real headcount.
+  const PAGE_SIZE = 5000;
 
   const fetchDepts = useCallback(async () => {
     try {
@@ -457,19 +461,24 @@ function EmployeeTable() {
       {summary && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
           {[
-            { id: "total",      label: "Total Employees", val: summary.total,      color: "#2563eb", icon: "👥" },
-            { id: "active",     label: "Active",          val: summary.active,     color: "#16a34a", icon: "🟢" },
-            { id: "resign",     label: "Resign",          val: summary.resign,     color: "#dc2626", icon: "🔴" },
-            { id: "permanent",  label: "Permanent",       val: summary.permanent,  color: "#22c55e", icon: "✓" },
-            { id: "contract",   label: "Contract",        val: summary.contract,   color: "#f59e0b", icon: "📋" },
-            { id: "probation",  label: "Probation",       val: summary.probation,  color: "#a855f7", icon: "⏳" },
-          ].map(({ id, label, val, color, icon }) => {
+            // `activeBg` is a darker shade of `color`, used only for the
+            // selected (filled) state's background — the white value/label
+            // text needs that extra darkness to read cleanly; the base
+            // `color` alone (esp. amber/purple) looked washed out and hard
+            // to read with white text directly on it.
+            { id: "total",      label: "Total Employees", val: summary.total,      color: "#2563eb", activeBg: "#1d4ed8", icon: "👥" },
+            { id: "active",     label: "Active",          val: summary.active,     color: "#16a34a", activeBg: "#15803d", icon: "🟢" },
+            { id: "resign",     label: "Resign",          val: summary.resign,     color: "#dc2626", activeBg: "#b91c1c", icon: "🔴" },
+            { id: "permanent",  label: "Permanent",       val: summary.permanent,  color: "#22c55e", activeBg: "#16a34a", icon: "✓" },
+            { id: "contract",   label: "Contract",        val: summary.contract,   color: "#f59e0b", activeBg: "#b45309", icon: "📋" },
+            { id: "probation",  label: "Probation",       val: summary.probation,  color: "#a855f7", activeBg: "#7e22ce", icon: "⏳" },
+          ].map(({ id, label, val, color, activeBg, icon }) => {
             const isActive = activeCard === id;
             return (
               <button key={id} onClick={() => handleCardClick(id)}
                 style={{
                   padding: "6px 8px", borderRadius: 10, border: "none",
-                  background: isActive ? color : "#f1f5f9",
+                  background: isActive ? activeBg : "#f1f5f9",
                   boxShadow: isActive
                     ? "inset 2px 2px 4px rgba(0,0,0,0.2)"
                     : "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
@@ -479,7 +488,7 @@ function EmployeeTable() {
                 }}
               >
                 <div style={{ fontSize: 15, fontWeight: 800, color: isActive ? "#fff" : color }}>{val}</div>
-                <div style={{ fontSize: 9, fontWeight: 700, color: isActive ? "rgba(255,255,255,0.85)" : "#64748b", marginTop: 1 }}>{label}</div>
+                <div style={{ fontSize: 9, fontWeight: 700, color: isActive ? "rgba(255,255,255,0.95)" : "#64748b", marginTop: 1 }}>{label}</div>
               </button>
             );
           })}
@@ -678,7 +687,7 @@ function EmployeeTable() {
         const COLS = getEmployeeFullCols(employeeNames);
 
         return (
-          <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 480 }}>
+          <div className="overflow-x-auto rounded-lg border border-gray-800">
             <table className="w-full text-sm" style={{ minWidth: 4200 }}>
               <thead className="sticky top-0 z-10">
                 <tr className="bg-gray-800">
@@ -731,7 +740,7 @@ function EmployeeTable() {
                       {e.employment_status !== "Resign" && (
                         <button
                           onClick={(ev) => { ev.stopPropagation(); setResigningEmployee(e); }}
-                          className="rounded-md border border-red-800/50 bg-red-950/40 px-2.5 py-1 text-xs font-semibold text-red-400 hover:bg-red-900/50 hover:border-red-700 transition-colors"
+                          className="rounded-md border border-red-700 bg-red-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-600 hover:border-red-600 transition-colors"
                         >
                           Resign
                         </button>
@@ -745,39 +754,11 @@ function EmployeeTable() {
         );
       })()}
 
-      {/* Pagination */}
-      {data.pages > 1 && (
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "10px 0", fontSize: 12,
-        }}>
-          <span style={{ color: "#475569", fontWeight: 600 }}>
-            {data.total} employees · page {page} of {data.pages}
-          </span>
-          <div style={{ display: "flex", gap: 4 }}>
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              style={{
-                padding: 6, borderRadius: 8, border: "none", cursor: page === 1 ? "not-allowed" : "pointer",
-                background: "#f1f5f9", color: page === 1 ? "#cbd5e1" : "#475569",
-                boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
-              }}
-            >
-              <ChevronLeft size={13} />
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(data.pages, p + 1))}
-              disabled={page === data.pages}
-              style={{
-                padding: 6, borderRadius: 8, border: "none", cursor: page === data.pages ? "not-allowed" : "pointer",
-                background: "#f1f5f9", color: page === data.pages ? "#cbd5e1" : "#475569",
-                boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
-              }}
-            >
-              <ChevronRight size={13} />
-            </button>
-          </div>
+      {/* No pagination — the whole matching list is fetched at once above,
+          this is just a count, not a "page N of M" control. */}
+      {data.total > 0 && (
+        <div style={{ padding: "10px 0", fontSize: 12, color: "#475569", fontWeight: 600 }}>
+          {data.total} employees
         </div>
       )}
 
