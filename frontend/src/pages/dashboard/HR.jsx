@@ -2770,6 +2770,55 @@ function EmployeeListModal({ initialFilters, onClose }) {
 // ── Employee Summary: Summary per Year — headcount by dept, Beginning/Ending
 // per year (format reference: SUMMARY sheet, "Yearly" block) ──────────────
 
+// Color-codes each row by what it actually represents, not just its raw
+// indentation depth — a department and its department-head row, or a
+// division and its division-head row, sat at the same visual depth before
+// and were hard to tell apart at a glance. Related concepts share a hue
+// family (department/department-head both blue-ish, division/division-head
+// both green-ish) so the family itself hints at "these two go together",
+// while the two shades within a family stay distinguishable. President
+// Director gets its own color since it's a singleton, outside every
+// department/division below it. Plain team rows (the actual headcount
+// leaves) intentionally stay neutral gray — giving every one of dozens of
+// team rows its own color would just be noise, not an aid to identification.
+function summaryRowKind(row, level, isLeadRow, isDivisionHeader) {
+  if (level === 0) return row.department === "President Director" ? "presidentDirector" : "department";
+  if (isLeadRow) return row.division != null ? "divisionHead" : "departmentHead";
+  if (isDivisionHeader) return "division";
+  return "team";
+}
+const SUMMARY_KIND_COLOR = {
+  presidentDirector: "text-amber-300",
+  department:         "text-indigo-300",
+  departmentHead:     "text-sky-300",
+  division:            "text-emerald-300",
+  divisionHead:        "text-teal-300",
+};
+// Written out as literal bg-* classes (not derived from SUMMARY_KIND_COLOR
+// via string replace) so Tailwind's content scanner — which only picks up
+// class names it can find as literal substrings in the source — actually
+// generates these utilities.
+const SUMMARY_LEGEND = [
+  ["presidentDirector", "President Director", "bg-amber-300"],
+  ["department",        "Department",         "bg-indigo-300"],
+  ["departmentHead",     "Department Head",    "bg-sky-300"],
+  ["division",           "Division",           "bg-emerald-300"],
+  ["divisionHead",       "Division Head",      "bg-teal-300"],
+];
+
+function SummaryColorLegend() {
+  return (
+    <div className="flex items-center gap-3 flex-wrap text-[10px] text-gray-500">
+      {SUMMARY_LEGEND.map(([kind, label, dotColor]) => (
+        <span key={kind} className="flex items-center gap-1">
+          <span className={`inline-block w-2 h-2 rounded-full ${dotColor}`} />
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function EmployeeYearSummaryTable({ onYearClick }) {
   const { token } = useAuthStore();
   const headers = { Authorization: `Bearer ${token}` };
@@ -2868,6 +2917,7 @@ function EmployeeYearSummaryTable({ onYearClick }) {
           </label>
         </div>
       </div>
+      <SummaryColorLegend />
       <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 480 }}>
       <table className="text-sm" style={{ minWidth: 220 + d.years.length * 140 }}>
         <thead className="sticky top-0 z-10 bg-gray-800">
@@ -2940,11 +2990,14 @@ function EmployeeYearSummaryTable({ onYearClick }) {
               : (row.team || row.division || row.department);
             const pad = ["", "pl-8", "pl-16", "pl-24"][level] || "pl-24";
             const rowClass = level === 0 ? "bg-gray-800/30 font-semibold" : level === 1 ? "bg-gray-900/40 font-medium hover:bg-gray-800/30" : "hover:bg-gray-800/30";
+            const kind = summaryRowKind(row, level, isLeadRow, isDivisionHeader);
+            const kindBg = level >= 2 ? "bg-gray-900" : level === 1 ? "bg-gray-900/40" : "bg-gray-800/30";
+            const kindText = SUMMARY_KIND_COLOR[kind] || (level >= 2 ? "text-gray-400" : level === 1 ? "text-gray-300" : "text-gray-200");
             return (
             <tr key={`${row.department}-${row.division || ""}-${row.team || ""}`} className={rowClass}>
               <td
                 onClick={hasChildren ? toggle : undefined}
-                className={`px-2.5 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${level >= 2 ? "text-gray-400 bg-gray-900" : level === 1 ? "text-gray-300 bg-gray-900/40" : "text-gray-200 bg-gray-800/30"} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
+                className={`px-2.5 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${kindText} ${kindBg} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
                 title={hasChildren && level === 0 ? (isOpen ? "Collapse team list" : "Expand team list") : undefined}
               >
                 {hasChildren && (
@@ -3035,6 +3088,7 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
         <h3 className="text-sm font-semibold text-gray-200">Monthly Summary · {year}</h3>
         <p className="text-[10px] text-gray-600">Click + to expand a department's teams · click a value to view that exact list of employees</p>
       </div>
+      <SummaryColorLegend />
 
       {loading ? (
         <div className="py-16 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></div>
@@ -3081,11 +3135,14 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
                   : (row.team || row.division || row.department);
                 const pad = ["", "pl-8", "pl-16", "pl-24"][level] || "pl-24";
                 const rowClass = level === 0 ? "bg-gray-800/30 font-semibold" : level === 1 ? "bg-gray-900/40 font-medium hover:bg-gray-800/30" : "hover:bg-gray-800/30";
+                const kind = summaryRowKind(row, level, isLeadRow, isDivisionHeader);
+                const kindBg = level >= 2 ? "bg-gray-900" : level === 1 ? "bg-gray-900/40" : "bg-gray-800/30";
+                const kindText = SUMMARY_KIND_COLOR[kind] || (level >= 2 ? "text-gray-400" : level === 1 ? "text-gray-300" : "text-gray-200");
                 return (
                 <tr key={`${row.department}-${row.division || ""}-${row.team || ""}`} className={rowClass}>
                   <td
                     onClick={hasChildren ? toggle : undefined}
-                    className={`px-3 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${level >= 2 ? "text-gray-400 bg-gray-900" : level === 1 ? "text-gray-300 bg-gray-900/40" : "text-gray-200 bg-gray-800/30"} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
+                    className={`px-3 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${kindText} ${kindBg} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
                     title={hasChildren && level === 0 ? (isOpen ? "Collapse team list" : "Expand team list") : undefined}
                   >
                     {hasChildren && (
