@@ -1411,15 +1411,22 @@ _DEPT_GROUP_MAP = {
 }
 
 
+# Recognized "lead" team values, in rank order — used both for a
+# department's own Director/General Manager AND, identically, for a
+# division's own head (e.g. Plant > Production Management's "Senior
+# Manager" vs Plant > Quality Management's "General Manager" — division
+# heads don't all share one rank, see LEAD_TEAM_NAMES's use in
+# /summary/by-year and /summary/by-month below).
+LEAD_TEAM_NAMES = ("Director", "General Manager", "Senior Manager")
+
+
 def _team_sort_key(team: str):
-    """Sort key for team rows within a department: a department-scoped
-    "Director" leads first (outranks the department head), "General
-    Manager" leads next, everything else alphabetical after."""
-    if team == "Director":
-        return (0, "")
-    if team == "General Manager":
-        return (1, "")
-    return (2, team)
+    """Sort key for team rows within a department or division: a
+    Director leads first (outranks everyone), General Manager next,
+    Senior Manager next, everything else alphabetical after."""
+    if team in LEAD_TEAM_NAMES:
+        return (LEAD_TEAM_NAMES.index(team), "")
+    return (len(LEAD_TEAM_NAMES), team)
 
 
 def _group_department(raw: Optional[str], team: Optional[str] = None, job_title: Optional[str] = None) -> Optional[str]:
@@ -1545,7 +1552,7 @@ async def get_summary_by_year(
         # so they're tagged `parent_team` to nest one level under the lead
         # row instead of sitting as its siblings.
         lead_team_label = None
-        for lead_team in ("Director", "General Manager"):
+        for lead_team in LEAD_TEAM_NAMES:
             if teams_direct and teams_direct[0] == lead_team:
                 rows.append({
                     "department": label, "division": None, "team": lead_team,
@@ -1564,9 +1571,27 @@ async def get_summary_by_year(
                 t for d, v, t, _j, _r, _es in emps
                 if d == label and v == division and t
             }, key=_team_sort_key)
+
+            # A division head (e.g. Production Management's "Senior
+            # Manager", Quality Management's "General Manager") gets the
+            # exact same treatment as a department's own Director/General
+            # Manager above — popped out first, the division's other teams
+            # report to them (parent_team), not straight to the division.
+            division_lead_label = None
+            for lead_team in LEAD_TEAM_NAMES:
+                if teams_in_division and teams_in_division[0] == lead_team:
+                    rows.append({
+                        "department": label, "division": division, "team": lead_team,
+                        "lead_title": _lead_job_title(emps_with_title, label, division, lead_team),
+                        "by_year": by_year_for(label, division, lead_team),
+                    })
+                    division_lead_label = division_lead_label or lead_team
+                    teams_in_division = teams_in_division[1:]
+
             for team in teams_in_division:
                 rows.append({
                     "department": label, "division": division, "team": team,
+                    "parent_team": division_lead_label,
                     "by_year": by_year_for(label, division, team),
                 })
 
@@ -1660,7 +1685,7 @@ async def get_summary_by_month(
         # rendered after every division block. See the matching comment in
         # /summary/by-year for `lead_team_label`/`parent_team`.
         lead_team_label = None
-        for lead_team in ("Director", "General Manager"):
+        for lead_team in LEAD_TEAM_NAMES:
             if teams_direct and teams_direct[0] == lead_team:
                 rows.append({
                     "department": label, "division": None, "team": lead_team,
@@ -1679,9 +1704,24 @@ async def get_summary_by_month(
                 t for d, v, t, _j, _r, _es in emps
                 if d == label and v == division and t
             }, key=_team_sort_key)
+
+            # See the matching comment in /summary/by-year for
+            # `division_lead_label`.
+            division_lead_label = None
+            for lead_team in LEAD_TEAM_NAMES:
+                if teams_in_division and teams_in_division[0] == lead_team:
+                    rows.append({
+                        "department": label, "division": division, "team": lead_team,
+                        "lead_title": _lead_job_title(emps_with_title, label, division, lead_team),
+                        "by_month": by_month_for(label, division, lead_team),
+                    })
+                    division_lead_label = division_lead_label or lead_team
+                    teams_in_division = teams_in_division[1:]
+
             for team in teams_in_division:
                 rows.append({
                     "department": label, "division": division, "team": team,
+                    "parent_team": division_lead_label,
                     "by_month": by_month_for(label, division, team),
                 })
 

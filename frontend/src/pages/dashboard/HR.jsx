@@ -2894,54 +2894,57 @@ function EmployeeYearSummaryTable({ onYearClick }) {
         </thead>
         <tbody className="divide-y divide-gray-800">
           {visibleRows.map((row) => {
-            // A row is level 1 when it's a division, or a lead row
-            // (Director/General Manager — has `lead_title`, only ever set
-            // department-direct), or a plain team with no lead to report to
-            // (no divisions in this department, no parent_team tagged).
-            // Everything nested under a division OR under a lead row is
-            // level 2.
+            // Depth is additive: +1 for being inside a division, +1 for
+            // being a team row at all, +1 again for reporting to a lead
+            // (parent_team) rather than sitting directly under its parent.
+            // A division head (e.g. "Division Head - Senior Manager") gets
+            // exactly the same treatment as a department's own Director/
+            // General Manager, just one level deeper — its own team's
+            // rank-and-file (Engineering, QA, ...) then nest one level
+            // under THAT. Division/department header rows (team == null)
+            // are never a "child of lead" themselves.
             const isLeadRow = row.lead_title !== undefined;
             const isChildOfLead = row.parent_team != null;
-            const level = (row.division && row.team) || isChildOfLead ? 2
-              : row.division || isLeadRow ? 1
-              : row.team ? 1
-              : 0;
-            // Lead rows (Director/General Manager) are never independently
-            // collapsible — their children show and hide together with the
-            // whole department, not as their own expand/collapse target.
+            const isDivisionHeader = row.division != null && row.team == null;
+            const level = (row.division != null ? 1 : 0) + (row.team != null ? 1 : 0) + (isChildOfLead ? 1 : 0);
+            // Only the department row and a division's own header row are
+            // independently collapsible — a lead row (Director/General
+            // Manager/Senior Manager) never is; its children show and hide
+            // together with whichever of those two owns it.
             const hasChildren = level === 0
               ? d.rows.some((r) => r.department === row.department && (r.division || r.team))
-              : level === 1 && row.division
+              : isDivisionHeader
                 ? d.rows.some((r) => r.department === row.department && r.division === row.division && r.team)
                 : false;
             const toggleKey = level === 0 ? row.department
-              : row.division ? divKey(row.department, row.division)
+              : isDivisionHeader ? divKey(row.department, row.division)
               : null;
             const collapsedSet = level === 0 ? collapsedDepts : collapsedDivisions;
             const isOpen = hasChildren && !collapsedSet.has(toggleKey);
             const toggle = () => {
               if (level === 0) toggleDept(toggleKey);
-              else if (row.division) toggleDivision(toggleKey);
+              else if (isDivisionHeader) toggleDivision(toggleKey);
             };
-            // Department-lead rows ("Director"/"General Manager") show as
-            // "<job title> - <team>" (e.g. "Department Head - General
-            // Manager") to match the company's org chart image — falls back
-            // to the plain team name when no one currently fills that role.
-            // "Director"/"Director" (e.g. Plant's own department head) would
-            // otherwise render as a redundant "Director - Director" — only
-            // combine when the two actually say something different, same
-            // treatment as President Director's own flat "President
-            // Director" label (job_title alone, no team suffix).
+            // Lead rows ("Director"/"General Manager"/"Senior Manager") show
+            // as "<job title> - <team>" (e.g. "Department Head - General
+            // Manager", "Division Head - Senior Manager") to match the
+            // company's org chart image — falls back to the plain team name
+            // when no one currently fills that role. Two identical values
+            // (e.g. Plant's own "Director"/"Director") would otherwise
+            // render as a redundant "Director - Director" — only combine
+            // when the two actually say something different, same treatment
+            // as President Director's own flat "President Director" label
+            // (job_title alone, no team suffix).
             const label = row.team && row.lead_title && row.lead_title !== row.team
               ? `${row.lead_title} - ${row.team}`
               : (row.team || row.division || row.department);
-            const pad = level === 0 ? "" : level === 1 ? "pl-8" : "pl-16";
+            const pad = ["", "pl-8", "pl-16", "pl-24"][level] || "pl-24";
             const rowClass = level === 0 ? "bg-gray-800/30 font-semibold" : level === 1 ? "bg-gray-900/40 font-medium hover:bg-gray-800/30" : "hover:bg-gray-800/30";
             return (
             <tr key={`${row.department}-${row.division || ""}-${row.team || ""}`} className={rowClass}>
               <td
                 onClick={hasChildren ? toggle : undefined}
-                className={`px-2.5 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${level === 2 ? "text-gray-400 bg-gray-900" : level === 1 ? "text-gray-300 bg-gray-900/40" : "text-gray-200 bg-gray-800/30"} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
+                className={`px-2.5 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${level >= 2 ? "text-gray-400 bg-gray-900" : level === 1 ? "text-gray-300 bg-gray-900/40" : "text-gray-200 bg-gray-800/30"} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
                 title={hasChildren && level === 0 ? (isOpen ? "Collapse team list" : "Expand team list") : undefined}
               >
                 {hasChildren && (
@@ -3048,39 +3051,41 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
             </thead>
             <tbody className="divide-y divide-gray-800">
               {visibleRows.map((row) => {
+                // See EmployeeYearSummaryTable's matching comment — depth is
+                // additive (division / team / reports-to-a-lead), so a
+                // division head's own team nests one level deeper than the
+                // division head row itself.
                 const isLeadRow = row.lead_title !== undefined;
                 const isChildOfLead = row.parent_team != null;
-                const level = (row.division && row.team) || isChildOfLead ? 2
-                  : row.division || isLeadRow ? 1
-                  : row.team ? 1
-                  : 0;
-                // Lead rows (Director/General Manager) are never
-                // independently collapsible — their children show/hide
-                // together with the whole department.
+                const isDivisionHeader = row.division != null && row.team == null;
+                const level = (row.division != null ? 1 : 0) + (row.team != null ? 1 : 0) + (isChildOfLead ? 1 : 0);
+                // Only the department row and a division's own header row
+                // are independently collapsible — a lead row (Director/
+                // General Manager/Senior Manager) never is.
                 const hasChildren = level === 0
                   ? d.rows.some((r) => r.department === row.department && (r.division || r.team))
-                  : level === 1 && row.division
+                  : isDivisionHeader
                     ? d.rows.some((r) => r.department === row.department && r.division === row.division && r.team)
                     : false;
                 const toggleKey = level === 0 ? row.department
-                  : row.division ? divKey(row.department, row.division)
+                  : isDivisionHeader ? divKey(row.department, row.division)
                   : null;
                 const collapsedSet = level === 0 ? collapsedDepts : collapsedDivisions;
                 const isOpen = hasChildren && !collapsedSet.has(toggleKey);
                 const toggle = () => {
                   if (level === 0) toggleDept(toggleKey);
-                  else if (row.division) toggleDivision(toggleKey);
+                  else if (isDivisionHeader) toggleDivision(toggleKey);
                 };
                 const label = row.team && row.lead_title && row.lead_title !== row.team
                   ? `${row.lead_title} - ${row.team}`
                   : (row.team || row.division || row.department);
-                const pad = level === 0 ? "" : level === 1 ? "pl-8" : "pl-16";
+                const pad = ["", "pl-8", "pl-16", "pl-24"][level] || "pl-24";
                 const rowClass = level === 0 ? "bg-gray-800/30 font-semibold" : level === 1 ? "bg-gray-900/40 font-medium hover:bg-gray-800/30" : "hover:bg-gray-800/30";
                 return (
                 <tr key={`${row.department}-${row.division || ""}-${row.team || ""}`} className={rowClass}>
                   <td
                     onClick={hasChildren ? toggle : undefined}
-                    className={`px-3 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${level === 2 ? "text-gray-400 bg-gray-900" : level === 1 ? "text-gray-300 bg-gray-900/40" : "text-gray-200 bg-gray-800/30"} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
+                    className={`px-3 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${level >= 2 ? "text-gray-400 bg-gray-900" : level === 1 ? "text-gray-300 bg-gray-900/40" : "text-gray-200 bg-gray-800/30"} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
                     title={hasChildren && level === 0 ? (isOpen ? "Collapse team list" : "Expand team list") : undefined}
                   >
                     {hasChildren && (
