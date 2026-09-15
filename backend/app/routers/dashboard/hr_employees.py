@@ -1511,6 +1511,16 @@ async def get_summary_by_year(
     for label in DEPT_GROUPS:
         rows.append({"department": label, "division": None, "team": None, "by_year": by_year_for(label)})
 
+        # "President Director" is a singleton role, not a department with
+        # real division/team substructure — any team value on a row routed
+        # here (e.g. a predecessor's raw Employee.team happening to be
+        # "Director") is a legacy artifact of that person's own record, not
+        # meaningful org structure, and would otherwise render as a
+        # confusing "President Director - Director" child row the image
+        # doesn't show. Keep this group as a single flat row.
+        if label == "President Director":
+            continue
+
         divisions_in_dept = sorted({v for d, v, _t, _j, _r, _es in emps if d == label and v})
         teams_direct = sorted({t for d, v, t, _j, _r, _es in emps if d == label and not v and t}, key=_team_sort_key)
 
@@ -1615,6 +1625,12 @@ async def get_summary_by_month(
     rows = []
     for label in DEPT_GROUPS:
         rows.append({"department": label, "division": None, "team": None, "by_month": by_month_for(label)})
+
+        # See the matching comment in /summary/by-year — "President Director"
+        # is a singleton role, not a department with real division/team
+        # substructure.
+        if label == "President Director":
+            continue
 
         divisions_in_dept = sorted({v for d, v, _t, _j, _r, _es in emps if d == label and v})
         teams_direct = sorted({t for d, v, t, _j, _r, _es in emps if d == label and not v and t}, key=_team_sort_key)
