@@ -419,12 +419,25 @@ function EmployeeTable() {
   // Only narrows the table (employmentStatusFilter/statusFilter) — never
   // touches summaryEmploymentStatus, so the KPI cards themselves stay a
   // stable snapshot of whatever "Employment State" is set in Filters.
+  //
+  // Permanent/Contract/Probation deliberately do NOT reset
+  // employmentStatusFilter: the card's own number (e.g. "Probation: 3") is
+  // counted against whatever Employment State is currently selected
+  // (Active by default), so the table has to stay scoped the same way —
+  // otherwise clicking a card whose number was computed against "Active
+  // only" could show a different row count than the card said (bug fixed
+  // 2026-09-15: clicking Probation cleared employment_status entirely, so
+  // the table showed active+resigned Probation combined instead of the 3
+  // active ones the card counted).
   const handleCardClick = (id) => {
     if (activeCard === id) {
-      setActiveCard(""); setStatusFilter(""); setEmploymentStatusFilter(""); setPage(1);
+      setActiveCard("");
+      setStatusFilter("");
+      if (id === "active" || id === "resign") setEmploymentStatusFilter("Active"); // back to the app's standing default
+      setPage(1);
     } else {
       setActiveCard(id);
-      setStatusFilter(""); setEmploymentStatusFilter("");
+      setStatusFilter("");
       if (id === "active")         setEmploymentStatusFilter("Active");
       else if (id === "resign")    setEmploymentStatusFilter("Resign");
       else if (id === "permanent") setStatusFilter("Permanent");
@@ -2770,40 +2783,43 @@ function EmployeeListModal({ initialFilters, onClose }) {
 // ── Employee Summary: Summary per Year — headcount by dept, Beginning/Ending
 // per year (format reference: SUMMARY sheet, "Yearly" block) ──────────────
 
-// Color-codes each row by what it actually represents, not just its raw
-// indentation depth — a department and its department-head row, or a
-// division and its division-head row, sat at the same visual depth before
-// and were hard to tell apart at a glance. Related concepts share a hue
-// family (department/department-head both blue-ish, division/division-head
-// both green-ish) so the family itself hints at "these two go together",
-// while the two shades within a family stay distinguishable. President
-// Director gets its own color since it's a singleton, outside every
-// department/division below it. Plain team rows (the actual headcount
-// leaves) intentionally stay neutral gray — giving every one of dozens of
-// team rows its own color would just be noise, not an aid to identification.
+// Color-codes each row's actual CELL/ROW BACKGROUND by what it represents,
+// not just its raw indentation depth — a department and its department-head
+// row, or a division and its division-head row, sat at the same visual
+// depth before and were hard to tell apart at a glance. Deliberately a
+// background tint, not a text color — the identification cue is the place
+// (row) that department/division/team data occupies, not the color of the
+// characters. Related concepts share a hue family (department/department-
+// head both blue-ish, division/division-head both green-ish) so the family
+// itself hints at "these two go together", while the two shades within a
+// family stay distinguishable. President Director gets its own color since
+// it's a singleton, outside every department/division below it. Plain team
+// rows (the actual headcount leaves) intentionally stay neutral — tinting
+// dozens of team rows individually would be noise, not an aid.
 function summaryRowKind(row, level, isLeadRow, isDivisionHeader) {
   if (level === 0) return row.department === "President Director" ? "presidentDirector" : "department";
   if (isLeadRow) return row.division != null ? "divisionHead" : "departmentHead";
   if (isDivisionHeader) return "division";
   return "team";
 }
-const SUMMARY_KIND_COLOR = {
-  presidentDirector: "text-amber-300",
-  department:         "text-indigo-300",
-  departmentHead:     "text-sky-300",
-  division:            "text-emerald-300",
-  divisionHead:        "text-teal-300",
+// Row/cell background tints (low-opacity so the numeric columns underneath
+// stay readable) and matching solid legend-dot colors, kept as literal
+// class strings (not derived from each other via string concatenation) so
+// Tailwind's content scanner — which only picks up class names it can find
+// as literal substrings in the source — actually generates every utility.
+const SUMMARY_KIND_BG = {
+  presidentDirector: "bg-amber-500/20",
+  department:         "bg-indigo-500/20",
+  departmentHead:     "bg-sky-500/20",
+  division:            "bg-emerald-500/20",
+  divisionHead:        "bg-teal-500/20",
 };
-// Written out as literal bg-* classes (not derived from SUMMARY_KIND_COLOR
-// via string replace) so Tailwind's content scanner — which only picks up
-// class names it can find as literal substrings in the source — actually
-// generates these utilities.
 const SUMMARY_LEGEND = [
-  ["presidentDirector", "President Director", "bg-amber-300"],
-  ["department",        "Department",         "bg-indigo-300"],
-  ["departmentHead",     "Department Head",    "bg-sky-300"],
-  ["division",           "Division",           "bg-emerald-300"],
-  ["divisionHead",       "Division Head",      "bg-teal-300"],
+  ["presidentDirector", "President Director", "bg-amber-400"],
+  ["department",        "Department",         "bg-indigo-400"],
+  ["departmentHead",     "Department Head",    "bg-sky-400"],
+  ["division",           "Division",           "bg-emerald-400"],
+  ["divisionHead",       "Division Head",      "bg-teal-400"],
 ];
 
 function SummaryColorLegend() {
@@ -2989,15 +3005,17 @@ function EmployeeYearSummaryTable({ onYearClick }) {
               ? `${row.lead_title} - ${row.team}`
               : (row.team || row.division || row.department);
             const pad = ["", "pl-8", "pl-16", "pl-24"][level] || "pl-24";
-            const rowClass = level === 0 ? "bg-gray-800/30 font-semibold" : level === 1 ? "bg-gray-900/40 font-medium hover:bg-gray-800/30" : "hover:bg-gray-800/30";
             const kind = summaryRowKind(row, level, isLeadRow, isDivisionHeader);
-            const kindBg = level >= 2 ? "bg-gray-900" : level === 1 ? "bg-gray-900/40" : "bg-gray-800/30";
-            const kindText = SUMMARY_KIND_COLOR[kind] || (level >= 2 ? "text-gray-400" : level === 1 ? "text-gray-300" : "text-gray-200");
+            // The tint IS the identification cue — plain "team" rows fall
+            // back to the old depth-based gray shading instead.
+            const cellBg = SUMMARY_KIND_BG[kind] || (level >= 2 ? "bg-gray-900" : level === 1 ? "bg-gray-900/40" : "bg-gray-800/30");
+            const textColor = level >= 2 ? "text-gray-300" : level === 1 ? "text-gray-200" : "text-gray-100";
+            const rowClass = `${cellBg} ${level === 0 ? "font-semibold" : level === 1 ? "font-medium" : ""} ${SUMMARY_KIND_BG[kind] ? "" : "hover:bg-gray-800/30"}`;
             return (
             <tr key={`${row.department}-${row.division || ""}-${row.team || ""}`} className={rowClass}>
               <td
                 onClick={hasChildren ? toggle : undefined}
-                className={`px-2.5 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${kindText} ${kindBg} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
+                className={`px-2.5 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${textColor} ${cellBg} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
                 title={hasChildren && level === 0 ? (isOpen ? "Collapse team list" : "Expand team list") : undefined}
               >
                 {hasChildren && (
@@ -3134,15 +3152,15 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
                   ? `${row.lead_title} - ${row.team}`
                   : (row.team || row.division || row.department);
                 const pad = ["", "pl-8", "pl-16", "pl-24"][level] || "pl-24";
-                const rowClass = level === 0 ? "bg-gray-800/30 font-semibold" : level === 1 ? "bg-gray-900/40 font-medium hover:bg-gray-800/30" : "hover:bg-gray-800/30";
                 const kind = summaryRowKind(row, level, isLeadRow, isDivisionHeader);
-                const kindBg = level >= 2 ? "bg-gray-900" : level === 1 ? "bg-gray-900/40" : "bg-gray-800/30";
-                const kindText = SUMMARY_KIND_COLOR[kind] || (level >= 2 ? "text-gray-400" : level === 1 ? "text-gray-300" : "text-gray-200");
+                const cellBg = SUMMARY_KIND_BG[kind] || (level >= 2 ? "bg-gray-900" : level === 1 ? "bg-gray-900/40" : "bg-gray-800/30");
+                const textColor = level >= 2 ? "text-gray-300" : level === 1 ? "text-gray-200" : "text-gray-100";
+                const rowClass = `${cellBg} ${level === 0 ? "font-semibold" : level === 1 ? "font-medium" : ""} ${SUMMARY_KIND_BG[kind] ? "" : "hover:bg-gray-800/30"}`;
                 return (
                 <tr key={`${row.department}-${row.division || ""}-${row.team || ""}`} className={rowClass}>
                   <td
                     onClick={hasChildren ? toggle : undefined}
-                    className={`px-3 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${kindText} ${kindBg} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
+                    className={`px-3 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${textColor} ${cellBg} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
                     title={hasChildren && level === 0 ? (isOpen ? "Collapse team list" : "Expand team list") : undefined}
                   >
                     {hasChildren && (
