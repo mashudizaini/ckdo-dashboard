@@ -1247,7 +1247,18 @@ async def get_turnover_summary(
     """Laporan turnover: tren resign bulanan (Jan-Des tahun terpilih, default tahun
     berjalan), turnover rate, breakdown per departemen/level. `month` mempersempit
     breakdown & avg tenure ke bulan itu saja; tanpa `month`, breakdown mencakup
-    satu tahun penuh. `department`/`team` mempersempit seluruh laporan."""
+    satu tahun penuh. `department`/`team` mempersempit seluruh laporan.
+
+    Two turnover rates, both keyed off `month` (2026-09-15):
+    - turnover_rate_ytd: cumulative "as of <month>" — resigns Jan..month /
+      average of each of those months' own avg_headcount. Without `month`,
+      this covers the full year (same number as annual_turnover_rate).
+    - turnover_rate_month: that one month's own rate alone (resigns that
+      month / that month's own avg_headcount) — null without `month`.
+    avg_tenure_years: mean (resign_date - date_of_joining) in years, across
+    employees who resigned within the breakdown scope (month, or full year
+    without a month filter) — "how long people who left had been here",
+    not the tenure of the current active roster."""
     from datetime import date
     from calendar import monthrange
 
@@ -1298,6 +1309,23 @@ async def get_turnover_summary(
     avg_headcount_year = sum(r["avg_headcount"] for r in resign_trend) / 12
     annual_turnover_rate = round((total_resigns_year / avg_headcount_year) * 100, 2) if avg_headcount_year > 0 else 0
 
+    # Two period-scoped turnover rates, both keyed off the selected month
+    # (2026-09-15): "as of <month>" is the cumulative rate Jan through that
+    # month — total resigns Jan..month divided by the AVERAGE of each of
+    # those months' own avg_headcount (not a single point-in-time
+    # snapshot), so it stays comparable in shape to the per-month rate
+    # below. "per month" is just that one month's own rate, already
+    # computed inside resign_trend — re-exposed at the top level so the
+    # frontend doesn't have to index into resign_trend to find it. Without
+    # a month filter, "as of" degrades to the full year (Jan-Dec), same
+    # number annual_turnover_rate already gives.
+    effective_month = month or 12
+    ytd_months = resign_trend[:effective_month]
+    total_resigns_ytd = sum(r["resigns"] for r in ytd_months)
+    avg_headcount_ytd = sum(r["avg_headcount"] for r in ytd_months) / len(ytd_months) if ytd_months else 0
+    turnover_rate_ytd = round((total_resigns_ytd / avg_headcount_ytd) * 100, 2) if avg_headcount_ytd > 0 else 0
+    turnover_rate_month = resign_trend[month - 1]["turnover_rate"] if month else None
+
     # Breakdown karyawan resign — satu bulan (jika `month` diisi) atau satu tahun penuh
     if month:
         b_start = date(target_year, month, 1)
@@ -1339,6 +1367,8 @@ async def get_turnover_summary(
         "month":                month,
         "resign_trend":         resign_trend,
         "annual_turnover_rate": annual_turnover_rate,
+        "turnover_rate_ytd":    turnover_rate_ytd,
+        "turnover_rate_month":  turnover_rate_month,
         "total_resigns_period": len(resigned_in_scope),
         "avg_tenure_years":     avg_tenure_years,
         "current_headcount":    current_headcount,

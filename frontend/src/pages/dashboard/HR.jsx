@@ -3394,7 +3394,8 @@ function TurnoverSection() {
   );
 
   const {
-    resign_trend = [], annual_turnover_rate = 0, total_resigns_period = 0,
+    resign_trend = [], total_resigns_period = 0,
+    turnover_rate_ytd = 0, turnover_rate_month = null, avg_tenure_years = 0,
     current_headcount = 0,
     by_dept: by_dept_raw = [], by_level: by_level_raw = [], by_status = [], year = curYear, month = null,
   } = data;
@@ -3422,11 +3423,24 @@ function TurnoverSection() {
       {filterBar}
 
       {/* KPI Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {[
-          { label: `Turnover Rate (${year})`,      val: `${annual_turnover_rate}%`, sub: "annualized",              color: "#fb7185" },
+          // Cumulative Jan..selected month / average headcount over that
+          // same stretch — e.g. "as of Aug 2026" = Jan-Aug resigns over the
+          // Jan-Aug average headcount, NOT the full year.
+          { label: `Turnover Rate as of ${periodLabel}`, val: `${turnover_rate_ytd}%`,
+            sub: `Jan–${month ? MONTHS_ID[month - 1] : "Dec"} ${year}, cumulative`, color: "#fb7185" },
+          // That one month alone — resigns in just that month / that
+          // month's own average headcount.
+          { label: `Turnover Rate (${periodLabel})`, val: turnover_rate_month != null ? `${turnover_rate_month}%` : "—",
+            sub: month ? "this month only" : "select a month", color: "#f97316" },
           { label: `Total Resigned (${periodLabel})`, val: total_resigns_period,     sub: "employees left",          color: "#fbbf24" },
           { label: "Current Headcount",            val: current_headcount,          sub: "active employees",        color: "#34d399" },
+          // Mean (resign_date - date_of_joining) among employees who
+          // resigned within this same scope — how long people who left
+          // had actually been here, not the tenure of the current roster.
+          { label: `Avg. Tenure — Resigned (${periodLabel})`, val: `${avg_tenure_years} yrs`,
+            sub: "avg. years worked before resigning", color: "#60a5fa" },
         ].map(({ label, val, sub, color }) => (
           <div key={label} className="rounded-xl border border-gray-800 bg-gray-900 p-4">
             <div className="text-2xl font-bold" style={{ color }}>{val}</div>
