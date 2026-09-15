@@ -2751,7 +2751,6 @@ function EmployeeListModal({ initialFilters, onClose }) {
 
 // ── Employee Summary: Summary per Year — headcount by dept, Beginning/Ending
 // per year (format reference: SUMMARY sheet, "Yearly" block) ──────────────
-const YEAR_WINDOW_SIZE = 6; // standardized trailing window — keep in sync with the backend's default `years`
 
 function EmployeeYearSummaryTable({ onYearClick }) {
   const { token } = useAuthStore();
@@ -2760,15 +2759,33 @@ function EmployeeYearSummaryTable({ onYearClick }) {
   const [loading, setLoading] = useState(true);
   const [collapsedDepts, setCollapsedDepts] = useState(() => new Set());
   const [collapsedDivisions, setCollapsedDivisions] = useState(() => new Set());
-  const [endYear, setEndYear] = useState(() => new Date().getFullYear());
+  // null = "use the backend's own default" (earliest date_of_joining on
+  // file / current year) — only set once the user actually picks a value,
+  // so the dropdowns can show the real default without a second fetch.
+  const [yearFrom, setYearFrom] = useState(null);
+  const [yearTo, setYearTo] = useState(null);
 
   useEffect(() => {
     setLoading(true);
-    fetch(`${API}/summary/by-year?years=${YEAR_WINDOW_SIZE}&end_year=${endYear}`, { headers })
+    const params = new URLSearchParams();
+    if (yearFrom != null) params.set("year_from", yearFrom);
+    if (yearTo != null) params.set("year_to", yearTo);
+    fetch(`${API}/summary/by-year?${params}`, { headers })
       .then((r) => r.ok ? r.json() : null)
       .then(setD)
       .finally(() => setLoading(false));
-  }, [endYear]); // eslint-disable-line
+  }, [yearFrom, yearTo]); // eslint-disable-line
+
+  const handleYearFrom = (v) => {
+    const n = Number(v);
+    setYearFrom(n);
+    if (yearTo != null && n > yearTo) setYearTo(n);
+  };
+  const handleYearTo = (v) => {
+    const n = Number(v);
+    setYearTo(n);
+    if (yearFrom != null && n < yearFrom) setYearFrom(n);
+  };
 
   const toggleSet = (setFn) => (key) => setFn((prev) => {
     const next = new Set(prev);
@@ -2798,22 +2815,40 @@ function EmployeeYearSummaryTable({ onYearClick }) {
   const TD = "px-2.5 py-2 text-xs text-right whitespace-nowrap";
 
   const currentYear = new Date().getFullYear();
-  const endYearOptions = Array.from({ length: 15 }, (_, i) => currentYear - i);
+  // The dropdown must always be able to show the real default (earliest
+  // date_of_joining on file) once loaded, even if that's further back than
+  // this fallback window — extend it to whatever d.years actually covers.
+  const rangeStart = Math.min(currentYear - 15, d.years[0]);
+  const yearOptions = Array.from({ length: currentYear - rangeStart + 1 }, (_, i) => currentYear - i);
+  const displayFrom = yearFrom ?? d.years[0];
+  const displayTo = yearTo ?? d.years[d.years.length - 1];
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-[10px] text-gray-600">Click + to expand a department's teams · click a year to view its monthly breakdown</p>
-        <label className="flex items-center gap-2 text-[11px] text-gray-500">
-          Periode s/d tahun
-          <select
-            value={endYear}
-            onChange={(e) => setEndYear(Number(e.target.value))}
-            className="rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
-          >
-            {endYearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
-          </select>
-        </label>
+        <div className="flex items-center gap-3 flex-wrap">
+          <label className="flex items-center gap-2 text-[11px] text-gray-500">
+            Periode dari
+            <select
+              value={displayFrom}
+              onChange={(e) => handleYearFrom(e.target.value)}
+              className="rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-gray-500">
+            Periode sampai
+            <select
+              value={displayTo}
+              onChange={(e) => handleYearTo(e.target.value)}
+              className="rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </label>
+        </div>
       </div>
       <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 480 }}>
       <table className="text-sm" style={{ minWidth: 220 + d.years.length * 140 }}>

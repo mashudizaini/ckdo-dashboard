@@ -1458,8 +1458,8 @@ def _lead_job_title(emps_with_title, dept_filter, division_filter, team_filter) 
 
 @router.get("/summary/by-year")
 async def get_summary_by_year(
-    years:    int           = Query(6, ge=1, le=30, description="How many of the most recent years to show"),
-    end_year: Optional[int] = Query(None, description="Last year of the window — defaults to the current year"),
+    year_from: Optional[int] = Query(None, description="First year of the window — defaults to the earliest date_of_joining on file"),
+    year_to:   Optional[int] = Query(None, description="Last year of the window — defaults to the current year"),
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
@@ -1468,16 +1468,14 @@ async def get_summary_by_year(
     windowing used by /turnover-summary and /monthly-summary. Division/team
     rows mirror /summary/by-month's tree (only some departments have them).
 
-    Standardized to a fixed 6-year trailing window by default (was: every
-    year since the earliest date_of_joining on file, which only ever grew
-    and made the table wider every year) — `years`/`end_year` let the HR
-    page offer a period filter instead of always showing everything.
-    end_year is capped at the current year: a future end_year would make
-    by_year_for's `min(date(y, 12, 31), today)` clamp to `today` for every
-    such year, silently repeating the current year's count instead of
-    showing that year hasn't happened yet."""
+    `year_from`/`year_to` let the HR page offer an explicit period filter;
+    left blank, the window defaults to the full history (earliest
+    date_of_joining on file through the current year) — same as before any
+    period filter existed. year_to is capped at the current year: a future
+    year_to would make by_year_for's `min(date(y, 12, 31), today)` clamp to
+    `today` for every such year, silently repeating the current year's
+    count instead of showing that year hasn't happened yet."""
     today = date.today()
-    target_end_year = min(end_year, today.year) if end_year else today.year
 
     rows_q = await db.execute(
         select(Employee.department, Employee.division, Employee.team, Employee.job_title,
@@ -1491,7 +1489,10 @@ async def get_summary_by_year(
     emps_with_title = [row for row in emps_with_title if row[0] is not None]
     emps = [(d, v, t, j, r, es) for d, v, t, _jt, j, r, es in emps_with_title]
 
-    year_list = list(range(target_end_year - years + 1, target_end_year + 1))
+    default_year_from = min((j.year for _d, _v, _t, j, _r, _es in emps), default=today.year)
+    target_from = year_from or default_year_from
+    target_to = min(year_to, today.year) if year_to else today.year
+    year_list = list(range(target_from, target_to + 1)) if target_from <= target_to else [target_to]
 
     departments = DEPT_GROUPS
 
