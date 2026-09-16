@@ -311,7 +311,11 @@ function EmployeeTable() {
   const [teams,       setTeams]         = useState([]);
   const [joinYears,   setJoinYears]     = useState([]);
   const [summary,    setSummary]    = useState(null);
-  const [sortBy,     setSortBy]     = useState("date_of_joining");
+  // "default" = grouped Department -> Active/Inactive -> Status for easy
+  // scanning on first load (see hr_employees.py's list_employees). Clicking
+  // a column header (handleSort) switches to that single-column sort as
+  // before; "default" only applies until the user clicks something.
+  const [sortBy,     setSortBy]     = useState("default");
   const [sortDir,    setSortDir]    = useState("asc");
   const [showExportPicker, setShowExportPicker] = useState(false);
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
@@ -718,7 +722,13 @@ function EmployeeTable() {
         const COLS = getEmployeeFullCols(employeeNames);
 
         return (
-          <div className="overflow-x-auto rounded-lg border border-gray-800">
+          // Capped height + overflow-auto on this div (not just overflow-x
+          // on the page) keeps the horizontal scrollbar pinned to the
+          // bottom of the visible table, reachable at any scroll position —
+          // instead of the old overflow-x-auto div, whose scrollbar only
+          // showed up below the very last row of a long list. Same fix as
+          // .fs-table-scroll in Financial Statement (index.css).
+          <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: "70vh" }}>
             <table className="w-full text-sm" style={{ minWidth: 4200 }}>
               <thead className="sticky top-0 z-10">
                 <tr className="bg-gray-800">
@@ -2999,7 +3009,7 @@ function EmployeeYearSummaryTable({ onYearClick }) {
         <p className="text-[10px] text-gray-600">Click + to expand a department's teams · click a year to view its monthly breakdown</p>
         <div className="flex items-center gap-3 flex-wrap">
           <label className="flex items-center gap-2 text-[11px] text-gray-500">
-            Periode dari
+            Period from
             <select
               value={displayFrom}
               onChange={(e) => handleYearFrom(e.target.value)}
@@ -3009,7 +3019,7 @@ function EmployeeYearSummaryTable({ onYearClick }) {
             </select>
           </label>
           <label className="flex items-center gap-2 text-[11px] text-gray-500">
-            Periode sampai
+            Period To
             <select
               value={displayTo}
               onChange={(e) => handleYearTo(e.target.value)}

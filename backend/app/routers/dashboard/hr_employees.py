@@ -907,8 +907,17 @@ async def list_employees(
         "bank_account_bca": Employee.bank_account_bca,
         "bank_account_name": Employee.bank_account_name,
     }
-    sort_col = _SORT_COLS.get(sort_by, Employee.full_name)
-    q        = q.order_by(sort_col.desc() if sort_dir == "desc" else sort_col.asc())
+    if sort_by == "default":
+        # Initial-load ordering: group by Department, then Active/Inactive,
+        # then Status — makes it easy to scan the list without first
+        # clicking a column header. Column-header clicks still sort by that
+        # single column (see _SORT_COLS below), this only applies before
+        # the user has clicked anything.
+        default_cols = [Employee.department, Employee.employment_status, Employee.status]
+        q = q.order_by(*[c.desc() for c in default_cols] if sort_dir == "desc" else default_cols)
+    else:
+        sort_col = _SORT_COLS.get(sort_by, Employee.full_name)
+        q        = q.order_by(sort_col.desc() if sort_dir == "desc" else sort_col.asc())
     q        = q.offset((page - 1) * page_size).limit(page_size)
     result   = await db.execute(q)
     employees = result.scalars().all()
@@ -1023,9 +1032,13 @@ async def export_employees(
         join_month=join_month, join_year=join_year,
         snapshot_month=snapshot_month, snapshot_year=snapshot_year,
     )
-    sort_map = {k: getattr(Employee, k) for k, _, _ in _EXPORT_COLUMNS}
-    sort_col = sort_map.get(sort_by, Employee.full_name)
-    q = q.order_by(sort_col.desc() if sort_dir == "desc" else sort_col.asc())
+    if sort_by == "default":
+        default_cols = [Employee.department, Employee.employment_status, Employee.status]
+        q = q.order_by(*[c.desc() for c in default_cols] if sort_dir == "desc" else default_cols)
+    else:
+        sort_map = {k: getattr(Employee, k) for k, _, _ in _EXPORT_COLUMNS}
+        sort_col = sort_map.get(sort_by, Employee.full_name)
+        q = q.order_by(sort_col.desc() if sort_dir == "desc" else sort_col.asc())
     employees = (await db.execute(q)).scalars().all()
 
     selected_keys = set(fields.split(",")) if fields else None
