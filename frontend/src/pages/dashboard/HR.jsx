@@ -344,9 +344,15 @@ function EmployeeTable() {
     try { setEmployeeNames((await hrApi.getEmployeeNames()) || []); } catch (_) {}
   }, []); // eslint-disable-line
 
+  // exclude_leads drops the "Director"/"General Manager"/"Senior Manager"
+  // placeholder values Employee.team holds for department/division-head
+  // level employees — not real teams, so they don't belong in a Team
+  // filter meant to narrow the list down to an actual team.
   const fetchTeams = useCallback(async (dept) => {
     try {
-      const url = dept ? `${API}/teams?department=${encodeURIComponent(dept)}` : `${API}/teams`;
+      const url = dept
+        ? `${API}/teams?department=${encodeURIComponent(dept)}&exclude_leads=true`
+        : `${API}/teams?exclude_leads=true`;
       const res = await fetch(url, { headers });
       if (res.ok) setTeams(await res.json());
     } catch (_) {}
@@ -2645,9 +2651,15 @@ function EmployeeListModal({ initialFilters, onClose }) {
     } catch (_) {}
   }, []); // eslint-disable-line
 
+  // exclude_leads drops the "Director"/"General Manager"/"Senior Manager"
+  // placeholder values Employee.team holds for department/division-head
+  // level employees — not real teams, so they don't belong in a Team
+  // filter meant to narrow the summary down to an actual team.
   const fetchTeams = useCallback(async (dept) => {
     try {
-      const url = dept ? `${API}/teams?department=${encodeURIComponent(dept)}` : `${API}/teams`;
+      const url = dept
+        ? `${API}/teams?department=${encodeURIComponent(dept)}&exclude_leads=true`
+        : `${API}/teams?exclude_leads=true`;
       const res = await fetch(url, { headers });
       if (res.ok) setTeams(await res.json());
     } catch (_) {}
