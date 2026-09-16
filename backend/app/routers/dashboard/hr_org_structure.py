@@ -164,53 +164,84 @@ def _norm_name(s: Optional[str]) -> str:
     return " ".join((s or "").strip().lower().split())
 
 
-@router.post("/sync-join-dates")
-async def sync_join_dates(
+# (Employee column, OrgStructureNode column) pairs this syncs — every
+# descriptive field the two tables have in common.
+_SYNC_FIELDS = [
+    ("job_title",      "position"),
+    ("department",     "department"),
+    ("division",       "division"),
+    ("team",           "sub_team"),
+    ("date_of_joining", "join_date"),
+]
+
+
+@router.post("/sync-from-employees")
+async def sync_from_employees(
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Fills in empty join_date on chart entries by matching full_name
-    against the Employee master (any employment_status — a chart entry can
-    be a legacy/resigned person too). Deliberately additive-only: never
-    touches a node that already has a join_date, so this stays safe to
-    re-run and never overwrites a value HR entered/corrected by hand — same
-    "decoupled, one-time prefill" philosophy as /employee-search, just
-    applied in bulk instead of one node at a time. A name matching more
-    than one Employee with different join dates is left alone rather than
-    guessing which one is right."""
-    nodes_result = await db.execute(
-        select(OrgStructureNode).where(OrgStructureNode.join_date.is_(None))
+    """Fills in EVERY empty chart field (position, department, division,
+    sub_team, join_date) by matching full_name against the Employee master
+    (any employment_status — a chart entry can be a legacy/resigned person
+    too). Deliberately additive-only, field by field: a field is only
+    touched if it's currently empty on the node, so this stays safe to
+    re-run and never overwrites something HR entered/corrected by hand —
+    same "decoupled, one-time prefill" philosophy as /employee-search, just
+    applied across every field and every node instead of one field at a
+    time. If a name matches more than one Employee and they disagree on a
+    given field, that one field is left alone (reported as ambiguous)
+    rather than guessing — other fields on the same node still sync
+    normally."""
+    nodes_result = await db.execute(select(OrgStructureNode))
+    nodes = nodes_result.scalars().all()
+
+    emp_result = await db.execute(
+        select(Employee.full_name, Employee.job_title, Employee.department,
+               Employee.division, Employee.team, Employee.date_of_joining)
     )
-    empty_nodes = nodes_result.scalars().all()
-    if not empty_nodes:
-        return {"total_missing": 0, "updated": 0, "unmatched": [], "ambiguous": []}
+    by_name: dict[str, list] = {}
+    for row in emp_result.fetchall():
+        key = _norm_name(row.full_name)
+        if key:
+            by_name.setdefault(key, []).append(row)
 
-    emp_result = await db.execute(select(Employee.full_name, Employee.date_of_joining))
-    by_name: dict[str, set] = {}
-    for full_name, doj in emp_result.fetchall():
-        key = _norm_name(full_name)
-        if not key:
+    updated_names, unmatched, ambiguous = [], [], {}
+    nodes_with_gaps = 0
+    for node in nodes:
+        missing_fields = [nf for _, nf in _SYNC_FIELDS if not getattr(node, nf)]
+        if not missing_fields:
             continue
-        by_name.setdefault(key, set()).add(doj)
+        nodes_with_gaps += 1
 
-    updated, unmatched, ambiguous = [], [], []
-    for node in empty_nodes:
-        key = _norm_name(node.full_name)
-        dates = by_name.get(key)
-        if not dates:
+        matches = by_name.get(_norm_name(node.full_name))
+        if not matches:
             unmatched.append(node.full_name)
             continue
-        real_dates = {d for d in dates if d is not None}
-        if len(real_dates) != 1:
-            ambiguous.append(node.full_name)
-            continue
-        node.join_date = next(iter(real_dates))
-        updated.append(node.full_name)
+
+        node_changed = False
+        node_ambiguous = []
+        for ef, nf in _SYNC_FIELDS:
+            if getattr(node, nf):  # already has a value — never overwrite
+                continue
+            values = {getattr(m, ef) for m in matches if getattr(m, ef)}
+            if not values:
+                continue
+            if len(values) > 1:
+                node_ambiguous.append(nf)
+                continue
+            setattr(node, nf, next(iter(values)))
+            node_changed = True
+
+        if node_changed:
+            updated_names.append(node.full_name)
+        if node_ambiguous:
+            ambiguous[node.full_name] = node_ambiguous
 
     await db.commit()
     return {
-        "total_missing": len(empty_nodes),
-        "updated": len(updated), "updated_names": updated,
+        "total_nodes": len(nodes),
+        "nodes_with_gaps": nodes_with_gaps,
+        "updated": len(updated_names), "updated_names": updated_names,
         "unmatched": unmatched,
         "ambiguous": ambiguous,
     }

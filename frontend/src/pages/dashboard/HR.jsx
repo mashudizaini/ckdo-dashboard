@@ -1912,19 +1912,20 @@ function OrgChartView() {
     return [...set].sort((a, b) => (ORG_DEPT_ORDER[a] ?? 99) - (ORG_DEPT_ORDER[b] ?? 99));
   }, [root]);
 
-  // Fills empty join dates by matching each chart entry's name against the
-  // Employee master — additive only (see sync_join_dates's docstring), so
-  // it's safe to click repeatedly and never clobbers a value already on
-  // the node.
-  const handleSyncJoinDates = async () => {
+  // Fills every empty chart field (position, department, division,
+  // sub_team, join_date) by matching each chart entry's name against the
+  // Employee master — additive only, field by field (see
+  // sync_from_employees's docstring), so it's safe to click repeatedly and
+  // never clobbers a value already curated on the node.
+  const handleSyncFromEmployees = async () => {
     setSyncing(true);
     setSyncResult(null);
     try {
-      const res = await hrApi.syncOrgStructureJoinDates();
+      const res = await hrApi.syncOrgStructureFromEmployees();
       setSyncResult(res);
       if (res.updated > 0) await load();
     } catch (err) {
-      setSyncResult({ error: err?.detail || "Failed to sync join dates" });
+      setSyncResult({ error: err?.detail || "Failed to sync from Employee master" });
     } finally {
       setSyncing(false);
     }
@@ -1998,11 +1999,11 @@ function OrgChartView() {
         )}
         <div style={{ flex: 1 }} />
 
-        <button onClick={handleSyncJoinDates} disabled={syncing} title="Fill empty join dates from the Employee master (never overwrites an existing one)"
+        <button onClick={handleSyncFromEmployees} disabled={syncing} title="Fill empty chart fields (position, department, division, team, join date) from the Employee master — never overwrites an existing value"
           className="flex items-center gap-1.5"
           style={{ padding: "7px 12px", borderRadius: 8, border: "none", cursor: syncing ? "wait" : "pointer", background: "#0891b2", color: "#fff", fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>
           {syncing ? <Loader2 size={13} className="animate-spin" /> : <CalendarCheck size={13} />}
-          {syncing ? "Syncing..." : "Sync Join Dates"}
+          {syncing ? "Syncing..." : "Sync from Employee List"}
         </button>
 
         <button onClick={handleDownloadImage} disabled={exportingImage} title="Download as image"
@@ -2027,7 +2028,7 @@ function OrgChartView() {
         <span style={{ fontSize: 10.5, fontWeight: 700, color: "#64748b", minWidth: 34, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
       </div>
 
-      {/* Sync Join Dates result */}
+      {/* Sync from Employee List result */}
       {syncResult && (
         <div style={{
           borderRadius: 10, padding: "9px 14px", fontSize: 11, fontWeight: 600,
@@ -2036,12 +2037,14 @@ function OrgChartView() {
         }}>
           <div style={{ flex: 1 }}>
             {syncResult.error ? syncResult.error : (
-              syncResult.total_missing === 0
-                ? "No positions with an empty join date — nothing to sync."
+              syncResult.nodes_with_gaps === 0
+                ? "Every position already has position/department/division/team/join date filled in — nothing to sync."
                 : <>
-                    Filled {syncResult.updated} of {syncResult.total_missing} empty join date{syncResult.total_missing !== 1 ? "s" : ""} from the Employee master.
+                    Filled {syncResult.updated} of {syncResult.nodes_with_gaps} position{syncResult.nodes_with_gaps !== 1 ? "s" : ""} with missing fields, from the Employee master.
                     {syncResult.unmatched?.length > 0 && ` No matching employee found for: ${syncResult.unmatched.join(", ")}.`}
-                    {syncResult.ambiguous?.length > 0 && ` Skipped (multiple employees share this name, join dates differ): ${syncResult.ambiguous.join(", ")}.`}
+                    {syncResult.ambiguous && Object.keys(syncResult.ambiguous).length > 0 && (
+                      ` Skipped some fields (name matches multiple employees who disagree): ${Object.entries(syncResult.ambiguous).map(([n, fs]) => `${n} (${fs.join(", ")})`).join("; ")}.`
+                    )}
                   </>
             )}
           </div>
