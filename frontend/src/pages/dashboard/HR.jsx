@@ -1522,6 +1522,15 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
   const [supOpen, setSupOpen]   = useState(false);
   const [customFields, setCustomFields] = useState(() => new Set());
 
+  // "Fill from Employee List" — a one-time pre-fill from an existing
+  // Employee record, not a live link (see /employee-search's docstring):
+  // picking a match just populates the fields below, which HR can still
+  // freely adjust before saving, same as if they'd typed them by hand.
+  const [empOpen, setEmpOpen] = useState(false);
+  const [empQuery, setEmpQuery] = useState("");
+  const [empMatches, setEmpMatches] = useState([]);
+  const [empSearching, setEmpSearching] = useState(false);
+
   useEffect(() => {
     hrApi.getOrgStructureLov().then((r) => setLov(r || [])).catch(() => {});
     hrApi.getOrgStructurePositions().then((r) => setPositionLov(r || [])).catch(() => {});
@@ -1529,6 +1538,32 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
     hrApi.getOrgStructureDivisions().then((r) => setDivisionLov(r || [])).catch(() => {});
     hrApi.getOrgStructureSubTeams().then((r) => setSubTeamLov(r || [])).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!empOpen || !empQuery.trim()) { setEmpMatches([]); return; }
+    setEmpSearching(true);
+    const t = setTimeout(() => {
+      hrApi.searchEmployeesForOrgFill(empQuery.trim())
+        .then((r) => setEmpMatches(r || []))
+        .catch(() => setEmpMatches([]))
+        .finally(() => setEmpSearching(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [empQuery, empOpen]);
+
+  const fillFromEmployee = (e) => {
+    setForm((f) => ({
+      ...f,
+      full_name:  e.full_name || f.full_name,
+      position:   e.job_title || f.position,
+      department: e.department || f.department,
+      division:   e.division || f.division,
+      sub_team:   e.team || f.sub_team,
+      join_date:  e.join_date || f.join_date,
+    }));
+    setEmpOpen(false);
+    setEmpQuery("");
+  };
 
   const supervisorName = lov.find((n) => n.id === form.supervisor_id)?.full_name;
   const matches = lov
@@ -1632,6 +1667,47 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
         </div>
 
         <div className="p-6 space-y-3">
+          <div style={{ position: "relative" }}>
+            {!empOpen ? (
+              <button type="button" onClick={() => setEmpOpen(true)}
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: "#2563eb", background: "rgba(37,99,235,0.08)", border: "none", borderRadius: 8, padding: "8px 10px", cursor: "pointer", width: "100%" }}>
+                <Search size={13} /> Fill from Employee List...
+              </button>
+            ) : (
+              <div style={{ borderRadius: 8, background: "#fff", padding: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <Search size={13} color="#94a3b8" />
+                  <input
+                    autoFocus
+                    value={empQuery}
+                    onChange={(e) => setEmpQuery(e.target.value)}
+                    placeholder="Search active employee by name or NIK..."
+                    style={{ flex: 1, fontSize: 12.5, fontWeight: 600, border: "none", outline: "none", color: "#1e293b" }}
+                  />
+                  {empSearching && <Loader2 size={13} className="animate-spin" color="#94a3b8" />}
+                  <button type="button" onClick={() => { setEmpOpen(false); setEmpQuery(""); }}
+                    style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", lineHeight: 0 }}>
+                    <X size={13} />
+                  </button>
+                </div>
+                {empQuery.trim() && (
+                  <div style={{ maxHeight: 160, overflowY: "auto", marginTop: 6 }}>
+                    {empMatches.map((e) => (
+                      <div key={e.user_id} onClick={() => fillFromEmployee(e)}
+                        style={{ padding: "6px 4px", fontSize: 11.5, fontWeight: 600, color: "#1e293b", cursor: "pointer", borderTop: "1px solid #f1f5f9" }}>
+                        {e.full_name} <span style={{ color: "#94a3b8", fontWeight: 500 }}>· {e.job_title || "—"} · {e.department || "—"}</span>
+                      </div>
+                    ))}
+                    {!empSearching && empMatches.length === 0 && (
+                      <div style={{ padding: "6px 4px", fontSize: 11, color: "#94a3b8" }}>No matching active employee</div>
+                    )}
+                  </div>
+                )}
+                <p style={{ fontSize: 10, color: "#94a3b8", marginTop: 6 }}>Fills the fields below — you can still adjust them before saving.</p>
+              </div>
+            )}
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 12px" }}>
             {field("full_name", "Full Name *", { full: true })}
             {selectField("position", "Position", positionLov, { allowCustom: true })}

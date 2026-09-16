@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import require_role, CurrentUser, Roles
+from app.models.employee import Employee
 from app.models.org_structure import OrgStructureNode, OrgStructureUploadLog
 from app.services.department_taxonomy import clean_department_list
 
@@ -121,6 +122,42 @@ async def get_lov(
         .order_by(OrgStructureNode.full_name)
     )
     return [{"id": r[0], "full_name": r[1], "department": r[2]} for r in result.fetchall()]
+
+
+@router.get("/employee-search")
+async def search_employees_for_fill(
+    q:    str          = Query(..., min_length=1),
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Read-only lookup into the Employee table for the Add/Edit Position
+    form's "Fill from Employee List" button — deliberately just a one-time
+    pre-fill of the node form, not a write-side link between
+    OrgStructureNode and Employee. Keeping the two decoupled (see this
+    module's own docstring) means HR can still adjust a chart entry's
+    phrasing/placement afterward without a future Employee edit or a bulk
+    sync silently overwriting that curation. Active employees only — this
+    is for adding someone who's currently here, not editing legacy/resigned
+    chart entries."""
+    term = f"%{q}%"
+    result = await db.execute(
+        select(Employee.user_id, Employee.full_name, Employee.job_title, Employee.department,
+               Employee.division, Employee.team, Employee.date_of_joining)
+        .where(
+            Employee.employment_status == "Active",
+            Employee.full_name.ilike(term) | Employee.user_id.ilike(term),
+        )
+        .order_by(Employee.full_name)
+        .limit(15)
+    )
+    return [
+        {
+            "user_id": r[0], "full_name": r[1], "job_title": r[2], "department": r[3],
+            "division": r[4], "team": r[5],
+            "join_date": r[6].isoformat() if r[6] else None,
+        }
+        for r in result.fetchall()
+    ]
 
 
 @router.get("/departments")
