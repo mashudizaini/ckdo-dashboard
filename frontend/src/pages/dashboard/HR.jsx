@@ -1399,6 +1399,11 @@ function orgCollectIds(node, set) {
 const GM_TIER_RE = /general manager|president director|\bdirector\b|board of/i;
 const isGmTierOrAbove = (node) => !node?.division && GM_TIER_RE.test((node?.position || "").trim());
 
+// The two Korean expat Director/GM positions whose join date isn't shown on
+// the org chart card, per explicit HR correction (2026-09-16) — everyone
+// else's join date shows, at every tier.
+const KOREA_EXPAT_NO_JOIN_DATE = new Set(["Sunho Lee", "Manjae Park"]);
+
 function OrgCard({ node, isPlaceholder, color, isMatch, groupLabel, onNodeClick, hasChildren, width, showJoinDate }) {
   return (
     <div
@@ -1470,12 +1475,11 @@ function OrgNode({ node, mode, expanded, toggle, matchIds, onNodeClick, visibleI
   const isPlaceholder = node.id === null;
   const color = isPlaceholder ? "#94a3b8" : orgDeptColor(node.department);
   const groupLabel = node.sub_team || node.division || node.department || "";
-  // Join date shows from Team Head level down. The horizontal fan-out rows
-  // (mode "h") cover the top brass — root/Board/President Director/GM AND
-  // each GM's direct reports (division heads) per the isGmTierOrAbove
-  // comment above — so "below that" is exactly the vertical tree (mode
-  // "v"), which starts at Team Head and goes down through staff.
-  const showJoinDate = !isPlaceholder && mode === "v";
+  // Join date shows on every real card now — simpler than the earlier
+  // "Team Head level down" tiering, per explicit correction (2026-09-16).
+  // Only these two named Korean expat Director/GM positions are excluded
+  // (their join date isn't meaningful to show here), not a tier rule.
+  const showJoinDate = !isPlaceholder && !KOREA_EXPAT_NO_JOIN_DATE.has(node.full_name);
   // Placeholder ("N branches") nodes have no real position, so just carry
   // the parent's own mode forward instead of falling through to "vertical".
   const childMode = isPlaceholder ? mode : (isGmTierOrAbove(node) ? "h" : "v");
