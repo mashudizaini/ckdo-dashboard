@@ -18,9 +18,8 @@ const NEU = {
 const REC_CFG = {
   "Highly Recommended": { bg: "#dcfce7", color: "#16a34a" },
   "Recommended":         { bg: "#dbeafe", color: "#1d4ed8" },
-  "Consider":            { bg: "#fef3c7", color: "#d97706" },
+  "Considered":          { bg: "#fef3c7", color: "#d97706" },
   "Not Recommended":     { bg: "#fee2e2", color: "#dc2626" },
-  "Error Processing":    { bg: "#f1f5f9", color: "#64748b" },
 };
 
 const CV_SUBTABS = [
@@ -43,7 +42,7 @@ function SortableTHi({ label, field, sortBy, sortDir, onSort, style }) {
 }
 
 function RecBadge({ rec }) {
-  const cfg = REC_CFG[rec] || REC_CFG["Consider"];
+  const cfg = REC_CFG[rec] || REC_CFG["Considered"];
   return (
     <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: cfg.bg, color: cfg.color }}>
       {rec}
@@ -151,7 +150,7 @@ function JobForm({ onSave, onCancel, saving, initial }) {
 
 function JdGeneratorPanel({ onUseCriteria, onCancel }) {
   const [jdText, setJdText] = useState("");
-  const [method, setMethod] = useState("onprem");
+  const [method, setMethod] = useState("anthropic");
   const [uploading, setUploading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(null);
@@ -215,8 +214,8 @@ function JdGeneratorPanel({ onUseCriteria, onCancel }) {
         </label>
         <select value={method} onChange={e => setMethod(e.target.value)}
           style={{ fontSize: 11.5, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: NEU.shadowOutSm, cursor: "pointer", outline: "none", colorScheme: "light" }}>
-          <option value="onprem">Standard (On-Premise AI)</option>
-          <option value="anthropic">Premium (Anthropic Claude)</option>
+          <option value="anthropic">Standard (Claude)</option>
+          <option value="onprem">On-Premise AI</option>
           <option value="template">Template (no AI, instant)</option>
         </select>
       </div>
@@ -433,7 +432,7 @@ function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState(null);
-  const [provider, setProvider] = useState("onprem"); // "onprem" (standard, default) | "anthropic" (premium)
+  const [provider, setProvider] = useState("anthropic"); // "anthropic" (standard, default) | "onprem" (local AI engine)
   const [recFilter, setRecFilter] = useState("");
   const [search, setSearch] = useState("");
   const [sortBy,  setSortBy]  = useState(null);
@@ -475,7 +474,17 @@ function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || JSON.stringify(data));
-      setUploadMsg({ type: "success", text: `Screened ${data.count} CV(s) successfully` });
+      // A CV that failed extraction/AI analysis never becomes a candidate
+      // row (see upload_and_screen) — surfaced here per-file instead, so
+      // it's still visible without an "Error Processing" entry cluttering
+      // the Result column.
+      const failedText = data.failed_count > 0
+        ? ` — ${data.failed_count} failed: ${data.failed.map(f => f.filename).join(", ")}`
+        : "";
+      setUploadMsg({
+        type: data.failed_count > 0 && data.count === 0 ? "error" : data.failed_count > 0 ? "warning" : "success",
+        text: `Screened ${data.count} CV(s) successfully${failedText}`,
+      });
       fetchCandidates();
     } catch (err) {
       setUploadMsg({ type: "error", text: err.message || "Upload failed" });
@@ -547,8 +556,8 @@ function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
               <select value={provider} onChange={e => setProvider(e.target.value)} disabled={uploading}
                 title="AI provider used to analyze each CV"
                 style={{ fontSize: 11.5, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: NEU.shadowOutSm, cursor: "pointer", outline: "none", colorScheme: "light" }}>
-                <option value="onprem">Standard (On-Premise AI)</option>
-                <option value="anthropic">Premium (Anthropic Claude)</option>
+                <option value="anthropic">Standard (Claude)</option>
+                <option value="onprem">On-Premise AI</option>
               </select>
               <label>
                 <input ref={fileRef} type="file" accept=".pdf,.docx,.doc,.txt" multiple onChange={handleUpload} style={{ display: "none" }} />
@@ -569,11 +578,11 @@ function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
             <div style={{
               padding: "10px 16px", borderRadius: 12, fontSize: 12, fontWeight: 600,
               display: "flex", alignItems: "center", gap: 8,
-              background: uploadMsg.type === "error" ? "#fee2e2" : "#dcfce7",
-              color: uploadMsg.type === "error" ? "#dc2626" : "#16a34a",
+              background: uploadMsg.type === "error" ? "#fee2e2" : uploadMsg.type === "warning" ? "#fef3c7" : "#dcfce7",
+              color: uploadMsg.type === "error" ? "#dc2626" : uploadMsg.type === "warning" ? "#d97706" : "#16a34a",
               boxShadow: NEU.shadowOutSm,
             }}>
-              {uploadMsg.type === "error" ? <X size={13} /> : <CheckCircle size={13} />}
+              {uploadMsg.type === "error" ? <X size={13} /> : uploadMsg.type === "warning" ? <AlertTriangle size={13} /> : <CheckCircle size={13} />}
               {uploadMsg.text}
             </div>
           )}
@@ -585,7 +594,7 @@ function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
                 { label: "Total CVs",       val: stats.total,              color: "#2563eb" },
                 { label: "Highly Rec.",     val: stats.highly_recommended, color: "#16a34a" },
                 { label: "Recommended",     val: stats.recommended,        color: "#1d4ed8" },
-                { label: "Consider",        val: stats.consider,           color: "#d97706" },
+                { label: "Considered",      val: stats.considered,         color: "#d97706" },
                 { label: "Not Recommended", val: stats.not_recommended,    color: "#dc2626" },
                 { label: "Avg. Score",      val: stats.average_score,      color: "#7c3aed" },
               ].map(c => (
@@ -601,7 +610,7 @@ function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <select value={recFilter} onChange={e => setRecFilter(e.target.value)}
               style={{ fontSize: 12, fontWeight: 600, padding: "6px 12px", borderRadius: 8, border: "none", background: NEU.bg, color: "#1e293b", boxShadow: NEU.shadowOutSm, cursor: "pointer", outline: "none" }}>
-              <option value="">All Recommendations</option>
+              <option value="">All</option>
               {Object.keys(REC_CFG).map(r => <option key={r} value={r}>{r}</option>)}
             </select>
             <div style={{ position: "relative" }}>
@@ -630,7 +639,7 @@ function ScreeningTab({ jobs, activeJobId, setActiveJobId }) {
                     <SortableTHi label="Education"      field="education"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} style={{ borderBottom: "2px solid rgba(0,0,0,0.06)" }} />
                     <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10.5, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "2px solid rgba(0,0,0,0.06)" }}>Skills</th>
                     <SortableTHi label="Score"          field="total_score"      sortBy={sortBy} sortDir={sortDir} onSort={handleSort} style={{ borderBottom: "2px solid rgba(0,0,0,0.06)" }} />
-                    <SortableTHi label="Recommendation" field="recommendation"   sortBy={sortBy} sortDir={sortDir} onSort={handleSort} style={{ borderBottom: "2px solid rgba(0,0,0,0.06)" }} />
+                    <SortableTHi label="Result"         field="recommendation"   sortBy={sortBy} sortDir={sortDir} onSort={handleSort} style={{ borderBottom: "2px solid rgba(0,0,0,0.06)" }} />
                     <th style={{ padding: "10px 12px", borderBottom: "2px solid rgba(0,0,0,0.06)" }} />
                   </tr>
                 </thead>
@@ -873,7 +882,7 @@ function CandidateDatabaseTab() {
   const HEADERS = [
     ["Position", "position_title"], ["Name", "name"], ["Email", "email"], ["Phone", "phone"],
     ["Experience (yrs)", "experience_years"], ["Education", "education"], ["Total Score", "total_score"],
-    ["Recommendation", "recommendation"], ["Status", "is_hired"], ["File Name", "filename"], ["Processed Date", "screened_at"],
+    ["Result", "recommendation"], ["Status", "is_hired"], ["File Name", "filename"], ["Processed Date", "screened_at"],
   ];
 
   return (

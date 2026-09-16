@@ -138,7 +138,11 @@ export const hrApi = {
   getCvStats:      (id)     => api.get(`/dashboard/hr/cv-screening/jobs/${id}/stats`),
   exportCvExcel:   (id)     => `/api/v1/dashboard/hr/cv-screening/jobs/${id}/export`,
   uploadCvJd:      (form)   => api.post("/dashboard/hr/cv-screening/jd/upload", form, { headers: { "Content-Type": undefined } }),
-  generateCvJd:    (d)      => api.post("/dashboard/hr/cv-screening/jd/generate", d),
+  // On-premise (qwen3:30b) can take a couple minutes for this prompt — the
+  // client's default 30s timeout was firing well before the backend's own
+  // (now 300s) Ollama timeout ever got a chance, so this was aborting the
+  // request client-side long before the AI engine was actually stuck.
+  generateCvJd:    (d)      => api.post("/dashboard/hr/cv-screening/jd/generate", d, { timeout: 300000 }),
   hireCvCandidate: (id, d)  => api.put(`/dashboard/hr/cv-screening/candidates/${id}/hire`, d),
   getCvDetail:     (p)      => api.get("/dashboard/hr/cv-screening/detail", { params: p }),
   getAllCvCandidates: (p)   => api.get("/dashboard/hr/cv-screening/candidates", { params: p }),

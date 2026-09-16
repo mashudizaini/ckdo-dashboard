@@ -177,7 +177,7 @@ async def delete_job(
 async def upload_and_screen(
     job_id: int,
     files: List[UploadFile] = File(...),
-    provider: str = Query("onprem", description='"onprem" (standard, default) or "anthropic" (premium)'),
+    provider: str = Query("anthropic", description='"anthropic" (standard, default) or "onprem" (local AI engine)'),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_role(Roles.HR)),
 ):
@@ -194,6 +194,7 @@ async def upload_and_screen(
         raise HTTPException(400, "Job has no required skills configured")
 
     candidates = []
+    failed = []
     for f in files:
         ext = os.path.splitext(f.filename)[1].lower()
         if ext not in ALLOWED_EXT:
@@ -212,16 +213,30 @@ async def upload_and_screen(
             if os.path.exists(file_path):
                 os.remove(file_path)
 
+        # A failed screen (extraction/AI error — see screen_cv's except
+        # branch) doesn't become a candidate row at all: an "Error
+        # Processing" result category isn't a real screening outcome, and
+        # leaving it in the table just clutters the Result column/filter
+        # forever with something that isn't an actual recommendation.
+        # Reported back to the caller instead, per-file, so HR knows to
+        # retry that one CV.
+        if data.get("error"):
+            failed.append({"filename": f.filename, "error": data["error"]})
+            continue
+
         c = CvScreeningCandidate(job_id=job_id, **data)
         db.add(c)
         candidates.append(c)
 
-    if not candidates:
+    if not candidates and not failed:
         raise HTTPException(400, f"No valid CV files uploaded. Allowed: {', '.join(ALLOWED_EXT)}")
 
     await db.flush()
     candidates.sort(key=lambda c: c.total_score, reverse=True)
-    return {"count": len(candidates), "candidates": [_candidate_to_dict(c) for c in candidates]}
+    return {
+        "count": len(candidates), "candidates": [_candidate_to_dict(c) for c in candidates],
+        "failed_count": len(failed), "failed": failed,
+    }
 
 
 # ── Candidates ───────────────────────────────────────────────────────
@@ -327,14 +342,13 @@ async def get_stats(
     by_rec = {}
     for c in candidates:
         by_rec[c.recommendation] = by_rec.get(c.recommendation, 0) + 1
-    scores = [c.total_score for c in candidates if c.recommendation != "Error Processing"]
+    scores = [c.total_score for c in candidates]
     return {
         "total": total,
         "highly_recommended": by_rec.get("Highly Recommended", 0),
         "recommended": by_rec.get("Recommended", 0),
-        "consider": by_rec.get("Consider", 0),
+        "considered": by_rec.get("Considered", 0),
         "not_recommended": by_rec.get("Not Recommended", 0),
-        "errors": by_rec.get("Error Processing", 0),
         "average_score": round(sum(scores) / len(scores), 1) if scores else 0,
     }
 
@@ -409,7 +423,7 @@ async def get_screening_detail(
 
 class JdGenerateRequest(BaseModel):
     jd_text: str
-    method: str = "onprem"  # "onprem" (standard, default) | "anthropic" (premium) | "template" (offline, no AI)
+    method: str = "anthropic"  # "anthropic" (standard, default) | "onprem" (local AI engine) | "template" (offline, no AI)
 
 
 @router.post("/jd/upload")
@@ -484,7 +498,7 @@ async def export_excel(
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Screening Results"
-    headers = ["Name", "Email", "Phone", "Total Score", "Recommendation", "Confidence",
+    headers = ["Name", "Email", "Phone", "Total Score", "Result", "Confidence",
                "Relevant Exp (yrs)", "Total Exp (yrs)", "Education", "Skills Found",
                "Missing Skills", "Skills Score", "Experience Score", "Education Score",
                "Certification Score", "Filename", "Screened At"]
