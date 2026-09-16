@@ -25,6 +25,7 @@ import app.models.investment_plan  # noqa: F401
 import app.models.opex_plan  # noqa: F401
 import app.models.db_browser_audit  # noqa: F401
 import app.models.org_structure  # noqa: F401
+import app.models.department_master  # noqa: F401
 import app.models.user_api_key  # noqa: F401
 import app.models.meeting_recording  # noqa: F401
 import app.models.speaker_voiceprint  # noqa: F401
@@ -81,6 +82,11 @@ async def lifespan(app: FastAPI):
     if settings.environment == "development":
         async with async_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+
+    # Seed the department/division/team master hierarchy (curated display
+    # order for Employee Summary etc.) — no-ops once already seeded.
+    from app.services.department_master_service import ensure_seeded as ensure_department_master_seeded
+    await ensure_department_master_seeded()
 
     # Initialize Oracle Thick Mode
     init_oracle_client()

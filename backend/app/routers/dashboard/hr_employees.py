@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import require_role, get_current_user, CurrentUser, Roles
 from app.models.employee import Employee, EmployeeUploadLog, EmployeeHistory
+from app.services import department_master_service
 from app.services.department_taxonomy import clean_department_list
 
 router = APIRouter()
@@ -1450,13 +1451,21 @@ _DEPT_GROUP_MAP = {
 LEAD_TEAM_NAMES = ("Director", "General Manager", "Senior Manager")
 
 
-def _team_sort_key(team: str):
+def _team_sort_key(team: str, dept: Optional[str] = None, division: Optional[str] = None, team_seq: Optional[dict] = None):
     """Sort key for team rows within a department or division: a
     Director leads first (outranks everyone), General Manager next,
-    Senior Manager next, everything else alphabetical after."""
+    Senior Manager next, then the curated order from department_master
+    (department_master_service.get_order_maps's team_seq, keyed by
+    (department, division_or_None, team)) for everyone else, falling back
+    to alphabetical for any team not in that master table. `dept`/
+    `division`/`team_seq` are optional so this still works as a plain
+    alphabetical-after-leads sort if a caller doesn't have order data handy."""
     if team in LEAD_TEAM_NAMES:
-        return (LEAD_TEAM_NAMES.index(team), "")
-    return (len(LEAD_TEAM_NAMES), team)
+        return (0, LEAD_TEAM_NAMES.index(team), "")
+    seq = (team_seq or {}).get((dept, division, team))
+    if seq is not None:
+        return (1, seq, team)
+    return (2, 0, team)
 
 
 def _group_department(raw: Optional[str], team: Optional[str] = None, job_title: Optional[str] = None) -> Optional[str]:
@@ -1526,12 +1535,16 @@ async def get_summary_by_year(
     emps_with_title = [row for row in emps_with_title if row[0] is not None]
     emps = [(d, v, t, j, r, es) for d, v, t, _jt, j, r, es in emps_with_title]
 
+    order_maps = await department_master_service.get_order_maps(db)
+    dept_seq, division_seq, team_seq = order_maps["dept_seq"], order_maps["division_seq"], order_maps["team_seq"]
+
     default_year_from = min((j.year for _d, _v, _t, j, _r, _es in emps), default=today.year)
     target_from = year_from or default_year_from
     target_to = min(year_to, today.year) if year_to else today.year
     year_list = list(range(target_from, target_to + 1)) if target_from <= target_to else [target_to]
 
-    departments = DEPT_GROUPS
+    ordered_dept_groups = sorted(DEPT_GROUPS, key=lambda d: dept_seq.get(d, 99))
+    departments = ordered_dept_groups
 
     def active_count(snapshot, dept_filter=None, division_filter=None, team_filter=None):
         return sum(
@@ -1554,7 +1567,7 @@ async def get_summary_by_year(
         return result
 
     rows = []
-    for label in DEPT_GROUPS:
+    for label in ordered_dept_groups:
         rows.append({"department": label, "division": None, "team": None, "by_year": by_year_for(label)})
 
         # "President Director" is a singleton role, not a department with
@@ -1567,8 +1580,14 @@ async def get_summary_by_year(
         if label == "President Director":
             continue
 
-        divisions_in_dept = sorted({v for d, v, _t, _j, _r, _es in emps if d == label and v})
-        teams_direct = sorted({t for d, v, t, _j, _r, _es in emps if d == label and not v and t}, key=_team_sort_key)
+        divisions_in_dept = sorted(
+            {v for d, v, _t, _j, _r, _es in emps if d == label and v},
+            key=lambda v: (division_seq.get((label, v), 99), v),
+        )
+        teams_direct = sorted(
+            {t for d, v, t, _j, _r, _es in emps if d == label and not v and t},
+            key=lambda t: _team_sort_key(t, label, None, team_seq),
+        )
 
         # A department-scoped Director, then General Manager, lead the whole
         # department (rows #1/#2 after the department total) even when the
@@ -1597,10 +1616,10 @@ async def get_summary_by_year(
                 "department": label, "division": division, "team": None,
                 "by_year": by_year_for(label, division),
             })
-            teams_in_division = sorted({
-                t for d, v, t, _j, _r, _es in emps
-                if d == label and v == division and t
-            }, key=_team_sort_key)
+            teams_in_division = sorted(
+                {t for d, v, t, _j, _r, _es in emps if d == label and v == division and t},
+                key=lambda t: _team_sort_key(t, label, division, team_seq),
+            )
 
             # A division head (e.g. Production Management's "Senior
             # Manager", Quality Management's "General Manager") gets the
@@ -1667,6 +1686,10 @@ async def get_summary_by_month(
     emps_with_title = [row for row in emps_with_title if row[0] is not None]
     emps = [(d, v, t, j, r, es) for d, v, t, _jt, j, r, es in emps_with_title]
 
+    order_maps = await department_master_service.get_order_maps(db)
+    dept_seq, division_seq, team_seq = order_maps["dept_seq"], order_maps["division_seq"], order_maps["team_seq"]
+    ordered_dept_groups = sorted(DEPT_GROUPS, key=lambda d: dept_seq.get(d, 99))
+
     today = date.today()
     months = list(range(1, 13))
 
@@ -1696,7 +1719,7 @@ async def get_summary_by_month(
         return result
 
     rows = []
-    for label in DEPT_GROUPS:
+    for label in ordered_dept_groups:
         rows.append({"department": label, "division": None, "team": None, "by_month": by_month_for(label)})
 
         # See the matching comment in /summary/by-year — "President Director"
@@ -1705,8 +1728,14 @@ async def get_summary_by_month(
         if label == "President Director":
             continue
 
-        divisions_in_dept = sorted({v for d, v, _t, _j, _r, _es in emps if d == label and v})
-        teams_direct = sorted({t for d, v, t, _j, _r, _es in emps if d == label and not v and t}, key=_team_sort_key)
+        divisions_in_dept = sorted(
+            {v for d, v, _t, _j, _r, _es in emps if d == label and v},
+            key=lambda v: (division_seq.get((label, v), 99), v),
+        )
+        teams_direct = sorted(
+            {t for d, v, t, _j, _r, _es in emps if d == label and not v and t},
+            key=lambda t: _team_sort_key(t, label, None, team_seq),
+        )
 
         # A department-scoped Director, then General Manager, lead the whole
         # department (rows #1/#2 after the department total) even when the
@@ -1730,10 +1759,10 @@ async def get_summary_by_month(
                 "department": label, "division": division, "team": None,
                 "by_month": by_month_for(label, division),
             })
-            teams_in_division = sorted({
-                t for d, v, t, _j, _r, _es in emps
-                if d == label and v == division and t
-            }, key=_team_sort_key)
+            teams_in_division = sorted(
+                {t for d, v, t, _j, _r, _es in emps if d == label and v == division and t},
+                key=lambda t: _team_sort_key(t, label, division, team_seq),
+            )
 
             # See the matching comment in /summary/by-year for
             # `division_lead_label`.
@@ -1824,7 +1853,14 @@ async def get_departments(
     result = await db.execute(
         select(Employee.department).distinct()
     )
-    return clean_department_list(r[0] for r in result.fetchall())
+    names = clean_department_list(r[0] for r in result.fetchall())
+    # Curated order from department_master where available (see its own
+    # module docstring), alphabetical for anything not in that table (a
+    # misfiled/legacy value, or a department added there but not yet in
+    # department_master) so nothing silently disappears from the dropdown.
+    order_maps = await department_master_service.get_order_maps(db)
+    dept_seq = order_maps["dept_seq"]
+    return sorted(names, key=lambda n: (dept_seq.get(n, 99), n))
 
 
 @router.get("/teams")
@@ -1834,11 +1870,28 @@ async def get_teams(
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
     """Daftar team untuk filter dropdown, opsional difilter per department."""
-    q = select(Employee.team).distinct().order_by(Employee.team)
+    q = select(Employee.team).distinct()
     if department:
         q = q.where(Employee.department == department)
     result = await db.execute(q)
-    return [r[0] for r in result.fetchall() if r[0]]
+    names = [r[0] for r in result.fetchall() if r[0]]
+
+    # Curated order from department_master's team_seq — keyed by
+    # (department, division_or_None, team), so a flat "teams for a
+    # department" list (no division context here) takes the best
+    # (lowest) sequence found across any division that team appears
+    # under, falling back to alphabetical for anything unmapped.
+    order_maps = await department_master_service.get_order_maps(db)
+    team_seq = order_maps["team_seq"]
+
+    def _rank(name):
+        candidates = [
+            seq for (d, _v, t), seq in team_seq.items()
+            if t == name and (department is None or d == department)
+        ]
+        return (min(candidates), name) if candidates else (99, name)
+
+    return sorted(names, key=_rank)
 
 
 @router.get("/educations")
