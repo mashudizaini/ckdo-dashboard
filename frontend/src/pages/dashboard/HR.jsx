@@ -1387,7 +1387,7 @@ function orgCollectIds(node, set) {
 const GM_TIER_RE = /general manager|president director|\bdirector\b|board of/i;
 const isGmTierOrAbove = (node) => !node?.division && GM_TIER_RE.test((node?.position || "").trim());
 
-function OrgCard({ node, isPlaceholder, color, isMatch, groupLabel, onNodeClick, hasChildren, width }) {
+function OrgCard({ node, isPlaceholder, color, isMatch, groupLabel, onNodeClick, hasChildren, width, showJoinDate }) {
   return (
     <div
       onClick={() => !isPlaceholder && onNodeClick(node)}
@@ -1432,6 +1432,11 @@ function OrgCard({ node, isPlaceholder, color, isMatch, groupLabel, onNodeClick,
             }} title={node.full_name}>
               {node.full_name || "—"}
             </div>
+            {showJoinDate && (
+              <div style={{ fontSize: 8.5, fontWeight: 600, color: "#64748b", marginTop: 3 }}>
+                Joined {_fmtEmpDate(node.join_date)}
+              </div>
+            )}
             {hasChildren && (
               <div style={{ fontSize: 8.5, fontWeight: 700, color: "#94a3b8", marginTop: 2 }}>
                 {node.children.length} direct report{node.children.length !== 1 ? "s" : ""}
@@ -1453,6 +1458,12 @@ function OrgNode({ node, mode, expanded, toggle, matchIds, onNodeClick, visibleI
   const isPlaceholder = node.id === null;
   const color = isPlaceholder ? "#94a3b8" : orgDeptColor(node.department);
   const groupLabel = node.sub_team || node.division || node.department || "";
+  // Join date shows from Team Head level down. The horizontal fan-out rows
+  // (mode "h") cover the top brass — root/Board/President Director/GM AND
+  // each GM's direct reports (division heads) per the isGmTierOrAbove
+  // comment above — so "below that" is exactly the vertical tree (mode
+  // "v"), which starts at Team Head and goes down through staff.
+  const showJoinDate = !isPlaceholder && mode === "v";
   // Placeholder ("N branches") nodes have no real position, so just carry
   // the parent's own mode forward instead of falling through to "vertical".
   const childMode = isPlaceholder ? mode : (isGmTierOrAbove(node) ? "h" : "v");
@@ -1468,7 +1479,7 @@ function OrgNode({ node, mode, expanded, toggle, matchIds, onNodeClick, visibleI
     return (
       <li>
         <div style={{ position: "relative" }}>
-          <OrgCard node={node} isPlaceholder={isPlaceholder} color={color} isMatch={isMatch} groupLabel={groupLabel} onNodeClick={onNodeClick} hasChildren={hasChildren} width={168} />
+          <OrgCard node={node} isPlaceholder={isPlaceholder} color={color} isMatch={isMatch} groupLabel={groupLabel} onNodeClick={onNodeClick} hasChildren={hasChildren} width={168} showJoinDate={showJoinDate} />
           {hasChildren && (
             <button
               onClick={(e) => { e.stopPropagation(); toggle(node.id); }}
@@ -1510,7 +1521,7 @@ function OrgNode({ node, mode, expanded, toggle, matchIds, onNodeClick, visibleI
           <span style={{ flexShrink: 0, width: 20, height: 20 }} />
         )}
 
-        <OrgCard node={node} isPlaceholder={isPlaceholder} color={color} isMatch={isMatch} groupLabel={groupLabel} onNodeClick={onNodeClick} hasChildren={hasChildren} width={190} />
+        <OrgCard node={node} isPlaceholder={isPlaceholder} color={color} isMatch={isMatch} groupLabel={groupLabel} onNodeClick={onNodeClick} hasChildren={hasChildren} width={190} showJoinDate={showJoinDate} />
       </div>
 
       {childList}
