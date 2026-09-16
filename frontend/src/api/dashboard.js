@@ -158,6 +158,7 @@ export const hrApi = {
   getOrgStructureList:    (p)         => api.get("/dashboard/hr/org-structure/list", { params: p }),
   getOrgStructureLov:     ()          => api.get("/dashboard/hr/org-structure/lov"),
   searchEmployeesForOrgFill: (q)      => api.get("/dashboard/hr/org-structure/employee-search", { params: { q } }),
+  syncOrgStructureJoinDates: ()       => api.post("/dashboard/hr/org-structure/sync-join-dates"),
   getOrgStructureDepts:   ()          => api.get("/dashboard/hr/org-structure/departments"),
   getOrgStructurePositions: ()        => api.get("/dashboard/hr/org-structure/positions"),
   getOrgStructureDivisions: ()        => api.get("/dashboard/hr/org-structure/divisions"),

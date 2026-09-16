@@ -1813,6 +1813,8 @@ function OrgChartView() {
   const [selectedNode, setSelectedNode] = useState(null);
   const [error, setError]       = useState("");
   const [exportingImage, setExportingImage] = useState(false);
+  const [syncing, setSyncing]   = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
   const chartRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -1910,6 +1912,24 @@ function OrgChartView() {
     return [...set].sort((a, b) => (ORG_DEPT_ORDER[a] ?? 99) - (ORG_DEPT_ORDER[b] ?? 99));
   }, [root]);
 
+  // Fills empty join dates by matching each chart entry's name against the
+  // Employee master — additive only (see sync_join_dates's docstring), so
+  // it's safe to click repeatedly and never clobbers a value already on
+  // the node.
+  const handleSyncJoinDates = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await hrApi.syncOrgStructureJoinDates();
+      setSyncResult(res);
+      if (res.updated > 0) await load();
+    } catch (err) {
+      setSyncResult({ error: err?.detail || "Failed to sync join dates" });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const handleDownloadImage = async () => {
     if (!chartRef.current) return;
     setExportingImage(true);
@@ -1978,6 +1998,13 @@ function OrgChartView() {
         )}
         <div style={{ flex: 1 }} />
 
+        <button onClick={handleSyncJoinDates} disabled={syncing} title="Fill empty join dates from the Employee master (never overwrites an existing one)"
+          className="flex items-center gap-1.5"
+          style={{ padding: "7px 12px", borderRadius: 8, border: "none", cursor: syncing ? "wait" : "pointer", background: "#0891b2", color: "#fff", fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>
+          {syncing ? <Loader2 size={13} className="animate-spin" /> : <CalendarCheck size={13} />}
+          {syncing ? "Syncing..." : "Sync Join Dates"}
+        </button>
+
         <button onClick={handleDownloadImage} disabled={exportingImage} title="Download as image"
           className="flex items-center gap-1.5"
           style={{ padding: "7px 12px", borderRadius: 8, border: "none", cursor: exportingImage ? "wait" : "pointer", background: "#2563eb", color: "#fff", fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>
@@ -1999,6 +2026,30 @@ function OrgChartView() {
         ))}
         <span style={{ fontSize: 10.5, fontWeight: 700, color: "#64748b", minWidth: 34, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
       </div>
+
+      {/* Sync Join Dates result */}
+      {syncResult && (
+        <div style={{
+          borderRadius: 10, padding: "9px 14px", fontSize: 11, fontWeight: 600,
+          background: syncResult.error ? "#fee2e2" : "#e0f2fe", color: syncResult.error ? "#dc2626" : "#075985",
+          display: "flex", alignItems: "flex-start", gap: 10,
+        }}>
+          <div style={{ flex: 1 }}>
+            {syncResult.error ? syncResult.error : (
+              syncResult.total_missing === 0
+                ? "No positions with an empty join date — nothing to sync."
+                : <>
+                    Filled {syncResult.updated} of {syncResult.total_missing} empty join date{syncResult.total_missing !== 1 ? "s" : ""} from the Employee master.
+                    {syncResult.unmatched?.length > 0 && ` No matching employee found for: ${syncResult.unmatched.join(", ")}.`}
+                    {syncResult.ambiguous?.length > 0 && ` Skipped (multiple employees share this name, join dates differ): ${syncResult.ambiguous.join(", ")}.`}
+                  </>
+            )}
+          </div>
+          <button onClick={() => setSyncResult(null)} style={{ border: "none", background: "none", cursor: "pointer", color: "inherit", opacity: 0.6, flexShrink: 0 }}>
+            <X size={13} />
+          </button>
+        </div>
+      )}
 
       {/* Legend */}
       {deptsPresent.length > 0 && (

@@ -160,6 +160,62 @@ async def search_employees_for_fill(
     ]
 
 
+def _norm_name(s: Optional[str]) -> str:
+    return " ".join((s or "").strip().lower().split())
+
+
+@router.post("/sync-join-dates")
+async def sync_join_dates(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Fills in empty join_date on chart entries by matching full_name
+    against the Employee master (any employment_status — a chart entry can
+    be a legacy/resigned person too). Deliberately additive-only: never
+    touches a node that already has a join_date, so this stays safe to
+    re-run and never overwrites a value HR entered/corrected by hand — same
+    "decoupled, one-time prefill" philosophy as /employee-search, just
+    applied in bulk instead of one node at a time. A name matching more
+    than one Employee with different join dates is left alone rather than
+    guessing which one is right."""
+    nodes_result = await db.execute(
+        select(OrgStructureNode).where(OrgStructureNode.join_date.is_(None))
+    )
+    empty_nodes = nodes_result.scalars().all()
+    if not empty_nodes:
+        return {"total_missing": 0, "updated": 0, "unmatched": [], "ambiguous": []}
+
+    emp_result = await db.execute(select(Employee.full_name, Employee.date_of_joining))
+    by_name: dict[str, set] = {}
+    for full_name, doj in emp_result.fetchall():
+        key = _norm_name(full_name)
+        if not key:
+            continue
+        by_name.setdefault(key, set()).add(doj)
+
+    updated, unmatched, ambiguous = [], [], []
+    for node in empty_nodes:
+        key = _norm_name(node.full_name)
+        dates = by_name.get(key)
+        if not dates:
+            unmatched.append(node.full_name)
+            continue
+        real_dates = {d for d in dates if d is not None}
+        if len(real_dates) != 1:
+            ambiguous.append(node.full_name)
+            continue
+        node.join_date = next(iter(real_dates))
+        updated.append(node.full_name)
+
+    await db.commit()
+    return {
+        "total_missing": len(empty_nodes),
+        "updated": len(updated), "updated_names": updated,
+        "unmatched": unmatched,
+        "ambiguous": ambiguous,
+    }
+
+
 @router.get("/departments")
 async def get_departments(
     db:   AsyncSession = Depends(get_db),
