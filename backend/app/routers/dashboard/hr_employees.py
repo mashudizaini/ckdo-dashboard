@@ -1379,6 +1379,64 @@ async def get_turnover_summary(
     }
 
 
+@router.get("/turnover-summary/resigned-list")
+async def get_turnover_resigned_list(
+    year:       int           = Query(...),
+    month:      Optional[int] = Query(None, ge=1, le=12),
+    department: Optional[str] = Query(None),
+    team:       Optional[str] = Query(None),
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """The actual employees behind one bar of the Turnover Report chart —
+    same scope rules as /turnover-summary's own breakdown (by_dept/by_level/
+    by_status/avg_tenure): one month if `month` is given, else the full
+    year. Backs the chart's click-to-drill-down popup."""
+    from datetime import date
+    from calendar import monthrange
+
+    if month:
+        b_start = date(year, month, 1)
+        b_end = date(year, month, monthrange(year, month)[1])
+    else:
+        b_start = date(year, 1, 1)
+        b_end = date(year, 12, 31)
+
+    q = select(Employee).where(
+        Employee.resign_date.isnot(None),
+        Employee.resign_date >= b_start,
+        Employee.resign_date <= b_end,
+    )
+    if department:
+        q = q.where(Employee.department == department)
+    if team:
+        q = q.where(Employee.team == team)
+    q = q.order_by(Employee.resign_date.desc())
+
+    result = await db.execute(q)
+    emps = result.scalars().all()
+    return [
+        {
+            "user_id":          e.user_id,
+            "full_name":        e.full_name,
+            "department":       e.department,
+            "division":         e.division,
+            "team":             e.team,
+            "level":            e.level,
+            "job_title":        e.job_title,
+            "status":           e.status,
+            "date_of_joining":  str(e.date_of_joining) if e.date_of_joining else None,
+            "resign_date":      str(e.resign_date) if e.resign_date else None,
+            "resign_reason":    e.resign_reason,
+            "tenure_years": (
+                round((e.resign_date - e.date_of_joining).days / 365.25, 1)
+                if e.date_of_joining and e.resign_date else None
+            ),
+        }
+        for e in emps
+    ]
+
+
 def _normalize_dept(raw: Optional[str]) -> str:
     """Same value stored with different casing (e.g. "Plant" / "PLANT") is a
     known data-quality issue in the source Excel — group them together here

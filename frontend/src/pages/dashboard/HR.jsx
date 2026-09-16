@@ -3386,6 +3386,10 @@ function TurnoverSection() {
   const [departments, setDepartments] = useState([]);
   const [teams, setTeams] = useState([]);
 
+  // Click a bar on the resign trend chart -> who actually resigned that
+  // month (or, clicking the chart title's own scope, the whole year).
+  const [drillDown, setDrillDown] = useState(null); // {year, month, label} | null
+
   const fetchTeams = useCallback(async (dept) => {
     try {
       const url = dept ? `${API}/teams?department=${encodeURIComponent(dept)}` : `${API}/teams`;
@@ -3530,13 +3534,23 @@ function TurnoverSection() {
       {RC ? (
         <>
           <SummaryChartCard title={`Resign & Turnover Rate Trend (Jan–Dec ${year})`}>
+            <p className="text-[10px] text-gray-600 -mt-1 mb-1">Click a bar to see who resigned that month</p>
             <RC.ResponsiveContainer width="100%" height={CHART_H}>
               <RC.ComposedChart data={resign_trend} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
                 <RC.XAxis dataKey="label" tick={tickStyle} />
                 <RC.YAxis yAxisId="left" tick={tickStyle} allowDecimals={false} />
                 <RC.YAxis yAxisId="right" orientation="right" tick={tickStyle} unit="%" />
                 <RC.Tooltip {...tooltipStyle} formatter={(v, name) => name === "turnover_rate" ? [`${v}%`, "Turnover Rate"] : [v, "Resigned"]} />
-                <RC.Bar yAxisId="left" dataKey="resigns" fill="#fb7185" radius={[3, 3, 0, 0]} />
+                <RC.Bar
+                  yAxisId="left" dataKey="resigns" fill="#fb7185" radius={[3, 3, 0, 0]}
+                  cursor="pointer"
+                  onClick={(barProps) => {
+                    const row = barProps?.payload ?? barProps;
+                    if (!row?.month) return;
+                    const [y, m] = row.month.split("-").map(Number);
+                    setDrillDown({ year: y, month: m, department: deptFilter, team: teamFilter, label: `${row.label} ${y}` });
+                  }}
+                />
                 <RC.Line yAxisId="right" type="monotone" dataKey="turnover_rate" stroke="#fbbf24" strokeWidth={2} dot={false} />
               </RC.ComposedChart>
             </RC.ResponsiveContainer>
@@ -3558,6 +3572,89 @@ function TurnoverSection() {
       ) : (
         <div className="py-6 text-center text-xs text-gray-300">Loading charts…</div>
       )}
+
+      {drillDown && (
+        <TurnoverResignedListModal {...drillDown} onClose={() => setDrillDown(null)} />
+      )}
+    </div>
+  );
+}
+
+// ── Turnover Report chart click -> who actually resigned that month ───────
+function TurnoverResignedListModal({ year, month, department, team, label, onClose }) {
+  const { token } = useAuthStore();
+  const headers = { Authorization: `Bearer ${token}` };
+  const [rows, setRows] = useState(null);
+  const [errMsg, setErrMsg] = useState("");
+
+  useEffect(() => {
+    const params = new URLSearchParams({
+      year, month,
+      ...(department ? { department } : {}),
+      ...(team ? { team } : {}),
+    });
+    fetch(`${API}/turnover-summary/resigned-list?${params}`, { headers })
+      .then(async (r) => {
+        const body = await r.json();
+        if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
+        return body;
+      })
+      .then(setRows)
+      .catch((e) => setErrMsg(e.message || "Network error"));
+  }, [year, month, department, team]); // eslint-disable-line
+
+  const COLS = [
+    ["full_name", "Name"], ["department", "Department"], ["division", "Division"], ["team", "Team"],
+    ["level", "Level"], ["job_title", "Job Title"], ["status", "Status"],
+    ["date_of_joining", "Join Date"], ["resign_date", "Resign Date"], ["tenure_years", "Tenure (yrs)"],
+    ["resign_reason", "Resign Reason"],
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,0.6)" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-4xl max-h-[85vh] overflow-y-auto rounded-2xl border border-gray-800 bg-gray-900">
+        <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3.5 border-b border-gray-800 bg-gray-900">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-100">Resigned — {label}</h3>
+            <p className="text-xs text-gray-500 mt-0.5">{rows ? `${rows.length} employee${rows.length === 1 ? "" : "s"}` : "Loading..."}</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-gray-500 hover:text-gray-200 hover:bg-gray-800 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-4">
+          {errMsg && <p className="text-xs text-red-400 font-semibold px-1 pb-2">{errMsg}</p>}
+          {!rows ? (
+            <div className="py-12 text-center"><Loader2 size={18} className="mx-auto animate-spin text-gray-600" /></div>
+          ) : rows.length === 0 ? (
+            <p className="py-12 text-center text-xs text-gray-500">No one resigned in this period.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-800">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-800/70">
+                  <tr>
+                    {COLS.map(([key, colLabel]) => (
+                      <th key={key} className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{colLabel}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800">
+                  {rows.map((r) => (
+                    <tr key={r.user_id} className="hover:bg-gray-800/30">
+                      {COLS.map(([key]) => (
+                        <td key={key} className={`px-3 py-2 whitespace-nowrap ${key === "full_name" ? "font-medium text-gray-200" : "text-gray-400"}`}>
+                          {r[key] ?? "—"}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
