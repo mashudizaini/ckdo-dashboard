@@ -3154,16 +3154,15 @@ function EmployeeYearSummaryTable({ onYearClick }) {
               else if (isDivisionHeader) toggleDivision(toggleKey);
             };
             // Lead rows ("Director"/"General Manager"/"Senior Manager") show
-            // as "<job title> - <team>" (e.g. "Department Head - General
-            // Manager", "Division Head - Senior Manager") to match the
-            // company's org chart image — falls back to the plain team name
-            // when no one currently fills that role. Two identical values
-            // (e.g. Plant's own "Director"/"Director") would otherwise
-            // render as a redundant "Director - Director" — only combine
-            // when the two actually say something different, same treatment
-            // as President Director's own flat "President Director" label
-            // (job_title alone, no team suffix).
-            const label = row.team && row.lead_title && row.lead_title !== row.team
+            // as "<role> - <team>" (e.g. "Department Head - General
+            // Manager", "Division Head - Senior Manager", "Department Head
+            // - Director") to match the company's org chart image —
+            // row.lead_title is always the fixed role ("Department Head" /
+            // "Division Head" from _lead_row_role), never the actual
+            // person's own job_title, so it never collides with the team
+            // value even when someone's real title literally reads
+            // "Director" (e.g. Plant).
+            const label = row.team && row.lead_title
               ? `${row.lead_title} - ${row.team}`
               : (row.team || row.division || row.department);
             const pad = ["", "pl-8", "pl-16", "pl-24"][level] || "pl-24";
@@ -3310,7 +3309,9 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
                   if (level === 0) toggleDept(toggleKey);
                   else if (isDivisionHeader) toggleDivision(toggleKey);
                 };
-                const label = row.team && row.lead_title && row.lead_title !== row.team
+                // See EmployeeYearSummaryTable's matching comment — lead_title
+                // is always the fixed "Department Head"/"Division Head" role.
+                const label = row.team && row.lead_title
                   ? `${row.lead_title} - ${row.team}`
                   : (row.team || row.division || row.department);
                 const pad = ["", "pl-8", "pl-16", "pl-24"][level] || "pl-24";
@@ -3476,9 +3477,15 @@ function TurnoverSection() {
   // month (or, clicking the chart title's own scope, the whole year).
   const [drillDown, setDrillDown] = useState(null); // {year, month, label} | null
 
+  // exclude_leads drops the "Director"/"General Manager"/"Senior Manager"
+  // placeholder values Employee.team holds for department/division-head
+  // level employees — not real teams, so they don't belong in a Team
+  // filter meant to narrow the turnover breakdown to an actual team.
   const fetchTeams = useCallback(async (dept) => {
     try {
-      const url = dept ? `${API}/teams?department=${encodeURIComponent(dept)}` : `${API}/teams`;
+      const url = dept
+        ? `${API}/teams?department=${encodeURIComponent(dept)}&exclude_leads=true`
+        : `${API}/teams?exclude_leads=true`;
       const res = await fetch(url, { headers });
       if (res.ok) setTeams(await res.json());
     } catch (_) {}

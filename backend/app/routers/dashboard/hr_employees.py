@@ -1555,22 +1555,18 @@ def _group_department(raw: Optional[str], team: Optional[str] = None, job_title:
     return _DEPT_GROUP_MAP.get(raw.strip().upper())
 
 
-def _lead_job_title(emps_with_title, dept_filter, division_filter, team_filter) -> Optional[str]:
-    """Representative job_title for a department-lead row ("Director" /
-    "General Manager") — the image this tree is meant to match labels these
-    rows "<job title> - <team>" (e.g. "Department Head - General Manager"),
-    but a summary row is a count, not one person, so this picks whichever
-    job_title to show. These are normally single-person buckets; when more
-    than one employee has ever held the slot (e.g. a resigned predecessor),
-    the currently-Active one wins, falling back to any if none is Active."""
-    candidates = [
-        (jt, es) for d, v, t, jt, _j, _r, es in emps_with_title
-        if d == dept_filter and v == division_filter and t == team_filter and jt
-    ]
-    if not candidates:
-        return None
-    active = [jt for jt, es in candidates if es == "Active"]
-    return active[0] if active else candidates[0][0]
+def _lead_row_role(division_filter) -> str:
+    """Fixed role label for a lead row ("Director"/"General Manager"/
+    "Senior Manager") — the image this tree is meant to match labels these
+    rows "<role> - <team>" (e.g. "Department Head - General Manager",
+    "Division Head - Senior Manager"). This is a FIXED label based on
+    where the row sits (straight under the department vs. under a
+    division), not the actual person's own job_title — those can read
+    identically to the team value itself (e.g. Plant's Director's real
+    job_title is literally "Director", same string as their `team`
+    placeholder), which used to collapse the label down to a bare
+    "Director" instead of "Department Head - Director"."""
+    return "Division Head" if division_filter else "Department Head"
 
 
 @router.get("/summary/by-year")
@@ -1676,7 +1672,7 @@ async def get_summary_by_year(
             if teams_direct and teams_direct[0] == lead_team:
                 rows.append({
                     "department": label, "division": None, "team": lead_team,
-                    "lead_title": _lead_job_title(emps_with_title, label, None, lead_team),
+                    "lead_title": _lead_row_role(None),
                     "by_year": by_year_for(label, None, lead_team),
                 })
                 lead_team_label = lead_team_label or lead_team
@@ -1702,7 +1698,7 @@ async def get_summary_by_year(
                 if teams_in_division and teams_in_division[0] == lead_team:
                     rows.append({
                         "department": label, "division": division, "team": lead_team,
-                        "lead_title": _lead_job_title(emps_with_title, label, division, lead_team),
+                        "lead_title": _lead_row_role(division),
                         "by_year": by_year_for(label, division, lead_team),
                     })
                     division_lead_label = division_lead_label or lead_team
@@ -1819,7 +1815,7 @@ async def get_summary_by_month(
             if teams_direct and teams_direct[0] == lead_team:
                 rows.append({
                     "department": label, "division": None, "team": lead_team,
-                    "lead_title": _lead_job_title(emps_with_title, label, None, lead_team),
+                    "lead_title": _lead_row_role(None),
                     "by_month": by_month_for(label, None, lead_team),
                 })
                 lead_team_label = lead_team_label or lead_team
@@ -1842,7 +1838,7 @@ async def get_summary_by_month(
                 if teams_in_division and teams_in_division[0] == lead_team:
                     rows.append({
                         "department": label, "division": division, "team": lead_team,
-                        "lead_title": _lead_job_title(emps_with_title, label, division, lead_team),
+                        "lead_title": _lead_row_role(division),
                         "by_month": by_month_for(label, division, lead_team),
                     })
                     division_lead_label = division_lead_label or lead_team
@@ -1936,16 +1932,28 @@ async def get_departments(
 
 @router.get("/teams")
 async def get_teams(
-    department: Optional[str] = Query(None),
+    department:    Optional[str] = Query(None),
+    exclude_leads: bool          = Query(False),  # drop LEAD_TEAM_NAMES ("Director"/"General Manager"/"Senior Manager") placeholder values
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Daftar team untuk filter dropdown, opsional difilter per department."""
+    """Daftar team untuk filter dropdown, opsional difilter per department.
+
+    Employee.team also holds LEAD_TEAM_NAMES placeholder values ("Director"
+    / "General Manager" / "Senior Manager") for department/division-head
+    level employees who don't belong to a real team — see this value's use
+    in _team_sort_key for the Employee Summary hierarchy this was built
+    for. Those aren't real teams, so a caller filtering BY team (e.g.
+    Turnover Report) passes exclude_leads=true to drop them; left off by
+    default so this doesn't change Employee List's existing team filter,
+    which callers may still want to include them in."""
     q = select(Employee.team).distinct()
     if department:
         q = q.where(Employee.department == department)
     result = await db.execute(q)
     names = [r[0] for r in result.fetchall() if r[0]]
+    if exclude_leads:
+        names = [n for n in names if n not in LEAD_TEAM_NAMES]
 
     # Curated order from department_master's team_seq — keyed by
     # (department, division_or_None, team), so a flat "teams for a
