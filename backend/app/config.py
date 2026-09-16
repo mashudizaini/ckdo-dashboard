@@ -185,6 +185,15 @@ class Settings(BaseSettings):
     # there's no Dashboard JWT to validate instead.
     ebs_chat_service_key: str = ""
 
+    # AP Autoinvoice — Google Drive polling. Path is inside the container
+    # (backend/credentials/ on the host, bind-mounted to /app like the rest
+    # of backend/ — see .gitignore, this file is deployed straight to the
+    # server, never through git, same as .env itself). Shared Drive ID
+    # comes from its URL (drive.google.com/drive/folders/<this>) once
+    # opened as a Shared Drive, not a regular folder.
+    gdrive_service_account_json: str = "/app/credentials/sso-dashboard-490501-ab13df3c569e.json"
+    gdrive_shared_drive_id: str = "0AIVSTEWPWT8uUk9PVA"
+
     class Config:
         env_file = ".env"
         case_sensitive = False

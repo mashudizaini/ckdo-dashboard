@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Upload, FileText, CheckCircle, Send, Loader2, AlertTriangle,
   RefreshCw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, X, Pencil, Trash2, Save, Search, Paperclip, Link2,
+  Cloud, FolderPlus,
 } from "lucide-react";
 import { apInvoiceApi, supplierWhtApi } from "@/api/dashboard";
 
@@ -72,6 +73,178 @@ function EditInput({ value, onChange, type = "text", align = "left", style: extr
         ...extraStyle,
       }}
     />
+  );
+}
+
+// Collapsible admin panel — watched Google Drive folders (one per user,
+// each mapped to a subfolder of the configured Shared Drive), last sync
+// run, and a manual "Sync Now" (the actual polling happens on its own via
+// Celery Beat every ~10 min — see ap_invoice_gdrive_service.py). Closed by
+// default so it doesn't compete with the invoice list most people open
+// this page for.
+function GdriveSyncPanel() {
+  const [open, setOpen] = useState(false);
+  const [status, setStatus] = useState(null);
+  const [folders, setFolders] = useState([]);
+  const [subfolders, setSubfolders] = useState([]);
+  const [loadingSubfolders, setLoadingSubfolders] = useState(false);
+  const [newLabel, setNewLabel] = useState("");
+  const [newFolderId, setNewFolderId] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  const loadStatus = async () => {
+    try { setStatus(await apInvoiceApi.gdriveStatus()); } catch (_) {}
+  };
+  const loadFolders = async () => {
+    try { setFolders(await apInvoiceApi.gdriveListFolders()); } catch (_) {}
+  };
+  const loadSubfolders = async () => {
+    setLoadingSubfolders(true);
+    try { setSubfolders(await apInvoiceApi.gdriveSubfolders()); }
+    catch (_) { setSubfolders([]); }
+    finally { setLoadingSubfolders(false); }
+  };
+
+  useEffect(() => { loadStatus(); loadFolders(); }, []);
+  useEffect(() => { if (open) { loadStatus(); loadFolders(); loadSubfolders(); } }, [open]); // eslint-disable-line
+
+  const handleSyncNow = async () => {
+    setSyncing(true);
+    setMsg(null);
+    try {
+      await apInvoiceApi.gdriveSyncNow();
+      setMsg({ type: "success", text: "Sync dimulai di background — status akan diperbarui dalam beberapa saat." });
+    } catch (e) {
+      setMsg({ type: "error", text: e?.detail || "Gagal memulai sync" });
+    } finally {
+      setSyncing(false);
+      // The sync itself runs in a Celery worker, not this request — give it
+      // a few seconds before refreshing status. The invoice list's own
+      // Refresh button (top of the page) is what picks up newly-synced
+      // invoices once they land.
+      setTimeout(loadStatus, 4000);
+    }
+  };
+
+  const handleAddFolder = async () => {
+    if (!newLabel.trim() || !newFolderId) { setMsg({ type: "error", text: "Pilih nama user dan folder-nya" }); return; }
+    setMsg(null);
+    try {
+      await apInvoiceApi.gdriveAddFolder({ user_label: newLabel.trim(), folder_id: newFolderId });
+      setNewLabel(""); setNewFolderId("");
+      await loadFolders();
+    } catch (e) {
+      setMsg({ type: "error", text: e?.detail || "Gagal menambah folder" });
+    }
+  };
+
+  const handleRemoveFolder = async (id) => {
+    if (!confirm("Berhenti memantau folder ini? Invoice yang sudah diproses tidak terpengaruh.")) return;
+    try {
+      await apInvoiceApi.gdriveDeleteFolder(id);
+      await loadFolders();
+    } catch (e) {
+      setMsg({ type: "error", text: e?.detail || "Gagal menghapus" });
+    }
+  };
+
+  const mappedFolderIds = new Set(folders.map(f => f.folder_id));
+  const availableSubfolders = subfolders.filter(f => !mappedFolderIds.has(f.id));
+  const lastRun = status?.last_run;
+  const lastRunSummary = lastRun?.summary;
+
+  return (
+    <div style={{ borderRadius: 18, overflow: "hidden", boxShadow: NEU.shadowOut, background: NEU.bg }}>
+      <div onClick={() => setOpen(o => !o)}
+        style={{ padding: "12px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Cloud size={15} color="#64748b" />
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>Google Drive Auto-Sync</span>
+          {status && (
+            <span style={{
+              fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 20,
+              background: status.configured ? "#d1fae5" : "#fee2e2",
+              color: status.configured ? "#059669" : "#dc2626",
+            }}>
+              {status.configured ? "Configured" : "Not configured"}
+            </span>
+          )}
+        </div>
+        {open ? <ChevronUp size={16} color="#64748b" /> : <ChevronDown size={16} color="#64748b" />}
+      </div>
+
+      {open && (
+        <div style={{ padding: "0 18px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <p style={{ fontSize: 11.5, color: "#64748b", margin: 0 }}>
+            Setiap user upload PDF invoice ke subfolder mereka sendiri di Shared Drive — sistem otomatis
+            memindai tiap ~10 menit, memproses PDF baru persis seperti upload manual, lalu memindahkan file
+            ke subfolder <b>Processed</b> (berhasil) atau <b>Error</b> (gagal, nama file diberi keterangan error).
+          </p>
+
+          {msg && (
+            <div style={{
+              padding: "8px 12px", borderRadius: 8, fontSize: 11.5, fontWeight: 600,
+              background: msg.type === "error" ? "#fee2e2" : "#d1fae5",
+              color: msg.type === "error" ? "#dc2626" : "#059669",
+            }}>
+              {msg.text}
+            </div>
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 11, color: "#64748b" }}>
+              {lastRun ? (
+                <>
+                  Terakhir sync: <b>{lastRun.finished_at ? new Date(lastRun.finished_at).toLocaleString("id-ID") : "sedang berjalan..."}</b>
+                  {lastRunSummary && lastRunSummary.skipped !== true && (
+                    <> — {lastRunSummary.processed ?? 0} diproses, {lastRunSummary.errors ?? 0} gagal, {lastRunSummary.skipped ?? 0} dilewati</>
+                  )}
+                  {lastRun.error_message && <span style={{ color: "#dc2626" }}> — {lastRun.error_message}</span>}
+                </>
+              ) : "Belum pernah sync."}
+            </div>
+            <NeuBtn small icon={RefreshCw} label={syncing ? "Syncing..." : "Sync Now"} color="#0369a1"
+              onClick={handleSyncNow} loading={syncing} disabled={!status?.configured} />
+          </div>
+
+          <div>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+              Folder yang dipantau ({folders.length})
+            </div>
+            {folders.length === 0 ? (
+              <p style={{ fontSize: 11.5, color: "#94a3b8", margin: 0 }}>Belum ada folder terdaftar.</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {folders.map(f => (
+                  <div key={f.id} style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "6px 10px", borderRadius: 8, background: "#fff", fontSize: 11.5,
+                  }}>
+                    <span style={{ fontWeight: 600, color: "#1e293b" }}>{f.user_label}</span>
+                    <button onClick={() => handleRemoveFolder(f.id)} title="Berhenti memantau"
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 2 }}>
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="Nama user (mis. Budi Santoso)"
+              style={{ fontSize: 11.5, fontWeight: 600, padding: "7px 10px", borderRadius: 8, border: "none", background: "#fff", color: "#1e293b", outline: "none", flex: "1 1 180px" }} />
+            <select value={newFolderId} onChange={e => setNewFolderId(e.target.value)} disabled={loadingSubfolders}
+              style={{ fontSize: 11.5, fontWeight: 600, padding: "7px 10px", borderRadius: 8, border: "none", background: "#fff", color: "#1e293b", outline: "none", cursor: "pointer", flex: "1 1 200px" }}>
+              <option value="">{loadingSubfolders ? "Memuat folder..." : "— Pilih subfolder di Shared Drive —"}</option>
+              {availableSubfolders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+            <NeuBtn small icon={FolderPlus} label="Tambah" color="#2563eb" onClick={handleAddFolder} />
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -356,6 +529,8 @@ export default function APAutoInvoice() {
         </div>
       </div>
 
+      <GdriveSyncPanel />
+
       {/* Batch upload progress */}
       {batchProgress && (
         <div style={{
@@ -479,7 +654,19 @@ export default function APAutoInvoice() {
                           style={{ width: 14, height: 14, cursor: "pointer" }} />
                       </td>
                       <td style={{ padding: "10px 14px" }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1e293b" }}>{inv.invoice_num}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ fontSize: 12.5, fontWeight: 700, color: "#1e293b" }}>{inv.invoice_num}</span>
+                          {inv.source_channel === "gdrive" && (
+                            <span title={`Auto-synced from Google Drive${inv.gdrive_uploader ? ` — ${inv.gdrive_uploader}` : ""}`}
+                              style={{
+                                display: "inline-flex", alignItems: "center", gap: 3,
+                                fontSize: 9.5, fontWeight: 700, color: "#0369a1",
+                                background: "#e0f2fe", borderRadius: 6, padding: "1px 6px", whiteSpace: "nowrap",
+                              }}>
+                              <Cloud size={9} /> {inv.gdrive_uploader || "Drive"}
+                            </span>
+                          )}
+                        </div>
                         <div style={{ fontSize: 11, color: "#64748b", fontWeight: 500 }}>{inv.vendor_name}</div>
                       </td>
                       <td style={{ padding: "10px 14px", fontSize: 12, color: "#475569", whiteSpace: "nowrap" }}>

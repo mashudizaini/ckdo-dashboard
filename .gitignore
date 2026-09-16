@@ -27,3 +27,7 @@ sumber/
 # Runtime-generated, not source
 backend/downloads/
 nginx/ssl/
+
+# Google service account keys — deployed directly to the server (same as
+# .env), never through git.
+backend/credentials/

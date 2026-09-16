@@ -8,7 +8,7 @@ celery_app = Celery(
     "ckdo_dashboard",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.tasks.oracle_sync", "app.tasks.report_gen", "app.tasks.eis_etl_tasks", "app.tasks.document_converter_tasks", "app.tasks.document_translation_tasks", "app.tasks.openwebui_sync_tasks"],
+    include=["app.tasks.oracle_sync", "app.tasks.report_gen", "app.tasks.eis_etl_tasks", "app.tasks.document_converter_tasks", "app.tasks.document_translation_tasks", "app.tasks.openwebui_sync_tasks", "app.tasks.ap_invoice_gdrive_tasks"],
 )
 
 celery_app.conf.update(
@@ -50,5 +50,13 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.openwebui_sync_tasks.sync_to_openwebui",
         "schedule": crontab(hour=1, minute=30),
         "kwargs": {"triggered_by": "nightly-scheduler"},
+    },
+    # AP Autoinvoice — polls each watched Google Drive folder for new PDFs
+    # (see ap_invoice_gdrive_service.py). No-ops quickly (is_configured()
+    # check) until the service account/Shared Drive are actually set up.
+    "ap-invoice-gdrive-sync": {
+        "task": "app.tasks.ap_invoice_gdrive_tasks.sync_gdrive_invoices",
+        "schedule": crontab(minute="*/10"),
+        "kwargs": {"triggered_by": "scheduler"},
     },
 }

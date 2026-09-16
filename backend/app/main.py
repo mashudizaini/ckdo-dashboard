@@ -95,6 +95,10 @@ async def lifespan(app: FastAPI):
     from app.routers.dashboard.ap_invoice import ensure_staging_table
     ensure_staging_table()
 
+    # Create AP Invoice Google Drive auto-sync tables (folder map + sync log)
+    from app.services.ap_invoice_gdrive_service import ensure_tables as ensure_gdrive_tables
+    ensure_gdrive_tables()
+
     # Create Supplier WHT master table (psycopg2 sync)
     from app.services.supplier_wht_service import ensure_table as ensure_wht_table
     ensure_wht_table()

@@ -446,6 +446,14 @@ export const apInvoiceApi = {
   attachPdf:       (id)       => api.post(`/dashboard/accounting/ap-invoice/attach/${id}`),
   getPoLines:      (poNumber) => api.get(`/dashboard/accounting/ap-invoice/po-lines/${poNumber}`),
   glDatePreview:   (receivedDate) => api.get("/dashboard/accounting/ap-invoice/gl-date-preview", { params: { received_date: receivedDate } }),
+
+  // Google Drive auto-sync
+  gdriveStatus:      ()          => api.get("/dashboard/accounting/ap-invoice/gdrive/status"),
+  gdriveSyncNow:     ()          => api.post("/dashboard/accounting/ap-invoice/gdrive/sync"),
+  gdriveSubfolders:  ()          => api.get("/dashboard/accounting/ap-invoice/gdrive/subfolders"),
+  gdriveListFolders: ()          => api.get("/dashboard/accounting/ap-invoice/gdrive/folders"),
+  gdriveAddFolder:   (data)      => api.post("/dashboard/accounting/ap-invoice/gdrive/folders", data),
+  gdriveDeleteFolder:(id)        => api.delete(`/dashboard/accounting/ap-invoice/gdrive/folders/${id}`),
 };
 
 export const oracleEnvApi = {

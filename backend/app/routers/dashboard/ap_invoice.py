@@ -10,9 +10,11 @@ import psycopg2
 import anthropic
 import httpx
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from pydantic import BaseModel
 from app.config import get_settings
 from app.database import get_oracle_connection
 from app.services import ap_invoice_service as svc
+from app.services import ap_invoice_gdrive_service as gdrive_svc
 
 router = APIRouter()
 settings = get_settings()
@@ -102,6 +104,23 @@ def ensure_staging_table():
             conn.rollback()
         try:
             cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS awt_group_name VARCHAR(240)")
+        except Exception:
+            conn.rollback()
+        # Google Drive auto-sync (see ap_invoice_gdrive_service.py) — 'manual'
+        # (the existing /upload endpoint) vs 'gdrive'; gdrive_file_id is how
+        # a re-run of the sync tells "already processed" from "new file"
+        # without reprocessing, independent of whatever happens to the file
+        # afterward in Drive (renamed, moved between folders, etc).
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS source_channel VARCHAR(20) DEFAULT 'manual'")
+        except Exception:
+            conn.rollback()
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS gdrive_file_id VARCHAR(100)")
+        except Exception:
+            conn.rollback()
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS gdrive_uploader VARCHAR(150)")
         except Exception:
             conn.rollback()
         conn.commit()
@@ -452,3 +471,54 @@ async def delete_invoice(stg_id: int):
             os.remove(filepath)
 
     return {"message": "Deleted", "stg_id": stg_id}
+
+
+# ── Google Drive auto-sync (see ap_invoice_gdrive_service.py) ─────────────
+
+class GdriveFolderMapCreate(BaseModel):
+    user_label: str
+    folder_id: str
+
+
+@router.get("/gdrive/status")
+async def gdrive_status():
+    return {"configured": gdrive_svc.is_configured(), "last_run": gdrive_svc.get_last_sync()}
+
+
+@router.post("/gdrive/sync")
+async def gdrive_sync_now():
+    if not gdrive_svc.is_configured():
+        raise HTTPException(400, "Google Drive belum dikonfigurasi (service account JSON / Shared Drive ID belum diset)")
+    from app.tasks.celery_app import celery_app
+    task = celery_app.send_task("app.tasks.ap_invoice_gdrive_tasks.sync_gdrive_invoices", kwargs={"triggered_by": "manual"})
+    return {"message": "Sync Google Drive dimulai di background — cek status beberapa saat lagi.", "task_id": task.id}
+
+
+@router.get("/gdrive/subfolders")
+async def gdrive_list_subfolders():
+    """Subfolders directly under the configured Shared Drive — lets the
+    admin UI offer a picker instead of a hand-copied folder ID."""
+    if not gdrive_svc.is_configured():
+        raise HTTPException(400, "Google Drive belum dikonfigurasi (service account JSON / Shared Drive ID belum diset)")
+    try:
+        return gdrive_svc.list_shared_drive_subfolders()
+    except Exception as e:
+        raise HTTPException(502, f"Gagal ambil daftar folder dari Google Drive: {e}")
+
+
+@router.get("/gdrive/folders")
+async def gdrive_list_folders():
+    return gdrive_svc.list_folder_maps()
+
+
+@router.post("/gdrive/folders")
+async def gdrive_add_folder(body: GdriveFolderMapCreate):
+    if not body.user_label.strip() or not body.folder_id.strip():
+        raise HTTPException(400, "user_label dan folder_id wajib diisi")
+    return gdrive_svc.add_folder_map(body.user_label.strip(), body.folder_id.strip())
+
+
+@router.delete("/gdrive/folders/{map_id}")
+async def gdrive_delete_folder(map_id: int):
+    gdrive_svc.delete_folder_map(map_id)
+    return {"message": "Deleted"}

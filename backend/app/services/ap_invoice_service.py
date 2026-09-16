@@ -352,14 +352,16 @@ def list_invoices(db_conn) -> list[dict]:
                subtotal, invoice_amount, status, error_msg, source_file,
                TO_CHAR(created_date, 'DD/MM/YYYY HH24:MI:SS'),
                TO_CHAR(processed_date, 'DD/MM/YYYY HH24:MI:SS'),
-               ap_invoice_id, wht_enabled, wht_amount, awt_group_id, awt_group_name
+               ap_invoice_id, wht_enabled, wht_amount, awt_group_id, awt_group_name,
+               source_channel, gdrive_uploader
         FROM ap_invoice_stg
         ORDER BY created_date DESC
     """)
     cols = ["stg_id", "invoice_num", "vendor_name", "vendor_id", "invoice_date", "po_number",
             "subtotal", "invoice_amount", "status", "error_msg", "source_file",
             "created_date", "processed_date", "ap_invoice_id",
-            "wht_enabled", "wht_amount", "awt_group_id", "awt_group_name"]
+            "wht_enabled", "wht_amount", "awt_group_id", "awt_group_name",
+            "source_channel", "gdrive_uploader"]
     rows = [dict(zip(cols, r)) for r in cur.fetchall()]
     for r in rows:
         for key in ("subtotal", "invoice_amount", "wht_amount"):
