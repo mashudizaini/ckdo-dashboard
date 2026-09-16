@@ -11,6 +11,13 @@ class OrgStructureNode(Base):
 
     id             = Column(Integer, primary_key=True, autoincrement=True)
     full_name      = Column(String(200), nullable=False)
+    # Employee.user_id, set once /org-structure/sync-from-employees links this
+    # node to a real employee (by name match). No FK constraint — org chart
+    # entries deliberately stay decoupled from Employee (see this class's own
+    # docstring), so a soft reference here doesn't break if the Employee row
+    # is later removed. Once set, sync switches from name-matching to this
+    # reliable id for that node.
+    employee_id    = Column(String(20), nullable=True, index=True)
     position       = Column(String(200))
     department     = Column(String(100))   # top-level branch, e.g. Sales & Marketing
     division       = Column(String(100))

@@ -1923,7 +1923,7 @@ function OrgChartView() {
     try {
       const res = await hrApi.syncOrgStructureFromEmployees();
       setSyncResult(res);
-      if (res.updated > 0) await load();
+      if (res.linked > 0 || res.field_updated > 0) await load();
     } catch (err) {
       setSyncResult({ error: err?.detail || "Failed to sync from Employee master" });
     } finally {
@@ -2037,14 +2037,13 @@ function OrgChartView() {
         }}>
           <div style={{ flex: 1 }}>
             {syncResult.error ? syncResult.error : (
-              syncResult.nodes_with_gaps === 0
-                ? "Every position already has position/department/division/team/join date filled in — nothing to sync."
+              syncResult.linked === 0 && syncResult.field_updated === 0 && syncResult.unmatched?.length === 0 && syncResult.ambiguous_identity?.length === 0
+                ? "Every position is already linked and filled in — nothing to sync."
                 : <>
-                    Filled {syncResult.updated} of {syncResult.nodes_with_gaps} position{syncResult.nodes_with_gaps !== 1 ? "s" : ""} with missing fields, from the Employee master.
+                    Linked {syncResult.linked} new position{syncResult.linked !== 1 ? "s" : ""} to the Employee master (matched by name — exact, then a looser partial match) and filled in fields on {syncResult.field_updated}.
+                    {syncResult.renamed?.length > 0 && ` Corrected the chart name to match Employee for: ${syncResult.renamed_names.join(", ")}.`}
                     {syncResult.unmatched?.length > 0 && ` No matching employee found for: ${syncResult.unmatched.join(", ")}.`}
-                    {syncResult.ambiguous && Object.keys(syncResult.ambiguous).length > 0 && (
-                      ` Skipped some fields (name matches multiple employees who disagree): ${Object.entries(syncResult.ambiguous).map(([n, fs]) => `${n} (${fs.join(", ")})`).join("; ")}.`
-                    )}
+                    {syncResult.ambiguous_identity?.length > 0 && ` Skipped (name matches more than one employee): ${syncResult.ambiguous_identity.join(", ")}.`}
                   </>
             )}
           </div>
@@ -2208,6 +2207,7 @@ function OrgManageView() {
           <thead className="sticky top-0 z-10 bg-gray-800">
             <tr>
               <SortableTH label="Name" field="full_name" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500" title="Linked Employee record — set by Sync from Employee List on the Chart tab">Employee ID</th>
               <SortableTH label="Position" field="position" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <SortableTH label="Department" field="department" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Division / Sub-team</th>
@@ -2218,12 +2218,17 @@ function OrgManageView() {
           </thead>
           <tbody className="divide-y divide-gray-800">
             {loading ? (
-              <tr><td colSpan={7} className="py-12 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></td></tr>
+              <tr><td colSpan={8} className="py-12 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></td></tr>
             ) : sorted.length === 0 ? (
-              <tr><td colSpan={7} className="py-12 text-center text-xs text-gray-600">No structure data yet. Add a position or import Excel.</td></tr>
+              <tr><td colSpan={8} className="py-12 text-center text-xs text-gray-600">No structure data yet. Add a position or import Excel.</td></tr>
             ) : sorted.map((n) => (
               <tr key={n.id} onClick={() => setModalNode(n)} className="hover:bg-gray-800/40 cursor-pointer transition-colors">
                 <td className="px-3 py-2.5 font-medium text-gray-200 whitespace-nowrap">{n.full_name}</td>
+                <td className="px-3 py-2.5 text-xs whitespace-nowrap font-mono">
+                  {n.employee_id
+                    ? <span className="text-emerald-400">{n.employee_id}</span>
+                    : <span className="text-gray-600">not linked</span>}
+                </td>
                 <td className="px-3 py-2.5 text-gray-400 text-xs whitespace-nowrap">{n.position || "—"}</td>
                 <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap">{n.department || "—"}</td>
                 <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{[n.division, n.sub_team].filter(Boolean).join(" / ") || "—"}</td>

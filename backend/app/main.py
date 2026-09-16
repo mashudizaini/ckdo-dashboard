@@ -88,6 +88,11 @@ async def lifespan(app: FastAPI):
     from app.services.department_master_service import ensure_seeded as ensure_department_master_seeded
     await ensure_department_master_seeded()
 
+    # Organization Chart — add employee_id (links a chart entry to its
+    # Employee master record once matched by /sync-from-employees).
+    from app.routers.dashboard.hr_org_structure import ensure_employee_id_column
+    await ensure_employee_id_column()
+
     # Initialize Oracle Thick Mode
     init_oracle_client()
 

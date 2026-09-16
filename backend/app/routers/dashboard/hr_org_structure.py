@@ -13,16 +13,30 @@ from typing import Optional
 import openpyxl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
 from pydantic import BaseModel
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_db, async_engine
 from app.dependencies import require_role, CurrentUser, Roles
 from app.models.employee import Employee
 from app.models.org_structure import OrgStructureNode, OrgStructureUploadLog
 from app.services.department_taxonomy import clean_department_list
 
 router = APIRouter()
+
+
+async def ensure_employee_id_column():
+    """org_structure_nodes already existed before employee_id was added to
+    the model — Base.metadata.create_all only creates missing TABLES, it
+    never ALTERs an existing one for a new column (see this repo's other
+    ensure_* helpers for the same reason), so this runs once at startup."""
+    async with async_engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE org_structure_nodes ADD COLUMN IF NOT EXISTS employee_id VARCHAR(20)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_org_structure_nodes_employee_id ON org_structure_nodes (employee_id)"
+        ))
 
 # Left-to-right branch order at the top of the chart — matches "Organization
 # Structure CKDOTTO.xlsx" and the department order in the Daftar Karyawan
@@ -52,6 +66,7 @@ def _node_dict(n: OrgStructureNode) -> dict:
     return {
         "id": n.id,
         "full_name": n.full_name,
+        "employee_id": n.employee_id,
         "position": n.position,
         "department": n.department,
         "division": n.division,
@@ -175,75 +190,111 @@ _SYNC_FIELDS = [
 ]
 
 
+def _fuzzy_candidates(node_name_norm: str, emp_rows: list) -> list:
+    """LIKE-style fallback for when the exact normalized name doesn't hit
+    anything — a lot of chart entries carry an incomplete/abbreviated name
+    (e.g. "M. Nur Aidi S" for "Muhammad Nur Aidi Setiawan"), so this checks
+    substring containment in both directions instead of requiring an exact
+    match. Deliberately simple (no token/initials matching) — a first pass
+    per HR's own request, refine later if it's not catching enough."""
+    out = []
+    for row in emp_rows:
+        en = _norm_name(row.full_name)
+        if not en:
+            continue
+        if node_name_norm in en or en in node_name_norm:
+            out.append(row)
+    return out
+
+
 @router.post("/sync-from-employees")
 async def sync_from_employees(
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Fills in EVERY empty chart field (position, department, division,
-    sub_team, join_date) by matching full_name against the Employee master
-    (any employment_status — a chart entry can be a legacy/resigned person
-    too). Deliberately additive-only, field by field: a field is only
-    touched if it's currently empty on the node, so this stays safe to
-    re-run and never overwrites something HR entered/corrected by hand —
-    same "decoupled, one-time prefill" philosophy as /employee-search, just
-    applied across every field and every node instead of one field at a
-    time. If a name matches more than one Employee and they disagree on a
-    given field, that one field is left alone (reported as ambiguous)
-    rather than guessing — other fields on the same node still sync
-    normally."""
+    """Two-phase sync against the Employee master, which is the reference
+    for this data:
+
+    Phase 1 — IDENTITY: for every node without an employee_id yet, find its
+    Employee by full_name — exact match first, falling back to a LIKE-style
+    substring match in either direction (see _fuzzy_candidates) since many
+    chart names are incomplete. Exactly one candidate -> link
+    node.employee_id to it AND overwrite node.full_name with the Employee's
+    real name (Employee is the reference, so unlike every other field this
+    one is NOT additive-only — it's corrected every run). More than one
+    candidate -> left alone and reported as ambiguous rather than guessing.
+
+    Phase 2 — FIELDS: for every node that has an employee_id (just linked
+    above, or already linked from an earlier run), fill in any empty
+    position/department/division/sub_team/join_date straight from that
+    Employee row by id — reliable now that the identity is confirmed, so
+    unlike Phase 1 there's no ambiguity to resolve here. Still additive:
+    only touches a field that's currently empty."""
     nodes_result = await db.execute(select(OrgStructureNode))
     nodes = nodes_result.scalars().all()
 
     emp_result = await db.execute(
-        select(Employee.full_name, Employee.job_title, Employee.department,
+        select(Employee.user_id, Employee.full_name, Employee.job_title, Employee.department,
                Employee.division, Employee.team, Employee.date_of_joining)
     )
-    by_name: dict[str, list] = {}
-    for row in emp_result.fetchall():
+    emp_rows = emp_result.fetchall()
+    by_exact_name: dict[str, list] = {}
+    by_user_id: dict[str, object] = {}
+    for row in emp_rows:
+        by_user_id[row.user_id] = row
         key = _norm_name(row.full_name)
         if key:
-            by_name.setdefault(key, []).append(row)
+            by_exact_name.setdefault(key, []).append(row)
 
-    updated_names, unmatched, ambiguous = [], [], {}
-    nodes_with_gaps = 0
+    linked_names, renamed_names, unmatched, ambiguous_identity = [], [], [], []
+
+    # Phase 1 — identity
     for node in nodes:
-        missing_fields = [nf for _, nf in _SYNC_FIELDS if not getattr(node, nf)]
-        if not missing_fields:
+        if node.employee_id:
             continue
-        nodes_with_gaps += 1
-
-        matches = by_name.get(_norm_name(node.full_name))
-        if not matches:
+        key = _norm_name(node.full_name)
+        candidates = by_exact_name.get(key) or _fuzzy_candidates(key, emp_rows)
+        distinct_ids = {c.user_id for c in candidates}
+        if not distinct_ids:
             unmatched.append(node.full_name)
             continue
+        if len(distinct_ids) > 1:
+            ambiguous_identity.append(node.full_name)
+            continue
+        match = candidates[0]
+        node.employee_id = match.user_id
+        linked_names.append(node.full_name)
+        if node.full_name != match.full_name:
+            renamed_names.append(f"{node.full_name} -> {match.full_name}")
+            node.full_name = match.full_name
 
+    # Phase 2 — fields, keyed by the now-reliable employee_id link
+    updated_names = []
+    for node in nodes:
+        if not node.employee_id:
+            continue
+        match = by_user_id.get(node.employee_id)
+        if not match:
+            continue  # linked to an id no longer in the Employee master
         node_changed = False
-        node_ambiguous = []
         for ef, nf in _SYNC_FIELDS:
             if getattr(node, nf):  # already has a value — never overwrite
                 continue
-            values = {getattr(m, ef) for m in matches if getattr(m, ef)}
-            if not values:
-                continue
-            if len(values) > 1:
-                node_ambiguous.append(nf)
-                continue
-            setattr(node, nf, next(iter(values)))
-            node_changed = True
-
+            val = getattr(match, ef)
+            if val:
+                setattr(node, nf, val)
+                node_changed = True
         if node_changed:
             updated_names.append(node.full_name)
-        if node_ambiguous:
-            ambiguous[node.full_name] = node_ambiguous
 
     await db.commit()
     return {
         "total_nodes": len(nodes),
-        "nodes_with_gaps": nodes_with_gaps,
-        "updated": len(updated_names), "updated_names": updated_names,
+        "linked": len(linked_names), "linked_names": linked_names,
+        "renamed": len(renamed_names), "renamed_names": renamed_names,
+        "field_updated": len(updated_names), "field_updated_names": updated_names,
         "unmatched": unmatched,
-        "ambiguous": ambiguous,
+        "ambiguous_identity": ambiguous_identity,
     }
 
 
