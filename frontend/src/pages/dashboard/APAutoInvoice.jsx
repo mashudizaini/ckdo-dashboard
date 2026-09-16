@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Upload, FileText, CheckCircle, Send, Loader2, AlertTriangle,
   RefreshCw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, X, Pencil, Trash2, Save, Search, Paperclip, Link2,
-  Cloud, FolderPlus,
+  Cloud, FolderPlus, Zap,
 } from "lucide-react";
 import { apInvoiceApi, supplierWhtApi } from "@/api/dashboard";
 
@@ -444,6 +444,61 @@ export default function APAutoInvoice() {
     }
   };
 
+  // One-click Validate → Insert to Interface → Run APXIIMPT, for the
+  // common case where nothing needs a human decision. Stops and leaves the
+  // invoice at whatever step it reached — same as the per-step buttons —
+  // the moment either of this pipeline's two real judgment calls shows up:
+  // a blocking validate() warning (vendor not found / duplicate invoice),
+  // or a PO number with a line that was never manually matched to a PO
+  // line/receipt (get_po_lines_for_matching is deliberately not automatic —
+  // OCR item codes aren't reliable enough to post money against a PO line
+  // without a human looking at it). Only offered from a fresh (NEW)
+  // invoice — like bulk processing, an ERROR invoice's failed step isn't
+  // guessable, so those fall back to the per-step buttons.
+  const handleProcessAll = async (id) => {
+    setActionLoading("processall");
+    setMessage(null);
+    try {
+      const current = await apInvoiceApi.get(id);
+      if (current.po_number && (current.lines || []).some(ln => !ln.po_line_number)) {
+        setMessage({
+          type: "warning",
+          text: `Invoice ini punya PO Number ${current.po_number} dan masih ada line yang belum di-match ke PO Line/Receipt. Silakan match dulu lewat Edit, lalu lanjutkan dengan tombol per-step.`,
+        });
+        return;
+      }
+
+      const vres = await apInvoiceApi.validate(id);
+      const blocking = (vres.warnings || []).filter(w => w.type === "warning");
+      if (blocking.length) {
+        setMessage({
+          type: "warning",
+          text: `Validasi berhasil tapi ada yang perlu dikonfirmasi manual: ${blocking.map(w => w.message).join("; ")}. Silakan lanjutkan dengan tombol per-step.`,
+        });
+        return;
+      }
+
+      const preview = await apInvoiceApi.get(id);
+      const header = buildInterfaceHeader(preview);
+      await apInvoiceApi.insertInterface(id, { header, lines: preview.lines || [] });
+
+      const rres = await apInvoiceApi.runImport(id);
+      setMessage({
+        type: "success",
+        text: `Sekali klik selesai — APXIIMPT submitted (Request ID: ${rres.conc_request_id}). Klik "Check Status" untuk cek hasil.`,
+      });
+    } catch (e) {
+      setMessage({
+        type: "error",
+        text: (e?.detail || e?.message || String(e)) + " — silakan lanjutkan secara manual dari status terakhir.",
+      });
+    } finally {
+      setActionLoading("");
+      await refresh();
+      loadDetail(id);
+    }
+  };
+
   const toggleSelected = (stgId) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -749,6 +804,7 @@ export default function APAutoInvoice() {
         <DetailPanel
           detail={detail}
           onAction={doAction}
+          onProcessAll={handleProcessAll}
           onDelete={handleDelete}
           onSave={handleSave}
           actionLoading={actionLoading}
@@ -767,7 +823,7 @@ export default function APAutoInvoice() {
   );
 }
 
-function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
+function DetailPanel({ detail, onAction, onProcessAll, onDelete, onSave, actionLoading }) {
   const [showLines, setShowLines] = useState(true);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
@@ -1245,6 +1301,12 @@ function DetailPanel({ detail, onAction, onDelete, onSave, actionLoading }) {
                   label={s === "ERROR" ? "Re-validate" : "Validate"}
                   color="#059669"
                   onClick={() => onAction("validate", d.stg_id)} loading={actionLoading === "validate"} />
+              )}
+              {s === "NEW" && (
+                <NeuBtn icon={Zap}
+                  label="Process All (Get Request ID)"
+                  color="#7c3aed"
+                  onClick={() => onProcessAll(d.stg_id)} loading={actionLoading === "processall"} />
               )}
               {canInterface && (
                 <NeuBtn icon={Send}
