@@ -1363,8 +1363,19 @@ function orgCollectIds(node, set) {
 // where sibling counts stay small. Anything below that (actual team/staff
 // listings, which can run to dozens of siblings) renders as a vertical
 // indented tree instead, which scales far better than fanning out sideways.
+//
+// Matching on title text alone is a false-positive trap: a DIVISION head's
+// title can also literally be "General Manager" (e.g. Plant > Quality
+// Management's own lead, same rank concept as Production Management's "Sr.
+// Manager" — just worded differently), which isn't the department-level
+// tier this was meant for. A node with its own `division` set is always
+// nested under a division, never a real top-tier GM, so it renders
+// vertically regardless of what its title says (bug found 2026-09-16: Dian
+// Cahyaningtyas's "General Manager" title fanned her Quality Management
+// team out horizontally while Didit Pradipta's "Sr. Manager" — otherwise
+// the same tier — rendered vertically, for two peer nodes under Plant).
 const GM_TIER_RE = /general manager|president director|\bdirector\b|board of/i;
-const isGmTierOrAbove = (position) => GM_TIER_RE.test((position || "").trim());
+const isGmTierOrAbove = (node) => !node?.division && GM_TIER_RE.test((node?.position || "").trim());
 
 function OrgCard({ node, isPlaceholder, color, isMatch, groupLabel, onNodeClick, hasChildren, width }) {
   return (
@@ -1434,7 +1445,7 @@ function OrgNode({ node, mode, expanded, toggle, matchIds, onNodeClick, visibleI
   const groupLabel = node.sub_team || node.division || node.department || "";
   // Placeholder ("N branches") nodes have no real position, so just carry
   // the parent's own mode forward instead of falling through to "vertical".
-  const childMode = isPlaceholder ? mode : (isGmTierOrAbove(node.position) ? "h" : "v");
+  const childMode = isPlaceholder ? mode : (isGmTierOrAbove(node) ? "h" : "v");
   const childList = hasChildren && isOpen && (
     <ul className={childMode === "h" ? "org-tree-h" : "org-tree"}>
       {node.children.map((c) => (
