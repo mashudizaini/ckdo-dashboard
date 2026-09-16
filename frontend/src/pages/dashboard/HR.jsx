@@ -333,9 +333,15 @@ function EmployeeTable() {
   // employees.py's GET "" docstring), comfortably above the real headcount.
   const PAGE_SIZE = 5000;
 
+  // source=master: department_master's curated names (e.g. "Strategy
+  // Development", no ampersand) instead of the raw distinct
+  // Employee.department values — department_master is the corrected
+  // spelling where the two differ; the backend aliases that one known gap
+  // so filtering still matches the right employees (see
+  // _DEPT_FILTER_ALIASES in hr_employees.py).
   const fetchDepts = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/departments`, { headers });
+      const res = await fetch(`${API}/departments?source=master`, { headers });
       if (res.ok) setDepartments(await res.json());
     } catch (_) {}
   }, []); // eslint-disable-line
@@ -3509,7 +3515,8 @@ function TurnoverSection() {
   }, []); // eslint-disable-line
 
   useEffect(() => {
-    fetch(`${API}/departments`, { headers }).then((r) => r.ok ? r.json() : []).then(setDepartments).catch(() => {});
+    // source=master — see EmployeeTable's matching fetchDepts comment.
+    fetch(`${API}/departments?source=master`, { headers }).then((r) => r.ok ? r.json() : []).then(setDepartments).catch(() => {});
     fetchTeams("");
   }, []); // eslint-disable-line
 

@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import require_role, get_current_user, CurrentUser, Roles
 from app.models.employee import Employee, EmployeeUploadLog, EmployeeHistory
+from app.models.department_master import DepartmentMaster
 from app.services import department_master_service
 from app.services.department_taxonomy import clean_department_list
 
@@ -710,6 +711,24 @@ def _emp_dict(e: Employee) -> dict:
     }
 
 
+# department_master's curated department names (used for the Employee
+# List / Turnover Report filter dropdown, see /departments' source="master")
+# don't all match Employee.department's raw stored spelling 1:1 — a
+# 2026-08-10 upload-normalization migration settled on "Strategy &
+# Development" for that department's raw data, predating department_master,
+# which still (correctly, per HR) says "Strategy Development". This bridges
+# that one known gap so picking it from the dropdown still returns those 25
+# employees instead of zero. Add another entry here if department_master
+# ever gets a name that diverges from Employee.department in the same way.
+_DEPT_FILTER_ALIASES = {
+    "Strategy Development": "Strategy & Development",
+}
+
+
+def _resolve_department_alias(department: Optional[str]) -> Optional[str]:
+    return _DEPT_FILTER_ALIASES.get(department, department) if department else department
+
+
 def _apply_employee_filters(
     q, *, search=None, department=None, division=None, status=None, employment_status=None,
     level=None, team=None, sex=None, education=None, position=None,
@@ -719,6 +738,7 @@ def _apply_employee_filters(
     """Shared WHERE-clause builder — used by both the list endpoint and the
     Excel export, so the two can never silently drift apart on what counts
     as "matching" a filter."""
+    department = _resolve_department_alias(department)
     if search:
         term = f"%{search}%"
         q = q.where(
@@ -1280,6 +1300,7 @@ async def get_turnover_summary(
     today = date.today()
     target_year = year or today.year
 
+    department = _resolve_department_alias(department)
     q = select(Employee.date_of_joining, Employee.resign_date, Employee.department,
                Employee.level, Employee.status, Employee.team,
                Employee.employment_status).where(Employee.date_of_joining.isnot(None))
@@ -1415,6 +1436,7 @@ async def get_turnover_resigned_list(
         b_start = date(year, 1, 1)
         b_end = date(year, 12, 31)
 
+    department = _resolve_department_alias(department)
     q = select(Employee).where(
         Employee.resign_date.isnot(None),
         Employee.resign_date >= b_start,
@@ -1906,17 +1928,39 @@ async def get_join_years(
 
 @router.get("/departments")
 async def get_departments(
+    source: str = Query("employees", description="'employees' (default, raw distinct Employee.department values) or 'master' (department_master's curated department list)"),
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Daftar department untuk filter dropdown, langsung dari data karyawan.
-    Beberapa baris sumber data punya department yang rusak (mis. angka '15'
-    dari pergeseran kolom di file Excel asal) — nilai yang bukan nama (murni
-    angka) disaring dari daftar filter, meski tetap tersimpan apa adanya di
-    record karyawan itu sendiri. Case-duplicates ("Plant" / "PLANT") juga
-    digabung ke satu nama tampilan (lihat clean_department_list) — filter
-    department di list/export sudah case-insensitive, jadi memilih "Plant"
-    tetap menangkap baris "PLANT" juga."""
+    """Daftar department untuk filter dropdown.
+
+    source="employees" (default, used by Employee Summary): langsung dari
+    data karyawan. Beberapa baris sumber data punya department yang rusak
+    (mis. angka '15' dari pergeseran kolom di file Excel asal) — nilai yang
+    bukan nama (murni angka) disaring dari daftar filter, meski tetap
+    tersimpan apa adanya di record karyawan itu sendiri. Case-duplicates
+    ("Plant" / "PLANT") juga digabung ke satu nama tampilan (lihat
+    clean_department_list) — filter department di list/export sudah
+    case-insensitive, jadi memilih "Plant" tetap menangkap baris "PLANT"
+    juga.
+
+    source="master" (used by Employee List and Turnover Report): the
+    curated department_master names instead — department_master is the
+    corrected spelling (e.g. "Strategy Development", no ampersand) where it
+    differs from the raw Employee.department value ("Strategy & Development",
+    from a 2026-08-10 upload-normalization migration that predates
+    department_master). _apply_employee_filters and /turnover-summary both
+    resolve that one known difference via _DEPT_FILTER_ALIASES before
+    querying, so picking this department from the dropdown still matches
+    those employees instead of returning zero rows."""
+    if source == "master":
+        result = await db.execute(
+            select(DepartmentMaster.name, DepartmentMaster.sequence)
+            .where(DepartmentMaster.type == "department")
+            .order_by(DepartmentMaster.sequence)
+        )
+        return [r[0] for r in result.fetchall()]
+
     result = await db.execute(
         select(Employee.department).distinct()
     )
@@ -1947,6 +1991,7 @@ async def get_teams(
     Turnover Report) passes exclude_leads=true to drop them; left off by
     default so this doesn't change Employee List's existing team filter,
     which callers may still want to include them in."""
+    department = _resolve_department_alias(department)
     q = select(Employee.team).distinct()
     if department:
         q = q.where(Employee.department == department)
