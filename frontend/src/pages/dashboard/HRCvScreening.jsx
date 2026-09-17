@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Plus, Upload, Loader2, Trash2, Download, X, ChevronDown, ChevronUp,
-  AlertTriangle, CheckCircle, Search, FileText, Sparkles, ChevronLeft, ChevronRight,
+  AlertTriangle, CheckCircle, Search, FileText, Sparkles, ChevronLeft, ChevronRight, Pencil,
 } from "lucide-react";
 import { hrApi } from "@/api/dashboard";
 import { useAuthStore } from "@/store/authStore";
@@ -73,7 +73,7 @@ function Pagination({ total, page, onPage, pageSize = 10 }) {
   );
 }
 
-function JobForm({ onSave, onCancel, saving, initial }) {
+function JobForm({ onSave, onCancel, saving, initial, isEdit }) {
   const [form, setForm] = useState({
     position_title: initial?.position_title || "",
     key_responsibilities: (initial?.key_responsibilities || []).join("\n"),
@@ -102,7 +102,7 @@ function JobForm({ onSave, onCancel, saving, initial }) {
 
   return (
     <div style={{ background: NEU.bg, boxShadow: NEU.shadowOut, borderRadius: 16, padding: 18, marginBottom: 16 }}>
-      <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 12 }}>New Position / Job Requirement</h4>
+      <h4 style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", marginBottom: 12 }}>{isEdit ? "Edit Position" : "New Position / Job Requirement"}</h4>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
         <div style={{ gridColumn: "1 / -1" }}>
           <label style={labelStyle}>POSITION TITLE *</label>
@@ -138,11 +138,24 @@ function JobForm({ onSave, onCancel, saving, initial }) {
       <div style={{ display: "flex", gap: 8 }}>
         <button onClick={submit} disabled={saving || !form.position_title.trim() || !form.required_skills.trim()}
           style={{ fontSize: 12, fontWeight: 700, padding: "8px 18px", borderRadius: 10, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer", boxShadow: NEU.shadowBtn, opacity: (saving || !form.position_title.trim() || !form.required_skills.trim()) ? 0.5 : 1 }}>
-          {saving ? "Saving..." : "Create Position"}
+          {saving ? "Saving..." : isEdit ? "Save Changes" : "Create Position"}
         </button>
         <button onClick={onCancel} style={{ fontSize: 12, fontWeight: 700, padding: "8px 18px", borderRadius: 10, border: "none", background: NEU.bg, color: "#64748b", cursor: "pointer", boxShadow: NEU.shadowBtn }}>
           Cancel
         </button>
+      </div>
+    </div>
+  );
+}
+
+// Popup used to edit an existing position — reuses JobForm (isEdit=true
+// swaps its heading/button text) inside a modal backdrop, separate from
+// the inline panel "New Position" opens directly in the page.
+function JobEditModal({ job, onSave, onClose, saving }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,0.6)" }} onClick={onClose}>
+      <div style={{ width: "100%", maxWidth: 640, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+        <JobForm initial={job} isEdit onSave={onSave} onCancel={onClose} saving={saving} />
       </div>
     </div>
   );
@@ -664,6 +677,8 @@ function RequirementTab({ jobs, fetchJobs, activeJobId, setActiveJobId }) {
   const [showJdPanel, setShowJdPanel] = useState(false);
   const [jdPrefill, setJdPrefill] = useState(null);
   const [savingJob, setSavingJob] = useState(false);
+  const [editingJob, setEditingJob] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [sortBy,  setSortBy]  = useState(null);
   const [sortDir, setSortDir] = useState("asc");
   const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
@@ -678,6 +693,16 @@ function RequirementTab({ jobs, fetchJobs, activeJobId, setActiveJobId }) {
       setActiveJobId(j.id);
     } catch (_) {}
     finally { setSavingJob(false); }
+  };
+
+  const handleSaveEdit = async (data) => {
+    setSavingEdit(true);
+    try {
+      await hrApi.updateCvJob(editingJob.id, data);
+      setEditingJob(null);
+      await fetchJobs();
+    } catch (_) {}
+    finally { setSavingEdit(false); }
   };
 
   const handleUseJdCriteria = (criteria) => {
@@ -745,8 +770,11 @@ function RequirementTab({ jobs, fetchJobs, activeJobId, setActiveJobId }) {
                     <td style={{ ...TD, whiteSpace: "normal", maxWidth: 200 }}>{j.certification_keywords.join(", ") || "—"}</td>
                     <td style={TD}>{j.date_posted || "—"}</td>
                     <td style={TD}>{j.created_by || "—"}</td>
-                    <td style={TD}>
-                      <button onClick={() => handleDeleteJob(j.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}>
+                    <td style={{ ...TD, whiteSpace: "nowrap" }}>
+                      <button onClick={() => setEditingJob(j)} title="Edit" style={{ background: "none", border: "none", cursor: "pointer", color: "#2563eb", padding: 4 }}>
+                        <Pencil size={13} />
+                      </button>
+                      <button onClick={() => handleDeleteJob(j.id)} title="Delete" style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 4 }}>
                         <Trash2 size={13} />
                       </button>
                     </td>
@@ -756,6 +784,10 @@ function RequirementTab({ jobs, fetchJobs, activeJobId, setActiveJobId }) {
             </table>
           </div>
         </div>
+      )}
+
+      {editingJob && (
+        <JobEditModal job={editingJob} onSave={handleSaveEdit} onClose={() => setEditingJob(null)} saving={savingEdit} />
       )}
     </div>
   );

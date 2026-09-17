@@ -132,6 +132,7 @@ export const hrApi = {
   setSupervisor:   (userId, supervisorId) => api.patch(`/dashboard/hr/employees/${userId}/supervisor`, { supervisor_id: supervisorId }),
   getCvJobs:       ()       => api.get("/dashboard/hr/cv-screening/jobs"),
   createCvJob:     (d)      => api.post("/dashboard/hr/cv-screening/jobs", d),
+  updateCvJob:     (id, d)  => api.put(`/dashboard/hr/cv-screening/jobs/${id}`, d),
   deleteCvJob:     (id)     => api.delete(`/dashboard/hr/cv-screening/jobs/${id}`),
   getCvCandidates: (id, p)  => api.get(`/dashboard/hr/cv-screening/jobs/${id}/candidates`, { params: p }),
   deleteCvCandidate: (id)   => api.delete(`/dashboard/hr/cv-screening/candidates/${id}`),

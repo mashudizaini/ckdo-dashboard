@@ -157,6 +157,34 @@ async def create_job(
     return _job_to_dict(j)
 
 
+@router.put("/jobs/{job_id}")
+async def update_job(
+    job_id: int,
+    body: JobCreate,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    if not body.position_title.strip():
+        raise HTTPException(400, "Position title is required")
+    result = await db.execute(select(CvScreeningJob).where(CvScreeningJob.id == job_id))
+    j = result.scalars().first()
+    if not j:
+        raise HTTPException(404, "Job not found")
+    j.position_title = body.position_title.strip()
+    j.key_responsibilities = json.dumps(body.key_responsibilities)
+    j.required_skills = json.dumps(body.required_skills)
+    j.min_experience = body.min_experience
+    j.education_keywords = json.dumps(body.education_keywords)
+    j.certification_keywords = json.dumps(body.certification_keywords)
+    j.weight_skills = body.weight_skills
+    j.weight_experience = body.weight_experience
+    j.weight_education = body.weight_education
+    j.weight_certification = body.weight_certification
+    j.date_posted = _parse_date(body.date_posted)
+    await db.flush()
+    return _job_to_dict(j)
+
+
 @router.delete("/jobs/{job_id}")
 async def delete_job(
     job_id: int,
