@@ -22,6 +22,7 @@ const TABS = [
   { id: "profit",     icon: DollarSign, label: "AP Outstanding",    color: "#3b82f6" },
   { id: "ar",         icon: FileText,   label: "AR Outstanding",    color: "#f59e0b" },
   { id: "financial-statement", icon: FileBarChart2, label: "Financial Statement", color: "#8b5cf6" },
+  { id: "ap-vat-in", icon: FileText, label: "AP VAT In Listing Report", color: "#0ea5e9" },
 ];
 
 export default function AccountingDashboard() {
@@ -48,6 +49,8 @@ export default function AccountingDashboard() {
       {active === "ar" && <AROutstandingPanel />}
 
       {active === "financial-statement" && <FinancialStatement />}
+
+      {active === "ap-vat-in" && <APVatInListingPanel />}
     </div>
   );
 }
@@ -1626,6 +1629,252 @@ function monthInputToOPM(monthStr) {
 function currentMonthInput() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/* ─── AP VAT In Listing Report ───────────────────────────────────────────── */
+
+const VAT_HEADERS = [
+  { key: "journal_category",          label: "Journal Category",           mono: false, minW: 130 },
+  { key: "period",                    label: "Period",                     mono: true,  minW: 80  },
+  { key: "posted_date",               label: "Posted Date",                mono: false, minW: 100, date: true },
+  { key: "faktur_pajak",              label: "Faktur Pajak",               mono: true,  minW: 160 },
+  { key: "invoice_no",                label: "Invoice No",                 mono: true,  minW: 160 },
+  { key: "inv_sequence_no",           label: "Inv Sequence No",            mono: true,  minW: 110 },
+  { key: "invoice_type",              label: "Invoice Type",               mono: false, minW: 100 },
+  { key: "description",               label: "Description",                mono: false, minW: 260 },
+  { key: "npwp",                      label: "NPWP",                       mono: true,  minW: 150 },
+  { key: "supplier_tax_invoice_date", label: "Supplier Tax Invoice Date",  mono: false, minW: 130, date: true },
+  { key: "coa_full",                  label: "COA",                        mono: true,  minW: 170 },
+  { key: "coa_segment4",              label: "COA Segment 4",              mono: true,  minW: 100 },
+  { key: "coa_description",           label: "COA Segment 4 Description",  mono: false, minW: 200 },
+  { key: "supplier_name",             label: "Supplier Name",              mono: false, minW: 220 },
+  { key: "je_amount",                 label: "VAT Amount",                 mono: true,  minW: 130, num: true },
+  { key: "line_total_amount",         label: "Line Total Amount",          mono: true,  minW: 140, num: true },
+  { key: "tax_amount",                label: "Tax Amount",                 mono: true,  minW: 120, num: true },
+  { key: "awt_amount",                label: "AWT Amount",                 mono: true,  minW: 120, num: true },
+  { key: "invoice_total_amount",      label: "Invoice Total Amount",       mono: true,  minW: 150, num: true },
+];
+
+function fmtDate(v) {
+  if (!v) return "-";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return v;
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit" });
+}
+
+function exportVatCSV(rows, period) {
+  if (!rows?.length) return;
+  const hdrs = VAT_HEADERS.map(h => h.label);
+  const lines = [
+    "﻿" + hdrs.join(","),
+    ...rows.map(r =>
+      VAT_HEADERS.map(h => {
+        const raw = h.date ? fmtDate(r[h.key]) : r[h.key];
+        const v = String(raw ?? "").replace(/"/g, '""');
+        return `"${v}"`;
+      }).join(",")
+    ),
+  ];
+  const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = `ap_vat_in_listing_${period}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function exportVatExcel(period, setBusy) {
+  setBusy(true);
+  try {
+    const blobData = await accountingApi.exportApVatIn({ period });
+    const blob = new Blob([blobData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = `ap_vat_in_listing_${period}.xlsx`; a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    let msg = "Export failed";
+    if (e instanceof Blob) {
+      try { msg = JSON.parse(await e.text())?.detail || msg; } catch (_) {}
+    } else if (e?.detail) {
+      msg = e.detail;
+    } else if (e?.message) {
+      msg = e.message;
+    }
+    alert(msg);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function APVatInListingPanel() {
+  const [monthInput, setMonthInput] = useState(currentMonthInput());
+  const [data,       setData]       = useState(null);
+  const [loading,    setLoading]    = useState(false);
+  const [exporting,  setExporting]  = useState(false);
+  const [error,      setError]      = useState(null);
+  const [page,       setPage]       = useState(1);
+  const [sort,       setSort]       = useState({ key: null, dir: "asc" });
+
+  const period = monthInputToOPM(monthInput);
+  const VAT_PAGE_SIZE = 10;
+
+  const loadData = useCallback(async () => {
+    if (!period) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await accountingApi.getApVatIn({ period });
+      if (res.success) {
+        setData(res);
+        setPage(1);
+      } else {
+        setError(res.error || "Failed to load data");
+        setData(null);
+      }
+    } catch (e) {
+      setError(e?.response?.data?.detail || String(e));
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [period]);
+
+  const toggleSort = (key) => {
+    setPage(1);
+    setSort(s => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  };
+
+  const sortedRows = useMemo(() => {
+    const rows = data?.data || [];
+    if (!sort.key) return rows;
+    const col = VAT_HEADERS.find(h => h.key === sort.key);
+    const numeric = col?.num;
+    const mul = sort.dir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      if (numeric) return ((Number(a[sort.key]) || 0) - (Number(b[sort.key]) || 0)) * mul;
+      const av = (a[sort.key] ?? "").toString().toLowerCase();
+      const bv = (b[sort.key] ?? "").toString().toLowerCase();
+      return av.localeCompare(bv) * mul;
+    });
+  }, [data, sort]);
+
+  const pagedRows = sortedRows.slice((page - 1) * VAT_PAGE_SIZE, page * VAT_PAGE_SIZE);
+
+  const INPUT = {
+    padding: "7px 11px", borderRadius: 9, border: "none", fontSize: 12,
+    background: NEU.bg, boxShadow: NEU.shadowIn, color: "#1e293b", outline: "none",
+  };
+
+  return (
+    <SectionCard
+      title="AP VAT In Listing Report"
+      subtitle="VAT input per accounting period, from Oracle EBS AP/GL (segment4 = 114207) — plus COA & PO description lookup"
+    >
+      {/* Filter bar */}
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>Period</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="month"
+              value={monthInput}
+              onChange={e => setMonthInput(e.target.value)}
+              style={{ ...INPUT, width: 160 }}
+            />
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#10b981", fontFamily: "monospace", minWidth: 90 }}>{period || "—"}</span>
+          </div>
+        </div>
+        <ActionBtn icon={loading ? Loader2 : Search} label={loading ? "Loading…" : "Load"} color="#10b981" onClick={loadData} disabled={loading || !period} />
+        {data?.data?.length > 0 && (
+          <>
+            <ActionBtn icon={Download} label="Export CSV" color="#64748b" onClick={() => exportVatCSV(data.data, period)} />
+            <ActionBtn icon={exporting ? Loader2 : Download} label={exporting ? "Generating…" : "Download Excel"} color="#10b981"
+              onClick={() => exportVatExcel(period, setExporting)} disabled={exporting} />
+          </>
+        )}
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 10, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", fontSize: 12, color: "#dc2626" }}>
+          {error}
+        </div>
+      )}
+
+      {/* Row count + totals */}
+      {data && (
+        <div style={{ marginBottom: 10, display: "flex", flexWrap: "wrap", gap: 16, alignItems: "baseline" }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#10b981" }}>{data.count.toLocaleString()} rows</span>
+          {data.totals && (
+            <>
+              <span style={{ fontSize: 11, color: "#475569" }}>VAT Amount: <b style={{ fontFamily: "monospace" }}>{fmtNum(data.totals.je_amount)}</b></span>
+              <span style={{ fontSize: 11, color: "#475569" }}>Invoice Total: <b style={{ fontFamily: "monospace" }}>{fmtNum(data.totals.invoice_total_amount)}</b></span>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Table */}
+      <div style={{ borderRadius: 14, overflow: "hidden", boxShadow: NEU.shadowIn }}>
+        <div style={{ maxHeight: "65vh", overflow: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: VAT_HEADERS.reduce((s, h) => s + h.minW, 0) }}>
+            <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
+              <tr style={{ background: "linear-gradient(135deg,#1e293b,#0f172a)" }}>
+                <th style={{ ...TH, color: "#e2e8f0" }}>#</th>
+                {VAT_HEADERS.map(h => (
+                  <SortableTH key={h.key} label={h.label} sortKey={h.key} sort={sort} onSort={toggleSort}
+                    style={{ minWidth: h.minW, color: "#e2e8f0" }} />
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {!data ? (
+                <tr>
+                  <td colSpan={VAT_HEADERS.length + 1} style={{ padding: "40px 14px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
+                    Select a period and click Load to query the VAT In Listing report
+                  </td>
+                </tr>
+              ) : data.data.length === 0 ? (
+                <tr>
+                  <td colSpan={VAT_HEADERS.length + 1} style={{ padding: "40px 14px", textAlign: "center", fontSize: 12, color: "#94a3b8" }}>
+                    No VAT In data found for period {period}
+                  </td>
+                </tr>
+              ) : (
+                pagedRows.map((row, i) => {
+                  const globalIndex = (page - 1) * VAT_PAGE_SIZE + i;
+                  const rowBg = globalIndex % 2 === 0 ? "#f8fafc" : "#f1f5f9";
+                  return (
+                    <tr key={globalIndex}
+                      style={{ background: rowBg, transition: "background 0.1s" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "rgba(16,185,129,0.07)"}
+                      onMouseLeave={e => e.currentTarget.style.background = rowBg}
+                    >
+                      <td style={{ ...TD, color: "#94a3b8", fontFamily: "monospace", fontSize: 10 }}>{globalIndex + 1}</td>
+                      {VAT_HEADERS.map(h => {
+                        const v = row[h.key];
+                        const display = h.date ? fmtDate(v) : (h.num ? fmtNum(v) : (v ?? "-"));
+                        return (
+                          <td key={h.key} style={{ ...TD, fontFamily: h.mono ? "monospace" : undefined, textAlign: h.num ? "right" : "left", minWidth: h.minW }}>
+                            {display}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+        {data && data.data.length > 0 && (
+          <Pagination total={sortedRows.length} page={page} onPage={setPage} pageSize={VAT_PAGE_SIZE} />
+        )}
+      </div>
+    </SectionCard>
+  );
 }
 
 const ICC_HEADERS = [

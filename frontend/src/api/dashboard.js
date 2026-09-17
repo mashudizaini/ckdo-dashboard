@@ -393,6 +393,8 @@ export const accountingApi = {
   exportInventoryRmPm:     (p) => api.get("/dashboard/accounting/inventory-rm-pm/export", { params: p, responseType: "blob" }),
   getItemCostComponents:   (period) => api.get("/dashboard/accounting/item-cost-components", { params: { period } }),
   getMaterialTransactions: (p) => api.get("/dashboard/accounting/material-transactions", { params: p }),
+  getApVatIn:              (p) => api.get("/dashboard/accounting/ap-vat-in", { params: p }),
+  exportApVatIn:           (p) => api.get("/dashboard/accounting/ap-vat-in/export", { params: p, responseType: "blob" }),
 };
 
 export const financialStatementApi = {
