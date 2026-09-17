@@ -3503,6 +3503,10 @@ function TurnoverSection() {
   // Click a bar on the resign trend chart -> who actually resigned that
   // month (or, clicking the chart title's own scope, the whole year).
   const [drillDown, setDrillDown] = useState(null); // {year, month, label} | null
+  // Click the "Avg. Tenure" KPI card -> the Permanent/Contract x tenure-
+  // bucket breakdown behind that number, for the CURRENT filter scope.
+  const [showTenureBreakdown, setShowTenureBreakdown] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   // exclude_leads drops the "Director"/"General Manager"/"Senior Manager"
   // placeholder values Employee.team holds for department/division-head
@@ -3547,6 +3551,32 @@ function TurnoverSection() {
     import("recharts").then((mod) => setRC(mod)).catch(() => {});
   }, []);
 
+  // Same scope as the chart's own drill-down and the on-screen KPI cards —
+  // the export is never a separate query, just this same data as a file.
+  const handleDownloadReport = async () => {
+    setDownloading(true);
+    try {
+      const params = new URLSearchParams({
+        year: yearFilter,
+        ...(monthFilter ? { month: monthFilter } : {}),
+        ...(deptFilter ? { department: deptFilter } : {}),
+        ...(teamFilter ? { team: teamFilter } : {}),
+      });
+      const res = await fetch(`${API}/turnover-summary/export?${params}`, { headers });
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `turnover_report_${yearFilter}${monthFilter ? `-${String(monthFilter).padStart(2, "0")}` : ""}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (_) {}
+    finally { setDownloading(false); }
+  };
+
   const filterBar = (
     <div className="flex flex-wrap items-end gap-2">
       <div className="w-28">
@@ -3580,6 +3610,12 @@ function TurnoverSection() {
           {teams.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
       </div>
+      <div className="flex-1" />
+      <button onClick={handleDownloadReport} disabled={downloading}
+        className="flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 px-3 py-1.5 text-xs font-semibold text-white transition-colors">
+        {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+        {downloading ? "Exporting..." : "Download Report"}
+      </button>
     </div>
   );
 
@@ -3641,9 +3677,10 @@ function TurnoverSection() {
           // resigned within this same scope — how long people who left
           // had actually been here, not the tenure of the current roster.
           { label: `Avg. Tenure — Resigned (${periodLabel})`, val: `${avg_tenure_years} yrs`,
-            sub: "avg. years worked before resigning", color: "#60a5fa" },
-        ].map(({ label, val, sub, color }) => (
-          <div key={label} className="rounded-xl border border-gray-800 bg-gray-900 p-4">
+            sub: "avg. years worked before resigning — click for breakdown", color: "#60a5fa", onClick: () => setShowTenureBreakdown(true) },
+        ].map(({ label, val, sub, color, onClick }) => (
+          <div key={label} onClick={onClick}
+            className={`rounded-xl border border-gray-800 bg-gray-900 p-4 ${onClick ? "cursor-pointer hover:border-indigo-500 transition-colors" : ""}`}>
             <div className="text-2xl font-bold" style={{ color }}>{val}</div>
             <div className="text-xs font-semibold text-gray-100 mt-0.5">{label}</div>
             <div className="text-xs text-gray-400 mt-0.5">{sub}</div>
@@ -3696,6 +3733,13 @@ function TurnoverSection() {
 
       {drillDown && (
         <TurnoverResignedListModal {...drillDown} onClose={() => setDrillDown(null)} />
+      )}
+
+      {showTenureBreakdown && (
+        <TenureBreakdownModal
+          year={yearFilter} month={monthFilter || null} department={deptFilter} team={teamFilter}
+          periodLabel={periodLabel} onClose={() => setShowTenureBreakdown(false)}
+        />
       )}
     </div>
   );
@@ -3770,6 +3814,138 @@ function TurnoverResignedListModal({ year, month, department, team, label, onClo
                       ))}
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Tenure buckets matching HR's own breakdown convention — "< 1 Tahun",
+// "1 - 3 thn", ">3 - 5 thn", ">5 thn". Boundaries: [0,1) / [1,3] / (3,5] / (5,∞).
+const TENURE_BUCKETS = [
+  { label: "< 1 Tahun", test: (t) => t < 1 },
+  { label: "1 - 3 thn", test: (t) => t >= 1 && t <= 3 },
+  { label: ">3 - 5 thn", test: (t) => t > 3 && t <= 5 },
+  { label: ">5 thn", test: (t) => t > 5 },
+];
+const TENURE_STATUS_ORDER = ["Permanent", "Contract", "Probation"];
+
+// Groups the same resigned-employee rows the chart's drill-down uses by
+// Employee.status (Permanent/Contract/...), then by TENURE_BUCKETS within
+// each status — % and count per bucket, plus the SUM of each member's own
+// actual tenure_years (not a bucket-midpoint estimate). The grand total of
+// every bucket's years-sum, divided by the grand total count, is exactly
+// the same avg_tenure_years number the KPI card already shows — this is
+// that number's calculation made visible, per HR's own reference table.
+function buildTenureBreakdown(rows) {
+  const withTenure = rows.filter((r) => r.tenure_years != null);
+  const statuses = [...new Set(withTenure.map((r) => r.status || "—"))].sort((a, b) => {
+    const ai = TENURE_STATUS_ORDER.indexOf(a), bi = TENURE_STATUS_ORDER.indexOf(b);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return a.localeCompare(b);
+  });
+
+  const groups = statuses.map((status) => {
+    const members = withTenure.filter((r) => (r.status || "—") === status);
+    const buckets = TENURE_BUCKETS.map(({ label, test }) => {
+      const inBucket = members.filter((r) => test(r.tenure_years));
+      const yearsSum = inBucket.reduce((s, r) => s + r.tenure_years, 0);
+      return {
+        label, count: inBucket.length,
+        pct: members.length > 0 ? Math.round((inBucket.length / members.length) * 100) : 0,
+        yearsSum: inBucket.length > 0 ? yearsSum : null,
+      };
+    });
+    return { status, total: members.length, buckets };
+  });
+
+  return {
+    groups,
+    grandTotalYears: withTenure.reduce((s, r) => s + r.tenure_years, 0),
+    grandTotalCount: withTenure.length,
+  };
+}
+
+function TenureBreakdownModal({ year, month, department, team, periodLabel, onClose }) {
+  const { token } = useAuthStore();
+  const headers = { Authorization: `Bearer ${token}` };
+  const [rows, setRows] = useState(null);
+  const [errMsg, setErrMsg] = useState("");
+
+  useEffect(() => {
+    const params = new URLSearchParams({
+      year, ...(month ? { month } : {}),
+      ...(department ? { department } : {}),
+      ...(team ? { team } : {}),
+    });
+    fetch(`${API}/turnover-summary/resigned-list?${params}`, { headers })
+      .then(async (r) => {
+        const body = await r.json();
+        if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
+        return body;
+      })
+      .then(setRows)
+      .catch((e) => setErrMsg(e.message || "Network error"));
+  }, [year, month, department, team]); // eslint-disable-line
+
+  const breakdown = rows ? buildTenureBreakdown(rows) : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,0.6)" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl border border-gray-800 bg-gray-900">
+        <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3.5 border-b border-gray-800 bg-gray-900">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-100">Avg. Tenure Breakdown — {periodLabel}</h3>
+            <p className="text-xs text-gray-500 mt-0.5">By employment status, then years of service</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-gray-500 hover:text-gray-200 hover:bg-gray-800 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-4">
+          {errMsg && <p className="text-xs text-red-400 font-semibold px-1 pb-2">{errMsg}</p>}
+          {!rows ? (
+            <div className="py-12 text-center"><Loader2 size={18} className="mx-auto animate-spin text-gray-600" /></div>
+          ) : breakdown.grandTotalCount === 0 ? (
+            <p className="py-12 text-center text-xs text-gray-500">No one resigned in this period.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-800">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-800/70">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Status</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Tenure</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">%</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Count</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Years</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800">
+                  {breakdown.groups.map((g) => (
+                    <Fragment key={g.status}>
+                      {g.buckets.map((b, bi) => (
+                        <tr key={`${g.status}-${b.label}`} className="hover:bg-gray-800/30">
+                          <td className="px-3 py-1.5 font-semibold text-gray-200 whitespace-nowrap">{bi === 0 ? g.status : ""}</td>
+                          <td className="px-3 py-1.5 text-gray-400 whitespace-nowrap">{b.label}</td>
+                          <td className="px-3 py-1.5 text-right text-gray-400">{b.pct}%</td>
+                          <td className="px-3 py-1.5 text-right text-gray-400">{b.count}</td>
+                          <td className="px-3 py-1.5 text-right text-gray-300">{b.yearsSum != null ? b.yearsSum.toFixed(1) : "-"}</td>
+                        </tr>
+                      ))}
+                      <tr><td colSpan={5} className="py-1" /></tr>
+                    </Fragment>
+                  ))}
+                  <tr className="border-t border-gray-700">
+                    <td className="px-3 py-2" colSpan={4} />
+                    <td className="px-3 py-2 text-right font-bold text-gray-100">{breakdown.grandTotalYears.toFixed(1)}</td>
+                  </tr>
                 </tbody>
               </table>
             </div>

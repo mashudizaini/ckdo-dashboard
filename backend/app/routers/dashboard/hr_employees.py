@@ -1472,6 +1472,95 @@ async def get_turnover_resigned_list(
     ]
 
 
+@router.get("/turnover-summary/export")
+async def export_turnover_report(
+    year:       int           = Query(...),
+    month:      Optional[int] = Query(None, ge=1, le=12),
+    department: Optional[str] = Query(None),
+    team:       Optional[str] = Query(None),
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Excel export of the Turnover Report for the current filter scope —
+    a summary section (turnover rate, total resigned, avg tenure — the same
+    KPI cards on screen) followed by the exact same resigned-employee detail
+    data the chart's click-to-drill-down and the Avg Tenure breakdown popup
+    use (both endpoints called directly here rather than re-deriving their
+    logic, so the export can never drift from what's on screen)."""
+    MN = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    department = _resolve_department_alias(department)
+    summary  = await get_turnover_summary(year=year, month=month, department=department, team=team, db=db, user=user)
+    resigned = await get_turnover_resigned_list(year=year, month=month, department=department, team=team, db=db, user=user)
+
+    period_label = f"{MN[month - 1]} {year}" if month else f"{year} (Full Year)"
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Turnover Report"
+
+    title_font  = Font(name="Calibri", size=14, bold=True)
+    label_font  = Font(name="Calibri", size=12, bold=True)
+    value_font  = Font(name="Calibri", size=12)
+    header_font = Font(name="Calibri", size=12, bold=True)
+    header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    header_align = Alignment(horizontal="center", vertical="center")
+    thin   = Side(style="thin")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    ws.cell(row=1, column=1, value=f"Turnover Report — {period_label}").font = title_font
+    scope_bits = [department or "All Departments", team or "All Teams"]
+    ws.cell(row=2, column=1, value=" / ".join(scope_bits)).font = Font(name="Calibri", size=11, italic=True, color="64748B")
+
+    summary_rows = [
+        (f"Turnover Rate as of {period_label}",       f"{summary['turnover_rate_ytd']}%"),
+        (f"Turnover Rate ({period_label} only)",       f"{summary['turnover_rate_month']}%" if summary["turnover_rate_month"] is not None else "—"),
+        ("Total Resigned",                              summary["total_resigns_period"]),
+        ("Current Headcount",                           summary["current_headcount"]),
+        ("Avg. Tenure — Resigned (years)",              summary["avg_tenure_years"]),
+    ]
+    for i, (label, val) in enumerate(summary_rows):
+        r = 4 + i
+        ws.cell(row=r, column=1, value=label).font = label_font
+        ws.cell(row=r, column=2, value=val).font = value_font
+    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["B"].width = 16
+
+    detail_start = 4 + len(summary_rows) + 2
+    ws.cell(row=detail_start - 1, column=1, value="Resigned Employees").font = label_font
+
+    cols = [
+        ("full_name", "Name", 26), ("department", "Department", 20), ("division", "Division", 20),
+        ("team", "Team", 20), ("level", "Level", 12), ("job_title", "Job Title", 24),
+        ("status", "Status", 14), ("date_of_joining", "Join Date", 14), ("resign_date", "Resign Date", 14),
+        ("tenure_years", "Tenure (yrs)", 12), ("resign_reason", "Resign Reason", 30),
+    ]
+    for col_idx, (_key, label, width) in enumerate(cols, 1):
+        cell = ws.cell(row=detail_start, column=col_idx, value=label)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = border
+        ws.column_dimensions[cell.column_letter].width = width
+
+    for row_offset, r in enumerate(resigned, 1):
+        row_idx = detail_start + row_offset
+        for col_idx, (key, _label, _width) in enumerate(cols, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=r.get(key))
+            cell.font = value_font
+            cell.border = border
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"turnover_report_{year}{f'-{month:02d}' if month else ''}.xlsx"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
+
+
 def _normalize_dept(raw: Optional[str]) -> str:
     """Same value stored with different casing (e.g. "Plant" / "PLANT") is a
     known data-quality issue in the source Excel — group them together here
@@ -2000,20 +2089,24 @@ async def get_teams(
     if exclude_leads:
         names = [n for n in names if n not in LEAD_TEAM_NAMES]
 
-    # Curated order from department_master's team_seq — keyed by
-    # (department, division_or_None, team), so a flat "teams for a
-    # department" list (no division context here) takes the best
-    # (lowest) sequence found across any division that team appears
-    # under, falling back to alphabetical for anything unmapped.
+    # Curated order from department_master — (department sequence, team
+    # sequence) compound key, so the flat "all teams" list (no department
+    # filter, e.g. Turnover Report's initial dropdown before a department
+    # is picked) groups by department first instead of interleaving teams
+    # from different departments by team sequence alone. team_seq is keyed
+    # by (department, division_or_None, team); a team appearing under more
+    # than one division takes the best (lowest) sequence pair found,
+    # falling back to alphabetical for anything unmapped.
     order_maps = await department_master_service.get_order_maps(db)
+    dept_seq = order_maps["dept_seq"]
     team_seq = order_maps["team_seq"]
 
     def _rank(name):
         candidates = [
-            seq for (d, _v, t), seq in team_seq.items()
+            (dept_seq.get(d, 99), seq) for (d, _v, t), seq in team_seq.items()
             if t == name and (department is None or d == department)
         ]
-        return (min(candidates), name) if candidates else (99, name)
+        return (min(candidates), name) if candidates else ((99, 99), name)
 
     return sorted(names, key=_rank)
 
