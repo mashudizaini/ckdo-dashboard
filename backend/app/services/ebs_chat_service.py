@@ -299,7 +299,9 @@ async def _run_tool_calling_turn(question: str) -> dict:
             tool_result_blocks.append({
                 "type": "tool_result",
                 "tool_use_id": block.id,
-                "content": json.dumps({"error": error} if error else {"data": data}, default=str),
+                "content": json.dumps(
+                    {"error": error} if error else {"data": data, "count": len(data)}, default=str
+                ),
             })
         messages.append({"role": "user", "content": tool_result_blocks})
 

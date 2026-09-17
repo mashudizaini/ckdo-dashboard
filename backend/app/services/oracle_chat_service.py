@@ -102,6 +102,10 @@ SYSTEM_PROMPT = (
     "penuh mentah-mentah kecuali diminta persis.\n"
     "- Jika data yang diminta tidak ditemukan (list kosong), katakan terus terang tidak ada data "
     "untuk periode/filter tersebut — jangan mengarang.\n"
+    "- Untuk pertanyaan 'berapa total/jumlah X': hasil tool berisi field 'count' yang sudah dihitung "
+    "PASTI oleh sistem (jumlah baris di 'data') — SELALU pakai angka 'count' itu apa adanya untuk "
+    "menjawab total. JANGAN menghitung ulang secara manual dari isi 'data', dan JANGAN menulis kata "
+    "'perkiraan'/'estimasi' untuk angka yang sebenarnya sudah pasti dari 'count'.\n"
 )
 
 
