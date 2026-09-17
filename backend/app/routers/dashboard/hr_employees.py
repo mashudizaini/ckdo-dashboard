@@ -521,6 +521,100 @@ async def upload_employees(
     }
 
 
+# Column headers built to Title Case for readability — a couple read oddly
+# title-cased (an all-caps acronym, a trailing hyphen) so they're spelled
+# out explicitly instead. Every other header is exactly NEW_TEMPLATE_ALIASES'
+# own value, Title Cased — never hand-duplicated, so the template can't
+# drift out of sync with what /upload's parser actually looks for.
+_TEMPLATE_HEADER_OVERRIDES = {
+    "user_id": "User ID", "doj": "DOJ", "pkwt_ke": "PKWT Ke-",
+    "no_bpjs_health": "No BPJS Health Insurance", "no_bpjs_employee": "No BPJS Employee Benefits",
+    "npwp_number": "NPWP Number", "bank_account_bca": "Rekening Number (BCA)",
+    "bank_account_name": "Rekening Name (BCA)", "address": "Adress/Resident Employee",
+}
+# EMP Resign's real sheet doesn't carry these two (see NEW_TEMPLATE_SHEETS'
+# own comment: "EMP Active (has DIVISION/TEAM columns) and EMP Resign (doesn't)").
+_TEMPLATE_ACTIVE_ONLY_FIELDS = ("division", "team")
+
+
+@router.get("/upload-template")
+async def download_upload_template(
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    """Blank Excel template matching exactly what /upload's new-template
+    parser (_parse_new_template_sheet) expects — headers built directly
+    from NEW_TEMPLATE_ALIASES so this can never drift out of sync with the
+    parser itself. Two sheets (EMP Active / EMP Resign), a "LAST EDUCATION
+    BACKROUND" merged header spanning a Degree/Major column pair on row 2
+    (the parser skips row 2 unconditionally as this sub-header row — see
+    _parse_new_template_sheet's data_start = header_row + 2), data starts
+    row 3."""
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    header_font  = Font(bold=True, size=11, color="FFFFFF")
+    header_fill  = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    sub_font     = Font(bold=True, size=10, italic=True)
+    thin         = Side(style="thin")
+    border       = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def build_sheet(sheet_name, employment_status):
+        ws = wb.create_sheet(sheet_name)
+        fields = ["user_id"] + [f for f in NEW_TEMPLATE_ALIASES if f != "user_id"]
+        if employment_status == "Resign":
+            fields = [f for f in fields if f not in _TEMPLATE_ACTIVE_ONLY_FIELDS]
+        # Education (degree/major) isn't in NEW_TEMPLATE_ALIASES at all — it's
+        # parsed separately via _EDU_HEADER — inserted here right after job_title.
+        insert_at = fields.index("job_title") + 1 if "job_title" in fields else len(fields)
+        fields = fields[:insert_at] + ["__education__"] + fields[insert_at:]
+
+        col = 1
+        edu_col = None
+        for f in fields:
+            if f == "__education__":
+                edu_col = col
+                cell = ws.cell(row=1, column=col, value="LAST EDUCATION BACKROUND")
+                ws.merge_cells(start_row=1, start_column=col, end_row=1, end_column=col + 1)
+                for c in (col, col + 1):
+                    ws.cell(row=1, column=c).font = header_font
+                    ws.cell(row=1, column=c).fill = header_fill
+                    ws.cell(row=1, column=c).alignment = header_align
+                    ws.cell(row=1, column=c).border = border
+                ws.cell(row=2, column=col, value="Degree").font = sub_font
+                ws.cell(row=2, column=col + 1, value="Major").font = sub_font
+                ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = 16
+                ws.column_dimensions[ws.cell(row=1, column=col + 1).column_letter].width = 16
+                col += 2
+                continue
+            label = _TEMPLATE_HEADER_OVERRIDES.get(f, NEW_TEMPLATE_ALIASES[f].title())
+            cell = ws.cell(row=1, column=col, value=label)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            cell.border = border
+            ws.merge_cells(start_row=1, start_column=col, end_row=2, end_column=col)
+            ws.column_dimensions[cell.column_letter].width = 18
+            col += 1
+
+        ws.row_dimensions[1].height = 20
+        ws.freeze_panes = "A3"
+        return ws
+
+    build_sheet("EMP Active", "Active")
+    build_sheet("EMP Resign", "Resign")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=employee_upload_template.xlsx"},
+    )
+
+
 # ── Query endpoints ────────────────────────────────────────────────────────────
 
 @router.get("/birthdays-this-month")
@@ -569,18 +663,25 @@ async def get_employee_summary(
 ):
     """Statistik ringkasan untuk KPI cards.
 
-    Accepts the same filter set as the list endpoint below it. The 6 top
-    KPI cards (Total/Active/Resign/Permanent/Contract/Probation) are
-    computed against `card_base` — search/department/team/join-date AND
+    Accepts the same filter set as the list endpoint below it. The KPI
+    cards (Active/Inactive/Permanent/Contract/Probation) are computed
+    against `card_base` — search/department/team/join-date AND
     `employment_status` applied, but NOT `status` — instead of the
     fully-filtered `base` used for by_dept/by_level/by_sex below.
 
-    `employment_status` stays in card_base on purpose: it's the "which
-    population" toggle (Active roster vs Resign history), so with the
-    Employee List's default employment_status=Active, Total/Permanent/
-    Contract/Probation correctly count only active employees and Resign
-    correctly reads 0 — there's no contradiction in "0 of the active
-    population has resigned by definition."
+    `employment_status` stays in card_base for Permanent/Contract/
+    Probation on purpose: it's the "which population" toggle (Active
+    roster vs Resign history), so with the Employee List's default
+    employment_status=Active, those three correctly count only active
+    employees.
+
+    Active/Inactive themselves are the one exception (2026-09-17): they're
+    computed against `card_base_all_states` — the same filters MINUS
+    employment_status — so both numbers are always visible together
+    regardless of which Employment State is currently selected, instead of
+    one of them always reading a contradictory 0 (e.g. Inactive reading 0
+    whenever Employment State=Active, which isn't "0 people have resigned",
+    just "0 of the ACTIVE population counts as resigned by definition").
 
     `status` (Permanent/Contract/Probation) stays OUT of card_base because
     those three values are mutually exclusive — bug fixed 2026-09-09: with
@@ -595,6 +696,10 @@ async def get_employee_summary(
         employment_status=employment_status,
         join_month=join_month, join_year=join_year,
     )
+    card_base_all_states = _apply_employee_filters(
+        select(Employee), search=search, department=department, team=team,
+        join_month=join_month, join_year=join_year,
+    )
     base = _apply_employee_filters(
         select(Employee), search=search, department=department, status=status,
         employment_status=employment_status, team=team,
@@ -603,6 +708,12 @@ async def get_employee_summary(
 
     def card_counted(*conditions):
         q = card_base
+        for c in conditions:
+            q = q.where(c)
+        return select(func.count()).select_from(q.subquery())
+
+    def card_counted_all_states(*conditions):
+        q = card_base_all_states
         for c in conditions:
             q = q.where(c)
         return select(func.count()).select_from(q.subquery())
@@ -619,10 +730,10 @@ async def get_employee_summary(
     probation_q = await db.execute(card_counted(Employee.status == "Probation"))
     probation = probation_q.scalar() or 0
 
-    active_q = await db.execute(card_counted(Employee.employment_status == "Active"))
+    active_q = await db.execute(card_counted_all_states(Employee.employment_status == "Active"))
     active_count = active_q.scalar() or 0
 
-    resign_q = await db.execute(card_counted(Employee.employment_status == "Resign"))
+    resign_q = await db.execute(card_counted_all_states(Employee.employment_status == "Resign"))
     resign_count = resign_q.scalar() or 0
 
     base_sq = base.subquery()
@@ -796,11 +907,16 @@ def _apply_employee_filters(
     if marital_status:
         q = q.where(Employee.marital_status == marital_status)
     if join_year:
-        # Cumulative "as of" cutoff — how many employees have joined up to
-        # this month/year, regardless of whether they've since resigned.
-        cutoff_month = join_month or 12
-        cutoff_date = date(join_year, cutoff_month, monthrange(join_year, cutoff_month)[1])
-        q = q.where(Employee.date_of_joining.isnot(None), Employee.date_of_joining <= cutoff_date)
+        # Exact match — only employees who joined in this specific month/
+        # year, not a cumulative "up to" cutoff (changed 2026-09-17 from
+        # the previous <= cutoff-date behavior, per explicit request: the
+        # Joined Month/Year filter should only pull the exact period
+        # picked). Year alone (no month) still means "anywhere in that
+        # year" — the "All" option for Month stays meaningful.
+        conditions = [Employee.date_of_joining.isnot(None), extract("year", Employee.date_of_joining) == join_year]
+        if join_month:
+            conditions.append(extract("month", Employee.date_of_joining) == join_month)
+        q = q.where(*conditions)
     if snapshot_year:
         # "Active as of" a specific month-end — same windowing as
         # /summary/by-month, so drilling down from that report into this
@@ -2189,6 +2305,41 @@ async def get_marital_statuses(
 ):
     """Daftar marital status untuk filter dropdown Employee Summary."""
     result = await db.execute(select(Employee.marital_status).distinct().order_by(Employee.marital_status))
+    return [r[0] for r in result.fetchall() if r[0]]
+
+
+@router.get("/divisions")
+async def get_employee_divisions(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Daftar division untuk LOV Add/Edit Employee — raw distinct
+    Employee.division values, same pattern as /educations, /positions,
+    /levels (not department_master-sourced: unlike department/team,
+    Employee.division doesn't reliably map onto department_master's
+    division-type rows, e.g. Plant staff commonly carry their team name
+    directly in this field with no division layer)."""
+    result = await db.execute(select(Employee.division).distinct().order_by(Employee.division))
+    return [r[0] for r in result.fetchall() if r[0] and not r[0].strip().isdigit()]
+
+
+@router.get("/religions")
+async def get_religions(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Daftar religion untuk LOV Add/Edit Employee."""
+    result = await db.execute(select(Employee.religion).distinct().order_by(Employee.religion))
+    return [r[0] for r in result.fetchall() if r[0]]
+
+
+@router.get("/blood-types")
+async def get_blood_types(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Daftar blood type untuk LOV Add/Edit Employee."""
+    result = await db.execute(select(Employee.blood_type).distinct().order_by(Employee.blood_type))
     return [r[0] for r in result.fetchall() if r[0]]
 
 

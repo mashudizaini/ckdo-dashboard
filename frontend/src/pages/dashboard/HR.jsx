@@ -21,6 +21,18 @@ const API        = "/api/v1/dashboard/hr/employees";
 
 const MONTHS_ID = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
+// [label, monthNumber] pairs for a Month <select> tied to a Year <select> —
+// when `year` is the running calendar year, months after the current one
+// haven't happened yet (no one can have "joined" or have data for a month
+// that hasn't arrived), so they're left out entirely rather than shown
+// disabled. A past year always gets the full 12.
+function monthOptionsForYear(year) {
+  const now = new Date();
+  const isCurrentYear = String(year) === String(now.getFullYear());
+  const maxMonth = isCurrentYear ? now.getMonth() + 1 : 12;
+  return MONTHS_ID.slice(0, maxMonth).map((m, i) => [m, i + 1]);
+}
+
 // Earliest year Attendance Rate has real data for — the Plant ZKTeco
 // terminals' NIK-based employee IDs go back to 2018 (confirmed live
 // 2026-08-28). Every Year <select> across Attendance Rate's tabs
@@ -304,18 +316,18 @@ function EmployeeTable() {
   // "Employment State" as chosen in Filters until the user picks a
   // different value there.
   const [summaryEmploymentStatus, setSummaryEmploymentStatus] = useState("Active");
-  const [joinMonthFilter, setJoinMonthFilter] = useState(() => String(new Date().getMonth() + 1));
-  const [joinYearFilter, setJoinYearFilter] = useState(() => String(new Date().getFullYear()));
+  // Blank ("All") by default — Joined Month/Year is now an exact match
+  // (only employees who joined in that specific period, see
+  // _apply_employee_filters), so defaulting to the current month/year
+  // would show almost nobody instead of the full roster on first load.
+  const [joinMonthFilter, setJoinMonthFilter] = useState("");
+  const [joinYearFilter, setJoinYearFilter] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
   const [departments, setDepartments]   = useState([]);
   const [teams,       setTeams]         = useState([]);
   const [joinYears,   setJoinYears]     = useState([]);
   const [summary,    setSummary]    = useState(null);
-  // "default" = grouped Department -> Active/Inactive -> Status for easy
-  // scanning on first load (see hr_employees.py's list_employees). Clicking
-  // a column header (handleSort) switches to that single-column sort as
-  // before; "default" only applies until the user clicks something.
-  const [sortBy,     setSortBy]     = useState("default");
+  const [sortBy,     setSortBy]     = useState("date_of_joining");
   const [sortDir,    setSortDir]    = useState("asc");
   const [showExportPicker, setShowExportPicker] = useState(false);
   const [showFiltersPanel, setShowFiltersPanel] = useState(false);
@@ -500,18 +512,22 @@ function EmployeeTable() {
 
   return (
     <div className="space-y-4">
-      {/* Summary cards — clickable */}
+      {/* Summary cards — clickable. "Total" and "Resign" (as standalone
+          cards) are gone (2026-09-17): Active/Inactive now sit side by
+          side instead, both always showing the real count for whatever
+          Department/Team/Search/Join-date filters are set, regardless of
+          which Employment State is currently selected — see /summary's
+          own docstring on card_base_all_states for why. */}
       {summary && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6 }}>
           {[
             // `activeBg` is a darker shade of `color`, used only for the
             // selected (filled) state's background — the white value/label
             // text needs that extra darkness to read cleanly; the base
             // `color` alone (esp. amber/purple) looked washed out and hard
             // to read with white text directly on it.
-            { id: "total",      label: "Total Employees", val: summary.total,      color: "#2563eb", activeBg: "#1d4ed8", icon: "👥" },
             { id: "active",     label: "Active",          val: summary.active,     color: "#16a34a", activeBg: "#15803d", icon: "🟢" },
-            { id: "resign",     label: "Resign",          val: summary.resign,     color: "#dc2626", activeBg: "#b91c1c", icon: "🔴" },
+            { id: "resign",     label: "Inactive",        val: summary.resign,     color: "#dc2626", activeBg: "#b91c1c", icon: "🔴" },
             { id: "permanent",  label: "Permanent",       val: summary.permanent,  color: "#22c55e", activeBg: "#16a34a", icon: "✓" },
             { id: "contract",   label: "Contract",        val: summary.contract,   color: "#f59e0b", activeBg: "#b45309", icon: "📋" },
             { id: "probation",  label: "Probation",       val: summary.probation,  color: "#a855f7", activeBg: "#7e22ce", icon: "⏳" },
@@ -635,8 +651,8 @@ function EmployeeTable() {
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide" title="Shows employees who joined on or before the selected Month/Year">
-                      Joined up to (Month)
+                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide" title="Shows only employees who joined in this exact month/year">
+                      Joined Month
                     </label>
                     <select
                       value={joinMonthFilter}
@@ -644,17 +660,27 @@ function EmployeeTable() {
                       className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
                     >
                       <option value="">All</option>
-                      {MONTHS_ID.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                      {monthOptionsForYear(joinYearFilter || new Date().getFullYear()).map(([m, i]) => <option key={m} value={i}>{m}</option>)}
                     </select>
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide" title="Shows employees who joined on or before the selected Month/Year">
-                      Joined up to (Year)
+                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide" title="Shows only employees who joined in this exact month/year">
+                      Joined Year
                     </label>
                     <select
                       value={joinYearFilter}
-                      onChange={(e) => { setJoinYearFilter(e.target.value); setPage(1); }}
+                      onChange={(e) => {
+                        const y = e.target.value;
+                        setJoinYearFilter(y);
+                        // A month already picked can be past the new year's
+                        // cutoff (e.g. Oct selected, then year switched to
+                        // the running year in September) — drop it instead
+                        // of silently filtering on a now-invalid month.
+                        const valid = monthOptionsForYear(y || new Date().getFullYear()).some(([, i]) => String(i) === String(joinMonthFilter));
+                        if (!valid) setJoinMonthFilter("");
+                        setPage(1);
+                      }}
                       className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
                     >
                       <option value="">All</option>
@@ -892,8 +918,28 @@ const EMPTY_EMPLOYEE_FORM = Object.fromEntries(
 
 // Editable employee form — used both for editing an existing employee (row
 // click in Employee List) and adding a brand new one (Add Employee button).
+// Fields whose LOV is fetched live from the backend (an open-ended
+// taxonomy, unlike sex/status/employment_status's true fixed enums in
+// EMPLOYEE_SELECT_OPTIONS) — [form key, LOV endpoint]. department/team use
+// department_master (source=master), same curated list Employee List's own
+// filters read from, so Add/Edit Employee can't reintroduce the exact kind
+// of spelling fragmentation this session already fixed there.
+const EMPLOYEE_DYNAMIC_LOV_FIELDS = [
+  ["department", `${API}/departments?source=master`],
+  ["division", `${API}/divisions`],
+  ["team", `${API}/teams?source=master`],
+  ["education_degree", `${API}/educations`],
+  ["job_title", `${API}/positions`],
+  ["level", `${API}/levels`],
+  ["marital_status", `${API}/marital-statuses`],
+  ["religion", `${API}/religions`],
+  ["blood_type", `${API}/blood-types`],
+];
+
 function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved }) {
   const isNew = !employee;
+  const { token } = useAuthStore();
+  const headers = { Authorization: `Bearer ${token}` };
   const [form, setForm] = useState(() => ({
     ...EMPTY_EMPLOYEE_FORM,
     ...(employee || {}),
@@ -909,6 +955,21 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  // Live-fetched LOVs (department/division/team/education/job title/level/
+  // marital status/religion/blood type) — a field not in the list yet
+  // (e.g. an older record, or a genuinely new value) falls back to free
+  // text automatically, same escape-hatch pattern as Organization Chart's
+  // Add/Edit Position form.
+  const [dynamicLov, setDynamicLov] = useState({});
+  const [customFields, setCustomFields] = useState(() => new Set());
+
+  useEffect(() => {
+    Promise.all(
+      EMPLOYEE_DYNAMIC_LOV_FIELDS.map(([key, url]) =>
+        fetch(url, { headers }).then((r) => r.ok ? r.json() : []).then((list) => [key, list]).catch(() => [key, []])
+      )
+    ).then((results) => setDynamicLov(Object.fromEntries(results)));
+  }, []); // eslint-disable-line
 
   const setField = (key, val) => setForm((f) => ({ ...f, [key]: val }));
 
@@ -1046,7 +1107,15 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
                   const isSupervisor = key === "supervisor_id";
                   const isDate = EMPLOYEE_DETAIL_DATE_KEYS.has(key);
                   const isTime = EMPLOYEE_DETAIL_TIME_KEYS.has(key);
-                  const selectOptions = EMPLOYEE_SELECT_OPTIONS[key];
+                  // Fixed enums (sex/status/employment_status) never get an
+                  // escape hatch — dynamic ones do, since a not-yet-listed
+                  // value there is normal (an older record, or genuinely new).
+                  const isDynamicLov = !EMPLOYEE_SELECT_OPTIONS[key] && EMPLOYEE_DYNAMIC_LOV_FIELDS.some(([k]) => k === key);
+                  const selectOptions = EMPLOYEE_SELECT_OPTIONS[key]
+                    || (isDynamicLov && dynamicLov[key]?.length ? dynamicLov[key].map((v) => [v, v]) : null);
+                  const isCustom = isDynamicLov && (
+                    customFields.has(key) || (form[key] && selectOptions && !selectOptions.some(([v]) => v === form[key]))
+                  );
                   const isUserId = key === "user_id";
                   const inputStyle = {
                     width: "100%", fontSize: 12.5, fontWeight: 600, padding: "5px 6px", marginTop: 2,
@@ -1116,14 +1185,39 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
                             </button>
                           </div>
                         )
+                      ) : isCustom ? (
+                        <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
+                          <input
+                            type="text"
+                            value={form[key] || ""}
+                            onChange={(e) => setField(key, e.target.value)}
+                            placeholder="Type value..."
+                            style={{ ...inputStyle, marginTop: 0, flex: 1, minWidth: 0 }}
+                          />
+                          {selectOptions && (
+                            <button type="button" title="Pick from list instead"
+                              onClick={() => { setCustomFields((p) => { const n = new Set(p); n.delete(key); return n; }); setField(key, ""); }}
+                              style={{ padding: "0 8px", borderRadius: 6, border: "none", background: "#e2e8f0", color: "#475569", cursor: "pointer", fontSize: 10.5, fontWeight: 700 }}>
+                              List
+                            </button>
+                          )}
+                        </div>
                       ) : selectOptions ? (
                         <select
                           value={form[key] || ""}
-                          onChange={(e) => setField(key, e.target.value)}
+                          onChange={(e) => {
+                            if (e.target.value === "__new__") {
+                              setCustomFields((p) => new Set(p).add(key));
+                              setField(key, "");
+                            } else {
+                              setField(key, e.target.value);
+                            }
+                          }}
                           style={{ ...inputStyle, cursor: "pointer" }}
                         >
                           <option value="">—</option>
                           {selectOptions.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                          {isDynamicLov && <option value="__new__">+ Type new value...</option>}
                         </select>
                       ) : isDate ? (
                         <input
@@ -3459,7 +3553,10 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
 // given month/year snapshot (same windowing as Employee Summary/Turnover) ──
 function EmployeeGraphSection() {
   const curYear = new Date().getFullYear();
-  const [yearFilter, setYearFilter]   = useState("");
+  // Defaults straight to the real current year instead of a blank
+  // "Current" placeholder option — the value shown IS the default, no
+  // separate label needed for it.
+  const [yearFilter, setYearFilter]   = useState(curYear);
   const [monthFilter, setMonthFilter] = useState("");
   const [chartType, setChartType]     = useState("donut"); // "donut" | "pie"
   const { data, loading, errMsg } = useMonthlySummary(monthFilter || undefined, yearFilter || undefined);
@@ -3467,18 +3564,22 @@ function EmployeeGraphSection() {
     <div className="flex flex-wrap items-end gap-2">
       <div className="w-28">
         <label className="mb-1 block text-[10px] font-medium text-gray-500">Year</label>
-        <select value={yearFilter} onChange={(e) => { setYearFilter(e.target.value); if (!e.target.value) setMonthFilter(""); }}
+        <select value={yearFilter} onChange={(e) => {
+            const y = e.target.value;
+            setYearFilter(y);
+            const valid = monthOptionsForYear(y).some(([, i]) => String(i) === String(monthFilter));
+            if (!valid) setMonthFilter("");
+          }}
           className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer">
-          <option value="">Current</option>
           {[curYear, curYear - 1, curYear - 2, curYear - 3, curYear - 4].map((y) => <option key={y} value={y}>{y}</option>)}
         </select>
       </div>
       <div className="w-28">
         <label className="mb-1 block text-[10px] font-medium text-gray-500">Month</label>
-        <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)} disabled={!yearFilter}
-          className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+        <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)}
+          className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer">
           <option value="">Year-end</option>
-          {MONTHS_ID.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+          {monthOptionsForYear(yearFilter).map(([m, i]) => <option key={m} value={i}>{m}</option>)}
         </select>
       </div>
       <div>
