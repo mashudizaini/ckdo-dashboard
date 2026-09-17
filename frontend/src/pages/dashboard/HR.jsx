@@ -316,12 +316,16 @@ function EmployeeTable() {
   // "Employment State" as chosen in Filters until the user picks a
   // different value there.
   const [summaryEmploymentStatus, setSummaryEmploymentStatus] = useState("Active");
-  // Default to the current month/year, per explicit request (2026-09-17) —
-  // Joined Month/Year is an exact match (only employees who joined in that
-  // specific period, see _apply_employee_filters), so this narrows the
-  // list to this month's joiners by default rather than showing everyone.
-  const [joinMonthFilter, setJoinMonthFilter] = useState(() => String(new Date().getMonth() + 1));
-  const [joinYearFilter, setJoinYearFilter] = useState(() => String(new Date().getFullYear()));
+  // Blank ("All") by default — reverted 2026-09-17 after confirming live
+  // that defaulting to the current month/year (as briefly tried) made the
+  // list load empty: Joined Month/Year is an exact match (only employees
+  // who joined in that exact period, see _apply_employee_filters), and 0
+  // of the 127 active employees joined in the current month, so that
+  // default filtered out virtually everyone on every page load. The
+  // dropdowns themselves are unaffected — picking a specific month/year
+  // still works exactly as designed, this only changes what's pre-selected.
+  const [joinMonthFilter, setJoinMonthFilter] = useState("");
+  const [joinYearFilter, setJoinYearFilter] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
   const [departments, setDepartments]   = useState([]);
   const [teams,       setTeams]         = useState([]);
