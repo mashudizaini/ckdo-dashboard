@@ -12,6 +12,7 @@ from typing import Optional
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -583,8 +584,8 @@ async def download_upload_template(
                     ws.cell(row=1, column=c).border = border
                 ws.cell(row=2, column=col, value="Degree").font = sub_font
                 ws.cell(row=2, column=col + 1, value="Major").font = sub_font
-                ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = 16
-                ws.column_dimensions[ws.cell(row=1, column=col + 1).column_letter].width = 16
+                ws.column_dimensions[get_column_letter(col)].width = 16
+                ws.column_dimensions[get_column_letter(col + 1)].width = 16
                 col += 2
                 continue
             label = _TEMPLATE_HEADER_OVERRIDES.get(f, NEW_TEMPLATE_ALIASES[f].title())
@@ -594,7 +595,7 @@ async def download_upload_template(
             cell.alignment = header_align
             cell.border = border
             ws.merge_cells(start_row=1, start_column=col, end_row=2, end_column=col)
-            ws.column_dimensions[cell.column_letter].width = 18
+            ws.column_dimensions[get_column_letter(col)].width = 18
             col += 1
 
         ws.row_dimensions[1].height = 20
