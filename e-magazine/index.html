@@ -410,9 +410,19 @@ const els = {
 let pdf = null, numPages = 0, aspect = 0.707;
 let spread = 0, singleMode = false, singlePage = 1;
 let zoom = 1, flipping = false, activeEdition = -1;
+let albumPhotos = null; // string[] of photo URLs when the active edition is a photo album, else null
 const imgCache = new Map();
 const qrCache  = new Map(); // pageNum -> [{x,y,w,h,url}] in canvas-space
 const dimCache = new Map(); // pageNum -> {cw, ch}
+
+function loadImageEl(url){
+  return new Promise((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = reject;
+    im.src = url;
+  });
+}
 
 /* ── QR detection ───────────────────────── */
 function _jsqrOnCanvas(c){
@@ -577,7 +587,7 @@ function selectEdition(i){
   activeEdition = i;
   markActiveEdition();
   updateQRLinksBar(e);
-  return loadEdition(e.file, e.title);
+  return loadEdition(e);
 }
 
 /* drawer (mobile) */
@@ -587,32 +597,48 @@ els.toggle.onclick = openDrawer;
 els.scrim.onclick = closeDrawer;
 
 /* ── Document loading ───────────────────── */
-async function loadEdition(src, label){
+async function loadEdition(edition){
   resetState();
   els.overlay.classList.remove("hidden");
-  els.overlayMsg.textContent = "Loading " + (label||"document") + "…";
+  els.overlayMsg.textContent = "Loading " + (edition.title||"document") + "…";
   els.bar.hidden = false;
   try{
-    const task = pdfjsLib.getDocument(src);
-    task.onProgress = p => {
-      if(p.total) els.barFill.style.width = Math.round(p.loaded/p.total*100)+"%";
-    };
-    pdf = await task.promise;
-    numPages = pdf.numPages;
-    const vp = (await pdf.getPage(1)).getViewport({scale:1});
-    aspect = vp.width / vp.height;
-    els.overlay.classList.add("hidden");
-    layout();
-    await showSpread(0, true);
-    buildThumbs();
+    if(edition.type === "photo_album"){
+      const photos = edition.photos || [];
+      if(!photos.length) throw new Error("Album has no photos");
+      albumPhotos = photos;
+      numPages = photos.length;
+      const im = await loadImageEl(photos[0]);
+      aspect = im.naturalWidth / im.naturalHeight;
+      els.bar.hidden = true;
+      els.overlay.classList.add("hidden");
+      layout();
+      await showSpread(0, true);
+      buildThumbs();
+    } else {
+      const task = pdfjsLib.getDocument(edition.file);
+      task.onProgress = p => {
+        if(p.total) els.barFill.style.width = Math.round(p.loaded/p.total*100)+"%";
+      };
+      pdf = await task.promise;
+      numPages = pdf.numPages;
+      const vp = (await pdf.getPage(1)).getViewport({scale:1});
+      aspect = vp.width / vp.height;
+      els.overlay.classList.add("hidden");
+      layout();
+      await showSpread(0, true);
+      buildThumbs();
+    }
   }catch(err){
     els.bar.hidden = true;
-    els.overlayMsg.textContent = "Edisi gagal dimuat. Pastikan file PDF tersedia di server.";
+    els.overlayMsg.textContent = edition.type === "photo_album"
+      ? "Album gagal dimuat. Pastikan foto tersedia di server."
+      : "Edisi gagal dimuat. Pastikan file PDF tersedia di server.";
     console.error("loadEdition error:", err);
   }
 }
 function resetState(){
-  pdf=null; numPages=0; spread=0; singlePage=1; zoom=1;
+  pdf=null; numPages=0; spread=0; singlePage=1; zoom=1; albumPhotos=null;
   imgCache.clear(); qrCache.clear(); dimCache.clear();
   els.thumbs.innerHTML=""; applyZoom();
 }
@@ -621,6 +647,12 @@ function resetState(){
 async function pageImage(n){
   if(!n || n<1 || n>numPages) return null;
   if(imgCache.has(n)) return imgCache.get(n);
+  if(albumPhotos){
+    // Plain photo — no PDF render/QR scan, just the file URL itself.
+    const url = albumPhotos[n-1];
+    imgCache.set(n, url);
+    return url;
+  }
   const page = await pdf.getPage(n);
   const scale = 1400 / page.getViewport({scale:1}).height;
   const vp = page.getViewport({scale});
@@ -766,15 +798,22 @@ function updateChrome(){
 async function buildThumbs(){
   els.thumbs.innerHTML = "";
   for(let n=1;n<=numPages;n++){
-    const page = await pdf.getPage(n);
-    const scale = 56 / page.getViewport({scale:1}).height * (window.devicePixelRatio||1);
-    const vp = page.getViewport({scale});
     const c = document.createElement("canvas");
-    c.width=vp.width; c.height=vp.height;
     c.style.height="56px";
     c.dataset.page = n;
-    c.title = "Page "+n;
-    await page.render({canvasContext:c.getContext("2d"), viewport:vp}).promise;
+    c.title = (albumPhotos ? "Photo " : "Page ") + n;
+    if(albumPhotos){
+      const im = await loadImageEl(albumPhotos[n-1]);
+      const scale = 56 / im.naturalHeight * (window.devicePixelRatio||1);
+      c.width = im.naturalWidth*scale; c.height = im.naturalHeight*scale;
+      c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+    } else {
+      const page = await pdf.getPage(n);
+      const scale = 56 / page.getViewport({scale:1}).height * (window.devicePixelRatio||1);
+      const vp = page.getViewport({scale});
+      c.width=vp.width; c.height=vp.height;
+      await page.render({canvasContext:c.getContext("2d"), viewport:vp}).promise;
+    }
     c.addEventListener("click", ()=>{
       if(singleMode) showSingle(n);
       else showSpread(Math.floor((n-1)/2));
@@ -960,19 +999,29 @@ els.searchInput.addEventListener("keydown", e => {
   try{
     const res  = await fetch("magazines/index.json?_=" + Date.now());
     const list = res.ok ? await res.json() : [];
-    CONFIG.editions = list.map(e => ({
-      title:    e.title || e.filename,
-      date:     e.date  || "",
+    CONFIG.editions = list.map(e => {
+      const isAlbum = e.type === "photo_album";
+      const v = encodeURIComponent(e.uploaded_at || Date.now());
       // Cache-busted by uploaded_at (changes only on a real re-upload) rather
       // than Date.now() — a deleted-and-reuploaded edition keeps the exact
       // same filename (see backend hr_emagazine.py's _safe_filename()), so
       // without this the browser's HTTP cache would keep serving the OLD
-      // cached PDF bytes for that URL indefinitely, even after the file on
-      // disk was correctly overwritten. Falls back to Date.now() only for
+      // cached bytes for that URL indefinitely, even after the file on disk
+      // was correctly overwritten. Falls back to Date.now() only for
       // entries with no uploaded_at (e.g. an index.json rebuilt from disk).
-      file:     "magazines/" + encodeURIComponent(e.filename) + "?v=" + encodeURIComponent(e.uploaded_at || Date.now()),
-      filename: e.filename,
-    }));
+      const photos = isAlbum
+        ? (e.photos || []).map(p => "magazines/" + encodeURIComponent(e.filename) + "/" + encodeURIComponent(p) + "?v=" + v)
+        : null;
+      return {
+        title:    e.title || e.filename,
+        date:     e.date  || "",
+        type:     e.type || "magazine",
+        file:     isAlbum ? null : "magazines/" + encodeURIComponent(e.filename) + "?v=" + v,
+        filename: e.filename,
+        photos,
+        cover:    isAlbum && photos.length ? photos[0] : undefined,
+      };
+    });
   }catch(_){
     CONFIG.editions = [];
   }

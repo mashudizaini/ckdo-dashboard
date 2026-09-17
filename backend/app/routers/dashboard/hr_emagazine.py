@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,6 +24,8 @@ router = APIRouter()
 UPLOAD_DIR = Path("/app/magazine-uploads")
 INDEX_FILE = UPLOAD_DIR / "index.json"
 MAX_PDF_MB = 100
+ALLOWED_PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_PHOTO_MB = 20
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -122,6 +125,7 @@ async def upload_magazine(
     entries = _read_index()
     entries = [e for e in entries if e["filename"] != safe_name]
     entries.insert(0, {
+        "type":        "magazine",
         "filename":    safe_name,
         "title":       title.strip(),
         "date":        date_label.strip(),
@@ -130,6 +134,64 @@ async def upload_magazine(
     })
     _write_index(entries)
     return {"ok": True, "filename": safe_name, "entries": len(entries)}
+
+
+@router.post("/upload-album")
+async def upload_album(
+    title:         str               = Form(...),
+    date_label:    str               = Form(""),
+    qr_links_json: str               = Form("[]"),
+    photos:        list[UploadFile]  = File(...),
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    """Upload a photo album 'edition' — shown in the same public reading
+    room (magazines/index.json -> e-magazine/index.html) as a PDF
+    e-magazine, just as a folder of photos flipped through page-by-page
+    instead of PDF pages. Reuses every other endpoint below (qr-links,
+    meta, delete) since they're all keyed generically by the entry's
+    `filename` — here that's the album's folder name, not a real file."""
+    if not photos:
+        raise HTTPException(400, "Minimal 1 foto diperlukan.")
+    for p in photos:
+        if p.content_type not in ALLOWED_PHOTO_TYPES:
+            raise HTTPException(400, f"'{p.filename}' bukan tipe gambar yang didukung (JPEG/PNG/WebP).")
+
+    try:
+        qr_links = json.loads(qr_links_json) if qr_links_json else []
+        qr_links = [q for q in qr_links if q.get("url","").strip()]
+    except Exception:
+        qr_links = []
+
+    album_id = f"album_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}_{_safe_filename(title)[:40] or 'photos'}"
+    album_dir = UPLOAD_DIR / album_id
+    album_dir.mkdir(parents=True, exist_ok=True)
+
+    photo_names = []
+    try:
+        for i, p in enumerate(photos, start=1):
+            content = await p.read()
+            if len(content) > MAX_PHOTO_MB * 1024 * 1024:
+                raise HTTPException(413, f"'{p.filename}' melebihi {MAX_PHOTO_MB} MB.")
+            ext = Path(p.filename or "").suffix.lower() or ".jpg"
+            photo_filename = f"photo_{i}{ext}"
+            (album_dir / photo_filename).write_bytes(content)
+            photo_names.append(photo_filename)
+    except HTTPException:
+        shutil.rmtree(album_dir, ignore_errors=True)
+        raise
+
+    entries = _read_index()
+    entries.insert(0, {
+        "type":        "photo_album",
+        "filename":    album_id,
+        "title":       title.strip(),
+        "date":        date_label.strip(),
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "qr_links":    qr_links,
+        "photos":      photo_names,
+    })
+    _write_index(entries)
+    return {"ok": True, "filename": album_id, "entries": len(entries), "photos": len(photo_names)}
 
 
 @router.patch("/files/{filename}/qr-links")
@@ -185,14 +247,22 @@ async def delete_magazine(
     filename: str,
     user: CurrentUser = Depends(require_role(Roles.HR)),
 ):
-    """Delete a magazine PDF and remove it from index.json."""
+    """Delete an edition (PDF magazine or photo album) and remove it from
+    index.json."""
     safe_name = _safe_filename(filename)
-    dest = UPLOAD_DIR / safe_name
-    if not dest.exists():
+    entries = _read_index()
+    entry = next((e for e in entries if e["filename"] == safe_name), None)
+    if not entry:
         raise HTTPException(404, "File tidak ditemukan.")
-    dest.unlink()
 
-    entries = [e for e in _read_index() if e["filename"] != safe_name]
+    if entry.get("type") == "photo_album":
+        shutil.rmtree(UPLOAD_DIR / safe_name, ignore_errors=True)
+    else:
+        dest = UPLOAD_DIR / safe_name
+        if dest.exists():
+            dest.unlink()
+
+    entries = [e for e in entries if e["filename"] != safe_name]
     _write_index(entries)
     return {"ok": True, "deleted": safe_name}
 
@@ -206,6 +276,11 @@ async def convert_to_text(
     {filename}.pages.json next to the PDF — the same directory nginx serves
     statically at /e-magazine/magazines/, so the public viewer's search
     feature can fetch it directly with no new read endpoint."""
+    entries = _read_index()
+    entry = next((e for e in entries if e["filename"] == _safe_filename(filename)), None)
+    if entry and entry.get("type") == "photo_album":
+        raise HTTPException(400, "Convert to Text hanya berlaku untuk e-Magazine PDF, bukan photo album.")
+
     safe_name = _safe_filename(filename)
     pdf_path = UPLOAD_DIR / safe_name
     if not pdf_path.exists():

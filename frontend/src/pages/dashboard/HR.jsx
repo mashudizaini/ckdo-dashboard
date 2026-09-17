@@ -7356,9 +7356,11 @@ function EMagazineSection() {
   const [converting,    setConverting]    = useState(null); // filename currently being converted to text
   const [error,         setError]         = useState("");
   const [success,       setSuccess]       = useState("");
+  const [uploadType,    setUploadType]    = useState("magazine"); // "magazine" | "photo_album"
   const [title,         setTitle]         = useState("");
   const [dateLbl,       setDateLbl]       = useState("");
   const [file,          setFile]          = useState(null);
+  const [photos,        setPhotos]        = useState([]); // photo_album: File[]
   const [uploadQrLinks, setUploadQrLinks] = useState([]);
   const [editQr,        setEditQr]        = useState(null); // {filename, links:[{label,url}]}
   const [savingQr,      setSavingQr]      = useState(null);
@@ -7381,19 +7383,52 @@ function EMagazineSection() {
 
   useEffect(() => { load(); }, [load]);
 
+  const ALLOWED_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+  const handlePhotosSelect = (e) => {
+    const files = Array.from(e.target.files || []);
+    const invalid = files.filter(f => !ALLOWED_PHOTO_TYPES.includes(f.type));
+    if (invalid.length > 0) {
+      setError(`${invalid.map(f => f.name).join(", ")} — hanya JPEG, PNG, atau WebP yang didukung.`);
+      return;
+    }
+    setPhotos(prev => [...prev, ...files]);
+    setError("");
+    e.target.value = ""; // allow re-selecting the same file(s) again
+  };
+
+  const removePhoto = (idx) => setPhotos(prev => prev.filter((_, i) => i !== idx));
+
+  const resetUploadForm = () => {
+    setTitle(""); setDateLbl(""); setFile(null); setPhotos([]); setUploadQrLinks([]);
+  };
+
   const handleUpload = async (e) => {
     e.preventDefault();
-    if (!file || !title.trim()) { setError("Title and PDF file are required."); return; }
+    if (!title.trim()) { setError("Title is required."); return; }
+    if (uploadType === "magazine" && !file) { setError("PDF file is required."); return; }
+    if (uploadType === "photo_album" && photos.length === 0) { setError("Select at least one photo."); return; }
+
     setError(""); setSuccess(""); setUploading(true);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("title", title.trim());
-      form.append("date_label", dateLbl.trim());
-      form.append("qr_links_json", JSON.stringify(uploadQrLinks.filter(q => q.url.trim())));
-      await hrApi.eMagazineUpload(form);
-      setSuccess(`"${title}" uploaded successfully.`);
-      setTitle(""); setDateLbl(""); setFile(null); setUploadQrLinks([]);
+      if (uploadType === "magazine") {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("title", title.trim());
+        form.append("date_label", dateLbl.trim());
+        form.append("qr_links_json", JSON.stringify(uploadQrLinks.filter(q => q.url.trim())));
+        await hrApi.eMagazineUpload(form);
+        setSuccess(`"${title}" uploaded successfully.`);
+      } else {
+        const form = new FormData();
+        form.append("title", title.trim());
+        form.append("date_label", dateLbl.trim());
+        form.append("qr_links_json", JSON.stringify(uploadQrLinks.filter(q => q.url.trim())));
+        photos.forEach(p => form.append("photos", p));
+        await hrApi.eMagazineUploadAlbum(form);
+        setSuccess(`"${title}" (${photos.length} photos) uploaded successfully.`);
+      }
+      resetUploadForm();
       e.target.reset();
       load();
     } catch (err) {
@@ -7515,15 +7550,44 @@ function EMagazineSection() {
       {/* Upload form */}
       <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-5">
         <h3 className="text-sm font-semibold text-teal-400 mb-4 flex items-center gap-2">
-          <Upload size={14} /> Upload New e-Magazine
+          <Upload size={14} /> Upload New Edition
         </h3>
+
+        {/* Type toggle */}
+        <div className="flex gap-2 mb-4">
+          <button
+            type="button"
+            onClick={() => { setUploadType("magazine"); setError(""); }}
+            className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+              uploadType === "magazine"
+                ? "bg-teal-600 border-teal-600 text-white"
+                : "border-gray-700 text-gray-400 hover:bg-gray-800"
+            }`}
+          >
+            <BookOpen size={14} /> e-Magazine (PDF)
+          </button>
+          <button
+            type="button"
+            onClick={() => { setUploadType("photo_album"); setError(""); }}
+            className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+              uploadType === "photo_album"
+                ? "bg-teal-600 border-teal-600 text-white"
+                : "border-gray-700 text-gray-400 hover:bg-gray-800"
+            }`}
+          >
+            <Camera size={14} /> Photo Album
+          </button>
+        </div>
+
         <form onSubmit={handleUpload} className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="space-y-1">
-              <label className="text-xs text-gray-400 font-medium">Edition Title *</label>
+              <label className="text-xs text-gray-400 font-medium">
+                {uploadType === "magazine" ? "Edition Title *" : "Album Title *"}
+              </label>
               <input
                 type="text"
-                placeholder="e.g. 2nd Edition"
+                placeholder={uploadType === "magazine" ? "e.g. 2nd Edition" : "e.g. Company Anniversary 2026"}
                 value={title}
                 onChange={e => setTitle(e.target.value)}
                 className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
@@ -7540,17 +7604,48 @@ function EMagazineSection() {
                 className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
               />
             </div>
-            <div className="space-y-1">
-              <label className="text-xs text-gray-400 font-medium">PDF File * (max 100 MB)</label>
-              <input
-                type="file"
-                accept="application/pdf"
-                onChange={e => setFile(e.target.files[0] || null)}
-                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-400 file:mr-3 file:rounded file:border-0 file:bg-teal-600 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white focus:outline-none"
-                required
-              />
-            </div>
+            {uploadType === "magazine" ? (
+              <div className="space-y-1">
+                <label className="text-xs text-gray-400 font-medium">PDF File * (max 100 MB)</label>
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={e => setFile(e.target.files[0] || null)}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-400 file:mr-3 file:rounded file:border-0 file:bg-teal-600 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white focus:outline-none"
+                />
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <label className="text-xs text-gray-400 font-medium">Photos * (JPEG/PNG/WebP, max 20 MB each)</label>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  onChange={handlePhotosSelect}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-400 file:mr-3 file:rounded file:border-0 file:bg-teal-600 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white focus:outline-none"
+                />
+              </div>
+            )}
           </div>
+
+          {uploadType === "photo_album" && photos.length > 0 && (
+            <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 gap-2">
+              {photos.map((p, idx) => (
+                <div key={idx} className="relative group aspect-square rounded-lg overflow-hidden border border-gray-700">
+                  <img src={URL.createObjectURL(p)} alt={p.name} className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => removePhoto(idx)}
+                    className="absolute top-0.5 right-0.5 bg-black/70 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition"
+                    title="Remove"
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-3">
             <label className="text-xs text-gray-400 font-medium mb-2 flex items-center gap-1.5">
               <QrCode size={11} /> QR Code Link (optional)
@@ -7592,14 +7687,14 @@ function EMagazineSection() {
             <button onClick={load} className="text-teal-400 hover:text-teal-300 underline">Try again</button>
           </div>
         ) : list.length === 0 ? (
-          <p className="py-10 text-center text-xs text-gray-600">No e-magazines yet. Upload a PDF above.</p>
+          <p className="py-10 text-center text-xs text-gray-600">No editions yet. Upload a PDF e-magazine or a photo album above.</p>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-800/40">
                 <SortableTH label="Title"     field="title"       sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="px-4 py-2.5" />
                 <SortableTH label="Period"    field="date"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="px-4 py-2.5" />
-                <SortableTH label="File Name" field="filename"    sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="px-4 py-2.5" />
+                <SortableTH label="File" field="filename"    sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="px-4 py-2.5" />
                 <SortableTH label="Uploaded"  field="uploaded_at" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="px-4 py-2.5" />
                 <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Action</th>
               </tr>
@@ -7609,6 +7704,15 @@ function EMagazineSection() {
                 <>
                   <tr key={i} className="hover:bg-gray-800/40 transition-colors">
                     <td className="px-4 py-3 font-medium text-gray-200">
+                      {ed.type === "photo_album" ? (
+                        <span className="mr-2 inline-flex items-center gap-1 rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-purple-400 align-middle">
+                          <Camera size={10} /> Photo Album
+                        </span>
+                      ) : (
+                        <span className="mr-2 inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-blue-400 align-middle">
+                          <BookOpen size={10} /> e-Magazine
+                        </span>
+                      )}
                       {ed.title}
                       {ed.text_pages > 0 && (
                         <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-green-400 align-middle">
@@ -7617,19 +7721,23 @@ function EMagazineSection() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-gray-400">{ed.date || "-"}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs font-mono">{ed.filename}</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs font-mono">
+                      {ed.type === "photo_album" ? `${ed.photos?.length || 0} photos` : ed.filename}
+                    </td>
                     <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(ed.uploaded_at)}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => handleConvertToText(ed.filename)}
-                          disabled={converting === ed.filename}
-                          title="Extract text on-premise (PyMuPDF + Tesseract OCR fallback, same pipeline as the AI Chatbot's document ingest) so this edition becomes searchable in the public reader."
-                          className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-purple-400 hover:bg-purple-500/10 disabled:opacity-40 transition-colors"
-                        >
-                          {converting === ed.filename ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
-                          {converting === ed.filename ? "Converting…" : ed.text_pages > 0 ? "Re-convert" : "Convert to Text"}
-                        </button>
+                        {ed.type !== "photo_album" && (
+                          <button
+                            onClick={() => handleConvertToText(ed.filename)}
+                            disabled={converting === ed.filename}
+                            title="Extract text on-premise (PyMuPDF + Tesseract OCR fallback, same pipeline as the AI Chatbot's document ingest) so this edition becomes searchable in the public reader."
+                            className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-purple-400 hover:bg-purple-500/10 disabled:opacity-40 transition-colors"
+                          >
+                            {converting === ed.filename ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                            {converting === ed.filename ? "Converting…" : ed.text_pages > 0 ? "Re-convert" : "Convert to Text"}
+                          </button>
+                        )}
                         <button
                           onClick={() => editMeta?.filename === ed.filename ? setEditMeta(null) : openEditMeta(ed)}
                           className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
