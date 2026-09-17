@@ -29,7 +29,8 @@ const NAV_ITEMS = [
     { label: "Working Calendar", path: "/dashboard/hr/workingcalendar" },
     { label: "To Do List", path: "/dashboard/hr/todo" },
     { label: "E-Recruitment", path: "/dashboard/hr/cv" },
-    { label: "e-Magazine", path: "/e-magazine-viewer" },
+    { label: "e-Magazine", path: "/dashboard/hr/emagazine" },
+    { label: "e-Magazine Viewer", path: "/e-magazine-viewer" },
   ] },
   { label: "PAC", path: "/dashboard/pac", icon: Factory, roles: ["pac_staff"], children: [
     { label: "Business Plan", path: "/dashboard/pac/bizplan" },
@@ -531,7 +532,7 @@ function OracleEnvToggle() {
       </div>
       {isDev && (
         <p style={{ fontSize: 9.5, color: "#d97706", fontWeight: 600, marginTop: 4 }}>
-          ⚠ Semua modul Oracle sedang mengarah ke Development
+          ⚠ All Oracle modules are leading to Development
         </p>
       )}
     </div>

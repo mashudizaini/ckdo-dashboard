@@ -214,13 +214,13 @@ export default function VpnAccessMonitoring() {
           <Panel title="Active VPN Users" subtitle={gateway.has_credential ? "Live from the FortiGate CLI (get vpn ssl monitor)." : "Add an SSH credential in Setup to enable this."}
             action={gateway.has_credential ? <Btn size="sm" icon={loadingSessions ? Loader2 : RefreshCw} disabled={loadingSessions} onClick={refreshSessions}>Refresh</Btn> : null}>
             {!gateway.has_credential ? (
-              <Empty>Belum ada kredensial SSH FortiGate untuk gateway ini.</Empty>
+              <Empty>There is no specific SSH FortiGate for this gateway yet.</Empty>
             ) : loadingSessions && !sessions ? (
               <div className="flex justify-center py-6"><Loader2 size={16} className="animate-spin" style={{ color: "#94a3b8" }} /></div>
             ) : !sessions?.ok ? (
               <p style={{ fontSize: 11.5, color: "#dc2626" }}>{sessions?.error || "Failed to reach FortiGate CLI."}</p>
             ) : sessions.sessions.length === 0 ? (
-              <Empty>Tidak ada user yang sedang konek VPN saat ini.</Empty>
+              <Empty>No users are currently confounding VPN.</Empty>
             ) : (
               <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(0,0,0,0.06)" }}>
                 <table className="w-full text-xs">
