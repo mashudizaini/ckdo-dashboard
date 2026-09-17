@@ -351,6 +351,23 @@ async def sync_from_employees(
 # excluded from both the department_master sync below and the Team LOV.
 _LEAD_PLACEHOLDER_TEAMS = ("Director", "General Manager", "Senior Manager")
 
+# org_structure_nodes uses a different spelling than department_master's
+# existing entry for the exact same real-world department/team — confirmed
+# live (2026-09-17): the sync below first created 4 near-duplicate entries
+# ("QA" next to "Quality Assurance", "GA" next to "General Affair", "QC"
+# next to "Quality Control", "Strategy & Development" next to "Strategy
+# Development") before this map existed to catch them. Maps the
+# org_structure_nodes spelling -> the department_master spelling it's
+# really the same thing as, checked before deciding a value is genuinely
+# new. Add another entry here if a future sync run reports a name that
+# turns out to just be a spelling variant of something already there.
+_DM_SYNC_ALIASES = {
+    "qa": "Quality Assurance",
+    "qc": "Quality Control",
+    "ga": "General Affair",
+    "strategy & development": "Strategy Development",
+}
+
 
 @router.post("/sync-department-master")
 async def sync_department_master(
@@ -390,16 +407,17 @@ async def sync_department_master(
     async def _ensure(name, type_, parent_id):
         if not name or not name.strip():
             return None
-        key = (type_, name.strip().lower())
+        resolved = _DM_SYNC_ALIASES.get(name.strip().lower(), name.strip())
+        key = (type_, resolved.strip().lower())
         node = by_name_type.get(key)
         if node:
             return node.id
-        node = DepartmentMaster(name=name.strip(), type=type_, parent_id=parent_id, sequence=_next_seq(type_, parent_id))
+        node = DepartmentMaster(name=resolved, type=type_, parent_id=parent_id, sequence=_next_seq(type_, parent_id))
         db.add(node)
         await db.flush()
         existing.append(node)
         by_name_type[key] = node
-        added.append(f"{name} ({type_})")
+        added.append(f"{resolved} ({type_})")
         return node.id
 
     for department, team in rows:
