@@ -90,8 +90,13 @@ async def lifespan(app: FastAPI):
 
     # Organization Chart — add employee_id (links a chart entry to its
     # Employee master record once matched by /sync-from-employees).
-    from app.routers.dashboard.hr_org_structure import ensure_employee_id_column
+    from app.routers.dashboard.hr_org_structure import ensure_employee_id_column, ensure_team_region_columns
     await ensure_employee_id_column()
+
+    # Organization Chart — split the old combined "Sub-team / Region" field
+    # into separate team + region columns (see ensure_team_region_columns'
+    # own docstring).
+    await ensure_team_region_columns()
 
     # Initialize Oracle Thick Mode
     init_oracle_client()

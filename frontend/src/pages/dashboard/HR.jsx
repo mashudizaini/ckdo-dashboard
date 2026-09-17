@@ -350,15 +350,17 @@ function EmployeeTable() {
     try { setEmployeeNames((await hrApi.getEmployeeNames()) || []); } catch (_) {}
   }, []); // eslint-disable-line
 
-  // exclude_leads drops the "Director"/"General Manager"/"Senior Manager"
-  // placeholder values Employee.team holds for department/division-head
-  // level employees — not real teams, so they don't belong in a Team
-  // filter meant to narrow the list down to an actual team.
+  // source=master — department_master's curated team list, so this stays
+  // in sync automatically when department_master changes (see the
+  // matching fetchDepts comment above). exclude_leads drops the
+  // "Director"/"General Manager"/"Senior Manager" placeholder values —
+  // not real teams, so they don't belong in a Team filter meant to narrow
+  // the list down to an actual team.
   const fetchTeams = useCallback(async (dept) => {
     try {
       const url = dept
-        ? `${API}/teams?department=${encodeURIComponent(dept)}&exclude_leads=true`
-        : `${API}/teams?exclude_leads=true`;
+        ? `${API}/teams?department=${encodeURIComponent(dept)}&exclude_leads=true&source=master`
+        : `${API}/teams?exclude_leads=true&source=master`;
       const res = await fetch(url, { headers });
       if (res.ok) setTeams(await res.json());
     } catch (_) {}
@@ -1474,7 +1476,11 @@ function OrgNode({ node, mode, expanded, toggle, matchIds, onNodeClick, visibleI
   const isMatch = matchIds.has(node.id);
   const isPlaceholder = node.id === null;
   const color = isPlaceholder ? "#94a3b8" : orgDeptColor(node.department);
-  const groupLabel = node.sub_team || node.division || node.department || "";
+  // team first (a real team/function name), then region (Sales &
+  // Marketing's ASM/PS regional staff have no team value, just a
+  // territory — e.g. "Jakarta 2" — so this still labels their card),
+  // then division/department as before.
+  const groupLabel = node.team || node.region || node.division || node.department || "";
   // Join date shows on every real card now — simpler than the earlier
   // "Team Head level down" tiering, per explicit correction (2026-09-16).
   // Only these two named Korean expat Director/GM positions are excluded
@@ -1554,7 +1560,8 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
     position:      node?.position || "",
     department:    node?.department || "",
     division:      node?.division || "",
-    sub_team:      node?.sub_team || "",
+    team:          node?.team || "",
+    region:        node?.region || "",
     join_date:     node?.join_date || "",
     supervisor_id: node?.supervisor_id ?? null,
   });
@@ -1565,7 +1572,8 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
   const [positionLov, setPositionLov] = useState([]);
   const [departmentLov, setDepartmentLov] = useState([]);
   const [divisionLov, setDivisionLov] = useState([]);
-  const [subTeamLov, setSubTeamLov] = useState([]);
+  const [teamLov, setTeamLov] = useState([]);
+  const [regionLov, setRegionLov] = useState([]);
   const [supQuery, setSupQuery] = useState("");
   const [supOpen, setSupOpen]   = useState(false);
   const [customFields, setCustomFields] = useState(() => new Set());
@@ -1584,7 +1592,8 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
     hrApi.getOrgStructurePositions().then((r) => setPositionLov(r || [])).catch(() => {});
     hrApi.getOrgStructureDepts().then((r) => setDepartmentLov(r || [])).catch(() => {});
     hrApi.getOrgStructureDivisions().then((r) => setDivisionLov(r || [])).catch(() => {});
-    hrApi.getOrgStructureSubTeams().then((r) => setSubTeamLov(r || [])).catch(() => {});
+    hrApi.getOrgStructureTeams().then((r) => setTeamLov(r || [])).catch(() => {});
+    hrApi.getOrgStructureRegions().then((r) => setRegionLov(r || [])).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -1606,7 +1615,7 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
       position:   e.job_title || f.position,
       department: e.department || f.department,
       division:   e.division || f.division,
-      sub_team:   e.team || f.sub_team,
+      team:       e.team || f.team,
       join_date:  e.join_date || f.join_date,
     }));
     setEmpOpen(false);
@@ -1653,7 +1662,7 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
     </div>
   );
 
-  // ── LOV dropdown for position/department/division/sub_team — a plain
+  // ── LOV dropdown for position/department/division/team/region — a plain
   // <select> (not <datalist>, whose "type first, then see suggestions"
   // behavior isn't discoverable enough — HR expects a clickable list like
   // every other LOV in this app). allowCustom fields fall back to a free-
@@ -1761,7 +1770,8 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
             {selectField("position", "Position", positionLov, { allowCustom: true })}
             {selectField("department", "Department", departmentLov)}
             {selectField("division", "Division", divisionLov, { allowCustom: true })}
-            {selectField("sub_team", "Sub-team / Region", subTeamLov, { allowCustom: true })}
+            {selectField("team", "Team", teamLov, { allowCustom: true })}
+            {selectField("region", "Region", regionLov, { allowCustom: true })}
             <div>
               <label style={{ fontSize: 10, fontWeight: 700, color: "#64748b" }}>Join Date</label>
               <input type="date" value={form.join_date || ""} onChange={(e) => setForm({ ...form, join_date: e.target.value })}
@@ -1831,6 +1841,8 @@ function OrgChartView() {
   const [exportingImage, setExportingImage] = useState(false);
   const [syncing, setSyncing]   = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+  const [dmSyncing, setDmSyncing] = useState(false);
+  const [dmSyncResult, setDmSyncResult] = useState(null);
   const chartRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -1929,7 +1941,7 @@ function OrgChartView() {
   }, [root]);
 
   // Fills every empty chart field (position, department, division,
-  // sub_team, join_date) by matching each chart entry's name against the
+  // team, join_date) by matching each chart entry's name against the
   // Employee master — additive only, field by field (see
   // sync_from_employees's docstring), so it's safe to click repeatedly and
   // never clobbers a value already curated on the node.
@@ -1944,6 +1956,23 @@ function OrgChartView() {
       setSyncResult({ error: err?.detail || "Failed to sync from Employee master" });
     } finally {
       setSyncing(false);
+    }
+  };
+
+  // Grows department_master with any department/team value the chart
+  // actually uses that department_master doesn't have yet — see
+  // sync_department_master's own docstring for why division is
+  // deliberately left out of this. Additive-only, safe to re-run.
+  const handleSyncDepartmentMaster = async () => {
+    setDmSyncing(true);
+    setDmSyncResult(null);
+    try {
+      const res = await hrApi.syncOrgStructureDepartmentMaster();
+      setDmSyncResult(res);
+    } catch (err) {
+      setDmSyncResult({ error: err?.detail || "Failed to sync department_master" });
+    } finally {
+      setDmSyncing(false);
     }
   };
 
@@ -2022,6 +2051,13 @@ function OrgChartView() {
           {syncing ? "Syncing..." : "Sync from Employee List"}
         </button>
 
+        <button onClick={handleSyncDepartmentMaster} disabled={dmSyncing} title="Add any department/team value this chart uses that department_master doesn't have yet — never renames or moves an existing entry"
+          className="flex items-center gap-1.5"
+          style={{ padding: "7px 12px", borderRadius: 8, border: "none", cursor: dmSyncing ? "wait" : "pointer", background: "#7c3aed", color: "#fff", fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>
+          {dmSyncing ? <Loader2 size={13} className="animate-spin" /> : <ListChecks size={13} />}
+          {dmSyncing ? "Syncing..." : "Sync Department Master"}
+        </button>
+
         <button onClick={handleDownloadImage} disabled={exportingImage} title="Download as image"
           className="flex items-center gap-1.5"
           style={{ padding: "7px 12px", borderRadius: 8, border: "none", cursor: exportingImage ? "wait" : "pointer", background: "#2563eb", color: "#fff", fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>
@@ -2064,6 +2100,26 @@ function OrgChartView() {
             )}
           </div>
           <button onClick={() => setSyncResult(null)} style={{ border: "none", background: "none", cursor: "pointer", color: "inherit", opacity: 0.6, flexShrink: 0 }}>
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
+      {/* Sync Department Master result */}
+      {dmSyncResult && (
+        <div style={{
+          borderRadius: 10, padding: "9px 14px", fontSize: 11, fontWeight: 600,
+          background: dmSyncResult.error ? "#fee2e2" : "#ede9fe", color: dmSyncResult.error ? "#dc2626" : "#5b21b6",
+          display: "flex", alignItems: "flex-start", gap: 10,
+        }}>
+          <div style={{ flex: 1 }}>
+            {dmSyncResult.error ? dmSyncResult.error : (
+              dmSyncResult.added === 0
+                ? "department_master already has every department/team this chart uses — nothing to add."
+                : `Added ${dmSyncResult.added} new entr${dmSyncResult.added !== 1 ? "ies" : "y"} to department_master: ${dmSyncResult.added_names.join(", ")}.`
+            )}
+          </div>
+          <button onClick={() => setDmSyncResult(null)} style={{ border: "none", background: "none", cursor: "pointer", color: "inherit", opacity: 0.6, flexShrink: 0 }}>
             <X size={13} />
           </button>
         </div>
@@ -2226,7 +2282,9 @@ function OrgManageView() {
               <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500" title="Linked Employee record — set by Sync from Employee List on the Chart tab">Employee ID</th>
               <SortableTH label="Position" field="position" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <SortableTH label="Department" field="department" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Division / Sub-team</th>
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Division</th>
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Team</th>
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Region</th>
               <SortableTH label="Join Date" field="join_date" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Supervisor</th>
               <th className="px-3 py-2.5 w-12"></th>
@@ -2234,9 +2292,9 @@ function OrgManageView() {
           </thead>
           <tbody className="divide-y divide-gray-800">
             {loading ? (
-              <tr><td colSpan={8} className="py-12 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></td></tr>
+              <tr><td colSpan={10} className="py-12 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></td></tr>
             ) : sorted.length === 0 ? (
-              <tr><td colSpan={8} className="py-12 text-center text-xs text-gray-600">No structure data yet. Add a position or import Excel.</td></tr>
+              <tr><td colSpan={10} className="py-12 text-center text-xs text-gray-600">No structure data yet. Add a position or import Excel.</td></tr>
             ) : sorted.map((n) => (
               <tr key={n.id} onClick={() => setModalNode(n)} className="hover:bg-gray-800/40 cursor-pointer transition-colors">
                 <td className="px-3 py-2.5 font-medium text-gray-200 whitespace-nowrap">{n.full_name}</td>
@@ -2247,7 +2305,9 @@ function OrgManageView() {
                 </td>
                 <td className="px-3 py-2.5 text-gray-400 text-xs whitespace-nowrap">{n.position || "—"}</td>
                 <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap">{n.department || "—"}</td>
-                <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{[n.division, n.sub_team].filter(Boolean).join(" / ") || "—"}</td>
+                <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{n.division || "—"}</td>
+                <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{n.team || "—"}</td>
+                <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{n.region || "—"}</td>
                 <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{n.join_date || "—"}</td>
                 <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{n.supervisor_name || "—"}</td>
                 <td className="px-3 py-2.5">
@@ -3508,6 +3568,7 @@ function TurnoverSection() {
   const [showTenureBreakdown, setShowTenureBreakdown] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
+  // source=master — see EmployeeTable's matching fetchTeams comment.
   // exclude_leads drops the "Director"/"General Manager"/"Senior Manager"
   // placeholder values Employee.team holds for department/division-head
   // level employees — not real teams, so they don't belong in a Team
@@ -3515,8 +3576,8 @@ function TurnoverSection() {
   const fetchTeams = useCallback(async (dept) => {
     try {
       const url = dept
-        ? `${API}/teams?department=${encodeURIComponent(dept)}&exclude_leads=true`
-        : `${API}/teams?exclude_leads=true`;
+        ? `${API}/teams?department=${encodeURIComponent(dept)}&exclude_leads=true&source=master`
+        : `${API}/teams?exclude_leads=true&source=master`;
       const res = await fetch(url, { headers });
       if (res.ok) setTeams(await res.json());
     } catch (_) {}

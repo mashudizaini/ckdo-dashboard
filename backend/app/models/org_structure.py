@@ -21,7 +21,16 @@ class OrgStructureNode(Base):
     position       = Column(String(200))
     department     = Column(String(100))   # top-level branch, e.g. Sales & Marketing
     division       = Column(String(100))
-    sub_team       = Column(String(100))
+    # team: a real team/function name (e.g. "Global Business", "GA",
+    # "Validation") — matched against department_master. region: a
+    # geographic territory (e.g. "Jakarta 2", "Medan"), used only for
+    # Sales & Marketing's ASM/PS regional staff. Split 2026-09-17 from one
+    # combined "sub_team" column the form used to literally label
+    # "Sub-team / Region" — the two concepts don't mix in any LOV/sync
+    # logic that treats one as a department_master-backed value and the
+    # other as free-form geography.
+    team           = Column(String(100))
+    region         = Column(String(100))
     join_date      = Column(Date)
     supervisor_id  = Column(Integer, ForeignKey("org_structure_nodes.id"), nullable=True, index=True)
     # Controls left-to-right / top-to-bottom order among siblings under the same

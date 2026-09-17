@@ -2067,10 +2067,20 @@ async def get_departments(
 async def get_teams(
     department:    Optional[str] = Query(None),
     exclude_leads: bool          = Query(False),  # drop LEAD_TEAM_NAMES ("Director"/"General Manager"/"Senior Manager") placeholder values
+    source:        str           = Query("employees", description="'employees' (default, raw distinct Employee.team values) or 'master' (department_master's curated team list)"),
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
     """Daftar team untuk filter dropdown, opsional difilter per department.
+
+    source="master" (used by Employee List and Turnover Report, like
+    /departments?source=master) reads department_master's team-type rows
+    directly instead of Employee.team's raw distinct values — stays in
+    sync automatically whenever department_master changes (new team added/
+    renamed/reordered), rather than only reflecting whatever teams
+    Employee rows happen to already carry. Employee Summary keeps the
+    default "employees" source, matching its own DEPT_GROUPS-based
+    grouping.
 
     Employee.team also holds LEAD_TEAM_NAMES placeholder values ("Director"
     / "General Manager" / "Senior Manager") for department/division-head
@@ -2081,6 +2091,37 @@ async def get_teams(
     default so this doesn't change Employee List's existing team filter,
     which callers may still want to include them in."""
     department = _resolve_department_alias(department)
+
+    if source == "master":
+        rows = (await db.execute(select(DepartmentMaster))).scalars().all()
+        by_id = {r.id: r for r in rows}
+
+        def _dept_of(row) -> Optional[str]:
+            cur = row
+            seen = set()
+            while cur.parent_id and cur.parent_id not in seen:
+                seen.add(cur.parent_id)
+                parent = by_id.get(cur.parent_id)
+                if not parent:
+                    break
+                cur = parent
+            return cur.name
+
+        team_rows = [r for r in rows if r.type == "team" and (department is None or _dept_of(r) == department)]
+        if exclude_leads:
+            team_rows = [r for r in team_rows if r.name not in LEAD_TEAM_NAMES]
+        dept_seq = {r.name: r.sequence for r in rows if r.type in ("director", "department")}
+        team_rows.sort(key=lambda r: (dept_seq.get(_dept_of(r), 99), r.sequence, r.name))
+        # A team name appearing under more than one department/division
+        # (rare) would otherwise repeat in the flat "all teams" list —
+        # de-duplicate by name, keeping the first (best-sorted) occurrence.
+        seen_names, names = set(), []
+        for r in team_rows:
+            if r.name not in seen_names:
+                seen_names.add(r.name)
+                names.append(r.name)
+        return names
+
     q = select(Employee.team).distinct()
     if department:
         q = q.where(Employee.department == department)
