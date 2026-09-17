@@ -316,12 +316,12 @@ function EmployeeTable() {
   // "Employment State" as chosen in Filters until the user picks a
   // different value there.
   const [summaryEmploymentStatus, setSummaryEmploymentStatus] = useState("Active");
-  // Blank ("All") by default — Joined Month/Year is now an exact match
-  // (only employees who joined in that specific period, see
-  // _apply_employee_filters), so defaulting to the current month/year
-  // would show almost nobody instead of the full roster on first load.
-  const [joinMonthFilter, setJoinMonthFilter] = useState("");
-  const [joinYearFilter, setJoinYearFilter] = useState("");
+  // Default to the current month/year, per explicit request (2026-09-17) —
+  // Joined Month/Year is an exact match (only employees who joined in that
+  // specific period, see _apply_employee_filters), so this narrows the
+  // list to this month's joiners by default rather than showing everyone.
+  const [joinMonthFilter, setJoinMonthFilter] = useState(() => String(new Date().getMonth() + 1));
+  const [joinYearFilter, setJoinYearFilter] = useState(() => String(new Date().getFullYear()));
   const [teamFilter, setTeamFilter] = useState("");
   const [departments, setDepartments]   = useState([]);
   const [teams,       setTeams]         = useState([]);
@@ -510,24 +510,49 @@ function EmployeeTable() {
     }
   };
 
+  // Blank two-sheet (EMP Active/EMP Resign) Excel, headers only — the same
+  // template EmployeeUpload's own "Download Template" button offers, just
+  // also reachable right next to Download Excel here for visibility.
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
+  const handleDownloadTemplate = async () => {
+    setDownloadingTemplate(true);
+    try {
+      const res = await fetch(`${API}/upload-template`, { headers });
+      if (!res.ok) throw new Error("Download failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "employee_upload_template.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (_) {
+    } finally {
+      setDownloadingTemplate(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
-      {/* Summary cards — clickable. "Total" and "Resign" (as standalone
-          cards) are gone (2026-09-17): Active/Inactive now sit side by
-          side instead, both always showing the real count for whatever
-          Department/Team/Search/Join-date filters are set, regardless of
-          which Employment State is currently selected — see /summary's
-          own docstring on card_base_all_states for why. */}
-      {summary && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6 }}>
+      {/* Summary cards — clickable. Active/Inactive are back to ONE card
+          (2026-09-17): it shows whichever one the Employment State filter
+          is currently set to — Active count when Active (or the "All"
+          default) is selected, Inactive count when Resign is — instead of
+          always showing both side by side. */}
+      {summary && (() => {
+        const empIsResign = summaryEmploymentStatus === "Resign";
+        return (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
           {[
             // `activeBg` is a darker shade of `color`, used only for the
             // selected (filled) state's background — the white value/label
             // text needs that extra darkness to read cleanly; the base
             // `color` alone (esp. amber/purple) looked washed out and hard
             // to read with white text directly on it.
-            { id: "active",     label: "Active",          val: summary.active,     color: "#16a34a", activeBg: "#15803d", icon: "🟢" },
-            { id: "resign",     label: "Inactive",        val: summary.resign,     color: "#dc2626", activeBg: "#b91c1c", icon: "🔴" },
+            { id: empIsResign ? "resign" : "active", label: empIsResign ? "Inactive" : "Active",
+              val: empIsResign ? summary.resign : summary.active,
+              color: empIsResign ? "#dc2626" : "#16a34a", activeBg: empIsResign ? "#b91c1c" : "#15803d",
+              icon: empIsResign ? "🔴" : "🟢" },
             { id: "permanent",  label: "Permanent",       val: summary.permanent,  color: "#22c55e", activeBg: "#16a34a", icon: "✓" },
             { id: "contract",   label: "Contract",        val: summary.contract,   color: "#f59e0b", activeBg: "#b45309", icon: "📋" },
             { id: "probation",  label: "Probation",       val: summary.probation,  color: "#a855f7", activeBg: "#7e22ce", icon: "⏳" },
@@ -552,7 +577,8 @@ function EmployeeTable() {
             );
           })}
         </div>
-      )}
+        );
+      })()}
 
       {/* Toolbar — Refresh + search + Filters popup + actions */}
       <div className="flex flex-wrap items-end gap-2">
@@ -707,6 +733,15 @@ function EmployeeTable() {
           className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-semibold text-gray-300 hover:border-indigo-500 hover:text-white transition-colors"
         >
           <Upload size={13} /> {showUploadPanel ? "Hide Upload Employee" : "Upload Employee"}
+        </button>
+
+        <button
+          onClick={handleDownloadTemplate}
+          disabled={downloadingTemplate}
+          className="flex items-center gap-1.5 rounded-lg border border-blue-700/50 bg-blue-900/20 px-3 py-2 text-xs font-semibold text-blue-400 hover:border-blue-600 hover:bg-blue-900/30 disabled:opacity-40 transition-colors"
+        >
+          {downloadingTemplate ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+          {downloadingTemplate ? "Downloading..." : "Download Template"}
         </button>
 
         <div className="relative">
