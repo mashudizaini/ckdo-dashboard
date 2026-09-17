@@ -60,8 +60,11 @@ from typing import Optional
 import anthropic
 import psycopg2
 import structlog
+from sqlalchemy import select, func
 
 from app.config import get_settings
+from app.database import AsyncSessionLocal
+from app.models.employee import Employee
 from app.services import eis_tools
 from app.services.ai_service import ANTHROPIC_CHAT_DEFAULT_MODEL
 from app.services.department_taxonomy import CANONICAL_DEPARTMENTS
@@ -209,13 +212,39 @@ def _open_scoped_connection(scope: dict):
     return conn
 
 
+async def _employee_exists(email: str) -> bool:
+    """True if `email` matches an employee's company/personal email in
+    this app's own Employee table — the real, actively-maintained HR
+    source of truth (eis.dim_employee is itself mirrored FROM this table,
+    not from Oracle EBS's per_people_f — see etl_employee)."""
+    email = (email or "").strip().lower()
+    if not email:
+        return False
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Employee.user_id).where(
+                (func.lower(Employee.company_email) == email)
+                | (func.lower(Employee.personal_email) == email)
+            ).limit(1)
+        )
+        return result.scalar() is not None
+
+
 # ── Answering a question ────────────────────────────────────────────────
 
 async def answer_question(question: str, user_email: str) -> dict:
-    """Returns {"answer": str, "sources": [...]}
-    or {"error": "user_not_found_in_ebs"} if the email has no scope row."""
+    """Returns {"answer": str, "sources": [...]}, or one of two distinct
+    error shapes when the caller can't be answered for:
+    - {"error": "user_not_found_in_ebs"}: the email isn't a known employee
+      at all (not in the Employee master).
+    - {"error": "scope_not_configured"}: the email IS a known employee,
+      but no one has set up their ebs_chat_scope row yet — a different,
+      more actionable situation (admin needs to register them) than a
+      genuinely unknown/external email."""
     scope = _get_scope(user_email)
     if scope is None:
+        if await _employee_exists(user_email):
+            return {"error": "scope_not_configured"}
         return {"error": "user_not_found_in_ebs"}
 
     conn = _open_scoped_connection(scope)
@@ -288,4 +317,45 @@ async def _run_tool_calling_turn(question: str) -> dict:
         messages=messages,
     )
     answer = "".join(b.text for b in final.content if b.type == "text")
+
+    if not answer.strip():
+        logger.warning(
+            "ebs_chat_empty_answer",
+            stop_reason=final.stop_reason,
+            block_types=[b.type for b in final.content],
+            question=question,
+        )
+        final = await client.messages.create(
+            model=model,
+            max_tokens=FINAL_ANSWER_MAX_TOKENS,
+            system=final_system,
+            messages=messages,
+        )
+        answer = "".join(b.text for b in final.content if b.type == "text")
+
+    if not answer.strip():
+        logger.warning(
+            "ebs_chat_empty_answer_after_retry",
+            stop_reason=final.stop_reason,
+            block_types=[b.type for b in final.content],
+            question=question,
+        )
+        answer = _fallback_answer(sources, lang)
+
     return {"answer": answer, "sources": sources}
+
+
+def _fallback_answer(sources: list[dict], lang: str) -> str:
+    """Deterministic non-empty answer built from tool results, used only
+    when the model's final turn returns no text (retried once first) —
+    never surface a literal empty string to the user."""
+    rows_found = [s for s in sources if not s.get("error") and s.get("row_count", 0) > 0]
+    if rows_found:
+        if lang == "id":
+            parts = [f"{s['row_count']} baris dari {s['tool']}" for s in rows_found]
+            return "Data ditemukan (" + "; ".join(parts) + "), tetapi jawaban tidak berhasil dibuat. Silakan coba tanyakan ulang dengan kalimat yang lebih spesifik."
+        parts = [f"{s['row_count']} row(s) from {s['tool']}" for s in rows_found]
+        return "Data was found (" + "; ".join(parts) + ") but an answer could not be generated. Please try rephrasing your question."
+    if lang == "id":
+        return "Maaf, tidak dapat membuat jawaban untuk pertanyaan ini. Silakan coba tanyakan ulang dengan kalimat yang lebih spesifik."
+    return "Sorry, an answer could not be generated for this question. Please try rephrasing it."

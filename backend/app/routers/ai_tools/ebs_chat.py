@@ -47,8 +47,8 @@ async def query(payload: QueryRequest):
         raise HTTPException(400, "user_email is required")
 
     result = await ebs_chat_service.answer_question(payload.question, payload.user_email)
-    if result.get("error") == "user_not_found_in_ebs":
-        raise HTTPException(403, {"error": "user_not_found_in_ebs"})
+    if result.get("error") in ("user_not_found_in_ebs", "scope_not_configured"):
+        raise HTTPException(403, {"error": result["error"]})
     return result
 
 
