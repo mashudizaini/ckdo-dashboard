@@ -194,6 +194,60 @@ async def upload_album(
     return {"ok": True, "filename": album_id, "entries": len(entries), "photos": len(photo_names)}
 
 
+@router.post("/files/{filename}/add-photos")
+async def add_photos(
+    filename:      str,
+    title:         str               = Form(""),
+    date_label:    str               = Form(""),
+    photos:        list[UploadFile]  = File(...),
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    """Append more photos to an existing photo album, optionally renaming
+    it in the same call — the Edit button on a photo_album row reopens the
+    top upload form pre-filled with this album instead of the small
+    title/date-only inline editor, so the admin can add more event photos
+    without recreating the whole album."""
+    safe_name = _safe_filename(filename)
+    entries = _read_index()
+    entry = next((e for e in entries if e["filename"] == safe_name), None)
+    if not entry:
+        raise HTTPException(404, "Album tidak ditemukan.")
+    if entry.get("type") != "photo_album":
+        raise HTTPException(400, "Hanya photo album yang bisa ditambah foto.")
+    if not photos:
+        raise HTTPException(400, "Minimal 1 foto diperlukan.")
+    for p in photos:
+        if p.content_type not in ALLOWED_PHOTO_TYPES:
+            raise HTTPException(400, f"'{p.filename}' bukan tipe gambar yang didukung (JPEG/PNG/WebP).")
+
+    album_dir = UPLOAD_DIR / safe_name
+    album_dir.mkdir(parents=True, exist_ok=True)
+    existing_photos = entry.get("photos", [])
+
+    new_names = []
+    try:
+        for i, p in enumerate(photos, start=len(existing_photos) + 1):
+            content = await p.read()
+            if len(content) > MAX_PHOTO_MB * 1024 * 1024:
+                raise HTTPException(413, f"'{p.filename}' melebihi {MAX_PHOTO_MB} MB.")
+            ext = Path(p.filename or "").suffix.lower() or ".jpg"
+            photo_filename = f"photo_{i}{ext}"
+            (album_dir / photo_filename).write_bytes(content)
+            new_names.append(photo_filename)
+    except HTTPException:
+        for name in new_names:
+            (album_dir / name).unlink(missing_ok=True)
+        raise
+
+    entry["photos"] = existing_photos + new_names
+    if title.strip():
+        entry["title"] = title.strip()
+    if date_label.strip():
+        entry["date"] = date_label.strip()
+    _write_index(entries)
+    return {"ok": True, "filename": safe_name, "photos": len(entry["photos"]), "added": len(new_names)}
+
+
 @router.patch("/files/{filename}/qr-links")
 async def update_qr_links(
     filename: str,

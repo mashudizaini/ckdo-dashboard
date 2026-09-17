@@ -152,6 +152,7 @@ export const hrApi = {
   eMagazineList:       ()              => api.get("/dashboard/hr/e-magazine/files"),
   eMagazineUpload:     (form)          => api.post("/dashboard/hr/e-magazine/upload", form, { headers: { "Content-Type": "multipart/form-data" } }),
   eMagazineUploadAlbum: (form)         => api.post("/dashboard/hr/e-magazine/upload-album", form, { headers: { "Content-Type": "multipart/form-data" } }),
+  eMagazineAddPhotos:  (filename, form) => api.post(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/add-photos`, form, { headers: { "Content-Type": "multipart/form-data" } }),
   eMagazineDelete:     (filename)      => api.delete(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}`),
   eMagazineUpdateQR:   (filename, qrs) => api.patch(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/qr-links`, qrs),
   eMagazineUpdateMeta: (filename, meta) => api.patch(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/meta`, meta),

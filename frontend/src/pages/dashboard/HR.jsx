@@ -7366,9 +7366,11 @@ function EMagazineSection() {
   const [savingQr,      setSavingQr]      = useState(null);
   const [editMeta,      setEditMeta]      = useState(null); // {filename, title, date}
   const [savingMeta,    setSavingMeta]    = useState(null);
+  const [editingAlbum,  setEditingAlbum]  = useState(null); // {filename, existingCount} — reopens the top form to append photos
   const [sortBy,  setSortBy]  = useState(null);
   const [sortDir, setSortDir] = useState("asc");
   const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
+  const uploadFormRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -7401,7 +7403,20 @@ function EMagazineSection() {
 
   const resetUploadForm = () => {
     setTitle(""); setDateLbl(""); setFile(null); setPhotos([]); setUploadQrLinks([]);
+    setEditingAlbum(null);
   };
+
+  const openAddPhotos = (ed) => {
+    setEditMeta(null); setEditQr(null); setError(""); setSuccess("");
+    setUploadType("photo_album");
+    setTitle(ed.title || "");
+    setDateLbl(ed.date || "");
+    setPhotos([]);
+    setEditingAlbum({ filename: ed.filename, existingCount: ed.photos?.length || 0 });
+    uploadFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const cancelAddPhotos = () => resetUploadForm();
 
   const handleUpload = async (e) => {
     e.preventDefault();
@@ -7411,7 +7426,14 @@ function EMagazineSection() {
 
     setError(""); setSuccess(""); setUploading(true);
     try {
-      if (uploadType === "magazine") {
+      if (editingAlbum) {
+        const form = new FormData();
+        form.append("title", title.trim());
+        form.append("date_label", dateLbl.trim());
+        photos.forEach(p => form.append("photos", p));
+        const result = await hrApi.eMagazineAddPhotos(editingAlbum.filename, form);
+        setSuccess(`Added ${result.added} photo(s) — "${title}" now has ${result.photos} total.`);
+      } else if (uploadType === "magazine") {
         const form = new FormData();
         form.append("file", file);
         form.append("title", title.trim());
@@ -7444,6 +7466,7 @@ function EMagazineSection() {
       setSuccess(`"${filename}" deleted successfully.`);
       if (editQr?.filename === filename) setEditQr(null);
       if (editMeta?.filename === filename) setEditMeta(null);
+      if (editingAlbum?.filename === filename) setEditingAlbum(null);
       load();
     } catch {
       setError("Failed to delete file.");
@@ -7465,11 +7488,13 @@ function EMagazineSection() {
     const links = (ed.qr_links || []).map(q => ({ label: q.label || "", url: q.url || "" }));
     setEditQr({ filename: ed.filename, links });
     setEditMeta(null);
+    setEditingAlbum(null);
   };
 
   const openEditMeta = (ed) => {
     setEditMeta({ filename: ed.filename, title: ed.title || "", date: ed.date || "" });
     setEditQr(null);
+    setEditingAlbum(null);
   };
 
   const handleSaveMeta = async () => {
@@ -7548,36 +7573,44 @@ function EMagazineSection() {
   return (
     <div className="space-y-6">
       {/* Upload form */}
-      <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-5">
+      <div ref={uploadFormRef} className={`rounded-xl border p-5 ${editingAlbum ? "border-teal-600 bg-teal-950/20" : "border-gray-800 bg-gray-900/60"}`}>
         <h3 className="text-sm font-semibold text-teal-400 mb-4 flex items-center gap-2">
-          <Upload size={14} /> Upload New Edition
+          <Upload size={14} /> {editingAlbum ? `Add Photos to Album` : "Upload New Edition"}
         </h3>
 
-        {/* Type toggle */}
-        <div className="flex gap-2 mb-4">
-          <button
-            type="button"
-            onClick={() => { setUploadType("magazine"); setError(""); }}
-            className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
-              uploadType === "magazine"
-                ? "bg-teal-600 border-teal-600 text-white"
-                : "border-gray-700 text-gray-400 hover:bg-gray-800"
-            }`}
-          >
-            <BookOpen size={14} /> e-Magazine (PDF)
-          </button>
-          <button
-            type="button"
-            onClick={() => { setUploadType("photo_album"); setError(""); }}
-            className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
-              uploadType === "photo_album"
-                ? "bg-teal-600 border-teal-600 text-white"
-                : "border-gray-700 text-gray-400 hover:bg-gray-800"
-            }`}
-          >
-            <Camera size={14} /> Photo Album
-          </button>
-        </div>
+        {/* Type toggle — locked to Photo Album while adding photos to an existing one */}
+        {!editingAlbum && (
+          <div className="flex gap-2 mb-4">
+            <button
+              type="button"
+              onClick={() => { setUploadType("magazine"); setError(""); }}
+              className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                uploadType === "magazine"
+                  ? "bg-teal-600 border-teal-600 text-white"
+                  : "border-gray-700 text-gray-400 hover:bg-gray-800"
+              }`}
+            >
+              <BookOpen size={14} /> e-Magazine (PDF)
+            </button>
+            <button
+              type="button"
+              onClick={() => { setUploadType("photo_album"); setError(""); }}
+              className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                uploadType === "photo_album"
+                  ? "bg-teal-600 border-teal-600 text-white"
+                  : "border-gray-700 text-gray-400 hover:bg-gray-800"
+              }`}
+            >
+              <Camera size={14} /> Photo Album
+            </button>
+          </div>
+        )}
+
+        {editingAlbum && (
+          <p className="text-xs text-teal-300/80 mb-4">
+            This album already has {editingAlbum.existingCount} photo{editingAlbum.existingCount === 1 ? "" : "s"}. Photos selected below will be added after them.
+          </p>
+        )}
 
         <form onSubmit={handleUpload} className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -7646,12 +7679,14 @@ function EMagazineSection() {
             </div>
           )}
 
-          <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-3">
-            <label className="text-xs text-gray-400 font-medium mb-2 flex items-center gap-1.5">
-              <QrCode size={11} /> QR Code Link (optional)
-            </label>
-            <QrLinksEditor links={uploadQrLinks} setter={setUploadQrLinks} />
-          </div>
+          {!editingAlbum && (
+            <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-3">
+              <label className="text-xs text-gray-400 font-medium mb-2 flex items-center gap-1.5">
+                <QrCode size={11} /> QR Code Link (optional)
+              </label>
+              <QrLinksEditor links={uploadQrLinks} setter={setUploadQrLinks} />
+            </div>
+          )}
           <div className="flex items-center gap-3">
             <button
               type="submit"
@@ -7659,8 +7694,18 @@ function EMagazineSection() {
               className="flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2 text-sm font-semibold text-white hover:bg-teal-500 disabled:opacity-50 transition-colors"
             >
               {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-              {uploading ? "Uploading…" : "Upload"}
+              {uploading ? "Uploading…" : editingAlbum ? `Add ${photos.length || ""} Photo${photos.length === 1 ? "" : "s"}` : "Upload"}
             </button>
+            {editingAlbum && (
+              <button
+                type="button"
+                onClick={cancelAddPhotos}
+                disabled={uploading}
+                className="rounded-lg px-4 py-2 text-sm font-semibold text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            )}
             {success && <span className="text-xs text-teal-400">{success}</span>}
             {error   && <span className="text-xs text-red-400">{error}</span>}
           </div>
@@ -7739,9 +7784,15 @@ function EMagazineSection() {
                           </button>
                         )}
                         <button
-                          onClick={() => editMeta?.filename === ed.filename ? setEditMeta(null) : openEditMeta(ed)}
+                          onClick={() => {
+                            if (ed.type === "photo_album") {
+                              editingAlbum?.filename === ed.filename ? cancelAddPhotos() : openAddPhotos(ed);
+                            } else {
+                              editMeta?.filename === ed.filename ? setEditMeta(null) : openEditMeta(ed);
+                            }
+                          }}
                           className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
-                            editMeta?.filename === ed.filename
+                            editMeta?.filename === ed.filename || editingAlbum?.filename === ed.filename
                               ? "bg-teal-500/20 text-teal-300"
                               : "text-gray-400 hover:bg-gray-700/60 hover:text-gray-200"
                           }`}
