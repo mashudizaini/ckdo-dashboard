@@ -467,13 +467,14 @@ function EmployeeTable() {
     if (activeCard === id) {
       setActiveCard("");
       setStatusFilter("");
-      if (id === "active" || id === "resign") setEmploymentStatusFilter("Active"); // back to the app's standing default
+      if (id === "active" || id === "resign" || id === "all") setEmploymentStatusFilter("Active"); // back to the app's standing default
       setPage(1);
     } else {
       setActiveCard(id);
       setStatusFilter("");
       if (id === "active")         setEmploymentStatusFilter("Active");
       else if (id === "resign")    setEmploymentStatusFilter("Resign");
+      else if (id === "all")       setEmploymentStatusFilter("");
       else if (id === "permanent") setStatusFilter("Permanent");
       else if (id === "contract")  setStatusFilter("Contract");
       else if (id === "probation") setStatusFilter("Probation");
@@ -538,25 +539,26 @@ function EmployeeTable() {
 
   return (
     <div className="space-y-4">
-      {/* Summary cards — clickable. Active/Inactive are back to ONE card
-          (2026-09-17): it shows whichever one the Employment State filter
-          is currently set to — Active count when Active (or the "All"
-          default) is selected, Inactive count when Resign is — instead of
-          always showing both side by side. */}
+      {/* Summary cards — clickable. Active/Inactive is ONE card that
+          tracks the Employment State filter (2026-09-17): Active count
+          when Active is selected, Inactive count when Resign is, and —
+          added same day — the combined Active+Inactive total, labeled
+          "Active & Inactive", when Employment State is "All". */}
       {summary && (() => {
-        const empIsResign = summaryEmploymentStatus === "Resign";
+        // `activeBg` is a darker shade of `color`, used only for the
+        // selected (filled) state's background — the white value/label
+        // text needs that extra darkness to read cleanly; the base
+        // `color` alone (esp. amber/purple) looked washed out and hard
+        // to read with white text directly on it.
+        const firstCard = summaryEmploymentStatus === "Resign"
+          ? { id: "resign", label: "Inactive", val: summary.resign, color: "#dc2626", activeBg: "#b91c1c", icon: "🔴" }
+          : summaryEmploymentStatus === "Active"
+          ? { id: "active", label: "Active", val: summary.active, color: "#16a34a", activeBg: "#15803d", icon: "🟢" }
+          : { id: "all", label: "Active & Inactive", val: summary.active + summary.resign, color: "#2563eb", activeBg: "#1d4ed8", icon: "👥" };
         return (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
           {[
-            // `activeBg` is a darker shade of `color`, used only for the
-            // selected (filled) state's background — the white value/label
-            // text needs that extra darkness to read cleanly; the base
-            // `color` alone (esp. amber/purple) looked washed out and hard
-            // to read with white text directly on it.
-            { id: empIsResign ? "resign" : "active", label: empIsResign ? "Inactive" : "Active",
-              val: empIsResign ? summary.resign : summary.active,
-              color: empIsResign ? "#dc2626" : "#16a34a", activeBg: empIsResign ? "#b91c1c" : "#15803d",
-              icon: empIsResign ? "🔴" : "🟢" },
+            firstCard,
             { id: "permanent",  label: "Permanent",       val: summary.permanent,  color: "#22c55e", activeBg: "#16a34a", icon: "✓" },
             { id: "contract",   label: "Contract",        val: summary.contract,   color: "#f59e0b", activeBg: "#b45309", icon: "📋" },
             { id: "probation",  label: "Probation",       val: summary.probation,  color: "#a855f7", activeBg: "#7e22ce", icon: "⏳" },
