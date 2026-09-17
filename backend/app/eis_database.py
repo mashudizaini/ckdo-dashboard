@@ -131,6 +131,15 @@ async def ensure_employee_dim_table():
         await conn.execute(text(
             "ALTER TABLE eis.dim_employee ADD COLUMN IF NOT EXISTS division VARCHAR(100)"
         ))
+        # resign_date/resign_reason: added after a user caught EBS Chat
+        # claiming "the system doesn't store resign dates" — it does, in
+        # employees.resign_date, but dim_employee never mirrored it.
+        await conn.execute(text(
+            "ALTER TABLE eis.dim_employee ADD COLUMN IF NOT EXISTS resign_date DATE"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE eis.dim_employee ADD COLUMN IF NOT EXISTS resign_reason TEXT"
+        ))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_dim_employee_department "
             "ON eis.dim_employee (department)"

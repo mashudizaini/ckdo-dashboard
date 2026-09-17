@@ -197,7 +197,7 @@ EIS_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_employee_directory",
-            "description": "Cari daftar / total karyawan (nama, posisi, department, team, tanggal masuk, status) — untuk pertanyaan 'siapa saja di tim X', cari data karyawan tertentu, atau 'berapa total karyawan resign/aktif saat ini' (hitung dari jumlah baris hasil, employment_status='Resign' untuk yang sudah keluar, 'Active' untuk yang masih bekerja).",
+            "description": "Cari daftar / total karyawan (nama, posisi, department, team, tanggal masuk, status, tanggal & alasan resign) — untuk pertanyaan 'siapa saja di tim X', cari data karyawan tertentu, 'berapa total karyawan resign/aktif saat ini' (hitung dari jumlah baris hasil, employment_status='Resign' untuk yang sudah keluar, 'Active' untuk yang masih bekerja), atau 'kapan/kenapa si X resign' (pakai field resign_date dan resign_reason di hasilnya — SISTEM INI MENYIMPAN tanggal & alasan resign, jangan bilang tidak ada).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -475,7 +475,7 @@ def get_employee_directory(department: str = None, team: str = None, full_name: 
     return _query(
         """
         SELECT employee_number, full_name, department, division, team, position_title,
-               hire_date, employment_status
+               hire_date, employment_status, resign_date, resign_reason
         FROM eis.dim_employee
         WHERE (%(department)s IS NULL OR department = %(department)s)
           AND (%(team_like)s IS NULL OR team ILIKE %(team_like)s)

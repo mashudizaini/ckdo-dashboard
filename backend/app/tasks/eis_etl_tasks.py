@@ -973,12 +973,13 @@ def etl_employee(year: int = None, month: int = None):
                 (
                     e.user_id, e.full_name, e.sex, e.job_title,
                     e.department, e.division, e.team,
-                    e.date_of_joining, e.resign_date, e.employment_status,
+                    e.date_of_joining, e.resign_date, e.employment_status, e.resign_reason,
                 )
                 for e in main_db.query(
                     Employee.user_id, Employee.full_name, Employee.sex, Employee.job_title,
                     Employee.department, Employee.division, Employee.team,
                     Employee.date_of_joining, Employee.resign_date, Employee.employment_status,
+                    Employee.resign_reason,
                 )
             ]
         finally:
@@ -992,12 +993,13 @@ def etl_employee(year: int = None, month: int = None):
         # ── Complete employee roster snapshot → dim_employee ─────────
         roster_loaded = 0
         for (user_id, full_name, sex, job_title, department, division, team,
-             joined, resigned, emp_status) in emp_rows:
+             joined, resigned, emp_status, resign_reason) in emp_rows:
             cur_pg.execute(
                 """INSERT INTO eis.dim_employee
                        (employee_number, full_name, sex, position_title,
-                        department, division, team, hire_date, employment_status, updated_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                        department, division, team, hire_date, employment_status,
+                        resign_date, resign_reason, updated_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                    ON CONFLICT (employee_number) DO UPDATE SET
                        full_name         = EXCLUDED.full_name,
                        sex               = EXCLUDED.sex,
@@ -1007,9 +1009,11 @@ def etl_employee(year: int = None, month: int = None):
                        team              = EXCLUDED.team,
                        hire_date         = EXCLUDED.hire_date,
                        employment_status = EXCLUDED.employment_status,
+                       resign_date       = EXCLUDED.resign_date,
+                       resign_reason     = EXCLUDED.resign_reason,
                        updated_at        = now()""",
                 (user_id, full_name, sex, job_title, department, division, team,
-                 joined, emp_status),
+                 joined, emp_status, resigned, resign_reason),
             )
             roster_loaded += 1
         pg.commit()
@@ -1031,7 +1035,7 @@ def etl_employee(year: int = None, month: int = None):
             dept_totals: dict = defaultdict(int)
             resigned_totals: dict = defaultdict(int)
             for (_uid, _name, _sex, _job, department, _div, _team,
-                 joined, resigned, _status) in emp_rows:
+                 joined, resigned, _status, _reason) in emp_rows:
                 if not joined or joined > snap_date:
                     continue
                 if resigned and resigned <= snap_date:
