@@ -12,7 +12,9 @@ export default function NavigationBar() {
     toggleSidebar,
     toggleSearch,
     currentEditionId,
+    currentPageImage,
   } = useEMagazineStore();
+  const [downloading, setDownloading] = React.useState(false);
 
   const handlePageChange = (e) => {
     const page = parseInt(e.target.value);
@@ -21,10 +23,28 @@ export default function NavigationBar() {
     }
   };
 
-  const handleDownload = () => {
-    if (currentEditionId) {
-      // TODO: Implement PDF download
-      alert('Download feature coming soon!');
+  const handleDownload = async () => {
+    if (!currentPageImage?.path) return;
+    setDownloading(true);
+    try {
+      const res = await fetch(currentPageImage.path);
+      const blob = await res.blob();
+      const ext = currentPageImage.path.split('.').pop().split('?')[0] || 'jpg';
+      const safeName = (currentPageImage.title || `page-${currentPage}`).replace(/[^\w\- ]+/g, '').trim() || `page-${currentPage}`;
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${safeName}.${ext}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Download failed:', err);
+      alert('Failed to download this page.');
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -97,10 +117,11 @@ export default function NavigationBar() {
 
           <button
             onClick={handleDownload}
-            className="p-2 hover:bg-gray-100 rounded-lg transition"
-            title="Download"
+            disabled={!currentPageImage?.path || downloading}
+            className="p-2 hover:bg-gray-100 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Download this page"
           >
-            <Download size={20} />
+            <Download size={20} className={downloading ? 'animate-pulse' : ''} />
           </button>
 
           <button

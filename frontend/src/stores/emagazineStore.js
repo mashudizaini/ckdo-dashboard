@@ -13,6 +13,7 @@ export const useEMagazineStore = create((set) => ({
   error: null,
   showSidebar: true,
   showSearch: false,
+  currentPageImage: null, // { path, title } of the page currently shown — NavigationBar's Download button reads this rather than re-fetching
 
   // Actions
   setCurrentEdition: (editionId, totalPages) =>
@@ -44,6 +45,8 @@ export const useEMagazineStore = create((set) => ({
 
   setEditions: (editions) => set({ editions }),
 
+  setCurrentPageImage: (currentPageImage) => set({ currentPageImage }),
+
   setLoading: (isLoading) => set({ isLoading }),
 
   setError: (error) => set({ error }),
@@ -65,5 +68,6 @@ export const useEMagazineStore = create((set) => ({
       tableOfContents: {},
       isLoading: false,
       error: null,
+      currentPageImage: null,
     }),
 }));

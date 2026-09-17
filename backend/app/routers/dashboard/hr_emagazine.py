@@ -153,6 +153,33 @@ async def update_qr_links(
     return {"ok": True, "filename": safe_name}
 
 
+@router.patch("/files/{filename}/meta")
+async def update_meta(
+    filename: str,
+    payload: dict,
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    """Update title/period for an existing edition (without re-uploading the PDF)."""
+    safe_name = _safe_filename(filename)
+    entries   = _read_index()
+    found     = False
+    for e in entries:
+        if e["filename"] == safe_name:
+            if "title" in payload:
+                title = (payload.get("title") or "").strip()
+                if not title:
+                    raise HTTPException(400, "Title tidak boleh kosong.")
+                e["title"] = title
+            if "date" in payload:
+                e["date"] = (payload.get("date") or "").strip()
+            found = True
+            break
+    if not found:
+        raise HTTPException(404, "Edisi tidak ditemukan.")
+    _write_index(entries)
+    return {"ok": True, "filename": safe_name}
+
+
 @router.delete("/files/{filename}")
 async def delete_magazine(
     filename: str,

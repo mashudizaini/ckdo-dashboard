@@ -14,6 +14,11 @@ class EMagazineEdition(Base):
     total_pages = Column(Integer)
     pdf_path = Column(String(500))
     pdf_filename = Column(String(255))
+    # "magazine" (PDF-derived pages) or "album" (directly-uploaded photos,
+    # no PDF/text extraction) — same edition/content/hotspot tables and the
+    # same page-flip viewer serve both, just with a different upload path
+    # and page label ("Page N" vs "Photo N").
+    edition_type = Column(String(20), nullable=False, default="magazine", server_default="magazine")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

@@ -31,6 +31,17 @@ const emagazineAPI = {
     }
   },
 
+  // Update edition metadata (title / edition_number / published_date)
+  updateEdition: async (editionId, updates) => {
+    try {
+      const res = await axios.patch(`${API_BASE}/emagazine/editions/${editionId}`, updates);
+      return res.data;
+    } catch (error) {
+      console.error('Error updating edition:', error);
+      throw error;
+    }
+  },
+
   // Get single page content
   getPage: async (editionId, pageNum) => {
     try {
@@ -197,6 +208,25 @@ const emagazineAPI = {
       return res.data;
     } catch (error) {
       console.error('Error uploading edition:', error);
+      throw error;
+    }
+  },
+
+  // Upload new photo album (title, published_date, photos[] in formData)
+  uploadAlbum: async (formData) => {
+    try {
+      const res = await axios.post(
+        `${API_BASE}/emagazine/editions/album`,
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+      return res.data;
+    } catch (error) {
+      console.error('Error uploading album:', error);
       throw error;
     }
   },

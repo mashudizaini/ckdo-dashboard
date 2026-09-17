@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/Tabs';
-import { BarChart3, Zap, BookOpen, Upload, Trash2 } from 'lucide-react';
+import { BarChart3, Zap, BookOpen, Upload, Trash2, Images, Pencil } from 'lucide-react';
 import emagazineAPI from '../../utils/emagazineApi';
 import HotspotManager from '../../components/admin/HotspotManager';
 import AnalyticsDashboard from '../../components/admin/AnalyticsDashboard';
@@ -11,6 +11,9 @@ export default function EMagazineAdminPage() {
   const [selectedEditionId, setSelectedEditionId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('hotspots');
+  const [editingEdition, setEditingEdition] = useState(null); // {id, title, edition_number, published_date}
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState('');
 
   useEffect(() => {
     loadEditions();
@@ -46,9 +49,40 @@ export default function EMagazineAdminPage() {
     if (!confirm(`Delete "${edition.title}" (Edition ${edition.edition_number})? This removes its pages, hotspots, and analytics too — this cannot be undone.`)) return;
     try {
       await emagazineAPI.deleteEdition(edition.id);
+      if (editingEdition?.id === edition.id) setEditingEdition(null);
       await loadEditions();
     } catch (error) {
       alert(`Failed to delete edition: ${error.response?.data?.detail || error.message}`);
+    }
+  };
+
+  const openEditEdition = (edition) => {
+    setEditError('');
+    setEditingEdition({
+      id: edition.id,
+      title: edition.title,
+      edition_number: edition.edition_number,
+      published_date: edition.published_date,
+    });
+  };
+
+  const handleSaveEdition = async () => {
+    if (!editingEdition) return;
+    if (!editingEdition.title.trim()) { setEditError('Title cannot be empty.'); return; }
+    setSavingEdit(true);
+    setEditError('');
+    try {
+      await emagazineAPI.updateEdition(editingEdition.id, {
+        title: editingEdition.title.trim(),
+        edition_number: parseInt(editingEdition.edition_number, 10),
+        published_date: editingEdition.published_date,
+      });
+      setEditingEdition(null);
+      await loadEditions();
+    } catch (error) {
+      setEditError(error.response?.data?.detail || error.message || 'Failed to update edition.');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -77,7 +111,8 @@ export default function EMagazineAdminPage() {
             >
               {editions.map((ed) => (
                 <option key={ed.id} value={ed.id}>
-                  {ed.title} (Edition {ed.edition_number}) - {ed.total_pages} pages
+                  {ed.edition_type === 'album' ? '[Album] ' : ''}
+                  {ed.title} (Edition {ed.edition_number}) - {ed.total_pages} {ed.edition_type === 'album' ? 'photos' : 'pages'}
                 </option>
               ))}
             </select>
@@ -132,23 +167,100 @@ export default function EMagazineAdminPage() {
                   {editions.map((ed) => (
                     <div
                       key={ed.id}
-                      className="flex items-center justify-between px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg"
+                      className="bg-gray-50 border border-gray-200 rounded-lg"
                     >
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">
-                          {ed.title} <span className="text-gray-500">(Edition {ed.edition_number})</span>
-                        </p>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          {ed.total_pages} pages • Published {ed.published_date}
-                        </p>
+                      <div className="flex items-center justify-between px-4 py-3">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                            {ed.edition_type === 'album' ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-purple-50 text-purple-700 px-2 py-0.5 text-[10px] font-semibold">
+                                <Images size={10} /> Album
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 text-blue-700 px-2 py-0.5 text-[10px] font-semibold">
+                                <BookOpen size={10} /> Magazine
+                              </span>
+                            )}
+                            {ed.title} <span className="text-gray-500">(Edition {ed.edition_number})</span>
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {ed.total_pages} {ed.edition_type === 'album' ? 'photos' : 'pages'} • Published {ed.published_date}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => editingEdition?.id === ed.id ? setEditingEdition(null) : openEditEdition(ed)}
+                            className={`p-2 rounded transition ${
+                              editingEdition?.id === ed.id ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-200'
+                            }`}
+                            title="Edit edition"
+                          >
+                            <Pencil size={18} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteEdition(ed)}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded transition"
+                            title="Delete edition"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
                       </div>
-                      <button
-                        onClick={() => handleDeleteEdition(ed)}
-                        className="p-2 text-red-600 hover:bg-red-50 rounded transition"
-                        title="Delete edition"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+
+                      {editingEdition?.id === ed.id && (
+                        <div className="border-t border-gray-200 px-4 py-4 bg-white rounded-b-lg">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div className="md:col-span-2">
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Title</label>
+                              <input
+                                type="text"
+                                value={editingEdition.title}
+                                onChange={(e) => setEditingEdition((prev) => ({ ...prev, title: e.target.value }))}
+                                className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Edition Number</label>
+                              <input
+                                type="number"
+                                min="1"
+                                value={editingEdition.edition_number}
+                                onChange={(e) => setEditingEdition((prev) => ({ ...prev, edition_number: e.target.value }))}
+                                className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                              />
+                            </div>
+                            <div className="md:col-span-3">
+                              <label className="block text-xs font-medium text-gray-700 mb-1">
+                                {ed.edition_type === 'album' ? 'Event Date' : 'Published Date'}
+                              </label>
+                              <input
+                                type="date"
+                                value={editingEdition.published_date}
+                                onChange={(e) => setEditingEdition((prev) => ({ ...prev, published_date: e.target.value }))}
+                                className="w-full md:w-1/3 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                              />
+                            </div>
+                          </div>
+
+                          {editError && <p className="text-xs text-red-600 mt-2">{editError}</p>}
+
+                          <div className="flex items-center gap-2 mt-3">
+                            <button
+                              onClick={handleSaveEdition}
+                              disabled={savingEdit}
+                              className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition"
+                            >
+                              {savingEdit ? 'Saving…' : 'Save'}
+                            </button>
+                            <button
+                              onClick={() => setEditingEdition(null)}
+                              className="px-4 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 transition"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

@@ -4,7 +4,7 @@ Provides endpoints for e-magazine content, search, and analytics
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
-from sqlalchemy import select, and_, or_, delete
+from sqlalchemy import select, and_, or_, delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
 from pydantic import BaseModel
@@ -14,7 +14,7 @@ from pathlib import Path
 import shutil
 import os
 
-from app.database import get_db
+from app.database import get_db, async_engine
 from app.models.emagazine import (
     EMagazineEdition,
     EMagazineContent,
@@ -30,6 +30,22 @@ from app.utils.pdf_parser import (
 
 
 router = APIRouter(prefix="/api/emagazine", tags=["emagazine"])
+
+ALLOWED_PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_PHOTO_MB = 20
+
+
+async def ensure_edition_type_column():
+    """emagazine_editions already existed (magazine PDFs only) before the
+    photo-album edition type was added — Base.metadata.create_all only
+    creates missing TABLES, it never ALTERs an existing one for a new
+    column, so this runs once at startup (see this repo's other ensure_*
+    helpers for the same reason)."""
+    async with async_engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE emagazine_editions ADD COLUMN IF NOT EXISTS "
+            "edition_type VARCHAR(20) NOT NULL DEFAULT 'magazine'"
+        ))
 
 
 # ─────────────────────────────────────────
@@ -63,10 +79,17 @@ class EditionResponse(BaseModel):
     # rather than serializing the ORM object directly).
     published_date: date
     total_pages: int
+    edition_type: str
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class UpdateEditionRequest(BaseModel):
+    title: Optional[str] = None
+    edition_number: Optional[int] = None
+    published_date: Optional[str] = None  # Format: YYYY-MM-DD
 
 
 class SearchRequest(BaseModel):
@@ -102,6 +125,7 @@ class UploadEditionResponse(BaseModel):
     edition_number: int
     published_date: str
     total_pages: int
+    edition_type: str
     created_at: str
     message: str
 
@@ -133,6 +157,45 @@ async def get_edition(edition_id: int, db: AsyncSession = Depends(get_db)):
     if not edition:
         raise HTTPException(status_code=404, detail="Edition not found")
 
+    return edition
+
+
+@router.patch("/editions/{edition_id}", response_model=EditionResponse)
+async def update_edition(edition_id: int, req: UpdateEditionRequest, db: AsyncSession = Depends(get_db)):
+    """Edit an edition's title, edition number, and/or published date —
+    metadata only, doesn't touch the PDF/photos or the pages already
+    parsed/uploaded for it."""
+    stmt = select(EMagazineEdition).where(EMagazineEdition.id == edition_id)
+    result = await db.execute(stmt)
+    edition = result.scalar_one_or_none()
+    if not edition:
+        raise HTTPException(status_code=404, detail="Edition not found")
+
+    if req.title is not None:
+        if not req.title.strip():
+            raise HTTPException(status_code=400, detail="Title cannot be empty")
+        edition.title = req.title.strip()
+
+    if req.edition_number is not None and req.edition_number != edition.edition_number:
+        dup_stmt = select(EMagazineEdition).where(
+            and_(
+                EMagazineEdition.edition_number == req.edition_number,
+                EMagazineEdition.id != edition_id,
+            )
+        )
+        dup = await db.execute(dup_stmt)
+        if dup.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail=f"Edition number {req.edition_number} already exists")
+        edition.edition_number = req.edition_number
+
+    if req.published_date is not None:
+        try:
+            edition.published_date = datetime.strptime(req.published_date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Published date must be in YYYY-MM-DD format")
+
+    await db.commit()
+    await db.refresh(edition)
     return edition
 
 
@@ -299,6 +362,7 @@ async def upload_edition(
             edition_number=edition.edition_number,
             published_date=str(edition.published_date),
             total_pages=edition.total_pages,
+            edition_type=edition.edition_type,
             created_at=edition.created_at.isoformat(),
             message=f"Edition uploaded successfully. {edition.total_pages} pages parsed and indexed."
         )
@@ -312,6 +376,101 @@ async def upload_edition(
         except:
             pass
         raise HTTPException(status_code=500, detail=f"Failed to process PDF: {str(e)}")
+
+
+@router.post("/editions/album", response_model=UploadEditionResponse)
+async def upload_album(
+    title: str = Form(...),
+    published_date: str = Form(...),
+    photos: List[UploadFile] = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a photo album "edition" — a sequence of photos (e.g. an
+    office event) shown in the same page-flip viewer as a PDF magazine,
+    just without any PDF/text-extraction step: each photo is saved as-is
+    and becomes one EMagazineContent "page"."""
+
+    if not photos:
+        raise HTTPException(status_code=400, detail="At least one photo is required")
+
+    for photo in photos:
+        if photo.content_type not in ALLOWED_PHOTO_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{photo.filename}' is not a supported image type (JPEG, PNG, or WebP only)",
+            )
+
+    try:
+        datetime.strptime(published_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Published date must be in YYYY-MM-DD format")
+
+    # Album editions don't come with a natural edition number (there's no
+    # PDF to number) — auto-assign the next one so the response model
+    # (which requires a real int, same as list/get editions) always has
+    # something to serialize, and so it still sorts sensibly next to
+    # magazine editions in the admin's edition picker.
+    max_number = await db.scalar(select(func.max(EMagazineEdition.edition_number)))
+    edition_number = (max_number or 0) + 1
+
+    edition = EMagazineEdition(
+        title=title,
+        edition_number=edition_number,
+        published_date=datetime.strptime(published_date, "%Y-%m-%d").date(),
+        total_pages=len(photos),
+        edition_type="album",
+    )
+    db.add(edition)
+    await db.flush()  # need edition.id for the image folder/URL below
+
+    edition_images_dir = PAGE_IMAGES_ROOT / f"edition_{edition.id}"
+    edition_images_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        for i, photo in enumerate(photos, start=1):
+            content = await photo.read()
+            if len(content) > MAX_PHOTO_MB * 1024 * 1024:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"'{photo.filename}' exceeds {MAX_PHOTO_MB} MB",
+                )
+
+            ext = Path(photo.filename or "").suffix.lower() or ".jpg"
+            image_filename = f"page_{i}{ext}"
+            (edition_images_dir / image_filename).write_bytes(content)
+            image_path = f"/e-magazine/magazines/pages/edition_{edition.id}/{image_filename}"
+
+            db.add(EMagazineContent(
+                edition_id=edition.id,
+                page_number=i,
+                section_name="General",
+                title=Path(photo.filename or f"Photo {i}").stem[:255] or f"Photo {i}",
+                content_type="photo",
+                content_data={},
+                searchable_text="",
+                image_path=image_path,
+            ))
+
+        await db.commit()
+    except HTTPException:
+        await db.rollback()
+        shutil.rmtree(edition_images_dir, ignore_errors=True)
+        raise
+    except Exception as e:
+        await db.rollback()
+        shutil.rmtree(edition_images_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save album: {str(e)}")
+
+    return UploadEditionResponse(
+        id=edition.id,
+        title=edition.title,
+        edition_number=edition.edition_number,
+        published_date=str(edition.published_date),
+        total_pages=edition.total_pages,
+        edition_type=edition.edition_type,
+        created_at=edition.created_at.isoformat(),
+        message=f"Album uploaded successfully. {edition.total_pages} photos added.",
+    )
 
 
 @router.delete("/editions/{edition_id}")

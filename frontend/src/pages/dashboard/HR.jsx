@@ -7362,6 +7362,8 @@ function EMagazineSection() {
   const [uploadQrLinks, setUploadQrLinks] = useState([]);
   const [editQr,        setEditQr]        = useState(null); // {filename, links:[{label,url}]}
   const [savingQr,      setSavingQr]      = useState(null);
+  const [editMeta,      setEditMeta]      = useState(null); // {filename, title, date}
+  const [savingMeta,    setSavingMeta]    = useState(null);
   const [sortBy,  setSortBy]  = useState(null);
   const [sortDir, setSortDir] = useState("asc");
   const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
@@ -7406,6 +7408,7 @@ function EMagazineSection() {
       await hrApi.eMagazineDelete(filename);
       setSuccess(`"${filename}" deleted successfully.`);
       if (editQr?.filename === filename) setEditQr(null);
+      if (editMeta?.filename === filename) setEditMeta(null);
       load();
     } catch {
       setError("Failed to delete file.");
@@ -7426,6 +7429,26 @@ function EMagazineSection() {
   const openEditQr = (ed) => {
     const links = (ed.qr_links || []).map(q => ({ label: q.label || "", url: q.url || "" }));
     setEditQr({ filename: ed.filename, links });
+    setEditMeta(null);
+  };
+
+  const openEditMeta = (ed) => {
+    setEditMeta({ filename: ed.filename, title: ed.title || "", date: ed.date || "" });
+    setEditQr(null);
+  };
+
+  const handleSaveMeta = async () => {
+    if (!editMeta) return;
+    if (!editMeta.title.trim()) { setError("Title tidak boleh kosong."); return; }
+    setSavingMeta(editMeta.filename);
+    try {
+      await hrApi.eMagazineUpdateMeta(editMeta.filename, { title: editMeta.title.trim(), date: editMeta.date.trim() });
+      setSuccess("Edition updated successfully.");
+      setEditMeta(null);
+      load();
+    } catch (err) {
+      setError(err?.detail || "Failed to update edition.");
+    } finally { setSavingMeta(null); }
   };
 
   const handleSaveQr = async () => {
@@ -7608,6 +7631,17 @@ function EMagazineSection() {
                           {converting === ed.filename ? "Converting…" : ed.text_pages > 0 ? "Re-convert" : "Convert to Text"}
                         </button>
                         <button
+                          onClick={() => editMeta?.filename === ed.filename ? setEditMeta(null) : openEditMeta(ed)}
+                          className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                            editMeta?.filename === ed.filename
+                              ? "bg-teal-500/20 text-teal-300"
+                              : "text-gray-400 hover:bg-gray-700/60 hover:text-gray-200"
+                          }`}
+                        >
+                          <Pencil size={11} />
+                          Edit
+                        </button>
+                        <button
                           onClick={() => editQr?.filename === ed.filename ? setEditQr(null) : openEditQr(ed)}
                           className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
                             editQr?.filename === ed.filename
@@ -7631,6 +7665,53 @@ function EMagazineSection() {
                       </div>
                     </td>
                   </tr>
+                  {editMeta?.filename === ed.filename && (
+                    <tr key={`${i}-meta`}>
+                      <td colSpan={5} className="px-4 py-3 bg-gray-900/80 border-t border-gray-700/40">
+                        <div className="max-w-2xl space-y-3">
+                          <p className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                            <Pencil size={11} /> Edit Edition — {ed.filename}
+                          </p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <label className="text-xs text-gray-400 font-medium">Title *</label>
+                              <input
+                                type="text"
+                                value={editMeta.title}
+                                onChange={e => setEditMeta(prev => ({ ...prev, title: e.target.value }))}
+                                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-xs text-gray-400 font-medium">Period</label>
+                              <input
+                                type="text"
+                                value={editMeta.date}
+                                onChange={e => setEditMeta(prev => ({ ...prev, date: e.target.value }))}
+                                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 pt-1">
+                            <button
+                              onClick={handleSaveMeta}
+                              disabled={!!savingMeta}
+                              className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-teal-500 disabled:opacity-50 transition-colors"
+                            >
+                              {savingMeta ? <Loader2 size={11} className="animate-spin" /> : null}
+                              Save
+                            </button>
+                            <button
+                              onClick={() => setEditMeta(null)}
+                              className="rounded-lg px-4 py-1.5 text-xs font-semibold text-gray-400 hover:text-gray-200 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                   {editQr?.filename === ed.filename && (
                     <tr key={`${i}-qr`}>
                       <td colSpan={5} className="px-4 py-3 bg-gray-900/80 border-t border-teal-800/40">

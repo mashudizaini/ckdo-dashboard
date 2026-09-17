@@ -9,7 +9,9 @@ import VideoModal from './VideoModal';
 import QrCodeModal from './QrCodeModal';
 
 export default function PageViewer() {
-  const { currentPage, currentEditionId, setCurrentPage } = useEMagazineStore();
+  const { currentPage, currentEditionId, setCurrentPage, editions, setCurrentPageImage } = useEMagazineStore();
+  const currentEdition = editions.find((e) => e.id === currentEditionId);
+  const isAlbum = currentEdition?.edition_type === 'album';
   const [pageContent, setPageContent] = useState(null);
   const [hotspots, setHotspots] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -26,6 +28,7 @@ export default function PageViewer() {
       try {
         const content = await emagazineAPI.getPage(currentEditionId, currentPage);
         setPageContent(content);
+        setCurrentPageImage(content.image_path ? { path: content.image_path, title: content.title } : null);
 
         // Load hotspots for this page
         const hs = await emagazineAPI.getPageHotspots(currentEditionId, currentPage);
@@ -38,6 +41,7 @@ export default function PageViewer() {
       } catch (err) {
         console.error('Error loading page:', err);
         setError('Failed to load page content');
+        setCurrentPageImage(null);
       } finally {
         setLoading(false);
       }
@@ -100,10 +104,12 @@ export default function PageViewer() {
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-xl font-bold text-gray-900">
-                    {pageContent?.title || `Page ${currentPage}`}
+                    {pageContent?.title || (isAlbum ? `Photo ${currentPage}` : `Page ${currentPage}`)}
                   </h2>
                   <p className="text-sm text-gray-600 mt-1">
-                    {pageContent?.section_name} • Page {pageContent?.page_number}
+                    {isAlbum
+                      ? `Photo ${pageContent?.page_number} of ${currentEdition?.total_pages ?? ''}`
+                      : `${pageContent?.section_name} • Page ${pageContent?.page_number}`}
                   </p>
                 </div>
                 {hotspots.length > 0 && (
@@ -136,7 +142,7 @@ export default function PageViewer() {
 
             {/* Page Footer */}
             <div className="border-t border-gray-200 px-6 py-4 bg-gray-50 text-center text-sm text-gray-600">
-              Page {pageContent?.page_number}
+              {isAlbum ? `Photo ${pageContent?.page_number}` : `Page ${pageContent?.page_number}`}
               {hotspots.length > 0 && (
                 <span className="ml-2 text-blue-600">
                   • Hover over highlighted areas to see details

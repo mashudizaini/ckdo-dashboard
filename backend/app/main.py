@@ -98,6 +98,11 @@ async def lifespan(app: FastAPI):
     # own docstring).
     await ensure_team_region_columns()
 
+    # E-Magazine — add the edition_type column (magazine vs photo album)
+    # to the pre-existing emagazine_editions table.
+    from app.routers.emagazine import ensure_edition_type_column
+    await ensure_edition_type_column()
+
     # Initialize Oracle Thick Mode
     init_oracle_client()
 
