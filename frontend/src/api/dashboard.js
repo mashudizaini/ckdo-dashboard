@@ -173,6 +173,14 @@ export const hrApi = {
   deleteOrgStructureNode: (id)        => api.delete(`/dashboard/hr/org-structure/${id}`),
   importOrgStructure:     (form)      => api.post("/dashboard/hr/org-structure/import", form, { headers: { "Content-Type": "multipart/form-data" } }),
   getOrgStructureUploadLogs: ()       => api.get("/dashboard/hr/org-structure/upload-logs"),
+
+  // Department Master (curated department/division/team hierarchy + order)
+  getDeptMasterTree:   ()          => api.get("/dashboard/hr/department-master/tree"),
+  getDeptMasterList:   ()          => api.get("/dashboard/hr/department-master/list"),
+  getDeptMasterLov:    (type)      => api.get("/dashboard/hr/department-master/lov", { params: type ? { type } : {} }),
+  createDeptMaster:    (d)         => api.post("/dashboard/hr/department-master", d),
+  updateDeptMaster:    (id, d)     => api.put(`/dashboard/hr/department-master/${id}`, d),
+  deleteDeptMaster:    (id)        => api.delete(`/dashboard/hr/department-master/${id}`),
 };
 
 // EIS Dashboard — ported from the standalone eis-dashboard-v2 app.
