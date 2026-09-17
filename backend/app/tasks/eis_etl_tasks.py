@@ -1029,22 +1029,26 @@ def etl_employee(year: int = None, month: int = None):
                 continue
 
             dept_totals: dict = defaultdict(int)
+            resigned_totals: dict = defaultdict(int)
             for (_uid, _name, _sex, _job, department, _div, _team,
                  joined, resigned, _status) in emp_rows:
                 if not joined or joined > snap_date:
                     continue
                 if resigned and resigned <= snap_date:
+                    resigned_totals[department or "Unclassified"] += 1
                     continue
                 dept_totals[department or "Unclassified"] += 1
 
-            for department, headcount in dept_totals.items():
+            all_departments = set(dept_totals) | set(resigned_totals)
+            for department in all_departments:
                 cur_pg.execute(
                     """INSERT INTO eis.fact_employee
                            (period_id, dept_group, headcount, plan_headcount, resigned_cumulative)
-                       VALUES (%s, %s, %s, 0, 0)
+                       VALUES (%s, %s, %s, 0, %s)
                        ON CONFLICT (period_id, dept_group) DO UPDATE SET
-                           headcount = EXCLUDED.headcount""",
-                    (period_id, department, headcount),
+                           headcount = EXCLUDED.headcount,
+                           resigned_cumulative = EXCLUDED.resigned_cumulative""",
+                    (period_id, department, dept_totals.get(department, 0), resigned_totals.get(department, 0)),
                 )
                 trend_loaded += 1
 

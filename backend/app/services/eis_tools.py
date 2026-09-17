@@ -197,13 +197,14 @@ EIS_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_employee_directory",
-            "description": "Cari daftar karyawan (nama, posisi, department, team, tanggal masuk, status) — untuk pertanyaan 'siapa saja di tim X' atau cari data karyawan tertentu, bukan sekadar jumlah headcount.",
+            "description": "Cari daftar / total karyawan (nama, posisi, department, team, tanggal masuk, status) — untuk pertanyaan 'siapa saja di tim X', cari data karyawan tertentu, atau 'berapa total karyawan resign/aktif saat ini' (hitung dari jumlah baris hasil, employment_status='Resign' untuk yang sudah keluar, 'Active' untuk yang masih bekerja).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "department": {"type": "string", "description": "Opsional. Salah satu dari: Administration, Sales & Marketing, Strategy & Development, Plant"},
                     "team": {"type": "string", "description": "Opsional. Nama tim, contoh IT, HRGA, Purchasing, Accounting"},
                     "full_name": {"type": "string", "description": "Opsional. Cari berdasarkan nama (partial match)"},
+                    "employment_status": {"type": "string", "description": "Opsional. 'Active' (masih bekerja) atau 'Resign' (sudah keluar) — pakai ini untuk pertanyaan total/daftar karyawan resign atau aktif"},
                 },
                 "required": [],
             },
@@ -470,7 +471,7 @@ def get_sales_order_detail(
     )
 
 
-def get_employee_directory(department: str = None, team: str = None, full_name: str = None) -> list[dict]:
+def get_employee_directory(department: str = None, team: str = None, full_name: str = None, employment_status: str = None) -> list[dict]:
     return _query(
         """
         SELECT employee_number, full_name, department, division, team, position_title,
@@ -479,13 +480,15 @@ def get_employee_directory(department: str = None, team: str = None, full_name: 
         WHERE (%(department)s IS NULL OR department = %(department)s)
           AND (%(team_like)s IS NULL OR team ILIKE %(team_like)s)
           AND (%(name_like)s IS NULL OR full_name ILIKE %(name_like)s)
+          AND (%(employment_status)s IS NULL OR employment_status = %(employment_status)s)
         ORDER BY department, team, full_name
-        LIMIT 100
+        LIMIT 500
         """,
         {
             "department": department,
             "team_like": f"%{team}%" if team else None,
             "name_like": f"%{full_name}%" if full_name else None,
+            "employment_status": employment_status,
         },
     )
 
