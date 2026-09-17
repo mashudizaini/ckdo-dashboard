@@ -395,6 +395,8 @@ export const accountingApi = {
   getMaterialTransactions: (p) => api.get("/dashboard/accounting/material-transactions", { params: p }),
   getApVatIn:              (p) => api.get("/dashboard/accounting/ap-vat-in", { params: p }),
   exportApVatIn:           (p) => api.get("/dashboard/accounting/ap-vat-in/export", { params: p, responseType: "blob" }),
+  getApWhtListing:         (p) => api.get("/dashboard/accounting/ap-wht-listing", { params: p }),
+  exportApWhtListing:      (p) => api.get("/dashboard/accounting/ap-wht-listing/export", { params: p, responseType: "blob" }),
 };
 
 export const financialStatementApi = {

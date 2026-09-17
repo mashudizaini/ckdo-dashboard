@@ -45,7 +45,7 @@ from app.models.zkteco import init_zkteco_db
 from app.routers import emagazine, emagazine_hotspots
 
 # ── Dashboard Routers ──
-from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement, general, sales_marketing, ppwh, production, supplier_wht, ap_vat_in
+from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement, general, sales_marketing, ppwh, production, supplier_wht, ap_vat_in, ap_wht_listing
 from app.routers.dashboard import ebs_backup
 from app.routers.dashboard import vpn_monitor
 from app.routers.dashboard import it_hikcentral
@@ -283,6 +283,7 @@ app.include_router(ap_invoice.router,  prefix=f"{API_PREFIX}/dashboard/accountin
 app.include_router(supplier_wht.router, prefix=f"{API_PREFIX}/dashboard/accounting/supplier-wht", tags=["Dashboard - Supplier WHT"])
 app.include_router(financial_statement.router, prefix=f"{API_PREFIX}/dashboard/accounting/financial-statement", tags=["Dashboard - Financial Statement"])
 app.include_router(ap_vat_in.router, prefix=f"{API_PREFIX}/dashboard/accounting/ap-vat-in", tags=["Dashboard - AP VAT In Listing"])
+app.include_router(ap_wht_listing.router, prefix=f"{API_PREFIX}/dashboard/accounting/ap-wht-listing", tags=["Dashboard - AP WHT Listing"])
 app.include_router(purchasing.router, prefix=f"{API_PREFIX}/dashboard/purchasing", tags=["Dashboard - Purchasing"])
 app.include_router(general.router,    prefix=f"{API_PREFIX}/dashboard/general",    tags=["Dashboard - General"])
 app.include_router(sales_marketing.router, prefix=f"{API_PREFIX}/dashboard/sales", tags=["Dashboard - Sales & Marketing"])

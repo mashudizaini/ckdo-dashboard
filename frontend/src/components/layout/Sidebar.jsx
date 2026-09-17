@@ -45,6 +45,7 @@ const NAV_ITEMS = [
     { label: "AR Outstanding", path: "/dashboard/accounting/ar" },
     { label: "Financial Statement", path: "/dashboard/accounting/financial-statement" },
     { label: "AP VAT In Listing Report", path: "/dashboard/accounting/ap-vat-in" },
+    { label: "AP Withholding Tax Listing Report", path: "/dashboard/accounting/ap-wht-listing" },
   ] },
   { label: "Purchasing", path: "/dashboard/purchasing", icon: ShoppingCart, roles: ["purchasing_staff"], children: [
     { label: "Open PR", path: "/dashboard/purchasing/open-pr" },
