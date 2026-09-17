@@ -7701,8 +7701,8 @@ function EMagazineSection() {
             </thead>
             <tbody className="divide-y divide-gray-800">
               {sortRows(list, sortBy, sortDir, []).map((ed, i) => (
-                <>
-                  <tr key={i} className="hover:bg-gray-800/40 transition-colors">
+                <Fragment key={ed.filename ?? i}>
+                  <tr className="hover:bg-gray-800/40 transition-colors">
                     <td className="px-4 py-3 font-medium text-gray-200">
                       {ed.type === "photo_album" ? (
                         <span className="mr-2 inline-flex items-center gap-1 rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-purple-400 align-middle">
@@ -7855,7 +7855,7 @@ function EMagazineSection() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
