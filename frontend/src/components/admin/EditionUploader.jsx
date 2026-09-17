@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { Upload, AlertCircle, CheckCircle, BookOpen, Images, X } from 'lucide-react';
 import emagazineAPI from '../../utils/emagazineApi';
 
-export default function EditionUploader({ onUploadSuccess }) {
-  const [editionType, setEditionType] = useState('magazine'); // 'magazine' | 'album'
+export default function EditionUploader({ onUploadSuccess, initialType = 'magazine' }) {
+  const [editionType, setEditionType] = useState(initialType); // 'magazine' | 'album'
   const [formData, setFormData] = useState({
     title: '',
     edition_number: '',

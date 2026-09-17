@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/Tabs';
 import { BarChart3, Zap, BookOpen, Upload, Trash2, Images, Pencil } from 'lucide-react';
 import emagazineAPI from '../../utils/emagazineApi';
@@ -7,10 +8,27 @@ import AnalyticsDashboard from '../../components/admin/AnalyticsDashboard';
 import EditionUploader from '../../components/admin/EditionUploader';
 
 export default function EMagazineAdminPage() {
+  // Deep-linkable (e.g. the sidebar's separate "e-Magazine Viewer — Upload"
+  // and "Photo Album — Upload" entries both point here, with
+  // ?tab=editions&type=magazine|album) — keyed by the query string so
+  // switching between those two sidebar links remounts this page and picks
+  // up the new tab/type instead of leaving whatever was open before (the
+  // two entries share the same pathname, so React Router wouldn't
+  // otherwise remount on its own).
+  const [searchParams] = useSearchParams();
+  return <EMagazineAdminPageInner key={searchParams.toString()} searchParams={searchParams} />;
+}
+
+function EMagazineAdminPageInner({ searchParams }) {
+  const initialTab = ['hotspots', 'analytics', 'editions'].includes(searchParams.get('tab'))
+    ? searchParams.get('tab')
+    : 'hotspots';
+  const initialEditionType = searchParams.get('type') === 'album' ? 'album' : 'magazine';
+
   const [editions, setEditions] = useState([]);
   const [selectedEditionId, setSelectedEditionId] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('hotspots');
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [editingEdition, setEditingEdition] = useState(null); // {id, title, edition_number, published_date}
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState('');
@@ -269,7 +287,7 @@ export default function EMagazineAdminPage() {
 
             <div>
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Upload New Edition</h3>
-              <EditionUploader onUploadSuccess={handleEditionUpload} />
+              <EditionUploader onUploadSuccess={handleEditionUpload} initialType={initialEditionType} />
             </div>
           </TabsContent>
         </Tabs>
