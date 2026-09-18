@@ -22,6 +22,16 @@ class Settings(BaseSettings):
     keycloak_client_id: str
     keycloak_client_secret: str
 
+    # Keycloak Admin API — separate confidential service-account client
+    # (ckdo-dashboard-admin), NOT keycloak_client_id above (that one is the
+    # frontend's public login client, has no secret, no admin privileges).
+    # Used by keycloak_admin_service.py for Setup > Access Center's
+    # Dashboard-role panel (list/assign/revoke realm roles). Empty by
+    # default — that panel 503s with a clear message until configured,
+    # same pattern as ebs_chat_service_key below.
+    keycloak_admin_client_id: str = ""
+    keycloak_admin_client_secret: str = ""
+
     # Oracle EBS — Production and Development, selectable at runtime via the
     # environment toggle in the sidebar (see database.py's
     # get_oracle_environment()/set_oracle_environment() and the

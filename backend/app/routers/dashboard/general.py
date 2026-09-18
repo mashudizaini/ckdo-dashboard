@@ -10,7 +10,7 @@ caller's own team (see general_budget.py / budget_access_service.py)
 rather than by role.
 """
 from fastapi import APIRouter
-from app.routers.dashboard import general_budget, general_ap_payment, general_ap_list, general_access_control, general_oracle_env, general_notification_settings
+from app.routers.dashboard import general_budget, general_ap_payment, general_ap_list, general_access_control, general_oracle_env, general_notification_settings, general_access_center
 
 router = APIRouter()
 
@@ -40,3 +40,9 @@ router.include_router(general_oracle_env.router, prefix="/oracle-env", tags=["Da
 # general_notification_settings.py / notification_settings_service.py) —
 # gated per-endpoint inside that router, same reason as access-control.
 router.include_router(general_notification_settings.router, prefix="/notification-settings", tags=["Dashboard - General Notification Settings"])
+
+# Sub-router: unified Access Center (see general_access_center.py) — admin
+# view of Keycloak roles + Oracle EBS responsibility (read-only) for one
+# user by email. EBS Chat scope stays at its own existing endpoint
+# (/ai/ebs-chat/scope) rather than being duplicated here.
+router.include_router(general_access_center.router, prefix="/access-center", tags=["Dashboard - General Access Center"])

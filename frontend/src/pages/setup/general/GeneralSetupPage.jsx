@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
-import { ScanFace, Fingerprint, Workflow, ShieldCheck, Megaphone, Loader2 } from "lucide-react";
+import { ScanFace, Fingerprint, Workflow, ShieldCheck, Megaphone, Users, Loader2 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import HikCentralIntegration from "@/pages/setup/general/HikCentralIntegration";
 import ZKTecoIntegration from "@/pages/setup/general/ZKTecoIntegration";
 import EtlAdmin from "@/pages/setup/general/EtlAdmin";
 import AccessControlPanel from "@/pages/setup/general/AccessControlPanel";
 import NotificationSettingsPanel from "@/pages/setup/general/NotificationSettingsPanel";
+import AccessCenterPanel from "@/pages/setup/general/AccessCenterPanel";
 
 // HikCentral Integration, ZKTeco Integration and ETL Admin moved here from
 // Setup > IT (2026-09-01) — none of the three are actually IT-department-
@@ -47,6 +48,7 @@ export default function GeneralSetupPage() {
     ...visibleModuleTabs,
     ...(isIT ? [{ id: "access-control", icon: ShieldCheck, label: "Access Control" }] : []),
     ...(isAdmin ? [{ id: "notification-settings", icon: Megaphone, label: "Announcement & Notification" }] : []),
+    ...(isAdmin ? [{ id: "access-center", icon: Users, label: "Access Center" }] : []),
   ];
 
   useEffect(() => {
@@ -89,6 +91,7 @@ export default function GeneralSetupPage() {
       {activeId === "etl-admin"       && <EtlAdmin />}
       {activeId === "access-control"  && <AccessControlPanel />}
       {activeId === "notification-settings" && <NotificationSettingsPanel />}
+      {activeId === "access-center"   && <AccessCenterPanel />}
     </div>
   );
 }
