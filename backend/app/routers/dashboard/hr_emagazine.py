@@ -255,6 +255,36 @@ async def add_photos(
     return {"ok": True, "filename": safe_name, "photos": len(entry["photos"]), "added": len(new_names)}
 
 
+@router.patch("/files/{filename}/reorder-photos")
+async def reorder_photos(
+    filename: str,
+    payload: dict,   # {"photos": ["photo_3.jpg", "photo_1.jpg", ...]}
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    """Change the display order of an existing photo album's photos — no
+    files are renamed or moved on disk, only the order they're listed (and
+    therefore served as pages) in index.json changes."""
+    safe_name = _safe_filename(filename)
+    entries = _read_index()
+    entry = next((e for e in entries if e["filename"] == safe_name), None)
+    if not entry:
+        raise HTTPException(404, "Album tidak ditemukan.")
+    if entry.get("type") != "photo_album":
+        raise HTTPException(400, "Hanya photo album yang punya urutan foto.")
+
+    new_order = payload.get("photos")
+    if not isinstance(new_order, list) or not new_order:
+        raise HTTPException(400, "Urutan foto tidak valid.")
+
+    existing = entry.get("photos", [])
+    if sorted(new_order) != sorted(existing):
+        raise HTTPException(400, "Urutan baru harus berisi foto yang sama persis, tanpa tambah/hapus.")
+
+    entry["photos"] = new_order
+    _write_index(entries)
+    return {"ok": True, "filename": safe_name, "photos": entry["photos"]}
+
+
 @router.patch("/files/{filename}/qr-links")
 async def update_qr_links(
     filename: str,

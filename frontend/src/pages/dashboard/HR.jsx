@@ -7368,6 +7368,8 @@ function EMagazineSection() {
   const [editMeta,      setEditMeta]      = useState(null); // {filename, title, date, description}
   const [savingMeta,    setSavingMeta]    = useState(null);
   const [editingAlbum,  setEditingAlbum]  = useState(null); // {filename, existingCount} — reopens the top form to append photos
+  const [reorderPhotos, setReorderPhotos] = useState([]); // existing photo filenames, in the order being edited
+  const [savingOrder,   setSavingOrder]   = useState(false);
   const [sortBy,  setSortBy]  = useState(null);
   const [sortDir, setSortDir] = useState("asc");
   const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
@@ -7404,7 +7406,7 @@ function EMagazineSection() {
 
   const resetUploadForm = () => {
     setTitle(""); setDateLbl(""); setDescription(""); setFile(null); setPhotos([]); setUploadQrLinks([]);
-    setEditingAlbum(null);
+    setEditingAlbum(null); setReorderPhotos([]);
   };
 
   const openAddPhotos = (ed) => {
@@ -7414,11 +7416,37 @@ function EMagazineSection() {
     setDateLbl(ed.date || "");
     setDescription(ed.description || "");
     setPhotos([]);
+    setReorderPhotos(ed.photos || []);
     setEditingAlbum({ filename: ed.filename, existingCount: ed.photos?.length || 0 });
     uploadFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const cancelAddPhotos = () => resetUploadForm();
+
+  const photoUrl = (albumFilename, photoName) =>
+    `/e-magazine/magazines/${encodeURIComponent(albumFilename)}/${encodeURIComponent(photoName)}`;
+
+  const movePhoto = (idx, dir) => {
+    setReorderPhotos(prev => {
+      const target = idx + dir;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+  };
+
+  const handleSaveOrder = async () => {
+    if (!editingAlbum) return;
+    setSavingOrder(true); setError(""); setSuccess("");
+    try {
+      await hrApi.eMagazineReorderPhotos(editingAlbum.filename, reorderPhotos);
+      setSuccess("Photo order saved.");
+      load();
+    } catch (err) {
+      setError(err?.detail || "Failed to save photo order.");
+    } finally { setSavingOrder(false); }
+  };
 
   const handleUpload = async (e) => {
     e.preventDefault();
@@ -7471,7 +7499,7 @@ function EMagazineSection() {
       setSuccess(`"${filename}" deleted successfully.`);
       if (editQr?.filename === filename) setEditQr(null);
       if (editMeta?.filename === filename) setEditMeta(null);
-      if (editingAlbum?.filename === filename) setEditingAlbum(null);
+      if (editingAlbum?.filename === filename) { setEditingAlbum(null); setReorderPhotos([]); }
       load();
     } catch {
       setError("Failed to delete file.");
@@ -7616,9 +7644,53 @@ function EMagazineSection() {
         )}
 
         {editingAlbum && (
-          <p className="text-xs text-teal-300/80 mb-4">
-            This album already has {editingAlbum.existingCount} photo{editingAlbum.existingCount === 1 ? "" : "s"}. Photos selected below will be added after them.
-          </p>
+          <>
+            <p className="text-xs text-teal-300/80 mb-3">
+              This album has {editingAlbum.existingCount} photo{editingAlbum.existingCount === 1 ? "" : "s"}. Use the arrows to reorder them, or add more below.
+            </p>
+            {reorderPhotos.length > 0 && (
+              <div className="mb-4 rounded-lg border border-gray-700 bg-gray-800/40 p-3">
+                <p className="text-xs text-gray-400 font-medium mb-2">Reorder Existing Photos</p>
+                <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
+                  {reorderPhotos.map((p, idx) => (
+                    <div key={p} className="relative group aspect-square rounded-lg overflow-hidden border border-gray-700">
+                      <img src={photoUrl(editingAlbum.filename, p)} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                      <span className="absolute top-0.5 left-0.5 bg-black/70 text-white text-[10px] rounded px-1">{idx + 1}</span>
+                      <div className="absolute inset-x-0 bottom-0 flex justify-center gap-0.5 bg-black/60 opacity-0 group-hover:opacity-100 transition py-0.5">
+                        <button
+                          type="button"
+                          onClick={() => movePhoto(idx, -1)}
+                          disabled={idx === 0}
+                          className="text-white disabled:opacity-30 px-1"
+                          title="Move left"
+                        >
+                          <ChevronLeft size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => movePhoto(idx, 1)}
+                          disabled={idx === reorderPhotos.length - 1}
+                          className="text-white disabled:opacity-30 px-1"
+                          title="Move right"
+                        >
+                          <ChevronRight size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveOrder}
+                  disabled={savingOrder}
+                  className="mt-3 flex items-center gap-1.5 rounded-lg bg-teal-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-teal-500 disabled:opacity-50 transition-colors"
+                >
+                  {savingOrder ? <Loader2 size={11} className="animate-spin" /> : null}
+                  Save Order
+                </button>
+              </div>
+            )}
+          </>
         )}
 
         <form onSubmit={handleUpload} className="space-y-3">
