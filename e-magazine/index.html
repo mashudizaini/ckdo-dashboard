@@ -716,7 +716,7 @@ async function showSingle(p){
 
 /* ── Flip animation ─────────────────────── */
 async function flip(dir){
-  if(flipping || !pdf) return;
+  if(flipping || (!pdf && !albumPhotos)) return;
   if(singleMode){
     const t = singlePage + dir;
     if(t<1 || t>numPages) return;
@@ -760,7 +760,7 @@ async function flip(dir){
   }, {once:true});
 }
 function preloadAround(){
-  if(!pdf) return;
+  if(!pdf && !albumPhotos) return;
   if(singleMode){
     pageImage(singlePage+1); pageImage(singlePage-1);
   }else{
@@ -840,7 +840,7 @@ document.addEventListener("keydown", e=>{
   if(e.key==="ArrowLeft")  flip(-1);
 });
 window.addEventListener("resize", ()=>{
-  if(!pdf) return;
+  if(!pdf && !albumPhotos) return;
   const wasSingle = singleMode;
   layout();
   if(wasSingle!==singleMode){
