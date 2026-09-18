@@ -255,14 +255,14 @@ class MeetingNotesService:
                         "console.anthropic.com > Plans & Billing, atau pilih provider lain."
                     ) from e
                 raise
-            raw = response.content[0].text.strip()
+            raw = (response.content[0].text or "").strip()
         elif provider == "gemini":
             try:
                 raw = (await gemini_service.generate(
                     system_prompt="You produce structured meeting minutes. Respond with valid JSON only, no commentary.",
                     contents=[{"role": "user", "parts": [{"text": prompt}]}],
                     api_key=api_key,
-                )).strip()
+                ) or "").strip()
             except httpx.HTTPStatusError as e:
                 if _is_credit_error(e.response.status_code, e.response.text):
                     raise MomProviderCreditError(
@@ -288,7 +288,7 @@ class MeetingNotesService:
                         "atau pilih provider lain."
                     )
                 resp.raise_for_status()
-                raw = resp.json()["choices"][0]["message"]["content"].strip()
+                raw = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         elif provider == "openai":
             async with httpx.AsyncClient(timeout=CLOUD_MOM_TIMEOUT_SECONDS) as client:
                 resp = await client.post(
@@ -308,7 +308,7 @@ class MeetingNotesService:
                         "platform.openai.com, atau pilih provider lain."
                     )
                 resp.raise_for_status()
-                raw = resp.json()["choices"][0]["message"]["content"].strip()
+                raw = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         elif provider == "kimi":
             async with httpx.AsyncClient(timeout=CLOUD_MOM_TIMEOUT_SECONDS) as client:
                 resp = await client.post(
@@ -327,7 +327,7 @@ class MeetingNotesService:
                         "atau pilih provider lain."
                     )
                 resp.raise_for_status()
-                raw = resp.json()["choices"][0]["message"]["content"].strip()
+                raw = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         else:
             async with httpx.AsyncClient(timeout=OLLAMA_MOM_TIMEOUT_SECONDS) as client:
                 resp = await client.post(
@@ -352,7 +352,21 @@ class MeetingNotesService:
                     },
                 )
                 resp.raise_for_status()
-                raw = resp.json()["message"]["content"].strip()
+                raw = (resp.json()["message"]["content"] or "").strip()
+
+        if not raw:
+            # Every provider above can come back with an empty/None content
+            # field on its own error path (Ollama in particular: a schema-
+            # constrained generation that fails partway through a long
+            # transcript returns HTTP 200 with message.content: null rather
+            # than a 4xx/5xx — no exception to catch, just an empty result).
+            # Without this check that silently became AttributeError:
+            # 'NoneType' object has no attribute 'strip' before this fix.
+            raise ValueError(
+                "Model tidak mengembalikan hasil apa pun (respons kosong). Transkrip mungkin "
+                "terlalu panjang untuk provider ini, atau model gagal memproses permintaan. "
+                "Coba lagi, atau gunakan provider lain (Claude/Gemini) untuk rapat yang panjang."
+            )
 
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
