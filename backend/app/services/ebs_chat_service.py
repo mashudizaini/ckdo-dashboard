@@ -72,7 +72,7 @@ from sqlalchemy import select, func
 from app.config import get_settings
 from app.database import AsyncSessionLocal
 from app.models.employee import Employee
-from app.services import eis_tools
+from app.services import eis_tools, rag_service
 from app.services.ai_service import ANTHROPIC_CHAT_DEFAULT_MODEL
 from app.services.department_taxonomy import CANONICAL_DEPARTMENTS
 from app.services.oracle_chat_service import SYSTEM_PROMPT, _detect_language, _to_anthropic_tools
@@ -96,14 +96,15 @@ _BUDGET_GROUP_MAP = {
 # tool belongs to exactly one module here; keep in sync with EIS_TOOLS in
 # eis_tools.py if a new tool is ever added there.
 MODULE_TOOL_MAP: dict[str, list[str]] = {
-    "Sales":      ["get_sales_performance", "get_sales_order_detail"],
-    "Production": ["get_production_performance"],
-    "Financial":  ["get_financial_summary", "get_ar_ap_summary"],
-    "COGS":       ["get_cogs_performance"],
-    "Inventory":  ["get_inventory_summary"],
-    "Purchasing": ["get_purchasing_performance", "get_purchase_order_detail"],
-    "HR":         ["get_employee_directory", "get_employee_headcount"],
-    "Budget":     ["get_budget_vs_actual"],
+    "Sales":         ["get_sales_performance", "get_sales_order_detail"],
+    "Production":    ["get_production_performance"],
+    "Financial":     ["get_financial_summary", "get_ar_ap_summary"],
+    "COGS":          ["get_cogs_performance"],
+    "Inventory":     ["get_inventory_summary"],
+    "Purchasing":    ["get_purchasing_performance", "get_purchase_order_detail"],
+    "HR":            ["get_employee_directory", "get_employee_headcount"],
+    "Budget":        ["get_budget_vs_actual"],
+    "Company Rules": ["search_company_documents"],
 }
 _ALL_TOOL_NAMES = {name for names in MODULE_TOOL_MAP.values() for name in names}
 
@@ -118,6 +119,43 @@ def _tools_for_modules(modules: list[str]) -> set[str]:
         out.update(MODULE_TOOL_MAP.get(m, []))
     return out
 
+
+# search_company_documents isn't one of eis_tools.EIS_TOOLS (it doesn't touch
+# Oracle EBS data at all — it's the Dashboard's own pgvector Knowledge Base,
+# see rag_service.py) so it's defined and dispatched right here instead of
+# living in eis_tools.py.
+_COMPANY_RULES_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "search_company_documents",
+        "description": (
+            "Cari jawaban dari dokumen kebijakan/peraturan perusahaan (SOP, company rules, "
+            "kebijakan HR/Accounting/PAC/Purchasing/IT) — untuk pertanyaan seputar peraturan "
+            "atau prosedur internal perusahaan, BUKAN data transaksi Oracle EBS."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Pertanyaan atau topik yang ingin dicari dalam dokumen perusahaan"},
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+# ebs_chat_scope.kb_departments values <- rag_service.DEPARTMENTS tags
+# (General/HR/Accounting/PAC/Purchasing/IT) — deliberately its OWN field
+# rather than derived from `departments` (the CANONICAL_DEPARTMENTS used for
+# eis.* row scoping): the two vocabularies don't line up cleanly enough to
+# translate automatically (CANONICAL_DEPARTMENTS are 4 broad organizational
+# buckets, the KB's 6 tags are functional teams), and guessing a mapping
+# wrong here risks leaking or hiding actual policy document content — an
+# admin explicitly picking which KB tags a caller can read removes that
+# guesswork entirely, same as they already do for `departments`/
+# `allowed_modules`. Unlike those two fields, empty here means "General
+# only" (NOT unrestricted) — this is a brand new field nobody has set yet,
+# so there's no pre-existing access to preserve, and document content
+# warrants a safer default than structured tool output does.
 FINAL_ANSWER_MAX_TOKENS = 4096
 
 
@@ -149,6 +187,10 @@ def ensure_table():
         # _tools_for_modules() treats as "no restriction", so this migration
         # can't silently narrow anyone's existing access.
         cur.execute("ALTER TABLE ebs_chat_scope ADD COLUMN IF NOT EXISTS allowed_modules JSONB NOT NULL DEFAULT '[]'")
+        # kb_departments: added 2026-09-18 — see the comment above
+        # FINAL_ANSWER_MAX_TOKENS for why empty here means "General only",
+        # unlike departments/allowed_modules where empty means unrestricted.
+        cur.execute("ALTER TABLE ebs_chat_scope ADD COLUMN IF NOT EXISTS kb_departments JSONB NOT NULL DEFAULT '[]'")
         conn.commit()
         conn.close()
     except Exception:
@@ -162,15 +204,16 @@ def list_scopes() -> list[dict]:
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT email, full_access, departments, allowed_modules, notes, created_by, created_at, updated_at
+            SELECT email, full_access, departments, allowed_modules, kb_departments, notes, created_by, created_at, updated_at
             FROM ebs_chat_scope ORDER BY email
         """)
         rows = cur.fetchall()
         return [
             {
                 "email": r[0], "full_access": r[1], "departments": r[2] or [], "allowed_modules": r[3] or [],
-                "notes": r[4], "created_by": r[5], "created_at": r[6].isoformat() if r[6] else None,
-                "updated_at": r[7].isoformat() if r[7] else None,
+                "kb_departments": r[4] or [], "notes": r[5], "created_by": r[6],
+                "created_at": r[7].isoformat() if r[7] else None,
+                "updated_at": r[8].isoformat() if r[8] else None,
             }
             for r in rows
         ]
@@ -180,7 +223,7 @@ def list_scopes() -> list[dict]:
 
 def upsert_scope(
     email: str, full_access: bool, departments: list[str], notes: Optional[str], updated_by: str,
-    allowed_modules: Optional[list[str]] = None,
+    allowed_modules: Optional[list[str]] = None, kb_departments: Optional[list[str]] = None,
 ) -> dict:
     email = (email or "").strip().lower()
     if not email:
@@ -191,25 +234,32 @@ def upsert_scope(
     bad_modules = [m for m in allowed_modules or [] if m not in MODULE_TOOL_MAP]
     if bad_modules:
         raise ValueError(f"Unknown module(s): {bad_modules} — must be one of {list(MODULE_TOOL_MAP)}")
+    bad_kb = [d for d in kb_departments or [] if d not in rag_service.DEPARTMENTS]
+    if bad_kb:
+        raise ValueError(f"Unknown KB department(s): {bad_kb} — must be one of {rag_service.DEPARTMENTS}")
 
     from psycopg2.extras import Json
     conn = _get_pg()
     try:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO ebs_chat_scope (email, full_access, departments, allowed_modules, notes, created_by, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, NOW())
+            INSERT INTO ebs_chat_scope (email, full_access, departments, allowed_modules, kb_departments, notes, created_by, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (email) DO UPDATE SET
                 full_access     = EXCLUDED.full_access,
                 departments     = EXCLUDED.departments,
                 allowed_modules = EXCLUDED.allowed_modules,
+                kb_departments  = EXCLUDED.kb_departments,
                 notes           = EXCLUDED.notes,
                 updated_at      = NOW()
-        """, (email, full_access, Json(departments or []), Json(allowed_modules or []), notes, updated_by))
+        """, (
+            email, full_access, Json(departments or []), Json(allowed_modules or []),
+            Json(kb_departments or []), notes, updated_by,
+        ))
         conn.commit()
         return {
             "email": email, "full_access": full_access, "departments": departments or [],
-            "allowed_modules": allowed_modules or [], "notes": notes,
+            "allowed_modules": allowed_modules or [], "kb_departments": kb_departments or [], "notes": notes,
         }
     finally:
         conn.close()
@@ -230,13 +280,16 @@ def _get_scope(email: str) -> Optional[dict]:
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT full_access, departments, allowed_modules FROM ebs_chat_scope WHERE email = %s",
+            "SELECT full_access, departments, allowed_modules, kb_departments FROM ebs_chat_scope WHERE email = %s",
             ((email or "").strip().lower(),),
         )
         row = cur.fetchone()
         if not row:
             return None
-        return {"full_access": row[0], "departments": row[1] or [], "allowed_modules": row[2] or []}
+        return {
+            "full_access": row[0], "departments": row[1] or [], "allowed_modules": row[2] or [],
+            "kb_departments": row[3] or [],
+        }
     finally:
         conn.close()
 
@@ -301,7 +354,11 @@ async def answer_question(question: str, user_email: str) -> dict:
     conn = _open_scoped_connection(scope)
     try:
         with eis_tools.use_connection(conn):
-            result = await _run_tool_calling_turn(question, allowed_tools=_tools_for_modules(scope["allowed_modules"]))
+            result = await _run_tool_calling_turn(
+                question,
+                allowed_tools=_tools_for_modules(scope["allowed_modules"]),
+                kb_departments=None if scope["full_access"] else (scope["kb_departments"] or ["General"]),
+            )
         conn.commit()
         return result
     except Exception:
@@ -311,7 +368,9 @@ async def answer_question(question: str, user_email: str) -> dict:
         conn.close()
 
 
-async def _run_tool_calling_turn(question: str, allowed_tools: Optional[set[str]] = None) -> dict:
+async def _run_tool_calling_turn(
+    question: str, allowed_tools: Optional[set[str]] = None, kb_departments: Optional[list[str]] = None,
+) -> dict:
     """Single-turn (no chat history — each CoChat call is a fresh question),
     non-streaming Anthropic tool-calling turn. Mirrors oracle_chat_service.
     _stream_chat_anthropic's two-step flow, but eis_tools.execute_tool()
@@ -330,16 +389,29 @@ async def _run_tool_calling_turn(question: str, allowed_tools: Optional[set[str]
     model = ANTHROPIC_CHAT_DEFAULT_MODEL
     messages = [{"role": "user", "content": question}]
 
-    all_tools = eis_tools.EIS_TOOLS
+    all_tools = eis_tools.EIS_TOOLS + [_COMPANY_RULES_TOOL]
     offered_tools = (
         [t for t in all_tools if t["function"]["name"] in allowed_tools]
         if allowed_tools is not None else all_tools
     )
+    offered_names = {t["function"]["name"] for t in offered_tools}
+
+    # Only mention search_company_documents when it's actually offered —
+    # SYSTEM_PROMPT is shared with oracle_chat_service.py (the Dashboard's
+    # own internal chat), which never has this tool at all.
+    turn_system = SYSTEM_PROMPT
+    if "search_company_documents" in offered_names:
+        turn_system += (
+            "\n\n- Untuk pertanyaan seputar kebijakan/SOP/peraturan perusahaan (BUKAN data transaksi "
+            "Oracle EBS), gunakan tool search_company_documents. Jawab HANYA berdasarkan isi dokumen yang "
+            "ditemukan — jika tidak ada dokumen relevan, katakan terus terang tidak menemukan aturan yang "
+            "dimaksud, jangan mengarang."
+        )
 
     response = await client.messages.create(
         model=model,
         max_tokens=1024,
-        system=SYSTEM_PROMPT,
+        system=turn_system,
         messages=messages,
         tools=_to_anthropic_tools(offered_tools),
     )
@@ -356,6 +428,29 @@ async def _run_tool_calling_turn(question: str, allowed_tools: Optional[set[str]
                 data = []
                 error = "This tool is outside your granted access scope."
                 logger.warning("ebs_chat_tool_denied", tool=tool_name, arguments=arguments)
+            elif tool_name == "search_company_documents":
+                # Not an eis_tools.EIS_TOOLS entry — dispatched here directly
+                # instead of via eis_tools.execute_tool() because it needs
+                # kb_departments injected from the CALLER's own scope, never
+                # from the model/arguments, so a prompt can't talk its way
+                # into a department it wasn't granted.
+                try:
+                    rag_result = rag_service.retrieve_context(
+                        arguments.get("query", question), department_filter=kb_departments,
+                    )
+                    # One combined "row" carrying the actual excerpt text the
+                    # model needs to read plus its citations — rag_service
+                    # merges all matched chunks into one context string
+                    # (build_context), it doesn't return per-source content.
+                    data = (
+                        [{"excerpt": rag_result["context"], "citations": rag_result["sources"]}]
+                        if rag_result.get("context") else []
+                    )
+                    error = None
+                except Exception as e:
+                    data = []
+                    error = str(e)
+                    logger.warning("ebs_chat_kb_search_error", arguments=arguments, error=error)
             else:
                 try:
                     data = eis_tools.execute_tool(tool_name, arguments)
@@ -376,7 +471,7 @@ async def _run_tool_calling_turn(question: str, allowed_tools: Optional[set[str]
         messages.append({"role": "user", "content": tool_result_blocks})
 
     lang = _detect_language(question)
-    final_system = SYSTEM_PROMPT + "\n\n" + (
+    final_system = turn_system + "\n\n" + (
         "PENTING: Tulis balasan berikut dalam Bahasa Indonesia. Jangan gunakan Bahasa Inggris."
         if lang == "id" else
         "IMPORTANT: Write the following reply in English. Do not use Indonesian."

@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from app.config import get_settings
 from app.dependencies import require_role, CurrentUser, Roles
-from app.services import ebs_chat_service
+from app.services import ebs_chat_service, rag_service
 
 router = APIRouter()
 settings = get_settings()
@@ -57,6 +57,7 @@ class ScopeUpsert(BaseModel):
     full_access: bool = False
     departments: list[str] = []
     allowed_modules: list[str] = []
+    kb_departments: list[str] = []
     notes: str | None = None
 
 
@@ -66,6 +67,15 @@ async def list_modules(user: CurrentUser = Depends(require_role(Roles.ADMIN))):
     empty selection means "no restriction", same convention as an empty
     departments list under full_access."""
     return list(ebs_chat_service.MODULE_TOOL_MAP.keys())
+
+
+@router.get("/kb-departments")
+async def list_kb_departments(user: CurrentUser = Depends(require_role(Roles.ADMIN))):
+    """rag_service.DEPARTMENTS, for the kb_departments checkbox UI — unlike
+    modules/departments, an EMPTY selection here means "General only", not
+    unrestricted (see ebs_chat_service.py's comment above
+    FINAL_ANSWER_MAX_TOKENS)."""
+    return rag_service.DEPARTMENTS
 
 
 @router.get("/scope")
@@ -79,6 +89,7 @@ async def upsert_scope(payload: ScopeUpsert, user: CurrentUser = Depends(require
         return ebs_chat_service.upsert_scope(
             payload.email, payload.full_access, payload.departments, payload.notes,
             updated_by=user.username or "admin", allowed_modules=payload.allowed_modules,
+            kb_departments=payload.kb_departments,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))

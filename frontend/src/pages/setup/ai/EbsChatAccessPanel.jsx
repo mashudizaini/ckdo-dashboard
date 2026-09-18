@@ -5,7 +5,7 @@ import { useAuthStore } from "@/store/authStore";
 // Matches department_taxonomy.CANONICAL_DEPARTMENTS exactly.
 const DEPARTMENTS = ["Administration", "Sales & Marketing", "Strategy & Development", "Plant"];
 
-const EMPTY_FORM = { email: "", full_access: false, departments: [], allowed_modules: [], notes: "" };
+const EMPTY_FORM = { email: "", full_access: false, departments: [], allowed_modules: [], kb_departments: [], notes: "" };
 
 export default function EbsChatAccessPanel() {
   const { token } = useAuthStore();
@@ -13,6 +13,7 @@ export default function EbsChatAccessPanel() {
 
   const [rows, setRows] = useState(null); // null while loading
   const [modules, setModules] = useState([]); // MODULE_TOOL_MAP keys
+  const [kbDepartments, setKbDepartments] = useState([]); // rag_service.DEPARTMENTS
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingEmail, setDeletingEmail] = useState(null);
@@ -32,7 +33,14 @@ export default function EbsChatAccessPanel() {
     } catch (_) {}
   };
 
-  useEffect(() => { load(); loadModules(); }, []); // eslint-disable-line
+  const loadKbDepartments = async () => {
+    try {
+      const res = await fetch("/api/v1/ai/ebs-chat/kb-departments", { headers });
+      if (res.ok) setKbDepartments(await res.json());
+    } catch (_) {}
+  };
+
+  useEffect(() => { load(); loadModules(); loadKbDepartments(); }, []); // eslint-disable-line
 
   const toggleDept = (d) => {
     setForm((f) => ({
@@ -45,6 +53,13 @@ export default function EbsChatAccessPanel() {
     setForm((f) => ({
       ...f,
       allowed_modules: f.allowed_modules.includes(m) ? f.allowed_modules.filter((x) => x !== m) : [...f.allowed_modules, m],
+    }));
+  };
+
+  const toggleKbDept = (d) => {
+    setForm((f) => ({
+      ...f,
+      kb_departments: f.kb_departments.includes(d) ? f.kb_departments.filter((x) => x !== d) : [...f.kb_departments, d],
     }));
   };
 
@@ -84,7 +99,7 @@ export default function EbsChatAccessPanel() {
 
   const editRow = (r) => setForm({
     email: r.email, full_access: r.full_access, departments: r.departments,
-    allowed_modules: r.allowed_modules || [], notes: r.notes || "",
+    allowed_modules: r.allowed_modules || [], kb_departments: r.kb_departments || [], notes: r.notes || "",
   });
 
   if (rows === null) {
@@ -109,10 +124,12 @@ export default function EbsChatAccessPanel() {
         <div className="px-5 py-3 border-b border-gray-800 bg-blue-500/5 flex items-start gap-2">
           <Info size={14} className="text-blue-400 shrink-0 mt-0.5" />
           <p className="text-xs text-gray-400">
-            Dua lapis pembatasan, independen: <b>Departemen</b> membatasi baris data yang terlihat, tapi hanya
+            Tiga lapis pembatasan, independen: <b>Departemen</b> membatasi baris data yang terlihat, tapi hanya
             berlaku untuk Employee Directory/Headcount dan Budget vs Actual (data lain tidak punya kolom departemen).
-            <b> Modul</b> di bawah membatasi jenis data apa saja yang boleh ditanyakan sama sekali — kosongkan
-            keduanya untuk akses tanpa batasan (mis. Direksi/Admin).
+            <b> Modul</b> membatasi jenis data Oracle EBS apa saja yang boleh ditanyakan sama sekali — termasuk
+            "Company Rules" (tanya-jawab dokumen kebijakan perusahaan, bukan data Oracle). <b>Dokumen Perusahaan</b>
+            di bawah lalu membatasi kategori dokumen mana yang boleh dibaca (kosong = hanya "General", BUKAN semua —
+            beda dari dua yang di atas). Kosongkan Departemen &amp; Modul untuk akses tanpa batasan (mis. Direksi/Admin).
           </p>
         </div>
 
@@ -178,6 +195,26 @@ export default function EbsChatAccessPanel() {
             </div>
           </div>
 
+          {!form.full_access && (
+            <div>
+              <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wider mb-1.5">
+                Dokumen Perusahaan yang boleh dibaca (berlaku jika modul "Company Rules" aktif) — kosong = hanya "General"
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {kbDepartments.map((d) => (
+                  <button key={d} type="button" onClick={() => toggleKbDept(d)}
+                    className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      form.kb_departments.includes(d)
+                        ? "border-amber-500/50 bg-amber-500/10 text-amber-300"
+                        : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+                    }`}>
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <button type="submit" disabled={saving}
             className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white transition-colors">
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
@@ -197,6 +234,8 @@ export default function EbsChatAccessPanel() {
                   {r.full_access ? "Full access" : (r.departments.join(", ") || "Semua departemen")}
                   {" · "}
                   {r.allowed_modules?.length ? `Modul: ${r.allowed_modules.join(", ")}` : "Semua modul"}
+                  {!r.full_access && r.allowed_modules?.includes("Company Rules") &&
+                    ` · Dokumen: ${r.kb_departments?.length ? r.kb_departments.join(", ") : "General"}`}
                   {r.notes ? ` — ${r.notes}` : ""}
                 </p>
               </button>
