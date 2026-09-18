@@ -129,8 +129,7 @@ export default function App() {
         <Route
           path="sales/*"
           element={
-            // No dedicated role yet — see Sidebar.jsx's NAV_ITEMS comment.
-            <ProtectedRoute>
+            <ProtectedRoute roles={["sales_staff", "admin"]}>
               <SalesMarketingDashboard />
             </ProtectedRoute>
           }
@@ -138,8 +137,7 @@ export default function App() {
         <Route
           path="ppwh/*"
           element={
-            // No dedicated role yet — see Sidebar.jsx's NAV_ITEMS comment.
-            <ProtectedRoute>
+            <ProtectedRoute roles={["ppwh_staff", "admin"]}>
               <PPWHDashboard />
             </ProtectedRoute>
           }
@@ -147,8 +145,7 @@ export default function App() {
         <Route
           path="production/*"
           element={
-            // No dedicated role yet — see Sidebar.jsx's NAV_ITEMS comment.
-            <ProtectedRoute>
+            <ProtectedRoute roles={["production_staff", "admin"]}>
               <ProductionDashboard />
             </ProtectedRoute>
           }

@@ -180,6 +180,33 @@
         "attributes": {}
       },
       {
+        "id": "ef2863ed-f43b-4f6a-8d23-631712c33ca7",
+        "name": "sales_staff",
+        "description": "Sales & Marketing module access",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "647c713f-a671-4db1-bd8f-e87aeaea7c70",
+        "attributes": {}
+      },
+      {
+        "id": "4f54c053-aff0-47ac-98d3-9e766a512c7c",
+        "name": "ppwh_staff",
+        "description": "PPWH module access",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "647c713f-a671-4db1-bd8f-e87aeaea7c70",
+        "attributes": {}
+      },
+      {
+        "id": "9d33587c-d969-46ec-9aaa-4b5d84563d54",
+        "name": "production_staff",
+        "description": "Production module access",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "647c713f-a671-4db1-bd8f-e87aeaea7c70",
+        "attributes": {}
+      },
+      {
         "id": "0f5dfb31-67da-44c1-bb82-12a5293fa0f7",
         "name": "app:oracle-ebs",
         "description": "Oracle E-Business Suite",

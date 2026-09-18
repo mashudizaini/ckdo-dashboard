@@ -293,9 +293,18 @@ app.include_router(ap_vat_in.router, prefix=f"{API_PREFIX}/dashboard/accounting/
 app.include_router(ap_wht_listing.router, prefix=f"{API_PREFIX}/dashboard/accounting/ap-wht-listing", tags=["Dashboard - AP WHT Listing"])
 app.include_router(purchasing.router, prefix=f"{API_PREFIX}/dashboard/purchasing", tags=["Dashboard - Purchasing"])
 app.include_router(general.router,    prefix=f"{API_PREFIX}/dashboard/general",    tags=["Dashboard - General"])
-app.include_router(sales_marketing.router, prefix=f"{API_PREFIX}/dashboard/sales", tags=["Dashboard - Sales & Marketing"])
-app.include_router(ppwh.router,            prefix=f"{API_PREFIX}/dashboard/ppwh",  tags=["Dashboard - PPWH"])
-app.include_router(production.router,      prefix=f"{API_PREFIX}/dashboard/production", tags=["Dashboard - Production"])
+app.include_router(
+    sales_marketing.router, prefix=f"{API_PREFIX}/dashboard/sales", tags=["Dashboard - Sales & Marketing"],
+    dependencies=[Depends(require_role(Roles.SALES))],
+)
+app.include_router(
+    ppwh.router, prefix=f"{API_PREFIX}/dashboard/ppwh", tags=["Dashboard - PPWH"],
+    dependencies=[Depends(require_role(Roles.PPWH))],
+)
+app.include_router(
+    production.router, prefix=f"{API_PREFIX}/dashboard/production", tags=["Dashboard - Production"],
+    dependencies=[Depends(require_role(Roles.PRODUCTION))],
+)
 
 # EIS Dashboard — ported from the standalone eis-dashboard-v2 app.
 # Viewing/editing gated to management (+ admin, always implicitly allowed by

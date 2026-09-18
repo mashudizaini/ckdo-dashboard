@@ -57,26 +57,28 @@ const NAV_ITEMS = [
     { label: "Active Suppliers", path: "/dashboard/purchasing/active-suppliers" },
     { label: "Manufacturer Master", path: "/dashboard/purchasing/manufacturer-master" },
   ] },
-  // No dedicated role yet (2026-09-03) — no "sales_staff" exists in
-  // Keycloak, so this opens to any authenticated user like General below.
+  // Gated to "sales_staff" (2026-09-18) — previously roles: [] (open to any
+  // authenticated user) because no Keycloak role existed yet for this
+  // module; fixed after being flagged as a standing-policy violation (new
+  // modules must be inaccessible until a privilege is explicitly granted).
   // Fase 1 + first 3 Fase-2 modules of the "Blueprint Sales & Marketing"
   // plan — more will be added here as later phases land.
-  { label: "Sales & Marketing", path: "/dashboard/sales", icon: BarChart3, roles: [], children: [
+  { label: "Sales & Marketing", path: "/dashboard/sales", icon: BarChart3, roles: ["sales_staff"], children: [
     { label: "Sales Trend", path: "/dashboard/sales/trend" },
     { label: "Sales vs Budget", path: "/dashboard/sales/vs-budget" },
     { label: "Open Sales Order", path: "/dashboard/sales/open-orders" },
   ] },
-  // No dedicated role yet, same as Sales & Marketing above — inventory
-  // in/out tracking from Oracle INV (mtl_material_transactions).
-  { label: "PPWH", path: "/dashboard/ppwh", icon: Warehouse, roles: [], children: [
+  // Gated to "ppwh_staff" (2026-09-18) — same fix as Sales & Marketing above.
+  // Inventory in/out tracking from Oracle INV (mtl_material_transactions).
+  { label: "PPWH", path: "/dashboard/ppwh", icon: Warehouse, roles: ["ppwh_staff"], children: [
     { label: "Inventory In", path: "/dashboard/ppwh/inbound" },
     { label: "Inventory Out", path: "/dashboard/ppwh/outbound" },
     { label: "Kartu Stok", path: "/dashboard/ppwh/stock-card" },
   ] },
-  // No dedicated role yet, same as PPWH/Sales & Marketing above — OPM
-  // batch production tracking from gme_batch_header (this company runs
-  // Process Manufacturing, not discrete WIP jobs).
-  { label: "Production", path: "/dashboard/production", icon: FlaskConical, roles: [], children: [
+  // Gated to "production_staff" (2026-09-18) — same fix as PPWH/Sales &
+  // Marketing above. OPM batch production tracking from gme_batch_header
+  // (this company runs Process Manufacturing, not discrete WIP jobs).
+  { label: "Production", path: "/dashboard/production", icon: FlaskConical, roles: ["production_staff"], children: [
     { label: "Batch Status", path: "/dashboard/production/status" },
     { label: "Batch Yield", path: "/dashboard/production/yield" },
     { label: "Schedule Adherence", path: "/dashboard/production/schedule" },
