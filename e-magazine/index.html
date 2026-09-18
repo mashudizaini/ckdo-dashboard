@@ -178,7 +178,7 @@
 
   /* ── Editions sidebar (right) ───────────── */
   aside{
-    width:280px;flex-shrink:0;
+    width:360px;flex-shrink:0;
     border-left:1px solid var(--line);
     background:rgba(23,51,48,.5);
     display:flex;flex-direction:column;
@@ -195,7 +195,7 @@
   aside .head h2{font-family:'Fraunces',serif;font-size:17px;font-weight:700;margin-top:2px}
   #editionList{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin}
   .edition{
-    display:flex;gap:12px;align-items:center;
+    display:flex;gap:12px;align-items:flex-start;
     padding:10px;border-radius:10px;cursor:pointer;
     border:1px solid transparent;background:transparent;
     text-align:left;color:var(--mist);font-family:'Inter',sans-serif;
@@ -214,9 +214,10 @@
   }
   .edition .spine img{width:100%;height:100%;object-fit:cover}
   .edition .meta{min-width:0}
-  .edition .meta .t{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .edition .meta .d{font-size:11.5px;color:var(--mist-dim);margin-top:2px}
+  .edition .meta .t{font-size:13.5px;font-weight:600;white-space:normal;overflow-wrap:break-word;line-height:1.35}
+  .edition .meta .d{font-size:11.5px;color:var(--mist-dim);margin-top:3px}
   .edition.active .meta .d{color:var(--copper-soft)}
+  .edition .meta .desc{font-size:10.5px;color:var(--mist-dim);opacity:.85;margin-top:3px;white-space:normal;overflow-wrap:break-word;line-height:1.4}
   #editionEmpty{padding:18px;font-size:13px;color:var(--mist-dim);line-height:1.6}
 
   /* ── Bottom bar ─────────────────────────── */
@@ -251,6 +252,7 @@
     #editionsToggle{display:inline-flex}
     aside{
       position:fixed;top:0;right:0;bottom:0;z-index:60;
+      max-width:92vw;
       transform:translateX(100%);transition:transform .25s ease;
       background:var(--panel);box-shadow:-20px 0 50px rgba(0,0,0,.4);
     }
@@ -554,6 +556,12 @@ function buildEditionList(){
     meta.innerHTML = `<div class="t"></div><div class="d"></div>`;
     meta.querySelector(".t").textContent = e.title;
     meta.querySelector(".d").textContent = e.date || "";
+    if(e.description){
+      const desc = document.createElement("div");
+      desc.className = "desc";
+      desc.textContent = e.description;
+      meta.appendChild(desc);
+    }
     b.append(spine, meta);
     b.addEventListener("click", ()=>{
       selectEdition(i);
@@ -1017,8 +1025,9 @@ els.searchInput.addEventListener("keydown", e => {
         ? (e.photos || []).map(p => "magazines/" + encodeURIComponent(e.filename) + "/" + encodeURIComponent(p) + "?v=" + v)
         : null;
       return {
-        title:    e.title || e.filename,
-        date:     e.date  || "",
+        title:       e.title || e.filename,
+        date:        e.date  || "",
+        description: e.description || "",
         type:     e.type || "magazine",
         file:     isAlbum ? null : "magazines/" + encodeURIComponent(e.filename) + "?v=" + v,
         filename: e.filename,

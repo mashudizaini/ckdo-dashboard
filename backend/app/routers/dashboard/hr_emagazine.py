@@ -100,6 +100,7 @@ async def upload_magazine(
     file:          UploadFile = File(...),
     title:         str        = Form(...),
     date_label:    str        = Form(""),
+    description:   str        = Form(""),
     qr_links_json: str        = Form("[]"),   # JSON: [{"label":"...","url":"..."}]
     user: CurrentUser = Depends(require_role(Roles.HR)),
 ):
@@ -129,6 +130,7 @@ async def upload_magazine(
         "filename":    safe_name,
         "title":       title.strip(),
         "date":        date_label.strip(),
+        "description": description.strip(),
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
         "qr_links":    qr_links,
     })
@@ -140,6 +142,7 @@ async def upload_magazine(
 async def upload_album(
     title:         str               = Form(...),
     date_label:    str               = Form(""),
+    description:   str               = Form(""),
     qr_links_json: str               = Form("[]"),
     photos:        list[UploadFile]  = File(...),
     user: CurrentUser = Depends(require_role(Roles.HR)),
@@ -186,6 +189,7 @@ async def upload_album(
         "filename":    album_id,
         "title":       title.strip(),
         "date":        date_label.strip(),
+        "description": description.strip(),
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
         "qr_links":    qr_links,
         "photos":      photo_names,
@@ -199,6 +203,7 @@ async def add_photos(
     filename:      str,
     title:         str               = Form(""),
     date_label:    str               = Form(""),
+    description:   str               = Form(""),
     photos:        list[UploadFile]  = File(...),
     user: CurrentUser = Depends(require_role(Roles.HR)),
 ):
@@ -244,6 +249,8 @@ async def add_photos(
         entry["title"] = title.strip()
     if date_label.strip():
         entry["date"] = date_label.strip()
+    if description.strip():
+        entry["description"] = description.strip()
     _write_index(entries)
     return {"ok": True, "filename": safe_name, "photos": len(entry["photos"]), "added": len(new_names)}
 
@@ -275,7 +282,8 @@ async def update_meta(
     payload: dict,
     user: CurrentUser = Depends(require_role(Roles.HR)),
 ):
-    """Update title/period for an existing edition (without re-uploading the PDF)."""
+    """Update title/period/description for an existing edition (without
+    re-uploading the PDF)."""
     safe_name = _safe_filename(filename)
     entries   = _read_index()
     found     = False
@@ -288,6 +296,8 @@ async def update_meta(
                 e["title"] = title
             if "date" in payload:
                 e["date"] = (payload.get("date") or "").strip()
+            if "description" in payload:
+                e["description"] = (payload.get("description") or "").strip()
             found = True
             break
     if not found:

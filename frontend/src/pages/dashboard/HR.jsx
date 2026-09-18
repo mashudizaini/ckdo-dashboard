@@ -7359,12 +7359,13 @@ function EMagazineSection() {
   const [uploadType,    setUploadType]    = useState("magazine"); // "magazine" | "photo_album"
   const [title,         setTitle]         = useState("");
   const [dateLbl,       setDateLbl]       = useState("");
+  const [description,   setDescription]  = useState("");
   const [file,          setFile]          = useState(null);
   const [photos,        setPhotos]        = useState([]); // photo_album: File[]
   const [uploadQrLinks, setUploadQrLinks] = useState([]);
   const [editQr,        setEditQr]        = useState(null); // {filename, links:[{label,url}]}
   const [savingQr,      setSavingQr]      = useState(null);
-  const [editMeta,      setEditMeta]      = useState(null); // {filename, title, date}
+  const [editMeta,      setEditMeta]      = useState(null); // {filename, title, date, description}
   const [savingMeta,    setSavingMeta]    = useState(null);
   const [editingAlbum,  setEditingAlbum]  = useState(null); // {filename, existingCount} — reopens the top form to append photos
   const [sortBy,  setSortBy]  = useState(null);
@@ -7402,7 +7403,7 @@ function EMagazineSection() {
   const removePhoto = (idx) => setPhotos(prev => prev.filter((_, i) => i !== idx));
 
   const resetUploadForm = () => {
-    setTitle(""); setDateLbl(""); setFile(null); setPhotos([]); setUploadQrLinks([]);
+    setTitle(""); setDateLbl(""); setDescription(""); setFile(null); setPhotos([]); setUploadQrLinks([]);
     setEditingAlbum(null);
   };
 
@@ -7411,6 +7412,7 @@ function EMagazineSection() {
     setUploadType("photo_album");
     setTitle(ed.title || "");
     setDateLbl(ed.date || "");
+    setDescription(ed.description || "");
     setPhotos([]);
     setEditingAlbum({ filename: ed.filename, existingCount: ed.photos?.length || 0 });
     uploadFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -7430,6 +7432,7 @@ function EMagazineSection() {
         const form = new FormData();
         form.append("title", title.trim());
         form.append("date_label", dateLbl.trim());
+        form.append("description", description.trim());
         photos.forEach(p => form.append("photos", p));
         const result = await hrApi.eMagazineAddPhotos(editingAlbum.filename, form);
         setSuccess(`Added ${result.added} photo(s) — "${title}" now has ${result.photos} total.`);
@@ -7438,6 +7441,7 @@ function EMagazineSection() {
         form.append("file", file);
         form.append("title", title.trim());
         form.append("date_label", dateLbl.trim());
+        form.append("description", description.trim());
         form.append("qr_links_json", JSON.stringify(uploadQrLinks.filter(q => q.url.trim())));
         await hrApi.eMagazineUpload(form);
         setSuccess(`"${title}" uploaded successfully.`);
@@ -7445,6 +7449,7 @@ function EMagazineSection() {
         const form = new FormData();
         form.append("title", title.trim());
         form.append("date_label", dateLbl.trim());
+        form.append("description", description.trim());
         form.append("qr_links_json", JSON.stringify(uploadQrLinks.filter(q => q.url.trim())));
         photos.forEach(p => form.append("photos", p));
         await hrApi.eMagazineUploadAlbum(form);
@@ -7492,7 +7497,7 @@ function EMagazineSection() {
   };
 
   const openEditMeta = (ed) => {
-    setEditMeta({ filename: ed.filename, title: ed.title || "", date: ed.date || "" });
+    setEditMeta({ filename: ed.filename, title: ed.title || "", date: ed.date || "", description: ed.description || "" });
     setEditQr(null);
     setEditingAlbum(null);
   };
@@ -7502,7 +7507,11 @@ function EMagazineSection() {
     if (!editMeta.title.trim()) { setError("Title tidak boleh kosong."); return; }
     setSavingMeta(editMeta.filename);
     try {
-      await hrApi.eMagazineUpdateMeta(editMeta.filename, { title: editMeta.title.trim(), date: editMeta.date.trim() });
+      await hrApi.eMagazineUpdateMeta(editMeta.filename, {
+        title: editMeta.title.trim(),
+        date: editMeta.date.trim(),
+        description: editMeta.description.trim(),
+      });
       setSuccess("Edition updated successfully.");
       setEditMeta(null);
       load();
@@ -7659,6 +7668,17 @@ function EMagazineSection() {
                 />
               </div>
             )}
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs text-gray-400 font-medium">Description (optional)</label>
+            <textarea
+              placeholder="Additional notes about this edition — shown in the public reading room's edition list."
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={2}
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none resize-y"
+            />
           </div>
 
           {uploadType === "photo_album" && photos.length > 0 && (
@@ -7850,6 +7870,15 @@ function EMagazineSection() {
                                 className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
                               />
                             </div>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-gray-400 font-medium">Description (optional)</label>
+                            <textarea
+                              value={editMeta.description}
+                              onChange={e => setEditMeta(prev => ({ ...prev, description: e.target.value }))}
+                              rows={2}
+                              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none resize-y"
+                            />
                           </div>
                           <div className="flex items-center gap-2 pt-1">
                             <button
