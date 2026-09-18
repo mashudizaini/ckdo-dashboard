@@ -670,7 +670,11 @@ async function pageImage(n){
 
 /* ── Layout & sizing ────────────────────── */
 function layout(){
-  singleMode = window.innerWidth < 720;
+  // Photo albums are event photos, not designed page pairs like a magazine
+  // spread — most are landscape, so splitting the viewer in half (the
+  // normal two-page book layout) shrank each one hard. Always show one
+  // photo at a time, full width/height, regardless of window size.
+  singleMode = window.innerWidth < 720 || !!albumPhotos;
   const availW = els.viewer.clientWidth - 140;
   const availH = els.viewer.clientHeight - 70;
   let ph = availH;
