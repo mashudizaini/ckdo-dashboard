@@ -5,13 +5,14 @@ import { useAuthStore } from "@/store/authStore";
 // Matches department_taxonomy.CANONICAL_DEPARTMENTS exactly.
 const DEPARTMENTS = ["Administration", "Sales & Marketing", "Strategy & Development", "Plant"];
 
-const EMPTY_FORM = { email: "", full_access: false, departments: [], notes: "" };
+const EMPTY_FORM = { email: "", full_access: false, departments: [], allowed_modules: [], notes: "" };
 
 export default function EbsChatAccessPanel() {
   const { token } = useAuthStore();
   const headers = { Authorization: `Bearer ${token}` };
 
   const [rows, setRows] = useState(null); // null while loading
+  const [modules, setModules] = useState([]); // MODULE_TOOL_MAP keys
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingEmail, setDeletingEmail] = useState(null);
@@ -24,12 +25,26 @@ export default function EbsChatAccessPanel() {
     } catch (_) {}
   };
 
-  useEffect(() => { load(); }, []); // eslint-disable-line
+  const loadModules = async () => {
+    try {
+      const res = await fetch("/api/v1/ai/ebs-chat/modules", { headers });
+      if (res.ok) setModules(await res.json());
+    } catch (_) {}
+  };
+
+  useEffect(() => { load(); loadModules(); }, []); // eslint-disable-line
 
   const toggleDept = (d) => {
     setForm((f) => ({
       ...f,
       departments: f.departments.includes(d) ? f.departments.filter((x) => x !== d) : [...f.departments, d],
+    }));
+  };
+
+  const toggleModule = (m) => {
+    setForm((f) => ({
+      ...f,
+      allowed_modules: f.allowed_modules.includes(m) ? f.allowed_modules.filter((x) => x !== m) : [...f.allowed_modules, m],
     }));
   };
 
@@ -67,7 +82,10 @@ export default function EbsChatAccessPanel() {
     }
   };
 
-  const editRow = (r) => setForm({ email: r.email, full_access: r.full_access, departments: r.departments, notes: r.notes || "" });
+  const editRow = (r) => setForm({
+    email: r.email, full_access: r.full_access, departments: r.departments,
+    allowed_modules: r.allowed_modules || [], notes: r.notes || "",
+  });
 
   if (rows === null) {
     return <div className="p-6 flex justify-center"><Loader2 size={20} className="animate-spin text-gray-600" /></div>;
@@ -91,9 +109,10 @@ export default function EbsChatAccessPanel() {
         <div className="px-5 py-3 border-b border-gray-800 bg-blue-500/5 flex items-start gap-2">
           <Info size={14} className="text-blue-400 shrink-0 mt-0.5" />
           <p className="text-xs text-gray-400">
-            Pembatasan departemen hanya berlaku untuk data karyawan (Employee Directory, Headcount) dan Budget vs
-            Actual — data lain (Sales, Produksi, COGS, Purchasing, dsb.) tetap bisa diakses semua email yang
-            terdaftar di sini karena datanya memang ringkasan perusahaan, tidak punya kolom departemen.
+            Dua lapis pembatasan, independen: <b>Departemen</b> membatasi baris data yang terlihat, tapi hanya
+            berlaku untuk Employee Directory/Headcount dan Budget vs Actual (data lain tidak punya kolom departemen).
+            <b> Modul</b> di bawah membatasi jenis data apa saja yang boleh ditanyakan sama sekali — kosongkan
+            keduanya untuk akses tanpa batasan (mis. Direksi/Admin).
           </p>
         </div>
 
@@ -124,19 +143,40 @@ export default function EbsChatAccessPanel() {
           </label>
 
           {!form.full_access && (
+            <div>
+              <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wider mb-1.5">Departemen (baris data)</p>
+              <div className="flex flex-wrap gap-2">
+                {DEPARTMENTS.map((d) => (
+                  <button key={d} type="button" onClick={() => toggleDept(d)}
+                    className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      form.departments.includes(d)
+                        ? "border-blue-500/50 bg-blue-500/10 text-blue-300"
+                        : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+                    }`}>
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wider mb-1.5">
+              Modul (jenis data yang boleh ditanyakan) — kosong = semua modul
+            </p>
             <div className="flex flex-wrap gap-2">
-              {DEPARTMENTS.map((d) => (
-                <button key={d} type="button" onClick={() => toggleDept(d)}
+              {modules.map((m) => (
+                <button key={m} type="button" onClick={() => toggleModule(m)}
                   className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                    form.departments.includes(d)
-                      ? "border-blue-500/50 bg-blue-500/10 text-blue-300"
+                    form.allowed_modules.includes(m)
+                      ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-300"
                       : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
                   }`}>
-                  {d}
+                  {m}
                 </button>
               ))}
             </div>
-          )}
+          </div>
 
           <button type="submit" disabled={saving}
             className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white transition-colors">
@@ -154,7 +194,9 @@ export default function EbsChatAccessPanel() {
               <button onClick={() => editRow(r)} className="min-w-0 text-left">
                 <p className="text-sm text-gray-200 truncate">{r.email}</p>
                 <p className="text-xs text-gray-500 truncate">
-                  {r.full_access ? "Full access" : (r.departments.join(", ") || "Tidak ada departemen (tanpa akses data sensitif)")}
+                  {r.full_access ? "Full access" : (r.departments.join(", ") || "Semua departemen")}
+                  {" · "}
+                  {r.allowed_modules?.length ? `Modul: ${r.allowed_modules.join(", ")}` : "Semua modul"}
                   {r.notes ? ` — ${r.notes}` : ""}
                 </p>
               </button>

@@ -56,7 +56,16 @@ class ScopeUpsert(BaseModel):
     email: str
     full_access: bool = False
     departments: list[str] = []
+    allowed_modules: list[str] = []
     notes: str | None = None
+
+
+@router.get("/modules")
+async def list_modules(user: CurrentUser = Depends(require_role(Roles.ADMIN))):
+    """The MODULE_TOOL_MAP keys, for the allowed_modules checkbox UI —
+    empty selection means "no restriction", same convention as an empty
+    departments list under full_access."""
+    return list(ebs_chat_service.MODULE_TOOL_MAP.keys())
 
 
 @router.get("/scope")
@@ -69,7 +78,7 @@ async def upsert_scope(payload: ScopeUpsert, user: CurrentUser = Depends(require
     try:
         return ebs_chat_service.upsert_scope(
             payload.email, payload.full_access, payload.departments, payload.notes,
-            updated_by=user.username or "admin",
+            updated_by=user.username or "admin", allowed_modules=payload.allowed_modules,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))

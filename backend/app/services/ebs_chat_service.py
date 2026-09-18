@@ -47,11 +47,18 @@ placeholder pending calibration against the real Oracle COA, so this
 translation inherits that same uncertainty for the "SD" bucket in
 particular.
 
-Unscoped callers (any email in ebs_chat_scope with departments=[] and
-full_access=false) can still ask about sales/production/COGS/etc. — those
-tools are unaffected by RLS. They only get zero rows back from the 3 scoped
-tables (get_employee_directory, get_employee_headcount,
-get_budget_vs_actual), not an error — same as PLANT_DIRECT would in Oracle.
+Callers with departments=[] and full_access=false can still ask about
+sales/production/COGS/etc. — those 9 tables are unaffected by RLS regardless
+of department. They only get zero rows back from the 3 scoped tables
+(get_employee_directory, get_employee_headcount, get_budget_vs_actual), not
+an error — same as PLANT_DIRECT would in Oracle.
+
+allowed_modules (added 2026-09-18, see MODULE_TOOL_MAP) is the answer to
+"but I don't want this caller reaching sales/production at all" — an
+independent, coarser restriction that hides whole tools from the model
+rather than filtering their rows. departments/full_access and
+allowed_modules compose: a caller can be tool-restricted to just Inventory
+AND department-restricted within any tools that still support it.
 """
 import json
 import re
@@ -82,6 +89,35 @@ _BUDGET_GROUP_MAP = {
     "Plant": ["Plant Direct", "Plant Indirect"],
 }
 
+# Business-friendly grouping of the 12 eis_tools functions, for the
+# per-caller tool-level restriction (independent of the department/row-level
+# scoping above — a caller can be limited to a subset of MODULES regardless
+# of which departments' rows they're allowed to see within them). Every
+# tool belongs to exactly one module here; keep in sync with EIS_TOOLS in
+# eis_tools.py if a new tool is ever added there.
+MODULE_TOOL_MAP: dict[str, list[str]] = {
+    "Sales":      ["get_sales_performance", "get_sales_order_detail"],
+    "Production": ["get_production_performance"],
+    "Financial":  ["get_financial_summary", "get_ar_ap_summary"],
+    "COGS":       ["get_cogs_performance"],
+    "Inventory":  ["get_inventory_summary"],
+    "Purchasing": ["get_purchasing_performance", "get_purchase_order_detail"],
+    "HR":         ["get_employee_directory", "get_employee_headcount"],
+    "Budget":     ["get_budget_vs_actual"],
+}
+_ALL_TOOL_NAMES = {name for names in MODULE_TOOL_MAP.values() for name in names}
+
+
+def _tools_for_modules(modules: list[str]) -> set[str]:
+    """Empty/None modules list = no restriction (every existing scope row
+    predates this column and must keep working exactly as before)."""
+    if not modules:
+        return set(_ALL_TOOL_NAMES)
+    out = set()
+    for m in modules:
+        out.update(MODULE_TOOL_MAP.get(m, []))
+    return out
+
 FINAL_ANSWER_MAX_TOKENS = 4096
 
 
@@ -108,6 +144,11 @@ def ensure_table():
                 updated_at    TIMESTAMP DEFAULT NOW()
             )
         """)
+        # allowed_modules: added 2026-09-18 for per-tool restriction (see
+        # MODULE_TOOL_MAP) — NULL/empty on every pre-existing row, which
+        # _tools_for_modules() treats as "no restriction", so this migration
+        # can't silently narrow anyone's existing access.
+        cur.execute("ALTER TABLE ebs_chat_scope ADD COLUMN IF NOT EXISTS allowed_modules JSONB NOT NULL DEFAULT '[]'")
         conn.commit()
         conn.close()
     except Exception:
@@ -121,15 +162,15 @@ def list_scopes() -> list[dict]:
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT email, full_access, departments, notes, created_by, created_at, updated_at
+            SELECT email, full_access, departments, allowed_modules, notes, created_by, created_at, updated_at
             FROM ebs_chat_scope ORDER BY email
         """)
         rows = cur.fetchall()
         return [
             {
-                "email": r[0], "full_access": r[1], "departments": r[2] or [], "notes": r[3],
-                "created_by": r[4], "created_at": r[5].isoformat() if r[5] else None,
-                "updated_at": r[6].isoformat() if r[6] else None,
+                "email": r[0], "full_access": r[1], "departments": r[2] or [], "allowed_modules": r[3] or [],
+                "notes": r[4], "created_by": r[5], "created_at": r[6].isoformat() if r[6] else None,
+                "updated_at": r[7].isoformat() if r[7] else None,
             }
             for r in rows
         ]
@@ -137,29 +178,39 @@ def list_scopes() -> list[dict]:
         conn.close()
 
 
-def upsert_scope(email: str, full_access: bool, departments: list[str], notes: Optional[str], updated_by: str) -> dict:
+def upsert_scope(
+    email: str, full_access: bool, departments: list[str], notes: Optional[str], updated_by: str,
+    allowed_modules: Optional[list[str]] = None,
+) -> dict:
     email = (email or "").strip().lower()
     if not email:
         raise ValueError("email is required")
     bad = [d for d in departments or [] if d not in CANONICAL_DEPARTMENTS]
     if bad:
         raise ValueError(f"Unknown department(s): {bad} — must be one of {CANONICAL_DEPARTMENTS}")
+    bad_modules = [m for m in allowed_modules or [] if m not in MODULE_TOOL_MAP]
+    if bad_modules:
+        raise ValueError(f"Unknown module(s): {bad_modules} — must be one of {list(MODULE_TOOL_MAP)}")
 
     from psycopg2.extras import Json
     conn = _get_pg()
     try:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO ebs_chat_scope (email, full_access, departments, notes, created_by, updated_at)
-            VALUES (%s, %s, %s, %s, %s, NOW())
+            INSERT INTO ebs_chat_scope (email, full_access, departments, allowed_modules, notes, created_by, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (email) DO UPDATE SET
-                full_access = EXCLUDED.full_access,
-                departments = EXCLUDED.departments,
-                notes       = EXCLUDED.notes,
-                updated_at  = NOW()
-        """, (email, full_access, Json(departments or []), notes, updated_by))
+                full_access     = EXCLUDED.full_access,
+                departments     = EXCLUDED.departments,
+                allowed_modules = EXCLUDED.allowed_modules,
+                notes           = EXCLUDED.notes,
+                updated_at      = NOW()
+        """, (email, full_access, Json(departments or []), Json(allowed_modules or []), notes, updated_by))
         conn.commit()
-        return {"email": email, "full_access": full_access, "departments": departments or [], "notes": notes}
+        return {
+            "email": email, "full_access": full_access, "departments": departments or [],
+            "allowed_modules": allowed_modules or [], "notes": notes,
+        }
     finally:
         conn.close()
 
@@ -179,13 +230,13 @@ def _get_scope(email: str) -> Optional[dict]:
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT full_access, departments FROM ebs_chat_scope WHERE email = %s",
+            "SELECT full_access, departments, allowed_modules FROM ebs_chat_scope WHERE email = %s",
             ((email or "").strip().lower(),),
         )
         row = cur.fetchone()
         if not row:
             return None
-        return {"full_access": row[0], "departments": row[1] or []}
+        return {"full_access": row[0], "departments": row[1] or [], "allowed_modules": row[2] or []}
     finally:
         conn.close()
 
@@ -250,7 +301,7 @@ async def answer_question(question: str, user_email: str) -> dict:
     conn = _open_scoped_connection(scope)
     try:
         with eis_tools.use_connection(conn):
-            result = await _run_tool_calling_turn(question)
+            result = await _run_tool_calling_turn(question, allowed_tools=_tools_for_modules(scope["allowed_modules"]))
         conn.commit()
         return result
     except Exception:
@@ -260,23 +311,37 @@ async def answer_question(question: str, user_email: str) -> dict:
         conn.close()
 
 
-async def _run_tool_calling_turn(question: str) -> dict:
+async def _run_tool_calling_turn(question: str, allowed_tools: Optional[set[str]] = None) -> dict:
     """Single-turn (no chat history — each CoChat call is a fresh question),
     non-streaming Anthropic tool-calling turn. Mirrors oracle_chat_service.
     _stream_chat_anthropic's two-step flow, but eis_tools.execute_tool()
     now runs against whatever connection use_connection() has set active
     for this request (see answer_question above) instead of opening its
-    own chat_readonly connection — that's what makes the RLS scope apply."""
+    own chat_readonly connection — that's what makes the RLS scope apply.
+
+    allowed_tools (from the caller's MODULE_TOOL_MAP restriction, see
+    _tools_for_modules) is applied twice: once by simply not OFFERING the
+    disallowed tools to the model at all (so it never even considers them),
+    and again as a defense-in-depth check right before execute_tool() — the
+    second check is what actually matters for safety, the first is just
+    what keeps the model from wasting a turn asking for something it can't
+    have."""
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     model = ANTHROPIC_CHAT_DEFAULT_MODEL
     messages = [{"role": "user", "content": question}]
+
+    all_tools = eis_tools.EIS_TOOLS
+    offered_tools = (
+        [t for t in all_tools if t["function"]["name"] in allowed_tools]
+        if allowed_tools is not None else all_tools
+    )
 
     response = await client.messages.create(
         model=model,
         max_tokens=1024,
         system=SYSTEM_PROMPT,
         messages=messages,
-        tools=_to_anthropic_tools(eis_tools.EIS_TOOLS),
+        tools=_to_anthropic_tools(offered_tools),
     )
 
     sources = []
@@ -287,13 +352,18 @@ async def _run_tool_calling_turn(question: str) -> dict:
         for block in tool_use_blocks:
             tool_name = block.name
             arguments = block.input
-            try:
-                data = eis_tools.execute_tool(tool_name, arguments)
-                error = None
-            except Exception as e:
+            if allowed_tools is not None and tool_name not in allowed_tools:
                 data = []
-                error = str(e)
-                logger.warning("ebs_chat_tool_execution_error", tool=tool_name, arguments=arguments, error=error)
+                error = "This tool is outside your granted access scope."
+                logger.warning("ebs_chat_tool_denied", tool=tool_name, arguments=arguments)
+            else:
+                try:
+                    data = eis_tools.execute_tool(tool_name, arguments)
+                    error = None
+                except Exception as e:
+                    data = []
+                    error = str(e)
+                    logger.warning("ebs_chat_tool_execution_error", tool=tool_name, arguments=arguments, error=error)
 
             sources.append({"tool": tool_name, "arguments": arguments, "row_count": len(data), "error": error})
             tool_result_blocks.append({
