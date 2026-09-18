@@ -6,7 +6,7 @@ import {
   Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck,
   Wallet, Download, ChevronDown, ChevronUp, ListChecks, FileSearch, BookOpen, Trash2,
   QrCode, Plus, Minus, ArrowUpDown, Pencil, ZoomIn, ZoomOut, Maximize2, Minimize2, Network,
-  SlidersHorizontal, User, Camera, History, FileText, Sparkles, CheckCircle2,
+  SlidersHorizontal, User, Camera, History, FileText, Sparkles, CheckCircle2, Music,
 } from "lucide-react";
 import EmployeeUpload from "./EmployeeUpload";
 import AttendanceUpload from "./AttendanceUpload";
@@ -7362,12 +7362,14 @@ function EMagazineSection() {
   const [description,   setDescription]  = useState("");
   const [file,          setFile]          = useState(null);
   const [photos,        setPhotos]        = useState([]); // photo_album: File[]
+  const [musicFile,     setMusicFile]     = useState(null); // photo_album: background music File
+  const [savingMusic,   setSavingMusic]   = useState(false);
   const [uploadQrLinks, setUploadQrLinks] = useState([]);
   const [editQr,        setEditQr]        = useState(null); // {filename, links:[{label,url}]}
   const [savingQr,      setSavingQr]      = useState(null);
   const [editMeta,      setEditMeta]      = useState(null); // {filename, title, date, description}
   const [savingMeta,    setSavingMeta]    = useState(null);
-  const [editingAlbum,  setEditingAlbum]  = useState(null); // {filename, existingCount} — reopens the top form to append photos
+  const [editingAlbum,  setEditingAlbum]  = useState(null); // {filename, existingCount, hasMusic} — reopens the top form to append photos
   const [reorderPhotos, setReorderPhotos] = useState([]); // existing photo filenames, in the order being edited
   const [savingOrder,   setSavingOrder]   = useState(false);
   const [sortBy,  setSortBy]  = useState(null);
@@ -7406,7 +7408,7 @@ function EMagazineSection() {
 
   const resetUploadForm = () => {
     setTitle(""); setDateLbl(""); setDescription(""); setFile(null); setPhotos([]); setUploadQrLinks([]);
-    setEditingAlbum(null); setReorderPhotos([]);
+    setEditingAlbum(null); setReorderPhotos([]); setMusicFile(null);
   };
 
   const openAddPhotos = (ed) => {
@@ -7416,8 +7418,9 @@ function EMagazineSection() {
     setDateLbl(ed.date || "");
     setDescription(ed.description || "");
     setPhotos([]);
+    setMusicFile(null);
     setReorderPhotos(ed.photos || []);
-    setEditingAlbum({ filename: ed.filename, existingCount: ed.photos?.length || 0 });
+    setEditingAlbum({ filename: ed.filename, existingCount: ed.photos?.length || 0, hasMusic: !!ed.music });
     uploadFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
@@ -7446,6 +7449,49 @@ function EMagazineSection() {
     } catch (err) {
       setError(err?.detail || "Failed to save photo order.");
     } finally { setSavingOrder(false); }
+  };
+
+  const ALLOWED_AUDIO_TYPES = ["audio/mpeg", "audio/mp3", "audio/ogg", "audio/wav", "audio/x-wav"];
+
+  const handleMusicSelect = (e) => {
+    const f = e.target.files?.[0];
+    if (f && !ALLOWED_AUDIO_TYPES.includes(f.type)) {
+      setError(`${f.name} — only MP3, OGG, or WAV audio is supported.`);
+      e.target.value = "";
+      return;
+    }
+    setMusicFile(f || null);
+    setError("");
+  };
+
+  const handleUploadMusic = async () => {
+    if (!editingAlbum || !musicFile) return;
+    setSavingMusic(true); setError(""); setSuccess("");
+    try {
+      const form = new FormData();
+      form.append("music", musicFile);
+      await hrApi.eMagazineUploadMusic(editingAlbum.filename, form);
+      setSuccess("Background music saved.");
+      setMusicFile(null);
+      setEditingAlbum(prev => prev ? { ...prev, hasMusic: true } : prev);
+      load();
+    } catch (err) {
+      setError(err?.detail || "Failed to upload music.");
+    } finally { setSavingMusic(false); }
+  };
+
+  const handleRemoveMusic = async () => {
+    if (!editingAlbum) return;
+    if (!window.confirm("Remove background music from this album?")) return;
+    setSavingMusic(true); setError(""); setSuccess("");
+    try {
+      await hrApi.eMagazineDeleteMusic(editingAlbum.filename);
+      setSuccess("Background music removed.");
+      setEditingAlbum(prev => prev ? { ...prev, hasMusic: false } : prev);
+      load();
+    } catch (err) {
+      setError(err?.detail || "Failed to remove music.");
+    } finally { setSavingMusic(false); }
   };
 
   const handleUpload = async (e) => {
@@ -7480,6 +7526,7 @@ function EMagazineSection() {
         form.append("description", description.trim());
         form.append("qr_links_json", JSON.stringify(uploadQrLinks.filter(q => q.url.trim())));
         photos.forEach(p => form.append("photos", p));
+        if (musicFile) form.append("music", musicFile);
         await hrApi.eMagazineUploadAlbum(form);
         setSuccess(`"${title}" (${photos.length} photos) uploaded successfully.`);
       }
@@ -7690,6 +7737,47 @@ function EMagazineSection() {
                 </button>
               </div>
             )}
+
+            <div className="mb-4 rounded-lg border border-gray-700 bg-gray-800/40 p-3">
+              <p className="text-xs text-gray-400 font-medium mb-2 flex items-center gap-1.5">
+                <Music size={11} /> Background Music
+              </p>
+              {editingAlbum.hasMusic && (
+                <p className="text-xs text-teal-300/80 mb-2 flex items-center gap-1.5">
+                  <CheckCircle2 size={11} /> Music is set for this album.
+                </p>
+              )}
+              <div className="flex items-center gap-2">
+                <input
+                  type="file"
+                  accept="audio/mpeg,audio/mp3,audio/ogg,audio/wav"
+                  onChange={handleMusicSelect}
+                  className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-400 file:mr-3 file:rounded file:border-0 file:bg-teal-600 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white focus:outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={handleUploadMusic}
+                  disabled={!musicFile || savingMusic}
+                  className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-teal-500 disabled:opacity-50 transition-colors"
+                >
+                  {savingMusic ? <Loader2 size={11} className="animate-spin" /> : null}
+                  {editingAlbum.hasMusic ? "Replace Music" : "Upload Music"}
+                </button>
+                {editingAlbum.hasMusic && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveMusic}
+                    disabled={savingMusic}
+                    className="flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-xs font-semibold text-red-400 hover:bg-red-500/10 disabled:opacity-50 transition-colors"
+                  >
+                    <Trash2 size={11} /> Remove
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-500 mt-2">Loops automatically while a viewer is browsing this album in the public reading room.</p>
+            </div>
           </>
         )}
 
@@ -7752,6 +7840,21 @@ function EMagazineSection() {
               className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none resize-y"
             />
           </div>
+
+          {uploadType === "photo_album" && !editingAlbum && (
+            <div className="space-y-1">
+              <label className="text-xs text-gray-400 font-medium flex items-center gap-1.5">
+                <Music size={11} /> Background Music (optional, MP3/OGG/WAV, max 25 MB)
+              </label>
+              <input
+                type="file"
+                accept="audio/mpeg,audio/mp3,audio/ogg,audio/wav"
+                onChange={handleMusicSelect}
+                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-400 file:mr-3 file:rounded file:border-0 file:bg-teal-600 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white focus:outline-none"
+              />
+              <p className="text-[11px] text-gray-500">Loops automatically while a viewer is browsing this album in the public reading room.</p>
+            </div>
+          )}
 
           {uploadType === "photo_album" && photos.length > 0 && (
             <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 gap-2">
@@ -7854,6 +7957,11 @@ function EMagazineSection() {
                       {ed.text_pages > 0 && (
                         <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-green-400 align-middle">
                           <CheckCircle2 size={10} /> Text ready ({ed.text_pages}p)
+                        </span>
+                      )}
+                      {ed.type === "photo_album" && ed.music && (
+                        <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-teal-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-teal-400 align-middle">
+                          <Music size={10} /> Music
                         </span>
                       )}
                     </td>

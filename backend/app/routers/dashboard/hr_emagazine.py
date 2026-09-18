@@ -26,6 +26,8 @@ INDEX_FILE = UPLOAD_DIR / "index.json"
 MAX_PDF_MB = 100
 ALLOWED_PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_PHOTO_MB = 20
+ALLOWED_AUDIO_TYPES = {"audio/mpeg", "audio/mp3", "audio/ogg", "audio/wav", "audio/x-wav"}
+MAX_AUDIO_MB = 25
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -145,6 +147,7 @@ async def upload_album(
     description:   str               = Form(""),
     qr_links_json: str               = Form("[]"),
     photos:        list[UploadFile]  = File(...),
+    music:         UploadFile | None = File(None),
     user: CurrentUser = Depends(require_role(Roles.HR)),
 ):
     """Upload a photo album 'edition' — shown in the same public reading
@@ -179,6 +182,16 @@ async def upload_album(
             photo_filename = f"photo_{i}{ext}"
             (album_dir / photo_filename).write_bytes(content)
             photo_names.append(photo_filename)
+        music_filename = None
+        if music is not None and music.filename:
+            if music.content_type not in ALLOWED_AUDIO_TYPES:
+                raise HTTPException(400, f"'{music.filename}' bukan tipe audio yang didukung (MP3, OGG, atau WAV).")
+            music_content = await music.read()
+            if len(music_content) > MAX_AUDIO_MB * 1024 * 1024:
+                raise HTTPException(413, f"Ukuran musik melebihi {MAX_AUDIO_MB} MB.")
+            ext = Path(music.filename or "").suffix.lower() or ".mp3"
+            music_filename = f"music{ext}"
+            (album_dir / music_filename).write_bytes(music_content)
     except HTTPException:
         shutil.rmtree(album_dir, ignore_errors=True)
         raise
@@ -193,9 +206,10 @@ async def upload_album(
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
         "qr_links":    qr_links,
         "photos":      photo_names,
+        **({"music": music_filename} if music_filename else {}),
     })
     _write_index(entries)
-    return {"ok": True, "filename": album_id, "entries": len(entries), "photos": len(photo_names)}
+    return {"ok": True, "filename": album_id, "entries": len(entries), "photos": len(photo_names), "music": music_filename}
 
 
 @router.post("/files/{filename}/add-photos")
@@ -283,6 +297,65 @@ async def reorder_photos(
     entry["photos"] = new_order
     _write_index(entries)
     return {"ok": True, "filename": safe_name, "photos": entry["photos"]}
+
+
+@router.post("/files/{filename}/music")
+async def upload_music(
+    filename: str,
+    music:    UploadFile = File(...),
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    """Upload or replace an existing photo album's background music — the
+    public reading room loops it while that album is open (see
+    e-magazine/index.html)."""
+    safe_name = _safe_filename(filename)
+    entries = _read_index()
+    entry = next((e for e in entries if e["filename"] == safe_name), None)
+    if not entry:
+        raise HTTPException(404, "Album tidak ditemukan.")
+    if entry.get("type") != "photo_album":
+        raise HTTPException(400, "Hanya photo album yang bisa punya musik latar.")
+    if music.content_type not in ALLOWED_AUDIO_TYPES:
+        raise HTTPException(400, f"'{music.filename}' bukan tipe audio yang didukung (MP3, OGG, atau WAV).")
+
+    content = await music.read()
+    if len(content) > MAX_AUDIO_MB * 1024 * 1024:
+        raise HTTPException(413, f"Ukuran musik melebihi {MAX_AUDIO_MB} MB.")
+
+    album_dir = UPLOAD_DIR / safe_name
+    album_dir.mkdir(parents=True, exist_ok=True)
+
+    old_music = entry.get("music")
+    if old_music:
+        (album_dir / old_music).unlink(missing_ok=True)
+
+    ext = Path(music.filename or "").suffix.lower() or ".mp3"
+    music_filename = f"music{ext}"
+    (album_dir / music_filename).write_bytes(content)
+
+    entry["music"] = music_filename
+    _write_index(entries)
+    return {"ok": True, "filename": safe_name, "music": music_filename}
+
+
+@router.delete("/files/{filename}/music")
+async def delete_music(
+    filename: str,
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    """Remove an existing photo album's background music."""
+    safe_name = _safe_filename(filename)
+    entries = _read_index()
+    entry = next((e for e in entries if e["filename"] == safe_name), None)
+    if not entry:
+        raise HTTPException(404, "Album tidak ditemukan.")
+
+    music_filename = entry.get("music")
+    if music_filename:
+        (UPLOAD_DIR / safe_name / music_filename).unlink(missing_ok=True)
+        entry.pop("music", None)
+        _write_index(entries)
+    return {"ok": True, "filename": safe_name}
 
 
 @router.patch("/files/{filename}/qr-links")

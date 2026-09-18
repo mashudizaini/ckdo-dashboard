@@ -116,6 +116,7 @@
   .btn:focus-visible{outline:2px solid var(--copper);outline-offset:2px}
   .btn.icon{width:36px;height:36px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:15px}
   #editionsToggle{display:none}
+  #musicToggle{display:none}
 
   /* ── Content row: stage + sidebar ───────── */
   .content{flex:1;display:flex;min-height:0}
@@ -339,11 +340,13 @@
     <input type="search" id="searchInput" class="search-input" placeholder="Search inside magazines…" autocomplete="off">
     <div id="searchResults" class="search-results hidden"></div>
   </div>
+  <button class="btn icon" id="musicToggle" title="Toggle background music" aria-label="Toggle background music">🔊</button>
   <button class="btn icon" id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
   <button class="btn icon" id="zoomIn" title="Zoom in" aria-label="Zoom in">+</button>
   <button class="btn icon" id="fsBtn" title="Fullscreen" aria-label="Fullscreen">⛶</button>
   <button class="btn" id="editionsToggle">Editions</button>
 </header>
+<audio id="bgMusic" loop preload="none"></audio>
 
 <div class="content">
   <main id="viewer">
@@ -406,7 +409,8 @@ const els = {
   editionList:$("editionList"), panel:$("editionsPanel"),
   scrim:$("drawerScrim"), toggle:$("editionsToggle"),
   searchInput:$("searchInput"), searchResults:$("searchResults"),
-  jumpToast:$("jumpToast")
+  jumpToast:$("jumpToast"),
+  musicToggle:$("musicToggle"), bgMusic:$("bgMusic")
 };
 
 let pdf = null, numPages = 0, aspect = 0.707;
@@ -637,12 +641,14 @@ async function loadEdition(edition){
       await showSpread(0, true);
       buildThumbs();
     }
+    updateMusic(edition.music || null);
   }catch(err){
     els.bar.hidden = true;
     els.overlayMsg.textContent = edition.type === "photo_album"
       ? "Album gagal dimuat. Pastikan foto tersedia di server."
       : "Edisi gagal dimuat. Pastikan file PDF tersedia di server.";
     console.error("loadEdition error:", err);
+    updateMusic(null);
   }
 }
 function resetState(){
@@ -650,6 +656,46 @@ function resetState(){
   imgCache.clear(); qrCache.clear(); dimCache.clear();
   els.thumbs.innerHTML=""; applyZoom();
 }
+
+/* ── Background music (photo albums only) ───────── */
+let musicUserPaused = false; // sticky across edition switches, e.g. the user muted it on album A and browses to album B
+function updateMusic(url){
+  if(!url){
+    els.musicToggle.style.display = "none";
+    els.bgMusic.pause();
+    els.bgMusic.removeAttribute("src");
+    return;
+  }
+  els.musicToggle.style.display = "inline-flex";
+  const absUrl = new URL(url, location.href).href;
+  if(els.bgMusic.src !== absUrl){
+    els.bgMusic.src = url;
+  }
+  if(!musicUserPaused){
+    // A page-load autoplay (no prior click) is routinely blocked by the
+    // browser and rejects this promise — that's expected, not an error;
+    // the toggle button (which IS a user gesture) always works to start
+    // it manually. Switching editions via a sidebar click, though, is
+    // itself a user gesture, so autoplay succeeds there.
+    els.bgMusic.play().catch(()=>{});
+  }
+  updateMusicIcon();
+}
+function updateMusicIcon(){
+  els.musicToggle.textContent = els.bgMusic.paused ? "🔇" : "🔊";
+}
+els.musicToggle.addEventListener("click", ()=>{
+  if(els.bgMusic.paused){
+    musicUserPaused = false;
+    els.bgMusic.play().catch(()=>{});
+  }else{
+    musicUserPaused = true;
+    els.bgMusic.pause();
+  }
+  updateMusicIcon();
+});
+els.bgMusic.addEventListener("play", updateMusicIcon);
+els.bgMusic.addEventListener("pause", updateMusicIcon);
 
 /* ── Page -> image rendering ────────────── */
 async function pageImage(n){
@@ -1024,6 +1070,9 @@ els.searchInput.addEventListener("keydown", e => {
       const photos = isAlbum
         ? (e.photos || []).map(p => "magazines/" + encodeURIComponent(e.filename) + "/" + encodeURIComponent(p) + "?v=" + v)
         : null;
+      const music = isAlbum && e.music
+        ? "magazines/" + encodeURIComponent(e.filename) + "/" + encodeURIComponent(e.music) + "?v=" + v
+        : null;
       return {
         title:       e.title || e.filename,
         date:        e.date  || "",
@@ -1032,6 +1081,7 @@ els.searchInput.addEventListener("keydown", e => {
         file:     isAlbum ? null : "magazines/" + encodeURIComponent(e.filename) + "?v=" + v,
         filename: e.filename,
         photos,
+        music,
         cover:    isAlbum && photos.length ? photos[0] : undefined,
       };
     });
