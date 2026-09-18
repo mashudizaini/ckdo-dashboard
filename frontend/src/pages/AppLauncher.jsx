@@ -163,6 +163,33 @@ function CategorySection({ cat, apps, onNavigate, onDashboardClick, startIndex }
 
 // ─── Announcement row — one item in the marquee (birthday or task alert) ──
 function AnnouncementRow({ item }) {
+  if (item.kind === "announcement") {
+    return (
+      <div style={{
+        display: "flex", alignItems: "flex-start", gap: 10,
+        padding: "9px 12px", marginBottom: 8, borderRadius: 12,
+        background: "linear-gradient(135deg, #dbeafe, #e0e7ff)",
+        boxShadow: "0 0 0 1.5px #2563eb, 0 2px 4px rgba(15,23,42,0.08)",
+      }}>
+        <div style={{
+          width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+          background: "linear-gradient(135deg,#2563eb,#4f46e5)",
+          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14,
+        }}>
+          📢
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <p style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {item.title}
+          </p>
+          <p style={{ fontSize: 10.5, color: "#475569", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+            {item.message}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (item.kind === "task_alert") {
     const badgeBg = item.is_overdue ? "#fee2e2" : "#fef3c7";
     const badgeColor = item.is_overdue ? "#dc2626" : "#d97706";
@@ -331,16 +358,26 @@ export default function AppLauncher() {
   useEffect(() => {
     if (!token) return;
     const headers = { Authorization: `Bearer ${token}` };
+    const NOTIF_API = "/api/v1/dashboard/general/notification-settings";
     Promise.all([
+      fetch(`${NOTIF_API}/types`, { headers }).then(r => r.ok ? r.json() : []),
+      fetch(`${NOTIF_API}/announcements/active`, { headers }).then(r => r.ok ? r.json() : []),
       fetch("/api/v1/dashboard/hr/todo/active-alerts", { headers }).then(r => r.ok ? r.json() : []),
       fetch("/api/v1/dashboard/hr/employees/birthdays-this-month", { headers }).then(r => r.ok ? r.json() : []),
       fetch("/api/v1/dashboard/hr/attendance/late-this-month", { headers }).then(r => r.ok ? r.json() : []),
     ])
-      .then(([alerts, birthdays, lateArrivals]) => {
+      .then(([types, customAnnouncements, alerts, birthdays, lateArrivals]) => {
+        // Missing/failed types fetch defaults every type to visible — same
+        // fail-open behavior these 3 always had before this setting existed.
+        const enabled = (key) => {
+          const t = types.find(x => x.key === key);
+          return t ? t.is_enabled : true;
+        };
         setAnnouncements([
-          ...alerts.map(a => ({ ...a, kind: "task_alert" })),
-          ...birthdays.map(b => ({ ...b, kind: "birthday" })),
-          ...lateArrivals.map(l => ({ ...l, kind: "late" })),
+          ...customAnnouncements.map(a => ({ ...a, kind: "announcement" })),
+          ...(enabled("task_alert") ? alerts.map(a => ({ ...a, kind: "task_alert" })) : []),
+          ...(enabled("birthday") ? birthdays.map(b => ({ ...b, kind: "birthday" })) : []),
+          ...(enabled("late_attendance") ? lateArrivals.map(l => ({ ...l, kind: "late" })) : []),
         ]);
       })
       .catch(() => {});
