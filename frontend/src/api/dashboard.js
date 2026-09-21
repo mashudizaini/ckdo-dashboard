@@ -41,6 +41,19 @@ export const itApi = {
   getDbAuditLog:  (limit)                => api.get("/dashboard/it/db-browser/audit-log", { params: { limit } }),
 };
 
+export const serverRegistryApi = {
+  getServers:        ()                => api.get("/dashboard/it/server-registry"),
+  getCategories:     ()                => api.get("/dashboard/it/server-registry/categories"),
+  getAccessLog:      ()                => api.get("/dashboard/it/server-registry/access-log"),
+  createServer:      (body)            => api.post("/dashboard/it/server-registry", body),
+  updateServer:      (id, body)        => api.put(`/dashboard/it/server-registry/${id}`, body),
+  deleteServer:      (id)              => api.delete(`/dashboard/it/server-registry/${id}`),
+  addCredential:     (serverId, body)  => api.post(`/dashboard/it/server-registry/${serverId}/credentials`, body),
+  updateCredential:  (id, body)        => api.put(`/dashboard/it/server-registry/credentials/${id}`, body),
+  deleteCredential:  (id)              => api.delete(`/dashboard/it/server-registry/credentials/${id}`),
+  revealCredential:  (id)              => api.post(`/dashboard/it/server-registry/credentials/${id}/reveal`),
+};
+
 export const vpnApi = {
   listGateways:    ()          => api.get("/dashboard/it/vpn-monitor/gateways"),
   upsertGateway:   (body)      => api.post("/dashboard/it/vpn-monitor/gateways", body),

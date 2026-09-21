@@ -16,6 +16,7 @@ import { oracleEnvApi } from "@/api/dashboard";
 // as an in-page tab bar) — clicking a section navigates straight to its URL.
 const NAV_ITEMS = [
   { label: "IT", path: "/dashboard/it", icon: Monitor, roles: ["it_staff"], children: [
+    { label: "Server Control", path: "/dashboard/it/server-control" },
     { label: "Oracle Server Monitoring", path: "/dashboard/it/server-monitoring" },
     { label: "Oracle Tablespace Monitoring", path: "/dashboard/it/tablespace-usage" },
     { label: "Oracle Storage Monitoring", path: "/dashboard/it/disk-usage" },

@@ -32,6 +32,7 @@ import app.models.speaker_voiceprint  # noqa: F401
 import app.models.menu_access  # noqa: F401
 import app.models.notification_settings  # noqa: F401
 import app.models.announcement  # noqa: F401
+import app.models.server_registry  # noqa: F401
 import app.models.ai_chat_provider  # noqa: F401
 import app.models.outlook_material  # noqa: F401
 import app.models.financial_statement_upload  # noqa: F401
@@ -47,7 +48,7 @@ from app.models.zkteco import init_zkteco_db
 from app.routers import emagazine, emagazine_hotspots
 
 # ── Dashboard Routers ──
-from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement, general, sales_marketing, ppwh, production, supplier_wht, ap_vat_in, ap_wht_listing
+from app.routers.dashboard import it, it_db_browser, it_server_registry, hr, pac, accounting, purchasing, ap_invoice, financial_statement, general, sales_marketing, ppwh, production, supplier_wht, ap_vat_in, ap_wht_listing
 from app.routers.dashboard import ebs_backup
 from app.routers.dashboard import vpn_monitor
 from app.routers.dashboard import it_hikcentral
@@ -260,6 +261,14 @@ app.include_router(
 app.include_router(
     vpn_monitor.router, prefix=f"{API_PREFIX}/dashboard/it/vpn-monitor",
     tags=["Dashboard - IT - VPN Monitoring"],
+    dependencies=[Depends(require_role(Roles.IT))],
+)
+# Server Control — centralized server inventory + encrypted credentials
+# (see server_registry_service.py / crypto.py). IT-only, no exceptions —
+# this is the single highest-value target in the whole app if it leaked.
+app.include_router(
+    it_server_registry.router, prefix=f"{API_PREFIX}/dashboard/it/server-registry",
+    tags=["Dashboard - IT - Server Control"],
     dependencies=[Depends(require_role(Roles.IT))],
 )
 # These three moved from Setup > IT to Setup > General (2026-09-01) — no
