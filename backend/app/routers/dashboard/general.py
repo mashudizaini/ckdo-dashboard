@@ -10,7 +10,7 @@ caller's own team (see general_budget.py / budget_access_service.py)
 rather than by role.
 """
 from fastapi import APIRouter
-from app.routers.dashboard import general_budget, general_ap_payment, general_access_control
+from app.routers.dashboard import general_budget, general_ap_payment, general_ap_list, general_access_control, general_oracle_env, general_notification_settings, general_access_center
 
 router = APIRouter()
 
@@ -22,7 +22,27 @@ router.include_router(general_budget.router, prefix="/budget", tags=["Dashboard 
 # here instead so it's visible company-wide, not gated to accounting_staff.
 router.include_router(general_ap_payment.router, prefix="/ap-payment", tags=["Dashboard - General AP Outstanding with Payment"])
 
+# Sub-router: AP List (see general_ap_list.py) — every AP transaction by GL
+# Date, Paid and unpaid alike, with DPP/VAT/WHT breakdown and NPWP, format
+# matching sumber/FORMAT LIST AP 2025.xlsx. Placed here for the same
+# company-wide-visibility reason as ap-payment above.
+router.include_router(general_ap_list.router, prefix="/ap-list", tags=["Dashboard - General AP List"])
+
 # Sub-router: per-user menu access control (see general_access_control.py /
 # menu_access_service.py) — gated per-endpoint inside that router, not here,
 # since it mixes IT-only admin endpoints with one endpoint any user needs.
 router.include_router(general_access_control.router, prefix="/access-control", tags=["Dashboard - General Access Control"])
+
+# Sub-router: Oracle Production/Development toggle (see general_oracle_env.py)
+router.include_router(general_oracle_env.router, prefix="/oracle-env", tags=["Dashboard - Oracle Environment"])
+
+# Sub-router: Announcement & Notification settings (see
+# general_notification_settings.py / notification_settings_service.py) —
+# gated per-endpoint inside that router, same reason as access-control.
+router.include_router(general_notification_settings.router, prefix="/notification-settings", tags=["Dashboard - General Notification Settings"])
+
+# Sub-router: unified Access Center (see general_access_center.py) — admin
+# view of Keycloak roles + Oracle EBS responsibility (read-only) for one
+# user by email. EBS Chat scope stays at its own existing endpoint
+# (/ai/ebs-chat/scope) rather than being duplicated here.
+router.include_router(general_access_center.router, prefix="/access-center", tags=["Dashboard - General Access Center"])

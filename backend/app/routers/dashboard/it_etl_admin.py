@@ -56,6 +56,7 @@ async def trigger_etl(job_name: str, params: TriggerParams):
     valid_jobs = [
         "etl_sales", "etl_cogs", "etl_production", "etl_financial",
         "etl_employee", "etl_inventory", "etl_ar_ap", "etl_budget", "etl_po",
+        "etl_po_lines", "etl_open_pr", "etl_sales_orders", "etl_inventory_txn", "etl_batches",
     ]
     if job_name not in valid_jobs:
         raise HTTPException(status_code=400, detail=f"Unknown job. Valid: {valid_jobs}")
@@ -229,6 +230,52 @@ async def get_job_data(
             WHERE per.fiscal_year = :year {period_filter}
             ORDER BY per.period_num, p.material_type
         """,
+        # Not period-keyed like the fact_* tables above — filtered directly
+        # on creation_date instead of joining dim_period.
+        "etl_po_lines": f"""
+            SELECT po_number, line_num, item_code, supplier_name,
+                   ROUND(amount_idr::numeric, 2) AS amount_idr, creation_date, closure_status
+            FROM eis.fact_po_line
+            WHERE EXTRACT(YEAR FROM creation_date) = :year
+              {"AND EXTRACT(MONTH FROM creation_date) = :month" if month else ""}
+            ORDER BY creation_date DESC
+            LIMIT 100
+        """,
+        "etl_open_pr": """
+            SELECT pr_number, po_number, item_code, requestor, supplier_name,
+                   pr_status, creation_date, due_date
+            FROM eis.fact_open_pr
+            ORDER BY creation_date DESC
+            LIMIT 100
+        """,
+        "etl_sales_orders": f"""
+            SELECT order_number, line_num, item_code, customer_name, business_type,
+                   ROUND(amount_idr::numeric, 2) AS amount_idr, flow_status_code, ordered_date
+            FROM eis.fact_sales_order
+            WHERE EXTRACT(YEAR FROM ordered_date) = :year
+              {"AND EXTRACT(MONTH FROM ordered_date) = :month" if month else ""}
+            ORDER BY ordered_date DESC
+            LIMIT 100
+        """,
+        "etl_inventory_txn": f"""
+            SELECT transaction_id, transaction_date, direction, transaction_type_name,
+                   item_code, organization_code, subinventory_code, quantity, uom
+            FROM eis.fact_inventory_txn
+            WHERE EXTRACT(YEAR FROM transaction_date) = :year
+              {"AND EXTRACT(MONTH FROM transaction_date) = :month" if month else ""}
+            ORDER BY transaction_date DESC
+            LIMIT 100
+        """,
+        "etl_batches": f"""
+            SELECT batch_id, batch_no, organization_name, batch_status_name,
+                   product_item_code, product_plan_qty, product_actual_qty,
+                   plan_start_date, actual_cmplt_date
+            FROM eis.fact_batch
+            WHERE EXTRACT(YEAR FROM plan_start_date) = :year
+              {"AND EXTRACT(MONTH FROM plan_start_date) = :month" if month else ""}
+            ORDER BY plan_start_date DESC
+            LIMIT 100
+        """,
     }
 
     sql = queries.get(job_name)
@@ -287,6 +334,26 @@ _JOB_META = {
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["po_headers_all", "po_lines_all", "po_line_locations_all"],
                         "destination_table": "eis.fact_purchasing"},
+    "etl_po_lines":   {"frequency": "Daily",  "schedule": "05:15 AM WIB", "source": "Oracle PO (line-item detail)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["po_headers_all", "po_lines_all", "po_line_locations_all", "mtl_system_items_b", "xxckdo_manufacturer_master"],
+                        "destination_table": "eis.fact_po_line"},
+    "etl_open_pr":    {"frequency": "Every 15 min", "schedule": "*/15 * * * *", "source": "Oracle PO (PR Approval Status)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["po_requisition_headers_all", "po_requisition_lines_all", "po_action_history"],
+                        "destination_table": "eis.fact_open_pr"},
+    "etl_sales_orders": {"frequency": "Daily", "schedule": "05:30 AM WIB", "source": "Oracle OM (Sales Order line-item)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["oe_order_headers_all", "oe_order_lines_all", "hz_cust_accounts", "hz_parties"],
+                        "destination_table": "eis.fact_sales_order"},
+    "etl_inventory_txn": {"frequency": "Daily", "schedule": "05:45 AM WIB", "source": "Oracle INV (Material Transactions)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["mtl_material_transactions", "mtl_transaction_types", "mtl_system_items_b"],
+                        "destination_table": "eis.fact_inventory_txn"},
+    "etl_batches": {"frequency": "Daily", "schedule": "06:00 AM WIB", "source": "Oracle OPM (Process Batch)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["gme_batch_header", "gme_material_details", "mtl_system_items_b"],
+                        "destination_table": "eis.fact_batch"},
 }
 
 

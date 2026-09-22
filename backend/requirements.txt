@@ -92,3 +92,9 @@ croniter==3.0.3
 # binary / no raw-socket capability), the actual protocol connection works
 # fine once that precheck is skipped. See zkteco_client.py.
 pyzk==0.9
+
+# AP Autoinvoice — Google Drive polling (service account, Shared Drive).
+# See ap_invoice_gdrive_service.py.
+google-api-python-client==2.126.0
+google-auth==2.29.0
+google-auth-httplib2==0.2.0

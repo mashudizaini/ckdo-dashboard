@@ -8,8 +8,7 @@ import { useAuthStore } from "@/store/authStore";
  *
  * storageKey: optional localStorage key to persist messages across sessions.
  * endpoint: which chat backend to stream from — defaults to the Policy Chat;
- * pass "/api/v1/ai/chatbot/oracle-chat" for the Oracle EBS Data Chat, or
- * "/api/v1/ai/chatbot/general-chat" for the General Chat.
+ * pass "/api/v1/ai/chatbot/oracle-chat" for the Oracle EBS Data Chat.
  * provider: "onprem" (default, local Ollama) or "gemini" — read fresh on
  * every sendMessage call, so callers can flip a state variable to switch
  * providers mid-conversation without losing message history.

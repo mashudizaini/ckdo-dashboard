@@ -252,6 +252,17 @@ class AccountingService:
     # of Oracle's live status/remaining figures.
     LEGACY_PAID_CUTOFF = "2021-12-31"
 
+    # GL account (segment4) for "VAT-INPUT" — used by get_ap_list. Some AP
+    # invoices (confirmed live: Rentokil's EXPENSE REPORT-type invoices)
+    # never get Oracle's native REC_TAX/NONREC_TAX line_type_lookup_code at
+    # all — whoever enters the invoice instead adds a plain manual line
+    # (line_type_lookup_code='ITEM', description literally "VAT") coded
+    # straight to this GL account. Oracle's own invoice-summary Tax field
+    # shows 0.00 for these (since REC_TAX/NONREC_TAX is what that field
+    # reads), even though a real VAT amount was posted. get_ap_list treats
+    # a distribution against this account as real VAT too.
+    AP_VAT_INPUT_COA_SEGMENT4 = "114207"
+
     async def get_ap_outstanding(
         self,
         as_of_date: str = None,
@@ -294,7 +305,7 @@ class AccountingService:
         genuinely collected but missing/incomplete payment-application
         records in Oracle), Oracle itself untouched.
         """
-        limit = min(max(limit, 1), 2000)
+        limit = min(max(limit, 1), 20000)
 
         date_expr = "TO_DATE(:as_of_date, 'YYYY-MM-DD')" if as_of_date else "TRUNC(SYSDATE)"
         params: dict = {}
@@ -485,7 +496,7 @@ class AccountingService:
         from where this was written). If it errors, the fix is almost
         certainly a column/table name mismatch here, not the surrounding logic.
         """
-        limit = min(max(limit, 1), 2000)
+        limit = min(max(limit, 1), 20000)
 
         date_expr = "TO_DATE(:as_of_date, 'YYYY-MM-DD')" if as_of_date else "TRUNC(SYSDATE)"
         params: dict = {}
@@ -628,6 +639,446 @@ class AccountingService:
             }
         except Exception as e:
             logger.error("ap_outstanding_with_payment_error", error=str(e))
+            return {"success": False, "error": str(e), "data": []}
+
+    async def get_ap_list(
+        self,
+        gl_date_from: str = None,
+        gl_date_to: str = None,
+        payment_date_cutoff: str = None,
+        supplier_name: str = None,
+        payment_status: str = None,
+        limit: int = 500,
+    ) -> dict:
+        """
+        AP List — every AP transaction by GL Date, Paid and unpaid alike
+        (deliberately NOT excluding Paid, unlike get_ap_outstanding/
+        get_ap_outstanding_with_payment above — this report's whole point).
+        One row per invoice (payments aggregated into a single Payment
+        total), not one row per payment application. Format follows
+        "FORMAT LIST AP 2025.xlsx" (see the AP List plan for the full
+        verification trail behind each column below).
+
+        DPP/VAT/WHT/Total are a REPORT-LEVEL calculation, refined twice
+        against real live data (not Oracle's real tax posting for VAT
+        specifically, but real distribution-level amounts for DPP):
+          dpp   = SUM of the invoice's ITEM/ACCRUAL distributions,
+                  excluding any line coded to the VAT-INPUT COA (see
+                  dpp_expr in the code below) — falls back to
+                  NVL(ai.base_amount, ai.invoice_amount) only when an
+                  invoice has no distributions yet (not validated).
+                  Deliberately NOT the header ai.base_amount/invoice_amount
+                  as the primary source, even though that was this
+                  column's original definition — user-reported and
+                  verified live for VISION SCIENTIFIC (2025VS3486): the
+                  header invoice_amount (34,765,200) already IS base+tax
+                  (ACCRUAL 31,320,000 + REC_TAX 3,445,200), so treating the
+                  header as dpp and then adding another fresh 11% on top
+                  double-counted VAT. The same pattern was quietly present
+                  in the AGRU FARMA example originally used to confirm the
+                  header-based formula — that confirmation only checked
+                  against the reference file's own (also double-counted)
+                  numbers, not real Oracle math, so this correction
+                  supersedes it.
+          vat   = one of three cases, in priority order (see vat_expr in
+                  the code below):
+                  1. Oracle-native REC_TAX/NONREC_TAX distribution present
+                     -> ROUND(dpp * 0.11, 2), computed fresh against the
+                     distribution-level dpp above (in practice this now
+                     lands within rounding of Oracle's own REC_TAX amount,
+                     since REC_TAX is itself ~11% of ACCRUAL in this
+                     company's data — verified on both AGRU FARMA and
+                     VISION SCIENTIFIC).
+                  2. No REC_TAX/NONREC_TAX, but a manual distribution line
+                     was posted straight to the VAT-INPUT GL account
+                     (AP_VAT_INPUT_COA_SEGMENT4) -> use that line's REAL
+                     posted amount as-is. Confirmed live for Rentokil's
+                     EXPENSE REPORT invoices: a line_type_lookup_code=
+                     'ITEM' row, description literally "VAT", coded to
+                     that account — Oracle's own invoice Tax field shows
+                     0.00 for these (it only reads REC_TAX/NONREC_TAX),
+                     but the VAT is real and posted, just not tagged the
+                     way Oracle usually tags tax. Per the user: "walaupun
+                     ini sebagai LINE tapi tetap di hitung sebagai VAT."
+                  3. Neither -> 0. Confirmed live for Agus Suprianto/
+                     Jiangsu: only ACCRUAL/AWT distributions, no tax
+                     anywhere on the invoice, matching Oracle's own Tax
+                     field being 0.00 (user-reported, with a screenshot)
+                     and the reference file's row 8 (Agus Suprianto)
+                     showing VAT = 0.
+          wht   = SUM(AP_INVOICE_DISTRIBUTIONS_ALL.amount WHERE
+                  line_type_lookup_code = 'AWT') — this one IS real Oracle
+                  data, already negative in Oracle so no sign-flip needed
+          total = dpp + vat + NVL(wht, 0)
+          remaining_ap = 0 when payment_status = 'Paid' (see below), else
+                  (total - NVL(payment, 0)) — verified live that Oracle's
+                  actual AP_INVOICE_PAYMENTS_ALL.amount reflects the real
+                  cash paid (~= dpp, not dpp+vat, since the 11% gross-up
+                  above was never a real separately-paid amount), so the
+                  naive subtraction alone would show a nonzero "remaining"
+                  on invoices that are actually fully paid. Confirmed with
+                  the user: force 0 in that case rather than show a
+                  misleading residual.
+
+        payment (and therefore payment_status/remaining_ap/payment_rate)
+        respects `payment_date_cutoff` (default: today) — a payment applied
+        AFTER the cutoff does not count. Requested by the user: "jika
+        tanggal parameter Jan 1 - Dec 31 2025 dan payment date diisi 31 Dec
+        2025, maka data yang diambil adalah yang pembayarannya maksimal 31
+        Dec 2025" — an invoice genuinely paid in, say, January 2026 must
+        still show as outstanding when the cutoff is Dec 31 2025, i.e. this
+        report can answer "what did AP look like as of a past payment
+        cutoff," not just "what does it look like today."
+
+        This is why payment_status here is NOT the same
+        AP_PAYMENT_SCHEDULES_ALL.amount_remaining-based CASE logic
+        get_ap_outstanding/get_ap_outstanding_with_payment use above —
+        amount_remaining is a live/current-only Oracle field with no
+        historical snapshot, so it can't answer "was this Paid as of a past
+        cutoff." Instead: payment_status = 'Paid' when the cutoff-filtered
+        payment sum >= (the invoice's total scheduled amount,
+        AP_PAYMENT_SCHEDULES_ALL.gross_amount summed per invoice — an
+        immutable figure set when the schedule is created, unlike
+        amount_remaining which mutates as payments post, so comparing
+        against it works for any cutoff date, not just "now" — PLUS wht,
+        which is negative: gross_amount is the invoice's full face amount
+        and does NOT itself reflect that WHT is remitted to the tax office
+        rather than paid to the vendor, so without netting it out here an
+        invoice with real withholding would never reach 'Paid' even once
+        genuinely fully settled — verified live: MCD/INV-08/2020.II has
+        gross_amount 800,000 but only 780,000 was ever paid to the vendor,
+        the other 20,000 being AWT), 'Partially Paid' when partially
+        covered, else 'Not Paid'. (Also incidentally fixes the reference
+        file's own internal inconsistency noted in an earlier version of
+        this docstring — a row with Payment == Total and Remaining == 0
+        still labeled "Not Paid" — since status is now derived from the
+        same Payment figure shown in the report, not a separate live
+        Oracle flag.)
+
+        payment_date/payment_rate both come from that same most-recent
+        payment applied ON OR BEFORE the cutoff — payment_date is
+        NVL(AP_INVOICE_PAYMENTS_ALL.accounting_date, AP_CHECKS_ALL.
+        check_date) (NULL for invoices unpaid as of the cutoff),
+        payment_rate is that payment's EXCHANGE_RATE (also NULL/blank for
+        IDR payments, where Oracle doesn't populate it — confirmed live
+        this is sparse-but-real, ~23% of payments, exactly matching the
+        reference file's own blank-for-IDR pattern).
+
+        gl_date_from/gl_date_to scope WHICH invoices appear (by GL Date);
+        payment_date_cutoff separately scopes which of THOSE invoices'
+        payments count — the two are independent, per the user's example
+        (a full-year GL Date range with a Dec 31 payment cutoff).
+
+        Response carries `count` (rows actually in `data`, capped by
+        `limit`) separately from `total_count` (the true unbounded row
+        count for the filter) and `monthly` (a YYYY-MM breakdown, also
+        unbounded) — a user hitting `limit` should still see accurate
+        totals/chart, not a silently truncated sum. Found live: a full
+        year (2025) has 4,418 matching rows, well past the old 2000 cap,
+        and the summary cards were being computed from the capped `data`
+        list until this fix.
+        """
+        limit = min(max(limit, 1), 20000)
+
+        params: dict = {}
+        params["payment_date_cutoff"] = payment_date_cutoff or date.today().isoformat()
+        cutoff_expr = "TO_DATE(:payment_date_cutoff, 'YYYY-MM-DD')"
+
+        coa_binds = {f"coa{i}": code for i, code in enumerate(self.AP_COA_WHITELIST)}
+        params.update(coa_binds)
+        coa_filter = "gcc.segment4 IN (" + ", ".join(f":{k}" for k in coa_binds) + ")"
+
+        params["vat_input_coa"] = self.AP_VAT_INPUT_COA_SEGMENT4
+
+        # 'Paid'/'Partially Paid'/'Not Paid' derived from the SAME
+        # cutoff-filtered payment_summary.total_payment shown as the
+        # report's own Payment column, compared against
+        # sched_summary.total_gross (the invoice's immutable total
+        # scheduled amount) — NOT Oracle's live amount_remaining, which has
+        # no historical snapshot and can't answer "as of a past cutoff."
+        # See the docstring for the full reasoning.
+        #
+        # net_payable = total_gross + wht (wht already negative in Oracle):
+        # total_gross is the invoice's FULL face amount before withholding
+        # — it does NOT reflect that WHT is remitted to the tax office, not
+        # paid to the vendor. Verified live: MCD/INV-08/2020.II has
+        # total_gross=800,000 but only 780,000 was ever actually paid to
+        # the vendor (the other 20,000 is the AWT withholding) — comparing
+        # against total_gross alone wrongly showed "Partially Paid" for an
+        # invoice that is, in Oracle's real accounting sense, fully
+        # cleared. Same for Rentokil's 26.89764939 (4,895,100 gross vs.
+        # 4,806,900 real payment, exactly netting its 88,200 AWT).
+        payment_status_expr = """CASE
+                                      WHEN NVL(sched_summary.total_gross, 0) + NVL(wht_summary.wht_amount, 0) <> 0
+                                           AND NVL(payment_summary.total_payment, 0) >=
+                                               (NVL(sched_summary.total_gross, 0) + NVL(wht_summary.wht_amount, 0))
+                                           THEN 'Paid'
+                                      WHEN NVL(payment_summary.total_payment, 0) > 0
+                                           THEN 'Partially Paid'
+                                      ELSE 'Not Paid'
+                                  END"""
+
+        # dpp = the invoice's true pre-tax base — SUM of its ITEM/ACCRUAL
+        # distributions (excluding any line coded to the VAT-INPUT COA,
+        # which IS the tax portion, not base), falling back to the header
+        # ai.base_amount/invoice_amount only when an invoice has no
+        # distributions to read yet (e.g. not validated in Oracle). NOT
+        # ai.base_amount/invoice_amount as the primary source — verified
+        # live for VISION SCIENTIFIC (2025VS3486): header invoice_amount is
+        # 34,765,200, but that already IS base+tax (ACCRUAL 31,320,000 +
+        # REC_TAX 3,445,200 — REC_TAX being exactly 11% of ACCRUAL). Taking
+        # the header as dpp and then adding another fresh 11% on top (the
+        # bug the user reported) double-counts VAT and inflates Total past
+        # what the invoice is actually worth. Same root cause was quietly
+        # present in the AGRU FARMA case used to confirm the original
+        # formula (4,042,250 ACCRUAL + 444,648 REC_TAX = 4,486,898 header,
+        # 444,648 also being ~11% of 4,042,250) — that earlier
+        # confirmation only compared against the reference file's own
+        # (also double-counted) numbers, not real Oracle math, so this fix
+        # supersedes it.
+        dpp_expr = "NVL(NULLIF(tax_summary.base_amount, 0), NVL(ai.base_amount, ai.invoice_amount))"
+
+        # Two distinct real-tax signals, in priority order:
+        #  1. Oracle-native REC_TAX/NONREC_TAX distribution present -> VAT
+        #     is computed fresh as 11% of DPP (confirmed formula, see
+        #     docstring — Oracle's own REC_TAX amount is NOT used directly,
+        #     though on the true distribution-level dpp above the two now
+        #     agree almost exactly since REC_TAX already IS ~11% of ACCRUAL
+        #     in practice).
+        #  2. No REC_TAX/NONREC_TAX, but a manual line was posted straight
+        #     to the VAT-INPUT GL account (confirmed live for Rentokil's
+        #     EXPENSE REPORT invoices: line_type_lookup_code='ITEM',
+        #     description "VAT", coded to AP_VAT_INPUT_COA_SEGMENT4) -> use
+        #     that line's REAL posted amount as-is, not a recomputed 11% —
+        #     it's an actual figure someone entered, not a reporting
+        #     gross-up. Per the user: "walaupun ini sebagai LINE tapi tetap
+        #     di hitung sebagai VAT."
+        #  3. Neither -> VAT = 0 (e.g. Agus Suprianto/Jiangsu, no tax at
+        #     all posted anywhere on the invoice).
+        vat_expr = f"""CASE
+                          WHEN NVL(tax_summary.rec_tax_amount, 0) <> 0
+                               THEN ROUND({dpp_expr} * 0.11, 2)
+                          WHEN NVL(tax_summary.manual_vat_amount, 0) <> 0
+                               THEN tax_summary.manual_vat_amount
+                          ELSE 0
+                      END"""
+
+        extra_where = ""
+        if supplier_name:
+            extra_where += " AND UPPER(pv.vendor_name) LIKE UPPER(:supplier_name)"
+            params["supplier_name"] = f"%{supplier_name}%"
+        if gl_date_from:
+            extra_where += " AND ai.gl_date >= TO_DATE(:gl_date_from, 'YYYY-MM-DD')"
+            params["gl_date_from"] = gl_date_from
+        if gl_date_to:
+            extra_where += " AND ai.gl_date <= TO_DATE(:gl_date_to, 'YYYY-MM-DD')"
+            params["gl_date_to"] = gl_date_to
+        if payment_status and payment_status != "ALL":
+            extra_where += f" AND {payment_status_expr} = :pay_status"
+            params["pay_status"] = payment_status
+
+        inner_sql = f"""
+                SELECT
+                    ai.org_id,
+                    pv.vendor_name                                                 AS supplier_name,
+                    hp.tax_reference                                               AS npwp,
+                    SUBSTR(NVL(ai.description, '-'), 1, 100)                       AS description,
+                    gcc.segment1||'.'||gcc.segment2||'.'||gcc.segment3||'.'||
+                    gcc.segment4||'.'||gcc.segment5||'.'||gcc.segment6             AS coa,
+                    gcc.segment4                                                   AS coa_number,
+                    SUBSTR(NVL(ffvl.description, '-'), 1, 80)                      AS coa_descpt,
+                    ai.invoice_type_lookup_code                                    AS transaction_type,
+                    ai.invoice_num                                                 AS transaction_number,
+                    ai.invoice_id,
+                    TO_CHAR(ai.invoice_date, 'YYYY-MM-DD')                         AS invoice_date,
+                    TO_CHAR(ai.gl_date,      'YYYY-MM-DD')                         AS gl_date,
+                    ai.invoice_currency_code                                       AS currency,
+                    {payment_status_expr}                                         AS payment_status,
+                    CASE WHEN ai.invoice_currency_code <> 'IDR'
+                         THEN ai.invoice_amount        END                         AS original_amount_orig,
+                    {dpp_expr}                                                     AS dpp,
+                    {vat_expr}                                                     AS vat,
+                    NVL(wht_summary.wht_amount, 0)                                 AS wht,
+                    {dpp_expr}
+                        + {vat_expr}
+                        + NVL(wht_summary.wht_amount, 0)                          AS total_ap,
+                    NVL(payment_summary.total_payment, 0)                         AS payment,
+                    TO_CHAR(payment_summary.latest_payment_date, 'YYYY-MM-DD')    AS payment_date,
+                    payment_summary.latest_rate                                   AS payment_rate,
+                    -- Forced to 0 when payment_status_expr says Paid, even
+                    -- though (total_ap - payment) alone would rarely land
+                    -- exactly on 0: the computed 11% VAT gross-up above is
+                    -- a reporting figure, not a real amount anyone actually
+                    -- paid separately, so the naive subtraction leaves a
+                    -- residual ~= vat on fully-paid invoices. Confirmed
+                    -- with the user before applying this guard.
+                    CASE WHEN {payment_status_expr} = 'Paid' THEN 0
+                         ELSE ({dpp_expr}
+                                 + {vat_expr}
+                                 + NVL(wht_summary.wht_amount, 0))
+                               - NVL(payment_summary.total_payment, 0)
+                    END                                                          AS remaining_ap
+                FROM apps.ap_invoices_all              ai
+                   , apps.ap_suppliers                 pv
+                   , apps.hz_parties                   hp
+                   , apps.gl_code_combinations         gcc
+                   , apps.fnd_flex_values_vl           ffvl
+                   , apps.fnd_flex_value_sets          ffvs
+                   , ( SELECT aps.invoice_id
+                            , SUM(aps.gross_amount)                                AS total_gross
+                         FROM apps.ap_payment_schedules_all aps
+                        GROUP BY aps.invoice_id
+                     ) sched_summary
+                   , ( SELECT aid.invoice_id
+                            , SUM(aid.amount)                                     AS wht_amount
+                         FROM apps.ap_invoice_distributions_all aid
+                        WHERE aid.line_type_lookup_code = 'AWT'
+                        GROUP BY aid.invoice_id
+                     ) wht_summary
+                   , ( SELECT aid.invoice_id
+                            , SUM(CASE WHEN aid.line_type_lookup_code IN ('REC_TAX', 'NONREC_TAX')
+                                       THEN aid.amount ELSE 0 END)                    AS rec_tax_amount
+                            , SUM(CASE WHEN aid.line_type_lookup_code NOT IN ('REC_TAX', 'NONREC_TAX')
+                                            AND aid_gcc.segment4 = :vat_input_coa
+                                       THEN aid.amount ELSE 0 END)                    AS manual_vat_amount
+                            -- True pre-tax base: ITEM/ACCRUAL lines only,
+                            -- excluding any line coded to the VAT-INPUT COA
+                            -- (that's the manual_vat_amount above, not base
+                            -- — a line can be line_type_lookup_code='ITEM'
+                            -- and still BE the VAT line, per Rentokil).
+                            , SUM(CASE WHEN aid.line_type_lookup_code IN ('ITEM', 'ACCRUAL')
+                                            AND NVL(aid_gcc.segment4, 'X') <> :vat_input_coa
+                                       THEN aid.amount ELSE 0 END)                    AS base_amount
+                         FROM apps.ap_invoice_distributions_all aid
+                            , apps.gl_code_combinations         aid_gcc
+                        WHERE aid.dist_code_combination_id     = aid_gcc.code_combination_id (+)
+                        GROUP BY aid.invoice_id
+                     ) tax_summary
+                   , ( SELECT apn.invoice_id
+                            , SUM(apn.amount)                                     AS total_payment
+                            , MAX(apn.exchange_rate) KEEP (
+                                  DENSE_RANK LAST ORDER BY NVL(apn.accounting_date, cks.check_date)
+                              )                                                   AS latest_rate
+                            , MAX(NVL(apn.accounting_date, cks.check_date)) KEEP (
+                                  DENSE_RANK LAST ORDER BY NVL(apn.accounting_date, cks.check_date)
+                              )                                                   AS latest_payment_date
+                         FROM apps.ap_invoice_payments_all apn
+                            , apps.ap_checks_all           cks
+                        WHERE cks.check_id (+)            = apn.check_id
+                          AND NVL(apn.accounting_date, cks.check_date) <= {cutoff_expr}
+                        GROUP BY apn.invoice_id
+                     ) payment_summary
+                WHERE ai.invoice_id                       = sched_summary.invoice_id (+)
+                  AND ai.invoice_id                       = wht_summary.invoice_id (+)
+                  AND ai.invoice_id                       = tax_summary.invoice_id (+)
+                  AND ai.invoice_id                       = payment_summary.invoice_id (+)
+                  AND ai.vendor_id                        = pv.vendor_id
+                  AND pv.party_id                         = hp.party_id (+)
+                  AND ai.accts_pay_code_combination_id    = gcc.code_combination_id
+                  AND ffvl.flex_value_set_id              = ffvs.flex_value_set_id
+                  AND ffvl.flex_value                     = gcc.segment4
+                  AND {coa_filter}
+                  {extra_where}
+                ORDER BY ai.gl_date, pv.vendor_name, ai.invoice_num
+        """
+
+        detail_sql = f"SELECT * FROM ( {inner_sql} ) WHERE ROWNUM <= {limit}"
+
+        # Monthly totals — a SEPARATE, unbounded aggregate over the exact
+        # same filtered row set (same inner_sql, no ROWNUM cap), so the
+        # chart above the table always reflects the true per-month totals
+        # even when `limit` caps how many detail rows are actually
+        # returned/displayed. Grouped by YYYY-MM (not just month-of-year)
+        # so a multi-year gl_date range never conflates e.g. Jan-2024 with
+        # Jan-2025.
+        monthly_sql = f"""
+            SELECT TO_CHAR(TO_DATE(t.gl_date, 'YYYY-MM-DD'), 'YYYY-MM') AS period,
+                   COUNT(*)              AS cnt,
+                   SUM(t.dpp)            AS total_dpp,
+                   SUM(t.vat)            AS total_vat,
+                   SUM(t.wht)            AS total_wht,
+                   SUM(t.total_ap)       AS total_ap,
+                   SUM(t.payment)        AS total_payment,
+                   SUM(t.remaining_ap)   AS total_remaining_ap
+            FROM ( {inner_sql} ) t
+            GROUP BY TO_CHAR(TO_DATE(t.gl_date, 'YYYY-MM-DD'), 'YYYY-MM')
+            ORDER BY period
+        """
+
+        # Payment-status counts, same unbounded-over-inner_sql idea as
+        # monthly_sql above — kept as their own tiny query rather than
+        # folded into monthly_sql, since a status breakdown grouped ALSO by
+        # month isn't needed anywhere yet and would just add columns unused
+        # by the current UI.
+        status_sql = f"""
+            SELECT t.payment_status, COUNT(*) AS cnt
+            FROM ( {inner_sql} ) t
+            GROUP BY t.payment_status
+        """
+
+        try:
+            rows, monthly_rows, status_rows = await asyncio.gather(
+                asyncio.to_thread(self._query, detail_sql, params),
+                asyncio.to_thread(self._query, monthly_sql, params),
+                asyncio.to_thread(self._query, status_sql, params),
+            )
+            clean = [
+                {
+                    k: (float(v) if hasattr(v, "__float__") and not isinstance(v, (int, float, str, type(None), bool)) else v)
+                    for k, v in r.items()
+                }
+                for r in rows
+            ]
+            for i, r in enumerate(clean, start=1):
+                r["row_no"] = i
+
+            # monthly/status figures come from monthly_sql/status_sql, NOT
+            # from summing `clean` — `clean` is capped at `limit`, so an
+            # AP List spanning more rows than `limit` (confirmed live: a
+            # full 2025 has 4,418 rows, well past the old 2000 cap) would
+            # otherwise silently understate every summary card, not just
+            # the detail table below it.
+            monthly = [
+                {
+                    "period": r.get("period"),
+                    "count": int(r.get("cnt") or 0),
+                    "total_dpp": round(float(r.get("total_dpp") or 0), 2),
+                    "total_vat": round(float(r.get("total_vat") or 0), 2),
+                    "total_wht": round(float(r.get("total_wht") or 0), 2),
+                    "total_ap": round(float(r.get("total_ap") or 0), 2),
+                    "total_payment": round(float(r.get("total_payment") or 0), 2),
+                    "total_remaining_ap": round(float(r.get("total_remaining_ap") or 0), 2),
+                }
+                for r in monthly_rows
+            ]
+            status_counts = {r.get("payment_status"): int(r.get("cnt") or 0) for r in status_rows}
+            true_count = sum(m["count"] for m in monthly)
+
+            def _msum(key):
+                return round(sum(m.get(key) or 0 for m in monthly), 2)
+
+            return {
+                "success": True,
+                "count": len(clean),
+                "total_count": true_count,
+                "gl_date_from": gl_date_from,
+                "gl_date_to": gl_date_to,
+                "monthly": monthly,
+                "summary": {
+                    "not_paid_count": status_counts.get("Not Paid", 0),
+                    "partial_paid_count": status_counts.get("Partially Paid", 0),
+                    "paid_count": status_counts.get("Paid", 0),
+                    "total_dpp": _msum("total_dpp"),
+                    "total_vat": _msum("total_vat"),
+                    "total_wht": _msum("total_wht"),
+                    "total_ap": _msum("total_ap"),
+                    "total_payment": _msum("total_payment"),
+                    "total_remaining_ap": _msum("total_remaining_ap"),
+                },
+                "data": clean,
+            }
+        except Exception as e:
+            logger.error("ap_list_error", error=str(e))
             return {"success": False, "error": str(e), "data": []}
 
     async def get_ap_aging(self, supplier_name: str = None, base_date: str = None, limit: int = 500) -> dict:
@@ -806,7 +1257,7 @@ class AccountingService:
         figure, separate from Oracle's system rate rather than silently
         blended into it.
         """
-        limit = min(max(limit, 1), 2000)
+        limit = min(max(limit, 1), 20000)
         where_extra = ""
         params: dict = {}
 

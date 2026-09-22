@@ -6,7 +6,7 @@ import {
   Upload, Search, ChevronLeft, ChevronRight, X, Loader2, CalendarCheck,
   Wallet, Download, ChevronDown, ChevronUp, ListChecks, FileSearch, BookOpen, Trash2,
   QrCode, Plus, Minus, ArrowUpDown, Pencil, ZoomIn, ZoomOut, Maximize2, Minimize2, Network,
-  SlidersHorizontal, User, Camera, History, FileText, Sparkles, CheckCircle2,
+  SlidersHorizontal, User, Camera, History, FileText, Sparkles, CheckCircle2, Music,
 } from "lucide-react";
 import EmployeeUpload from "./EmployeeUpload";
 import AttendanceUpload from "./AttendanceUpload";
@@ -20,6 +20,18 @@ import { SortableTH, toggleSort, sortRows } from "@/components/SortableTH";
 const API        = "/api/v1/dashboard/hr/employees";
 
 const MONTHS_ID = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+// [label, monthNumber] pairs for a Month <select> tied to a Year <select> —
+// when `year` is the running calendar year, months after the current one
+// haven't happened yet (no one can have "joined" or have data for a month
+// that hasn't arrived), so they're left out entirely rather than shown
+// disabled. A past year always gets the full 12.
+function monthOptionsForYear(year) {
+  const now = new Date();
+  const isCurrentYear = String(year) === String(now.getFullYear());
+  const maxMonth = isCurrentYear ? now.getMonth() + 1 : 12;
+  return MONTHS_ID.slice(0, maxMonth).map((m, i) => [m, i + 1]);
+}
 
 // Earliest year Attendance Rate has real data for — the Plant ZKTeco
 // terminals' NIK-based employee IDs go back to 2018 (confirmed live
@@ -297,8 +309,23 @@ function EmployeeTable() {
   const [deptFilter, setDeptFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [employmentStatusFilter, setEmploymentStatusFilter] = useState("Active");
-  const [joinMonthFilter, setJoinMonthFilter] = useState(() => String(new Date().getMonth() + 1));
-  const [joinYearFilter, setJoinYearFilter] = useState(() => String(new Date().getFullYear()));
+  // Drives the 6 KPI cards ONLY — set exclusively by the "Employment
+  // State" filter dropdown, never by clicking a card. Clicking a card
+  // (e.g. Resign) narrows the table below without silently reinterpreting
+  // what the cards themselves mean; the cards stay a stable snapshot of
+  // "Employment State" as chosen in Filters until the user picks a
+  // different value there.
+  const [summaryEmploymentStatus, setSummaryEmploymentStatus] = useState("Active");
+  // Blank ("All") by default — reverted 2026-09-17 after confirming live
+  // that defaulting to the current month/year (as briefly tried) made the
+  // list load empty: Joined Month/Year is an exact match (only employees
+  // who joined in that exact period, see _apply_employee_filters), and 0
+  // of the 127 active employees joined in the current month, so that
+  // default filtered out virtually everyone on every page load. The
+  // dropdowns themselves are unaffected — picking a specific month/year
+  // still works exactly as designed, this only changes what's pre-selected.
+  const [joinMonthFilter, setJoinMonthFilter] = useState("");
+  const [joinYearFilter, setJoinYearFilter] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
   const [departments, setDepartments]   = useState([]);
   const [teams,       setTeams]         = useState([]);
@@ -316,11 +343,21 @@ function EmployeeTable() {
   const [resigningEmployee, setResigningEmployee] = useState(null);
   const [employeeNames, setEmployeeNames] = useState([]);
 
-  const PAGE_SIZE = 8;
+  // No pagination on this list — fetch everything matching the current
+  // filters in one call and let the page scroll, instead of "page 1 of N"
+  // controls. 5000 matches the backend's own max page_size (see hr_
+  // employees.py's GET "" docstring), comfortably above the real headcount.
+  const PAGE_SIZE = 5000;
 
+  // source=master: department_master's curated names (e.g. "Strategy
+  // Development", no ampersand) instead of the raw distinct
+  // Employee.department values — department_master is the corrected
+  // spelling where the two differ; the backend aliases that one known gap
+  // so filtering still matches the right employees (see
+  // _DEPT_FILTER_ALIASES in hr_employees.py).
   const fetchDepts = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/departments`, { headers });
+      const res = await fetch(`${API}/departments?source=master`, { headers });
       if (res.ok) setDepartments(await res.json());
     } catch (_) {}
   }, []); // eslint-disable-line
@@ -329,9 +366,17 @@ function EmployeeTable() {
     try { setEmployeeNames((await hrApi.getEmployeeNames()) || []); } catch (_) {}
   }, []); // eslint-disable-line
 
+  // source=master — department_master's curated team list, so this stays
+  // in sync automatically when department_master changes (see the
+  // matching fetchDepts comment above). exclude_leads drops the
+  // "Director"/"General Manager"/"Senior Manager" placeholder values —
+  // not real teams, so they don't belong in a Team filter meant to narrow
+  // the list down to an actual team.
   const fetchTeams = useCallback(async (dept) => {
     try {
-      const url = dept ? `${API}/teams?department=${encodeURIComponent(dept)}` : `${API}/teams`;
+      const url = dept
+        ? `${API}/teams?department=${encodeURIComponent(dept)}&exclude_leads=true&source=master`
+        : `${API}/teams?exclude_leads=true&source=master`;
       const res = await fetch(url, { headers });
       if (res.ok) setTeams(await res.json());
     } catch (_) {}
@@ -343,7 +388,9 @@ function EmployeeTable() {
         ...(search       ? { search }                : {}),
         ...(deptFilter   ? { department: deptFilter } : {}),
         ...(statusFilter ? { status: statusFilter }   : {}),
-        ...(employmentStatusFilter ? { employment_status: employmentStatusFilter } : {}),
+        // Intentionally summaryEmploymentStatus, not employmentStatusFilter
+        // — see its declaration above for why.
+        ...(summaryEmploymentStatus ? { employment_status: summaryEmploymentStatus } : {}),
         ...(joinMonthFilter ? { join_month: joinMonthFilter } : {}),
         ...(joinYearFilter  ? { join_year: joinYearFilter }   : {}),
         ...(teamFilter   ? { team: teamFilter }        : {}),
@@ -351,7 +398,7 @@ function EmployeeTable() {
       const res = await fetch(`${API}/summary?${params}`, { headers });
       if (res.ok) setSummary(await res.json());
     } catch (_) {}
-  }, [search, deptFilter, statusFilter, employmentStatusFilter, joinMonthFilter, joinYearFilter, teamFilter]); // eslint-disable-line
+  }, [search, deptFilter, statusFilter, summaryEmploymentStatus, joinMonthFilter, joinYearFilter, teamFilter]); // eslint-disable-line
 
   const fetchJoinYears = useCallback(async () => {
     try {
@@ -403,14 +450,31 @@ function EmployeeTable() {
     setPage(1);
   };
 
+  // Only narrows the table (employmentStatusFilter/statusFilter) — never
+  // touches summaryEmploymentStatus, so the KPI cards themselves stay a
+  // stable snapshot of whatever "Employment State" is set in Filters.
+  //
+  // Permanent/Contract/Probation deliberately do NOT reset
+  // employmentStatusFilter: the card's own number (e.g. "Probation: 3") is
+  // counted against whatever Employment State is currently selected
+  // (Active by default), so the table has to stay scoped the same way —
+  // otherwise clicking a card whose number was computed against "Active
+  // only" could show a different row count than the card said (bug fixed
+  // 2026-09-15: clicking Probation cleared employment_status entirely, so
+  // the table showed active+resigned Probation combined instead of the 3
+  // active ones the card counted).
   const handleCardClick = (id) => {
     if (activeCard === id) {
-      setActiveCard(""); setStatusFilter(""); setEmploymentStatusFilter(""); setPage(1);
+      setActiveCard("");
+      setStatusFilter("");
+      if (id === "active" || id === "resign" || id === "all") setEmploymentStatusFilter("Active"); // back to the app's standing default
+      setPage(1);
     } else {
       setActiveCard(id);
-      setStatusFilter(""); setEmploymentStatusFilter("");
+      setStatusFilter("");
       if (id === "active")         setEmploymentStatusFilter("Active");
       else if (id === "resign")    setEmploymentStatusFilter("Resign");
+      else if (id === "all")       setEmploymentStatusFilter("");
       else if (id === "permanent") setStatusFilter("Permanent");
       else if (id === "contract")  setStatusFilter("Contract");
       else if (id === "probation") setStatusFilter("Probation");
@@ -451,25 +515,60 @@ function EmployeeTable() {
     }
   };
 
+  // Blank two-sheet (EMP Active/EMP Resign) Excel, headers only — the same
+  // template EmployeeUpload's own "Download Template" button offers, just
+  // also reachable right next to Download Excel here for visibility.
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
+  const handleDownloadTemplate = async () => {
+    setDownloadingTemplate(true);
+    try {
+      const res = await fetch(`${API}/upload-template`, { headers });
+      if (!res.ok) throw new Error("Download failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "employee_upload_template.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (_) {
+    } finally {
+      setDownloadingTemplate(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
-      {/* Summary cards — clickable */}
-      {summary && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 6 }}>
+      {/* Summary cards — clickable. Active/Inactive is ONE card that
+          tracks the Employment State filter (2026-09-17): Active count
+          when Active is selected, Inactive count when Resign is, and —
+          added same day — the combined Active+Inactive total, labeled
+          "Active & Inactive", when Employment State is "All". */}
+      {summary && (() => {
+        // `activeBg` is a darker shade of `color`, used only for the
+        // selected (filled) state's background — the white value/label
+        // text needs that extra darkness to read cleanly; the base
+        // `color` alone (esp. amber/purple) looked washed out and hard
+        // to read with white text directly on it.
+        const firstCard = summaryEmploymentStatus === "Resign"
+          ? { id: "resign", label: "Inactive", val: summary.resign, color: "#dc2626", activeBg: "#b91c1c", icon: "🔴" }
+          : summaryEmploymentStatus === "Active"
+          ? { id: "active", label: "Active", val: summary.active, color: "#16a34a", activeBg: "#15803d", icon: "🟢" }
+          : { id: "all", label: "Active & Inactive", val: summary.active + summary.resign, color: "#2563eb", activeBg: "#1d4ed8", icon: "👥" };
+        return (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
           {[
-            { id: "total",      label: "Total Employees", val: summary.total,      color: "#2563eb", icon: "👥" },
-            { id: "active",     label: "Active",          val: summary.active,     color: "#16a34a", icon: "🟢" },
-            { id: "resign",     label: "Resign",          val: summary.resign,     color: "#dc2626", icon: "🔴" },
-            { id: "permanent",  label: "Permanent",       val: summary.permanent,  color: "#22c55e", icon: "✓" },
-            { id: "contract",   label: "Contract",        val: summary.contract,   color: "#f59e0b", icon: "📋" },
-            { id: "probation",  label: "Probation",       val: summary.probation,  color: "#a855f7", icon: "⏳" },
-          ].map(({ id, label, val, color, icon }) => {
+            firstCard,
+            { id: "permanent",  label: "Permanent",       val: summary.permanent,  color: "#22c55e", activeBg: "#16a34a", icon: "✓" },
+            { id: "contract",   label: "Contract",        val: summary.contract,   color: "#f59e0b", activeBg: "#b45309", icon: "📋" },
+            { id: "probation",  label: "Probation",       val: summary.probation,  color: "#a855f7", activeBg: "#7e22ce", icon: "⏳" },
+          ].map(({ id, label, val, color, activeBg, icon }) => {
             const isActive = activeCard === id;
             return (
               <button key={id} onClick={() => handleCardClick(id)}
                 style={{
                   padding: "6px 8px", borderRadius: 10, border: "none",
-                  background: isActive ? color : "#f1f5f9",
+                  background: isActive ? activeBg : "#f1f5f9",
                   boxShadow: isActive
                     ? "inset 2px 2px 4px rgba(0,0,0,0.2)"
                     : "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)",
@@ -479,12 +578,13 @@ function EmployeeTable() {
                 }}
               >
                 <div style={{ fontSize: 15, fontWeight: 800, color: isActive ? "#fff" : color }}>{val}</div>
-                <div style={{ fontSize: 9, fontWeight: 700, color: isActive ? "rgba(255,255,255,0.85)" : "#64748b", marginTop: 1 }}>{label}</div>
+                <div style={{ fontSize: 9, fontWeight: 700, color: isActive ? "rgba(255,255,255,0.95)" : "#64748b", marginTop: 1 }}>{label}</div>
               </button>
             );
           })}
         </div>
-      )}
+        );
+      })()}
 
       {/* Toolbar — Refresh + search + Filters popup + actions */}
       <div className="flex flex-wrap items-end gap-2">
@@ -567,7 +667,13 @@ function EmployeeTable() {
                     <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Employment State</label>
                     <select
                       value={employmentStatusFilter}
-                      onChange={(e) => { setEmploymentStatusFilter(e.target.value); setActiveCard(""); setPage(1); }}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setEmploymentStatusFilter(v);
+                        setSummaryEmploymentStatus(v); // this dropdown is the one place the KPI cards' own scope changes
+                        setActiveCard("");
+                        setPage(1);
+                      }}
                       className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
                     >
                       <option value="">All</option>
@@ -577,8 +683,8 @@ function EmployeeTable() {
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide" title="Shows employees who joined on or before the selected Month/Year">
-                      Joined up to (Month)
+                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide" title="Shows only employees who joined in this exact month/year">
+                      Joined Month
                     </label>
                     <select
                       value={joinMonthFilter}
@@ -586,17 +692,27 @@ function EmployeeTable() {
                       className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
                     >
                       <option value="">All</option>
-                      {MONTHS_ID.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+                      {monthOptionsForYear(joinYearFilter || new Date().getFullYear()).map(([m, i]) => <option key={m} value={i}>{m}</option>)}
                     </select>
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide" title="Shows employees who joined on or before the selected Month/Year">
-                      Joined up to (Year)
+                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide" title="Shows only employees who joined in this exact month/year">
+                      Joined Year
                     </label>
                     <select
                       value={joinYearFilter}
-                      onChange={(e) => { setJoinYearFilter(e.target.value); setPage(1); }}
+                      onChange={(e) => {
+                        const y = e.target.value;
+                        setJoinYearFilter(y);
+                        // A month already picked can be past the new year's
+                        // cutoff (e.g. Oct selected, then year switched to
+                        // the running year in September) — drop it instead
+                        // of silently filtering on a now-invalid month.
+                        const valid = monthOptionsForYear(y || new Date().getFullYear()).some(([, i]) => String(i) === String(joinMonthFilter));
+                        if (!valid) setJoinMonthFilter("");
+                        setPage(1);
+                      }}
                       className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
                     >
                       <option value="">All</option>
@@ -623,6 +739,15 @@ function EmployeeTable() {
           className="flex items-center gap-1.5 rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-semibold text-gray-300 hover:border-indigo-500 hover:text-white transition-colors"
         >
           <Upload size={13} /> {showUploadPanel ? "Hide Upload Employee" : "Upload Employee"}
+        </button>
+
+        <button
+          onClick={handleDownloadTemplate}
+          disabled={downloadingTemplate}
+          className="flex items-center gap-1.5 rounded-lg border border-blue-700/50 bg-blue-900/20 px-3 py-2 text-xs font-semibold text-blue-400 hover:border-blue-600 hover:bg-blue-900/30 disabled:opacity-40 transition-colors"
+        >
+          {downloadingTemplate ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+          {downloadingTemplate ? "Downloading..." : "Download Template"}
         </button>
 
         <div className="relative">
@@ -678,7 +803,13 @@ function EmployeeTable() {
         const COLS = getEmployeeFullCols(employeeNames);
 
         return (
-          <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 480 }}>
+          // Capped height + overflow-auto on this div (not just overflow-x
+          // on the page) keeps the horizontal scrollbar pinned to the
+          // bottom of the visible table, reachable at any scroll position —
+          // instead of the old overflow-x-auto div, whose scrollbar only
+          // showed up below the very last row of a long list. Same fix as
+          // .fs-table-scroll in Financial Statement (index.css).
+          <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: "70vh" }}>
             <table className="w-full text-sm" style={{ minWidth: 4200 }}>
               <thead className="sticky top-0 z-10">
                 <tr className="bg-gray-800">
@@ -731,7 +862,7 @@ function EmployeeTable() {
                       {e.employment_status !== "Resign" && (
                         <button
                           onClick={(ev) => { ev.stopPropagation(); setResigningEmployee(e); }}
-                          className="rounded-md border border-red-800/50 bg-red-950/40 px-2.5 py-1 text-xs font-semibold text-red-400 hover:bg-red-900/50 hover:border-red-700 transition-colors"
+                          className="rounded-md border border-red-700 bg-red-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-red-600 hover:border-red-600 transition-colors"
                         >
                           Resign
                         </button>
@@ -745,39 +876,11 @@ function EmployeeTable() {
         );
       })()}
 
-      {/* Pagination */}
-      {data.pages > 1 && (
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "10px 0", fontSize: 12,
-        }}>
-          <span style={{ color: "#475569", fontWeight: 600 }}>
-            {data.total} employees · page {page} of {data.pages}
-          </span>
-          <div style={{ display: "flex", gap: 4 }}>
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              style={{
-                padding: 6, borderRadius: 8, border: "none", cursor: page === 1 ? "not-allowed" : "pointer",
-                background: "#f1f5f9", color: page === 1 ? "#cbd5e1" : "#475569",
-                boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
-              }}
-            >
-              <ChevronLeft size={13} />
-            </button>
-            <button
-              onClick={() => setPage((p) => Math.min(data.pages, p + 1))}
-              disabled={page === data.pages}
-              style={{
-                padding: 6, borderRadius: 8, border: "none", cursor: page === data.pages ? "not-allowed" : "pointer",
-                background: "#f1f5f9", color: page === data.pages ? "#cbd5e1" : "#475569",
-                boxShadow: "0 1px 2px rgba(15,23,42,0.08)",
-              }}
-            >
-              <ChevronRight size={13} />
-            </button>
-          </div>
+      {/* No pagination — the whole matching list is fetched at once above,
+          this is just a count, not a "page N of M" control. */}
+      {data.total > 0 && (
+        <div style={{ padding: "10px 0", fontSize: 12, color: "#475569", fontWeight: 600 }}>
+          {data.total} employees
         </div>
       )}
 
@@ -815,7 +918,7 @@ const EMPLOYEE_DETAIL_FIELDS = [
   ] },
   { section: "Employment", fields: [
     ["level", "Level"], ["department", "Department"], ["division", "Division"], ["team", "Team"],
-    ["job_title", "Position"], ["supervisor_id", "Direct Supervisor"], ["work_placement", "Placement"], ["status", "Status"],
+    ["job_title", "Job Title"], ["supervisor_id", "Direct Supervisor"], ["work_placement", "Placement"], ["status", "Status"],
     ["employment_status", "Employment Status"], ["employee_grade", "Grade"], ["scheduled_checkin", "Scheduled Check-in"],
     ["date_of_joining", "Join Date"], ["pkwt_ke", "PKWT Ke"], ["starting_pkwt", "Starting PKWT"], ["end_pkwt", "End PKWT"],
     ["permanent_date", "Permanent Date"], ["resign_date", "Resign Date"], ["resign_reason", "Resign Reason"], ["retire_date", "Retire Date"],
@@ -856,8 +959,28 @@ const EMPTY_EMPLOYEE_FORM = Object.fromEntries(
 
 // Editable employee form — used both for editing an existing employee (row
 // click in Employee List) and adding a brand new one (Add Employee button).
+// Fields whose LOV is fetched live from the backend (an open-ended
+// taxonomy, unlike sex/status/employment_status's true fixed enums in
+// EMPLOYEE_SELECT_OPTIONS) — [form key, LOV endpoint]. department/team use
+// department_master (source=master), same curated list Employee List's own
+// filters read from, so Add/Edit Employee can't reintroduce the exact kind
+// of spelling fragmentation this session already fixed there.
+const EMPLOYEE_DYNAMIC_LOV_FIELDS = [
+  ["department", `${API}/departments?source=master`],
+  ["division", `${API}/divisions`],
+  ["team", `${API}/teams?source=master`],
+  ["education_degree", `${API}/educations`],
+  ["job_title", `${API}/positions`],
+  ["level", `${API}/levels`],
+  ["marital_status", `${API}/marital-statuses`],
+  ["religion", `${API}/religions`],
+  ["blood_type", `${API}/blood-types`],
+];
+
 function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved }) {
   const isNew = !employee;
+  const { token } = useAuthStore();
+  const headers = { Authorization: `Bearer ${token}` };
   const [form, setForm] = useState(() => ({
     ...EMPTY_EMPLOYEE_FORM,
     ...(employee || {}),
@@ -873,6 +996,21 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  // Live-fetched LOVs (department/division/team/education/job title/level/
+  // marital status/religion/blood type) — a field not in the list yet
+  // (e.g. an older record, or a genuinely new value) falls back to free
+  // text automatically, same escape-hatch pattern as Organization Chart's
+  // Add/Edit Position form.
+  const [dynamicLov, setDynamicLov] = useState({});
+  const [customFields, setCustomFields] = useState(() => new Set());
+
+  useEffect(() => {
+    Promise.all(
+      EMPLOYEE_DYNAMIC_LOV_FIELDS.map(([key, url]) =>
+        fetch(url, { headers }).then((r) => r.ok ? r.json() : []).then((list) => [key, list]).catch(() => [key, []])
+      )
+    ).then((results) => setDynamicLov(Object.fromEntries(results)));
+  }, []); // eslint-disable-line
 
   const setField = (key, val) => setForm((f) => ({ ...f, [key]: val }));
 
@@ -1010,7 +1148,15 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
                   const isSupervisor = key === "supervisor_id";
                   const isDate = EMPLOYEE_DETAIL_DATE_KEYS.has(key);
                   const isTime = EMPLOYEE_DETAIL_TIME_KEYS.has(key);
-                  const selectOptions = EMPLOYEE_SELECT_OPTIONS[key];
+                  // Fixed enums (sex/status/employment_status) never get an
+                  // escape hatch — dynamic ones do, since a not-yet-listed
+                  // value there is normal (an older record, or genuinely new).
+                  const isDynamicLov = !EMPLOYEE_SELECT_OPTIONS[key] && EMPLOYEE_DYNAMIC_LOV_FIELDS.some(([k]) => k === key);
+                  const selectOptions = EMPLOYEE_SELECT_OPTIONS[key]
+                    || (isDynamicLov && dynamicLov[key]?.length ? dynamicLov[key].map((v) => [v, v]) : null);
+                  const isCustom = isDynamicLov && (
+                    customFields.has(key) || (form[key] && selectOptions && !selectOptions.some(([v]) => v === form[key]))
+                  );
                   const isUserId = key === "user_id";
                   const inputStyle = {
                     width: "100%", fontSize: 12.5, fontWeight: 600, padding: "5px 6px", marginTop: 2,
@@ -1080,14 +1226,39 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
                             </button>
                           </div>
                         )
+                      ) : isCustom ? (
+                        <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
+                          <input
+                            type="text"
+                            value={form[key] || ""}
+                            onChange={(e) => setField(key, e.target.value)}
+                            placeholder="Type value..."
+                            style={{ ...inputStyle, marginTop: 0, flex: 1, minWidth: 0 }}
+                          />
+                          {selectOptions && (
+                            <button type="button" title="Pick from list instead"
+                              onClick={() => { setCustomFields((p) => { const n = new Set(p); n.delete(key); return n; }); setField(key, ""); }}
+                              style={{ padding: "0 8px", borderRadius: 6, border: "none", background: "#e2e8f0", color: "#475569", cursor: "pointer", fontSize: 10.5, fontWeight: 700 }}>
+                              List
+                            </button>
+                          )}
+                        </div>
                       ) : selectOptions ? (
                         <select
                           value={form[key] || ""}
-                          onChange={(e) => setField(key, e.target.value)}
+                          onChange={(e) => {
+                            if (e.target.value === "__new__") {
+                              setCustomFields((p) => new Set(p).add(key));
+                              setField(key, "");
+                            } else {
+                              setField(key, e.target.value);
+                            }
+                          }}
                           style={{ ...inputStyle, cursor: "pointer" }}
                         >
                           <option value="">—</option>
                           {selectOptions.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                          {isDynamicLov && <option value="__new__">+ Type new value...</option>}
                         </select>
                       ) : isDate ? (
                         <input
@@ -1210,6 +1381,8 @@ function EmployeeDetailModal({ employee, onClose, employeeNames = [], onSaved })
 function ResignEmployeeModal({ employee, onClose, onSaved }) {
   const [resignDate, setResignDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [reason, setReason] = useState("");
+  const [resignDoc, setResignDoc] = useState(null);
+  const resignDocInputRef = useRef(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -1218,12 +1391,22 @@ function ResignEmployeeModal({ employee, onClose, onSaved }) {
     setSaving(true); setError("");
     try {
       await hrApi.resignEmployee(employee.user_id, { resign_date: resignDate, reason: reason.trim() || null });
-      onSaved?.();
     } catch (err) {
       setError(err?.detail || "Failed to save");
-    } finally {
       setSaving(false);
+      return;
     }
+    if (resignDoc) {
+      try {
+        await hrApi.uploadResignDocument(employee.user_id, resignDoc);
+      } catch (_) {
+        setError("Resign saved, but the attached document failed to upload — you can try attaching it again.");
+        setSaving(false);
+        return;
+      }
+    }
+    setSaving(false);
+    onSaved?.();
   };
 
   return (
@@ -1260,6 +1443,24 @@ function ResignEmployeeModal({ employee, onClose, onSaved }) {
               placeholder="Optional — reason for resignation..."
               className="w-full mt-1 rounded-lg border-none bg-white px-3 py-2 text-sm text-gray-800 outline-none resize-none"
             />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-gray-500">Attachment Document Resign</label>
+            <input
+              ref={resignDocInputRef}
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png"
+              onChange={(e) => setResignDoc(e.target.files?.[0] || null)}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => resignDocInputRef.current?.click()}
+              className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-3 py-2.5 text-xs font-semibold text-gray-600 hover:border-gray-400 hover:text-gray-800"
+            >
+              <FileText size={14} />
+              {resignDoc ? resignDoc.name : "Attach Resign Document (PDF/JPG/PNG, optional)"}
+            </button>
           </div>
 
           {error && <p style={{ fontSize: 11.5, color: "#dc2626", fontWeight: 600 }}>{error}</p>}
@@ -1321,10 +1522,26 @@ function orgCollectIds(node, set) {
 // where sibling counts stay small. Anything below that (actual team/staff
 // listings, which can run to dozens of siblings) renders as a vertical
 // indented tree instead, which scales far better than fanning out sideways.
+//
+// Matching on title text alone is a false-positive trap: a DIVISION head's
+// title can also literally be "General Manager" (e.g. Plant > Quality
+// Management's own lead, same rank concept as Production Management's "Sr.
+// Manager" — just worded differently), which isn't the department-level
+// tier this was meant for. A node with its own `division` set is always
+// nested under a division, never a real top-tier GM, so it renders
+// vertically regardless of what its title says (bug found 2026-09-16: Dian
+// Cahyaningtyas's "General Manager" title fanned her Quality Management
+// team out horizontally while Didit Pradipta's "Sr. Manager" — otherwise
+// the same tier — rendered vertically, for two peer nodes under Plant).
 const GM_TIER_RE = /general manager|president director|\bdirector\b|board of/i;
-const isGmTierOrAbove = (position) => GM_TIER_RE.test((position || "").trim());
+const isGmTierOrAbove = (node) => !node?.division && GM_TIER_RE.test((node?.position || "").trim());
 
-function OrgCard({ node, isPlaceholder, color, isMatch, groupLabel, onNodeClick, hasChildren, width }) {
+// The two Korean expat Director/GM positions whose join date isn't shown on
+// the org chart card, per explicit HR correction (2026-09-16) — everyone
+// else's join date shows, at every tier.
+const KOREA_EXPAT_NO_JOIN_DATE = new Set(["Sunho Lee", "Manjae Park"]);
+
+function OrgCard({ node, isPlaceholder, color, isMatch, groupLabel, onNodeClick, hasChildren, width, showJoinDate }) {
   return (
     <div
       onClick={() => !isPlaceholder && onNodeClick(node)}
@@ -1369,6 +1586,11 @@ function OrgCard({ node, isPlaceholder, color, isMatch, groupLabel, onNodeClick,
             }} title={node.full_name}>
               {node.full_name || "—"}
             </div>
+            {showJoinDate && (
+              <div style={{ fontSize: 8.5, fontWeight: 600, color: "#64748b", marginTop: 3 }}>
+                Joined {_fmtEmpDate(node.join_date)}
+              </div>
+            )}
             {hasChildren && (
               <div style={{ fontSize: 8.5, fontWeight: 700, color: "#94a3b8", marginTop: 2 }}>
                 {node.children.length} direct report{node.children.length !== 1 ? "s" : ""}
@@ -1389,10 +1611,19 @@ function OrgNode({ node, mode, expanded, toggle, matchIds, onNodeClick, visibleI
   const isMatch = matchIds.has(node.id);
   const isPlaceholder = node.id === null;
   const color = isPlaceholder ? "#94a3b8" : orgDeptColor(node.department);
-  const groupLabel = node.sub_team || node.division || node.department || "";
+  // team first (a real team/function name), then region (Sales &
+  // Marketing's ASM/PS regional staff have no team value, just a
+  // territory — e.g. "Jakarta 2" — so this still labels their card),
+  // then division/department as before.
+  const groupLabel = node.team || node.region || node.division || node.department || "";
+  // Join date shows on every real card now — simpler than the earlier
+  // "Team Head level down" tiering, per explicit correction (2026-09-16).
+  // Only these two named Korean expat Director/GM positions are excluded
+  // (their join date isn't meaningful to show here), not a tier rule.
+  const showJoinDate = !isPlaceholder && !KOREA_EXPAT_NO_JOIN_DATE.has(node.full_name);
   // Placeholder ("N branches") nodes have no real position, so just carry
   // the parent's own mode forward instead of falling through to "vertical".
-  const childMode = isPlaceholder ? mode : (isGmTierOrAbove(node.position) ? "h" : "v");
+  const childMode = isPlaceholder ? mode : (isGmTierOrAbove(node) ? "h" : "v");
   const childList = hasChildren && isOpen && (
     <ul className={childMode === "h" ? "org-tree-h" : "org-tree"}>
       {node.children.map((c) => (
@@ -1405,7 +1636,7 @@ function OrgNode({ node, mode, expanded, toggle, matchIds, onNodeClick, visibleI
     return (
       <li>
         <div style={{ position: "relative" }}>
-          <OrgCard node={node} isPlaceholder={isPlaceholder} color={color} isMatch={isMatch} groupLabel={groupLabel} onNodeClick={onNodeClick} hasChildren={hasChildren} width={168} />
+          <OrgCard node={node} isPlaceholder={isPlaceholder} color={color} isMatch={isMatch} groupLabel={groupLabel} onNodeClick={onNodeClick} hasChildren={hasChildren} width={168} showJoinDate={showJoinDate} />
           {hasChildren && (
             <button
               onClick={(e) => { e.stopPropagation(); toggle(node.id); }}
@@ -1447,7 +1678,7 @@ function OrgNode({ node, mode, expanded, toggle, matchIds, onNodeClick, visibleI
           <span style={{ flexShrink: 0, width: 20, height: 20 }} />
         )}
 
-        <OrgCard node={node} isPlaceholder={isPlaceholder} color={color} isMatch={isMatch} groupLabel={groupLabel} onNodeClick={onNodeClick} hasChildren={hasChildren} width={190} />
+        <OrgCard node={node} isPlaceholder={isPlaceholder} color={color} isMatch={isMatch} groupLabel={groupLabel} onNodeClick={onNodeClick} hasChildren={hasChildren} width={190} showJoinDate={showJoinDate} />
       </div>
 
       {childList}
@@ -1464,7 +1695,8 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
     position:      node?.position || "",
     department:    node?.department || "",
     division:      node?.division || "",
-    sub_team:      node?.sub_team || "",
+    team:          node?.team || "",
+    region:        node?.region || "",
     join_date:     node?.join_date || "",
     supervisor_id: node?.supervisor_id ?? null,
   });
@@ -1475,18 +1707,55 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
   const [positionLov, setPositionLov] = useState([]);
   const [departmentLov, setDepartmentLov] = useState([]);
   const [divisionLov, setDivisionLov] = useState([]);
-  const [subTeamLov, setSubTeamLov] = useState([]);
+  const [teamLov, setTeamLov] = useState([]);
+  const [regionLov, setRegionLov] = useState([]);
   const [supQuery, setSupQuery] = useState("");
   const [supOpen, setSupOpen]   = useState(false);
   const [customFields, setCustomFields] = useState(() => new Set());
+
+  // "Fill from Employee List" — a one-time pre-fill from an existing
+  // Employee record, not a live link (see /employee-search's docstring):
+  // picking a match just populates the fields below, which HR can still
+  // freely adjust before saving, same as if they'd typed them by hand.
+  const [empOpen, setEmpOpen] = useState(false);
+  const [empQuery, setEmpQuery] = useState("");
+  const [empMatches, setEmpMatches] = useState([]);
+  const [empSearching, setEmpSearching] = useState(false);
 
   useEffect(() => {
     hrApi.getOrgStructureLov().then((r) => setLov(r || [])).catch(() => {});
     hrApi.getOrgStructurePositions().then((r) => setPositionLov(r || [])).catch(() => {});
     hrApi.getOrgStructureDepts().then((r) => setDepartmentLov(r || [])).catch(() => {});
     hrApi.getOrgStructureDivisions().then((r) => setDivisionLov(r || [])).catch(() => {});
-    hrApi.getOrgStructureSubTeams().then((r) => setSubTeamLov(r || [])).catch(() => {});
+    hrApi.getOrgStructureTeams().then((r) => setTeamLov(r || [])).catch(() => {});
+    hrApi.getOrgStructureRegions().then((r) => setRegionLov(r || [])).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!empOpen || !empQuery.trim()) { setEmpMatches([]); return; }
+    setEmpSearching(true);
+    const t = setTimeout(() => {
+      hrApi.searchEmployeesForOrgFill(empQuery.trim())
+        .then((r) => setEmpMatches(r || []))
+        .catch(() => setEmpMatches([]))
+        .finally(() => setEmpSearching(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [empQuery, empOpen]);
+
+  const fillFromEmployee = (e) => {
+    setForm((f) => ({
+      ...f,
+      full_name:  e.full_name || f.full_name,
+      position:   e.job_title || f.position,
+      department: e.department || f.department,
+      division:   e.division || f.division,
+      team:       e.team || f.team,
+      join_date:  e.join_date || f.join_date,
+    }));
+    setEmpOpen(false);
+    setEmpQuery("");
+  };
 
   const supervisorName = lov.find((n) => n.id === form.supervisor_id)?.full_name;
   const matches = lov
@@ -1528,7 +1797,7 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
     </div>
   );
 
-  // ── LOV dropdown for position/department/division/sub_team — a plain
+  // ── LOV dropdown for position/department/division/team/region — a plain
   // <select> (not <datalist>, whose "type first, then see suggestions"
   // behavior isn't discoverable enough — HR expects a clickable list like
   // every other LOV in this app). allowCustom fields fall back to a free-
@@ -1590,12 +1859,54 @@ function OrgNodeFormModal({ node, onClose, onSaved, onDeleted }) {
         </div>
 
         <div className="p-6 space-y-3">
+          <div style={{ position: "relative" }}>
+            {!empOpen ? (
+              <button type="button" onClick={() => setEmpOpen(true)}
+                style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, fontWeight: 700, color: "#2563eb", background: "rgba(37,99,235,0.08)", border: "none", borderRadius: 8, padding: "8px 10px", cursor: "pointer", width: "100%" }}>
+                <Search size={13} /> Fill from Employee List...
+              </button>
+            ) : (
+              <div style={{ borderRadius: 8, background: "#fff", padding: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <Search size={13} color="#94a3b8" />
+                  <input
+                    autoFocus
+                    value={empQuery}
+                    onChange={(e) => setEmpQuery(e.target.value)}
+                    placeholder="Search active employee by name or NIK..."
+                    style={{ flex: 1, fontSize: 12.5, fontWeight: 600, border: "none", outline: "none", color: "#1e293b" }}
+                  />
+                  {empSearching && <Loader2 size={13} className="animate-spin" color="#94a3b8" />}
+                  <button type="button" onClick={() => { setEmpOpen(false); setEmpQuery(""); }}
+                    style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", lineHeight: 0 }}>
+                    <X size={13} />
+                  </button>
+                </div>
+                {empQuery.trim() && (
+                  <div style={{ maxHeight: 160, overflowY: "auto", marginTop: 6 }}>
+                    {empMatches.map((e) => (
+                      <div key={e.user_id} onClick={() => fillFromEmployee(e)}
+                        style={{ padding: "6px 4px", fontSize: 11.5, fontWeight: 600, color: "#1e293b", cursor: "pointer", borderTop: "1px solid #f1f5f9" }}>
+                        {e.full_name} <span style={{ color: "#94a3b8", fontWeight: 500 }}>· {e.job_title || "—"} · {e.department || "—"}</span>
+                      </div>
+                    ))}
+                    {!empSearching && empMatches.length === 0 && (
+                      <div style={{ padding: "6px 4px", fontSize: 11, color: "#94a3b8" }}>No matching active employee</div>
+                    )}
+                  </div>
+                )}
+                <p style={{ fontSize: 10, color: "#94a3b8", marginTop: 6 }}>Fills the fields below — you can still adjust them before saving.</p>
+              </div>
+            )}
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 12px" }}>
             {field("full_name", "Full Name *", { full: true })}
             {selectField("position", "Position", positionLov, { allowCustom: true })}
             {selectField("department", "Department", departmentLov)}
             {selectField("division", "Division", divisionLov, { allowCustom: true })}
-            {selectField("sub_team", "Sub-team / Region", subTeamLov, { allowCustom: true })}
+            {selectField("team", "Team", teamLov, { allowCustom: true })}
+            {selectField("region", "Region", regionLov, { allowCustom: true })}
             <div>
               <label style={{ fontSize: 10, fontWeight: 700, color: "#64748b" }}>Join Date</label>
               <input type="date" value={form.join_date || ""} onChange={(e) => setForm({ ...form, join_date: e.target.value })}
@@ -1663,6 +1974,10 @@ function OrgChartView() {
   const [selectedNode, setSelectedNode] = useState(null);
   const [error, setError]       = useState("");
   const [exportingImage, setExportingImage] = useState(false);
+  const [syncing, setSyncing]   = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
+  const [dmSyncing, setDmSyncing] = useState(false);
+  const [dmSyncResult, setDmSyncResult] = useState(null);
   const chartRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -1760,6 +2075,42 @@ function OrgChartView() {
     return [...set].sort((a, b) => (ORG_DEPT_ORDER[a] ?? 99) - (ORG_DEPT_ORDER[b] ?? 99));
   }, [root]);
 
+  // Fills every empty chart field (position, department, division,
+  // team, join_date) by matching each chart entry's name against the
+  // Employee master — additive only, field by field (see
+  // sync_from_employees's docstring), so it's safe to click repeatedly and
+  // never clobbers a value already curated on the node.
+  const handleSyncFromEmployees = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await hrApi.syncOrgStructureFromEmployees();
+      setSyncResult(res);
+      if (res.linked > 0 || res.field_updated > 0) await load();
+    } catch (err) {
+      setSyncResult({ error: err?.detail || "Failed to sync from Employee master" });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // Grows department_master with any department/team value the chart
+  // actually uses that department_master doesn't have yet — see
+  // sync_department_master's own docstring for why division is
+  // deliberately left out of this. Additive-only, safe to re-run.
+  const handleSyncDepartmentMaster = async () => {
+    setDmSyncing(true);
+    setDmSyncResult(null);
+    try {
+      const res = await hrApi.syncOrgStructureDepartmentMaster();
+      setDmSyncResult(res);
+    } catch (err) {
+      setDmSyncResult({ error: err?.detail || "Failed to sync department_master" });
+    } finally {
+      setDmSyncing(false);
+    }
+  };
+
   const handleDownloadImage = async () => {
     if (!chartRef.current) return;
     setExportingImage(true);
@@ -1828,6 +2179,20 @@ function OrgChartView() {
         )}
         <div style={{ flex: 1 }} />
 
+        <button onClick={handleSyncFromEmployees} disabled={syncing} title="Fill empty chart fields (position, department, division, team, join date) from the Employee master — never overwrites an existing value"
+          className="flex items-center gap-1.5"
+          style={{ padding: "7px 12px", borderRadius: 8, border: "none", cursor: syncing ? "wait" : "pointer", background: "#0891b2", color: "#fff", fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>
+          {syncing ? <Loader2 size={13} className="animate-spin" /> : <CalendarCheck size={13} />}
+          {syncing ? "Syncing..." : "Sync from Employee List"}
+        </button>
+
+        <button onClick={handleSyncDepartmentMaster} disabled={dmSyncing} title="Add any department/team value this chart uses that department_master doesn't have yet — never renames or moves an existing entry"
+          className="flex items-center gap-1.5"
+          style={{ padding: "7px 12px", borderRadius: 8, border: "none", cursor: dmSyncing ? "wait" : "pointer", background: "#7c3aed", color: "#fff", fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>
+          {dmSyncing ? <Loader2 size={13} className="animate-spin" /> : <ListChecks size={13} />}
+          {dmSyncing ? "Syncing..." : "Sync Department Master"}
+        </button>
+
         <button onClick={handleDownloadImage} disabled={exportingImage} title="Download as image"
           className="flex items-center gap-1.5"
           style={{ padding: "7px 12px", borderRadius: 8, border: "none", cursor: exportingImage ? "wait" : "pointer", background: "#2563eb", color: "#fff", fontSize: 11.5, fontWeight: 700, boxShadow: "0 2px 4px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04)" }}>
@@ -1849,6 +2214,51 @@ function OrgChartView() {
         ))}
         <span style={{ fontSize: 10.5, fontWeight: 700, color: "#64748b", minWidth: 34, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
       </div>
+
+      {/* Sync from Employee List result */}
+      {syncResult && (
+        <div style={{
+          borderRadius: 10, padding: "9px 14px", fontSize: 11, fontWeight: 600,
+          background: syncResult.error ? "#fee2e2" : "#e0f2fe", color: syncResult.error ? "#dc2626" : "#075985",
+          display: "flex", alignItems: "flex-start", gap: 10,
+        }}>
+          <div style={{ flex: 1 }}>
+            {syncResult.error ? syncResult.error : (
+              syncResult.linked === 0 && syncResult.field_updated === 0 && syncResult.unmatched?.length === 0 && syncResult.ambiguous_identity?.length === 0
+                ? "Every position is already linked and filled in — nothing to sync."
+                : <>
+                    Linked {syncResult.linked} new position{syncResult.linked !== 1 ? "s" : ""} to the Employee master (matched by name — exact, then a looser partial match) and filled in fields on {syncResult.field_updated}.
+                    {syncResult.renamed?.length > 0 && ` Corrected the chart name to match Employee for: ${syncResult.renamed_names.join(", ")}.`}
+                    {syncResult.unmatched?.length > 0 && ` No matching employee found for: ${syncResult.unmatched.join(", ")}.`}
+                    {syncResult.ambiguous_identity?.length > 0 && ` Skipped (name matches more than one employee): ${syncResult.ambiguous_identity.join(", ")}.`}
+                  </>
+            )}
+          </div>
+          <button onClick={() => setSyncResult(null)} style={{ border: "none", background: "none", cursor: "pointer", color: "inherit", opacity: 0.6, flexShrink: 0 }}>
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
+      {/* Sync Department Master result */}
+      {dmSyncResult && (
+        <div style={{
+          borderRadius: 10, padding: "9px 14px", fontSize: 11, fontWeight: 600,
+          background: dmSyncResult.error ? "#fee2e2" : "#ede9fe", color: dmSyncResult.error ? "#dc2626" : "#5b21b6",
+          display: "flex", alignItems: "flex-start", gap: 10,
+        }}>
+          <div style={{ flex: 1 }}>
+            {dmSyncResult.error ? dmSyncResult.error : (
+              dmSyncResult.added === 0
+                ? "department_master already has every department/team this chart uses — nothing to add."
+                : `Added ${dmSyncResult.added} new entr${dmSyncResult.added !== 1 ? "ies" : "y"} to department_master: ${dmSyncResult.added_names.join(", ")}.`
+            )}
+          </div>
+          <button onClick={() => setDmSyncResult(null)} style={{ border: "none", background: "none", cursor: "pointer", color: "inherit", opacity: 0.6, flexShrink: 0 }}>
+            <X size={13} />
+          </button>
+        </div>
+      )}
 
       {/* Legend */}
       {deptsPresent.length > 0 && (
@@ -2004,9 +2414,12 @@ function OrgManageView() {
           <thead className="sticky top-0 z-10 bg-gray-800">
             <tr>
               <SortableTH label="Name" field="full_name" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500" title="Linked Employee record — set by Sync from Employee List on the Chart tab">Employee ID</th>
               <SortableTH label="Position" field="position" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <SortableTH label="Department" field="department" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Division / Sub-team</th>
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Division</th>
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Team</th>
+              <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Region</th>
               <SortableTH label="Join Date" field="join_date" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               <th className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Supervisor</th>
               <th className="px-3 py-2.5 w-12"></th>
@@ -2014,15 +2427,22 @@ function OrgManageView() {
           </thead>
           <tbody className="divide-y divide-gray-800">
             {loading ? (
-              <tr><td colSpan={7} className="py-12 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></td></tr>
+              <tr><td colSpan={10} className="py-12 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></td></tr>
             ) : sorted.length === 0 ? (
-              <tr><td colSpan={7} className="py-12 text-center text-xs text-gray-600">No structure data yet. Add a position or import Excel.</td></tr>
+              <tr><td colSpan={10} className="py-12 text-center text-xs text-gray-600">No structure data yet. Add a position or import Excel.</td></tr>
             ) : sorted.map((n) => (
               <tr key={n.id} onClick={() => setModalNode(n)} className="hover:bg-gray-800/40 cursor-pointer transition-colors">
                 <td className="px-3 py-2.5 font-medium text-gray-200 whitespace-nowrap">{n.full_name}</td>
+                <td className="px-3 py-2.5 text-xs whitespace-nowrap font-mono">
+                  {n.employee_id
+                    ? <span className="text-emerald-400">{n.employee_id}</span>
+                    : <span className="text-gray-600">not linked</span>}
+                </td>
                 <td className="px-3 py-2.5 text-gray-400 text-xs whitespace-nowrap">{n.position || "—"}</td>
                 <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap">{n.department || "—"}</td>
-                <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{[n.division, n.sub_team].filter(Boolean).join(" / ") || "—"}</td>
+                <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{n.division || "—"}</td>
+                <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{n.team || "—"}</td>
+                <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{n.region || "—"}</td>
                 <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{n.join_date || "—"}</td>
                 <td className="px-3 py-2.5 text-gray-500 text-xs whitespace-nowrap">{n.supervisor_name || "—"}</td>
                 <td className="px-3 py-2.5">
@@ -2102,21 +2522,69 @@ function useMonthlySummary(month, year) {
   return { data, loading, errMsg };
 }
 
-const SUMMARY_COLORS = ["#6366f1","#34d399","#f59e0b","#f43f5e","#60a5fa","#a78bfa","#fb923c","#4ade80","#38bdf8","#c084fc"];
+// CVD-safe categorical order (blue/orange/aqua/yellow/magenta/green/violet/red),
+// stepped for a dark surface — worst adjacent pair clears both the
+// colorblind-safety and normal-vision separation floors, so no two
+// neighboring slices/bars are ever confusable.
+const SUMMARY_COLORS = ["#3987e5","#d95926","#199e70","#c98500","#d55181","#008300","#9085e9","#e66767"];
 
-function SummaryChartCard({ title, children }) {
+// Seniority order for the Employee Graph's "By Level" chart — highest
+// first, so the ranking reads top-down instead of by headcount. Covers
+// every Employee.level value seen in production data (checked 2026-09-08);
+// anything not listed here (a future/typo value) sorts after all of these,
+// in whatever order the backend returned it (headcount desc), rather than
+// silently disappearing.
+const LEVEL_ORDER = [
+  "President Director", "Director", "Driver Dir",
+  "General Manager", "Driver Gm",
+  "Senior Manager", "Manager", "Assistant Manager", "Project Control Assistant Manager",
+  "Supervisor", "HR & GA Spv", "Production Supervisor",
+  "Senior Staff", "Officer", "Staff", "Product Specialis", "Secretary",
+  "Operator", "Operator / Clerk", "Clerk", "Driver",
+].map((l) => l.toLowerCase());
+
+function sortByLevel(items) {
+  const rank = (name) => {
+    const i = LEVEL_ORDER.indexOf((name || "").trim().toLowerCase());
+    return i === -1 ? LEVEL_ORDER.length : i;
+  };
+  return [...items].sort((a, b) => rank(a.name) - rank(b.name));
+}
+
+// Same relative department order as the backend's DEPT_GROUPS (Employee
+// Summary), minus "President Director" — that's a derived grouping (by
+// job_title, not a raw Employee.department value), so it never appears in
+// a breakdown taken straight from the department column, like this one.
+const DEPT_ORDER = ["Sales & Marketing", "Strategy & Development", "Plant", "Administration"].map((d) => d.toLowerCase());
+
+function sortByDept(items) {
+  const rank = (name) => {
+    const i = DEPT_ORDER.indexOf((name || "").trim().toLowerCase());
+    return i === -1 ? DEPT_ORDER.length : i;
+  };
+  return [...items].sort((a, b) => rank(a.name) - rank(b.name));
+}
+
+function SummaryChartCard({ title, total, children }) {
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
-      <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider mb-3">{title}</p>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider">{title}</p>
+        {total != null && (
+          <span className="shrink-0 rounded-full bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-300">
+            Total: {total}
+          </span>
+        )}
+      </div>
       {children}
     </div>
   );
 }
 
-function SummaryHBarList({ items, max }) {
+function SummaryHBarList({ items, max, limit = 15 }) {
   return (
     <div className="space-y-1.5">
-      {items.slice(0, 15).map((it, i) => (
+      {items.slice(0, limit).map((it, i) => (
         <div key={i} className="flex items-center gap-2 text-xs">
           <div className="w-28 text-gray-300 truncate shrink-0" title={it.name}>{it.name}</div>
           <div className="flex-1 bg-gray-800 rounded-full h-3 overflow-hidden">
@@ -2125,6 +2593,183 @@ function SummaryHBarList({ items, max }) {
           <div className="w-8 text-right font-bold text-white">{it.total}</div>
         </div>
       ))}
+      {items.length === 0 && <p className="text-xs text-gray-400">No data.</p>}
+    </div>
+  );
+}
+
+// A flat 2D ring (no perspective/extrusion — a true 3D pie distorts how big
+// each slice reads) with a soft drop-shadow for lift, rounded segment ends
+// standing in for a gap between slices, and the grand total set directly in
+// the middle — the one number every donut in the reference image was built
+// around. Built as plain SVG stroke-dasharray arcs rather than a charting
+// library so segment gaps/rounding/center text stay under exact control.
+function DonutRing({ items, size = 132, thickness = 20 }) {
+  const total = items.reduce((s, it) => s + (Number(it.total) || 0), 0);
+  const r = (size - thickness) / 2;
+  const cx = size / 2, cy = size / 2;
+  const circumference = 2 * Math.PI * r;
+  const gap = items.length > 1 ? 3 : 0;
+
+  let offset = 0;
+  const arcs = items.map((it, i) => {
+    const value = Number(it.total) || 0;
+    const rawLen = total > 0 ? (value / total) * circumference : 0;
+    const len = Math.max(rawLen - gap, 0);
+    const dashoffset = -offset;
+    offset += rawLen;
+    if (len <= 0) return null;
+    return (
+      <circle key={i} cx={cx} cy={cy} r={r} fill="none"
+        stroke={SUMMARY_COLORS[i % SUMMARY_COLORS.length]} strokeWidth={thickness} strokeLinecap="round"
+        strokeDasharray={`${len} ${Math.max(circumference - len, 0)}`} strokeDashoffset={dashoffset}
+        transform={`rotate(-90 ${cx} ${cy})`} />
+    );
+  });
+
+  return (
+    <svg width={size} height={size} style={{ filter: "drop-shadow(0 8px 12px rgba(0,0,0,0.45))" }}>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={thickness} />
+      {arcs}
+      <text x={cx} y={cy - 3} textAnchor="middle" fontSize={24} fontWeight={800} fill="#f8fafc">{total}</text>
+      <text x={cx} y={cy + 15} textAnchor="middle" fontSize={9} fontWeight={700} fill="#94a3b8" letterSpacing="0.06em">TOTAL</text>
+    </svg>
+  );
+}
+
+function DonutLegend({ items }) {
+  const total = items.reduce((s, it) => s + (Number(it.total) || 0), 0);
+  return (
+    <div className="w-full space-y-1">
+      {items.map((it, i) => (
+        <div key={i} className="flex items-center gap-2 text-xs">
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: SUMMARY_COLORS[i % SUMMARY_COLORS.length] }} />
+          <span className="flex-1 truncate text-gray-300" title={it.name}>{it.name}</span>
+          <span className="text-gray-500">{total > 0 ? `${Math.round((it.total / total) * 100)}%` : "0%"}</span>
+          <span className="w-7 text-right font-bold text-white">{it.total}</span>
+        </div>
+      ))}
+      {items.length === 0 && <p className="text-xs text-gray-400">No data.</p>}
+    </div>
+  );
+}
+
+function DonutBlock({ items }) {
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <DonutRing items={items} />
+      <DonutLegend items={items} />
+    </div>
+  );
+}
+
+// Flat 2D pie (full wedges from center, no ring hole) with straight
+// leader-line callouts — matches the requested reference layout, but
+// intentionally skips its true 3D extrusion: a beveled "wall" makes the
+// slices facing the viewer read as bigger than their real share, the same
+// distortion true-3D donuts have. Depth here is only a drop-shadow.
+// Leader labels are only drawn up to 8 slices — past that they start
+// overlapping (this is why By Level, with up to ~20 raw values, still
+// needs its own legend below every time, in both chart types).
+function PieWedges({ items, size = 240 }) {
+  const total = items.reduce((s, it) => s + (Number(it.total) || 0), 0);
+  const vbW = size, vbH = size * 0.82;
+  const cx = vbW / 2, cy = vbH / 2;
+  const r = size * 0.22;
+  const showLabels = items.length > 0 && items.length <= 8;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+
+  let angle = -90;
+  const wedges = [];
+  const labels = [];
+
+  items.forEach((it, i) => {
+    const value = Number(it.total) || 0;
+    const frac = total > 0 ? value / total : 0;
+    const sweep = frac * 360;
+    if (sweep <= 0) return;
+    const startAngle = angle;
+    const endAngle = angle + sweep;
+    const large = sweep > 180 ? 1 : 0;
+    const x1 = cx + r * Math.cos(toRad(startAngle));
+    const y1 = cy + r * Math.sin(toRad(startAngle));
+    const x2 = cx + r * Math.cos(toRad(endAngle));
+    const y2 = cy + r * Math.sin(toRad(endAngle));
+
+    wedges.push(
+      <path key={i} d={`M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`}
+        fill={SUMMARY_COLORS[i % SUMMARY_COLORS.length]} stroke="#111827" strokeWidth={1.5} />
+    );
+
+    if (showLabels) {
+      const mid = startAngle + sweep / 2;
+      const dotX = cx + r * Math.cos(toRad(mid));
+      const dotY = cy + r * Math.sin(toRad(mid));
+      const kinkX = cx + (r + 16) * Math.cos(toRad(mid));
+      const kinkY = cy + (r + 16) * Math.sin(toRad(mid));
+      const isRight = Math.cos(toRad(mid)) >= 0;
+      const endX = kinkX + (isRight ? 30 : -30);
+      const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+      labels.push(
+        <g key={`l${i}`}>
+          <circle cx={dotX} cy={dotY} r={2.5} fill="#94a3b8" />
+          <path d={`M ${dotX} ${dotY} L ${kinkX} ${kinkY} L ${endX} ${kinkY}`} fill="none" stroke="#475569" strokeWidth={1} />
+          <text x={endX + (isRight ? 4 : -4)} y={kinkY - 4} textAnchor={isRight ? "start" : "end"} fontSize={11} fontWeight={700} fill="#1e293b">{it.name}</text>
+          <text x={endX + (isRight ? 4 : -4)} y={kinkY + 9} textAnchor={isRight ? "start" : "end"} fontSize={10} fill="#334155">{it.total} · {pct}%</text>
+        </g>
+      );
+    }
+
+    angle = endAngle;
+  });
+
+  return (
+    <svg viewBox={`0 0 ${vbW} ${vbH}`} className="w-full" style={{ overflow: "visible", filter: "drop-shadow(0 8px 12px rgba(0,0,0,0.45))" }}>
+      {wedges}
+      {labels}
+    </svg>
+  );
+}
+
+function PieBlock({ items }) {
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <PieWedges items={items} />
+      <DonutLegend items={items} />
+    </div>
+  );
+}
+
+// Ranked horizontal bar list — bar length + a bold value sit to the left,
+// the full category name (never truncated, unlike SummaryHBarList's fixed
+// label column) to the right, thin dashed rules between rows. Each bar
+// takes the same per-category hue as the donut/pie/legend views, so a
+// color stays tied to its category across all 3 chart types.
+function BarRankChart({ items }) {
+  const max = Math.max(...items.map((it) => Number(it.total) || 0), 1);
+  const total = items.reduce((s, it) => s + (Number(it.total) || 0), 0);
+  return (
+    <div className="w-full">
+      <div className="mb-2 flex justify-end">
+        <span className="rounded-full bg-indigo-500/10 px-2 py-0.5 text-[10px] font-bold text-indigo-300">Total: {total}</span>
+      </div>
+      {items.map((it, i) => {
+        const value = Number(it.total) || 0;
+        const widthPct = Math.round((value / max) * 100);
+        const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+        const color = SUMMARY_COLORS[i % SUMMARY_COLORS.length];
+        return (
+          <div key={i}
+            className={`flex items-center gap-2 py-2 ${i < items.length - 1 ? "border-b border-dashed border-gray-700/60" : ""}`}>
+            <div className="h-4 w-20 shrink-0 overflow-hidden bg-gray-800/60">
+              <div className="h-4" style={{ width: `${widthPct}%`, background: color }} />
+            </div>
+            <span className="w-7 shrink-0 text-right text-xs font-extrabold" style={{ color }}>{value}</span>
+            <span className="w-9 shrink-0 text-xs text-gray-500">{pct}%</span>
+            <span className="flex-1 text-xs text-gray-300">{it.name}</span>
+          </div>
+        );
+      })}
       {items.length === 0 && <p className="text-xs text-gray-400">No data.</p>}
     </div>
   );
@@ -2211,9 +2856,15 @@ function EmployeeListModal({ initialFilters, onClose }) {
     } catch (_) {}
   }, []); // eslint-disable-line
 
+  // exclude_leads drops the "Director"/"General Manager"/"Senior Manager"
+  // placeholder values Employee.team holds for department/division-head
+  // level employees — not real teams, so they don't belong in a Team
+  // filter meant to narrow the summary down to an actual team.
   const fetchTeams = useCallback(async (dept) => {
     try {
-      const url = dept ? `${API}/teams?department=${encodeURIComponent(dept)}` : `${API}/teams`;
+      const url = dept
+        ? `${API}/teams?department=${encodeURIComponent(dept)}&exclude_leads=true`
+        : `${API}/teams?exclude_leads=true`;
       const res = await fetch(url, { headers });
       if (res.ok) setTeams(await res.json());
     } catch (_) {}
@@ -2515,6 +3166,59 @@ function EmployeeListModal({ initialFilters, onClose }) {
 
 // ── Employee Summary: Summary per Year — headcount by dept, Beginning/Ending
 // per year (format reference: SUMMARY sheet, "Yearly" block) ──────────────
+
+// Color-codes each row's actual CELL/ROW BACKGROUND by what it represents,
+// not just its raw indentation depth — a department and its department-head
+// row, or a division and its division-head row, sat at the same visual
+// depth before and were hard to tell apart at a glance. Deliberately a
+// background tint, not a text color — the identification cue is the place
+// (row) that department/division/team data occupies, not the color of the
+// characters. Related concepts share a hue family (department/department-
+// head both blue-ish, division/division-head both green-ish) so the family
+// itself hints at "these two go together", while the two shades within a
+// family stay distinguishable. President Director gets its own color since
+// it's a singleton, outside every department/division below it. Plain team
+// rows (the actual headcount leaves) intentionally stay neutral — tinting
+// dozens of team rows individually would be noise, not an aid.
+function summaryRowKind(row, level, isLeadRow, isDivisionHeader) {
+  if (level === 0) return row.department === "President Director" ? "presidentDirector" : "department";
+  if (isLeadRow) return row.division != null ? "divisionHead" : "departmentHead";
+  if (isDivisionHeader) return "division";
+  return "team";
+}
+// Row/cell background tints (low-opacity so the numeric columns underneath
+// stay readable) and matching solid legend-dot colors, kept as literal
+// class strings (not derived from each other via string concatenation) so
+// Tailwind's content scanner — which only picks up class names it can find
+// as literal substrings in the source — actually generates every utility.
+const SUMMARY_KIND_BG = {
+  presidentDirector: "bg-amber-500/20",
+  department:         "bg-indigo-500/20",
+  departmentHead:     "bg-sky-500/20",
+  division:            "bg-emerald-500/20",
+  divisionHead:        "bg-teal-500/20",
+};
+const SUMMARY_LEGEND = [
+  ["presidentDirector", "President Director", "bg-amber-400"],
+  ["department",        "Department",         "bg-indigo-400"],
+  ["departmentHead",     "Department Head",    "bg-sky-400"],
+  ["division",           "Division",           "bg-emerald-400"],
+  ["divisionHead",       "Division Head",      "bg-teal-400"],
+];
+
+function SummaryColorLegend() {
+  return (
+    <div className="flex items-center gap-3 flex-wrap text-[10px] text-gray-500">
+      {SUMMARY_LEGEND.map(([kind, label, dotColor]) => (
+        <span key={kind} className="flex items-center gap-1">
+          <span className={`inline-block w-2 h-2 rounded-full ${dotColor}`} />
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function EmployeeYearSummaryTable({ onYearClick }) {
   const { token } = useAuthStore();
   const headers = { Authorization: `Bearer ${token}` };
@@ -2522,14 +3226,33 @@ function EmployeeYearSummaryTable({ onYearClick }) {
   const [loading, setLoading] = useState(true);
   const [collapsedDepts, setCollapsedDepts] = useState(() => new Set());
   const [collapsedDivisions, setCollapsedDivisions] = useState(() => new Set());
+  // null = "use the backend's own default" (earliest date_of_joining on
+  // file / current year) — only set once the user actually picks a value,
+  // so the dropdowns can show the real default without a second fetch.
+  const [yearFrom, setYearFrom] = useState(null);
+  const [yearTo, setYearTo] = useState(null);
 
   useEffect(() => {
     setLoading(true);
-    fetch(`${API}/summary/by-year`, { headers })
+    const params = new URLSearchParams();
+    if (yearFrom != null) params.set("year_from", yearFrom);
+    if (yearTo != null) params.set("year_to", yearTo);
+    fetch(`${API}/summary/by-year?${params}`, { headers })
       .then((r) => r.ok ? r.json() : null)
       .then(setD)
       .finally(() => setLoading(false));
-  }, []); // eslint-disable-line
+  }, [yearFrom, yearTo]); // eslint-disable-line
+
+  const handleYearFrom = (v) => {
+    const n = Number(v);
+    setYearFrom(n);
+    if (yearTo != null && n > yearTo) setYearTo(n);
+  };
+  const handleYearTo = (v) => {
+    const n = Number(v);
+    setYearTo(n);
+    if (yearFrom != null && n < yearFrom) setYearFrom(n);
+  };
 
   const toggleSet = (setFn) => (key) => setFn((prev) => {
     const next = new Set(prev);
@@ -2539,7 +3262,13 @@ function EmployeeYearSummaryTable({ onYearClick }) {
   const toggleDept = toggleSet(setCollapsedDepts);
   const toggleDivision = toggleSet(setCollapsedDivisions);
   const divKey = (dept, division) => `${dept}::${division}`;
-
+  // A department's ordinary teams (no real division) report to that
+  // department's own Director/General Manager row in the real org chart
+  // (e.g. Planning & Coordination reports to Administration's GM) — the
+  // backend tags them with `parent_team` so they render indented one level
+  // further right, under that lead row, instead of sitting beside it. This
+  // is display-only: the lead row itself has no expand/collapse of its
+  // own — its children show and hide together with the whole department.
   const visibleRows = d ? d.rows.filter((row) => {
     if (collapsedDepts.has(row.department)) return row.division == null && row.team == null;
     if (row.division && row.team && collapsedDivisions.has(divKey(row.department, row.division))) return false;
@@ -2552,9 +3281,43 @@ function EmployeeYearSummaryTable({ onYearClick }) {
   const TH = "px-2.5 py-2 text-xs font-semibold uppercase tracking-wider text-gray-500 whitespace-nowrap text-center border-b border-gray-800";
   const TD = "px-2.5 py-2 text-xs text-right whitespace-nowrap";
 
+  const currentYear = new Date().getFullYear();
+  // The dropdown must always be able to show the real default (earliest
+  // date_of_joining on file) once loaded, even if that's further back than
+  // this fallback window — extend it to whatever d.years actually covers.
+  const rangeStart = Math.min(currentYear - 15, d.years[0]);
+  const yearOptions = Array.from({ length: currentYear - rangeStart + 1 }, (_, i) => currentYear - i);
+  const displayFrom = yearFrom ?? d.years[0];
+  const displayTo = yearTo ?? d.years[d.years.length - 1];
+
   return (
     <div className="space-y-2">
-      <p className="text-[10px] text-gray-600">Click + to expand a department's teams · click a year to view its monthly breakdown</p>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-[10px] text-gray-600">Click + to expand a department's teams · click a year to view its monthly breakdown</p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <label className="flex items-center gap-2 text-[11px] text-gray-500">
+            Period from
+            <select
+              value={displayFrom}
+              onChange={(e) => handleYearFrom(e.target.value)}
+              className="rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-gray-500">
+            Period To
+            <select
+              value={displayTo}
+              onChange={(e) => handleYearTo(e.target.value)}
+              className="rounded-md border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
+            >
+              {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </label>
+        </div>
+      </div>
+      <SummaryColorLegend />
       <div className="overflow-auto rounded-lg border border-gray-800" style={{ maxHeight: 480 }}>
       <table className="text-sm" style={{ minWidth: 220 + d.years.length * 140 }}>
         <thead className="sticky top-0 z-10 bg-gray-800">
@@ -2581,22 +3344,61 @@ function EmployeeYearSummaryTable({ onYearClick }) {
         </thead>
         <tbody className="divide-y divide-gray-800">
           {visibleRows.map((row) => {
-            const level = row.team ? 2 : row.division ? 1 : 0;
+            // Depth is additive: +1 for being inside a division, +1 for
+            // being a team row at all, +1 again for reporting to a lead
+            // (parent_team) rather than sitting directly under its parent.
+            // A division head (e.g. "Division Head - Senior Manager") gets
+            // exactly the same treatment as a department's own Director/
+            // General Manager, just one level deeper — its own team's
+            // rank-and-file (Engineering, QA, ...) then nest one level
+            // under THAT. Division/department header rows (team == null)
+            // are never a "child of lead" themselves.
+            const isLeadRow = row.lead_title !== undefined;
+            const isChildOfLead = row.parent_team != null;
+            const isDivisionHeader = row.division != null && row.team == null;
+            const level = (row.division != null ? 1 : 0) + (row.team != null ? 1 : 0) + (isChildOfLead ? 1 : 0);
+            // Only the department row and a division's own header row are
+            // independently collapsible — a lead row (Director/General
+            // Manager/Senior Manager) never is; its children show and hide
+            // together with whichever of those two owns it.
             const hasChildren = level === 0
               ? d.rows.some((r) => r.department === row.department && (r.division || r.team))
-              : level === 1
+              : isDivisionHeader
                 ? d.rows.some((r) => r.department === row.department && r.division === row.division && r.team)
                 : false;
-            const toggleKey = level === 0 ? row.department : divKey(row.department, row.division);
-            const isOpen = hasChildren && !(level === 0 ? collapsedDepts : collapsedDivisions).has(toggleKey);
-            const label = row.team || row.division || row.department;
-            const pad = level === 0 ? "" : level === 1 ? "pl-6" : "pl-9";
-            const rowClass = level === 0 ? "bg-gray-800/30 font-semibold" : level === 1 ? "bg-gray-900/40 font-medium hover:bg-gray-800/30" : "hover:bg-gray-800/30";
+            const toggleKey = level === 0 ? row.department
+              : isDivisionHeader ? divKey(row.department, row.division)
+              : null;
+            const collapsedSet = level === 0 ? collapsedDepts : collapsedDivisions;
+            const isOpen = hasChildren && !collapsedSet.has(toggleKey);
+            const toggle = () => {
+              if (level === 0) toggleDept(toggleKey);
+              else if (isDivisionHeader) toggleDivision(toggleKey);
+            };
+            // Lead rows ("Director"/"General Manager"/"Senior Manager") show
+            // as "<role> - <team>" (e.g. "Department Head - General
+            // Manager", "Division Head - Senior Manager", "Department Head
+            // - Director") to match the company's org chart image —
+            // row.lead_title is always the fixed role ("Department Head" /
+            // "Division Head" from _lead_row_role), never the actual
+            // person's own job_title, so it never collides with the team
+            // value even when someone's real title literally reads
+            // "Director" (e.g. Plant).
+            const label = row.team && row.lead_title
+              ? `${row.lead_title} - ${row.team}`
+              : (row.team || row.division || row.department);
+            const pad = ["", "pl-8", "pl-16", "pl-24"][level] || "pl-24";
+            const kind = summaryRowKind(row, level, isLeadRow, isDivisionHeader);
+            // The tint IS the identification cue — plain "team" rows fall
+            // back to the old depth-based gray shading instead.
+            const cellBg = SUMMARY_KIND_BG[kind] || (level >= 2 ? "bg-gray-900" : level === 1 ? "bg-gray-900/40" : "bg-gray-800/30");
+            const textColor = level >= 2 ? "text-gray-300" : level === 1 ? "text-gray-200" : "text-gray-100";
+            const rowClass = `${cellBg} ${level === 0 ? "font-semibold" : level === 1 ? "font-medium" : ""} ${SUMMARY_KIND_BG[kind] ? "" : "hover:bg-gray-800/30"}`;
             return (
             <tr key={`${row.department}-${row.division || ""}-${row.team || ""}`} className={rowClass}>
               <td
-                onClick={hasChildren ? () => (level === 0 ? toggleDept(toggleKey) : toggleDivision(toggleKey)) : undefined}
-                className={`px-2.5 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${level === 2 ? "text-gray-400 bg-gray-900" : level === 1 ? "text-gray-300 bg-gray-900/40" : "text-gray-200 bg-gray-800/30"} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
+                onClick={hasChildren ? toggle : undefined}
+                className={`px-2.5 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${textColor} ${cellBg} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
                 title={hasChildren && level === 0 ? (isOpen ? "Collapse team list" : "Expand team list") : undefined}
               >
                 {hasChildren && (
@@ -2668,7 +3470,10 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
   const toggleDept = toggleSet(setCollapsedDepts);
   const toggleDivision = toggleSet(setCollapsedDivisions);
   const divKey = (dept, division) => `${dept}::${division}`;
-
+  // See EmployeeYearSummaryTable's matching comment — a department's
+  // ordinary teams render indented under its own Director/General Manager
+  // row (parent_team), but that lead row has no expand/collapse of its
+  // own — its children show/hide together with the whole department.
   const visibleRows = d ? d.rows.filter((row) => {
     if (collapsedDepts.has(row.department)) return row.division == null && row.team == null; // dept row itself always shows
     if (row.division && row.team && collapsedDivisions.has(divKey(row.department, row.division))) return false;
@@ -2684,6 +3489,7 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
         <h3 className="text-sm font-semibold text-gray-200">Monthly Summary · {year}</h3>
         <p className="text-[10px] text-gray-600">Click + to expand a department's teams · click a value to view that exact list of employees</p>
       </div>
+      <SummaryColorLegend />
 
       {loading ? (
         <div className="py-16 text-center"><Loader2 size={16} className="mx-auto animate-spin text-gray-600" /></div>
@@ -2700,22 +3506,46 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
             </thead>
             <tbody className="divide-y divide-gray-800">
               {visibleRows.map((row) => {
-                const level = row.team ? 2 : row.division ? 1 : 0;
+                // See EmployeeYearSummaryTable's matching comment — depth is
+                // additive (division / team / reports-to-a-lead), so a
+                // division head's own team nests one level deeper than the
+                // division head row itself.
+                const isLeadRow = row.lead_title !== undefined;
+                const isChildOfLead = row.parent_team != null;
+                const isDivisionHeader = row.division != null && row.team == null;
+                const level = (row.division != null ? 1 : 0) + (row.team != null ? 1 : 0) + (isChildOfLead ? 1 : 0);
+                // Only the department row and a division's own header row
+                // are independently collapsible — a lead row (Director/
+                // General Manager/Senior Manager) never is.
                 const hasChildren = level === 0
                   ? d.rows.some((r) => r.department === row.department && (r.division || r.team))
-                  : level === 1
+                  : isDivisionHeader
                     ? d.rows.some((r) => r.department === row.department && r.division === row.division && r.team)
                     : false;
-                const toggleKey = level === 0 ? row.department : divKey(row.department, row.division);
-                const isOpen = hasChildren && !(level === 0 ? collapsedDepts : collapsedDivisions).has(toggleKey);
-                const label = row.team || row.division || row.department;
-                const pad = level === 0 ? "" : level === 1 ? "pl-6" : "pl-9";
-                const rowClass = level === 0 ? "bg-gray-800/30 font-semibold" : level === 1 ? "bg-gray-900/40 font-medium hover:bg-gray-800/30" : "hover:bg-gray-800/30";
+                const toggleKey = level === 0 ? row.department
+                  : isDivisionHeader ? divKey(row.department, row.division)
+                  : null;
+                const collapsedSet = level === 0 ? collapsedDepts : collapsedDivisions;
+                const isOpen = hasChildren && !collapsedSet.has(toggleKey);
+                const toggle = () => {
+                  if (level === 0) toggleDept(toggleKey);
+                  else if (isDivisionHeader) toggleDivision(toggleKey);
+                };
+                // See EmployeeYearSummaryTable's matching comment — lead_title
+                // is always the fixed "Department Head"/"Division Head" role.
+                const label = row.team && row.lead_title
+                  ? `${row.lead_title} - ${row.team}`
+                  : (row.team || row.division || row.department);
+                const pad = ["", "pl-8", "pl-16", "pl-24"][level] || "pl-24";
+                const kind = summaryRowKind(row, level, isLeadRow, isDivisionHeader);
+                const cellBg = SUMMARY_KIND_BG[kind] || (level >= 2 ? "bg-gray-900" : level === 1 ? "bg-gray-900/40" : "bg-gray-800/30");
+                const textColor = level >= 2 ? "text-gray-300" : level === 1 ? "text-gray-200" : "text-gray-100";
+                const rowClass = `${cellBg} ${level === 0 ? "font-semibold" : level === 1 ? "font-medium" : ""} ${SUMMARY_KIND_BG[kind] ? "" : "hover:bg-gray-800/30"}`;
                 return (
                 <tr key={`${row.department}-${row.division || ""}-${row.team || ""}`} className={rowClass}>
                   <td
-                    onClick={hasChildren ? () => (level === 0 ? toggleDept(toggleKey) : toggleDivision(toggleKey)) : undefined}
-                    className={`px-3 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${level === 2 ? "text-gray-400 bg-gray-900" : level === 1 ? "text-gray-300 bg-gray-900/40" : "text-gray-200 bg-gray-800/30"} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
+                    onClick={hasChildren ? toggle : undefined}
+                    className={`px-3 py-2 text-xs whitespace-nowrap sticky left-0 ${pad} ${textColor} ${cellBg} ${hasChildren ? "cursor-pointer select-none hover:text-indigo-300" : ""}`}
                     title={hasChildren && level === 0 ? (isOpen ? "Collapse team list" : "Expand team list") : undefined}
                   >
                     {hasChildren && (
@@ -2760,125 +3590,94 @@ function EmployeeMonthSummaryTable({ year, onDrillDown }) {
   );
 }
 
-// ── Employee Graph — semua chart (area/bar/pie) ─────────────────────────────────
+// ── Employee Graph — demographic breakdown charts, optionally "as of" a
+// given month/year snapshot (same windowing as Employee Summary/Turnover) ──
 function EmployeeGraphSection() {
-  const { data, loading, errMsg } = useMonthlySummary();
-  const [RC, setRC] = useState(null);
+  const curYear = new Date().getFullYear();
+  // Defaults straight to the real current year instead of a blank
+  // "Current" placeholder option — the value shown IS the default, no
+  // separate label needed for it.
+  const [yearFilter, setYearFilter]   = useState(curYear);
+  const [monthFilter, setMonthFilter] = useState("");
+  const [chartType, setChartType]     = useState("donut"); // "donut" | "pie"
+  const { data, loading, errMsg } = useMonthlySummary(monthFilter || undefined, yearFilter || undefined);
+  const filterBar = (
+    <div className="flex flex-wrap items-end gap-2">
+      <div className="w-28">
+        <label className="mb-1 block text-[10px] font-medium text-gray-500">Year</label>
+        <select value={yearFilter} onChange={(e) => {
+            const y = e.target.value;
+            setYearFilter(y);
+            const valid = monthOptionsForYear(y).some(([, i]) => String(i) === String(monthFilter));
+            if (!valid) setMonthFilter("");
+          }}
+          className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer">
+          {[curYear, curYear - 1, curYear - 2, curYear - 3, curYear - 4].map((y) => <option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+      <div className="w-28">
+        <label className="mb-1 block text-[10px] font-medium text-gray-500">Month</label>
+        <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)}
+          className="w-full rounded-lg border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer">
+          <option value="">Year-end</option>
+          {monthOptionsForYear(yearFilter).map(([m, i]) => <option key={m} value={i}>{m}</option>)}
+        </select>
+      </div>
+      <div>
+        <label className="mb-1 block text-[10px] font-medium text-gray-500">Chart Type</label>
+        <div className="flex rounded-lg border border-gray-700 bg-gray-900 p-0.5">
+          {[["donut", "Donut"], ["pie", "Pie"], ["bar", "Bar"]].map(([id, label]) => (
+            <button key={id} type="button" onClick={() => setChartType(id)}
+              className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                chartType === id ? "bg-indigo-600 text-white" : "text-gray-400 hover:text-gray-200"
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 
-  useEffect(() => {
-    import("recharts").then((mod) => setRC(mod)).catch(() => {});
-  }, []);
-
-  if (loading) return <div className="py-20 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-300" /></div>;
+  if (loading) return <div className="space-y-3 mt-2">{filterBar}<div className="py-16 text-center"><Loader2 size={20} className="mx-auto animate-spin text-gray-300" /></div></div>;
   if (errMsg || !data) return (
-    <div className="py-10 text-center space-y-2">
-      <p className="text-xs text-red-400 font-semibold">Failed to load graph data</p>
-      {errMsg && <pre className="text-xs text-gray-300 max-w-xl mx-auto whitespace-pre-wrap text-left bg-gray-900 rounded p-3">{errMsg}</pre>}
+    <div className="space-y-3 mt-2">
+      {filterBar}
+      <div className="py-10 text-center space-y-2">
+        <p className="text-xs text-red-400 font-semibold">Failed to load graph data</p>
+        {errMsg && <pre className="text-xs text-gray-300 max-w-xl mx-auto whitespace-pre-wrap text-left bg-gray-900 rounded p-3">{errMsg}</pre>}
+      </div>
     </div>
   );
 
   const {
-    headcount_trend = [], monthly_joins = [],
-    by_marital = [], by_status = [], by_gender = [],
+    by_marital = [], by_status = [], by_gender = [], by_level: by_level_raw = [], period = {},
   } = data;
 
-  const CHART_H = 200;
-
-  const tickStyle = { fill: "#cbd5e1", fontSize: 10 };
-  const tooltipStyle = {
-    contentStyle: { borderRadius: 8, fontSize: 11 },
-    labelStyle: { color: "#1e293b", fontWeight: 600 },
-    itemStyle: { color: "#334155" },
-    cursor: { fill: "rgba(0,0,0,0.04)" },
-  };
-  if (!RC) return <div className="py-6 text-center text-xs text-gray-300">Loading charts…</div>;
-
-  // Recharts' default pie-slice label ignores the `style` prop and renders
-  // dark text, which is unreadable on this dark background — render it manually.
-  const renderPieLabel = ({ cx, cy, midAngle, outerRadius, percent, name }) => {
-    const RADIAN = Math.PI / 180;
-    const radius = outerRadius + 14;
-    const x = cx + radius * Math.cos(-midAngle * RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * RADIAN);
-    return (
-      <text x={x} y={y} fill="#f1f5f9" fontSize={10} fontWeight={600} textAnchor={x > cx ? "start" : "end"} dominantBaseline="central">
-        {`${name} ${(percent * 100).toFixed(0)}%`}
-      </text>
-    );
-  };
+  const by_level = sortByLevel(by_level_raw);
+  const periodLabel = period.label || "Current";
+  const ChartBlock = chartType === "pie" ? PieBlock : chartType === "bar" ? BarRankChart : DonutBlock;
 
   return (
     <div className="space-y-4 mt-2">
-      {/* Charts row 1: headcount trend + monthly joins */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SummaryChartCard title="Headcount Trend (36 Months)">
-          <RC.ResponsiveContainer width="100%" height={CHART_H}>
-            <RC.AreaChart data={headcount_trend} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
-              <defs>
-                <linearGradient id="hcGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#818cf8" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="#818cf8" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <RC.XAxis dataKey="label" tick={tickStyle} interval={5} />
-              <RC.YAxis tick={tickStyle} />
-              <RC.Tooltip {...tooltipStyle} formatter={(v) => [v, "Headcount"]} />
-              <RC.Area type="monotone" dataKey="count" stroke="#818cf8" strokeWidth={2} fill="url(#hcGrad)" dot={false} />
-            </RC.AreaChart>
-          </RC.ResponsiveContainer>
-        </SummaryChartCard>
+      {filterBar}
+      <p className="text-[10px] text-gray-500">Snapshot: {periodLabel} · as of {period.snapshot_date}</p>
 
-        <SummaryChartCard title="New Hires per Month (24 Months)">
-          <RC.ResponsiveContainer width="100%" height={CHART_H}>
-            <RC.BarChart data={monthly_joins} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
-              <RC.XAxis dataKey="label" tick={tickStyle} interval={3} />
-              <RC.YAxis tick={tickStyle} allowDecimals={false} />
-              <RC.Tooltip {...tooltipStyle} formatter={(v) => [v, "New Hires"]} />
-              <RC.Bar dataKey="joins" fill="#34d399" radius={[3, 3, 0, 0]}>
-                {monthly_joins.map((_, i) => <RC.Cell key={i} fill={i === monthly_joins.length - 1 ? "#818cf8" : "#34d399"} />)}
-              </RC.Bar>
-            </RC.BarChart>
-          </RC.ResponsiveContainer>
-        </SummaryChartCard>
-      </div>
-
-      {/* Charts row 2: status + gender + marital */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <SummaryChartCard title="Employee Status">
-          <RC.ResponsiveContainer width="100%" height={170}>
-            <RC.PieChart>
-              <RC.Pie data={by_status} cx="50%" cy="50%" outerRadius={65} dataKey="total" nameKey="name" label={renderPieLabel} labelLine={false}>
-                {by_status.map((_, i) => <RC.Cell key={i} fill={SUMMARY_COLORS[i % SUMMARY_COLORS.length]} />)}
-              </RC.Pie>
-              <RC.Tooltip {...tooltipStyle} />
-              <RC.Legend wrapperStyle={{ fontSize: 11, color: "#f1f5f9" }} />
-            </RC.PieChart>
-          </RC.ResponsiveContainer>
+          <ChartBlock items={by_status} />
         </SummaryChartCard>
 
         <SummaryChartCard title="Gender">
-          <RC.ResponsiveContainer width="100%" height={170}>
-            <RC.PieChart>
-              <RC.Pie data={by_gender} cx="50%" cy="50%" outerRadius={65} dataKey="total" nameKey="name" label={renderPieLabel} labelLine={false}>
-                <RC.Cell fill="#60a5fa" />
-                <RC.Cell fill="#fb7185" />
-              </RC.Pie>
-              <RC.Tooltip {...tooltipStyle} />
-              <RC.Legend wrapperStyle={{ fontSize: 11, color: "#f1f5f9" }} />
-            </RC.PieChart>
-          </RC.ResponsiveContainer>
+          <ChartBlock items={by_gender} />
         </SummaryChartCard>
 
         <SummaryChartCard title="Marital Status">
-          <RC.ResponsiveContainer width="100%" height={170}>
-            <RC.PieChart>
-              <RC.Pie data={by_marital} cx="50%" cy="50%" outerRadius={65} dataKey="total" nameKey="name" label={renderPieLabel} labelLine={false}>
-                {by_marital.map((_, i) => <RC.Cell key={i} fill={SUMMARY_COLORS[i % SUMMARY_COLORS.length]} />)}
-              </RC.Pie>
-              <RC.Tooltip {...tooltipStyle} />
-              <RC.Legend wrapperStyle={{ fontSize: 11, color: "#f1f5f9" }} />
-            </RC.PieChart>
-          </RC.ResponsiveContainer>
+          <ChartBlock items={by_marital} />
+        </SummaryChartCard>
+
+        <SummaryChartCard title="By Level">
+          <ChartBlock items={by_level} />
         </SummaryChartCard>
       </div>
     </div>
@@ -2897,22 +3696,38 @@ function TurnoverSection() {
   const [RC, setRC] = useState(null);
 
   const [yearFilter, setYearFilter] = useState(curYear);
-  const [monthFilter, setMonthFilter] = useState("");
+  const [monthFilter, setMonthFilter] = useState(() => String(new Date().getMonth() + 1));
   const [deptFilter, setDeptFilter] = useState("");
   const [teamFilter, setTeamFilter] = useState("");
   const [departments, setDepartments] = useState([]);
   const [teams, setTeams] = useState([]);
 
+  // Click a bar on the resign trend chart -> who actually resigned that
+  // month (or, clicking the chart title's own scope, the whole year).
+  const [drillDown, setDrillDown] = useState(null); // {year, month, label} | null
+  // Click the "Avg. Tenure" KPI card -> the Permanent/Contract x tenure-
+  // bucket breakdown behind that number, for the CURRENT filter scope.
+  const [showTenureBreakdown, setShowTenureBreakdown] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  // source=master — see EmployeeTable's matching fetchTeams comment.
+  // exclude_leads drops the "Director"/"General Manager"/"Senior Manager"
+  // placeholder values Employee.team holds for department/division-head
+  // level employees — not real teams, so they don't belong in a Team
+  // filter meant to narrow the turnover breakdown to an actual team.
   const fetchTeams = useCallback(async (dept) => {
     try {
-      const url = dept ? `${API}/teams?department=${encodeURIComponent(dept)}` : `${API}/teams`;
+      const url = dept
+        ? `${API}/teams?department=${encodeURIComponent(dept)}&exclude_leads=true&source=master`
+        : `${API}/teams?exclude_leads=true&source=master`;
       const res = await fetch(url, { headers });
       if (res.ok) setTeams(await res.json());
     } catch (_) {}
   }, []); // eslint-disable-line
 
   useEffect(() => {
-    fetch(`${API}/departments`, { headers }).then((r) => r.ok ? r.json() : []).then(setDepartments).catch(() => {});
+    // source=master — see EmployeeTable's matching fetchDepts comment.
+    fetch(`${API}/departments?source=master`, { headers }).then((r) => r.ok ? r.json() : []).then(setDepartments).catch(() => {});
     fetchTeams("");
   }, []); // eslint-disable-line
 
@@ -2938,6 +3753,32 @@ function TurnoverSection() {
   useEffect(() => {
     import("recharts").then((mod) => setRC(mod)).catch(() => {});
   }, []);
+
+  // Same scope as the chart's own drill-down and the on-screen KPI cards —
+  // the export is never a separate query, just this same data as a file.
+  const handleDownloadReport = async () => {
+    setDownloading(true);
+    try {
+      const params = new URLSearchParams({
+        year: yearFilter,
+        ...(monthFilter ? { month: monthFilter } : {}),
+        ...(deptFilter ? { department: deptFilter } : {}),
+        ...(teamFilter ? { team: teamFilter } : {}),
+      });
+      const res = await fetch(`${API}/turnover-summary/export?${params}`, { headers });
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `turnover_report_${yearFilter}${monthFilter ? `-${String(monthFilter).padStart(2, "0")}` : ""}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (_) {}
+    finally { setDownloading(false); }
+  };
 
   const filterBar = (
     <div className="flex flex-wrap items-end gap-2">
@@ -2972,6 +3813,12 @@ function TurnoverSection() {
           {teams.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
       </div>
+      <div className="flex-1" />
+      <button onClick={handleDownloadReport} disabled={downloading}
+        className="flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 px-3 py-1.5 text-xs font-semibold text-white transition-colors">
+        {downloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+        {downloading ? "Exporting..." : "Download Report"}
+      </button>
     </div>
   );
 
@@ -2987,10 +3834,14 @@ function TurnoverSection() {
   );
 
   const {
-    resign_trend = [], annual_turnover_rate = 0, total_resigns_period = 0,
-    avg_tenure_years = 0, current_headcount = 0,
-    by_dept = [], by_level = [], by_status = [], year = curYear, month = null,
+    resign_trend = [], total_resigns_period = 0,
+    turnover_rate_ytd = 0, turnover_rate_month = null, avg_tenure_years = 0,
+    current_headcount = 0,
+    by_dept: by_dept_raw = [], by_level: by_level_raw = [], by_status = [], year = curYear, month = null,
   } = data;
+
+  const by_dept = sortByDept(by_dept_raw);
+  const by_level = sortByLevel(by_level_raw);
 
   const CHART_H = 200;
   const periodLabel = month ? `${MONTHS_ID[month - 1]} ${year}` : `${year}`;
@@ -3012,14 +3863,27 @@ function TurnoverSection() {
       {filterBar}
 
       {/* KPI Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {[
-          { label: `Turnover Rate (${year})`,      val: `${annual_turnover_rate}%`, sub: "annualized",              color: "#fb7185" },
+          // Cumulative Jan..selected month / average headcount over that
+          // same stretch — e.g. "as of Aug 2026" = Jan-Aug resigns over the
+          // Jan-Aug average headcount, NOT the full year.
+          { label: `Turnover Rate as of ${periodLabel}`, val: `${turnover_rate_ytd}%`,
+            sub: `Jan–${month ? MONTHS_ID[month - 1] : "Dec"} ${year}, cumulative`, color: "#fb7185" },
+          // That one month alone — resigns in just that month / that
+          // month's own average headcount.
+          { label: `Turnover Rate (${periodLabel})`, val: turnover_rate_month != null ? `${turnover_rate_month}%` : "—",
+            sub: month ? "this month only" : "select a month", color: "#f97316" },
           { label: `Total Resigned (${periodLabel})`, val: total_resigns_period,     sub: "employees left",          color: "#fbbf24" },
-          { label: "Avg. Tenure",                  val: `${avg_tenure_years} yrs`,  sub: "of resigned employees",   color: "#818cf8" },
           { label: "Current Headcount",            val: current_headcount,          sub: "active employees",        color: "#34d399" },
-        ].map(({ label, val, sub, color }) => (
-          <div key={label} className="rounded-xl border border-gray-800 bg-gray-900 p-4">
+          // Mean (resign_date - date_of_joining) among employees who
+          // resigned within this same scope — how long people who left
+          // had actually been here, not the tenure of the current roster.
+          { label: `Avg. Tenure — Resigned (${periodLabel})`, val: `${avg_tenure_years} yrs`,
+            sub: "avg. years worked before resigning — click for breakdown", color: "#60a5fa", onClick: () => setShowTenureBreakdown(true) },
+        ].map(({ label, val, sub, color, onClick }) => (
+          <div key={label} onClick={onClick}
+            className={`rounded-xl border border-gray-800 bg-gray-900 p-4 ${onClick ? "cursor-pointer hover:border-indigo-500 transition-colors" : ""}`}>
             <div className="text-2xl font-bold" style={{ color }}>{val}</div>
             <div className="text-xs font-semibold text-gray-100 mt-0.5">{label}</div>
             <div className="text-xs text-gray-400 mt-0.5">{sub}</div>
@@ -3031,13 +3895,23 @@ function TurnoverSection() {
       {RC ? (
         <>
           <SummaryChartCard title={`Resign & Turnover Rate Trend (Jan–Dec ${year})`}>
+            <p className="text-[10px] text-gray-600 -mt-1 mb-1">Click a bar to see who resigned that month</p>
             <RC.ResponsiveContainer width="100%" height={CHART_H}>
               <RC.ComposedChart data={resign_trend} margin={{ top: 4, right: 4, bottom: 0, left: -10 }}>
                 <RC.XAxis dataKey="label" tick={tickStyle} />
                 <RC.YAxis yAxisId="left" tick={tickStyle} allowDecimals={false} />
                 <RC.YAxis yAxisId="right" orientation="right" tick={tickStyle} unit="%" />
                 <RC.Tooltip {...tooltipStyle} formatter={(v, name) => name === "turnover_rate" ? [`${v}%`, "Turnover Rate"] : [v, "Resigned"]} />
-                <RC.Bar yAxisId="left" dataKey="resigns" fill="#fb7185" radius={[3, 3, 0, 0]} />
+                <RC.Bar
+                  yAxisId="left" dataKey="resigns" fill="#fb7185" radius={[3, 3, 0, 0]}
+                  cursor="pointer"
+                  onClick={(barProps) => {
+                    const row = barProps?.payload ?? barProps;
+                    if (!row?.month) return;
+                    const [y, m] = row.month.split("-").map(Number);
+                    setDrillDown({ year: y, month: m, department: deptFilter, team: teamFilter, label: `${row.label} ${y}` });
+                  }}
+                />
                 <RC.Line yAxisId="right" type="monotone" dataKey="turnover_rate" stroke="#fbbf24" strokeWidth={2} dot={false} />
               </RC.ComposedChart>
             </RC.ResponsiveContainer>
@@ -3059,6 +3933,228 @@ function TurnoverSection() {
       ) : (
         <div className="py-6 text-center text-xs text-gray-300">Loading charts…</div>
       )}
+
+      {drillDown && (
+        <TurnoverResignedListModal {...drillDown} onClose={() => setDrillDown(null)} />
+      )}
+
+      {showTenureBreakdown && (
+        <TenureBreakdownModal
+          year={yearFilter} month={monthFilter || null} department={deptFilter} team={teamFilter}
+          periodLabel={periodLabel} onClose={() => setShowTenureBreakdown(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Turnover Report chart click -> who actually resigned that month ───────
+function TurnoverResignedListModal({ year, month, department, team, label, onClose }) {
+  const { token } = useAuthStore();
+  const headers = { Authorization: `Bearer ${token}` };
+  const [rows, setRows] = useState(null);
+  const [errMsg, setErrMsg] = useState("");
+
+  useEffect(() => {
+    const params = new URLSearchParams({
+      year, month,
+      ...(department ? { department } : {}),
+      ...(team ? { team } : {}),
+    });
+    fetch(`${API}/turnover-summary/resigned-list?${params}`, { headers })
+      .then(async (r) => {
+        const body = await r.json();
+        if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
+        return body;
+      })
+      .then(setRows)
+      .catch((e) => setErrMsg(e.message || "Network error"));
+  }, [year, month, department, team]); // eslint-disable-line
+
+  const COLS = [
+    ["full_name", "Name"], ["department", "Department"], ["division", "Division"], ["team", "Team"],
+    ["level", "Level"], ["job_title", "Job Title"], ["status", "Status"],
+    ["date_of_joining", "Join Date"], ["resign_date", "Resign Date"], ["tenure_years", "Tenure (yrs)"],
+    ["resign_reason", "Resign Reason"],
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,0.6)" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-4xl max-h-[85vh] overflow-y-auto rounded-2xl border border-gray-800 bg-gray-900">
+        <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3.5 border-b border-gray-800 bg-gray-900">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-100">Resigned — {label}</h3>
+            <p className="text-xs text-gray-500 mt-0.5">{rows ? `${rows.length} employee${rows.length === 1 ? "" : "s"}` : "Loading..."}</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-gray-500 hover:text-gray-200 hover:bg-gray-800 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-4">
+          {errMsg && <p className="text-xs text-red-400 font-semibold px-1 pb-2">{errMsg}</p>}
+          {!rows ? (
+            <div className="py-12 text-center"><Loader2 size={18} className="mx-auto animate-spin text-gray-600" /></div>
+          ) : rows.length === 0 ? (
+            <p className="py-12 text-center text-xs text-gray-500">No one resigned in this period.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-800">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-800/70">
+                  <tr>
+                    {COLS.map(([key, colLabel]) => (
+                      <th key={key} className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{colLabel}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800">
+                  {rows.map((r) => (
+                    <tr key={r.user_id} className="hover:bg-gray-800/30">
+                      {COLS.map(([key]) => (
+                        <td key={key} className={`px-3 py-2 whitespace-nowrap ${key === "full_name" ? "font-medium text-gray-200" : "text-gray-400"}`}>
+                          {r[key] ?? "—"}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Tenure buckets matching HR's own breakdown convention — "< 1 Tahun",
+// "1 - 3 thn", ">3 - 5 thn", ">5 thn". Boundaries: [0,1) / [1,3] / (3,5] / (5,∞).
+const TENURE_BUCKETS = [
+  { label: "< 1 Tahun", test: (t) => t < 1 },
+  { label: "1 - 3 thn", test: (t) => t >= 1 && t <= 3 },
+  { label: ">3 - 5 thn", test: (t) => t > 3 && t <= 5 },
+  { label: ">5 thn", test: (t) => t > 5 },
+];
+const TENURE_STATUS_ORDER = ["Permanent", "Contract", "Probation"];
+
+// Groups the same resigned-employee rows the chart's drill-down uses by
+// Employee.status (Permanent/Contract/...), then by TENURE_BUCKETS within
+// each status — % and count per bucket, plus the SUM of each member's own
+// actual tenure_years (not a bucket-midpoint estimate). The grand total of
+// every bucket's years-sum, divided by the grand total count, is exactly
+// the same avg_tenure_years number the KPI card already shows — this is
+// that number's calculation made visible, per HR's own reference table.
+function buildTenureBreakdown(rows) {
+  const withTenure = rows.filter((r) => r.tenure_years != null);
+  const statuses = [...new Set(withTenure.map((r) => r.status || "—"))].sort((a, b) => {
+    const ai = TENURE_STATUS_ORDER.indexOf(a), bi = TENURE_STATUS_ORDER.indexOf(b);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return a.localeCompare(b);
+  });
+
+  const groups = statuses.map((status) => {
+    const members = withTenure.filter((r) => (r.status || "—") === status);
+    const buckets = TENURE_BUCKETS.map(({ label, test }) => {
+      const inBucket = members.filter((r) => test(r.tenure_years));
+      const yearsSum = inBucket.reduce((s, r) => s + r.tenure_years, 0);
+      return {
+        label, count: inBucket.length,
+        pct: members.length > 0 ? Math.round((inBucket.length / members.length) * 100) : 0,
+        yearsSum: inBucket.length > 0 ? yearsSum : null,
+      };
+    });
+    return { status, total: members.length, buckets };
+  });
+
+  return {
+    groups,
+    grandTotalYears: withTenure.reduce((s, r) => s + r.tenure_years, 0),
+    grandTotalCount: withTenure.length,
+  };
+}
+
+function TenureBreakdownModal({ year, month, department, team, periodLabel, onClose }) {
+  const { token } = useAuthStore();
+  const headers = { Authorization: `Bearer ${token}` };
+  const [rows, setRows] = useState(null);
+  const [errMsg, setErrMsg] = useState("");
+
+  useEffect(() => {
+    const params = new URLSearchParams({
+      year, ...(month ? { month } : {}),
+      ...(department ? { department } : {}),
+      ...(team ? { team } : {}),
+    });
+    fetch(`${API}/turnover-summary/resigned-list?${params}`, { headers })
+      .then(async (r) => {
+        const body = await r.json();
+        if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
+        return body;
+      })
+      .then(setRows)
+      .catch((e) => setErrMsg(e.message || "Network error"));
+  }, [year, month, department, team]); // eslint-disable-line
+
+  const breakdown = rows ? buildTenureBreakdown(rows) : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(15,23,42,0.6)" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-2xl border border-gray-800 bg-gray-900">
+        <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3.5 border-b border-gray-800 bg-gray-900">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-100">Avg. Tenure Breakdown — {periodLabel}</h3>
+            <p className="text-xs text-gray-500 mt-0.5">By employment status, then years of service</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-gray-500 hover:text-gray-200 hover:bg-gray-800 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-4">
+          {errMsg && <p className="text-xs text-red-400 font-semibold px-1 pb-2">{errMsg}</p>}
+          {!rows ? (
+            <div className="py-12 text-center"><Loader2 size={18} className="mx-auto animate-spin text-gray-600" /></div>
+          ) : breakdown.grandTotalCount === 0 ? (
+            <p className="py-12 text-center text-xs text-gray-500">No one resigned in this period.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-gray-800">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-800/70">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Status</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Tenure</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">%</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Count</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Years</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800">
+                  {breakdown.groups.map((g) => (
+                    <Fragment key={g.status}>
+                      {g.buckets.map((b, bi) => (
+                        <tr key={`${g.status}-${b.label}`} className="hover:bg-gray-800/30">
+                          <td className="px-3 py-1.5 font-semibold text-gray-200 whitespace-nowrap">{bi === 0 ? g.status : ""}</td>
+                          <td className="px-3 py-1.5 text-gray-400 whitespace-nowrap">{b.label}</td>
+                          <td className="px-3 py-1.5 text-right text-gray-400">{b.pct}%</td>
+                          <td className="px-3 py-1.5 text-right text-gray-400">{b.count}</td>
+                          <td className="px-3 py-1.5 text-right text-gray-300">{b.yearsSum != null ? b.yearsSum.toFixed(1) : "-"}</td>
+                        </tr>
+                      ))}
+                      <tr><td colSpan={5} className="py-1" /></tr>
+                    </Fragment>
+                  ))}
+                  <tr className="border-t border-gray-700">
+                    <td className="px-3 py-2" colSpan={4} />
+                    <td className="px-3 py-2 text-right font-bold text-gray-100">{breakdown.grandTotalYears.toFixed(1)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -6260,15 +7356,26 @@ function EMagazineSection() {
   const [converting,    setConverting]    = useState(null); // filename currently being converted to text
   const [error,         setError]         = useState("");
   const [success,       setSuccess]       = useState("");
+  const [uploadType,    setUploadType]    = useState("magazine"); // "magazine" | "photo_album"
   const [title,         setTitle]         = useState("");
   const [dateLbl,       setDateLbl]       = useState("");
+  const [description,   setDescription]  = useState("");
   const [file,          setFile]          = useState(null);
+  const [photos,        setPhotos]        = useState([]); // photo_album: File[]
+  const [musicFile,     setMusicFile]     = useState(null); // photo_album: background music File
+  const [savingMusic,   setSavingMusic]   = useState(false);
   const [uploadQrLinks, setUploadQrLinks] = useState([]);
   const [editQr,        setEditQr]        = useState(null); // {filename, links:[{label,url}]}
   const [savingQr,      setSavingQr]      = useState(null);
+  const [editMeta,      setEditMeta]      = useState(null); // {filename, title, date, description}
+  const [savingMeta,    setSavingMeta]    = useState(null);
+  const [editingAlbum,  setEditingAlbum]  = useState(null); // {filename, existingCount, hasMusic} — reopens the top form to append photos
+  const [reorderPhotos, setReorderPhotos] = useState([]); // existing photo filenames, in the order being edited
+  const [savingOrder,   setSavingOrder]   = useState(false);
   const [sortBy,  setSortBy]  = useState(null);
   const [sortDir, setSortDir] = useState("asc");
   const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
+  const uploadFormRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -6283,19 +7390,147 @@ function EMagazineSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleUpload = async (e) => {
-    e.preventDefault();
-    if (!file || !title.trim()) { setError("Title and PDF file are required."); return; }
-    setError(""); setSuccess(""); setUploading(true);
+  const ALLOWED_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+  const handlePhotosSelect = (e) => {
+    const files = Array.from(e.target.files || []);
+    const invalid = files.filter(f => !ALLOWED_PHOTO_TYPES.includes(f.type));
+    if (invalid.length > 0) {
+      setError(`${invalid.map(f => f.name).join(", ")} — hanya JPEG, PNG, atau WebP yang didukung.`);
+      return;
+    }
+    setPhotos(prev => [...prev, ...files]);
+    setError("");
+    e.target.value = ""; // allow re-selecting the same file(s) again
+  };
+
+  const removePhoto = (idx) => setPhotos(prev => prev.filter((_, i) => i !== idx));
+
+  const resetUploadForm = () => {
+    setTitle(""); setDateLbl(""); setDescription(""); setFile(null); setPhotos([]); setUploadQrLinks([]);
+    setEditingAlbum(null); setReorderPhotos([]); setMusicFile(null);
+  };
+
+  const openAddPhotos = (ed) => {
+    setEditMeta(null); setEditQr(null); setError(""); setSuccess("");
+    setUploadType("photo_album");
+    setTitle(ed.title || "");
+    setDateLbl(ed.date || "");
+    setDescription(ed.description || "");
+    setPhotos([]);
+    setMusicFile(null);
+    setReorderPhotos(ed.photos || []);
+    setEditingAlbum({ filename: ed.filename, existingCount: ed.photos?.length || 0, hasMusic: !!ed.music });
+    uploadFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const cancelAddPhotos = () => resetUploadForm();
+
+  const photoUrl = (albumFilename, photoName) =>
+    `/e-magazine/magazines/${encodeURIComponent(albumFilename)}/${encodeURIComponent(photoName)}`;
+
+  const movePhoto = (idx, dir) => {
+    setReorderPhotos(prev => {
+      const target = idx + dir;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+  };
+
+  const handleSaveOrder = async () => {
+    if (!editingAlbum) return;
+    setSavingOrder(true); setError(""); setSuccess("");
+    try {
+      await hrApi.eMagazineReorderPhotos(editingAlbum.filename, reorderPhotos);
+      setSuccess("Photo order saved.");
+      load();
+    } catch (err) {
+      setError(err?.detail || "Failed to save photo order.");
+    } finally { setSavingOrder(false); }
+  };
+
+  const ALLOWED_AUDIO_TYPES = ["audio/mpeg", "audio/mp3", "audio/ogg", "audio/wav", "audio/x-wav"];
+
+  const handleMusicSelect = (e) => {
+    const f = e.target.files?.[0];
+    if (f && !ALLOWED_AUDIO_TYPES.includes(f.type)) {
+      setError(`${f.name} — only MP3, OGG, or WAV audio is supported.`);
+      e.target.value = "";
+      return;
+    }
+    setMusicFile(f || null);
+    setError("");
+  };
+
+  const handleUploadMusic = async () => {
+    if (!editingAlbum || !musicFile) return;
+    setSavingMusic(true); setError(""); setSuccess("");
     try {
       const form = new FormData();
-      form.append("file", file);
-      form.append("title", title.trim());
-      form.append("date_label", dateLbl.trim());
-      form.append("qr_links_json", JSON.stringify(uploadQrLinks.filter(q => q.url.trim())));
-      await hrApi.eMagazineUpload(form);
-      setSuccess(`"${title}" uploaded successfully.`);
-      setTitle(""); setDateLbl(""); setFile(null); setUploadQrLinks([]);
+      form.append("music", musicFile);
+      await hrApi.eMagazineUploadMusic(editingAlbum.filename, form);
+      setSuccess("Background music saved.");
+      setMusicFile(null);
+      setEditingAlbum(prev => prev ? { ...prev, hasMusic: true } : prev);
+      load();
+    } catch (err) {
+      setError(err?.detail || "Failed to upload music.");
+    } finally { setSavingMusic(false); }
+  };
+
+  const handleRemoveMusic = async () => {
+    if (!editingAlbum) return;
+    if (!window.confirm("Remove background music from this album?")) return;
+    setSavingMusic(true); setError(""); setSuccess("");
+    try {
+      await hrApi.eMagazineDeleteMusic(editingAlbum.filename);
+      setSuccess("Background music removed.");
+      setEditingAlbum(prev => prev ? { ...prev, hasMusic: false } : prev);
+      load();
+    } catch (err) {
+      setError(err?.detail || "Failed to remove music.");
+    } finally { setSavingMusic(false); }
+  };
+
+  const handleUpload = async (e) => {
+    e.preventDefault();
+    if (!title.trim()) { setError("Title is required."); return; }
+    if (uploadType === "magazine" && !file) { setError("PDF file is required."); return; }
+    if (uploadType === "photo_album" && photos.length === 0) { setError("Select at least one photo."); return; }
+
+    setError(""); setSuccess(""); setUploading(true);
+    try {
+      if (editingAlbum) {
+        const form = new FormData();
+        form.append("title", title.trim());
+        form.append("date_label", dateLbl.trim());
+        form.append("description", description.trim());
+        photos.forEach(p => form.append("photos", p));
+        const result = await hrApi.eMagazineAddPhotos(editingAlbum.filename, form);
+        setSuccess(`Added ${result.added} photo(s) — "${title}" now has ${result.photos} total.`);
+      } else if (uploadType === "magazine") {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("title", title.trim());
+        form.append("date_label", dateLbl.trim());
+        form.append("description", description.trim());
+        form.append("qr_links_json", JSON.stringify(uploadQrLinks.filter(q => q.url.trim())));
+        await hrApi.eMagazineUpload(form);
+        setSuccess(`"${title}" uploaded successfully.`);
+      } else {
+        const form = new FormData();
+        form.append("title", title.trim());
+        form.append("date_label", dateLbl.trim());
+        form.append("description", description.trim());
+        form.append("qr_links_json", JSON.stringify(uploadQrLinks.filter(q => q.url.trim())));
+        photos.forEach(p => form.append("photos", p));
+        if (musicFile) form.append("music", musicFile);
+        await hrApi.eMagazineUploadAlbum(form);
+        setSuccess(`"${title}" (${photos.length} photos) uploaded successfully.`);
+      }
+      resetUploadForm();
       e.target.reset();
       load();
     } catch (err) {
@@ -6310,6 +7545,8 @@ function EMagazineSection() {
       await hrApi.eMagazineDelete(filename);
       setSuccess(`"${filename}" deleted successfully.`);
       if (editQr?.filename === filename) setEditQr(null);
+      if (editMeta?.filename === filename) setEditMeta(null);
+      if (editingAlbum?.filename === filename) { setEditingAlbum(null); setReorderPhotos([]); }
       load();
     } catch {
       setError("Failed to delete file.");
@@ -6330,6 +7567,32 @@ function EMagazineSection() {
   const openEditQr = (ed) => {
     const links = (ed.qr_links || []).map(q => ({ label: q.label || "", url: q.url || "" }));
     setEditQr({ filename: ed.filename, links });
+    setEditMeta(null);
+    setEditingAlbum(null);
+  };
+
+  const openEditMeta = (ed) => {
+    setEditMeta({ filename: ed.filename, title: ed.title || "", date: ed.date || "", description: ed.description || "" });
+    setEditQr(null);
+    setEditingAlbum(null);
+  };
+
+  const handleSaveMeta = async () => {
+    if (!editMeta) return;
+    if (!editMeta.title.trim()) { setError("Title tidak boleh kosong."); return; }
+    setSavingMeta(editMeta.filename);
+    try {
+      await hrApi.eMagazineUpdateMeta(editMeta.filename, {
+        title: editMeta.title.trim(),
+        date: editMeta.date.trim(),
+        description: editMeta.description.trim(),
+      });
+      setSuccess("Edition updated successfully.");
+      setEditMeta(null);
+      load();
+    } catch (err) {
+      setError(err?.detail || "Failed to update edition.");
+    } finally { setSavingMeta(null); }
   };
 
   const handleSaveQr = async () => {
@@ -6394,17 +7657,139 @@ function EMagazineSection() {
   return (
     <div className="space-y-6">
       {/* Upload form */}
-      <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-5">
+      <div ref={uploadFormRef} className={`rounded-xl border p-5 ${editingAlbum ? "border-teal-600 bg-teal-950/20" : "border-gray-800 bg-gray-900/60"}`}>
         <h3 className="text-sm font-semibold text-teal-400 mb-4 flex items-center gap-2">
-          <Upload size={14} /> Upload New e-Magazine
+          <Upload size={14} /> {editingAlbum ? `Add Photos to Album` : "Upload New Edition"}
         </h3>
+
+        {/* Type toggle — locked to Photo Album while adding photos to an existing one */}
+        {!editingAlbum && (
+          <div className="flex gap-2 mb-4">
+            <button
+              type="button"
+              onClick={() => { setUploadType("magazine"); setError(""); }}
+              className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                uploadType === "magazine"
+                  ? "bg-teal-600 border-teal-600 text-white"
+                  : "border-gray-700 text-gray-400 hover:bg-gray-800"
+              }`}
+            >
+              <BookOpen size={14} /> e-Magazine (PDF)
+            </button>
+            <button
+              type="button"
+              onClick={() => { setUploadType("photo_album"); setError(""); }}
+              className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${
+                uploadType === "photo_album"
+                  ? "bg-teal-600 border-teal-600 text-white"
+                  : "border-gray-700 text-gray-400 hover:bg-gray-800"
+              }`}
+            >
+              <Camera size={14} /> Photo Album
+            </button>
+          </div>
+        )}
+
+        {editingAlbum && (
+          <>
+            <p className="text-xs text-teal-300/80 mb-3">
+              This album has {editingAlbum.existingCount} photo{editingAlbum.existingCount === 1 ? "" : "s"}. Use the arrows to reorder them, or add more below.
+            </p>
+            {reorderPhotos.length > 0 && (
+              <div className="mb-4 rounded-lg border border-gray-700 bg-gray-800/40 p-3">
+                <p className="text-xs text-gray-400 font-medium mb-2">Reorder Existing Photos</p>
+                <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
+                  {reorderPhotos.map((p, idx) => (
+                    <div key={p} className="relative group aspect-square rounded-lg overflow-hidden border border-gray-700">
+                      <img src={photoUrl(editingAlbum.filename, p)} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                      <span className="absolute top-0.5 left-0.5 bg-black/70 text-white text-[10px] rounded px-1">{idx + 1}</span>
+                      <div className="absolute inset-x-0 bottom-0 flex justify-center gap-0.5 bg-black/60 opacity-0 group-hover:opacity-100 transition py-0.5">
+                        <button
+                          type="button"
+                          onClick={() => movePhoto(idx, -1)}
+                          disabled={idx === 0}
+                          className="text-white disabled:opacity-30 px-1"
+                          title="Move left"
+                        >
+                          <ChevronLeft size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => movePhoto(idx, 1)}
+                          disabled={idx === reorderPhotos.length - 1}
+                          className="text-white disabled:opacity-30 px-1"
+                          title="Move right"
+                        >
+                          <ChevronRight size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveOrder}
+                  disabled={savingOrder}
+                  className="mt-3 flex items-center gap-1.5 rounded-lg bg-teal-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-teal-500 disabled:opacity-50 transition-colors"
+                >
+                  {savingOrder ? <Loader2 size={11} className="animate-spin" /> : null}
+                  Save Order
+                </button>
+              </div>
+            )}
+
+            <div className="mb-4 rounded-lg border border-gray-700 bg-gray-800/40 p-3">
+              <p className="text-xs text-gray-400 font-medium mb-2 flex items-center gap-1.5">
+                <Music size={11} /> Background Music
+              </p>
+              {editingAlbum.hasMusic && (
+                <p className="text-xs text-teal-300/80 mb-2 flex items-center gap-1.5">
+                  <CheckCircle2 size={11} /> Music is set for this album.
+                </p>
+              )}
+              <div className="flex items-center gap-2">
+                <input
+                  type="file"
+                  accept="audio/mpeg,audio/mp3,audio/ogg,audio/wav"
+                  onChange={handleMusicSelect}
+                  className="flex-1 rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-400 file:mr-3 file:rounded file:border-0 file:bg-teal-600 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white focus:outline-none"
+                />
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={handleUploadMusic}
+                  disabled={!musicFile || savingMusic}
+                  className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-teal-500 disabled:opacity-50 transition-colors"
+                >
+                  {savingMusic ? <Loader2 size={11} className="animate-spin" /> : null}
+                  {editingAlbum.hasMusic ? "Replace Music" : "Upload Music"}
+                </button>
+                {editingAlbum.hasMusic && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveMusic}
+                    disabled={savingMusic}
+                    className="flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-xs font-semibold text-red-400 hover:bg-red-500/10 disabled:opacity-50 transition-colors"
+                  >
+                    <Trash2 size={11} /> Remove
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-500 mt-2">Loops automatically while a viewer is browsing this album in the public reading room.</p>
+            </div>
+          </>
+        )}
+
         <form onSubmit={handleUpload} className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="space-y-1">
-              <label className="text-xs text-gray-400 font-medium">Edition Title *</label>
+              <label className="text-xs text-gray-400 font-medium">
+                {uploadType === "magazine" ? "Edition Title *" : "Album Title *"}
+              </label>
               <input
                 type="text"
-                placeholder="e.g. 2nd Edition"
+                placeholder={uploadType === "magazine" ? "e.g. 2nd Edition" : "e.g. Company Anniversary 2026"}
                 value={title}
                 onChange={e => setTitle(e.target.value)}
                 className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
@@ -6421,23 +7806,82 @@ function EMagazineSection() {
                 className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
               />
             </div>
+            {uploadType === "magazine" ? (
+              <div className="space-y-1">
+                <label className="text-xs text-gray-400 font-medium">PDF File * (max 100 MB)</label>
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={e => setFile(e.target.files[0] || null)}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-400 file:mr-3 file:rounded file:border-0 file:bg-teal-600 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white focus:outline-none"
+                />
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <label className="text-xs text-gray-400 font-medium">Photos * (JPEG/PNG/WebP, max 20 MB each)</label>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  multiple
+                  onChange={handlePhotosSelect}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-400 file:mr-3 file:rounded file:border-0 file:bg-teal-600 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white focus:outline-none"
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs text-gray-400 font-medium">Description (optional)</label>
+            <textarea
+              placeholder="Additional notes about this edition — shown in the public reading room's edition list."
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={2}
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none resize-y"
+            />
+          </div>
+
+          {uploadType === "photo_album" && !editingAlbum && (
             <div className="space-y-1">
-              <label className="text-xs text-gray-400 font-medium">PDF File * (max 100 MB)</label>
+              <label className="text-xs text-gray-400 font-medium flex items-center gap-1.5">
+                <Music size={11} /> Background Music (optional, MP3/OGG/WAV, max 25 MB)
+              </label>
               <input
                 type="file"
-                accept="application/pdf"
-                onChange={e => setFile(e.target.files[0] || null)}
+                accept="audio/mpeg,audio/mp3,audio/ogg,audio/wav"
+                onChange={handleMusicSelect}
                 className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-400 file:mr-3 file:rounded file:border-0 file:bg-teal-600 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white focus:outline-none"
-                required
               />
+              <p className="text-[11px] text-gray-500">Loops automatically while a viewer is browsing this album in the public reading room.</p>
             </div>
-          </div>
-          <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-3">
-            <label className="text-xs text-gray-400 font-medium mb-2 flex items-center gap-1.5">
-              <QrCode size={11} /> QR Code Link (optional)
-            </label>
-            <QrLinksEditor links={uploadQrLinks} setter={setUploadQrLinks} />
-          </div>
+          )}
+
+          {uploadType === "photo_album" && photos.length > 0 && (
+            <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 gap-2">
+              {photos.map((p, idx) => (
+                <div key={idx} className="relative group aspect-square rounded-lg overflow-hidden border border-gray-700">
+                  <img src={URL.createObjectURL(p)} alt={p.name} className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => removePhoto(idx)}
+                    className="absolute top-0.5 right-0.5 bg-black/70 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition"
+                    title="Remove"
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!editingAlbum && (
+            <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-3">
+              <label className="text-xs text-gray-400 font-medium mb-2 flex items-center gap-1.5">
+                <QrCode size={11} /> QR Code Link (optional)
+              </label>
+              <QrLinksEditor links={uploadQrLinks} setter={setUploadQrLinks} />
+            </div>
+          )}
           <div className="flex items-center gap-3">
             <button
               type="submit"
@@ -6445,8 +7889,18 @@ function EMagazineSection() {
               className="flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2 text-sm font-semibold text-white hover:bg-teal-500 disabled:opacity-50 transition-colors"
             >
               {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-              {uploading ? "Uploading…" : "Upload"}
+              {uploading ? "Uploading…" : editingAlbum ? `Add ${photos.length || ""} Photo${photos.length === 1 ? "" : "s"}` : "Upload"}
             </button>
+            {editingAlbum && (
+              <button
+                type="button"
+                onClick={cancelAddPhotos}
+                disabled={uploading}
+                className="rounded-lg px-4 py-2 text-sm font-semibold text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            )}
             {success && <span className="text-xs text-teal-400">{success}</span>}
             {error   && <span className="text-xs text-red-400">{error}</span>}
           </div>
@@ -6473,43 +7927,78 @@ function EMagazineSection() {
             <button onClick={load} className="text-teal-400 hover:text-teal-300 underline">Try again</button>
           </div>
         ) : list.length === 0 ? (
-          <p className="py-10 text-center text-xs text-gray-600">No e-magazines yet. Upload a PDF above.</p>
+          <p className="py-10 text-center text-xs text-gray-600">No editions yet. Upload a PDF e-magazine or a photo album above.</p>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-800/40">
                 <SortableTH label="Title"     field="title"       sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="px-4 py-2.5" />
                 <SortableTH label="Period"    field="date"        sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="px-4 py-2.5" />
-                <SortableTH label="File Name" field="filename"    sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="px-4 py-2.5" />
+                <SortableTH label="File" field="filename"    sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="px-4 py-2.5" />
                 <SortableTH label="Uploaded"  field="uploaded_at" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} className="px-4 py-2.5" />
                 <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
               {sortRows(list, sortBy, sortDir, []).map((ed, i) => (
-                <>
-                  <tr key={i} className="hover:bg-gray-800/40 transition-colors">
+                <Fragment key={ed.filename ?? i}>
+                  <tr className="hover:bg-gray-800/40 transition-colors">
                     <td className="px-4 py-3 font-medium text-gray-200">
+                      {ed.type === "photo_album" ? (
+                        <span className="mr-2 inline-flex items-center gap-1 rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-purple-400 align-middle">
+                          <Camera size={10} /> Photo Album
+                        </span>
+                      ) : (
+                        <span className="mr-2 inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-blue-400 align-middle">
+                          <BookOpen size={10} /> e-Magazine
+                        </span>
+                      )}
                       {ed.title}
                       {ed.text_pages > 0 && (
                         <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-green-400 align-middle">
                           <CheckCircle2 size={10} /> Text ready ({ed.text_pages}p)
                         </span>
                       )}
+                      {ed.type === "photo_album" && ed.music && (
+                        <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-teal-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-teal-400 align-middle">
+                          <Music size={10} /> Music
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-gray-400">{ed.date || "-"}</td>
-                    <td className="px-4 py-3 text-gray-500 text-xs font-mono">{ed.filename}</td>
+                    <td className="px-4 py-3 text-gray-500 text-xs font-mono">
+                      {ed.type === "photo_album" ? `${ed.photos?.length || 0} photos` : ed.filename}
+                    </td>
                     <td className="px-4 py-3 text-gray-500 text-xs">{fmtDate(ed.uploaded_at)}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {ed.type !== "photo_album" && (
+                          <button
+                            onClick={() => handleConvertToText(ed.filename)}
+                            disabled={converting === ed.filename}
+                            title="Extract text on-premise (PyMuPDF + Tesseract OCR fallback, same pipeline as the AI Chatbot's document ingest) so this edition becomes searchable in the public reader."
+                            className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-purple-400 hover:bg-purple-500/10 disabled:opacity-40 transition-colors"
+                          >
+                            {converting === ed.filename ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+                            {converting === ed.filename ? "Converting…" : ed.text_pages > 0 ? "Re-convert" : "Convert to Text"}
+                          </button>
+                        )}
                         <button
-                          onClick={() => handleConvertToText(ed.filename)}
-                          disabled={converting === ed.filename}
-                          title="Extract text on-premise (PyMuPDF + Tesseract OCR fallback, same pipeline as the AI Chatbot's document ingest) so this edition becomes searchable in the public reader."
-                          className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-purple-400 hover:bg-purple-500/10 disabled:opacity-40 transition-colors"
+                          onClick={() => {
+                            if (ed.type === "photo_album") {
+                              editingAlbum?.filename === ed.filename ? cancelAddPhotos() : openAddPhotos(ed);
+                            } else {
+                              editMeta?.filename === ed.filename ? setEditMeta(null) : openEditMeta(ed);
+                            }
+                          }}
+                          className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+                            editMeta?.filename === ed.filename || editingAlbum?.filename === ed.filename
+                              ? "bg-teal-500/20 text-teal-300"
+                              : "text-gray-400 hover:bg-gray-700/60 hover:text-gray-200"
+                          }`}
                         >
-                          {converting === ed.filename ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
-                          {converting === ed.filename ? "Converting…" : ed.text_pages > 0 ? "Re-convert" : "Convert to Text"}
+                          <Pencil size={11} />
+                          Edit
                         </button>
                         <button
                           onClick={() => editQr?.filename === ed.filename ? setEditQr(null) : openEditQr(ed)}
@@ -6535,6 +8024,62 @@ function EMagazineSection() {
                       </div>
                     </td>
                   </tr>
+                  {editMeta?.filename === ed.filename && (
+                    <tr key={`${i}-meta`}>
+                      <td colSpan={5} className="px-4 py-3 bg-gray-900/80 border-t border-gray-700/40">
+                        <div className="max-w-2xl space-y-3">
+                          <p className="text-xs font-semibold text-gray-300 flex items-center gap-1.5">
+                            <Pencil size={11} /> Edit Edition — {ed.filename}
+                          </p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <label className="text-xs text-gray-400 font-medium">Title *</label>
+                              <input
+                                type="text"
+                                value={editMeta.title}
+                                onChange={e => setEditMeta(prev => ({ ...prev, title: e.target.value }))}
+                                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-xs text-gray-400 font-medium">Period</label>
+                              <input
+                                type="text"
+                                value={editMeta.date}
+                                onChange={e => setEditMeta(prev => ({ ...prev, date: e.target.value }))}
+                                className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none"
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs text-gray-400 font-medium">Description (optional)</label>
+                            <textarea
+                              value={editMeta.description}
+                              onChange={e => setEditMeta(prev => ({ ...prev, description: e.target.value }))}
+                              rows={2}
+                              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:border-teal-500 focus:outline-none resize-y"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2 pt-1">
+                            <button
+                              onClick={handleSaveMeta}
+                              disabled={!!savingMeta}
+                              className="flex items-center gap-1.5 rounded-lg bg-teal-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-teal-500 disabled:opacity-50 transition-colors"
+                            >
+                              {savingMeta ? <Loader2 size={11} className="animate-spin" /> : null}
+                              Save
+                            </button>
+                            <button
+                              onClick={() => setEditMeta(null)}
+                              className="rounded-lg px-4 py-1.5 text-xs font-semibold text-gray-400 hover:text-gray-200 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
                   {editQr?.filename === ed.filename && (
                     <tr key={`${i}-qr`}>
                       <td colSpan={5} className="px-4 py-3 bg-gray-900/80 border-t border-teal-800/40">
@@ -6570,7 +8115,7 @@ function EMagazineSection() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>

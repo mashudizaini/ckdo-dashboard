@@ -137,3 +137,6 @@ class Roles:
     ACCOUNTING = "accounting_staff"
     PURCHASING = "purchasing_staff"
     MANAGEMENT = "management"
+    SALES = "sales_staff"
+    PPWH = "ppwh_staff"
+    PRODUCTION = "production_staff"

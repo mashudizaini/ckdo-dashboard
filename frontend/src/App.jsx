@@ -12,6 +12,9 @@ import HRDashboard from "@/pages/dashboard/HR";
 import PACDashboard from "@/pages/dashboard/PAC";
 import AccountingDashboard from "@/pages/dashboard/Accounting";
 import PurchasingDashboard from "@/pages/dashboard/Purchasing";
+import SalesMarketingDashboard from "@/pages/dashboard/SalesMarketing";
+import PPWHDashboard from "@/pages/dashboard/PPWH";
+import ProductionDashboard from "@/pages/dashboard/Production";
 import GeneralDashboard from "@/pages/dashboard/General";
 import EISDashboard from "@/pages/dashboard/EIS";
 import OvertimeSystem from "@/pages/dashboard/overtime/OvertimeSystem";
@@ -20,12 +23,17 @@ import OvertimeSystem from "@/pages/dashboard/overtime/OvertimeSystem";
 import SetupPage from "@/pages/setup/SetupPage";
 import HRSetupPage from "@/pages/setup/HRSetupPage";
 import GeneralSetupPage from "@/pages/setup/general/GeneralSetupPage";
+import AccountingSetupPage from "@/pages/setup/accounting/AccountingSetupPage";
+import AiSetupPage from "@/pages/setup/ai/AiSetupPage";
 
 // AI Tools Pages
 import Chatbot from "@/pages/ai-tools/Chatbot";
-import DocumentConverter from "@/pages/ai-tools/DocumentConverter";
 import MeetingNotes from "@/pages/ai-tools/MeetingNotes";
 import MeetingTranscriptView from "@/pages/ai-tools/MeetingTranscriptView";
+
+// E-Magazine Pages
+import EMagazinePage from "@/pages/EMagazinePage";
+import EMagazineAdminPage from "@/pages/admin/EMagazineAdminPage";
 
 export default function App() {
   const { init, isLoading, isAuthenticated, returnPath, clearReturnPath } = useAuthStore();
@@ -134,6 +142,30 @@ export default function App() {
           }
         />
         <Route
+          path="sales/*"
+          element={
+            <ProtectedRoute roles={["sales_staff", "admin"]}>
+              <SalesMarketingDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="ppwh/*"
+          element={
+            <ProtectedRoute roles={["ppwh_staff", "admin"]}>
+              <PPWHDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="production/*"
+          element={
+            <ProtectedRoute roles={["production_staff", "admin"]}>
+              <ProductionDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="general/*"
           element={
             // No roles — reachable by any authenticated user. Sub-modules
@@ -165,9 +197,10 @@ export default function App() {
         <Route path="it"          element={<ProtectedRoute><SetupPage team="IT" /></ProtectedRoute>} />
         <Route path="hr"          element={<ProtectedRoute><HRSetupPage /></ProtectedRoute>} />
         <Route path="pac"         element={<ProtectedRoute><SetupPage team="PAC" /></ProtectedRoute>} />
-        <Route path="accounting"  element={<ProtectedRoute><SetupPage team="Accounting & Tax" /></ProtectedRoute>} />
+        <Route path="accounting"  element={<ProtectedRoute><AccountingSetupPage /></ProtectedRoute>} />
         <Route path="purchasing"  element={<ProtectedRoute><SetupPage team="Purchasing" /></ProtectedRoute>} />
         <Route path="general"     element={<ProtectedRoute><GeneralSetupPage /></ProtectedRoute>} />
+        <Route path="ai"          element={<ProtectedRoute><AiSetupPage /></ProtectedRoute>} />
       </Route>
 
       {/* Bare new-tab view (no sidebar chrome) — opened via window.open() after transcribing */}
@@ -176,10 +209,20 @@ export default function App() {
       {/* AI Tools */}
       <Route path="/ai" element={<Layout />}>
         <Route path="chatbot" element={<Chatbot />} />
-        <Route path="document-converter" element={<DocumentConverter />} />
+        {/* Moved to Setup > AI (2026-09-03) alongside Knowledge Base — kept
+            as a redirect so any existing bookmark/link still lands somewhere. */}
+        <Route path="document-converter" element={<Navigate to="/setup/ai" replace />} />
         <Route path="oracle-data" element={<Navigate to="/ai/chatbot" replace />} />
         <Route path="meeting-notes" element={<MeetingNotes />} />
       </Route>
+
+      {/* E-Magazine (new dynamic viewer) — deliberately NOT /e-magazine: nginx
+          already serves the old static PDF-based e-magazine directly from
+          disk at that exact prefix (location /e-magazine/ in nginx.dev.conf),
+          which wins over this SPA route since it's a more specific prefix
+          match. Temporary path while both versions coexist during testing. */}
+      <Route path="/e-magazine-viewer" element={<EMagazinePage />} />
+      <Route path="/e-magazine-viewer/admin" element={<EMagazineAdminPage />} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

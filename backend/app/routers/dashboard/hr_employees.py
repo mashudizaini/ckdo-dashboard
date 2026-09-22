@@ -12,6 +12,7 @@ from typing import Optional
 
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -21,6 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.dependencies import require_role, get_current_user, CurrentUser, Roles
 from app.models.employee import Employee, EmployeeUploadLog, EmployeeHistory
+from app.models.department_master import DepartmentMaster
+from app.services import department_master_service
 from app.services.department_taxonomy import clean_department_list
 
 router = APIRouter()
@@ -29,6 +32,11 @@ _PHOTO_UPLOAD_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "uploads", "employee_photos"
 )
 os.makedirs(_PHOTO_UPLOAD_DIR, exist_ok=True)
+
+_RESIGN_DOC_UPLOAD_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "uploads", "employee_resign_documents"
+)
+os.makedirs(_RESIGN_DOC_UPLOAD_DIR, exist_ok=True)
 
 # ── Mapping kolom Excel → field model ─────────────────────────────────────────
 # Index berdasarkan posisi kolom di baris 1 (0-based), sesuai export standar Talenta
@@ -514,6 +522,100 @@ async def upload_employees(
     }
 
 
+# Column headers built to Title Case for readability — a couple read oddly
+# title-cased (an all-caps acronym, a trailing hyphen) so they're spelled
+# out explicitly instead. Every other header is exactly NEW_TEMPLATE_ALIASES'
+# own value, Title Cased — never hand-duplicated, so the template can't
+# drift out of sync with what /upload's parser actually looks for.
+_TEMPLATE_HEADER_OVERRIDES = {
+    "user_id": "User ID", "doj": "DOJ", "pkwt_ke": "PKWT Ke-",
+    "no_bpjs_health": "No BPJS Health Insurance", "no_bpjs_employee": "No BPJS Employee Benefits",
+    "npwp_number": "NPWP Number", "bank_account_bca": "Rekening Number (BCA)",
+    "bank_account_name": "Rekening Name (BCA)", "address": "Adress/Resident Employee",
+}
+# EMP Resign's real sheet doesn't carry these two (see NEW_TEMPLATE_SHEETS'
+# own comment: "EMP Active (has DIVISION/TEAM columns) and EMP Resign (doesn't)").
+_TEMPLATE_ACTIVE_ONLY_FIELDS = ("division", "team")
+
+
+@router.get("/upload-template")
+async def download_upload_template(
+    user: CurrentUser = Depends(require_role(Roles.HR)),
+):
+    """Blank Excel template matching exactly what /upload's new-template
+    parser (_parse_new_template_sheet) expects — headers built directly
+    from NEW_TEMPLATE_ALIASES so this can never drift out of sync with the
+    parser itself. Two sheets (EMP Active / EMP Resign), a "LAST EDUCATION
+    BACKROUND" merged header spanning a Degree/Major column pair on row 2
+    (the parser skips row 2 unconditionally as this sub-header row — see
+    _parse_new_template_sheet's data_start = header_row + 2), data starts
+    row 3."""
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    header_font  = Font(bold=True, size=11, color="FFFFFF")
+    header_fill  = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    sub_font     = Font(bold=True, size=10, italic=True)
+    thin         = Side(style="thin")
+    border       = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def build_sheet(sheet_name, employment_status):
+        ws = wb.create_sheet(sheet_name)
+        fields = ["user_id"] + [f for f in NEW_TEMPLATE_ALIASES if f != "user_id"]
+        if employment_status == "Resign":
+            fields = [f for f in fields if f not in _TEMPLATE_ACTIVE_ONLY_FIELDS]
+        # Education (degree/major) isn't in NEW_TEMPLATE_ALIASES at all — it's
+        # parsed separately via _EDU_HEADER — inserted here right after job_title.
+        insert_at = fields.index("job_title") + 1 if "job_title" in fields else len(fields)
+        fields = fields[:insert_at] + ["__education__"] + fields[insert_at:]
+
+        col = 1
+        edu_col = None
+        for f in fields:
+            if f == "__education__":
+                edu_col = col
+                cell = ws.cell(row=1, column=col, value="LAST EDUCATION BACKROUND")
+                ws.merge_cells(start_row=1, start_column=col, end_row=1, end_column=col + 1)
+                for c in (col, col + 1):
+                    ws.cell(row=1, column=c).font = header_font
+                    ws.cell(row=1, column=c).fill = header_fill
+                    ws.cell(row=1, column=c).alignment = header_align
+                    ws.cell(row=1, column=c).border = border
+                ws.cell(row=2, column=col, value="Degree").font = sub_font
+                ws.cell(row=2, column=col + 1, value="Major").font = sub_font
+                ws.column_dimensions[get_column_letter(col)].width = 16
+                ws.column_dimensions[get_column_letter(col + 1)].width = 16
+                col += 2
+                continue
+            label = _TEMPLATE_HEADER_OVERRIDES.get(f, NEW_TEMPLATE_ALIASES[f].title())
+            cell = ws.cell(row=1, column=col, value=label)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            cell.border = border
+            ws.merge_cells(start_row=1, start_column=col, end_row=2, end_column=col)
+            ws.column_dimensions[get_column_letter(col)].width = 18
+            col += 1
+
+        ws.row_dimensions[1].height = 20
+        ws.freeze_panes = "A3"
+        return ws
+
+    build_sheet("EMP Active", "Active")
+    build_sheet("EMP Resign", "Resign")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=employee_upload_template.xlsx"},
+    )
+
+
 # ── Query endpoints ────────────────────────────────────────────────────────────
 
 @router.get("/birthdays-this-month")
@@ -562,39 +664,77 @@ async def get_employee_summary(
 ):
     """Statistik ringkasan untuk KPI cards.
 
-    Accepts the same filter set as the list endpoint below it (search,
-    department, status, employment_status, team, join_month/join_year) so the
-    cards always match whatever the Employee List is currently showing —
-    otherwise the cards (unfiltered) silently disagree with the filtered list
-    (e.g. "Resign" card showing more than the list actually displays)."""
+    Accepts the same filter set as the list endpoint below it. The KPI
+    cards (Active/Inactive/Permanent/Contract/Probation) are computed
+    against `card_base` — search/department/team/join-date AND
+    `employment_status` applied, but NOT `status` — instead of the
+    fully-filtered `base` used for by_dept/by_level/by_sex below.
+
+    `employment_status` stays in card_base for Permanent/Contract/
+    Probation on purpose: it's the "which population" toggle (Active
+    roster vs Resign history), so with the Employee List's default
+    employment_status=Active, those three correctly count only active
+    employees.
+
+    Active/Inactive themselves are the one exception (2026-09-17): they're
+    computed against `card_base_all_states` — the same filters MINUS
+    employment_status — so both numbers are always visible together
+    regardless of which Employment State is currently selected, instead of
+    one of them always reading a contradictory 0 (e.g. Inactive reading 0
+    whenever Employment State=Active, which isn't "0 people have resigned",
+    just "0 of the ACTIVE population counts as resigned by definition").
+
+    `status` (Permanent/Contract/Probation) stays OUT of card_base because
+    those three values are mutually exclusive — bug fixed 2026-09-09: with
+    `status` included, clicking any one of those cards zeroed out the
+    other two (a Permanent employee can't also be Contract), so each
+    card's number was silently scoped by whichever *other* card the user
+    had already clicked instead of showing a stable breakdown. The list
+    endpoint below still filters by employment_status/status as
+    requested for the actual table."""
+    card_base = _apply_employee_filters(
+        select(Employee), search=search, department=department, team=team,
+        employment_status=employment_status,
+        join_month=join_month, join_year=join_year,
+    )
+    card_base_all_states = _apply_employee_filters(
+        select(Employee), search=search, department=department, team=team,
+        join_month=join_month, join_year=join_year,
+    )
     base = _apply_employee_filters(
         select(Employee), search=search, department=department, status=status,
         employment_status=employment_status, team=team,
         join_month=join_month, join_year=join_year,
     )
 
-    def counted(*conditions):
-        q = base
+    def card_counted(*conditions):
+        q = card_base
         for c in conditions:
             q = q.where(c)
         return select(func.count()).select_from(q.subquery())
 
-    total_q   = await db.execute(counted())
+    def card_counted_all_states(*conditions):
+        q = card_base_all_states
+        for c in conditions:
+            q = q.where(c)
+        return select(func.count()).select_from(q.subquery())
+
+    total_q   = await db.execute(card_counted())
     total     = total_q.scalar() or 0
 
-    perm_q    = await db.execute(counted(Employee.status == "Permanent"))
+    perm_q    = await db.execute(card_counted(Employee.status == "Permanent"))
     permanent = perm_q.scalar() or 0
 
-    contract_q = await db.execute(counted(Employee.status == "Contract"))
+    contract_q = await db.execute(card_counted(Employee.status == "Contract"))
     contract  = contract_q.scalar() or 0
 
-    probation_q = await db.execute(counted(Employee.status == "Probation"))
+    probation_q = await db.execute(card_counted(Employee.status == "Probation"))
     probation = probation_q.scalar() or 0
 
-    active_q = await db.execute(counted(Employee.employment_status == "Active"))
+    active_q = await db.execute(card_counted_all_states(Employee.employment_status == "Active"))
     active_count = active_q.scalar() or 0
 
-    resign_q = await db.execute(counted(Employee.employment_status == "Resign"))
+    resign_q = await db.execute(card_counted_all_states(Employee.employment_status == "Resign"))
     resign_count = resign_q.scalar() or 0
 
     base_sq = base.subquery()
@@ -679,7 +819,26 @@ def _emp_dict(e: Employee) -> dict:
         "bank_account_name": e.bank_account_name,
         "scheduled_checkin": e.scheduled_checkin,
         "has_photo":        bool(e.photo_filename),
+        "has_resign_document": bool(e.resign_document_filename),
     }
+
+
+# department_master's curated department names (used for the Employee
+# List / Turnover Report filter dropdown, see /departments' source="master")
+# don't all match Employee.department's raw stored spelling 1:1 — a
+# 2026-08-10 upload-normalization migration settled on "Strategy &
+# Development" for that department's raw data, predating department_master,
+# which still (correctly, per HR) says "Strategy Development". This bridges
+# that one known gap so picking it from the dropdown still returns those 25
+# employees instead of zero. Add another entry here if department_master
+# ever gets a name that diverges from Employee.department in the same way.
+_DEPT_FILTER_ALIASES = {
+    "Strategy Development": "Strategy & Development",
+}
+
+
+def _resolve_department_alias(department: Optional[str]) -> Optional[str]:
+    return _DEPT_FILTER_ALIASES.get(department, department) if department else department
 
 
 def _apply_employee_filters(
@@ -691,6 +850,7 @@ def _apply_employee_filters(
     """Shared WHERE-clause builder — used by both the list endpoint and the
     Excel export, so the two can never silently drift apart on what counts
     as "matching" a filter."""
+    department = _resolve_department_alias(department)
     if search:
         term = f"%{search}%"
         q = q.where(
@@ -699,16 +859,31 @@ def _apply_employee_filters(
             Employee.job_title.ilike(term)
         )
     if department:
-        if department in DEPT_GROUPS:
-            # One of the 4 canonical Employee Summary groups (e.g. drilling
+        if department == "President Director":
+            # Not a raw Employee.department value at all — this group is
+            # routed purely by job_title containing "President Director"
+            # (see _group_department's docstring — the raw department/team
+            # columns for this one role have proven unreliable to key off).
+            # Drilling down from the Summary's "President Director" row must
+            # match the same people it counted, not zero rows.
+            q = q.where(Employee.job_title.ilike("%president director%"))
+        elif department in DEPT_GROUPS:
+            # One of the canonical Employee Summary groups (e.g. drilling
             # down from the summary view) — match every raw department value
             # that rolls up into this group, not just an exact string match.
             # Needed both for case-duplicates ("Plant"/"PLANT") and for
-            # misfiled raw values ("Director", "Validation", ...) that group
-            # display labels don't literally match (e.g. "Strategy &
-            # Development" vs the raw "Strategy Development").
+            # misfiled raw values ("Validation", ...) that group display
+            # labels don't literally match. Also excludes President-Director
+            # rows even when their raw department is this group, since those
+            # belong to "President Director" instead — a department-scoped
+            # Director (job_title not matching "President Director", e.g.
+            # "Plant Director") is NOT excluded, so they stay counted in
+            # their own department.
             raw_uppers = [k for k, v in _DEPT_GROUP_MAP.items() if v == department]
-            q = q.where(func.upper(Employee.department).in_(raw_uppers))
+            q = q.where(
+                func.upper(Employee.department).in_(raw_uppers),
+                or_(Employee.job_title.is_(None), ~Employee.job_title.ilike("%president director%")),
+            )
         else:
             # Case-insensitive — the source Excel has case duplicates for the
             # same department ("Plant" / "PLANT"); an exact match would
@@ -733,22 +908,60 @@ def _apply_employee_filters(
     if marital_status:
         q = q.where(Employee.marital_status == marital_status)
     if join_year:
-        # Cumulative "as of" cutoff — how many employees have joined up to
-        # this month/year, regardless of whether they've since resigned.
-        cutoff_month = join_month or 12
-        cutoff_date = date(join_year, cutoff_month, monthrange(join_year, cutoff_month)[1])
-        q = q.where(Employee.date_of_joining.isnot(None), Employee.date_of_joining <= cutoff_date)
+        # Exact match — only employees who joined in this specific month/
+        # year, not a cumulative "up to" cutoff (changed 2026-09-17 from
+        # the previous <= cutoff-date behavior, per explicit request: the
+        # Joined Month/Year filter should only pull the exact period
+        # picked). Year alone (no month) still means "anywhere in that
+        # year" — the "All" option for Month stays meaningful.
+        conditions = [Employee.date_of_joining.isnot(None), extract("year", Employee.date_of_joining) == join_year]
+        if join_month:
+            conditions.append(extract("month", Employee.date_of_joining) == join_month)
+        q = q.where(*conditions)
     if snapshot_year:
         # "Active as of" a specific month-end — same windowing as
         # /summary/by-month, so drilling down from that report into this
         # list yields the exact same headcount.
         cutoff_month = snapshot_month or 12
         snapshot_date = date(snapshot_year, cutoff_month, monthrange(snapshot_year, cutoff_month)[1])
-        q = q.where(
-            Employee.date_of_joining.isnot(None), Employee.date_of_joining <= snapshot_date,
-            (Employee.resign_date.is_(None) | (Employee.resign_date >= snapshot_date)),
-        )
+        q = q.where(_active_as_of_expr(snapshot_date))
     return q
+
+
+def _active_as_of_expr(snapshot_date):
+    """SQLAlchemy WHERE-fragment: employee was part of the active roster as
+    of snapshot_date, based on join/resign dates. A NULL resign_date
+    normally means "still with the company" — but 3 records (found
+    2026-09-08 via the Employee Graph's By Level chart overcounting "HR &
+    GA Spv") have employment_status == "Resign" with no resign_date on
+    file, an HR data gap rather than a still-employed person. Falling back
+    to employment_status for exactly that combination stops such rows from
+    being silently counted as active forever; NULL employment_status is
+    treated as "not known to be resigned" (unrelated blank field, not a
+    resign signal). See _is_active for the equivalent in-memory version
+    used by endpoints that window over a fetched employee list instead of
+    filtering in SQL."""
+    return and_(
+        Employee.date_of_joining.isnot(None),
+        Employee.date_of_joining <= snapshot_date,
+        or_(
+            Employee.resign_date >= snapshot_date,
+            and_(
+                Employee.resign_date.is_(None),
+                or_(Employee.employment_status.is_(None), Employee.employment_status != "Resign"),
+            ),
+        ),
+    )
+
+
+def _is_active(join_date, resign_date, employment_status, snapshot_date) -> bool:
+    """In-memory equivalent of _active_as_of_expr — see its docstring for
+    the employment_status fallback rationale."""
+    if join_date is None or join_date > snapshot_date:
+        return False
+    if resign_date is not None:
+        return resign_date >= snapshot_date
+    return employment_status != "Resign"
 
 
 @router.get("")
@@ -831,8 +1044,17 @@ async def list_employees(
         "bank_account_bca": Employee.bank_account_bca,
         "bank_account_name": Employee.bank_account_name,
     }
-    sort_col = _SORT_COLS.get(sort_by, Employee.full_name)
-    q        = q.order_by(sort_col.desc() if sort_dir == "desc" else sort_col.asc())
+    if sort_by == "default":
+        # Initial-load ordering: group by Department, then Active/Inactive,
+        # then Status — makes it easy to scan the list without first
+        # clicking a column header. Column-header clicks still sort by that
+        # single column (see _SORT_COLS below), this only applies before
+        # the user has clicked anything.
+        default_cols = [Employee.department, Employee.employment_status, Employee.status]
+        q = q.order_by(*[c.desc() for c in default_cols] if sort_dir == "desc" else default_cols)
+    else:
+        sort_col = _SORT_COLS.get(sort_by, Employee.full_name)
+        q        = q.order_by(sort_col.desc() if sort_dir == "desc" else sort_col.asc())
     q        = q.offset((page - 1) * page_size).limit(page_size)
     result   = await db.execute(q)
     employees = result.scalars().all()
@@ -947,9 +1169,13 @@ async def export_employees(
         join_month=join_month, join_year=join_year,
         snapshot_month=snapshot_month, snapshot_year=snapshot_year,
     )
-    sort_map = {k: getattr(Employee, k) for k, _, _ in _EXPORT_COLUMNS}
-    sort_col = sort_map.get(sort_by, Employee.full_name)
-    q = q.order_by(sort_col.desc() if sort_dir == "desc" else sort_col.asc())
+    if sort_by == "default":
+        default_cols = [Employee.department, Employee.employment_status, Employee.status]
+        q = q.order_by(*[c.desc() for c in default_cols] if sort_dir == "desc" else default_cols)
+    else:
+        sort_map = {k: getattr(Employee, k) for k, _, _ in _EXPORT_COLUMNS}
+        sort_col = sort_map.get(sort_by, Employee.full_name)
+        q = q.order_by(sort_col.desc() if sort_dir == "desc" else sort_col.asc())
     employees = (await db.execute(q)).scalars().all()
 
     selected_keys = set(fields.split(",")) if fields else None
@@ -1036,11 +1262,11 @@ async def get_monthly_summary(
     try:
         # All join/resign pairs for cumulative headcount
         emps_q = await db.execute(
-            select(Employee.user_id, Employee.date_of_joining, Employee.resign_date)
+            select(Employee.user_id, Employee.date_of_joining, Employee.resign_date, Employee.employment_status)
             .where(Employee.date_of_joining.isnot(None))
         )
-        emps_full = [(r[0], r[1], r[2]) for r in emps_q.fetchall()]
-        emps = [(join, resign) for _uid, join, resign in emps_full]
+        emps_full = [(r[0], r[1], r[2], r[3]) for r in emps_q.fetchall()]
+        emps = [(join, resign, es) for _uid, join, resign, es in emps_full]
     except Exception as e:
         raise HTTPException(500, f"emps_q error: {e}")
 
@@ -1061,8 +1287,8 @@ async def get_monthly_summary(
         last_day  = date(y, m, monthrange(y, m)[1])
         first_day = date(y, m, 1)
         cnt = sum(
-            1 for join, resign in emps
-            if join <= last_day and (resign is None or resign >= first_day)
+            1 for join, resign, es in emps
+            if join <= last_day and (resign >= first_day if resign is not None else es != "Resign")
         )
         headcount_trend.append({"month": f"{y}-{m:02d}", "label": f"{MN[m-1]} '{str(y)[2:]}", "count": cnt})
 
@@ -1073,29 +1299,27 @@ async def get_monthly_summary(
         key = f"{y}-{m:02d}"
         monthly_joins.append({"month": key, "label": f"{MN[m-1]} '{str(y)[2:]}", "joins": joins_map.get(key, 0)})
 
-    # Period filter — when month/year is given, breakdowns/KPIs reflect the
-    # active roster as of the end of that period instead of today's roster.
-    # Attribute values (department, status, ...) are still each employee's
-    # *current* value; only which employees get counted is period-aware.
-    active_ids = None
-    if year:
-        snapshot_date = date(year, month or 12, monthrange(year, month or 12)[1])
-        active_ids = {
-            uid for uid, join, resign in emps_full
-            if join <= snapshot_date and (resign is None or resign >= snapshot_date)
-        }
-    else:
-        snapshot_date = today
+    # Period filter — breakdowns/KPIs always reflect the *active* roster as
+    # of the end of the given period (or today, when no month/year is
+    # given) — never resigned employees. Attribute values (department,
+    # status, ...) are still each employee's *current* value; only which
+    # employees get counted is period-aware. Bug fixed 2026-09-08:
+    # active_ids used to stay None (no filter applied at all) for the
+    # default "Current" view, so by_status/by_level/by_marital/by_gender
+    # silently included every resigned employee too — only the year/month
+    # snapshot path was ever active-filtered.
+    snapshot_date = date(year, month or 12, monthrange(year, month or 12)[1]) if year else today
+    active_ids = {
+        uid for uid, join, resign, es in emps_full
+        if _is_active(join, resign, es, snapshot_date)
+    }
 
     # Generic breakdown helper — explicit AND to avoid any dialect issues
     async def _bd(col):
         try:
-            conditions = [col.isnot(None), col != ""]
-            if active_ids is not None:
-                conditions.append(Employee.user_id.in_(active_ids))
             q = await db.execute(
                 select(col, func.count().label("total"))
-                .where(and_(*conditions))
+                .where(and_(col.isnot(None), col != "", Employee.user_id.in_(active_ids)))
                 .group_by(col)
                 .order_by(func.count().desc())
             )
@@ -1112,10 +1336,11 @@ async def get_monthly_summary(
     by_religion= await _bd(Employee.religion)
 
     try:
-        sex_q = select(Employee.sex, func.count().label("t"))
-        if active_ids is not None:
-            sex_q = sex_q.where(Employee.user_id.in_(active_ids))
-        sex_q = sex_q.group_by(Employee.sex)
+        sex_q = (
+            select(Employee.sex, func.count().label("t"))
+            .where(Employee.user_id.in_(active_ids))
+            .group_by(Employee.sex)
+        )
         sex_result = await db.execute(sex_q)
         sex_map = {r[0]: r[1] for r in sex_result.fetchall()}
     except Exception:
@@ -1126,7 +1351,7 @@ async def get_monthly_summary(
         {"name": "Female", "total": sex_map.get("F", 0)},
     ]
 
-    period_total = len(active_ids) if active_ids is not None else headcount_trend[-1]["count"]
+    period_total = len(active_ids)
     if year and month:
         period_joins = joins_map.get(f"{year}-{month:02d}", 0)
     elif year:
@@ -1173,7 +1398,18 @@ async def get_turnover_summary(
     """Laporan turnover: tren resign bulanan (Jan-Des tahun terpilih, default tahun
     berjalan), turnover rate, breakdown per departemen/level. `month` mempersempit
     breakdown & avg tenure ke bulan itu saja; tanpa `month`, breakdown mencakup
-    satu tahun penuh. `department`/`team` mempersempit seluruh laporan."""
+    satu tahun penuh. `department`/`team` mempersempit seluruh laporan.
+
+    Two turnover rates, both keyed off `month` (2026-09-15):
+    - turnover_rate_ytd: cumulative "as of <month>" — resigns Jan..month /
+      average of each of those months' own avg_headcount. Without `month`,
+      this covers the full year (same number as annual_turnover_rate).
+    - turnover_rate_month: that one month's own rate alone (resigns that
+      month / that month's own avg_headcount) — null without `month`.
+    avg_tenure_years: mean (resign_date - date_of_joining) in years, across
+    employees who resigned within the breakdown scope (month, or full year
+    without a month filter) — "how long people who left had been here",
+    not the tenure of the current active roster."""
     from datetime import date
     from calendar import monthrange
 
@@ -1181,8 +1417,10 @@ async def get_turnover_summary(
     today = date.today()
     target_year = year or today.year
 
+    department = _resolve_department_alias(department)
     q = select(Employee.date_of_joining, Employee.resign_date, Employee.department,
-               Employee.level, Employee.status, Employee.team).where(Employee.date_of_joining.isnot(None))
+               Employee.level, Employee.status, Employee.team,
+               Employee.employment_status).where(Employee.date_of_joining.isnot(None))
     if department:
         q = q.where(Employee.department == department)
     if team:
@@ -1200,12 +1438,12 @@ async def get_turnover_summary(
             if resign is not None and first_day <= resign <= last_day
         )
         headcount_start = sum(
-            1 for join, resign, *_ in emps
-            if join < first_day and (resign is None or resign >= first_day)
+            1 for join, resign, _dept, _lvl, _st, _tm, es in emps
+            if join < first_day and (resign >= first_day if resign is not None else es != "Resign")
         )
         headcount_end = sum(
-            1 for join, resign, *_ in emps
-            if join <= last_day and (resign is None or resign >= first_day)
+            1 for join, resign, _dept, _lvl, _st, _tm, es in emps
+            if join <= last_day and (resign >= first_day if resign is not None else es != "Resign")
         )
         avg_headcount = (headcount_start + headcount_end) / 2 if (headcount_start + headcount_end) > 0 else 0
         rate = round((resigns_in_month / avg_headcount) * 100, 2) if avg_headcount > 0 else 0
@@ -1222,6 +1460,23 @@ async def get_turnover_summary(
     total_resigns_year = sum(r["resigns"] for r in resign_trend)
     avg_headcount_year = sum(r["avg_headcount"] for r in resign_trend) / 12
     annual_turnover_rate = round((total_resigns_year / avg_headcount_year) * 100, 2) if avg_headcount_year > 0 else 0
+
+    # Two period-scoped turnover rates, both keyed off the selected month
+    # (2026-09-15): "as of <month>" is the cumulative rate Jan through that
+    # month — total resigns Jan..month divided by the AVERAGE of each of
+    # those months' own avg_headcount (not a single point-in-time
+    # snapshot), so it stays comparable in shape to the per-month rate
+    # below. "per month" is just that one month's own rate, already
+    # computed inside resign_trend — re-exposed at the top level so the
+    # frontend doesn't have to index into resign_trend to find it. Without
+    # a month filter, "as of" degrades to the full year (Jan-Dec), same
+    # number annual_turnover_rate already gives.
+    effective_month = month or 12
+    ytd_months = resign_trend[:effective_month]
+    total_resigns_ytd = sum(r["resigns"] for r in ytd_months)
+    avg_headcount_ytd = sum(r["avg_headcount"] for r in ytd_months) / len(ytd_months) if ytd_months else 0
+    turnover_rate_ytd = round((total_resigns_ytd / avg_headcount_ytd) * 100, 2) if avg_headcount_ytd > 0 else 0
+    turnover_rate_month = resign_trend[month - 1]["turnover_rate"] if month else None
 
     # Breakdown karyawan resign — satu bulan (jika `month` diisi) atau satu tahun penuh
     if month:
@@ -1254,13 +1509,18 @@ async def get_turnover_summary(
     ]
     avg_tenure_years = round(sum(tenures) / len(tenures), 1) if tenures else 0
 
-    current_headcount = sum(1 for join, resign, *_ in emps if resign is None)
+    current_headcount = sum(
+        1 for join, resign, _dept, _lvl, _st, _tm, es in emps
+        if resign is None and es != "Resign"
+    )
 
     return {
         "year":                 target_year,
         "month":                month,
         "resign_trend":         resign_trend,
         "annual_turnover_rate": annual_turnover_rate,
+        "turnover_rate_ytd":    turnover_rate_ytd,
+        "turnover_rate_month":  turnover_rate_month,
         "total_resigns_period": len(resigned_in_scope),
         "avg_tenure_years":     avg_tenure_years,
         "current_headcount":    current_headcount,
@@ -1268,6 +1528,154 @@ async def get_turnover_summary(
         "by_level":             by_level,
         "by_status":            by_status,
     }
+
+
+@router.get("/turnover-summary/resigned-list")
+async def get_turnover_resigned_list(
+    year:       int           = Query(...),
+    month:      Optional[int] = Query(None, ge=1, le=12),
+    department: Optional[str] = Query(None),
+    team:       Optional[str] = Query(None),
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """The actual employees behind one bar of the Turnover Report chart —
+    same scope rules as /turnover-summary's own breakdown (by_dept/by_level/
+    by_status/avg_tenure): one month if `month` is given, else the full
+    year. Backs the chart's click-to-drill-down popup."""
+    from datetime import date
+    from calendar import monthrange
+
+    if month:
+        b_start = date(year, month, 1)
+        b_end = date(year, month, monthrange(year, month)[1])
+    else:
+        b_start = date(year, 1, 1)
+        b_end = date(year, 12, 31)
+
+    department = _resolve_department_alias(department)
+    q = select(Employee).where(
+        Employee.resign_date.isnot(None),
+        Employee.resign_date >= b_start,
+        Employee.resign_date <= b_end,
+    )
+    if department:
+        q = q.where(Employee.department == department)
+    if team:
+        q = q.where(Employee.team == team)
+    q = q.order_by(Employee.resign_date.desc())
+
+    result = await db.execute(q)
+    emps = result.scalars().all()
+    return [
+        {
+            "user_id":          e.user_id,
+            "full_name":        e.full_name,
+            "department":       e.department,
+            "division":         e.division,
+            "team":             e.team,
+            "level":            e.level,
+            "job_title":        e.job_title,
+            "status":           e.status,
+            "date_of_joining":  str(e.date_of_joining) if e.date_of_joining else None,
+            "resign_date":      str(e.resign_date) if e.resign_date else None,
+            "resign_reason":    e.resign_reason,
+            "tenure_years": (
+                round((e.resign_date - e.date_of_joining).days / 365.25, 1)
+                if e.date_of_joining and e.resign_date else None
+            ),
+        }
+        for e in emps
+    ]
+
+
+@router.get("/turnover-summary/export")
+async def export_turnover_report(
+    year:       int           = Query(...),
+    month:      Optional[int] = Query(None, ge=1, le=12),
+    department: Optional[str] = Query(None),
+    team:       Optional[str] = Query(None),
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Excel export of the Turnover Report for the current filter scope —
+    a summary section (turnover rate, total resigned, avg tenure — the same
+    KPI cards on screen) followed by the exact same resigned-employee detail
+    data the chart's click-to-drill-down and the Avg Tenure breakdown popup
+    use (both endpoints called directly here rather than re-deriving their
+    logic, so the export can never drift from what's on screen)."""
+    MN = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    department = _resolve_department_alias(department)
+    summary  = await get_turnover_summary(year=year, month=month, department=department, team=team, db=db, user=user)
+    resigned = await get_turnover_resigned_list(year=year, month=month, department=department, team=team, db=db, user=user)
+
+    period_label = f"{MN[month - 1]} {year}" if month else f"{year} (Full Year)"
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Turnover Report"
+
+    title_font  = Font(name="Calibri", size=14, bold=True)
+    label_font  = Font(name="Calibri", size=12, bold=True)
+    value_font  = Font(name="Calibri", size=12)
+    header_font = Font(name="Calibri", size=12, bold=True)
+    header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+    header_align = Alignment(horizontal="center", vertical="center")
+    thin   = Side(style="thin")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    ws.cell(row=1, column=1, value=f"Turnover Report — {period_label}").font = title_font
+    scope_bits = [department or "All Departments", team or "All Teams"]
+    ws.cell(row=2, column=1, value=" / ".join(scope_bits)).font = Font(name="Calibri", size=11, italic=True, color="64748B")
+
+    summary_rows = [
+        (f"Turnover Rate as of {period_label}",       f"{summary['turnover_rate_ytd']}%"),
+        (f"Turnover Rate ({period_label} only)",       f"{summary['turnover_rate_month']}%" if summary["turnover_rate_month"] is not None else "—"),
+        ("Total Resigned",                              summary["total_resigns_period"]),
+        ("Current Headcount",                           summary["current_headcount"]),
+        ("Avg. Tenure — Resigned (years)",              summary["avg_tenure_years"]),
+    ]
+    for i, (label, val) in enumerate(summary_rows):
+        r = 4 + i
+        ws.cell(row=r, column=1, value=label).font = label_font
+        ws.cell(row=r, column=2, value=val).font = value_font
+    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["B"].width = 16
+
+    detail_start = 4 + len(summary_rows) + 2
+    ws.cell(row=detail_start - 1, column=1, value="Resigned Employees").font = label_font
+
+    cols = [
+        ("full_name", "Name", 26), ("department", "Department", 20), ("division", "Division", 20),
+        ("team", "Team", 20), ("level", "Level", 12), ("job_title", "Job Title", 24),
+        ("status", "Status", 14), ("date_of_joining", "Join Date", 14), ("resign_date", "Resign Date", 14),
+        ("tenure_years", "Tenure (yrs)", 12), ("resign_reason", "Resign Reason", 30),
+    ]
+    for col_idx, (_key, label, width) in enumerate(cols, 1):
+        cell = ws.cell(row=detail_start, column=col_idx, value=label)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_align
+        cell.border = border
+        ws.column_dimensions[cell.column_letter].width = width
+
+    for row_offset, r in enumerate(resigned, 1):
+        row_idx = detail_start + row_offset
+        for col_idx, (key, _label, _width) in enumerate(cols, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=r.get(key))
+            cell.font = value_font
+            cell.border = border
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"turnover_report_{year}{f'-{month:02d}' if month else ''}.xlsx"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
 
 
 def _normalize_dept(raw: Optional[str]) -> str:
@@ -1298,11 +1706,31 @@ def _normalize_dept(raw: Optional[str]) -> str:
 # dropped out of every DEPT_GROUPS-based query (Summary headcount, drill-down
 # filters) — always add a canonical-label self-mapping key here, don't rely
 # solely on the misfiled-value aliases.
-DEPT_GROUPS = ["Administration", "Sales & Marketing", "Strategy & Development", "Plant"]
+#
+# "President Director" (2026-09-08, renamed/refined 2026-09-15 to match the
+# company's own org chart image, which labels this row "President Director"
+# rather than "Board of Directors" and lists it first, then Sales &
+# Marketing / Strategy & Development / Plant / Administration in that exact
+# order): per the Organization Chart (org_structure_nodes), the President
+# Director sits at the very top, above every department (only the Board of
+# Commissioners outranks them), so Employee Summary pulls them into their
+# own canonical group. A department-scoped Director (e.g. Plant's own
+# department head) is a peer of that department's General Manager, not the
+# company's top — they stay counted in their own department instead,
+# leading its team list (see _team_sort_key) rather than being folded into
+# President Director.
+#
+# The distinguishing signal is job_title containing "President Director"
+# alone — NOT team == "Director" (dropped 2026-09-15): the raw
+# department/team columns for this one role have proven unreliable to key
+# off (seen live: the same person's department flipped between "Board Of
+# Director", "Administration" and blank, and team between "Director" and
+# blank, across successive manual data edits) while job_title has stayed
+# the one stable signal throughout. See _group_department.
+DEPT_GROUPS = ["President Director", "Sales & Marketing", "Strategy & Development", "Plant", "Administration"]
 
 _DEPT_GROUP_MAP = {
     "ADMINISTRATION":         "Administration",
-    "DIRECTOR":               "Administration",
     "SALES & MARKETING":      "Sales & Marketing",
     "MKT & BD":               "Sales & Marketing",
     "STRATEGY DEVELOPMENT":   "Strategy & Development",
@@ -1313,51 +1741,110 @@ _DEPT_GROUP_MAP = {
 }
 
 
-def _team_sort_key(team: str):
-    """Sort key for team rows within a department: "General Manager" always
-    leads (the department head), everything else alphabetical after it."""
-    return (0, "") if team == "General Manager" else (1, team)
+# Recognized "lead" team values, in rank order — used both for a
+# department's own Director/General Manager AND, identically, for a
+# division's own head (e.g. Plant > Production Management's "Senior
+# Manager" vs Plant > Quality Management's "General Manager" — division
+# heads don't all share one rank, see LEAD_TEAM_NAMES's use in
+# /summary/by-year and /summary/by-month below).
+LEAD_TEAM_NAMES = ("Director", "General Manager", "Senior Manager")
 
 
-def _group_department(raw: Optional[str]) -> Optional[str]:
-    """Raw Employee.department value -> one of the 4 canonical DEPT_GROUPS,
-    or None to exclude (blank/numeric-corrupted rows — same exclusion
-    _normalize_dept already applied)."""
+def _team_sort_key(team: str, dept: Optional[str] = None, division: Optional[str] = None, team_seq: Optional[dict] = None):
+    """Sort key for team rows within a department or division: a
+    Director leads first (outranks everyone), General Manager next,
+    Senior Manager next, then the curated order from department_master
+    (department_master_service.get_order_maps's team_seq, keyed by
+    (department, division_or_None, team)) for everyone else, falling back
+    to alphabetical for any team not in that master table. `dept`/
+    `division`/`team_seq` are optional so this still works as a plain
+    alphabetical-after-leads sort if a caller doesn't have order data handy."""
+    if team in LEAD_TEAM_NAMES:
+        return (0, LEAD_TEAM_NAMES.index(team), "")
+    seq = (team_seq or {}).get((dept, division, team))
+    if seq is not None:
+        return (1, seq, team)
+    return (2, 0, team)
+
+
+def _group_department(raw: Optional[str], team: Optional[str] = None, job_title: Optional[str] = None) -> Optional[str]:
+    """Raw Employee.department/team/job_title -> one of the canonical
+    DEPT_GROUPS, or None to exclude (blank/numeric-corrupted rows — same
+    exclusion _normalize_dept already applied). Anyone whose job_title
+    contains "President Director" routes to the "President Director" group
+    regardless of their raw department/team value — see the note above
+    DEPT_GROUPS for why job_title alone is the signal here. A
+    department-scoped Director (e.g. "Plant Director") doesn't match this
+    substring, so they stay grouped under their own department instead."""
+    if job_title and "president director" in job_title.strip().lower():
+        return "President Director"
     if not raw or raw.strip().isdigit():
         return None
     return _DEPT_GROUP_MAP.get(raw.strip().upper())
 
 
+def _lead_row_role(division_filter) -> str:
+    """Fixed role label for a lead row ("Director"/"General Manager"/
+    "Senior Manager") — the image this tree is meant to match labels these
+    rows "<role> - <team>" (e.g. "Department Head - General Manager",
+    "Division Head - Senior Manager"). This is a FIXED label based on
+    where the row sits (straight under the department vs. under a
+    division), not the actual person's own job_title — those can read
+    identically to the team value itself (e.g. Plant's Director's real
+    job_title is literally "Director", same string as their `team`
+    placeholder), which used to collapse the label down to a bare
+    "Director" instead of "Department Head - Director"."""
+    return "Division Head" if division_filter else "Department Head"
+
+
 @router.get("/summary/by-year")
 async def get_summary_by_year(
+    year_from: Optional[int] = Query(None, description="First year of the window — defaults to the earliest date_of_joining on file"),
+    year_to:   Optional[int] = Query(None, description="Last year of the window — defaults to the current year"),
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Headcount by department (grouped into the 4 canonical DEPT_GROUPS) >
+    """Headcount by department (grouped into the canonical DEPT_GROUPS) >
     division > team, Beginning/Ending per year — same "active as of a date"
     windowing used by /turnover-summary and /monthly-summary. Division/team
-    rows mirror /summary/by-month's tree (only some departments have them)."""
+    rows mirror /summary/by-month's tree (only some departments have them).
+
+    `year_from`/`year_to` let the HR page offer an explicit period filter;
+    left blank, the window defaults to the full history (earliest
+    date_of_joining on file through the current year) — same as before any
+    period filter existed. year_to is capped at the current year: a future
+    year_to would make by_year_for's `min(date(y, 12, 31), today)` clamp to
+    `today` for every such year, silently repeating the current year's
+    count instead of showing that year hasn't happened yet."""
+    today = date.today()
+
     rows_q = await db.execute(
-        select(Employee.department, Employee.division, Employee.team,
-               Employee.date_of_joining, Employee.resign_date)
+        select(Employee.department, Employee.division, Employee.team, Employee.job_title,
+               Employee.date_of_joining, Employee.resign_date, Employee.employment_status)
         .where(Employee.date_of_joining.isnot(None))
     )
-    emps = [
-        (_group_department(d), (v or "").strip() or None, (t or "").strip() or None, j, r)
-        for d, v, t, j, r in rows_q.fetchall()
+    emps_with_title = [
+        (_group_department(d, t, jt), (v or "").strip() or None, (t or "").strip() or None, jt, j, r, es)
+        for d, v, t, jt, j, r, es in rows_q.fetchall()
     ]
-    emps = [(d, v, t, j, r) for d, v, t, j, r in emps if d is not None]
+    emps_with_title = [row for row in emps_with_title if row[0] is not None]
+    emps = [(d, v, t, j, r, es) for d, v, t, _jt, j, r, es in emps_with_title]
 
-    today = date.today()
-    year_from = min((j.year for _d, _v, _t, j, _r in emps), default=today.year)
-    years = list(range(year_from, today.year + 1))
+    order_maps = await department_master_service.get_order_maps(db)
+    dept_seq, division_seq, team_seq = order_maps["dept_seq"], order_maps["division_seq"], order_maps["team_seq"]
 
-    departments = DEPT_GROUPS
+    default_year_from = min((j.year for _d, _v, _t, j, _r, _es in emps), default=today.year)
+    target_from = year_from or default_year_from
+    target_to = min(year_to, today.year) if year_to else today.year
+    year_list = list(range(target_from, target_to + 1)) if target_from <= target_to else [target_to]
+
+    ordered_dept_groups = sorted(DEPT_GROUPS, key=lambda d: dept_seq.get(d, 99))
+    departments = ordered_dept_groups
 
     def active_count(snapshot, dept_filter=None, division_filter=None, team_filter=None):
         return sum(
-            1 for d, v, t, j, r in emps
-            if j <= snapshot and (r is None or r >= snapshot)
+            1 for d, v, t, j, r, es in emps
+            if _is_active(j, r, es, snapshot)
             and (dept_filter is None or d == dept_filter)
             and (division_filter is None or v == division_filter)
             and (team_filter is None or t == team_filter)
@@ -1365,7 +1852,7 @@ async def get_summary_by_year(
 
     def by_year_for(dept_filter=None, division_filter=None, team_filter=None):
         result = {}
-        for y in years:
+        for y in year_list:
             beg_snapshot = date(y, 1, 1)
             end_snapshot = min(date(y, 12, 31), today)
             result[y] = {
@@ -1375,52 +1862,97 @@ async def get_summary_by_year(
         return result
 
     rows = []
-    for label in DEPT_GROUPS:
+    for label in ordered_dept_groups:
         rows.append({"department": label, "division": None, "team": None, "by_year": by_year_for(label)})
 
-        divisions_in_dept = sorted({v for d, v, _t, _j, _r in emps if d == label and v})
-        teams_direct = sorted({t for d, v, t, _j, _r in emps if d == label and not v and t}, key=_team_sort_key)
+        # "President Director" is a singleton role, not a department with
+        # real division/team substructure — any team value on a row routed
+        # here (e.g. a predecessor's raw Employee.team happening to be
+        # "Director") is a legacy artifact of that person's own record, not
+        # meaningful org structure, and would otherwise render as a
+        # confusing "President Director - Director" child row the image
+        # doesn't show. Keep this group as a single flat row.
+        if label == "President Director":
+            continue
 
-        # General Manager leads the whole department (row #1 after the
-        # department total) even when the department also has divisions
-        # (e.g. Plant) — without this, it would otherwise land at the very
-        # bottom since teams_direct is normally rendered after every
-        # division block.
-        if teams_direct and teams_direct[0] == "General Manager":
-            rows.append({
-                "department": label, "division": None, "team": "General Manager",
-                "by_year": by_year_for(label, None, "General Manager"),
-            })
-            teams_direct = teams_direct[1:]
+        divisions_in_dept = sorted(
+            {v for d, v, _t, _j, _r, _es in emps if d == label and v},
+            key=lambda v: (division_seq.get((label, v), 99), v),
+        )
+        teams_direct = sorted(
+            {t for d, v, t, _j, _r, _es in emps if d == label and not v and t},
+            key=lambda t: _team_sort_key(t, label, None, team_seq),
+        )
+
+        # A department-scoped Director, then General Manager, lead the whole
+        # department (rows #1/#2 after the department total) even when the
+        # department also has divisions (e.g. Plant) — without this, they'd
+        # otherwise land at the very bottom since teams_direct is normally
+        # rendered after every division block. `lead_team_label` tracks
+        # whichever one was found (Director takes precedence when both
+        # exist) — this department's OTHER direct teams (below) report to
+        # that person in the real org chart (e.g. Planning & Coordination
+        # reports to Administration's GM, not straight to "Administration"),
+        # so they're tagged `parent_team` to nest one level under the lead
+        # row instead of sitting as its siblings.
+        lead_team_label = None
+        for lead_team in LEAD_TEAM_NAMES:
+            if teams_direct and teams_direct[0] == lead_team:
+                rows.append({
+                    "department": label, "division": None, "team": lead_team,
+                    "lead_title": _lead_row_role(None),
+                    "by_year": by_year_for(label, None, lead_team),
+                })
+                lead_team_label = lead_team_label or lead_team
+                teams_direct = teams_direct[1:]
 
         for division in divisions_in_dept:
             rows.append({
                 "department": label, "division": division, "team": None,
                 "by_year": by_year_for(label, division),
             })
-            teams_in_division = sorted({
-                t for d, v, t, _j, _r in emps
-                if d == label and v == division and t
-            }, key=_team_sort_key)
+            teams_in_division = sorted(
+                {t for d, v, t, _j, _r, _es in emps if d == label and v == division and t},
+                key=lambda t: _team_sort_key(t, label, division, team_seq),
+            )
+
+            # A division head (e.g. Production Management's "Senior
+            # Manager", Quality Management's "General Manager") gets the
+            # exact same treatment as a department's own Director/General
+            # Manager above — popped out first, the division's other teams
+            # report to them (parent_team), not straight to the division.
+            division_lead_label = None
+            for lead_team in LEAD_TEAM_NAMES:
+                if teams_in_division and teams_in_division[0] == lead_team:
+                    rows.append({
+                        "department": label, "division": division, "team": lead_team,
+                        "lead_title": _lead_row_role(division),
+                        "by_year": by_year_for(label, division, lead_team),
+                    })
+                    division_lead_label = division_lead_label or lead_team
+                    teams_in_division = teams_in_division[1:]
+
             for team in teams_in_division:
                 rows.append({
                     "department": label, "division": division, "team": team,
+                    "parent_team": division_lead_label,
                     "by_year": by_year_for(label, division, team),
                 })
 
         for team in teams_direct:
             rows.append({
                 "department": label, "division": None, "team": team,
+                "parent_team": lead_team_label,
                 "by_year": by_year_for(label, None, team),
             })
 
     total = by_year_for()
 
     growth = {}
-    for i, y in enumerate(years):
-        growth[y] = None if i == 0 else total[y]["ending"] - total[years[i - 1]]["ending"]
+    for i, y in enumerate(year_list):
+        growth[y] = None if i == 0 else total[y]["ending"] - total[year_list[i - 1]]["ending"]
 
-    return {"years": years, "departments": departments, "rows": rows, "total": total, "growth": growth}
+    return {"years": year_list, "departments": departments, "rows": rows, "total": total, "growth": growth}
 
 
 @router.get("/summary/by-month")
@@ -1429,7 +1961,7 @@ async def get_summary_by_month(
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Headcount by department (grouped into the 4 canonical DEPT_GROUPS) >
+    """Headcount by department (grouped into the canonical DEPT_GROUPS) >
     division > team, end-of-month snapshot for each month of the given year
     (default: current year). Division is only populated for some departments
     (currently just Plant) — departments without it go straight from
@@ -1438,23 +1970,28 @@ async def get_summary_by_month(
     /monthly-summary."""
     target_year = year or date.today().year
     rows_q = await db.execute(
-        select(Employee.department, Employee.division, Employee.team,
-               Employee.date_of_joining, Employee.resign_date)
+        select(Employee.department, Employee.division, Employee.team, Employee.job_title,
+               Employee.date_of_joining, Employee.resign_date, Employee.employment_status)
         .where(Employee.date_of_joining.isnot(None))
     )
-    emps = [
-        (_group_department(d), (v or "").strip() or None, (t or "").strip() or None, j, r)
-        for d, v, t, j, r in rows_q.fetchall()
+    emps_with_title = [
+        (_group_department(d, t, jt), (v or "").strip() or None, (t or "").strip() or None, jt, j, r, es)
+        for d, v, t, jt, j, r, es in rows_q.fetchall()
     ]
-    emps = [(d, v, t, j, r) for d, v, t, j, r in emps if d is not None]
+    emps_with_title = [row for row in emps_with_title if row[0] is not None]
+    emps = [(d, v, t, j, r, es) for d, v, t, _jt, j, r, es in emps_with_title]
+
+    order_maps = await department_master_service.get_order_maps(db)
+    dept_seq, division_seq, team_seq = order_maps["dept_seq"], order_maps["division_seq"], order_maps["team_seq"]
+    ordered_dept_groups = sorted(DEPT_GROUPS, key=lambda d: dept_seq.get(d, 99))
 
     today = date.today()
     months = list(range(1, 13))
 
     def active_count(snapshot, dept_filter=None, division_filter=None, team_filter=None):
         return sum(
-            1 for d, v, t, j, r in emps
-            if j <= snapshot and (r is None or r >= snapshot)
+            1 for d, v, t, j, r, es in emps
+            if _is_active(j, r, es, snapshot)
             and (dept_filter is None or d == dept_filter)
             and (division_filter is None or v == division_filter)
             and (team_filter is None or t == team_filter)
@@ -1477,42 +2014,75 @@ async def get_summary_by_month(
         return result
 
     rows = []
-    for label in DEPT_GROUPS:
+    for label in ordered_dept_groups:
         rows.append({"department": label, "division": None, "team": None, "by_month": by_month_for(label)})
 
-        divisions_in_dept = sorted({v for d, v, _t, _j, _r in emps if d == label and v})
-        teams_direct = sorted({t for d, v, t, _j, _r in emps if d == label and not v and t}, key=_team_sort_key)
+        # See the matching comment in /summary/by-year — "President Director"
+        # is a singleton role, not a department with real division/team
+        # substructure.
+        if label == "President Director":
+            continue
 
-        # General Manager leads the whole department (row #1 after the
-        # department total) even when the department also has divisions
-        # (e.g. Plant) — without this, it would otherwise land at the very
-        # bottom since teams_direct is normally rendered after every
-        # division block.
-        if teams_direct and teams_direct[0] == "General Manager":
-            rows.append({
-                "department": label, "division": None, "team": "General Manager",
-                "by_month": by_month_for(label, None, "General Manager"),
-            })
-            teams_direct = teams_direct[1:]
+        divisions_in_dept = sorted(
+            {v for d, v, _t, _j, _r, _es in emps if d == label and v},
+            key=lambda v: (division_seq.get((label, v), 99), v),
+        )
+        teams_direct = sorted(
+            {t for d, v, t, _j, _r, _es in emps if d == label and not v and t},
+            key=lambda t: _team_sort_key(t, label, None, team_seq),
+        )
+
+        # A department-scoped Director, then General Manager, lead the whole
+        # department (rows #1/#2 after the department total) even when the
+        # department also has divisions (e.g. Plant) — without this, they'd
+        # otherwise land at the very bottom since teams_direct is normally
+        # rendered after every division block. See the matching comment in
+        # /summary/by-year for `lead_team_label`/`parent_team`.
+        lead_team_label = None
+        for lead_team in LEAD_TEAM_NAMES:
+            if teams_direct and teams_direct[0] == lead_team:
+                rows.append({
+                    "department": label, "division": None, "team": lead_team,
+                    "lead_title": _lead_row_role(None),
+                    "by_month": by_month_for(label, None, lead_team),
+                })
+                lead_team_label = lead_team_label or lead_team
+                teams_direct = teams_direct[1:]
 
         for division in divisions_in_dept:
             rows.append({
                 "department": label, "division": division, "team": None,
                 "by_month": by_month_for(label, division),
             })
-            teams_in_division = sorted({
-                t for d, v, t, _j, _r in emps
-                if d == label and v == division and t
-            }, key=_team_sort_key)
+            teams_in_division = sorted(
+                {t for d, v, t, _j, _r, _es in emps if d == label and v == division and t},
+                key=lambda t: _team_sort_key(t, label, division, team_seq),
+            )
+
+            # See the matching comment in /summary/by-year for
+            # `division_lead_label`.
+            division_lead_label = None
+            for lead_team in LEAD_TEAM_NAMES:
+                if teams_in_division and teams_in_division[0] == lead_team:
+                    rows.append({
+                        "department": label, "division": division, "team": lead_team,
+                        "lead_title": _lead_row_role(division),
+                        "by_month": by_month_for(label, division, lead_team),
+                    })
+                    division_lead_label = division_lead_label or lead_team
+                    teams_in_division = teams_in_division[1:]
+
             for team in teams_in_division:
                 rows.append({
                     "department": label, "division": division, "team": team,
+                    "parent_team": division_lead_label,
                     "by_month": by_month_for(label, division, team),
                 })
 
         for team in teams_direct:
             rows.append({
                 "department": label, "division": None, "team": team,
+                "parent_team": lead_team_label,
                 "by_month": by_month_for(label, None, team),
             })
 
@@ -1564,35 +2134,139 @@ async def get_join_years(
 
 @router.get("/departments")
 async def get_departments(
+    source: str = Query("employees", description="'employees' (default, raw distinct Employee.department values) or 'master' (department_master's curated department list)"),
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Daftar department untuk filter dropdown, langsung dari data karyawan.
-    Beberapa baris sumber data punya department yang rusak (mis. angka '15'
-    dari pergeseran kolom di file Excel asal) — nilai yang bukan nama (murni
-    angka) disaring dari daftar filter, meski tetap tersimpan apa adanya di
-    record karyawan itu sendiri. Case-duplicates ("Plant" / "PLANT") juga
-    digabung ke satu nama tampilan (lihat clean_department_list) — filter
-    department di list/export sudah case-insensitive, jadi memilih "Plant"
-    tetap menangkap baris "PLANT" juga."""
+    """Daftar department untuk filter dropdown.
+
+    source="employees" (default, used by Employee Summary): langsung dari
+    data karyawan. Beberapa baris sumber data punya department yang rusak
+    (mis. angka '15' dari pergeseran kolom di file Excel asal) — nilai yang
+    bukan nama (murni angka) disaring dari daftar filter, meski tetap
+    tersimpan apa adanya di record karyawan itu sendiri. Case-duplicates
+    ("Plant" / "PLANT") juga digabung ke satu nama tampilan (lihat
+    clean_department_list) — filter department di list/export sudah
+    case-insensitive, jadi memilih "Plant" tetap menangkap baris "PLANT"
+    juga.
+
+    source="master" (used by Employee List and Turnover Report): the
+    curated department_master names instead — department_master is the
+    corrected spelling (e.g. "Strategy Development", no ampersand) where it
+    differs from the raw Employee.department value ("Strategy & Development",
+    from a 2026-08-10 upload-normalization migration that predates
+    department_master). _apply_employee_filters and /turnover-summary both
+    resolve that one known difference via _DEPT_FILTER_ALIASES before
+    querying, so picking this department from the dropdown still matches
+    those employees instead of returning zero rows."""
+    if source == "master":
+        result = await db.execute(
+            select(DepartmentMaster.name, DepartmentMaster.sequence)
+            .where(DepartmentMaster.type == "department")
+            .order_by(DepartmentMaster.sequence)
+        )
+        return [r[0] for r in result.fetchall()]
+
     result = await db.execute(
         select(Employee.department).distinct()
     )
-    return clean_department_list(r[0] for r in result.fetchall())
+    names = clean_department_list(r[0] for r in result.fetchall())
+    # Curated order from department_master where available (see its own
+    # module docstring), alphabetical for anything not in that table (a
+    # misfiled/legacy value, or a department added there but not yet in
+    # department_master) so nothing silently disappears from the dropdown.
+    order_maps = await department_master_service.get_order_maps(db)
+    dept_seq = order_maps["dept_seq"]
+    return sorted(names, key=lambda n: (dept_seq.get(n, 99), n))
 
 
 @router.get("/teams")
 async def get_teams(
-    department: Optional[str] = Query(None),
+    department:    Optional[str] = Query(None),
+    exclude_leads: bool          = Query(False),  # drop LEAD_TEAM_NAMES ("Director"/"General Manager"/"Senior Manager") placeholder values
+    source:        str           = Query("employees", description="'employees' (default, raw distinct Employee.team values) or 'master' (department_master's curated team list)"),
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Daftar team untuk filter dropdown, opsional difilter per department."""
-    q = select(Employee.team).distinct().order_by(Employee.team)
+    """Daftar team untuk filter dropdown, opsional difilter per department.
+
+    source="master" (used by Employee List and Turnover Report, like
+    /departments?source=master) reads department_master's team-type rows
+    directly instead of Employee.team's raw distinct values — stays in
+    sync automatically whenever department_master changes (new team added/
+    renamed/reordered), rather than only reflecting whatever teams
+    Employee rows happen to already carry. Employee Summary keeps the
+    default "employees" source, matching its own DEPT_GROUPS-based
+    grouping.
+
+    Employee.team also holds LEAD_TEAM_NAMES placeholder values ("Director"
+    / "General Manager" / "Senior Manager") for department/division-head
+    level employees who don't belong to a real team — see this value's use
+    in _team_sort_key for the Employee Summary hierarchy this was built
+    for. Those aren't real teams, so a caller filtering BY team (e.g.
+    Turnover Report) passes exclude_leads=true to drop them; left off by
+    default so this doesn't change Employee List's existing team filter,
+    which callers may still want to include them in."""
+    department = _resolve_department_alias(department)
+
+    if source == "master":
+        rows = (await db.execute(select(DepartmentMaster))).scalars().all()
+        by_id = {r.id: r for r in rows}
+
+        def _dept_of(row) -> Optional[str]:
+            cur = row
+            seen = set()
+            while cur.parent_id and cur.parent_id not in seen:
+                seen.add(cur.parent_id)
+                parent = by_id.get(cur.parent_id)
+                if not parent:
+                    break
+                cur = parent
+            return cur.name
+
+        team_rows = [r for r in rows if r.type == "team" and (department is None or _dept_of(r) == department)]
+        if exclude_leads:
+            team_rows = [r for r in team_rows if r.name not in LEAD_TEAM_NAMES]
+        dept_seq = {r.name: r.sequence for r in rows if r.type in ("director", "department")}
+        team_rows.sort(key=lambda r: (dept_seq.get(_dept_of(r), 99), r.sequence, r.name))
+        # A team name appearing under more than one department/division
+        # (rare) would otherwise repeat in the flat "all teams" list —
+        # de-duplicate by name, keeping the first (best-sorted) occurrence.
+        seen_names, names = set(), []
+        for r in team_rows:
+            if r.name not in seen_names:
+                seen_names.add(r.name)
+                names.append(r.name)
+        return names
+
+    q = select(Employee.team).distinct()
     if department:
         q = q.where(Employee.department == department)
     result = await db.execute(q)
-    return [r[0] for r in result.fetchall() if r[0]]
+    names = [r[0] for r in result.fetchall() if r[0]]
+    if exclude_leads:
+        names = [n for n in names if n not in LEAD_TEAM_NAMES]
+
+    # Curated order from department_master — (department sequence, team
+    # sequence) compound key, so the flat "all teams" list (no department
+    # filter, e.g. Turnover Report's initial dropdown before a department
+    # is picked) groups by department first instead of interleaving teams
+    # from different departments by team sequence alone. team_seq is keyed
+    # by (department, division_or_None, team); a team appearing under more
+    # than one division takes the best (lowest) sequence pair found,
+    # falling back to alphabetical for anything unmapped.
+    order_maps = await department_master_service.get_order_maps(db)
+    dept_seq = order_maps["dept_seq"]
+    team_seq = order_maps["team_seq"]
+
+    def _rank(name):
+        candidates = [
+            (dept_seq.get(d, 99), seq) for (d, _v, t), seq in team_seq.items()
+            if t == name and (department is None or d == department)
+        ]
+        return (min(candidates), name) if candidates else ((99, 99), name)
+
+    return sorted(names, key=_rank)
 
 
 @router.get("/educations")
@@ -1632,6 +2306,41 @@ async def get_marital_statuses(
 ):
     """Daftar marital status untuk filter dropdown Employee Summary."""
     result = await db.execute(select(Employee.marital_status).distinct().order_by(Employee.marital_status))
+    return [r[0] for r in result.fetchall() if r[0]]
+
+
+@router.get("/divisions")
+async def get_employee_divisions(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Daftar division untuk LOV Add/Edit Employee — raw distinct
+    Employee.division values, same pattern as /educations, /positions,
+    /levels (not department_master-sourced: unlike department/team,
+    Employee.division doesn't reliably map onto department_master's
+    division-type rows, e.g. Plant staff commonly carry their team name
+    directly in this field with no division layer)."""
+    result = await db.execute(select(Employee.division).distinct().order_by(Employee.division))
+    return [r[0] for r in result.fetchall() if r[0] and not r[0].strip().isdigit()]
+
+
+@router.get("/religions")
+async def get_religions(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Daftar religion untuk LOV Add/Edit Employee."""
+    result = await db.execute(select(Employee.religion).distinct().order_by(Employee.religion))
+    return [r[0] for r in result.fetchall() if r[0]]
+
+
+@router.get("/blood-types")
+async def get_blood_types(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Daftar blood type untuk LOV Add/Edit Employee."""
+    result = await db.execute(select(Employee.blood_type).distinct().order_by(Employee.blood_type))
     return [r[0] for r in result.fetchall() if r[0]]
 
 
@@ -1957,6 +2666,85 @@ async def delete_employee_photo(
         if os.path.exists(path):
             os.remove(path)
         target.photo_filename = None
+        await db.flush()
+    return {"success": True}
+
+
+_RESIGN_DOC_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+_RESIGN_DOC_EXTS = {".pdf", ".jpg", ".jpeg", ".png"}
+
+
+@router.post("/{user_id}/resign-document")
+async def upload_employee_resign_document(
+    user_id: str,
+    file: UploadFile = File(...),
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Upload/replace the scanned resignation letter/document attached to
+    an employee's resign record — shown in the Resign popup (Employee List)."""
+    target = await db.scalar(select(Employee).where(Employee.user_id == user_id))
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Employee {user_id} not found")
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _RESIGN_DOC_EXTS:
+        raise HTTPException(status_code=400, detail="File must be PDF, JPG, or PNG")
+
+    content = await file.read()
+    if len(content) > _RESIGN_DOC_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="File must be 10 MB or smaller")
+
+    stored_name = f"{user_id}_{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}{ext}"
+
+    old_path = os.path.join(_RESIGN_DOC_UPLOAD_DIR, target.resign_document_filename) if target.resign_document_filename else None
+    with open(os.path.join(_RESIGN_DOC_UPLOAD_DIR, stored_name), "wb") as f:
+        f.write(content)
+    if old_path and os.path.exists(old_path):
+        os.remove(old_path)
+
+    target.resign_document_filename = stored_name
+    await db.flush()
+    return {"success": True, "resign_document_filename": stored_name}
+
+
+@router.get("/{user_id}/resign-document")
+async def get_employee_resign_document(
+    user_id: str,
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Stream an employee's resign document, if one has been uploaded."""
+    target = await db.scalar(select(Employee).where(Employee.user_id == user_id))
+    if not target or not target.resign_document_filename:
+        raise HTTPException(status_code=404, detail="No resign document on file")
+    path = os.path.join(_RESIGN_DOC_UPLOAD_DIR, target.resign_document_filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Resign document file missing on server")
+    with open(path, "rb") as f:
+        content = f.read()
+    ext = os.path.splitext(target.resign_document_filename)[1].lower()
+    media_type = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}.get(ext, "application/octet-stream")
+    return StreamingResponse(io.BytesIO(content), media_type=media_type, headers={
+        "Content-Disposition": f'inline; filename="{target.resign_document_filename}"'
+    })
+
+
+@router.delete("/{user_id}/resign-document")
+async def delete_employee_resign_document(
+    user_id: str,
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Remove an employee's resign document."""
+    target = await db.scalar(select(Employee).where(Employee.user_id == user_id))
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Employee {user_id} not found")
+    if target.resign_document_filename:
+        path = os.path.join(_RESIGN_DOC_UPLOAD_DIR, target.resign_document_filename)
+        if os.path.exists(path):
+            os.remove(path)
+        target.resign_document_filename = None
         await db.flush()
     return {"success": True}
 

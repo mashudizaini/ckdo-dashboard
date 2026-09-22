@@ -7,7 +7,7 @@ import {
   Cpu, TrendingUp, List, Lightbulb, Terminal,
   Table2, Layers, Hash, Code2, Key, Link2, Trash2, Search,
   ChevronLeft, ChevronRight, Play, History,
-  ShieldCheck,
+  ShieldCheck, KeyRound,
 } from "lucide-react";
 import {
   AreaChart, Area,
@@ -17,6 +17,7 @@ import {
 import { itApi } from "@/api/dashboard";
 import EbsBackupRecovery from "@/pages/dashboard/it/EbsBackupRecovery";
 import VpnAccessMonitoring from "@/pages/dashboard/it/VpnAccessMonitoring";
+import ServerControl from "@/pages/dashboard/it/ServerControl";
 // HikCentral Integration, ZKTeco Integration and ETL Admin moved to
 // Setup > General (2026-09-01, previously Setup > IT as of 2026-08-19) —
 // see src/pages/setup/general/GeneralSetupPage.jsx.
@@ -24,6 +25,7 @@ import VpnAccessMonitoring from "@/pages/dashboard/it/VpnAccessMonitoring";
 /* ─── Tab definitions ─────────────────────────────── */
 
 const TABS = [
+  { id: "server-control",    icon: KeyRound,      color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40", label: "Server Control" },
   { id: "server-monitoring", icon: Server,        color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Oracle Server Monitoring" },
   { id: "tablespace-usage",  icon: Activity,      color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Oracle Tablespace Monitoring"  },
   { id: "disk-usage",        icon: HardDrive,     color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Oracle Storage Monitoring"        },
@@ -39,18 +41,19 @@ export default function ITDashboard() {
   const location  = useLocation();
 
   // Derive active tab from URL
-  const activeId = TABS.find((t) => location.pathname.endsWith(t.id))?.id ?? "server-monitoring";
+  const activeId = TABS.find((t) => location.pathname.endsWith(t.id))?.id ?? "server-control";
 
-  // On first load with no sub-path, redirect to server-monitoring
+  // On first load with no sub-path, redirect to server-control (first tab)
   useEffect(() => {
     if (location.pathname === "/dashboard/it" || location.pathname === "/dashboard/it/") {
-      navigate("/dashboard/it/server-monitoring", { replace: true });
+      navigate("/dashboard/it/server-control", { replace: true });
     }
   }, []);
 
   return (
     <div className="p-6 space-y-4">
       {/* Section Panels — navigation now lives in the left sidebar tree menu */}
+      {activeId === "server-control"     && <ServerControl />}
       {activeId === "server-monitoring" && <ServerMonitoringSection />}
       {activeId === "tablespace-usage"  && <TablespaceSection />}
       {activeId === "disk-usage"        && <DiskUsageSection />}

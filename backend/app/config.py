@@ -22,12 +22,34 @@ class Settings(BaseSettings):
     keycloak_client_id: str
     keycloak_client_secret: str
 
-    # Oracle EBS
-    oracle_host: str = "172.21.2.201"
-    oracle_port: int = 1521
-    oracle_service: str = "PROD"
-    oracle_user: str = "apps"
-    oracle_password: str
+    # Keycloak Admin API — separate confidential service-account client
+    # (ckdo-dashboard-admin), NOT keycloak_client_id above (that one is the
+    # frontend's public login client, has no secret, no admin privileges).
+    # Used by keycloak_admin_service.py for Setup > Access Center's
+    # Dashboard-role panel (list/assign/revoke realm roles). Empty by
+    # default — that panel 503s with a clear message until configured,
+    # same pattern as ebs_chat_service_key below.
+    keycloak_admin_client_id: str = ""
+    keycloak_admin_client_secret: str = ""
+
+    # Oracle EBS — Production and Development, selectable at runtime via the
+    # environment toggle in the sidebar (see database.py's
+    # get_oracle_environment()/set_oracle_environment() and the
+    # oracle_env_setting table). A single shared flag, not per-user — the
+    # backend's Oracle connection is one shared resource, so switching
+    # applies to every user's next Oracle-backed request.
+    oracle_prod_host: str = "172.21.2.201"
+    oracle_prod_port: int = 1521
+    oracle_prod_service: str = "PROD"
+    oracle_prod_user: str = "apps"
+    oracle_prod_password: str = "apps"
+
+    oracle_dev_host: str = "172.21.2.197"
+    oracle_dev_port: int = 1525
+    oracle_dev_service: str = "DEV"
+    oracle_dev_user: str = "apps"
+    oracle_dev_password: str = "apps"
+
     oracle_instant_client: str = "/opt/oracle/instantclient"
 
     # Talenta HR API
@@ -133,6 +155,17 @@ class Settings(BaseSettings):
     kimi_model: str = "kimi-latest"
     kimi_api_base: str = "https://api.moonshot.ai/v1"
 
+    # Open WebUI ("CoChat", linked from the Sidebar) — pushes this app's own
+    # RAG Knowledge Base (company_documents, managed under Setup > AI >
+    # Knowledge Base) into CoChat's separate "Company Rules" Knowledge
+    # collection via its native sync API, so CoChat's own chat can also
+    # answer from these same documents. See openwebui_sync_service.py.
+    # Knowledge ID belongs to a collection owned by a dedicated
+    # "dashboard-integration" CoChat account, not a personal admin login.
+    openwebui_base_url: str = ""
+    openwebui_api_key: str = ""
+    openwebui_knowledge_id: str = ""
+
     # Field-level encryption for secrets stored at rest in Postgres —
     # currently only per-user Gemini API keys (see crypto.py). Distinct from
     # any auth secret; generate once per environment with
@@ -149,6 +182,27 @@ class Settings(BaseSettings):
     # scheme like `database_url` above — the +asyncpg driver is added at the
     # point of use (see eis_database.py), same convention as app/database.py.
     eis_database_url_rw: str = "postgresql://eis_user:eis_secret@172.21.2.209:5433/eis_dashboard"
+
+    # EBS Chat — CoChat (Open WebUI) <-> Oracle EBS integration (Track B).
+    # Separate, RLS-scoped role on the same eis_dashboard Postgres above:
+    # department-restricted callers get filtered rows enforced by Postgres
+    # itself (RLS policies on eis.dim_employee/fact_employee/fact_budget),
+    # not by trusting the LLM. See app/services/ebs_chat_service.py.
+    eis_ebs_chat_reader_url: str = "postgresql://ebs_chat_reader:N4YRkQnQmw7k3wm2nqShxFVutiY8fdav@172.21.2.209:5433/eis_dashboard"
+    # Shared secret CoChat's own Tool code sends as the X-Service-Key header
+    # on POST /api/v1/ai/ebs-chat/query — this is a service-to-service call
+    # (Open WebUI has its own separate login, not a Keycloak session), so
+    # there's no Dashboard JWT to validate instead.
+    ebs_chat_service_key: str = ""
+
+    # AP Autoinvoice — Google Drive polling. Path is inside the container
+    # (backend/credentials/ on the host, bind-mounted to /app like the rest
+    # of backend/ — see .gitignore, this file is deployed straight to the
+    # server, never through git, same as .env itself). Shared Drive ID
+    # comes from its URL (drive.google.com/drive/folders/<this>) once
+    # opened as a Shared Drive, not a regular folder.
+    gdrive_service_account_json: str = "/app/credentials/sso-dashboard-490501-ab13df3c569e.json"
+    gdrive_shared_drive_id: str = "0AIVSTEWPWT8uUk9PVA"
 
     class Config:
         env_file = ".env"

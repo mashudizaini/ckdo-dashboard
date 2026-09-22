@@ -7,28 +7,31 @@ Required role: any authenticated user (chat) / any staff role (knowledge base)
 Endpoints:
   POST   /chat                — Policy chat: send message, get AI response (streaming, RAG-grounded)
   POST   /oracle-chat         — Oracle EBS data chat: tool-calling over Postgres EIS (streaming)
-  POST   /general-chat        — General-purpose chat: no RAG, no tools (streaming)
   GET    /documents           — List ingested knowledge base documents
   GET    /documents/content   — Full concatenated text of one document (for editing)
   POST   /documents           — Ingest a new document (paste text or upload file)
   DELETE /documents           — Delete a document by source+title
   GET    /status               — Whether RAG (local Ollama embeddings) is configured
+  GET    /openwebui-sync/status — Whether CoChat sync is configured + last run summary
+  POST   /openwebui-sync        — Push this Knowledge Base into CoChat's "Company Rules" collection
 
-All 3 chat endpoints take an optional `provider` field on the request body:
+Both chat endpoints take an optional `provider` field on the request body:
 "onprem" (default, local Ollama), "gemini" (Google Gemini API), or —
-/chat and /general-chat only — "anthropic" (Claude — shared company key by
-default, on claude-sonnet-5; or the user's own key + model choice if set
-via My API Key, see user_api_key_service.ALLOWED_MODELS).
+/chat only — "anthropic" (Claude — shared company key by default, on
+claude-sonnet-5; or the user's own key + model choice if set via My API
+Key, see user_api_key_service.ALLOWED_MODELS).
 /oracle-chat doesn't support "anthropic" yet — it's a tool-calling pipeline
 with its own separate Ollama/Gemini implementations (see
 oracle_chat_service.py); adding Claude there means building a third
 tool-calling path against Anthropic's own tool-use API, not just this
 plain-chat wiring.
 
-General Chat's "anthropic" additionally grounds every answer in Claude's
-live web_search tool (see ai_service.py's _anthropic_complete_with_search_
-history) — the one place in this interactive chatbot that isn't capped at
-a model's training-data cutoff.
+General Chat (a third, ungrounded "ask me anything" mode — no RAG, no
+tools) was removed: the company's internal Open WebUI instance (CoChat,
+linked from the Sidebar) already covers that use case, so keeping a
+second general-purpose chat surface in this app was redundant. See
+ai_chat_provider_service.py's MODES for the 2 modes that remain
+(Policy/Oracle).
 """
 import asyncio
 import os
@@ -42,8 +45,10 @@ from app.database import get_db
 from app.dependencies import get_current_user, require_role, CurrentUser, Roles
 from app.services.ai_service import AIService
 from app.services.oracle_chat_service import OracleChatService
+from app.services import openwebui_sync_service
 from app.services import rag_service
 from app.services import user_api_key_service
+from app.services import ai_chat_provider_service
 
 router = APIRouter()
 settings = get_settings()
@@ -64,6 +69,12 @@ async def _resolve_gemini_key(db: AsyncSession, user: CurrentUser) -> str:
     return user_key or settings.gemini_api_key
 
 
+async def _ensure_provider_enabled(db: AsyncSession, provider: str):
+    if not await ai_chat_provider_service.is_provider_enabled(db, provider):
+        label = ai_chat_provider_service.PROVIDERS.get(provider, provider)
+        raise HTTPException(403, f"{label} is currently disabled for the AI Chatbot — ask IT to re-enable it in Setup > AI.")
+
+
 async def _resolve_anthropic(db: AsyncSession, user: CurrentUser) -> tuple[str | None, str | None]:
     """(api_key, model) from the user's own saved Claude key/model preference
     (see My API Key), or (None, None) to fall back to the shared company key
@@ -76,6 +87,66 @@ async def _resolve_anthropic(db: AsyncSession, user: CurrentUser) -> tuple[str |
         return None, None
     model = await user_api_key_service.get_user_model(db, user.username, "anthropic")
     return row_key, model
+
+
+@router.get("/provider-status")
+async def get_provider_status(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Which of the 3 chat providers are currently enabled — any
+    authenticated user (the chatbot's own provider dropdown needs this to
+    decide what to show)."""
+    return await ai_chat_provider_service.list_provider_status(db)
+
+
+class ProviderStatusUpdate(BaseModel):
+    enabled: bool
+
+
+@router.put("/provider-status/{provider}")
+async def set_provider_status(
+    provider: str,
+    body: ProviderStatusUpdate,
+    user: CurrentUser = Depends(require_role(Roles.IT, Roles.ADMIN)),
+    db: AsyncSession = Depends(get_db),
+):
+    """IT/admin only — a usage/cost control lever, see ai_chat_provider_service.py."""
+    if provider not in ai_chat_provider_service.PROVIDERS:
+        raise HTTPException(400, f"Unknown provider: {provider}")
+    await ai_chat_provider_service.set_provider_enabled(db, provider, body.enabled, user.username)
+    return await ai_chat_provider_service.list_provider_status(db)
+
+
+@router.get("/default-providers")
+async def get_default_providers(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Which provider each chat mode (Policy/Oracle) starts on — any
+    authenticated user (Chatbot.jsx/ChatWidget.jsx read this on mount
+    instead of a hardcoded default)."""
+    return await ai_chat_provider_service.list_default_providers(db)
+
+
+class DefaultProviderUpdate(BaseModel):
+    provider: str
+
+
+@router.put("/default-providers/{mode}")
+async def set_default_provider(
+    mode: str,
+    body: DefaultProviderUpdate,
+    user: CurrentUser = Depends(require_role(Roles.IT, Roles.ADMIN)),
+    db: AsyncSession = Depends(get_db),
+):
+    """IT/admin only — see ai_chat_provider_service.py."""
+    if mode not in ai_chat_provider_service.MODES:
+        raise HTTPException(400, f"Unknown chat mode: {mode}")
+    if body.provider not in ai_chat_provider_service.PROVIDERS:
+        raise HTTPException(400, f"Unknown provider: {body.provider}")
+    await ai_chat_provider_service.set_default_provider(db, mode, body.provider, user.username)
+    return await ai_chat_provider_service.list_default_providers(db)
 
 
 @router.post("/chat")
@@ -91,6 +162,7 @@ async def chat(
     """
     if request.provider not in ("onprem", "gemini", "anthropic"):
         raise HTTPException(400, 'Invalid provider — use "onprem", "gemini", or "anthropic"')
+    await _ensure_provider_enabled(db, request.provider)
 
     is_unrestricted = user.has_any_role("it_staff", "admin")
     department_filter = rag_service.departments_for_roles(user.roles, is_unrestricted)
@@ -111,51 +183,24 @@ async def oracle_chat(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Oracle EBS Data Chat — streaming response (local Ollama or Gemini,
-    tool-calling). The model picks a predefined, parameterized query
-    (sales/production/budget/financial) instead of writing SQL itself; the
-    query runs against Postgres EIS through a read-only DB role. See
-    oracle_chat_service.py.
-
-    No "anthropic" here yet (unlike /chat and /general-chat) — this mode's
-    tool-calling has its own separate Ollama/Gemini implementations, and
-    adding Claude means a third path against Anthropic's own tool-use API,
-    not just re-pointing the plain-chat wiring the other 2 endpoints use.
-    """
-    if request.provider not in ("onprem", "gemini"):
-        raise HTTPException(400, 'Invalid provider — use "onprem" or "gemini"')
-
-    gemini_key = await _resolve_gemini_key(db, user) if request.provider == "gemini" else None
-
-    service = OracleChatService()
-    return StreamingResponse(
-        service.stream_chat(request.message, request.conversation_history, user, request.provider, gemini_key),
-        media_type="text/event-stream",
-    )
-
-
-@router.post("/general-chat")
-async def general_chat(
-    request: ChatRequest,
-    user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    General-purpose chat — streaming response (local Ollama, Gemini, or
-    Claude), no RAG retrieval, no tools. For questions outside company
-    policy docs and Oracle ERP data. provider="anthropic" here is grounded
-    in live web search (see ai_service.py) — the only mode in this app's
-    interactive chatbot that isn't capped at a training-data cutoff.
+    Oracle EBS Data Chat — streaming response (local Ollama, Gemini, or
+    Claude — tool-calling). The model picks a predefined, parameterized
+    query (sales/production/budget/financial) instead of writing SQL
+    itself; the query runs against Postgres EIS through a read-only DB
+    role. See oracle_chat_service.py — each provider has its own
+    tool-calling implementation there (Ollama/OpenAI-style, Gemini
+    functionDeclarations, Anthropic tool_use/tool_result blocks).
     """
     if request.provider not in ("onprem", "gemini", "anthropic"):
         raise HTTPException(400, 'Invalid provider — use "onprem", "gemini", or "anthropic"')
+    await _ensure_provider_enabled(db, request.provider)
 
     gemini_key = await _resolve_gemini_key(db, user) if request.provider == "gemini" else None
     anthropic_key, anthropic_model = await _resolve_anthropic(db, user) if request.provider == "anthropic" else (None, None)
 
-    service = AIService()
+    service = OracleChatService()
     return StreamingResponse(
-        service.stream_general_chat(request.message, request.conversation_history, user, request.provider, gemini_key, anthropic_key, anthropic_model),
+        service.stream_chat(request.message, request.conversation_history, user, request.provider, gemini_key, anthropic_key, anthropic_model),
         media_type="text/event-stream",
     )
 
@@ -324,3 +369,33 @@ async def cleanup_all(
     """IT/Admin only: wipe the entire knowledge base."""
     deleted = await asyncio.to_thread(rag_service.delete_all_documents)
     return {"message": f"Knowledge base wiped — {deleted} chunks removed", "deleted_chunks": deleted}
+
+
+# ── CoChat (Open WebUI) Knowledge Sync ──────────────────────────────────────
+
+@router.get("/openwebui-sync/status")
+async def openwebui_sync_status(
+    user: CurrentUser = Depends(require_role(Roles.IT, Roles.HR, Roles.ACCOUNTING, Roles.PAC, Roles.PURCHASING, Roles.ADMIN)),
+):
+    return {
+        "configured": openwebui_sync_service.is_configured(),
+        "last_run": openwebui_sync_service.get_last_run(),
+    }
+
+
+@router.post("/openwebui-sync")
+async def trigger_openwebui_sync(
+    user: CurrentUser = Depends(require_role(Roles.IT, Roles.HR, Roles.ACCOUNTING, Roles.PAC, Roles.PURCHASING, Roles.ADMIN)),
+):
+    # Dispatched to Celery, not run inline — live-verified that CoChat's
+    # own file-registration call can take minutes per document on this
+    # instance, far past any reasonable request/response window. Poll
+    # GET /openwebui-sync/status afterward for the result.
+    if not openwebui_sync_service.is_configured():
+        raise HTTPException(400, "CoChat sync belum dikonfigurasi (OPENWEBUI_BASE_URL/API_KEY/KNOWLEDGE_ID belum diset)")
+    from app.tasks.celery_app import celery_app
+    task = celery_app.send_task(
+        "app.tasks.openwebui_sync_tasks.sync_to_openwebui",
+        kwargs={"triggered_by": user.username or "manual"},
+    )
+    return {"message": "Sync ke CoChat dimulai di background — cek status beberapa menit lagi.", "task_id": task.id}

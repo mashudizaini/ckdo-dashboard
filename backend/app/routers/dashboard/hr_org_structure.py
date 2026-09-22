@@ -13,15 +13,76 @@ from typing import Optional
 import openpyxl
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
 from pydantic import BaseModel
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, update, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_db, async_engine
 from app.dependencies import require_role, CurrentUser, Roles
+from app.models.employee import Employee
+from app.models.department_master import DepartmentMaster
 from app.models.org_structure import OrgStructureNode, OrgStructureUploadLog
 from app.services.department_taxonomy import clean_department_list
 
 router = APIRouter()
+
+
+async def ensure_employee_id_column():
+    """org_structure_nodes already existed before employee_id was added to
+    the model — Base.metadata.create_all only creates missing TABLES, it
+    never ALTERs an existing one for a new column (see this repo's other
+    ensure_* helpers for the same reason), so this runs once at startup."""
+    async with async_engine.begin() as conn:
+        await conn.execute(text(
+            "ALTER TABLE org_structure_nodes ADD COLUMN IF NOT EXISTS employee_id VARCHAR(20)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_org_structure_nodes_employee_id ON org_structure_nodes (employee_id)"
+        ))
+
+
+# The exact geographic territory names confirmed live in org_structure_nodes'
+# old sub_team column (query run 2026-09-17) — Sales & Marketing's ASM/PS
+# regional staff only, nowhere else. Everything else ever seen in that
+# column (e.g. "Global Business", "GA", "DI Compliance", or a
+# LEAD_TEAM_NAMES placeholder like "General Manager") is a real team value,
+# not a place.
+_KNOWN_REGIONS = (
+    "Bali", "Bandung", "East Java", "East Kalimantan", "Jakarta", "Jakarta 1", "Jakarta 2",
+    "Kalimantan & Sulawesi", "Malang", "Pontianak/West Kalimantan", "South Kalimantan",
+    "Sulawesi", "Surabaya", "West Java", "Central Java", "Depok & Bogor", "Lampung",
+    "Medan", "Padang", "Palembang", "Solo", "Sumatera", "Tangerang", "Yogya/Purwokerto",
+)
+
+
+async def ensure_team_region_columns():
+    """org_structure_nodes' old sub_team field conflated two different
+    concepts under one form field literally labeled "Sub-team / Region" — a
+    real team/function name, and (for Sales & Marketing's ASM/PS regional
+    staff only) a geographic territory. Split per HR request (2026-09-17):
+    sub_team -> team (rename, keeps whatever's already there), region added
+    fresh, then the confirmed region values (_KNOWN_REGIONS) are moved out
+    of team into region. Idempotent — safe to run on every startup: the
+    rename only fires while the old column name still exists, and the data
+    move only ever matches while a known region name is still sitting in
+    `team` with `region` still empty."""
+    async with async_engine.begin() as conn:
+        has_old_col = await conn.execute(text(
+            "SELECT 1 FROM information_schema.columns WHERE table_name='org_structure_nodes' AND column_name='sub_team'"
+        ))
+        if has_old_col.first():
+            await conn.execute(text("ALTER TABLE org_structure_nodes RENAME COLUMN sub_team TO team"))
+        await conn.execute(text(
+            "ALTER TABLE org_structure_nodes ADD COLUMN IF NOT EXISTS region VARCHAR(100)"
+        ))
+
+    from app.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            update(OrgStructureNode)
+            .where(OrgStructureNode.team.in_(_KNOWN_REGIONS), OrgStructureNode.region.is_(None))
+            .values({OrgStructureNode.region: OrgStructureNode.team, OrgStructureNode.team: None})
+        )
+        await db.commit()
 
 # Left-to-right branch order at the top of the chart — matches "Organization
 # Structure CKDOTTO.xlsx" and the department order in the Daftar Karyawan
@@ -51,10 +112,12 @@ def _node_dict(n: OrgStructureNode) -> dict:
     return {
         "id": n.id,
         "full_name": n.full_name,
+        "employee_id": n.employee_id,
         "position": n.position,
         "department": n.department,
         "division": n.division,
-        "sub_team": n.sub_team,
+        "team": n.team,
+        "region": n.region,
         "join_date": n.join_date.isoformat() if n.join_date else None,
         "supervisor_id": n.supervisor_id,
         "sort_order": n.sort_order,
@@ -68,7 +131,8 @@ class NodeUpsert(BaseModel):
     position: Optional[str] = None
     department: Optional[str] = None
     division: Optional[str] = None
-    sub_team: Optional[str] = None
+    team: Optional[str] = None
+    region: Optional[str] = None
     join_date: Optional[str] = None  # YYYY-MM-DD
     supervisor_id: Optional[int] = None
     sort_order: Optional[int] = None
@@ -123,14 +187,264 @@ async def get_lov(
     return [{"id": r[0], "full_name": r[1], "department": r[2]} for r in result.fetchall()]
 
 
+@router.get("/employee-search")
+async def search_employees_for_fill(
+    q:    str          = Query(..., min_length=1),
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Read-only lookup into the Employee table for the Add/Edit Position
+    form's "Fill from Employee List" button — deliberately just a one-time
+    pre-fill of the node form, not a write-side link between
+    OrgStructureNode and Employee. Keeping the two decoupled (see this
+    module's own docstring) means HR can still adjust a chart entry's
+    phrasing/placement afterward without a future Employee edit or a bulk
+    sync silently overwriting that curation. Active employees only — this
+    is for adding someone who's currently here, not editing legacy/resigned
+    chart entries."""
+    term = f"%{q}%"
+    result = await db.execute(
+        select(Employee.user_id, Employee.full_name, Employee.job_title, Employee.department,
+               Employee.division, Employee.team, Employee.date_of_joining)
+        .where(
+            Employee.employment_status == "Active",
+            Employee.full_name.ilike(term) | Employee.user_id.ilike(term),
+        )
+        .order_by(Employee.full_name)
+        .limit(15)
+    )
+    return [
+        {
+            "user_id": r[0], "full_name": r[1], "job_title": r[2], "department": r[3],
+            "division": r[4], "team": r[5],
+            "join_date": r[6].isoformat() if r[6] else None,
+        }
+        for r in result.fetchall()
+    ]
+
+
+def _norm_name(s: Optional[str]) -> str:
+    return " ".join((s or "").strip().lower().split())
+
+
+# (Employee column, OrgStructureNode column) pairs this syncs — every
+# descriptive field the two tables have in common.
+_SYNC_FIELDS = [
+    ("job_title",      "position"),
+    ("department",     "department"),
+    ("division",       "division"),
+    ("team",           "team"),
+    ("date_of_joining", "join_date"),
+]
+
+
+def _fuzzy_candidates(node_name_norm: str, emp_rows: list) -> list:
+    """LIKE-style fallback for when the exact normalized name doesn't hit
+    anything — a lot of chart entries carry an incomplete/abbreviated name
+    (e.g. "M. Nur Aidi S" for "Muhammad Nur Aidi Setiawan"), so this checks
+    substring containment in both directions instead of requiring an exact
+    match. Deliberately simple (no token/initials matching) — a first pass
+    per HR's own request, refine later if it's not catching enough."""
+    out = []
+    for row in emp_rows:
+        en = _norm_name(row.full_name)
+        if not en:
+            continue
+        if node_name_norm in en or en in node_name_norm:
+            out.append(row)
+    return out
+
+
+@router.post("/sync-from-employees")
+async def sync_from_employees(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Two-phase sync against the Employee master, which is the reference
+    for this data:
+
+    Phase 1 — IDENTITY: for every node without an employee_id yet, find its
+    Employee by full_name — exact match first, falling back to a LIKE-style
+    substring match in either direction (see _fuzzy_candidates) since many
+    chart names are incomplete. Exactly one candidate -> link
+    node.employee_id to it AND overwrite node.full_name with the Employee's
+    real name (Employee is the reference, so unlike every other field this
+    one is NOT additive-only — it's corrected every run). More than one
+    candidate -> left alone and reported as ambiguous rather than guessing.
+
+    Phase 2 — FIELDS: for every node that has an employee_id (just linked
+    above, or already linked from an earlier run), fill in any empty
+    position/department/division/team/join_date straight from that
+    Employee row by id — reliable now that the identity is confirmed, so
+    unlike Phase 1 there's no ambiguity to resolve here. Still additive:
+    only touches a field that's currently empty."""
+    nodes_result = await db.execute(select(OrgStructureNode))
+    nodes = nodes_result.scalars().all()
+
+    emp_result = await db.execute(
+        select(Employee.user_id, Employee.full_name, Employee.job_title, Employee.department,
+               Employee.division, Employee.team, Employee.date_of_joining)
+    )
+    emp_rows = emp_result.fetchall()
+    by_exact_name: dict[str, list] = {}
+    by_user_id: dict[str, object] = {}
+    for row in emp_rows:
+        by_user_id[row.user_id] = row
+        key = _norm_name(row.full_name)
+        if key:
+            by_exact_name.setdefault(key, []).append(row)
+
+    linked_names, renamed_names, unmatched, ambiguous_identity = [], [], [], []
+
+    # Phase 1 — identity
+    for node in nodes:
+        if node.employee_id:
+            continue
+        key = _norm_name(node.full_name)
+        candidates = by_exact_name.get(key) or _fuzzy_candidates(key, emp_rows)
+        distinct_ids = {c.user_id for c in candidates}
+        if not distinct_ids:
+            unmatched.append(node.full_name)
+            continue
+        if len(distinct_ids) > 1:
+            ambiguous_identity.append(node.full_name)
+            continue
+        match = candidates[0]
+        node.employee_id = match.user_id
+        linked_names.append(node.full_name)
+        if node.full_name != match.full_name:
+            renamed_names.append(f"{node.full_name} -> {match.full_name}")
+            node.full_name = match.full_name
+
+    # Phase 2 — fields, keyed by the now-reliable employee_id link
+    updated_names = []
+    for node in nodes:
+        if not node.employee_id:
+            continue
+        match = by_user_id.get(node.employee_id)
+        if not match:
+            continue  # linked to an id no longer in the Employee master
+        node_changed = False
+        for ef, nf in _SYNC_FIELDS:
+            if getattr(node, nf):  # already has a value — never overwrite
+                continue
+            val = getattr(match, ef)
+            if val:
+                setattr(node, nf, val)
+                node_changed = True
+        if node_changed:
+            updated_names.append(node.full_name)
+
+    await db.commit()
+    return {
+        "total_nodes": len(nodes),
+        "linked": len(linked_names), "linked_names": linked_names,
+        "renamed": len(renamed_names), "renamed_names": renamed_names,
+        "field_updated": len(updated_names), "field_updated_names": updated_names,
+        "unmatched": unmatched,
+        "ambiguous_identity": ambiguous_identity,
+    }
+
+
+# A "team" placeholder for a department/division-head row (e.g. Jin Wook
+# Moon's own team value is literally "Director") — not a real team, so it's
+# excluded from both the department_master sync below and the Team LOV.
+_LEAD_PLACEHOLDER_TEAMS = ("Director", "General Manager", "Senior Manager")
+
+# org_structure_nodes uses a different spelling than department_master's
+# existing entry for the exact same real-world department/team — confirmed
+# live (2026-09-17): the sync below first created 4 near-duplicate entries
+# ("QA" next to "Quality Assurance", "GA" next to "General Affair", "QC"
+# next to "Quality Control", "Strategy & Development" next to "Strategy
+# Development") before this map existed to catch them. Maps the
+# org_structure_nodes spelling -> the department_master spelling it's
+# really the same thing as, checked before deciding a value is genuinely
+# new. Add another entry here if a future sync run reports a name that
+# turns out to just be a spelling variant of something already there.
+_DM_SYNC_ALIASES = {
+    "qa": "Quality Assurance",
+    "qc": "Quality Control",
+    "ga": "General Affair",
+    "strategy & development": "Strategy Development",
+}
+
+
+@router.post("/sync-department-master")
+async def sync_department_master(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Grows department_master (additive-only — never renames or moves an
+    existing entry) with any department or team value org_structure_nodes
+    actually uses that department_master doesn't have yet, so the
+    Department/Team LOVs below (now sourced from department_master) never
+    silently drop a value HR is already using in the chart.
+
+    Deliberately does NOT try to sync the `division` value: org_structure_
+    nodes' division field is populated inconsistently — sometimes a real
+    division (e.g. "Production Management"), sometimes literally the same
+    string as team (e.g. division="Engineering" team="Engineering"),
+    sometimes a division-like label department_master doesn't otherwise use
+    at all (e.g. division="General Affair" for the team "GA", which
+    department_master already has under "Production Management"). Reliably
+    reconstructing the correct division/team nesting from that isn't safe
+    to automate, so a new team is added directly under its department
+    instead; HR can move it under the right division afterward with the
+    Department Master CRUD (Setup > HRGA) if one applies."""
+    rows = (await db.execute(
+        select(OrgStructureNode.department, OrgStructureNode.team).distinct()
+    )).all()
+
+    existing = (await db.execute(select(DepartmentMaster))).scalars().all()
+    by_name_type = {(n.type, n.name.strip().lower()): n for n in existing}
+
+    def _next_seq(type_, parent_id):
+        siblings = [n.sequence for n in existing if n.type == type_ and n.parent_id == parent_id]
+        return (max(siblings) + 1) if siblings else 1
+
+    added = []
+
+    async def _ensure(name, type_, parent_id):
+        if not name or not name.strip():
+            return None
+        resolved = _DM_SYNC_ALIASES.get(name.strip().lower(), name.strip())
+        key = (type_, resolved.strip().lower())
+        node = by_name_type.get(key)
+        if node:
+            return node.id
+        node = DepartmentMaster(name=resolved, type=type_, parent_id=parent_id, sequence=_next_seq(type_, parent_id))
+        db.add(node)
+        await db.flush()
+        existing.append(node)
+        by_name_type[key] = node
+        added.append(f"{resolved} ({type_})")
+        return node.id
+
+    for department, team in rows:
+        dept_id = await _ensure(department, "department", None)
+        if dept_id and team and team not in _LEAD_PLACEHOLDER_TEAMS:
+            await _ensure(team, "team", dept_id)
+
+    await db.commit()
+    return {"added": len(added), "added_names": added}
+
+
 @router.get("/departments")
 async def get_departments(
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    result = await db.execute(select(OrgStructureNode.department).distinct())
-    depts = clean_department_list(r[0] for r in result.fetchall())
-    return sorted(depts, key=lambda d: (DEPARTMENT_ORDER.get(d, 99), d))
+    """Department LOV for the Add/Edit Position form — sourced from
+    department_master (type in director/department) instead of raw
+    distinct OrgStructureNode.department values, so it can never show a
+    division or team value by mistake and stays in sync whenever
+    department_master changes. Run /sync-department-master first if a
+    department used in the chart doesn't show up here yet."""
+    result = await db.execute(
+        select(DepartmentMaster).where(DepartmentMaster.type.in_(("director", "department")))
+        .order_by(DepartmentMaster.sequence, DepartmentMaster.name)
+    )
+    return [n.name for n in result.scalars().all()]
 
 
 # ── LOV for the Add/Edit Position form's free-text fields — every distinct
@@ -151,19 +465,62 @@ async def get_positions(
 
 @router.get("/divisions")
 async def get_divisions(
+    department: Optional[str] = Query(None),
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    result = await db.execute(select(OrgStructureNode.division).distinct())
-    return clean_department_list(r[0] for r in result.fetchall())
+    """Division LOV — sourced from department_master (type=division), same
+    reasoning as /departments: never shows a department or team value.
+    Optionally scoped to one department."""
+    q = select(DepartmentMaster).where(DepartmentMaster.type == "division")
+    result = await db.execute(q.order_by(DepartmentMaster.sequence, DepartmentMaster.name))
+    divisions = result.scalars().all()
+    if department:
+        parents = {n.id for n in (await db.execute(select(DepartmentMaster).where(DepartmentMaster.name == department))).scalars().all()}
+        divisions = [d for d in divisions if d.parent_id in parents]
+    return [d.name for d in divisions]
 
 
-@router.get("/sub-teams")
-async def get_sub_teams(
+@router.get("/teams")
+async def get_teams(
+    department: Optional[str] = Query(None),
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    result = await db.execute(select(OrgStructureNode.sub_team).distinct())
+    """Team LOV — sourced from department_master (type=team) instead of
+    raw distinct OrgStructureNode.team values, so it never shows a
+    department or division value by mistake (the reported bug this fixes).
+    Optionally scoped to one department, walking each team's parent chain
+    (a team can sit directly under a department or under a division)."""
+    rows = (await db.execute(select(DepartmentMaster))).scalars().all()
+    by_id = {n.id: n for n in rows}
+
+    def _dept_of(row) -> Optional[str]:
+        cur = row
+        seen = set()
+        while cur.parent_id and cur.parent_id not in seen:
+            seen.add(cur.parent_id)
+            parent = by_id.get(cur.parent_id)
+            if not parent:
+                break
+            cur = parent
+        return cur.name
+
+    teams = [n for n in rows if n.type == "team" and (department is None or _dept_of(n) == department)]
+    dept_seq = {n.name: n.sequence for n in rows if n.type in ("director", "department")}
+    teams.sort(key=lambda n: (dept_seq.get(_dept_of(n), 99), n.sequence, n.name))
+    return [n.name for n in teams]
+
+
+@router.get("/regions")
+async def get_regions(
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Region LOV — org_structure_nodes.region only, no department_master
+    equivalent (region is purely geographic, e.g. Sales & Marketing's
+    ASM/PS territories — not part of the department/division/team model)."""
+    result = await db.execute(select(OrgStructureNode.region).distinct())
     return clean_department_list(r[0] for r in result.fetchall())
 
 
@@ -198,7 +555,7 @@ async def get_tree(
         roots.sort(key=lambda r: (r["sort_order"], r["full_name"] or ""))
         main_root = {
             "id": None, "full_name": "Organization", "position": None,
-            "department": None, "division": None, "sub_team": None,
+            "department": None, "division": None, "team": None, "region": None,
             "join_date": None, "supervisor_id": None, "sort_order": 0,
             "children": roots,
         }
@@ -226,7 +583,7 @@ async def create_node(
 
     node = OrgStructureNode(
         full_name=body.full_name, position=body.position, department=body.department,
-        division=body.division, sub_team=body.sub_team, join_date=_parse_join_date(body.join_date),
+        division=body.division, team=body.team, region=body.region, join_date=_parse_join_date(body.join_date),
         supervisor_id=body.supervisor_id, sort_order=sort_order,
     )
     db.add(node)
@@ -266,7 +623,8 @@ async def update_node(
     node.position = body.position
     node.department = body.department
     node.division = body.division
-    node.sub_team = body.sub_team
+    node.team = body.team
+    node.region = body.region
     node.join_date = _parse_join_date(body.join_date)
     node.supervisor_id = body.supervisor_id
     if body.sort_order is not None:
@@ -303,7 +661,7 @@ async def delete_node(
 # Posisi, Tanggal Bergabung, Atasan Langsung (supervisor referenced BY NAME).
 
 _HEADER_ALIASES = {
-    "departemen": "department", "divisi/tim": "division", "wilayah/sub-tim": "sub_team",
+    "departemen": "department", "divisi/tim": "division", "wilayah/sub-tim": "team_or_region",
     "nama": "full_name", "posisi": "position", "tanggal bergabung": "join_date",
     "atasan langsung": "supervisor_name",
 }
@@ -370,12 +728,18 @@ async def import_structure(
         if not name:
             continue
         raw_department = str(cell(row, "department") or "").strip() or None
+        # The template's single "Wilayah/Sub-Tim" column holds both concepts
+        # (see ensure_team_region_columns' docstring) — same _KNOWN_REGIONS
+        # split applied here so a re-import doesn't reintroduce the mix.
+        raw_tr = str(cell(row, "team_or_region") or "").strip()
+        raw_tr = raw_tr if raw_tr not in ("", "-") else None
         parsed.append({
             "full_name":       name,
             "position":        (str(cell(row, "position") or "").strip() or None),
             "department":      _DEPARTMENT_TRANSLATIONS.get(raw_department, raw_department),
             "division":        (str(cell(row, "division") or "").strip() or None) if str(cell(row, "division") or "").strip() not in ("", "-") else None,
-            "sub_team":        (str(cell(row, "sub_team") or "").strip() or None) if str(cell(row, "sub_team") or "").strip() not in ("", "-") else None,
+            "team":            None if raw_tr in _KNOWN_REGIONS else raw_tr,
+            "region":          raw_tr if raw_tr in _KNOWN_REGIONS else None,
             "join_date":       _parse_month_year(cell(row, "join_date")),
             "supervisor_name": (str(cell(row, "supervisor_name") or "").strip() or None),
         })
@@ -407,7 +771,7 @@ async def import_structure(
     for p in parsed:
         node = OrgStructureNode(
             full_name=p["full_name"], position=p["position"], department=p["department"],
-            division=p["division"], sub_team=p["sub_team"], join_date=p["join_date"],
+            division=p["division"], team=p["team"], region=p["region"], join_date=p["join_date"],
             sort_order=p["sort_order"],
         )
         db.add(node)

@@ -8,7 +8,7 @@ import { useState, useRef, useEffect } from "react";
 import {
   Upload, FileSpreadsheet, CheckCircle2, XCircle,
   Loader2, RefreshCw, Clock, ChevronDown, ChevronUp,
-  Users, UserPlus, RotateCcw, AlertCircle
+  Users, UserPlus, RotateCcw, AlertCircle, Download
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { SortableTH, toggleSort, sortRows } from "@/components/SortableTH";
@@ -28,10 +28,29 @@ export default function EmployeeUpload({ onUploaded } = {}) {
   const [sortBy,  setSortBy]  = useState(null);
   const [sortDir, setSortDir] = useState("asc");
   const handleSort = (f) => { const r = toggleSort(sortBy, sortDir, f); setSortBy(r.sortBy); setSortDir(r.sortDir); };
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const inputRef = useRef(null);
   const { token }  = useAuthStore();
 
   const headers = { Authorization: `Bearer ${token}` };
+
+  const handleDownloadTemplate = async () => {
+    setDownloadingTemplate(true);
+    try {
+      const res = await fetch(`${API}/upload-template`, { headers });
+      if (!res.ok) throw new Error("Download failed");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "employee_upload_template.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (_) {}
+    finally { setDownloadingTemplate(false); }
+  };
 
   // ── Load riwayat upload ────────────────────────────────────────────────────
   const loadLogs = async () => {
@@ -100,11 +119,19 @@ export default function EmployeeUpload({ onUploaded } = {}) {
     <div className="space-y-5">
 
       {/* ── Panduan singkat ─────────────────────────────────────────────────── */}
-      <div className="flex gap-3 rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3 text-sm text-blue-300">
-        <AlertCircle size={15} className="mt-0.5 shrink-0" />
-        <span>
-          Upload the Employee Database template 
+      <div className="flex items-center gap-3 rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3 text-sm text-blue-300">
+        <AlertCircle size={15} className="shrink-0" />
+        <span className="flex-1">
+          Upload the Employee Database template — new to this? Download a blank one below to get the columns right.
         </span>
+        <button
+          onClick={handleDownloadTemplate}
+          disabled={downloadingTemplate}
+          className="flex items-center gap-1.5 shrink-0 rounded-lg border border-blue-500/40 bg-blue-500/10 px-3 py-1.5 text-xs font-semibold text-blue-300 hover:bg-blue-500/20 disabled:opacity-40 transition-colors"
+        >
+          {downloadingTemplate ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+          {downloadingTemplate ? "Downloading..." : "Download Template"}
+        </button>
       </div>
 
       {/* ── Drop zone ───────────────────────────────────────────────────────── */}

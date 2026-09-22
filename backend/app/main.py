@@ -18,28 +18,38 @@ import app.models.business_plan  # noqa: F401
 import app.models.business_plan_setup  # noqa: F401
 import app.models.sales_plan  # noqa: F401
 import app.models.purchase_plan  # noqa: F401
+import app.models.purchase_plan_fg  # noqa: F401
 import app.models.personnel_plan  # noqa: F401
 import app.models.manufacture_plan  # noqa: F401
 import app.models.investment_plan  # noqa: F401
 import app.models.opex_plan  # noqa: F401
 import app.models.db_browser_audit  # noqa: F401
 import app.models.org_structure  # noqa: F401
+import app.models.department_master  # noqa: F401
 import app.models.user_api_key  # noqa: F401
 import app.models.meeting_recording  # noqa: F401
 import app.models.speaker_voiceprint  # noqa: F401
 import app.models.menu_access  # noqa: F401
+import app.models.notification_settings  # noqa: F401
+import app.models.announcement  # noqa: F401
+import app.models.server_registry  # noqa: F401
+import app.models.ai_chat_provider  # noqa: F401
 import app.models.outlook_material  # noqa: F401
 import app.models.financial_statement_upload  # noqa: F401
 import app.models.document_conversion_job  # noqa: F401
 import app.models.document_glossary  # noqa: F401
 import app.models.overtime  # noqa: F401
+import app.models.emagazine  # noqa: F401 — register emagazine models
 from app.models.ebs_backup import init_ebs_db
 from app.models.vpn_monitor import init_vpn_db
 from app.models.hikcentral import init_hikcentral_db
 from app.models.zkteco import init_zkteco_db
 
+# ── E-Magazine Routers ──
+from app.routers import emagazine, emagazine_hotspots
+
 # ── Dashboard Routers ──
-from app.routers.dashboard import it, it_db_browser, hr, pac, accounting, purchasing, ap_invoice, financial_statement, general
+from app.routers.dashboard import it, it_db_browser, it_server_registry, hr, pac, accounting, purchasing, ap_invoice, financial_statement, general, sales_marketing, ppwh, production, supplier_wht, ap_vat_in, ap_wht_listing
 from app.routers.dashboard import ebs_backup
 from app.routers.dashboard import vpn_monitor
 from app.routers.dashboard import it_hikcentral
@@ -56,7 +66,7 @@ from app.routers.dashboard import (
 from app.routers.coretax_router import coretax_router
 
 # ── AI Tools Routers ──
-from app.routers.ai_tools import chatbot, meeting_notes, user_settings, document_converter
+from app.routers.ai_tools import chatbot, meeting_notes, user_settings, document_converter, ebs_chat
 
 # ── Util Routers ──
 from app.routers import health
@@ -78,6 +88,26 @@ async def lifespan(app: FastAPI):
         async with async_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
+    # Seed the department/division/team master hierarchy (curated display
+    # order for Employee Summary etc.) — no-ops once already seeded.
+    from app.services.department_master_service import ensure_seeded as ensure_department_master_seeded
+    await ensure_department_master_seeded()
+
+    # Organization Chart — add employee_id (links a chart entry to its
+    # Employee master record once matched by /sync-from-employees).
+    from app.routers.dashboard.hr_org_structure import ensure_employee_id_column, ensure_team_region_columns
+    await ensure_employee_id_column()
+
+    # Organization Chart — split the old combined "Sub-team / Region" field
+    # into separate team + region columns (see ensure_team_region_columns'
+    # own docstring).
+    await ensure_team_region_columns()
+
+    # E-Magazine — add the edition_type column (magazine vs photo album)
+    # to the pre-existing emagazine_editions table.
+    from app.routers.emagazine import ensure_edition_type_column
+    await ensure_edition_type_column()
+
     # Initialize Oracle Thick Mode
     init_oracle_client()
 
@@ -85,15 +115,39 @@ async def lifespan(app: FastAPI):
     from app.routers.dashboard.ap_invoice import ensure_staging_table
     ensure_staging_table()
 
+    # Create AP Invoice Google Drive auto-sync tables (folder map + sync log)
+    from app.services.ap_invoice_gdrive_service import ensure_tables as ensure_gdrive_tables
+    ensure_gdrive_tables()
+
+    # Create Supplier WHT master table (psycopg2 sync)
+    from app.services.supplier_wht_service import ensure_table as ensure_wht_table
+    ensure_wht_table()
+
+    # Create Oracle Production/Development toggle table
+    from app.database import ensure_oracle_env_table
+    ensure_oracle_env_table()
+
+    # Create Open WebUI (CoChat) Knowledge Sync log table
+    from app.services.openwebui_sync_service import ensure_table as ensure_openwebui_sync_table
+    ensure_openwebui_sync_table()
+
+    # Create EBS Chat email -> department scope table
+    from app.services.ebs_chat_service import ensure_table as ensure_ebs_chat_scope_table
+    ensure_ebs_chat_scope_table()
+
     # Create RAG chatbot schema (pgvector extension + company_documents table)
     from app.services import rag_service
     rag_service.ensure_schema()
 
     # EIS Data Upload — upload-history log table (separate `eis_dashboard` DB)
-    from app.eis_database import ensure_upload_log_table, ensure_purchasing_table, ensure_employee_dim_table
+    from app.eis_database import ensure_upload_log_table, ensure_purchasing_table, ensure_employee_dim_table, ensure_purchasing_migration_tables, ensure_sales_order_table, ensure_inventory_txn_table, ensure_batch_table
     await ensure_upload_log_table()
     await ensure_purchasing_table()
     await ensure_employee_dim_table()
+    await ensure_purchasing_migration_tables()
+    await ensure_sales_order_table()
+    await ensure_inventory_txn_table()
+    await ensure_batch_table()
 
     # EBS Backup Recovery — dedicated sync tables (ebs_*) + its own 60s
     # schedule poller (ported from the standalone ebs-backup-dashboard app).
@@ -211,6 +265,14 @@ app.include_router(
     tags=["Dashboard - IT - VPN Monitoring"],
     dependencies=[Depends(require_role(Roles.IT))],
 )
+# Server Control — centralized server inventory + encrypted credentials
+# (see server_registry_service.py / crypto.py). IT-only, no exceptions —
+# this is the single highest-value target in the whole app if it leaked.
+app.include_router(
+    it_server_registry.router, prefix=f"{API_PREFIX}/dashboard/it/server-registry",
+    tags=["Dashboard - IT - Server Control"],
+    dependencies=[Depends(require_role(Roles.IT))],
+)
 # These three moved from Setup > IT to Setup > General (2026-09-01) — no
 # longer blanket it_staff-gated. Access is now per-user via the new
 # menu_access_service (see Setup > General > Access Control), not tied to
@@ -245,9 +307,24 @@ app.include_router(hr.router,         prefix=f"{API_PREFIX}/dashboard/hr",      
 app.include_router(pac.router,        prefix=f"{API_PREFIX}/dashboard/pac",        tags=["Dashboard - PAC"])
 app.include_router(accounting.router, prefix=f"{API_PREFIX}/dashboard/accounting", tags=["Dashboard - Accounting"])
 app.include_router(ap_invoice.router,  prefix=f"{API_PREFIX}/dashboard/accounting/ap-invoice", tags=["Dashboard - AP Invoice"])
+app.include_router(supplier_wht.router, prefix=f"{API_PREFIX}/dashboard/accounting/supplier-wht", tags=["Dashboard - Supplier WHT"])
 app.include_router(financial_statement.router, prefix=f"{API_PREFIX}/dashboard/accounting/financial-statement", tags=["Dashboard - Financial Statement"])
+app.include_router(ap_vat_in.router, prefix=f"{API_PREFIX}/dashboard/accounting/ap-vat-in", tags=["Dashboard - AP VAT In Listing"])
+app.include_router(ap_wht_listing.router, prefix=f"{API_PREFIX}/dashboard/accounting/ap-wht-listing", tags=["Dashboard - AP WHT Listing"])
 app.include_router(purchasing.router, prefix=f"{API_PREFIX}/dashboard/purchasing", tags=["Dashboard - Purchasing"])
 app.include_router(general.router,    prefix=f"{API_PREFIX}/dashboard/general",    tags=["Dashboard - General"])
+app.include_router(
+    sales_marketing.router, prefix=f"{API_PREFIX}/dashboard/sales", tags=["Dashboard - Sales & Marketing"],
+    dependencies=[Depends(require_role(Roles.SALES))],
+)
+app.include_router(
+    ppwh.router, prefix=f"{API_PREFIX}/dashboard/ppwh", tags=["Dashboard - PPWH"],
+    dependencies=[Depends(require_role(Roles.PPWH))],
+)
+app.include_router(
+    production.router, prefix=f"{API_PREFIX}/dashboard/production", tags=["Dashboard - Production"],
+    dependencies=[Depends(require_role(Roles.PRODUCTION))],
+)
 
 # EIS Dashboard — ported from the standalone eis-dashboard-v2 app.
 # Viewing/editing gated to management (+ admin, always implicitly allowed by
@@ -264,11 +341,16 @@ app.include_router(eis_business_plan.router,  prefix=f"{API_PREFIX}/dashboard/ei
 app.include_router(eis_daily_sales.router,    prefix=f"{API_PREFIX}/dashboard/eis/daily-sales", tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
 app.include_router(eis_data_upload.router,    prefix=f"{API_PREFIX}/dashboard/eis/data-upload", tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
 
+# E-Magazine
+app.include_router(emagazine.router, tags=["E-Magazine"])
+app.include_router(emagazine_hotspots.router, tags=["E-Magazine - Hotspots"])
+
 # AI Tools
 app.include_router(chatbot.router,       prefix=f"{API_PREFIX}/ai/chatbot",       tags=["AI - Chatbot"])
 app.include_router(meeting_notes.router, prefix=f"{API_PREFIX}/ai/meeting-notes", tags=["AI - Meeting Notes"])
 app.include_router(user_settings.router, prefix=f"{API_PREFIX}/ai/settings",       tags=["AI - User Settings"])
 app.include_router(document_converter.router, prefix=f"{API_PREFIX}/ai/document-converter", tags=["AI - Document Converter"])
+app.include_router(ebs_chat.router, prefix=f"{API_PREFIX}/ai/ebs-chat", tags=["AI - EBS Chat"])
 
 # Coretax Bulk Downloader (prefix already set in router: /api/coretax)
 app.include_router(coretax_router)

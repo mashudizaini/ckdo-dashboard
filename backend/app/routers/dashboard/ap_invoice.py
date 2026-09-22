@@ -10,9 +10,11 @@ import psycopg2
 import anthropic
 import httpx
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from pydantic import BaseModel
 from app.config import get_settings
 from app.database import get_oracle_connection
 from app.services import ap_invoice_service as svc
+from app.services import ap_invoice_gdrive_service as gdrive_svc
 
 router = APIRouter()
 settings = get_settings()
@@ -42,6 +44,7 @@ def ensure_staging_table():
                 processed_date      TIMESTAMP,
                 invoice_num         VARCHAR(50) NOT NULL,
                 invoice_date        VARCHAR(20),
+                received_date       VARCHAR(20),
                 vendor_name         VARCHAR(240),
                 vendor_id           BIGINT,
                 vendor_site_id      BIGINT,
@@ -55,6 +58,7 @@ def ensure_staging_table():
                 subtotal            NUMERIC,
                 tax_amount          NUMERIC,
                 tax_serial_number   VARCHAR(100),
+                faktur_pajak_date   VARCHAR(20),
                 lines_json          TEXT,
                 interface_invoice_id BIGINT,
                 ap_invoice_id       BIGINT,
@@ -67,6 +71,58 @@ def ensure_staging_table():
                 cur.execute(f"ALTER TABLE ap_invoice_stg ALTER COLUMN {col} TYPE BIGINT")
             except Exception:
                 conn.rollback()
+        # received_date — the invoice's "RECEIVED BY" stamp date, extracted
+        # by AI vision or filled in manually when it can't be read; used as
+        # GL_DATE's basis (see insert_to_interface's _compute_gl_date).
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS received_date VARCHAR(20)")
+        except Exception:
+            conn.rollback()
+        # faktur_pajak_date — the Faktur Pajak page's own issue date, feeds
+        # Oracle's SUPPLIER_TAX_INVOICE_DATE (see insert_to_interface).
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS faktur_pajak_date VARCHAR(20)")
+        except Exception:
+            conn.rollback()
+        # WHT (withholding tax / PPh) — opt-in per invoice via the checkbox
+        # in the UI. When enabled, wht_amount is subtracted from the gross
+        # Total at Insert-to-Interface time and posted as its own AWT-type
+        # line (see insert_to_interface) — awt_group_id/name is carried
+        # along purely for that line's description and Oracle grouping,
+        # sourced from supplier_wht_master (see supplier_wht_service.py).
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS wht_enabled BOOLEAN DEFAULT FALSE")
+        except Exception:
+            conn.rollback()
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS wht_amount NUMERIC")
+        except Exception:
+            conn.rollback()
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS awt_group_id BIGINT")
+        except Exception:
+            conn.rollback()
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS awt_group_name VARCHAR(240)")
+        except Exception:
+            conn.rollback()
+        # Google Drive auto-sync (see ap_invoice_gdrive_service.py) — 'manual'
+        # (the existing /upload endpoint) vs 'gdrive'; gdrive_file_id is how
+        # a re-run of the sync tells "already processed" from "new file"
+        # without reprocessing, independent of whatever happens to the file
+        # afterward in Drive (renamed, moved between folders, etc).
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS source_channel VARCHAR(20) DEFAULT 'manual'")
+        except Exception:
+            conn.rollback()
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS gdrive_file_id VARCHAR(100)")
+        except Exception:
+            conn.rollback()
+        try:
+            cur.execute("ALTER TABLE ap_invoice_stg ADD COLUMN IF NOT EXISTS gdrive_uploader VARCHAR(150)")
+        except Exception:
+            conn.rollback()
         conn.commit()
         conn.close()
     except Exception:
@@ -112,6 +168,42 @@ async def upload_pdf(
     conn.close()
 
     return {"stg_id": stg_id, "status": "NEW", "preview": invoice_data}
+
+
+@router.get("/po-lines/{po_number}")
+async def get_po_lines(po_number: str):
+    """PO's lines + their receipts, for the manual PO-line/receipt matching
+    picker in the invoice line editor — see get_po_lines_for_matching's
+    docstring for why this has to be a human choice, not an auto-match."""
+    ora = get_oracle_connection()
+    try:
+        result = svc.get_po_lines_for_matching(ora, po_number)
+    except Exception as e:
+        raise HTTPException(500, f"Gagal ambil PO lines: {str(e)}")
+    finally:
+        ora.close()
+    if not result:
+        raise HTTPException(404, f"PO '{po_number}' tidak ditemukan di EBS")
+    return result
+
+
+@router.get("/gl-date-preview")
+async def gl_date_preview(received_date: str = Query(..., description="DD-MON-YYYY or any format normalize_date_str accepts")):
+    """Live preview of what GL_DATE insert_to_interface will actually use
+    for this received_date — the real computation always re-runs fresh at
+    insert time (a period can close between when this is viewed and when
+    the invoice is actually interfaced), this is purely informational so
+    staff aren't surprised by it."""
+    try:
+        base = svc._parse_date(received_date)
+    except ValueError:
+        raise HTTPException(400, f"Format tanggal tidak dikenali: '{received_date}'")
+    ora = get_oracle_connection()
+    try:
+        gl_date = svc._compute_gl_date(ora, base)
+    finally:
+        ora.close()
+    return {"gl_date": svc._format_oracle_date(gl_date)}
 
 
 @router.get("/invoices")
@@ -297,15 +389,54 @@ async def check_status(stg_id: int):
 
 @router.put("/invoices/{stg_id}")
 async def update_invoice(stg_id: int, payload: dict):
-    allowed = {"invoice_num", "invoice_date", "vendor_name", "terms_date",
-               "po_number", "so_number", "currency_code", "invoice_amount",
-               "subtotal", "tax_amount", "lines_json"}
+    allowed = {"invoice_num", "invoice_date", "received_date", "vendor_name", "terms_date",
+               "payment_terms", "po_number", "so_number", "currency_code", "invoice_amount",
+               "subtotal", "tax_amount", "tax_serial_number", "faktur_pajak_date", "lines_json",
+               "wht_enabled", "wht_amount", "awt_group_id", "awt_group_name"}
     updates = {k: v for k, v in payload.items() if k in allowed}
     if not updates:
         raise HTTPException(400, "Tidak ada field valid untuk diupdate")
 
     pg = _get_pg()
     cur = pg.cursor()
+
+    # received_date left blank on save falls back to invoice_date — same
+    # rule extract_pdf() applies when the stamp can't be OCR'd at all.
+    if "received_date" in updates and not updates["received_date"]:
+        updates["received_date"] = updates.get("invoice_date")
+        if not updates["received_date"]:
+            cur.execute("SELECT invoice_date FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
+            row = cur.fetchone()
+            updates["received_date"] = row[0] if row else None
+        if not updates["received_date"]:
+            del updates["received_date"]
+
+    # Normalize to Oracle's own DD-MON-RRRR here, at save time — not only
+    # when inserting to interface — so a bad format is caught immediately
+    # with a clear error instead of surfacing later as "Insert interface
+    # gagal", and so every date this module stores/displays is consistent.
+    for date_key in ("invoice_date", "received_date", "faktur_pajak_date", "terms_date"):
+        if updates.get(date_key):
+            normalized = svc.normalize_date_str(updates[date_key])
+            if normalized is None:
+                raise HTTPException(400, f"Format tanggal tidak dikenali untuk {date_key}: '{updates[date_key]}'")
+            updates[date_key] = normalized
+
+    # TOP (terms_date) is always derived from received_date + the invoice's
+    # payment_terms — recompute and override whenever received_date changes,
+    # rather than trusting a stale terms_date the client might still send
+    # alongside it. Prefers payment_terms from this same save (the field is
+    # now user-editable too) over what's already stored.
+    if "received_date" in updates:
+        payment_terms = updates.get("payment_terms")
+        if not payment_terms:
+            cur.execute("SELECT payment_terms FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
+            row = cur.fetchone()
+            payment_terms = row[0] if row else None
+        computed_terms_date = svc.compute_terms_date(updates["received_date"], payment_terms)
+        if computed_terms_date:
+            updates["terms_date"] = computed_terms_date
+
     sets = ", ".join(f"{k} = %({k})s" for k in updates)
     updates["stg_id"] = stg_id
     cur.execute(f"UPDATE ap_invoice_stg SET {sets}, status = 'NEW' WHERE stg_id = %(stg_id)s AND status IN ('NEW','VALIDATED','ERROR')", updates)
@@ -340,3 +471,54 @@ async def delete_invoice(stg_id: int):
             os.remove(filepath)
 
     return {"message": "Deleted", "stg_id": stg_id}
+
+
+# ── Google Drive auto-sync (see ap_invoice_gdrive_service.py) ─────────────
+
+class GdriveFolderMapCreate(BaseModel):
+    user_label: str
+    folder_id: str
+
+
+@router.get("/gdrive/status")
+async def gdrive_status():
+    return {"configured": gdrive_svc.is_configured(), "last_run": gdrive_svc.get_last_sync()}
+
+
+@router.post("/gdrive/sync")
+async def gdrive_sync_now():
+    if not gdrive_svc.is_configured():
+        raise HTTPException(400, "Google Drive belum dikonfigurasi (service account JSON / Shared Drive ID belum diset)")
+    from app.tasks.celery_app import celery_app
+    task = celery_app.send_task("app.tasks.ap_invoice_gdrive_tasks.sync_gdrive_invoices", kwargs={"triggered_by": "manual"})
+    return {"message": "Sync Google Drive dimulai di background — cek status beberapa saat lagi.", "task_id": task.id}
+
+
+@router.get("/gdrive/subfolders")
+async def gdrive_list_subfolders():
+    """Subfolders directly under the configured Shared Drive — lets the
+    admin UI offer a picker instead of a hand-copied folder ID."""
+    if not gdrive_svc.is_configured():
+        raise HTTPException(400, "Google Drive belum dikonfigurasi (service account JSON / Shared Drive ID belum diset)")
+    try:
+        return gdrive_svc.list_shared_drive_subfolders()
+    except Exception as e:
+        raise HTTPException(502, f"Gagal ambil daftar folder dari Google Drive: {e}")
+
+
+@router.get("/gdrive/folders")
+async def gdrive_list_folders():
+    return gdrive_svc.list_folder_maps()
+
+
+@router.post("/gdrive/folders")
+async def gdrive_add_folder(body: GdriveFolderMapCreate):
+    if not body.user_label.strip() or not body.folder_id.strip():
+        raise HTTPException(400, "user_label dan folder_id wajib diisi")
+    return gdrive_svc.add_folder_map(body.user_label.strip(), body.folder_id.strip())
+
+
+@router.delete("/gdrive/folders/{map_id}")
+async def gdrive_delete_folder(map_id: int):
+    gdrive_svc.delete_folder_map(map_id)
+    return {"message": "Deleted"}

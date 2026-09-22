@@ -1,4 +1,4 @@
-import { MessageSquare, Database, MessageCircle } from "lucide-react";
+import { MessageSquare, Database } from "lucide-react";
 
 /**
  * Shared AI Chatbot mode config — single source of truth for both the full
@@ -57,31 +57,6 @@ export const CHAT_MODES = {
     focusRing: "focus:border-emerald-500",
     suggestHover: "hover:border-emerald-500 hover:text-emerald-400",
   },
-  general: {
-    key: "general",
-    label: "General",
-    shortLabel: "General",
-    icon: MessageCircle,
-    subtitle: "Ask me anything",
-    subtitle2: "General-purpose assistant — no company documents or ERP data",
-    greeting: "Hello! Ask me anything — general questions, writing help, quick lookups, and more.",
-    endpoint: "/api/v1/ai/chatbot/general-chat",
-    storageKey: "ckdo_chat_general",
-    suggestions: [
-      "Terjemahkan 'follow up' ke Bahasa Indonesia formal",
-      "Ringkas paragraf berikut jadi 3 poin",
-      "Bantu draft email follow-up ke vendor",
-      "Apa itu inflasi?",
-    ],
-    thinkingLabel: "Thinking...",
-    gradient: "from-violet-600 to-violet-800",
-    tabActive: "border-violet-500 text-violet-400",
-    userBubble: "bg-violet-600",
-    userAvatar: "bg-violet-600",
-    sendBtn: "bg-violet-600 hover:bg-violet-700",
-    focusRing: "focus:border-violet-500",
-    suggestHover: "hover:border-violet-500 hover:text-violet-400",
-  },
 };
 
-export const CHAT_MODE_ORDER = ["policy", "oracle", "general"];
+export const CHAT_MODE_ORDER = ["policy", "oracle"];

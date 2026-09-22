@@ -24,6 +24,36 @@ settings = get_settings()
 RAG_TIMEOUT_SECONDS = 6.0
 OLLAMA_CHAT_TIMEOUT_SECONDS = 120.0
 
+# A "match the question's language" rule buried once in a long system
+# prompt isn't reliably followed, especially by the on-premise model
+# (verified empirically in Oracle EBS Data Chat — see oracle_chat_service.py,
+# where this exact pattern already fixed the same problem there). Detecting
+# the language ourselves and injecting an explicit, single-purpose
+# instruction as the LAST thing before generation — closest to where the
+# model actually writes its reply — is far more reliable than a rule stated
+# once up front, for every provider, not just onprem.
+_INDONESIAN_HINTS = {
+    "yang", "dan", "untuk", "dari", "dengan", "bagaimana", "apa", "apakah", "berapa",
+    "ini", "itu", "adalah", "tidak", "saya", "kita", "kami", "bulan", "tahun", "periode",
+    "bandingkan", "ringkasan", "kinerja", "penjualan", "produksi", "keuangan", "dibanding",
+    "terhadap", "pada", "atau", "juga", "sudah", "belum", "bisa", "tolong", "mohon",
+    "bagaimana", "apakah", "kenapa", "mengapa", "dimana", "kapan", "siapa", "berapa",
+    "cuti", "karyawan", "perusahaan", "kebijakan", "dokumen", "peraturan", "gaji",
+}
+
+
+def _detect_language(text: str) -> str:
+    words = {w.strip(".,?!:;()").lower() for w in text.split()}
+    return "id" if words & _INDONESIAN_HINTS else "en"
+
+
+def _lang_directive(lang: str) -> str:
+    return (
+        "PENTING: Tulis balasan berikut dalam Bahasa Indonesia. Jangan gunakan Bahasa Inggris."
+        if lang == "id" else
+        "IMPORTANT: Write the following reply in English. Do not use Indonesian."
+    )
+
 # Default Claude model for the interactive chatbot (Policy Chat, General
 # Chat) when the user hasn't picked one via My API Key. Sonnet over Opus by
 # default: near-Opus quality for everyday Q&A at a fraction of the cost and
@@ -32,20 +62,6 @@ OLLAMA_CHAT_TIMEOUT_SECONDS = 120.0
 # Opus). Users who want Opus's extra reasoning power for their own chats can
 # select it when saving a personal API key.
 ANTHROPIC_CHAT_DEFAULT_MODEL = "claude-sonnet-5"
-
-GENERAL_CHAT_SYSTEM_PROMPT = (
-    "Kamu adalah asisten AI internal PT CKD OTTO Pharmaceuticals bernama CKDO Assistant, "
-    "untuk pertanyaan umum sehari-hari (di luar kebijakan perusahaan spesifik dan data ERP Oracle "
-    "— untuk itu ada mode chat terpisah).\n\n"
-    "## Gaya Jawaban\n"
-    "- Langsung ke inti — jangan awali dengan basa-basi seperti \"Tentu!\", \"Baik saya akan...\".\n"
-    "- Gunakan **bold** untuk istilah kunci, tabel untuk perbandingan multi-kolom, list untuk "
-    "langkah-langkah. Pakai format hanya jika benar-benar membantu kejelasan.\n"
-    "- Pertanyaan singkat -> jawab singkat.\n"
-    "- Balas dalam bahasa yang SAMA dengan bahasa pertanyaan user: Bahasa Indonesia -> jawab dalam "
-    "Bahasa Indonesia; Bahasa Inggris -> jawab dalam Bahasa Inggris.\n"
-)
-
 
 class AIService:
     def __init__(self):
@@ -337,15 +353,19 @@ class AIService:
         # indication of what went wrong. Catch it and emit a proper SSE
         # error event so the frontend can show a real message instead.
         full_answer = []
+        # Explicit, single-purpose language directive appended last — see
+        # _detect_language's module-level comment for why this is more
+        # reliable than the rule already stated once in `system` above.
+        final_system = system + "\n\n" + _lang_directive(_detect_language(message))
         if provider == "gemini":
             contents = gemini_service.to_contents(history, message)
             try:
-                async for text in gemini_service.stream_generate(system, contents, gemini_api_key):
+                async for text in gemini_service.stream_generate(final_system, contents, gemini_api_key):
                     full_answer.append(text)
                     yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
             except Exception as e:
                 logger.error("gemini_stream_error", error=str(e))
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e) or type(e).__name__})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
         elif provider == "anthropic":
@@ -360,7 +380,7 @@ class AIService:
                 async with client.messages.stream(
                     model=anthropic_model or ANTHROPIC_CHAT_DEFAULT_MODEL,
                     max_tokens=4096,
-                    system=system,
+                    system=final_system,
                     messages=anthropic_history + [{"role": "user", "content": message}],
                 ) as stream:
                     async for text in stream.text_stream:
@@ -368,13 +388,21 @@ class AIService:
                         yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
             except Exception as e:
                 logger.error("anthropic_stream_error", error=str(e))
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e) or type(e).__name__})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
         else:
             # Ollama takes the system prompt as a regular message in the list
-            # (unlike Anthropic/Gemini, which have a separate top-level `system` param).
-            messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": message}]
+            # (unlike Anthropic/Gemini, which have a separate top-level `system`
+            # param) — the language directive goes in as its own trailing
+            # system message, AFTER the user's turn, so it's the most recent
+            # instruction the model sees (matches oracle_chat_service.py's
+            # proven pattern for the same local model).
+            messages = (
+                [{"role": "system", "content": system}] + history
+                + [{"role": "user", "content": message}]
+                + [{"role": "system", "content": _lang_directive(_detect_language(message))}]
+            )
             try:
                 async with httpx.AsyncClient(timeout=OLLAMA_CHAT_TIMEOUT_SECONDS) as client:
                     async with client.stream(
@@ -397,7 +425,7 @@ class AIService:
                                 break
             except Exception as e:
                 logger.error("ollama_stream_error", error=str(e))
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e) or type(e).__name__})}\n\n"
                 yield "data: [DONE]\n\n"
                 return
 
@@ -415,76 +443,5 @@ class AIService:
             suggestions = []
         if suggestions:
             yield f"data: {json.dumps({'type': 'suggestions', 'suggestions': suggestions})}\n\n"
-
-        yield "data: [DONE]\n\n"
-
-    async def stream_general_chat(self, message: str, history: list[dict], user, provider: str = "onprem", gemini_api_key: str = None, anthropic_api_key: str = None, anthropic_model: str = None):
-        """
-        General-purpose chat — no RAG retrieval, no tools. Simplest of the
-        3 chat modes; for questions that aren't about company policy docs
-        or Oracle ERP data.
-        """
-        if provider == "gemini":
-            contents = gemini_service.to_contents(history, message)
-            try:
-                async for text in gemini_service.stream_generate(GENERAL_CHAT_SYSTEM_PROMPT, contents, gemini_api_key):
-                    yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
-            except Exception as e:
-                logger.error("gemini_general_chat_error", error=str(e))
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-                yield "data: [DONE]\n\n"
-                return
-        elif provider == "anthropic":
-            # Unlike Policy/Oracle Chat, General Chat's Claude option grounds
-            # every answer in live web search (Claude's server-side
-            # web_search tool — same mechanism PAC's Business Plan Outlook
-            # already uses) instead of plain model knowledge, since General
-            # Chat has no other grounding (no RAG/tools) and this is the one
-            # mode in this app's interactive chatbot that can answer with
-            # genuinely current information rather than being capped at
-            # training-data knowledge. Not true token-by-token streaming —
-            # web search is a multi-step server-side process (Claude decides
-            # what to search, reads results, then answers), so the full
-            # answer arrives as one chunk once it's ready rather than
-            # progressively like the other 2 providers.
-            try:
-                text, sources = await asyncio.to_thread(
-                    self._anthropic_complete_with_search_history, GENERAL_CHAT_SYSTEM_PROMPT, history, message,
-                    8192, anthropic_api_key, anthropic_model,
-                )
-                yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
-                if sources:
-                    yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
-            except Exception as e:
-                logger.error("anthropic_general_chat_error", error=str(e))
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-                yield "data: [DONE]\n\n"
-                return
-        else:
-            messages = [{"role": "system", "content": GENERAL_CHAT_SYSTEM_PROMPT}] + history + [{"role": "user", "content": message}]
-            try:
-                async with httpx.AsyncClient(timeout=OLLAMA_CHAT_TIMEOUT_SECONDS) as client:
-                    async with client.stream(
-                        "POST",
-                        f"{self.base_url}/api/chat",
-                        json={"model": self.model, "messages": messages, "stream": True},
-                    ) as response:
-                        response.raise_for_status()
-                        async for line in response.aiter_lines():
-                            if not line.strip():
-                                continue
-                            chunk = json.loads(line)
-                            if chunk.get("error"):
-                                raise RuntimeError(chunk["error"])
-                            text = chunk.get("message", {}).get("content", "")
-                            if text:
-                                yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
-                            if chunk.get("done"):
-                                break
-            except Exception as e:
-                logger.error("ollama_general_chat_error", error=str(e))
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-                yield "data: [DONE]\n\n"
-                return
 
         yield "data: [DONE]\n\n"

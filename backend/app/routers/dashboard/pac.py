@@ -32,6 +32,7 @@ from app.services.business_plan_setup_service import BusinessPlanSetupService
 from app.services.outlook_material_service import OutlookMaterialService
 from app.services.sales_plan_service import SalesPlanService
 from app.services.purchase_plan_service import PurchasePlanService
+from app.services.purchase_plan_fg_service import PurchasePlanFGService
 from app.services.personnel_plan_service import PersonnelPlanService
 from app.services.manufacture_plan_service import ManufacturePlanService
 from app.services.investment_plan_service import InvestmentPlanService
@@ -1440,6 +1441,81 @@ async def upload_purchase_plan_excel(
     per recognized data sheet (Summary/Local/CMO/Export)."""
     content = await file.read()
     return await PurchasePlanService().import_excel(db, content, plan_year, user.username)
+
+
+# ── Purchase Plan (Finished Good) ───────────────────────────────────────────────
+# Parallel to Purchase Plan (Material) above, but a genuinely different Excel
+# template ("Purchase Plan FG - 2026.xlsx") — see PurchasePlanFGService's
+# docstring. Kept in its own table/endpoints so an FG plan can never collide
+# with a Material plan sharing the same (plan_year, plan_category,
+# department, team_code).
+
+class PurchasePlanFGPayload(BaseModel):
+    id:            Optional[int]  = None
+    plan_year:     int
+    plan_category: str            = "Local"   # Summary | Local | CMO | Export
+    department:    str            = ""
+    team_code:     str            = ""
+    team_name:     str            = ""
+    content:       dict           = {}
+    status:        Optional[str]  = "draft"
+
+
+@router.get("/purchase-plans-fg")
+async def list_purchase_plans_fg(
+    plan_year:     Optional[int] = Query(None),
+    department:    Optional[str] = Query(None),
+    team_code:     Optional[str] = Query(None),
+    plan_category: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """List purchase plans (FG) filtered by year/department/team/category."""
+    return await PurchasePlanFGService().list_purchase_plans(db, plan_year, department, team_code, plan_category)
+
+
+@router.get("/purchase-plans-fg/{plan_id}")
+async def get_purchase_plan_fg(
+    plan_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Get single purchase plan (FG)."""
+    return await PurchasePlanFGService().get_purchase_plan(db, plan_id)
+
+
+@router.post("/purchase-plans-fg")
+async def upsert_purchase_plan_fg(
+    body: PurchasePlanFGPayload,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Create / update purchase plan (FG)."""
+    return await PurchasePlanFGService().upsert_purchase_plan(db, body.model_dump(), user.username)
+
+
+@router.delete("/purchase-plans-fg/{plan_id}")
+async def delete_purchase_plan_fg(
+    plan_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Delete purchase plan (FG)."""
+    return await PurchasePlanFGService().delete_purchase_plan(db, plan_id)
+
+
+@router.post("/purchase-plans-fg/upload")
+async def upload_purchase_plan_fg_excel(
+    plan_year: int = Query(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_role(Roles.PAC)),
+):
+    """Import Purchase Plan (Finished Good) data from an Excel file matching
+    the "Purchase Plan FG - 2026.xlsx" template — one plan created/updated
+    per recognized data sheet."""
+    content = await file.read()
+    return await PurchasePlanFGService().import_excel(db, content, plan_year, user.username)
 
 
 # ── Personnel Plan ("Personal Plan Data") ──────────────────────────────────────

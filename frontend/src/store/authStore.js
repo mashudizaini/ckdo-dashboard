@@ -25,7 +25,11 @@ const kc = new Keycloak({
 
 let kcInitialized = false;
 
-// Auto-logout setelah 10 menit tanpa aktivitas (mouse/keyboard/touch/scroll).
+// Auto-logout setelah 100 menit tanpa aktivitas (mouse/keyboard/touch/scroll).
+// Nilai permanen (2026-09-18, sempat 1 jam sebagai mitigasi sementara sebelum
+// ini) setelah keluhan logout terlalu cepat — lihat juga ssoSessionIdleTimeout
+// di realm Keycloak "ckdo", yang harus >= nilai ini juga, atau sesi Keycloak
+// sendiri akan expire duluan.
 //
 // Rewritten from a single `setTimeout(fn, 10*60*1000)` to a periodic
 // elapsed-wall-clock-time check. Two real bugs with the old version:
@@ -50,7 +54,7 @@ let kcInitialized = false;
 // LAST_ACTIVITY_KEY is written to localStorage (shared across same-origin
 // tabs) instead of only an in-memory variable, so activity in ANY open
 // dashboard tab counts as activity for ALL of them — fixing #1 directly.
-const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+const IDLE_TIMEOUT_MS = 100 * 60 * 1000;
 const IDLE_CHECK_INTERVAL_MS = 15 * 1000;
 const ACTIVITY_EVENTS = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"];
 const LAST_ACTIVITY_KEY = "ckdo_last_activity_at";

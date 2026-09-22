@@ -65,6 +65,15 @@ CLOUD_MOM_TIMEOUT_SECONDS = 180.0
 # Cloud providers can run genuinely long, detailed MOMs — this is a JSON
 # structure with many departments/topics/points, not a short chat reply.
 MOM_MAX_OUTPUT_TOKENS = 8192
+# Claude specifically gets its own, higher ceiling: confirmed live (a real
+# meeting's MOM truncated exactly ~6-8K tokens in, matching 8192) that the
+# shared limit above is too tight for claude-opus-5's typically more
+# detailed/verbose output on a long, department-heavy meeting. Not raised
+# for the other 3 cloud providers sharing MOM_MAX_OUTPUT_TOKENS (deepseek/
+# openai/kimi) since their completion-endpoint ceilings aren't confirmed —
+# requesting more than a model supports there risks an outright 400
+# instead of Claude's graceful stop-at-limit behavior.
+ANTHROPIC_MOM_MAX_OUTPUT_TOKENS = 16384
 
 # Generous margin — ~17x realtime measured on the ai-engine GPU means even a
 # 5h meeting (the longest meetings are expected to run) takes under 20
@@ -236,7 +245,7 @@ class MeetingNotesService:
                 client = anthropic.AsyncAnthropic(api_key=api_key or settings.anthropic_api_key)
                 response = await client.messages.create(
                     model="claude-opus-5",
-                    max_tokens=MOM_MAX_OUTPUT_TOKENS,
+                    max_tokens=ANTHROPIC_MOM_MAX_OUTPUT_TOKENS,
                     messages=[{"role": "user", "content": prompt}],
                 )
             except anthropic.APIStatusError as e:
@@ -246,14 +255,14 @@ class MeetingNotesService:
                         "console.anthropic.com > Plans & Billing, atau pilih provider lain."
                     ) from e
                 raise
-            raw = response.content[0].text.strip()
+            raw = (response.content[0].text or "").strip()
         elif provider == "gemini":
             try:
                 raw = (await gemini_service.generate(
                     system_prompt="You produce structured meeting minutes. Respond with valid JSON only, no commentary.",
                     contents=[{"role": "user", "parts": [{"text": prompt}]}],
                     api_key=api_key,
-                )).strip()
+                ) or "").strip()
             except httpx.HTTPStatusError as e:
                 if _is_credit_error(e.response.status_code, e.response.text):
                     raise MomProviderCreditError(
@@ -279,7 +288,7 @@ class MeetingNotesService:
                         "atau pilih provider lain."
                     )
                 resp.raise_for_status()
-                raw = resp.json()["choices"][0]["message"]["content"].strip()
+                raw = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         elif provider == "openai":
             async with httpx.AsyncClient(timeout=CLOUD_MOM_TIMEOUT_SECONDS) as client:
                 resp = await client.post(
@@ -299,7 +308,7 @@ class MeetingNotesService:
                         "platform.openai.com, atau pilih provider lain."
                     )
                 resp.raise_for_status()
-                raw = resp.json()["choices"][0]["message"]["content"].strip()
+                raw = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         elif provider == "kimi":
             async with httpx.AsyncClient(timeout=CLOUD_MOM_TIMEOUT_SECONDS) as client:
                 resp = await client.post(
@@ -318,7 +327,7 @@ class MeetingNotesService:
                         "atau pilih provider lain."
                     )
                 resp.raise_for_status()
-                raw = resp.json()["choices"][0]["message"]["content"].strip()
+                raw = (resp.json()["choices"][0]["message"]["content"] or "").strip()
         else:
             async with httpx.AsyncClient(timeout=OLLAMA_MOM_TIMEOUT_SECONDS) as client:
                 resp = await client.post(
@@ -333,7 +342,7 @@ class MeetingNotesService:
                         # shows up as inconsistency/invention rather than useful
                         # variety. Low temperature + constrained top_p keep the smaller
                         # on-prem model closer to the transcript's actual content.
-                        "options": {"temperature": 0.15, "top_p": 0.9},
+                        "options": {"temperature": 0.15, "top_p": 0.9, "num_ctx": 16384},  # num_ctx: Ollama's 2048 default cut long transcripts off mid-JSON ("Unterminated string" downstream)
                         "format": MOM_JSON_SCHEMA,
                         # Harmless no-op for non-thinking models (confirmed empirically);
                         # required for qwen3-class hybrid-thinking models so the chain-
@@ -343,11 +352,35 @@ class MeetingNotesService:
                     },
                 )
                 resp.raise_for_status()
-                raw = resp.json()["message"]["content"].strip()
+                raw = (resp.json()["message"]["content"] or "").strip()
+
+        if not raw:
+            # Every provider above can come back with an empty/None content
+            # field on its own error path (Ollama in particular: a schema-
+            # constrained generation that fails partway through a long
+            # transcript returns HTTP 200 with message.content: null rather
+            # than a 4xx/5xx — no exception to catch, just an empty result).
+            # Without this check that silently became AttributeError:
+            # 'NoneType' object has no attribute 'strip' before this fix.
+            raise ValueError(
+                "Model tidak mengembalikan hasil apa pun (respons kosong). Transkrip mungkin "
+                "terlalu panjang untuk provider ini, atau model gagal memproses permintaan. "
+                "Coba lagi, atau gunakan provider lain (Claude/Gemini) untuk rapat yang panjang."
+            )
 
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as e:
+            # Near-always means the model's output got cut off before the JSON
+            # closed (context/output limit reached on a long transcript) —
+            # the raw parser error ("Unterminated string...") means nothing to
+            # a user, so translate it into an actionable message instead.
+            raise ValueError(
+                "Model menghasilkan JSON yang terpotong (kemungkinan transkrip terlalu panjang). "
+                "Coba lagi, atau gunakan provider lain (Claude/Gemini) untuk rapat yang sangat panjang."
+            ) from e
 
     def build_mom_docx(self, mom_json: dict, meeting_title: str, participants: str, meta: dict) -> bytes:
         """Renders the (possibly user-edited) MOM structure into a .docx,

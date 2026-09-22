@@ -3,10 +3,11 @@ CV Screening Service
 Parse CV (PDF/DOCX/TXT) → analyze with AI → structured score + recommendation.
 
 Two providers, selected per-request (see screen_cv's `provider` param):
-  - "onprem"    (standard, default) — local Ollama (qwen2.5:14b-instruct) on
-                the "ai-engine" VM (172.21.2.27), no per-call API cost.
-  - "anthropic" (premium, opt-in)   — Claude, higher quality on tricky CVs
-                but costs real API credits.
+  - "anthropic" (standard, default) — Claude, higher quality on tricky CVs,
+                costs real API credits.
+  - "onprem"    (opt-in)            — local Ollama (qwen3:30b) on the
+                "ai-engine" VM (172.21.2.27), no per-call API cost, but
+                noticeably slower (see OLLAMA_TIMEOUT_SECONDS below).
 
 Ported from sumber/cv_screening (AI-Enhanced screener) into the FastAPI stack.
 """
@@ -23,7 +24,13 @@ import httpx
 from app.config import get_settings
 
 settings = get_settings()
-OLLAMA_TIMEOUT_SECONDS = 120.0
+# qwen3:30b (the on-prem model, see ollama_chat_model in config.py) genuinely
+# needs more than 2 minutes for the full CV-analysis prompt on real CVs —
+# confirmed live (2026-09-16): a realistic-length CV consistently exceeded
+# a 120s timeout with httpx.ReadTimeout, even though the model itself was
+# still working, not hung. nginx's own proxy_read_timeout (3900s) has ample
+# headroom above this.
+OLLAMA_TIMEOUT_SECONDS = 300.0
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads", "cv_screening")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -100,7 +107,7 @@ Analyze this CV deeply and extract structured information. Be smart about:
     "total_score": 86, "reasoning": "Detailed explanation"
   }},
   "recommendation": {{
-    "decision": "Highly Recommended / Recommended / Consider / Not Recommended",
+    "decision": "Highly Recommended / Recommended / Considered / Not Recommended",
     "confidence": "high / medium / low",
     "reasoning": "Detailed reasoning",
     "interview_focus": ["Topic worth probing in the interview"]
@@ -157,10 +164,10 @@ def analyze_cv_with_ollama(cv_text: str, job: dict) -> dict:
 analyze_cv_with_ai = analyze_cv_with_ollama
 
 
-def screen_cv(file_path: str, filename: str, job: dict, provider: str = "onprem") -> dict:
+def screen_cv(file_path: str, filename: str, job: dict, provider: str = "anthropic") -> dict:
     """Extract + analyze a single CV. Returns a dict matching CvScreeningCandidate
-    fields. `provider`: "onprem" (standard, default, local Ollama) or
-    "anthropic" (premium, opt-in, costs API credits)."""
+    fields. `provider`: "anthropic" (standard, default, Claude) or
+    "onprem" (opt-in, local Ollama)."""
     try:
         cv_text = extract_cv_text(file_path)
         if not cv_text or len(cv_text) < 30:
@@ -192,7 +199,7 @@ def screen_cv(file_path: str, filename: str, job: dict, provider: str = "onprem"
             "education_score": float(scoring.get("education_score", 0) or 0),
             "certification_score": float(scoring.get("certification_score", 0) or 0),
             "total_score": float(scoring.get("total_score", 0) or 0),
-            "recommendation": rec.get("decision", "Consider"),
+            "recommendation": rec.get("decision", "Considered"),
             "confidence": rec.get("confidence"),
             "reasoning": rec.get("reasoning") or scoring.get("reasoning"),
             "interview_focus": json.dumps(rec.get("interview_focus", [])),
@@ -201,6 +208,9 @@ def screen_cv(file_path: str, filename: str, job: dict, provider: str = "onprem"
             "error": None,
         }
     except Exception as e:
+        # The caller (upload_and_screen) checks "error" and never persists
+        # this as a candidate row — a failed extraction/AI call isn't a real
+        # screening result, so it doesn't get a recommendation at all.
         return {
             "filename": filename,
             "name": "Unknown",
@@ -210,7 +220,7 @@ def screen_cv(file_path: str, filename: str, job: dict, provider: str = "onprem"
             "skills_found": "[]", "missing_skills": "[]", "additional_relevant_skills": "[]",
             "certifications": "[]",
             "skills_score": 0, "experience_score": 0, "education_score": 0, "certification_score": 0,
-            "total_score": 0, "recommendation": "Error Processing",
+            "total_score": 0, "recommendation": None,
             "confidence": None, "reasoning": None, "interview_focus": "[]",
             "red_flags": "[]", "strengths": "[]",
             "error": str(e),

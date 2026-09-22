@@ -151,43 +151,50 @@ export default function LoginPage() {
           pointerEvents: "none",
         }} />
 
-        {/* ── Floating particles ── */}
-        {Array.from({ length: 12 }).map((_, i) => (
-          <div key={i} style={{
-            position: "absolute",
-            left: `${8 + i * 8}%`,
-            bottom: `-${5 + (i % 4) * 5}%`,
-            width: i % 3 === 0 ? 5 : 3,
-            height: i % 3 === 0 ? 5 : 3,
-            borderRadius: "50%",
-            background: "rgba(147,197,253,0.5)",
-            animation: `floatUp ${14 + i * 2}s linear ${i * 1.2}s infinite`,
-            pointerEvents: "none",
-          }} />
-        ))}
+        {/* ── Floating vials — small injection-vial silhouettes drifting
+            upward, in place of plain bubbles, so the ambient motion reads
+            as pharmaceutical/oncology manufacturing rather than generic
+            decoration. ── */}
+        {Array.from({ length: 12 }).map((_, i) => {
+          const scale = i % 3 === 0 ? 1.35 : 1;
+          const w = 9 * scale, h = 17 * scale;
+          return (
+            <svg key={i} width={w} height={h} viewBox="0 0 9 17" style={{
+              position: "absolute",
+              left: `${8 + i * 8}%`,
+              bottom: `-${5 + (i % 4) * 5}%`,
+              animation: `floatUp ${14 + i * 2}s linear ${i * 1.2}s infinite`,
+              pointerEvents: "none",
+            }}>
+              <rect x="2.7" y="0" width="3.6" height="2.2" rx="0.6" fill="rgba(191,219,254,0.55)" />
+              <rect x="0.8" y="2" width="7.4" height="14.5" rx="2.4" fill="rgba(147,197,253,0.16)" stroke="rgba(147,197,253,0.45)" strokeWidth="0.6" />
+              <rect x="1.4" y="8.5" width="6.2" height="7.5" rx="1.8" fill="rgba(96,165,250,0.32)" />
+            </svg>
+          );
+        })}
 
         {/* ── Header bar ── */}
         <header style={{
           position: "relative", zIndex: 10,
           display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "16px 40px",
+          padding: "20px 40px",
           background: "rgba(255,255,255,0.07)",
           backdropFilter: "blur(10px)",
           borderBottom: "1px solid rgba(255,255,255,0.1)",
           animation: "fadeIn 0.6s ease forwards",
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <img src={logo} alt="CKD Otto" style={{ height: 42, width: 42, objectFit: "contain" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <img src={logo} alt="CKD Otto" style={{ height: 58, width: 58, objectFit: "contain" }} />
             <div>
-              <p style={{ fontSize: 14, fontWeight: 700, color: "#f1f5f9", letterSpacing: "0.06em" }}>
-                CKD OTTO PHARMACEUTICALS
+              <p style={{ fontSize: 20, fontWeight: 700, color: "#f1f5f9", letterSpacing: "0.03em" }}>
+                CKD OTTO Pharmaceuticals
               </p>
-              <p style={{ fontSize: 9.5, color: "#93c5fd", letterSpacing: "0.1em", fontWeight: 600, marginTop: 1 }}>
+              <p style={{ fontSize: 11.5, color: "#93c5fd", letterSpacing: "0.09em", fontWeight: 600, marginTop: 2 }}>
                 INTERNAL APPLICATION PORTAL
               </p>
             </div>
           </div>
-          <p style={{ fontSize: 11, color: "#93c5fd", fontWeight: 600, letterSpacing: "0.08em" }}>
+          <p style={{ fontSize: 14, color: "#93c5fd", fontWeight: 700, letterSpacing: "0.07em" }}>
             BETTER LIFE THROUGH BETTER MEDICINE
           </p>
         </header>

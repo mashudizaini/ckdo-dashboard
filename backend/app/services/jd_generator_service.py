@@ -4,10 +4,11 @@ Takes a raw job description and produces a structured, HR-friendly version
 plus ready-to-use CV screening criteria.
 
 Three methods, selected per-request (see the router's JdGenerateRequest.method):
-  - "onprem"    (standard, default) — local Ollama (qwen2.5:14b-instruct) on
-                the "ai-engine" VM (172.21.2.27), no per-call API cost.
-  - "anthropic" (premium, opt-in)   — Claude, higher quality on messy/unusual
-                JDs but costs real API credits.
+  - "anthropic" (standard, default) — Claude, highest quality, costs real API
+                credits.
+  - "onprem"    (opt-in)            — local Ollama (qwen3:30b) on the
+                "ai-engine" VM (172.21.2.27), no per-call API cost, but
+                noticeably slower (see OLLAMA_TIMEOUT_SECONDS below).
   - "template"  (offline fallback)  — regex/keyword extraction, no AI at all.
 
 Ported from sumber/cv_screening (jd_generator_template.py + AI method in
@@ -22,7 +23,10 @@ import httpx
 from app.config import get_settings
 
 settings = get_settings()
-OLLAMA_TIMEOUT_SECONDS = 120.0
+# See the matching constant/comment in cv_screening_service.py — qwen3:30b
+# genuinely needs more than 2 minutes for this prompt's length on the
+# ai-engine VM's hardware; confirmed live (2026-09-16).
+OLLAMA_TIMEOUT_SECONDS = 300.0
 
 
 # ── AI-Powered (Claude / Ollama) ──────────────────────────────────────

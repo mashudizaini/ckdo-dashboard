@@ -1,0 +1,191 @@
+import React, { useEffect, useState } from 'react';
+import { useEMagazineStore } from '../../stores/emagazineStore';
+import emagazineAPI from '../../utils/emagazineApi';
+import HotspotLayer from './HotspotLayer';
+import Modal from './Modal';
+import ContactModal from './ContactModal';
+import LinkModal from './LinkModal';
+import VideoModal from './VideoModal';
+import QrCodeModal from './QrCodeModal';
+
+export default function PageViewer() {
+  const { currentPage, currentEditionId, setCurrentPage, editions, setCurrentPageImage } = useEMagazineStore();
+  const currentEdition = editions.find((e) => e.id === currentEditionId);
+  const isAlbum = currentEdition?.edition_type === 'album';
+  const [pageContent, setPageContent] = useState(null);
+  const [hotspots, setHotspots] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [activeModal, setActiveModal] = useState(null);
+  const [modalData, setModalData] = useState(null);
+
+  useEffect(() => {
+    if (!currentEditionId) return;
+
+    const loadPageContent = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const content = await emagazineAPI.getPage(currentEditionId, currentPage);
+        setPageContent(content);
+        setCurrentPageImage(content.image_path ? { path: content.image_path, title: content.title } : null);
+
+        // Load hotspots for this page
+        const hs = await emagazineAPI.getPageHotspots(currentEditionId, currentPage);
+        setHotspots(hs || []);
+
+        // Track page view
+        await emagazineAPI.trackAnalytics(currentEditionId, 'page_view', {
+          pageNumber: currentPage,
+        });
+      } catch (err) {
+        console.error('Error loading page:', err);
+        setError('Failed to load page content');
+        setCurrentPageImage(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadPageContent();
+  }, [currentPage, currentEditionId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full bg-gray-50">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <p className="mt-4 text-gray-600">Loading page {currentPage}...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const handleHotspotClick = (hotspot) => {
+    // page_jump navigates within the same edition (e.g. a printed table-of-
+    // contents page's entries) — no modal to open, just move the reader.
+    if (hotspot.action_type === 'page_jump') {
+      const targetPage = parseInt(hotspot.action_data?.page, 10);
+      if (targetPage) setCurrentPage(targetPage);
+    } else {
+      setModalData({
+        actionType: hotspot.action_type,
+        data: hotspot.action_data,
+      });
+      setActiveModal(hotspot.action_type);
+    }
+
+    // Track analytics
+    emagazineAPI.trackAnalytics(currentEditionId, 'hotspot_click', {
+      pageNumber: currentPage,
+      hotspotId: hotspot.id,
+      actionType: hotspot.action_type,
+    });
+  };
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-full bg-gray-50">
+        <div className="text-center">
+          <p className="text-red-600 font-semibold">{error}</p>
+          <p className="text-gray-600 text-sm mt-2">Page {currentPage}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="flex-1 overflow-auto bg-gray-100">
+        <div className="flex items-center justify-center min-h-full p-4">
+          <div className="bg-white shadow-lg rounded-lg max-w-4xl w-full relative">
+            {/* Page Header */}
+            <div className="border-b border-gray-200 px-6 py-4 bg-gray-50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">
+                    {pageContent?.title || (isAlbum ? `Photo ${currentPage}` : `Page ${currentPage}`)}
+                  </h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    {isAlbum
+                      ? `Photo ${pageContent?.page_number} of ${currentEdition?.total_pages ?? ''}`
+                      : `${pageContent?.section_name} • Page ${pageContent?.page_number}`}
+                  </p>
+                </div>
+                {hotspots.length > 0 && (
+                  <div className="text-xs text-gray-500 bg-blue-50 px-2 py-1 rounded">
+                    {hotspots.length} interactive area{hotspots.length > 1 ? 's' : ''}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Page Image with Hotspots Overlay */}
+            <div className="max-h-[70vh] overflow-y-auto">
+              {pageContent?.image_path ? (
+                <div className="relative">
+                  <img
+                    src={pageContent.image_path}
+                    alt={pageContent?.title || `Page ${currentPage}`}
+                    className="w-full h-auto block"
+                  />
+                  {hotspots.length > 0 && (
+                    <HotspotLayer hotspots={hotspots} onHotspotClick={handleHotspotClick} />
+                  )}
+                </div>
+              ) : (
+                <div className="text-center text-gray-500 py-12">
+                  <p>Page image not available</p>
+                </div>
+              )}
+            </div>
+
+            {/* Page Footer */}
+            <div className="border-t border-gray-200 px-6 py-4 bg-gray-50 text-center text-sm text-gray-600">
+              {isAlbum ? `Photo ${pageContent?.page_number}` : `Page ${pageContent?.page_number}`}
+              {hotspots.length > 0 && (
+                <span className="ml-2 text-blue-600">
+                  • Hover over highlighted areas to see details
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Modals */}
+      <ContactModal
+        isOpen={activeModal === 'contact' || activeModal === 'profile'}
+        onClose={() => setActiveModal(null)}
+        data={modalData?.actionType === 'contact' || modalData?.actionType === 'profile' ? modalData?.data : null}
+      />
+
+      <LinkModal
+        isOpen={activeModal === 'link'}
+        onClose={() => setActiveModal(null)}
+        data={modalData?.actionType === 'link' ? modalData?.data : null}
+      />
+
+      <VideoModal
+        isOpen={activeModal === 'video'}
+        onClose={() => setActiveModal(null)}
+        data={modalData?.actionType === 'video' ? modalData?.data : null}
+      />
+
+      <Modal
+        isOpen={activeModal === 'form'}
+        onClose={() => setActiveModal(null)}
+        title="Form"
+        size="md"
+      >
+        <p className="text-gray-600">Form feature coming soon</p>
+      </Modal>
+
+      <QrCodeModal
+        isOpen={activeModal === 'qrcode'}
+        onClose={() => setActiveModal(null)}
+        data={modalData?.actionType === 'qrcode' ? modalData?.data : null}
+      />
+    </>
+  );
+}

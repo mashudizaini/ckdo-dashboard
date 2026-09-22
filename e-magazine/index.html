@@ -116,6 +116,7 @@
   .btn:focus-visible{outline:2px solid var(--copper);outline-offset:2px}
   .btn.icon{width:36px;height:36px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:15px}
   #editionsToggle{display:none}
+  #musicToggle{display:none}
 
   /* ── Content row: stage + sidebar ───────── */
   .content{flex:1;display:flex;min-height:0}
@@ -178,7 +179,7 @@
 
   /* ── Editions sidebar (right) ───────────── */
   aside{
-    width:280px;flex-shrink:0;
+    width:360px;flex-shrink:0;
     border-left:1px solid var(--line);
     background:rgba(23,51,48,.5);
     display:flex;flex-direction:column;
@@ -195,7 +196,7 @@
   aside .head h2{font-family:'Fraunces',serif;font-size:17px;font-weight:700;margin-top:2px}
   #editionList{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin}
   .edition{
-    display:flex;gap:12px;align-items:center;
+    display:flex;gap:12px;align-items:flex-start;
     padding:10px;border-radius:10px;cursor:pointer;
     border:1px solid transparent;background:transparent;
     text-align:left;color:var(--mist);font-family:'Inter',sans-serif;
@@ -214,9 +215,10 @@
   }
   .edition .spine img{width:100%;height:100%;object-fit:cover}
   .edition .meta{min-width:0}
-  .edition .meta .t{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .edition .meta .d{font-size:11.5px;color:var(--mist-dim);margin-top:2px}
+  .edition .meta .t{font-size:13.5px;font-weight:600;white-space:normal;overflow-wrap:break-word;line-height:1.35}
+  .edition .meta .d{font-size:11.5px;color:var(--mist-dim);margin-top:3px}
   .edition.active .meta .d{color:var(--copper-soft)}
+  .edition .meta .desc{font-size:10.5px;color:var(--mist-dim);opacity:.85;margin-top:3px;white-space:normal;overflow-wrap:break-word;line-height:1.4}
   #editionEmpty{padding:18px;font-size:13px;color:var(--mist-dim);line-height:1.6}
 
   /* ── Bottom bar ─────────────────────────── */
@@ -251,6 +253,7 @@
     #editionsToggle{display:inline-flex}
     aside{
       position:fixed;top:0;right:0;bottom:0;z-index:60;
+      max-width:92vw;
       transform:translateX(100%);transition:transform .25s ease;
       background:var(--panel);box-shadow:-20px 0 50px rgba(0,0,0,.4);
     }
@@ -337,11 +340,13 @@
     <input type="search" id="searchInput" class="search-input" placeholder="Search inside magazines…" autocomplete="off">
     <div id="searchResults" class="search-results hidden"></div>
   </div>
+  <button class="btn icon" id="musicToggle" title="Toggle background music" aria-label="Toggle background music">🔊</button>
   <button class="btn icon" id="zoomOut" title="Zoom out" aria-label="Zoom out">−</button>
   <button class="btn icon" id="zoomIn" title="Zoom in" aria-label="Zoom in">+</button>
   <button class="btn icon" id="fsBtn" title="Fullscreen" aria-label="Fullscreen">⛶</button>
   <button class="btn" id="editionsToggle">Editions</button>
 </header>
+<audio id="bgMusic" loop preload="none"></audio>
 
 <div class="content">
   <main id="viewer">
@@ -404,15 +409,26 @@ const els = {
   editionList:$("editionList"), panel:$("editionsPanel"),
   scrim:$("drawerScrim"), toggle:$("editionsToggle"),
   searchInput:$("searchInput"), searchResults:$("searchResults"),
-  jumpToast:$("jumpToast")
+  jumpToast:$("jumpToast"),
+  musicToggle:$("musicToggle"), bgMusic:$("bgMusic")
 };
 
 let pdf = null, numPages = 0, aspect = 0.707;
 let spread = 0, singleMode = false, singlePage = 1;
 let zoom = 1, flipping = false, activeEdition = -1;
+let albumPhotos = null; // string[] of photo URLs when the active edition is a photo album, else null
 const imgCache = new Map();
 const qrCache  = new Map(); // pageNum -> [{x,y,w,h,url}] in canvas-space
 const dimCache = new Map(); // pageNum -> {cw, ch}
+
+function loadImageEl(url){
+  return new Promise((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = reject;
+    im.src = url;
+  });
+}
 
 /* ── QR detection ───────────────────────── */
 function _jsqrOnCanvas(c){
@@ -544,6 +560,12 @@ function buildEditionList(){
     meta.innerHTML = `<div class="t"></div><div class="d"></div>`;
     meta.querySelector(".t").textContent = e.title;
     meta.querySelector(".d").textContent = e.date || "";
+    if(e.description){
+      const desc = document.createElement("div");
+      desc.className = "desc";
+      desc.textContent = e.description;
+      meta.appendChild(desc);
+    }
     b.append(spine, meta);
     b.addEventListener("click", ()=>{
       selectEdition(i);
@@ -577,7 +599,7 @@ function selectEdition(i){
   activeEdition = i;
   markActiveEdition();
   updateQRLinksBar(e);
-  return loadEdition(e.file, e.title);
+  return loadEdition(e);
 }
 
 /* drawer (mobile) */
@@ -587,40 +609,114 @@ els.toggle.onclick = openDrawer;
 els.scrim.onclick = closeDrawer;
 
 /* ── Document loading ───────────────────── */
-async function loadEdition(src, label){
+async function loadEdition(edition){
   resetState();
   els.overlay.classList.remove("hidden");
-  els.overlayMsg.textContent = "Loading " + (label||"document") + "…";
+  els.overlayMsg.textContent = "Loading " + (edition.title||"document") + "…";
   els.bar.hidden = false;
   try{
-    const task = pdfjsLib.getDocument(src);
-    task.onProgress = p => {
-      if(p.total) els.barFill.style.width = Math.round(p.loaded/p.total*100)+"%";
-    };
-    pdf = await task.promise;
-    numPages = pdf.numPages;
-    const vp = (await pdf.getPage(1)).getViewport({scale:1});
-    aspect = vp.width / vp.height;
-    els.overlay.classList.add("hidden");
-    layout();
-    await showSpread(0, true);
-    buildThumbs();
+    if(edition.type === "photo_album"){
+      const photos = edition.photos || [];
+      if(!photos.length) throw new Error("Album has no photos");
+      albumPhotos = photos;
+      numPages = photos.length;
+      const im = await loadImageEl(photos[0]);
+      aspect = im.naturalWidth / im.naturalHeight;
+      els.bar.hidden = true;
+      els.overlay.classList.add("hidden");
+      layout();
+      await showSpread(0, true);
+      buildThumbs();
+    } else {
+      const task = pdfjsLib.getDocument(edition.file);
+      task.onProgress = p => {
+        if(p.total) els.barFill.style.width = Math.round(p.loaded/p.total*100)+"%";
+      };
+      pdf = await task.promise;
+      numPages = pdf.numPages;
+      const vp = (await pdf.getPage(1)).getViewport({scale:1});
+      aspect = vp.width / vp.height;
+      els.overlay.classList.add("hidden");
+      layout();
+      await showSpread(0, true);
+      buildThumbs();
+    }
+    updateMusic(edition.music || null);
   }catch(err){
     els.bar.hidden = true;
-    els.overlayMsg.textContent = "Edisi gagal dimuat. Pastikan file PDF tersedia di server.";
+    els.overlayMsg.textContent = edition.type === "photo_album"
+      ? "Album gagal dimuat. Pastikan foto tersedia di server."
+      : "Edisi gagal dimuat. Pastikan file PDF tersedia di server.";
     console.error("loadEdition error:", err);
+    updateMusic(null);
   }
 }
 function resetState(){
-  pdf=null; numPages=0; spread=0; singlePage=1; zoom=1;
+  pdf=null; numPages=0; spread=0; singlePage=1; zoom=1; albumPhotos=null;
   imgCache.clear(); qrCache.clear(); dimCache.clear();
   els.thumbs.innerHTML=""; applyZoom();
 }
+
+/* ── Background music (photo albums only) ───────── */
+let musicUserPaused = false; // sticky across edition switches, e.g. the user muted it on album A and browses to album B
+function updateMusic(url){
+  if(!url){
+    els.musicToggle.style.display = "none";
+    els.bgMusic.pause();
+    els.bgMusic.removeAttribute("src");
+    return;
+  }
+  // Embedded (?embed=1) is the small preview iframe on the dashboard's
+  // AppLauncher home page — chrome is already hidden there, and since it's
+  // same-origin the visitor's very first click anywhere on the dashboard
+  // (not necessarily on the e-magazine preview itself) can satisfy the
+  // browser's autoplay-requires-interaction rule for it too, so sound was
+  // starting just from using the dashboard. Music only plays on the real
+  // reading room (no ?embed=1); the toggle button stays hidden with the
+  // rest of the chrome so there's nothing to un-mute in the preview either.
+  if(IS_EMBED) return;
+
+  els.musicToggle.style.display = "inline-flex";
+  const absUrl = new URL(url, location.href).href;
+  if(els.bgMusic.src !== absUrl){
+    els.bgMusic.src = url;
+  }
+  if(!musicUserPaused){
+    // A page-load autoplay (no prior click) is routinely blocked by the
+    // browser and rejects this promise — that's expected, not an error;
+    // the toggle button (which IS a user gesture) always works to start
+    // it manually. Switching editions via a sidebar click, though, is
+    // itself a user gesture, so autoplay succeeds there.
+    els.bgMusic.play().catch(()=>{});
+  }
+  updateMusicIcon();
+}
+function updateMusicIcon(){
+  els.musicToggle.textContent = els.bgMusic.paused ? "🔇" : "🔊";
+}
+els.musicToggle.addEventListener("click", ()=>{
+  if(els.bgMusic.paused){
+    musicUserPaused = false;
+    els.bgMusic.play().catch(()=>{});
+  }else{
+    musicUserPaused = true;
+    els.bgMusic.pause();
+  }
+  updateMusicIcon();
+});
+els.bgMusic.addEventListener("play", updateMusicIcon);
+els.bgMusic.addEventListener("pause", updateMusicIcon);
 
 /* ── Page -> image rendering ────────────── */
 async function pageImage(n){
   if(!n || n<1 || n>numPages) return null;
   if(imgCache.has(n)) return imgCache.get(n);
+  if(albumPhotos){
+    // Plain photo — no PDF render/QR scan, just the file URL itself.
+    const url = albumPhotos[n-1];
+    imgCache.set(n, url);
+    return url;
+  }
   const page = await pdf.getPage(n);
   const scale = 1400 / page.getViewport({scale:1}).height;
   const vp = page.getViewport({scale});
@@ -638,7 +734,11 @@ async function pageImage(n){
 
 /* ── Layout & sizing ────────────────────── */
 function layout(){
-  singleMode = window.innerWidth < 720;
+  // Photo albums are event photos, not designed page pairs like a magazine
+  // spread — most are landscape, so splitting the viewer in half (the
+  // normal two-page book layout) shrank each one hard. Always show one
+  // photo at a time, full width/height, regardless of window size.
+  singleMode = window.innerWidth < 720 || !!albumPhotos;
   const availW = els.viewer.clientWidth - 140;
   const availH = els.viewer.clientHeight - 70;
   let ph = availH;
@@ -684,7 +784,7 @@ async function showSingle(p){
 
 /* ── Flip animation ─────────────────────── */
 async function flip(dir){
-  if(flipping || !pdf) return;
+  if(flipping || (!pdf && !albumPhotos)) return;
   if(singleMode){
     const t = singlePage + dir;
     if(t<1 || t>numPages) return;
@@ -728,7 +828,7 @@ async function flip(dir){
   }, {once:true});
 }
 function preloadAround(){
-  if(!pdf) return;
+  if(!pdf && !albumPhotos) return;
   if(singleMode){
     pageImage(singlePage+1); pageImage(singlePage-1);
   }else{
@@ -766,15 +866,22 @@ function updateChrome(){
 async function buildThumbs(){
   els.thumbs.innerHTML = "";
   for(let n=1;n<=numPages;n++){
-    const page = await pdf.getPage(n);
-    const scale = 56 / page.getViewport({scale:1}).height * (window.devicePixelRatio||1);
-    const vp = page.getViewport({scale});
     const c = document.createElement("canvas");
-    c.width=vp.width; c.height=vp.height;
     c.style.height="56px";
     c.dataset.page = n;
-    c.title = "Page "+n;
-    await page.render({canvasContext:c.getContext("2d"), viewport:vp}).promise;
+    c.title = (albumPhotos ? "Photo " : "Page ") + n;
+    if(albumPhotos){
+      const im = await loadImageEl(albumPhotos[n-1]);
+      const scale = 56 / im.naturalHeight * (window.devicePixelRatio||1);
+      c.width = im.naturalWidth*scale; c.height = im.naturalHeight*scale;
+      c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+    } else {
+      const page = await pdf.getPage(n);
+      const scale = 56 / page.getViewport({scale:1}).height * (window.devicePixelRatio||1);
+      const vp = page.getViewport({scale});
+      c.width=vp.width; c.height=vp.height;
+      await page.render({canvasContext:c.getContext("2d"), viewport:vp}).promise;
+    }
     c.addEventListener("click", ()=>{
       if(singleMode) showSingle(n);
       else showSpread(Math.floor((n-1)/2));
@@ -801,7 +908,7 @@ document.addEventListener("keydown", e=>{
   if(e.key==="ArrowLeft")  flip(-1);
 });
 window.addEventListener("resize", ()=>{
-  if(!pdf) return;
+  if(!pdf && !albumPhotos) return;
   const wasSingle = singleMode;
   layout();
   if(wasSingle!==singleMode){
@@ -811,7 +918,8 @@ window.addEventListener("resize", ()=>{
 });
 
 /* ── Embed mode: hide chrome when ?embed=1 ── */
-if(new URLSearchParams(location.search).get("embed") === "1"){
+const IS_EMBED = new URLSearchParams(location.search).get("embed") === "1";
+if(IS_EMBED){
   document.querySelector("header").style.display = "none";
   document.querySelector("footer").style.display = "none";
   document.querySelector("aside").style.display  = "none";
@@ -960,19 +1068,34 @@ els.searchInput.addEventListener("keydown", e => {
   try{
     const res  = await fetch("magazines/index.json?_=" + Date.now());
     const list = res.ok ? await res.json() : [];
-    CONFIG.editions = list.map(e => ({
-      title:    e.title || e.filename,
-      date:     e.date  || "",
+    CONFIG.editions = list.map(e => {
+      const isAlbum = e.type === "photo_album";
+      const v = encodeURIComponent(e.uploaded_at || Date.now());
       // Cache-busted by uploaded_at (changes only on a real re-upload) rather
       // than Date.now() — a deleted-and-reuploaded edition keeps the exact
       // same filename (see backend hr_emagazine.py's _safe_filename()), so
       // without this the browser's HTTP cache would keep serving the OLD
-      // cached PDF bytes for that URL indefinitely, even after the file on
-      // disk was correctly overwritten. Falls back to Date.now() only for
+      // cached bytes for that URL indefinitely, even after the file on disk
+      // was correctly overwritten. Falls back to Date.now() only for
       // entries with no uploaded_at (e.g. an index.json rebuilt from disk).
-      file:     "magazines/" + encodeURIComponent(e.filename) + "?v=" + encodeURIComponent(e.uploaded_at || Date.now()),
-      filename: e.filename,
-    }));
+      const photos = isAlbum
+        ? (e.photos || []).map(p => "magazines/" + encodeURIComponent(e.filename) + "/" + encodeURIComponent(p) + "?v=" + v)
+        : null;
+      const music = isAlbum && e.music
+        ? "magazines/" + encodeURIComponent(e.filename) + "/" + encodeURIComponent(e.music) + "?v=" + v
+        : null;
+      return {
+        title:       e.title || e.filename,
+        date:        e.date  || "",
+        description: e.description || "",
+        type:     e.type || "magazine",
+        file:     isAlbum ? null : "magazines/" + encodeURIComponent(e.filename) + "?v=" + v,
+        filename: e.filename,
+        photos,
+        music,
+        cover:    isAlbum && photos.length ? photos[0] : undefined,
+      };
+    });
   }catch(_){
     CONFIG.editions = [];
   }

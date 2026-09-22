@@ -4,16 +4,19 @@ import { useAuthStore } from "@/store/authStore";
 import { useThemeStore } from "@/store/themeStore";
 import {
   Monitor, Users, Factory, Calculator,
-  ShoppingCart, FileText, LogOut, LayoutGrid, TrendingUp, FileStack,
-  ChevronDown, ChevronRight, Settings, Clock,
+  ShoppingCart, FileText, LogOut, LayoutGrid, TrendingUp,
+  ChevronDown, ChevronRight, Settings, Clock, BarChart3, Warehouse,
+  FlaskConical, MessagesSquare, ExternalLink, Database, Loader2,
 } from "lucide-react";
 import RobotIcon from "@/components/icons/RobotIcon";
 import logo from "@/assets/LOGO-ONLY.png";
+import { oracleEnvApi } from "@/api/dashboard";
 
 // Each top-level module now expands into its own sections (formerly rendered
 // as an in-page tab bar) — clicking a section navigates straight to its URL.
 const NAV_ITEMS = [
   { label: "IT", path: "/dashboard/it", icon: Monitor, roles: ["it_staff"], children: [
+    { label: "Server Control", path: "/dashboard/it/server-control" },
     { label: "Oracle Server Monitoring", path: "/dashboard/it/server-monitoring" },
     { label: "Oracle Tablespace Monitoring", path: "/dashboard/it/tablespace-usage" },
     { label: "Oracle Storage Monitoring", path: "/dashboard/it/disk-usage" },
@@ -34,6 +37,10 @@ const NAV_ITEMS = [
     { label: "To Do List", path: "/dashboard/hr/todo", roles: ["hr_staff"] },
     { label: "E-Recruitment", path: "/dashboard/hr/cv", roles: ["hr_staff"] },
     { label: "e-Magazine", path: "/dashboard/hr/emagazine", roles: ["hr_staff"] },
+    // Kept hr_staff-gated to preserve the access this had on its own branch,
+    // where the HRGA parent carried the gate for every child. Opening the
+    // reading room to all employees is a product call, not a merge call.
+    { label: "e-Magazine Viewer", path: "/e-magazine-viewer", roles: ["hr_staff"] },
   ] },
   { label: "PAC", path: "/dashboard/pac", icon: Factory, roles: ["pac_staff"], children: [
     { label: "Business Plan", path: "/dashboard/pac/bizplan" },
@@ -48,6 +55,8 @@ const NAV_ITEMS = [
     { label: "AP Outstanding", path: "/dashboard/accounting/profit" },
     { label: "AR Outstanding", path: "/dashboard/accounting/ar" },
     { label: "Financial Statement", path: "/dashboard/accounting/financial-statement" },
+    { label: "AP VAT In Listing Report", path: "/dashboard/accounting/ap-vat-in" },
+    { label: "AP Withholding Tax Listing Report", path: "/dashboard/accounting/ap-wht-listing" },
   ] },
   { label: "Purchasing", path: "/dashboard/purchasing", icon: ShoppingCart, roles: ["purchasing_staff"], children: [
     { label: "Open PR", path: "/dashboard/purchasing/open-pr" },
@@ -58,6 +67,32 @@ const NAV_ITEMS = [
     { label: "Active Suppliers", path: "/dashboard/purchasing/active-suppliers" },
     { label: "Manufacturer Master", path: "/dashboard/purchasing/manufacturer-master" },
   ] },
+  // Gated to "sales_staff" (2026-09-18) — previously roles: [] (open to any
+  // authenticated user) because no Keycloak role existed yet for this
+  // module; fixed after being flagged as a standing-policy violation (new
+  // modules must be inaccessible until a privilege is explicitly granted).
+  // Fase 1 + first 3 Fase-2 modules of the "Blueprint Sales & Marketing"
+  // plan — more will be added here as later phases land.
+  { label: "Sales & Marketing", path: "/dashboard/sales", icon: BarChart3, roles: ["sales_staff"], children: [
+    { label: "Sales Trend", path: "/dashboard/sales/trend" },
+    { label: "Sales vs Budget", path: "/dashboard/sales/vs-budget" },
+    { label: "Open Sales Order", path: "/dashboard/sales/open-orders" },
+  ] },
+  // Gated to "ppwh_staff" (2026-09-18) — same fix as Sales & Marketing above.
+  // Inventory in/out tracking from Oracle INV (mtl_material_transactions).
+  { label: "PPWH", path: "/dashboard/ppwh", icon: Warehouse, roles: ["ppwh_staff"], children: [
+    { label: "Inventory In", path: "/dashboard/ppwh/inbound" },
+    { label: "Inventory Out", path: "/dashboard/ppwh/outbound" },
+    { label: "Kartu Stok", path: "/dashboard/ppwh/stock-card" },
+  ] },
+  // Gated to "production_staff" (2026-09-18) — same fix as PPWH/Sales &
+  // Marketing above. OPM batch production tracking from gme_batch_header
+  // (this company runs Process Manufacturing, not discrete WIP jobs).
+  { label: "Production", path: "/dashboard/production", icon: FlaskConical, roles: ["production_staff"], children: [
+    { label: "Batch Status", path: "/dashboard/production/status" },
+    { label: "Batch Yield", path: "/dashboard/production/yield" },
+    { label: "Schedule Adherence", path: "/dashboard/production/schedule" },
+  ] },
   // No roles — reachable by any authenticated user (matches AI_ITEMS'
   // convention below). Sub-modules apply their own access control instead
   // of a Keycloak role gate — Budget Monitoring restricts by the caller's
@@ -67,6 +102,7 @@ const NAV_ITEMS = [
     // Temporarily hidden — not in active use yet.
     // { label: "Budget Usage Report", path: "/dashboard/general/budget-usage" },
     { label: "AP Outstanding with Payment", path: "/dashboard/general/ap-payment" },
+    { label: "AP List", path: "/dashboard/general/ap-list" },
   ] },
 ];
 
@@ -84,6 +120,7 @@ const SETUP_ITEMS = [
     { label: "Accounting & Tax", path: "/setup/accounting" },
     { label: "Purchasing", path: "/setup/purchasing" },
     { label: "General", path: "/setup/general" },
+    { label: "AI", path: "/setup/ai" },
   ] },
 ];
 
@@ -102,14 +139,34 @@ const EIS_ITEMS = [
   ] },
 ];
 
+// Document Converter moved to Setup > AI (2026-09-03, alongside Knowledge
+// Base) — it's a content-management tool, not something every AI Tools
+// visitor needs a standalone entry for.
 const AI_ITEMS = [
-  { label: "AI Chatbot",         path: "/ai/chatbot",             icon: RobotIcon,  roles: [] },
-  { label: "Document Converter", path: "/ai/document-converter",  icon: FileStack,  roles: [] },
-  { label: "Meeting Notes",      path: "/ai/meeting-notes",       icon: FileText,   roles: [] },
+  { label: "AI Chatbot",    path: "/ai/chatbot",        icon: RobotIcon, roles: [] },
+  // Internal chat platform (Open WebUI) with SSO — plain external link,
+  // opens in a new tab (see NavCard's `item.external` branch).
+  { label: "CoChat",        path: "http://cochat.ckd-otto.com:3010", icon: MessagesSquare, roles: [], external: true },
+  { label: "Meeting Notes", path: "/ai/meeting-notes",  icon: FileText,  roles: [] },
 ];
 
 /* ── Leaf nav card — no children (AI Tools items, or a module with none) ── */
 function NavCard({ item }) {
+  // External tools (e.g. CoChat) aren't app routes — NavLink's client-side
+  // routing doesn't apply to a cross-origin URL, so these render a plain
+  // anchor instead, opened in a new tab so the dashboard's own state isn't
+  // lost navigating away to a wholly separate application.
+  if (item.external) {
+    return (
+      <a href={item.path} target="_blank" rel="noopener noreferrer" className="nav-card">
+        <span className="nav-card__icon">
+          <item.icon size={15} color="#2563eb" />
+        </span>
+        <span className="nav-card__label" style={{ flex: 1 }}>{item.label}</span>
+        <ExternalLink size={12} color="#64748b" />
+      </a>
+    );
+  }
   return (
     <NavLink
       to={item.path}
@@ -306,6 +363,8 @@ export default function Sidebar() {
           </div>
         </div>
 
+        <OracleEnvToggle />
+
         {/* Back to portal */}
         <button
           onClick={() => navigate("/")}
@@ -429,5 +488,74 @@ export default function Sidebar() {
         </div>
       </div>
     </aside>
+  );
+}
+
+// Oracle Production/Development toggle — a single flag shared by every
+// user (the backend's Oracle connection is one resource, not per-user),
+// so switching here changes what every logged-in user's next Oracle-
+// backed request hits. Development is styled loudly (amber) on purpose —
+// it's the state most likely to cause confusion if missed.
+function OracleEnvToggle() {
+  const { user } = useAuthStore();
+  const [state, setState] = useState(null); // { environment, prod_label, dev_label }
+  const [switching, setSwitching] = useState(false);
+
+  const load = () => {
+    oracleEnvApi.get().then(setState).catch(() => {});
+  };
+  useEffect(() => { load(); }, []);
+
+  const switchTo = async (env) => {
+    if (!state || env === state.environment || switching) return;
+    setSwitching(true);
+    try {
+      const next = await oracleEnvApi.set(env, user?.email || user?.username || "unknown");
+      setState(prev => ({ ...prev, ...next }));
+    } catch (_) {
+      // ignore — UI just stays on the previous value, safest failure mode
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  if (!state) return null;
+  const isDev = state.environment === "development";
+
+  return (
+    <div className="mb-4" title={isDev ? state.dev_label : state.prod_label}>
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <Database size={11} style={{ color: "#94a3b8" }} />
+        <span style={{ fontSize: 9.5, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em" }}>ORACLE DATABASE</span>
+        {switching && <Loader2 size={10} className="animate-spin" style={{ color: "#94a3b8" }} />}
+      </div>
+      <div className="flex rounded-lg overflow-hidden" style={{ border: "1px solid rgba(0,0,0,0.08)" }}>
+        <button
+          onClick={() => switchTo("production")}
+          disabled={switching}
+          style={{
+            flex: 1, padding: "5px 0", fontSize: 10.5, fontWeight: 700, border: "none", cursor: switching ? "default" : "pointer",
+            background: !isDev ? "#2563eb" : "#f8fafc",
+            color: !isDev ? "#ffffff" : "#94a3b8",
+          }}>
+          Production
+        </button>
+        <button
+          onClick={() => switchTo("development")}
+          disabled={switching}
+          style={{
+            flex: 1, padding: "5px 0", fontSize: 10.5, fontWeight: 700, border: "none", cursor: switching ? "default" : "pointer",
+            background: isDev ? "#d97706" : "#f8fafc",
+            color: isDev ? "#ffffff" : "#94a3b8",
+          }}>
+          Development
+        </button>
+      </div>
+      {isDev && (
+        <p style={{ fontSize: 9.5, color: "#d97706", fontWeight: 600, marginTop: 4 }}>
+          ⚠ All Oracle modules are leading to Development
+        </p>
+      )}
+    </div>
   );
 }

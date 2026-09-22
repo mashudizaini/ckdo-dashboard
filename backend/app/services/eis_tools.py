@@ -7,13 +7,37 @@ schema `eis`, ETL'd from Oracle EBS) run as a dedicated `chat_readonly`
 role that only has SELECT on schema `eis` — even a prompt-injected or
 hallucinated argument can't turn into a write, because the DB user itself
 can't write. See sumber/AI_Chat_Implementation_Guide.md section 5.
+
+use_connection() below lets a caller (EBS Chat, see ebs_chat_service.py)
+route every tool call in this module through one caller-supplied connection
+instead of the default per-call chat_readonly connection — needed so a
+whole tool-calling turn runs on a single connection/transaction, which is
+required for Postgres RLS session variables (SET LOCAL app.*) to actually
+apply to the queries these tools issue. The Dashboard's own internal
+Oracle EBS chat (oracle_chat_service.py) never calls use_connection(), so
+its behavior is unchanged — every _query() there still opens/closes its
+own chat_readonly connection exactly as before.
 """
+import contextvars
 import re
+from contextlib import contextmanager
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from app.config import get_settings
 
 settings = get_settings()
+
+_scoped_conn: contextvars.ContextVar = contextvars.ContextVar("eis_tools_scoped_conn", default=None)
+
+
+@contextmanager
+def use_connection(conn):
+    token = _scoped_conn.set(conn)
+    try:
+        yield
+    finally:
+        _scoped_conn.reset(token)
 
 EIS_TOOLS = [
     {
@@ -137,14 +161,50 @@ EIS_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_purchase_order_detail",
+            "description": "Cari data PO (Purchase Order) individual — nomor PO, item, harga — berdasarkan supplier, kode item, dan/atau nomor PO. Untuk pertanyaan 'PO apa saja dari supplier X', 'PO nomor berapa untuk item Y', bukan sekadar total/trend (untuk itu pakai get_purchasing_performance).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "supplier_name": {"type": "string", "description": "Opsional. Nama supplier (partial match), contoh IFORTE"},
+                    "item_code": {"type": "string", "description": "Opsional. Kode item Oracle"},
+                    "po_number": {"type": "string", "description": "Opsional. Nomor PO (partial match)"},
+                    "period": {"type": "string", "description": "Opsional. Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_sales_order_detail",
+            "description": "Cari data Sales Order individual — nomor order, item, customer, nilai — berdasarkan nama customer, kode item, nomor order, dan/atau tahun. Untuk pertanyaan 'total penjualan customer X', 'order apa saja dari customer Y', 'penjualan item Z ke customer mana saja' — bukan sekadar total/trend perusahaan (untuk itu pakai get_sales_performance). Kalau user tanya 'total' untuk satu customer/tahun, jumlahkan sendiri amount_idr dari baris-baris yang dikembalikan.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "customer_name": {"type": "string", "description": "Opsional. Nama customer (partial match), contoh SAIDAL"},
+                    "item_code": {"type": "string", "description": "Opsional. Kode item Oracle"},
+                    "order_number": {"type": "string", "description": "Opsional. Nomor Sales Order (partial match)"},
+                    "business_type": {"type": "string", "description": "Opsional. Salah satu dari: Local, Export, CMO"},
+                    "year": {"type": "integer", "description": "Opsional. Tahun fiskal 4 digit, contoh 2025 — untuk pertanyaan 'total setahun'"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_employee_directory",
-            "description": "Cari daftar karyawan (nama, posisi, department, team, tanggal masuk, status) — untuk pertanyaan 'siapa saja di tim X' atau cari data karyawan tertentu, bukan sekadar jumlah headcount.",
+            "description": "Cari daftar / total karyawan (nama, posisi, department, team, tanggal masuk, status, tanggal & alasan resign) — untuk pertanyaan 'siapa saja di tim X', cari data karyawan tertentu, 'berapa total karyawan resign/aktif saat ini' (hitung dari jumlah baris hasil, employment_status='Resign' untuk yang sudah keluar, 'Active' untuk yang masih bekerja), atau 'kapan/kenapa si X resign' (pakai field resign_date dan resign_reason di hasilnya — SISTEM INI MENYIMPAN tanggal & alasan resign, jangan bilang tidak ada).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "department": {"type": "string", "description": "Opsional. Salah satu dari: Administration, Sales & Marketing, Strategy & Development, Plant"},
                     "team": {"type": "string", "description": "Opsional. Nama tim, contoh IT, HRGA, Purchasing, Accounting"},
                     "full_name": {"type": "string", "description": "Opsional. Cari berdasarkan nama (partial match)"},
+                    "employment_status": {"type": "string", "description": "Opsional. 'Active' (masih bekerja) atau 'Resign' (sudah keluar) — pakai ini untuk pertanyaan total/daftar karyawan resign atau aktif"},
                 },
                 "required": [],
             },
@@ -181,17 +241,26 @@ def _parse_period(period: str) -> tuple[int, int]:
 
 
 def _get_conn():
+    override = _scoped_conn.get()
+    if override is not None:
+        return override
     return psycopg2.connect(settings.eis_database_url)
 
 
 def _query(sql: str, params: dict) -> list[dict]:
+    # Defense-in-depth independent of the DB role's own grants — every tool
+    # in this module is a predefined SELECT, so anything else here would
+    # mean a bug in this file, not a bad argument from the model.
+    assert sql.strip().upper().startswith("SELECT"), "eis_tools only issues SELECT statements"
     conn = _get_conn()
+    owns_conn = _scoped_conn.get() is None
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql, params)
             return [dict(r) for r in cur.fetchall()]
     finally:
-        conn.close()
+        if owns_conn:
+            conn.close()
 
 
 def get_sales_performance(period: str, product_code: str = None, business_type: str = None) -> list[dict]:
@@ -335,22 +404,91 @@ def get_purchasing_performance(period: str, material_type: str = None) -> list[d
     )
 
 
-def get_employee_directory(department: str = None, team: str = None, full_name: str = None) -> list[dict]:
+def get_purchase_order_detail(
+    supplier_name: str = None, item_code: str = None, po_number: str = None, period: str = None,
+) -> list[dict]:
+    """Line-item PO search — backed by eis.fact_po_line (etl_po_lines),
+    the same table Purchasing History/Price Analysis read from. Added so
+    the chatbot can answer "which POs from supplier X" questions that
+    get_purchasing_performance's aggregate-only shape never could."""
+    fy = pnum = None
+    if period:
+        fy, pnum = _parse_period(period)
+    return _query(
+        """
+        SELECT po_number, line_num, item_code, item_description, supplier_name,
+               material_type, currency_code, quantity, unit_price, amount_orig, amount_idr,
+               creation_date, closure_status
+        FROM eis.fact_po_line
+        WHERE (%(supplier_name)s IS NULL OR supplier_name ILIKE %(supplier_like)s)
+          AND (%(item_code)s    IS NULL OR item_code = %(item_code)s)
+          AND (%(po_number)s    IS NULL OR po_number ILIKE %(po_like)s)
+          AND (%(fy)s   IS NULL OR EXTRACT(YEAR FROM creation_date) = %(fy)s)
+          AND (%(pnum)s IS NULL OR EXTRACT(MONTH FROM creation_date) = %(pnum)s)
+        ORDER BY creation_date DESC
+        LIMIT 50
+        """,
+        {
+            "supplier_name": supplier_name, "supplier_like": f"%{supplier_name}%" if supplier_name else None,
+            "item_code": item_code,
+            "po_number": po_number, "po_like": f"%{po_number}%" if po_number else None,
+            "fy": fy, "pnum": pnum,
+        },
+    )
+
+
+def get_sales_order_detail(
+    customer_name: str = None, item_code: str = None, order_number: str = None,
+    business_type: str = None, year: int = None,
+) -> list[dict]:
+    """Line-item Sales Order search — backed by eis.fact_sales_order
+    (etl_sales_orders), the same table the Open Sales Order dashboard
+    reads from. Added so the chatbot can answer "total sales for customer
+    X" questions that get_sales_performance's aggregate-only shape never
+    could (verified live: "total penjualan customer GROUPE INDUSTRIEL
+    SAIDAL SPA" came back not-found before this tool existed)."""
+    return _query(
+        """
+        SELECT order_number, line_num, item_code, item_description, customer_name,
+               business_type, currency_code, quantity, unit_selling_price,
+               amount_orig, amount_idr, flow_status_code, ordered_date
+        FROM eis.fact_sales_order
+        WHERE (%(customer_name)s  IS NULL OR customer_name ILIKE %(customer_like)s)
+          AND (%(item_code)s      IS NULL OR item_code = %(item_code)s)
+          AND (%(order_number)s   IS NULL OR order_number ILIKE %(order_like)s)
+          AND (%(business_type)s  IS NULL OR business_type = %(business_type)s)
+          AND (%(year)s IS NULL OR EXTRACT(YEAR FROM ordered_date) = %(year)s)
+        ORDER BY ordered_date DESC
+        LIMIT 100
+        """,
+        {
+            "customer_name": customer_name, "customer_like": f"%{customer_name}%" if customer_name else None,
+            "item_code": item_code,
+            "order_number": order_number, "order_like": f"%{order_number}%" if order_number else None,
+            "business_type": business_type,
+            "year": year,
+        },
+    )
+
+
+def get_employee_directory(department: str = None, team: str = None, full_name: str = None, employment_status: str = None) -> list[dict]:
     return _query(
         """
         SELECT employee_number, full_name, department, division, team, position_title,
-               hire_date, employment_status
+               hire_date, employment_status, resign_date, resign_reason
         FROM eis.dim_employee
         WHERE (%(department)s IS NULL OR department = %(department)s)
           AND (%(team_like)s IS NULL OR team ILIKE %(team_like)s)
           AND (%(name_like)s IS NULL OR full_name ILIKE %(name_like)s)
+          AND (%(employment_status)s IS NULL OR employment_status = %(employment_status)s)
         ORDER BY department, team, full_name
-        LIMIT 100
+        LIMIT 500
         """,
         {
             "department": department,
             "team_like": f"%{team}%" if team else None,
             "name_like": f"%{full_name}%" if full_name else None,
+            "employment_status": employment_status,
         },
     )
 
@@ -380,6 +518,8 @@ _DISPATCH = {
     "get_inventory_summary": get_inventory_summary,
     "get_employee_headcount": get_employee_headcount,
     "get_purchasing_performance": get_purchasing_performance,
+    "get_purchase_order_detail": get_purchase_order_detail,
+    "get_sales_order_detail": get_sales_order_detail,
     "get_employee_directory": get_employee_directory,
 }
 

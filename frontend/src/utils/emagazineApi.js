@@ -1,0 +1,235 @@
+import axios from 'axios';
+
+// Relative, same-origin path — matches api/client.js's convention. The
+// previous default (an absolute http://localhost:8001/api) only ever
+// worked on the original developer's own machine; through nginx's reverse
+// proxy (any other deployment, including this app's normal dev/prod
+// servers) that hostname:port doesn't exist, so every request failed with
+// a network error before it even left the browser.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
+
+const emagazineAPI = {
+  // Get all editions
+  getEditions: async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/emagazine/editions`);
+      return res.data;
+    } catch (error) {
+      console.error('Error fetching editions:', error);
+      throw error;
+    }
+  },
+
+  // Get single edition
+  getEdition: async (editionId) => {
+    try {
+      const res = await axios.get(`${API_BASE}/emagazine/editions/${editionId}`);
+      return res.data;
+    } catch (error) {
+      console.error('Error fetching edition:', error);
+      throw error;
+    }
+  },
+
+  // Update edition metadata (title / edition_number / published_date)
+  updateEdition: async (editionId, updates) => {
+    try {
+      const res = await axios.patch(`${API_BASE}/emagazine/editions/${editionId}`, updates);
+      return res.data;
+    } catch (error) {
+      console.error('Error updating edition:', error);
+      throw error;
+    }
+  },
+
+  // Get single page content
+  getPage: async (editionId, pageNum) => {
+    try {
+      const res = await axios.get(
+        `${API_BASE}/emagazine/editions/${editionId}/pages/${pageNum}`
+      );
+      return res.data;
+    } catch (error) {
+      console.error(`Error fetching page ${pageNum}:`, error);
+      throw error;
+    }
+  },
+
+  // Search content
+  search: async (query, editionId = null) => {
+    try {
+      const res = await axios.post(`${API_BASE}/emagazine/search`, {
+        query,
+        edition_id: editionId,
+      });
+      return res.data;
+    } catch (error) {
+      console.error('Error searching:', error);
+      throw error;
+    }
+  },
+
+  // Get table of contents
+  getTableOfContents: async (editionId) => {
+    try {
+      const res = await axios.get(
+        `${API_BASE}/emagazine/editions/${editionId}/toc`
+      );
+      return res.data;
+    } catch (error) {
+      console.error('Error fetching TOC:', error);
+      throw error;
+    }
+  },
+
+  // Track analytics
+  trackAnalytics: async (editionId, actionType, metadata = {}) => {
+    try {
+      const payload = {
+        action_type: actionType,
+        metadata,
+      };
+
+      // Add page number if available
+      if (metadata.pageNumber) {
+        payload.page_number = metadata.pageNumber;
+      }
+
+      await axios.post(
+        `${API_BASE}/emagazine/analytics?edition_id=${editionId}`,
+        payload
+      );
+    } catch (error) {
+      console.error('Error tracking analytics:', error);
+      // Don't throw - analytics errors should not break UX
+    }
+  },
+
+  // Get analytics summary
+  getAnalyticsSummary: async (editionId) => {
+    try {
+      const res = await axios.get(
+        `${API_BASE}/emagazine/analytics/${editionId}/summary`
+      );
+      return res.data;
+    } catch (error) {
+      console.error('Error fetching analytics:', error);
+      throw error;
+    }
+  },
+
+  // Get hotspots for a page
+  getPageHotspots: async (editionId, pageNum) => {
+    try {
+      const res = await axios.get(
+        `${API_BASE}/emagazine/hotspots/editions/${editionId}/pages/${pageNum}`
+      );
+      return res.data;
+    } catch (error) {
+      console.error('Error fetching hotspots:', error);
+      return [];
+    }
+  },
+
+  // Get all hotspots for edition
+  getEditionHotspots: async (editionId) => {
+    try {
+      const res = await axios.get(
+        `${API_BASE}/emagazine/hotspots/editions/${editionId}`
+      );
+      return res.data;
+    } catch (error) {
+      console.error('Error fetching hotspots:', error);
+      return [];
+    }
+  },
+
+  // Create hotspot
+  createHotspot: async (editionId, hotspot) => {
+    try {
+      const res = await axios.post(`${API_BASE}/emagazine/hotspots`, {
+        edition_id: editionId,
+        ...hotspot,
+      });
+      return res.data;
+    } catch (error) {
+      console.error('Error creating hotspot:', error);
+      throw error;
+    }
+  },
+
+  // Update hotspot
+  updateHotspot: async (hotspotId, hotspot) => {
+    try {
+      const res = await axios.put(
+        `${API_BASE}/emagazine/hotspots/${hotspotId}`,
+        hotspot
+      );
+      return res.data;
+    } catch (error) {
+      console.error('Error updating hotspot:', error);
+      throw error;
+    }
+  },
+
+  // Delete hotspot
+  deleteHotspot: async (hotspotId) => {
+    try {
+      await axios.delete(`${API_BASE}/emagazine/hotspots/${hotspotId}`);
+    } catch (error) {
+      console.error('Error deleting hotspot:', error);
+      throw error;
+    }
+  },
+
+  // Delete an edition (and its content/hotspots/analytics/files, server-side)
+  deleteEdition: async (editionId) => {
+    try {
+      const res = await axios.delete(`${API_BASE}/emagazine/editions/${editionId}`);
+      return res.data;
+    } catch (error) {
+      console.error('Error deleting edition:', error);
+      throw error;
+    }
+  },
+
+  // Upload new edition PDF
+  uploadEdition: async (formData) => {
+    try {
+      const res = await axios.post(
+        `${API_BASE}/emagazine/editions/upload`,
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+      return res.data;
+    } catch (error) {
+      console.error('Error uploading edition:', error);
+      throw error;
+    }
+  },
+
+  // Upload new photo album (title, published_date, photos[] in formData)
+  uploadAlbum: async (formData) => {
+    try {
+      const res = await axios.post(
+        `${API_BASE}/emagazine/editions/album`,
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+      return res.data;
+    } catch (error) {
+      console.error('Error uploading album:', error);
+      throw error;
+    }
+  },
+};
+
+export default emagazineAPI;

@@ -13,7 +13,6 @@ import { mdToHtml } from "@/components/ai/MarkdownLite";
 const MODE_STYLE = {
   policy:  { grad: "linear-gradient(135deg, #2563eb 0%, #1e40af 100%)", bubble: "linear-gradient(135deg,#2563eb,#1e40af)", botBg: "#eff6ff", botIcon: "#1d4ed8" },
   oracle:  { grad: "linear-gradient(135deg, #059669 0%, #065f46 100%)", bubble: "linear-gradient(135deg,#059669,#065f46)", botBg: "#ecfdf5", botIcon: "#047857" },
-  general: { grad: "linear-gradient(135deg, #4f46e5 0%, #7c3aed 60%, #9333ea 100%)", bubble: "linear-gradient(135deg,#4f46e5,#7c3aed)", botBg: "#ede9fe", botIcon: "#6d28d9" },
 };
 
 function renderWidgetSource(modeKey, s, j) {
@@ -24,14 +23,6 @@ function renderWidgetSource(modeKey, s, j) {
         style={{ fontSize: 9, borderRadius: 8, padding: "1px 6px", background: s.error ? "#fee2e2" : "#ecfdf5", color: s.error ? "#dc2626" : "#047857" }}>
         🛠️ {s.tool}{argsText ? `(${argsText})` : ""}
       </span>
-    );
-  }
-  if (modeKey === "general") {
-    return (
-      <a key={j} href={s.url} target="_blank" rel="noopener noreferrer" title={s.url}
-        style={{ fontSize: 9, borderRadius: 8, padding: "1px 6px", background: "#ede9fe", color: "#6d28d9", textDecoration: "none", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "inline-block", verticalAlign: "bottom" }}>
-        🔗 {s.title}
-      </a>
     );
   }
   return null;
@@ -78,29 +69,59 @@ const FAB_H     = 48;
 const POPUP_W   = 380;
 const POPUP_H   = 540;
 
+// Mirrors Chatbot.jsx's DEFAULT_PROVIDER_BY_TAB — kept identical so the
+// widget and the full page agree on what each mode starts on.
+const DEFAULT_PROVIDER_BY_TAB = { policy: "onprem", oracle: "onprem" };
+
 export default function ChatWidget() {
   const location = useLocation();
   const [open, setOpen]               = useState(false);
   const [pos, setPos]                 = useState({ right: 20, bottom: 20 });
   const [confirmClear, setConfirmClear] = useState(false);
   const [activeTab, setActiveTab]     = useState("policy");
-  const [provider, setProvider]       = useState("onprem");
+  const [providerByTab, setProviderByTab] = useState(DEFAULT_PROVIDER_BY_TAB);
+  const [enabledProviders, setEnabledProviders] = useState(null); // null = still loading (assume all enabled)
   const [showApiKey, setShowApiKey]   = useState(false);
 
-  // Claude isn't wired into Oracle EBS Data Chat's tool-calling pipeline
-  // yet (see chatbot.py) — mirrors the same fallback in Chatbot.jsx (the
-  // full /ai/chatbot page).
+  const provider = providerByTab[activeTab];
+  const setProvider = (p) => setProviderByTab((prev) => ({ ...prev, [activeTab]: p }));
+
   useEffect(() => {
-    if (activeTab === "oracle" && provider === "anthropic") setProvider("gemini");
-  }, [activeTab, provider]);
+    (async () => {
+      try {
+        const res = await fetch("/api/v1/ai/chatbot/provider-status");
+        if (res.ok) setEnabledProviders(await res.json());
+      } catch (_) {}
+    })();
+    // Admin-configured default per mode (Setup > AI > Model Access) —
+    // mirrors Chatbot.jsx's same fetch, overwrites the hardcoded fallback
+    // above once loaded.
+    (async () => {
+      try {
+        const res = await fetch("/api/v1/ai/chatbot/default-providers");
+        if (res.ok) setProviderByTab(await res.json());
+      } catch (_) {}
+    })();
+  }, []);
+
+  // IT/admin can disable a provider app-wide (Setup > AI > Model Access) —
+  // mirrors the same fallback in Chatbot.jsx (the full /ai/chatbot page).
+  useEffect(() => {
+    const disabled = enabledProviders && enabledProviders[provider] === false;
+    if (disabled) {
+      const fallback = ["onprem", "gemini", "anthropic"].find(
+        (p) => !enabledProviders || enabledProviders[p] !== false
+      ) || "onprem";
+      setProvider(fallback);
+    }
+  }, [activeTab, provider, enabledProviders]);
 
   // Same localStorage keys/endpoints as the full /ai/chatbot page (see
   // config/chatModes.js) — so a conversation started in the widget
   // continues seamlessly if the user later opens the full page, and vice versa.
   const policyChat  = useChatStream(CHAT_MODES.policy.greeting,  CHAT_MODES.policy.storageKey,  CHAT_MODES.policy.endpoint,  provider);
   const oracleChat  = useChatStream(CHAT_MODES.oracle.greeting,  CHAT_MODES.oracle.storageKey,  CHAT_MODES.oracle.endpoint,  provider);
-  const generalChat = useChatStream(CHAT_MODES.general.greeting, CHAT_MODES.general.storageKey, CHAT_MODES.general.endpoint, provider);
-  const chats = { policy: policyChat, oracle: oracleChat, general: generalChat };
+  const chats = { policy: policyChat, oracle: oracleChat };
   const { messages, input, setInput, streaming, sendMessage, clearHistory } = chats[activeTab];
   const style = MODE_STYLE[activeTab];
 
@@ -221,9 +242,7 @@ export default function ChatWidget() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ fontSize: 12, fontWeight: 700, color: "#fff", margin: 0 }}>{CHAT_MODES[activeTab].label}</p>
               <p style={{ fontSize: 10, color: "rgba(255,255,255,0.75)", margin: 0 }}>
-                {streaming
-                  ? (activeTab === "general" && provider === "anthropic" ? "Mencari di web…" : "Typing…")
-                  : "Online · AI Assistant"}
+                {streaming ? "Typing…" : "Online · AI Assistant"}
               </p>
             </div>
             {/* Clear history */}
@@ -287,9 +306,9 @@ export default function ChatWidget() {
                 color: "#475569", cursor: "pointer",
               }}
             >
-              <option value="onprem">Standard</option>
-              <option value="gemini">Gemini</option>
-              <option value="anthropic" disabled={activeTab === "oracle"}>Claude</option>
+              <option value="onprem" disabled={enabledProviders?.onprem === false}>Standard</option>
+              <option value="gemini" disabled={enabledProviders?.gemini === false}>Gemini</option>
+              <option value="anthropic" disabled={enabledProviders?.anthropic === false}>Claude</option>
             </select>
             {provider !== "onprem" && (
               <button

@@ -41,6 +41,19 @@ export const itApi = {
   getDbAuditLog:  (limit)                => api.get("/dashboard/it/db-browser/audit-log", { params: { limit } }),
 };
 
+export const serverRegistryApi = {
+  getServers:        ()                => api.get("/dashboard/it/server-registry"),
+  getCategories:     ()                => api.get("/dashboard/it/server-registry/categories"),
+  getAccessLog:      ()                => api.get("/dashboard/it/server-registry/access-log"),
+  createServer:      (body)            => api.post("/dashboard/it/server-registry", body),
+  updateServer:      (id, body)        => api.put(`/dashboard/it/server-registry/${id}`, body),
+  deleteServer:      (id)              => api.delete(`/dashboard/it/server-registry/${id}`),
+  addCredential:     (serverId, body)  => api.post(`/dashboard/it/server-registry/${serverId}/credentials`, body),
+  updateCredential:  (id, body)        => api.put(`/dashboard/it/server-registry/credentials/${id}`, body),
+  deleteCredential:  (id)              => api.delete(`/dashboard/it/server-registry/credentials/${id}`),
+  revealCredential:  (id)              => api.post(`/dashboard/it/server-registry/credentials/${id}/reveal`),
+};
+
 export const vpnApi = {
   listGateways:    ()          => api.get("/dashboard/it/vpn-monitor/gateways"),
   upsertGateway:   (body)      => api.post("/dashboard/it/vpn-monitor/gateways", body),
@@ -121,18 +134,29 @@ export const hrApi = {
     return api.post(`/dashboard/hr/employees/${userId}/photo`, fd, { headers: { "Content-Type": undefined } });
   },
   deleteEmployeePhoto: (userId) => api.delete(`/dashboard/hr/employees/${userId}/photo`),
+  uploadResignDocument: (userId, file) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return api.post(`/dashboard/hr/employees/${userId}/resign-document`, fd, { headers: { "Content-Type": undefined } });
+  },
+  deleteResignDocument: (userId) => api.delete(`/dashboard/hr/employees/${userId}/resign-document`),
   getEmployeeHistory: (userId) => api.get(`/dashboard/hr/employees/${userId}/history`),
   getOrgChart:     ()      => api.get("/dashboard/hr/employees/org-chart"),
   setSupervisor:   (userId, supervisorId) => api.patch(`/dashboard/hr/employees/${userId}/supervisor`, { supervisor_id: supervisorId }),
   getCvJobs:       ()       => api.get("/dashboard/hr/cv-screening/jobs"),
   createCvJob:     (d)      => api.post("/dashboard/hr/cv-screening/jobs", d),
+  updateCvJob:     (id, d)  => api.put(`/dashboard/hr/cv-screening/jobs/${id}`, d),
   deleteCvJob:     (id)     => api.delete(`/dashboard/hr/cv-screening/jobs/${id}`),
   getCvCandidates: (id, p)  => api.get(`/dashboard/hr/cv-screening/jobs/${id}/candidates`, { params: p }),
   deleteCvCandidate: (id)   => api.delete(`/dashboard/hr/cv-screening/candidates/${id}`),
   getCvStats:      (id)     => api.get(`/dashboard/hr/cv-screening/jobs/${id}/stats`),
   exportCvExcel:   (id)     => `/api/v1/dashboard/hr/cv-screening/jobs/${id}/export`,
   uploadCvJd:      (form)   => api.post("/dashboard/hr/cv-screening/jd/upload", form, { headers: { "Content-Type": undefined } }),
-  generateCvJd:    (d)      => api.post("/dashboard/hr/cv-screening/jd/generate", d),
+  // On-premise (qwen3:30b) can take a couple minutes for this prompt — the
+  // client's default 30s timeout was firing well before the backend's own
+  // (now 300s) Ollama timeout ever got a chance, so this was aborting the
+  // request client-side long before the AI engine was actually stuck.
+  generateCvJd:    (d)      => api.post("/dashboard/hr/cv-screening/jd/generate", d, { timeout: 300000 }),
   hireCvCandidate: (id, d)  => api.put(`/dashboard/hr/cv-screening/candidates/${id}/hire`, d),
   getCvDetail:     (p)      => api.get("/dashboard/hr/cv-screening/detail", { params: p }),
   getAllCvCandidates: (p)   => api.get("/dashboard/hr/cv-screening/candidates", { params: p }),
@@ -140,8 +164,14 @@ export const hrApi = {
   // E-Magazine
   eMagazineList:       ()              => api.get("/dashboard/hr/e-magazine/files"),
   eMagazineUpload:     (form)          => api.post("/dashboard/hr/e-magazine/upload", form, { headers: { "Content-Type": "multipart/form-data" } }),
+  eMagazineUploadAlbum: (form)         => api.post("/dashboard/hr/e-magazine/upload-album", form, { headers: { "Content-Type": "multipart/form-data" } }),
+  eMagazineAddPhotos:  (filename, form) => api.post(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/add-photos`, form, { headers: { "Content-Type": "multipart/form-data" } }),
+  eMagazineReorderPhotos: (filename, photos) => api.patch(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/reorder-photos`, { photos }),
+  eMagazineUploadMusic: (filename, form) => api.post(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/music`, form, { headers: { "Content-Type": "multipart/form-data" } }),
+  eMagazineDeleteMusic: (filename)      => api.delete(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/music`),
   eMagazineDelete:     (filename)      => api.delete(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}`),
   eMagazineUpdateQR:   (filename, qrs) => api.patch(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/qr-links`, qrs),
+  eMagazineUpdateMeta: (filename, meta) => api.patch(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/meta`, meta),
   // OCR on a photo-heavy magazine can take minutes (mirrors the AI
   // Chatbot's document-ingest pipeline) — override the client's default
   // 30s timeout to match nginx's 600s proxy_read_timeout.
@@ -151,15 +181,27 @@ export const hrApi = {
   getOrgStructureTree:    ()          => api.get("/dashboard/hr/org-structure/tree"),
   getOrgStructureList:    (p)         => api.get("/dashboard/hr/org-structure/list", { params: p }),
   getOrgStructureLov:     ()          => api.get("/dashboard/hr/org-structure/lov"),
+  searchEmployeesForOrgFill: (q)      => api.get("/dashboard/hr/org-structure/employee-search", { params: { q } }),
+  syncOrgStructureFromEmployees: ()   => api.post("/dashboard/hr/org-structure/sync-from-employees"),
+  syncOrgStructureDepartmentMaster: () => api.post("/dashboard/hr/org-structure/sync-department-master"),
   getOrgStructureDepts:   ()          => api.get("/dashboard/hr/org-structure/departments"),
   getOrgStructurePositions: ()        => api.get("/dashboard/hr/org-structure/positions"),
-  getOrgStructureDivisions: ()        => api.get("/dashboard/hr/org-structure/divisions"),
-  getOrgStructureSubTeams:  ()        => api.get("/dashboard/hr/org-structure/sub-teams"),
+  getOrgStructureDivisions: (dept)    => api.get("/dashboard/hr/org-structure/divisions", { params: dept ? { department: dept } : {} }),
+  getOrgStructureTeams:     (dept)    => api.get("/dashboard/hr/org-structure/teams", { params: dept ? { department: dept } : {} }),
+  getOrgStructureRegions:   ()        => api.get("/dashboard/hr/org-structure/regions"),
   createOrgStructureNode: (d)         => api.post("/dashboard/hr/org-structure", d),
   updateOrgStructureNode: (id, d)     => api.put(`/dashboard/hr/org-structure/${id}`, d),
   deleteOrgStructureNode: (id)        => api.delete(`/dashboard/hr/org-structure/${id}`),
   importOrgStructure:     (form)      => api.post("/dashboard/hr/org-structure/import", form, { headers: { "Content-Type": "multipart/form-data" } }),
   getOrgStructureUploadLogs: ()       => api.get("/dashboard/hr/org-structure/upload-logs"),
+
+  // Department Master (curated department/division/team hierarchy + order)
+  getDeptMasterTree:   ()          => api.get("/dashboard/hr/department-master/tree"),
+  getDeptMasterList:   ()          => api.get("/dashboard/hr/department-master/list"),
+  getDeptMasterLov:    (type)      => api.get("/dashboard/hr/department-master/lov", { params: type ? { type } : {} }),
+  createDeptMaster:    (d)         => api.post("/dashboard/hr/department-master", d),
+  updateDeptMaster:    (id, d)     => api.put(`/dashboard/hr/department-master/${id}`, d),
+  deleteDeptMaster:    (id)        => api.delete(`/dashboard/hr/department-master/${id}`),
 };
 
 // EIS Dashboard — ported from the standalone eis-dashboard-v2 app.
@@ -291,6 +333,18 @@ export const pacApi = {
   },
   exportPurchasePlanReport: (planYear) => api.get("/dashboard/pac/purchase-plans/report/export", { params: { plan_year: planYear }, responseType: "blob" }),
 
+  // Purchase Plan Finished Good (Simulation) — parallel to Material above,
+  // different Excel template/content schema, kept in its own table.
+  listPurchasePlansFG:  (p)    => api.get("/dashboard/pac/purchase-plans-fg", { params: p }),
+  getPurchasePlanFG:    (id)   => api.get(`/dashboard/pac/purchase-plans-fg/${id}`),
+  upsertPurchasePlanFG: (body) => api.post("/dashboard/pac/purchase-plans-fg", body),
+  deletePurchasePlanFG: (id)   => api.delete(`/dashboard/pac/purchase-plans-fg/${id}`),
+  uploadPurchasePlanFGExcel: (file, planYear) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.post("/dashboard/pac/purchase-plans-fg/upload", form, { params: { plan_year: planYear }, headers: { "Content-Type": "multipart/form-data" } });
+  },
+
   // Personnel Plan (Simulation)
   listPersonnelPlans:  (p)    => api.get("/dashboard/pac/personnel-plans", { params: p }),
   getPersonnelPlan:    (id)   => api.get(`/dashboard/pac/personnel-plans/${id}`),
@@ -358,6 +412,10 @@ export const accountingApi = {
   exportInventoryRmPm:     (p) => api.get("/dashboard/accounting/inventory-rm-pm/export", { params: p, responseType: "blob" }),
   getItemCostComponents:   (period) => api.get("/dashboard/accounting/item-cost-components", { params: { period } }),
   getMaterialTransactions: (p) => api.get("/dashboard/accounting/material-transactions", { params: p }),
+  getApVatIn:              (p) => api.get("/dashboard/accounting/ap-vat-in", { params: p }),
+  exportApVatIn:           (p) => api.get("/dashboard/accounting/ap-vat-in/export", { params: p, responseType: "blob" }),
+  getApWhtListing:         (p) => api.get("/dashboard/accounting/ap-wht-listing", { params: p }),
+  exportApWhtListing:      (p) => api.get("/dashboard/accounting/ap-wht-listing/export", { params: p, responseType: "blob" }),
 };
 
 export const financialStatementApi = {
@@ -425,6 +483,30 @@ export const apInvoiceApi = {
   runImport:       (id)       => api.post(`/dashboard/accounting/ap-invoice/run-import/${id}`),
   checkStatus:     (id)       => api.get(`/dashboard/accounting/ap-invoice/check-status/${id}`),
   attachPdf:       (id)       => api.post(`/dashboard/accounting/ap-invoice/attach/${id}`),
+  getPoLines:      (poNumber) => api.get(`/dashboard/accounting/ap-invoice/po-lines/${poNumber}`),
+  glDatePreview:   (receivedDate) => api.get("/dashboard/accounting/ap-invoice/gl-date-preview", { params: { received_date: receivedDate } }),
+
+  // Google Drive auto-sync
+  gdriveStatus:      ()          => api.get("/dashboard/accounting/ap-invoice/gdrive/status"),
+  gdriveSyncNow:     ()          => api.post("/dashboard/accounting/ap-invoice/gdrive/sync"),
+  gdriveSubfolders:  ()          => api.get("/dashboard/accounting/ap-invoice/gdrive/subfolders"),
+  gdriveListFolders: ()          => api.get("/dashboard/accounting/ap-invoice/gdrive/folders"),
+  gdriveAddFolder:   (data)      => api.post("/dashboard/accounting/ap-invoice/gdrive/folders", data),
+  gdriveDeleteFolder:(id)        => api.delete(`/dashboard/accounting/ap-invoice/gdrive/folders/${id}`),
+};
+
+export const oracleEnvApi = {
+  get:    ()               => api.get("/dashboard/general/oracle-env"),
+  set:    (environment, updatedBy) => api.put("/dashboard/general/oracle-env", { environment, updated_by: updatedBy }),
+};
+
+export const supplierWhtApi = {
+  list:       (search)   => api.get("/dashboard/accounting/supplier-wht", { params: search ? { search } : {} }),
+  sync:       (updatedBy = "oracle-sync") => api.post("/dashboard/accounting/supplier-wht/sync", null, { params: { updated_by: updatedBy } }),
+  upsert:     (data)     => api.post("/dashboard/accounting/supplier-wht", data),
+  remove:     (id)       => api.delete(`/dashboard/accounting/supplier-wht/${id}`),
+  getForVendor: (vendorId, vendorName) => api.get(`/dashboard/accounting/supplier-wht/vendor/${vendorId || 0}`, { params: vendorName ? { vendor_name: vendorName } : {} }),
+  setActive:  (id, isActive) => api.put(`/dashboard/accounting/supplier-wht/${id}/active`, { is_active: isActive }),
 };
 
 export const purchasingApi = {

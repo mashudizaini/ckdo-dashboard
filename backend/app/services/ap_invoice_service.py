@@ -14,7 +14,7 @@ import json
 import base64
 import re
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import fitz  # PyMuPDF
@@ -46,13 +46,13 @@ Required JSON structure:
 {
   "invoice_num": "invoice number string",
   "invoice_date": "DD/MM/YYYY - printed date on the invoice page",
-  "received_date": "DD/MM/YYYY - handwritten date on RECEIVED stamp/cap, or null",
+  "received_date": "DD/MM/YYYY - the handwritten date inside a RECEIVED rubber stamp, or null",
   "vendor_name": "supplier company name issuing the invoice",
   "payment_terms": "payment terms from PURCHASE ORDER page (e.g. IMMEDIATE, 30 Days, Net 30, COD) or null",
-  "terms_date": "payment due date DD/MM/YYYY or null",
   "po_number": "PO/Purchase Order number or null",
   "so_number": "SO/Sales Order number or null",
-  "tax_serial_number": "nomor seri faktur pajak from FAKTUR PAJAK page or null",
+  "tax_serial_number": "nomor seri faktur pajak (No Faktur) from FAKTUR PAJAK page or null",
+  "faktur_pajak_date": "DD/MM/YYYY - the date printed on the FAKTUR PAJAK page itself, or null",
   "currency": "IDR",
   "subtotal": 0.0,
   "tax": 0.0,
@@ -72,10 +72,12 @@ Required JSON structure:
 
 IMPORTANT extraction rules:
 - vendor_name: the company ISSUING the invoice (usually top-left header), NOT PT. CKD OTTO Pharmaceuticals (the buyer)
-- received_date: look carefully for handwritten date near a rubber stamp that says "RECEIVED BY" or "DITERIMA". If not found, set null.
+- received_date: Find a rubber ink stamp (cap) — usually a rectangular or oval outline containing printed text like "RECEIVED", "DITERIMA", "GOODS RECEIVED", or a company/warehouse name — stamped anywhere on any page (often near the top, a corner, or beside a signature). That stamp normally has a blank line, box, or open space INSIDE or directly below it that has been filled in BY HAND with a date. Read that handwritten date carefully even if it is small, slanted, faint, or partially overlapping the stamp's printed text or a signature — it is often squeezed into a tight space. This handwritten date is a DIFFERENT value from any printed/typed date elsewhere on the document (invoice_date, PO date, etc.) — do not confuse them. If a page has more than one stamp, use the handwritten date closest to the words "RECEIVED"/"DITERIMA". Only set null if, after checking every page, there truly is no stamp or no handwritten date anywhere.
 - payment_terms: look for "Payment Terms", "Terms", "Syarat Pembayaran" on the PURCHASE ORDER page. If not found, set null.
-- tax_serial_number: from FAKTUR PAJAK page, look for "Kode dan Nomor Seri Faktur Pajak". If no Faktur Pajak page, set null.
+- tax_serial_number: from FAKTUR PAJAK page, look for "Kode dan Nomor Seri Faktur Pajak" (a long numeric code, often formatted like "010.001-26.12345678"). If no Faktur Pajak page, set null.
+- faktur_pajak_date: the date printed near the top or bottom of the FAKTUR PAJAK page itself (its own issue date, not the invoice's or the stamp's). If no Faktur Pajak page, set null.
 - invoice_date: the printed/typed date on the invoice document itself
+- item_code: item codes are frequently missing or hard to read on the invoice/DO line itself, but if a PURCHASE ORDER (PO) page is included in this document bundle, it almost always prints each item's code/item number clearly next to its description. Match invoice lines to PO lines BY THEIR ITEM DESCRIPTION (they describe the same goods, even if worded slightly differently), and use the matching PO line's item code for that invoice line. Only set null if no PO page is present or no matching PO line can be found.
 - All numeric values as plain numbers without thousand separators
 - Return ONLY the JSON, no markdown, no explanation"""
 
@@ -148,13 +150,104 @@ def _call_ollama_vision(images: list[str]) -> dict:
     return json.loads(raw)
 
 
+_ORACLE_MONTH_ABBR = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+
+# English + Indonesian month names/abbreviations — used for the "19 September
+# 2026" / "19-SEP-2026" style inputs Oracle's own Invoice Workbench displays
+# and staff naturally type, which strptime's locale-dependent %b/%B can't be
+# trusted to parse consistently regardless of the server's own locale.
+_MONTH_NAMES = {
+    "jan": 1, "january": 1, "januari": 1,
+    "feb": 2, "february": 2, "februari": 2,
+    "mar": 3, "march": 3, "maret": 3,
+    "apr": 4, "april": 4,
+    "may": 5, "mei": 5,
+    "jun": 6, "june": 6, "juni": 6,
+    "jul": 7, "july": 7, "juli": 7,
+    "aug": 8, "august": 8, "agt": 8, "agustus": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10, "okt": 10, "oktober": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12, "des": 12, "desember": 12,
+}
+
+
 def _parse_date(date_str: str) -> datetime:
+    """Accepts the AI extraction's own DD/MM/YYYY, ISO, and — since staff
+    edit these fields by hand — DD-MM-YYYY, DD-MON-YYYY ("19-SEP-2026",
+    matching Oracle's own display format) and "DD Month YYYY" in English or
+    Indonesian, with either a space or dash between the parts."""
+    s = date_str.strip()
     for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
         try:
-            return datetime.strptime(date_str.strip(), fmt)
+            return datetime.strptime(s, fmt)
         except ValueError:
             continue
+    m = re.match(r"^(\d{1,2})[\s\-]+([A-Za-z]+)\.?[\s\-]+(\d{4})$", s)
+    if m:
+        day, month_name, year = m.groups()
+        month = _MONTH_NAMES.get(month_name.lower())
+        if month:
+            try:
+                return datetime(int(year), month, int(day))
+            except ValueError:
+                pass
     raise ValueError(f"Format tanggal tidak dikenali: '{date_str}'")
+
+
+def _format_oracle_date(dt: datetime) -> str:
+    """Canonical display/storage format for every date field in this
+    module — matches Oracle's own DD-MON-RRRR (e.g. "19-SEP-2026"), so what
+    staff see here always matches the Invoice Workbench."""
+    return f"{dt.day:02d}-{_ORACLE_MONTH_ABBR[dt.month - 1]}-{dt.year}"
+
+
+def normalize_date_str(date_str: Optional[str], default: Optional[str] = None) -> Optional[str]:
+    """Parse (tolerating any of _parse_date's accepted formats) then
+    reformat to DD-MON-RRRR. Returns `default` — itself expected to already
+    be DD-MON-RRRR, or None — for a blank or unparseable input rather than
+    raising, since this is used both for the AI extraction's raw output
+    (which may be empty/malformed) and for validating a manual edit."""
+    if not date_str or not date_str.strip():
+        return default
+    try:
+        return _format_oracle_date(_parse_date(date_str))
+    except ValueError:
+        return default
+
+
+def _parse_payment_terms_days(payment_terms: Optional[str]) -> int:
+    """Day count implied by a payment-terms label. IMMEDIATE/COD/CASH mean
+    due on receipt (0 days); otherwise the first number found is the day
+    count ("30 Days" -> 30, "Net 45" -> 45). Falls back to 30 (this
+    module's own default payment_terms) when nothing recognizable is found,
+    rather than guessing 0 — an unrecognized label is far more likely to be
+    a garbled "30 Days" than a genuine on-receipt term."""
+    if not payment_terms:
+        return 30
+    s = payment_terms.strip().upper()
+    if s in ("IMMEDIATE", "COD", "CASH", "CASH ON DELIVERY", "CBD", "CIA"):
+        return 0
+    m = re.search(r"(\d+)", s)
+    return int(m.group(1)) if m else 30
+
+
+def compute_terms_date(received_date_str: Optional[str], payment_terms: Optional[str],
+                        fallback_date_str: Optional[str] = None) -> Optional[str]:
+    """TOP (Term of Payment / due date) = received_date + the payment-terms
+    day count — always derived this way per request, not read off the PDF
+    (payment terms are rarely printed on the invoice itself; when they are,
+    they're often for the vendor's own reference, not the actual due date
+    counted from receipt). Falls back to `fallback_date_str` (invoice_date)
+    only when received_date is unavailable."""
+    base_str = received_date_str or fallback_date_str
+    if not base_str:
+        return None
+    try:
+        base = _parse_date(base_str)
+    except ValueError:
+        return None
+    return _format_oracle_date(base + timedelta(days=_parse_payment_terms_days(payment_terms)))
 
 
 def _clean_vendor_name(name: str) -> str:
@@ -171,7 +264,23 @@ def extract_pdf(file_path: str, filename: str, provider: str = "onprem") -> dict
     images = _pdf_to_images_base64(file_path)
     data = _call_claude_vision(images) if provider == "anthropic" else _call_ollama_vision(images)
 
-    invoice_date = data.get("received_date") or data.get("invoice_date") or datetime.today().strftime("%d/%m/%Y")
+    # invoice_date and received_date are two different dates (printed invoice
+    # date vs. the handwritten "RECEIVED BY" stamp) — kept as separate fields
+    # rather than one silently standing in for the other, since received_date
+    # is what GL_DATE/GOODS_RECEIVED_DATE get computed from (see
+    # insert_to_interface). When the stamp genuinely can't be read, default
+    # to the invoice's own printed date rather than leaving it blank — still
+    # fully editable in the review step if it's wrong. Both, like every date
+    # this module handles, are normalized to Oracle's own DD-MON-RRRR display
+    # format (see normalize_date_str) regardless of whatever format the
+    # vision model actually returned.
+    invoice_date = normalize_date_str(data.get("invoice_date"), default=_format_oracle_date(datetime.today()))
+    received_date = normalize_date_str(data.get("received_date"), default=invoice_date)
+    faktur_pajak_date = normalize_date_str(data.get("faktur_pajak_date"))
+    payment_terms = data.get("payment_terms") or "30 Days"
+    # TOP (terms_date) is always derived from received_date + the payment
+    # terms' day count — never read off the PDF, see compute_terms_date.
+    terms_date = compute_terms_date(received_date, payment_terms, fallback_date_str=invoice_date)
 
     lines = []
     for i, ln in enumerate(data.get("lines", []), start=1):
@@ -195,9 +304,10 @@ def extract_pdf(file_path: str, filename: str, provider: str = "onprem") -> dict
     return {
         "invoice_num": data.get("invoice_num", "").strip(),
         "invoice_date": invoice_date,
+        "received_date": received_date,
         "vendor_name": data.get("vendor_name", "").strip(),
-        "payment_terms": data.get("payment_terms") or "30 Days",
-        "terms_date": data.get("terms_date"),
+        "payment_terms": payment_terms,
+        "terms_date": terms_date,
         "po_number": data.get("po_number"),
         "so_number": data.get("so_number"),
         "currency_code": data.get("currency", "IDR"),
@@ -205,6 +315,7 @@ def extract_pdf(file_path: str, filename: str, provider: str = "onprem") -> dict
         "tax_amount": tax_amount,
         "invoice_amount": invoice_amount,
         "tax_serial_number": data.get("tax_serial_number"),
+        "faktur_pajak_date": faktur_pajak_date,
         "source_file": filename,
         "lines": lines,
     }
@@ -215,14 +326,14 @@ def save_to_staging(db_conn, invoice_data: dict) -> int:
     cur = db_conn.cursor()
     cur.execute("""
         INSERT INTO ap_invoice_stg (
-            invoice_num, invoice_date, vendor_name, payment_terms,
+            invoice_num, invoice_date, received_date, vendor_name, payment_terms,
             terms_date, po_number, so_number, currency_code,
-            subtotal, tax_amount, invoice_amount, tax_serial_number,
+            subtotal, tax_amount, invoice_amount, tax_serial_number, faktur_pajak_date,
             source_file, lines_json, status, created_date
         ) VALUES (
-            %(invoice_num)s, %(invoice_date)s, %(vendor_name)s, %(payment_terms)s,
+            %(invoice_num)s, %(invoice_date)s, %(received_date)s, %(vendor_name)s, %(payment_terms)s,
             %(terms_date)s, %(po_number)s, %(so_number)s, %(currency_code)s,
-            %(subtotal)s, %(tax_amount)s, %(invoice_amount)s, %(tax_serial_number)s,
+            %(subtotal)s, %(tax_amount)s, %(invoice_amount)s, %(tax_serial_number)s, %(faktur_pajak_date)s,
             %(source_file)s, %(lines_json)s, 'NEW', NOW()
         ) RETURNING stg_id
     """, {
@@ -237,18 +348,26 @@ def save_to_staging(db_conn, invoice_data: dict) -> int:
 def list_invoices(db_conn) -> list[dict]:
     cur = db_conn.cursor()
     cur.execute("""
-        SELECT stg_id, invoice_num, vendor_name, invoice_date,
-               invoice_amount, status, error_msg, source_file,
+        SELECT stg_id, invoice_num, vendor_name, vendor_id, invoice_date, po_number,
+               subtotal, invoice_amount, status, error_msg, source_file,
                TO_CHAR(created_date, 'DD/MM/YYYY HH24:MI:SS'),
                TO_CHAR(processed_date, 'DD/MM/YYYY HH24:MI:SS'),
-               ap_invoice_id
+               ap_invoice_id, wht_enabled, wht_amount, awt_group_id, awt_group_name,
+               source_channel, gdrive_uploader
         FROM ap_invoice_stg
         ORDER BY created_date DESC
     """)
-    cols = ["stg_id", "invoice_num", "vendor_name", "invoice_date",
-            "invoice_amount", "status", "error_msg", "source_file",
-            "created_date", "processed_date", "ap_invoice_id"]
-    return [dict(zip(cols, r)) for r in cur.fetchall()]
+    cols = ["stg_id", "invoice_num", "vendor_name", "vendor_id", "invoice_date", "po_number",
+            "subtotal", "invoice_amount", "status", "error_msg", "source_file",
+            "created_date", "processed_date", "ap_invoice_id",
+            "wht_enabled", "wht_amount", "awt_group_id", "awt_group_name",
+            "source_channel", "gdrive_uploader"]
+    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+    for r in rows:
+        for key in ("subtotal", "invoice_amount", "wht_amount"):
+            if r.get(key) is not None:
+                r[key] = float(r[key])
+    return rows
 
 
 def get_invoice_detail(db_conn, stg_id: int) -> Optional[dict]:
@@ -257,12 +376,12 @@ def get_invoice_detail(db_conn, stg_id: int) -> Optional[dict]:
         SELECT stg_id, status, error_msg, source_file,
                TO_CHAR(created_date, 'DD/MM/YYYY HH24:MI:SS'),
                TO_CHAR(processed_date, 'DD/MM/YYYY HH24:MI:SS'),
-               invoice_num, invoice_date, vendor_name, vendor_id,
+               invoice_num, invoice_date, received_date, vendor_name, vendor_id,
                vendor_site_id, vendor_site_code, payment_terms,
                terms_date, po_number, so_number, currency_code,
-               invoice_amount, subtotal, tax_amount,
+               invoice_amount, subtotal, tax_amount, tax_serial_number, faktur_pajak_date,
                lines_json, interface_invoice_id, ap_invoice_id,
-               conc_request_id
+               conc_request_id, wht_enabled, wht_amount, awt_group_id, awt_group_name
         FROM ap_invoice_stg WHERE stg_id = %s
     """, (stg_id,))
     row = cur.fetchone()
@@ -270,17 +389,17 @@ def get_invoice_detail(db_conn, stg_id: int) -> Optional[dict]:
         return None
     cols = ["stg_id", "status", "error_msg", "source_file",
             "created_date", "processed_date",
-            "invoice_num", "invoice_date", "vendor_name", "vendor_id",
+            "invoice_num", "invoice_date", "received_date", "vendor_name", "vendor_id",
             "vendor_site_id", "vendor_site_code", "payment_terms",
             "terms_date", "po_number", "so_number", "currency_code",
-            "invoice_amount", "subtotal", "tax_amount",
+            "invoice_amount", "subtotal", "tax_amount", "tax_serial_number", "faktur_pajak_date",
             "lines_json", "interface_invoice_id", "ap_invoice_id",
-            "conc_request_id"]
+            "conc_request_id", "wht_enabled", "wht_amount", "awt_group_id", "awt_group_name"]
     data = dict(zip(cols, row))
     if data.get("lines_json"):
         data["lines"] = json.loads(data["lines_json"])
     data.pop("lines_json", None)
-    for key in ("invoice_amount", "subtotal", "tax_amount"):
+    for key in ("invoice_amount", "subtotal", "tax_amount", "wht_amount"):
         if data.get(key) is not None:
             data[key] = float(data[key])
     return data
@@ -356,34 +475,170 @@ def validate_invoice(db_conn, ora_conn, stg_id: int) -> dict:
     return {"stg_id": stg_id, "status": "VALIDATED", "vendor": vendor_info, "warnings": warnings}
 
 
+def get_po_lines_for_matching(ora_conn, po_number: str) -> Optional[dict]:
+    """PO's lines + their receipts, for a human to manually pick which PO
+    line (and, when the shipment is receipt-matched, which receipt) each
+    invoice line corresponds to — populates AP_INVOICE_LINES_INTERFACE's
+    PO_LINE_NUMBER/RECEIPT_NUMBER. Deliberately NOT auto-matched: the
+    extraction's item_code is frequently null (OCR can't always read it),
+    and matching by description text alone is too unreliable for something
+    that posts real money against a specific PO line/receipt — see the
+    "No PO Line Num"/"Insufficient Receipt Information" APXIIMPT rejections
+    this exists to let a person resolve correctly."""
+    with ora_conn.cursor() as oc:
+        oc.execute("""
+            SELECT po_header_id FROM po_headers_all WHERE segment1 = :po
+            FETCH FIRST 1 ROWS ONLY
+        """, {"po": po_number})
+        hrow = oc.fetchone()
+        if not hrow:
+            return None
+        po_header_id = hrow[0]
+
+        oc.execute("""
+            SELECT pol.line_num, msi.segment1 AS item_code, pol.item_description,
+                   pol.quantity, pol.unit_price, poll.line_location_id,
+                   poll.match_option, poll.quantity_received, poll.closed_code
+            FROM po_lines_all pol
+            JOIN po_line_locations_all poll ON poll.po_line_id = pol.po_line_id
+            LEFT JOIN mtl_system_items_b msi
+                   ON msi.inventory_item_id = pol.item_id AND msi.organization_id = poll.ship_to_organization_id
+            WHERE pol.po_header_id = :hid
+            ORDER BY pol.line_num
+        """, {"hid": po_header_id})
+        line_rows = oc.fetchall()
+
+        line_location_ids = [r[5] for r in line_rows]
+        receipts_by_loc: dict = {}
+        if line_location_ids:
+            placeholders = ",".join(f":loc{i}" for i in range(len(line_location_ids)))
+            params = {f"loc{i}": v for i, v in enumerate(line_location_ids)}
+            oc.execute(f"""
+                SELECT rt.po_line_location_id, rsh.receipt_num, rt.transaction_date, rt.quantity
+                FROM rcv_transactions rt
+                JOIN rcv_shipment_headers rsh ON rsh.shipment_header_id = rt.shipment_header_id
+                WHERE rt.po_line_location_id IN ({placeholders})
+                  AND rt.transaction_type = 'RECEIVE'
+                ORDER BY rt.transaction_date
+            """, params)
+            for loc_id, receipt_num, txn_date, qty in oc.fetchall():
+                receipts_by_loc.setdefault(loc_id, []).append({
+                    "receipt_number": receipt_num,
+                    "transaction_date": txn_date.strftime("%d/%m/%Y") if txn_date else None,
+                    "quantity": float(qty) if qty is not None else None,
+                })
+
+    lines = [
+        {
+            "line_num": line_num,
+            "item_code": item_code,
+            "description": item_desc,
+            "quantity": float(qty) if qty is not None else None,
+            "unit_price": float(unit_price) if unit_price is not None else None,
+            "line_location_id": loc_id,
+            "match_option": match_option,
+            "quantity_received": float(qty_received) if qty_received is not None else None,
+            "closed_code": closed_code,
+            "receipts": receipts_by_loc.get(loc_id, []),
+        }
+        for (line_num, item_code, item_desc, qty, unit_price, loc_id,
+             match_option, qty_received, closed_code) in line_rows
+    ]
+    return {"po_number": po_number, "lines": lines}
+
+
+def _compute_gl_date(ora_conn, base_date: datetime) -> datetime:
+    """GL Date = base_date (the invoice's received_date, or invoice_date
+    when no received_date was captured/entered), rolled forward to the 1st
+    of the next month if that period is already closed in Payables
+    (gl_period_statuses.application_id = 200 = SQLAP) — repeats until an
+    open period is found. Capped at 12 tries so a long-closed stretch can't
+    loop forever; falls back to the last candidate if none opens up."""
+    candidate = base_date
+    with ora_conn.cursor() as oc:
+        for _ in range(12):
+            oc.execute("""
+                SELECT closing_status FROM gl_period_statuses
+                WHERE application_id = 200
+                  AND :d BETWEEN start_date AND end_date
+                FETCH FIRST 1 ROWS ONLY
+            """, {"d": candidate})
+            row = oc.fetchone()
+            if row and row[0] == 'O':
+                return candidate
+            if candidate.month == 12:
+                candidate = candidate.replace(year=candidate.year + 1, month=1, day=1)
+            else:
+                candidate = candidate.replace(month=candidate.month + 1, day=1)
+    return candidate
+
+
 def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: list) -> dict:
+    invoice_date = _parse_date(header["INVOICE_DATE"])
+    try:
+        terms_date = _parse_date(header.get("TERMS_DATE", "")) if header.get("TERMS_DATE") else invoice_date
+    except ValueError:
+        terms_date = invoice_date
+
+    # received_date (the stamp date) feeds two separate Oracle columns:
+    # GOODS_RECEIVED_DATE on the header directly (the actual date, never
+    # adjusted), and GL_DATE's basis (which IS adjusted — rolled to an open
+    # Payables period below). Fixes two real gaps: GOODS_RECEIVED_DATE was
+    # never populated at all (shown as the Invoice Workbench's "*Dates
+    # Invoice" field, examine-field name GOODS_RECEIVED_DATE — confirmed
+    # blank on a live imported invoice), and GL_DATE used to be plain
+    # datetime.today(), which posts to whatever period today falls in
+    # regardless of the invoice's own period, and does nothing if closed.
+    received_date_str = header.get("RECEIVED_DATE")
+    try:
+        received_date_parsed = _parse_date(received_date_str) if received_date_str else None
+    except ValueError:
+        received_date_parsed = None
+    gl_date = _compute_gl_date(ora_conn, received_date_parsed or invoice_date)
+
+    faktur_date_str = header.get("FAKTUR_PAJAK_DATE")
+    try:
+        faktur_date_parsed = _parse_date(faktur_date_str) if faktur_date_str else None
+    except ValueError:
+        faktur_date_parsed = None
+
+    # WHT (withholding tax / PPh) — opt-in via the checkbox in the UI.
+    # Earlier this manually inserted a LINE_TYPE_LOOKUP_CODE='AWT' line —
+    # Oracle rejects that outright ("LINE TYPE CANNOT BE AWT": AWT lines
+    # can only be system-generated, never created through the Open
+    # Interface). The correct — and only — supported hook is the WHT GROUP
+    # NAME on the invoice HEADER (AWT_GROUP_ID/AWT_GROUP_NAME on
+    # AP_INVOICES_INTERFACE, sourced from supplier_wht_master): Oracle's
+    # own withholding engine then calculates and creates the AWT deduction
+    # itself at Validation, so INVOICE_AMOUNT here stays the gross Total —
+    # never manually netted down — same as before WHT existed.
+    awt_group_id = header.get("AWT_GROUP_ID")
+    awt_group_name = header.get("AWT_GROUP_NAME")
+
     with ora_conn.cursor() as oc:
         oc.execute("SELECT AP_INVOICES_INTERFACE_S.NEXTVAL FROM DUAL")
         iid = oc.fetchone()[0]
-
-        invoice_date = _parse_date(header["INVOICE_DATE"])
-        gl_date = datetime.today()
-        try:
-            terms_date = _parse_date(header.get("TERMS_DATE", "")) if header.get("TERMS_DATE") else invoice_date
-        except ValueError:
-            terms_date = invoice_date
 
         oc.execute("""
             INSERT INTO AP_INVOICES_INTERFACE (
                 INVOICE_ID, INVOICE_NUM, INVOICE_TYPE_LOOKUP_CODE,
                 INVOICE_DATE, VENDOR_ID, VENDOR_SITE_ID,
                 INVOICE_AMOUNT, INVOICE_CURRENCY_CODE,
-                TERMS_NAME, TERMS_DATE, GL_DATE, SOURCE, ORG_ID,
+                TERMS_NAME, TERMS_DATE, GL_DATE, GOODS_RECEIVED_DATE, SOURCE, ORG_ID,
                 PO_NUMBER, DESCRIPTION,
-                ATTRIBUTE1, ATTRIBUTE2,
+                SUPPLIER_TAX_INVOICE_NUMBER, SUPPLIER_TAX_INVOICE_DATE,
+                AWT_GROUP_ID, AWT_GROUP_NAME,
+                ATTRIBUTE1,
                 CREATION_DATE, CREATED_BY
             ) VALUES (
                 :iid, :inv_num, 'STANDARD',
                 :inv_date, :vid, :vsid,
                 :inv_amt, :curr,
-                :terms, :terms_date, :gl_date, :source, :org_id,
+                :terms, :terms_date, :gl_date, :goods_recv_date, :source, :org_id,
                 :po, :descr,
-                :attr1, :attr2,
+                :tax_inv_num, :tax_inv_date,
+                :awt_group_id, :awt_group_name,
+                :attr1,
                 SYSDATE, 1110
             )
         """, {
@@ -391,22 +646,35 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
             "inv_date": invoice_date, "vid": header["VENDOR_ID"], "vsid": header["VENDOR_SITE_ID"],
             "inv_amt": float(header["INVOICE_AMOUNT"]), "curr": header.get("INVOICE_CURRENCY_CODE", "IDR"),
             "terms": header.get("TERMS_NAME", "30 Days"), "terms_date": terms_date,
-            "gl_date": gl_date, "source": EBS_SOURCE, "org_id": EBS_ORG_ID,
+            "gl_date": gl_date, "goods_recv_date": received_date_parsed,
+            "source": EBS_SOURCE, "org_id": EBS_ORG_ID,
             "po": header.get("PO_NUMBER"), "descr": f"Import PDF: {header['INVOICE_NUM']}",
-            "attr1": header.get("SO_NUMBER"), "attr2": header.get("TAX_SERIAL_NUMBER"),
+            # No Faktur / Tgl Faktur Pajak — Oracle's own Indonesia-localization
+            # columns (confirmed live), not generic DFF attributes.
+            "tax_inv_num": header.get("TAX_SERIAL_NUMBER"), "tax_inv_date": faktur_date_parsed,
+            "awt_group_id": awt_group_id, "awt_group_name": awt_group_name,
+            "attr1": header.get("SO_NUMBER"),
         })
 
         for line in lines:
+            # PO_NUMBER/PO_LINE_NUMBER/RECEIPT_NUMBER come from the manual
+            # PO-line picker in the line editor (see get_po_lines_for_matching)
+            # — a line's own PO_NUMBER falls back to the header's when the
+            # picker didn't set one explicitly, since AP_INVOICE_LINES_INTERFACE
+            # needs it per-line, not inherited from AP_INVOICES_INTERFACE.
+            po_ln_num = line.get("PO_LINE_NUMBER", line.get("po_line_number"))
+            receipt_num = line.get("RECEIPT_NUMBER", line.get("receipt_number"))
+            po_num_line = line.get("PO_NUMBER", line.get("po_number")) or header.get("PO_NUMBER")
             oc.execute("""
                 INSERT INTO AP_INVOICE_LINES_INTERFACE (
                     INVOICE_ID, INVOICE_LINE_ID, LINE_NUMBER,
                     LINE_TYPE_LOOKUP_CODE, AMOUNT, QUANTITY_INVOICED,
                     UNIT_PRICE, DESCRIPTION, PO_NUMBER, PO_LINE_NUMBER,
-                    ATTRIBUTE1, ATTRIBUTE2, ORG_ID
+                    RECEIPT_NUMBER, ATTRIBUTE1, ATTRIBUTE2, ORG_ID
                 ) VALUES (
                     :iid, AP_INVOICE_LINES_INTERFACE_S.NEXTVAL, :ln,
                     'ITEM', :amt, :qty, :price, :descr, :po, :po_ln,
-                    :batch, :item_code, :org_id
+                    :receipt_num, :batch, :item_code, :org_id
                 )
             """, {
                 "iid": iid, "ln": line.get("LINE_NUMBER", line.get("line_num")),
@@ -414,7 +682,7 @@ def insert_to_interface(db_conn, ora_conn, stg_id: int, header: dict, lines: lis
                 "qty": float(line.get("QUANTITY_INVOICED", line.get("qty", 1))),
                 "price": float(line.get("UNIT_PRICE", line.get("unit_price", 0))),
                 "descr": line.get("DESCRIPTION", line.get("description", "")),
-                "po": line.get("PO_NUMBER"), "po_ln": line.get("PO_LINE_NUMBER"),
+                "po": po_num_line, "po_ln": po_ln_num, "receipt_num": receipt_num,
                 "batch": line.get("BATCH_NO", line.get("batch_no")),
                 "item_code": line.get("ITEM_CODE", line.get("item_code")),
                 "org_id": EBS_ORG_ID,
