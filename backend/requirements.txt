@@ -47,7 +47,10 @@ faster-whisper==1.0.3
 pgvector==0.3.6
 
 # Document Converter — PDF/DOCX/image -> RAG-friendly markdown (OCR + table
-# structure recognition via RapidOCR/onnxruntime, CPU-only, no torch needed)
+# structure recognition via RapidOCR/onnxruntime). Note: this does pull torch
+# in via docling-ibm-models, contrary to what this comment used to claim — the
+# Dockerfile installs the CPU build ahead of this file so the CUDA wheels never
+# get resolved.
 docling==2.117.0
 
 # Data Processing
