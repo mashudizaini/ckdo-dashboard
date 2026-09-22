@@ -30,7 +30,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from sqlalchemy import create_engine, inspect, text        # noqa: E402
+from sqlalchemy import MetaData, create_engine, inspect, text  # noqa: E402
 from sqlalchemy.dialects import postgresql                # noqa: E402
 from sqlalchemy.schema import CreateIndex, CreateTable    # noqa: E402
 
@@ -58,12 +58,40 @@ def make_sync_engine():
 
 
 def load_all_models():
-    """app/models/__init__.py only re-exports a couple of names, so importing
-    the package is not enough to populate Base.metadata — every module under it
-    has to be imported for its tables to register."""
+    """Import every module under app/models and return them.
+
+    app/models/__init__.py only re-exports a couple of names, so importing the
+    package is not enough for the tables to register."""
     import app.models as pkg
+    modules = []
     for mod in pkgutil.iter_modules(pkg.__path__):
-        importlib.import_module(f"app.models.{mod.name}")
+        modules.append(importlib.import_module(f"app.models.{mod.name}"))
+    return modules
+
+
+def collect_metadata(modules):
+    """Gather every MetaData the models use, not just app.database.Base's.
+
+    ebs_backup, vpn_monitor, hikcentral and zkteco each call declarative_base()
+    of their own, so their tables live in separate MetaData objects that are
+    invisible to Base.metadata. Those four create their tables through their own
+    init_*_db() at startup, but only a scan that walks every registry can say
+    whether a deployment actually has them."""
+    found = {}
+    for module in modules:
+        for obj in vars(module).values():
+            md = getattr(obj, "metadata", None)
+            if isinstance(md, MetaData):
+                found.setdefault(id(md), md)
+    found.setdefault(id(Base.metadata), Base.metadata)
+
+    tables, seen = [], set()
+    for md in found.values():
+        for table in md.sorted_tables:
+            if table.name not in seen:
+                seen.add(table.name)
+                tables.append(table)
+    return tables
 
 
 def sql_literal(value):
@@ -111,7 +139,7 @@ def add_column_ddl(table, col):
 
 
 def build_plan():
-    load_all_models()
+    tables = collect_metadata(load_all_models())
     engine = make_sync_engine()
     insp = inspect(engine)
     existing_tables = set(insp.get_table_names())
@@ -119,7 +147,7 @@ def build_plan():
     new_tables, altered = [], []
     statements = []
 
-    for table in Base.metadata.sorted_tables:
+    for table in tables:
         if table.name not in existing_tables:
             new_tables.append(table.name)
             statements.append(
