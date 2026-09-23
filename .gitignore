@@ -31,3 +31,13 @@ nginx/ssl/
 # Google service account keys — deployed directly to the server (same as
 # .env), never through git.
 backend/credentials/
+
+# Runtime content managed by the app (uploaded via HR e-Magazine admin) — not source
+e-magazine/magazines/*
+!e-magazine/magazines/.gitkeep
+backend/app/data/daily_sales.json
+
+# Server-local backups made during deploys/migrations
+.env.bak*
+*.bak-*
+e-magazine.pre-migration-*/
