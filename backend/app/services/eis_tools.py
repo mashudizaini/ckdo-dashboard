@@ -225,6 +225,73 @@ EIS_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_tablespace_usage",
+            "description": "Ambil kondisi tablespace Oracle EBS terkini (persen terpakai terhadap ukuran maksimum/autoextend). Gunakan min_used_pct untuk menyaring, misalnya 90 untuk 'tablespace yang lebih dari 90%'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "min_used_pct": {"type": "number", "description": "Hanya tampilkan tablespace dengan pemakaian >= nilai ini (persen)."},
+                    "tablespace_name": {"type": "string", "description": "Saring per nama tablespace (pencocokan sebagian, tidak peka huruf besar/kecil)."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_tablespace_trend",
+            "description": "Tren pemakaian sebuah tablespace per hari (nilai tertinggi harian) untuk melihat laju pertumbuhan dan memperkirakan kapan penuh.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tablespace_name": {"type": "string", "description": "Nama tablespace (pencocokan sebagian)."},
+                    "days": {"type": "integer", "description": "Rentang hari ke belakang, default 30."},
+                },
+                "required": ["tablespace_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_server_resources",
+            "description": "Kondisi CPU, memori, swap, load, dan uptime server terkini. Tanpa argumen mengembalikan semua server (DB dan Aplikasi).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "server": {"type": "string", "description": "Saring per server: 'db', 'app', atau sebagian nama labelnya."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_disk_usage",
+            "description": "Pemakaian filesystem per mount point di server DB dan Aplikasi. Gunakan min_used_pct untuk mencari partisi yang hampir penuh.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "server": {"type": "string", "description": "Saring per server: 'db', 'app', atau sebagian nama labelnya."},
+                    "min_used_pct": {"type": "number", "description": "Hanya tampilkan mount point dengan pemakaian >= nilai ini (persen)."},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_oracle_activity",
+            "description": "Jumlah sesi Oracle aktif/idle/terblokir dan antrean concurrent request (pending/running) terkini, beserta wait event teratas.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 _PERIOD_RE = re.compile(r"^(\d{4})-(\d{1,2})$")
@@ -508,6 +575,108 @@ def get_employee_headcount(period: str, dept_group: str = None) -> list[dict]:
     )
 
 
+# ── IT / DBA infrastructure tools ────────────────────────────────────────────
+# These read the eis.fact_it_* snapshots written every 15 minutes by
+# app.tasks.eis_etl_tasks.etl_it_monitoring. They are restricted to the "IT"
+# module in ebs_chat_service.MODULE_TOOL_MAP: mount points, server addresses
+# and remaining capacity are reconnaissance material, not company-wide facts
+# like sales figures, so they stay hidden from callers without that module.
+#
+# Each one reads the newest snapshot rather than an average, because "which
+# tablespace is above 90%" is a question about now. The trend tool is the
+# exception and is the reason the tables are append-only.
+
+
+def get_tablespace_usage(min_used_pct: float = None, tablespace_name: str = None) -> list[dict]:
+    """Latest tablespace snapshot, optionally only those above a threshold."""
+    sql = """
+        SELECT tablespace_name, used_pct, used_gb, max_gb, status, contents, captured_at
+          FROM eis.fact_it_tablespace
+         WHERE captured_at = (SELECT MAX(captured_at) FROM eis.fact_it_tablespace)
+    """
+    params = {}
+    if min_used_pct is not None:
+        sql += " AND used_pct >= %(min_used_pct)s"
+        params["min_used_pct"] = min_used_pct
+    if tablespace_name:
+        sql += " AND UPPER(tablespace_name) LIKE UPPER(%(tablespace_name)s)"
+        params["tablespace_name"] = f"%{tablespace_name}%"
+    sql += " ORDER BY used_pct DESC"
+    return _query(sql, params)
+
+
+def get_tablespace_trend(tablespace_name: str, days: int = 30) -> list[dict]:
+    """Daily high-water mark per tablespace over the last N days.
+
+    MAX per day rather than the raw 15-minute rows: the question behind this
+    is capacity planning, and a day's peak is what a threshold would have
+    tripped on. Returning every snapshot would also bury the model in ~96
+    rows per tablespace per day.
+    """
+    sql = """
+        SELECT DATE(captured_at)     AS day,
+               tablespace_name,
+               MAX(used_pct)         AS used_pct,
+               MAX(used_gb)          AS used_gb,
+               MAX(max_gb)           AS max_gb
+          FROM eis.fact_it_tablespace
+         WHERE captured_at >= NOW() - (%(days)s || ' days')::interval
+           AND UPPER(tablespace_name) LIKE UPPER(%(tablespace_name)s)
+         GROUP BY DATE(captured_at), tablespace_name
+         ORDER BY day, tablespace_name
+    """
+    return _query(sql, {"days": days, "tablespace_name": f"%{tablespace_name}%"})
+
+
+def get_server_resources(server: str = None) -> list[dict]:
+    """Latest CPU / memory / swap / load / uptime per server."""
+    sql = """
+        SELECT server_key, server_label, server_ip, status,
+               cpu_pct, cpu_count, memory_pct, memory_used_gb, memory_total_gb,
+               swap_pct, load_1, uptime, error_message, captured_at
+          FROM eis.fact_it_server_metrics
+         WHERE captured_at = (SELECT MAX(captured_at) FROM eis.fact_it_server_metrics)
+    """
+    params = {}
+    if server:
+        sql += " AND (UPPER(server_key) = UPPER(%(server)s) OR UPPER(server_label) LIKE UPPER(%(server_like)s))"
+        params["server"] = server
+        params["server_like"] = f"%{server}%"
+    sql += " ORDER BY server_key"
+    return _query(sql, params)
+
+
+def get_disk_usage(server: str = None, min_used_pct: float = None) -> list[dict]:
+    """Latest filesystem usage per mount point, optionally filtered."""
+    sql = """
+        SELECT server_key, server_label, mount_point, filesystem,
+               size_gb, used_gb, avail_gb, used_pct, captured_at
+          FROM eis.fact_it_disk_usage
+         WHERE captured_at = (SELECT MAX(captured_at) FROM eis.fact_it_disk_usage)
+    """
+    params = {}
+    if server:
+        sql += " AND (UPPER(server_key) = UPPER(%(server)s) OR UPPER(server_label) LIKE UPPER(%(server_like)s))"
+        params["server"] = server
+        params["server_like"] = f"%{server}%"
+    if min_used_pct is not None:
+        sql += " AND used_pct >= %(min_used_pct)s"
+        params["min_used_pct"] = min_used_pct
+    sql += " ORDER BY used_pct DESC"
+    return _query(sql, params)
+
+
+def get_oracle_activity() -> list[dict]:
+    """Latest Oracle session counts and concurrent-request backlog."""
+    sql = """
+        SELECT active_sessions, inactive_sessions, blocked_sessions,
+               pending_requests, running_requests, top_wait_event, captured_at
+          FROM eis.fact_it_oracle_activity
+         ORDER BY captured_at DESC
+         LIMIT 1
+    """
+    return _query(sql, {})
+
 _DISPATCH = {
     "get_sales_performance": get_sales_performance,
     "get_production_performance": get_production_performance,
@@ -521,6 +690,11 @@ _DISPATCH = {
     "get_purchase_order_detail": get_purchase_order_detail,
     "get_sales_order_detail": get_sales_order_detail,
     "get_employee_directory": get_employee_directory,
+    "get_tablespace_usage": get_tablespace_usage,
+    "get_tablespace_trend": get_tablespace_trend,
+    "get_server_resources": get_server_resources,
+    "get_disk_usage": get_disk_usage,
+    "get_oracle_activity": get_oracle_activity,
 }
 
 

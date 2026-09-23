@@ -42,6 +42,11 @@ celery_app.conf.beat_schedule = {
     "etl-sales-orders": {"task": "app.tasks.etl_tasks.etl_sales_orders", "schedule": crontab(hour=5, minute=30)},
     "etl-inventory-txn": {"task": "app.tasks.etl_tasks.etl_inventory_txn", "schedule": crontab(hour=5, minute=45)},
     "etl-batches": {"task": "app.tasks.etl_tasks.etl_batches", "schedule": crontab(hour=6, minute=0)},
+    # Infrastructure snapshots for CoChat's IT tools (tablespace / CPU / disk /
+    # Oracle activity). Every 15 min for the same reason as etl-open-pr above:
+    # these track live conditions, so a nightly batch would answer yesterday's
+    # question. See eis_etl_tasks.etl_it_monitoring.
+    "etl-it-monitoring": {"task": "app.tasks.etl_tasks.etl_it_monitoring", "schedule": crontab(minute="*/15")},
     # Nightly reconciliation for CoChat (Open WebUI) Knowledge Sync — the
     # main trigger is event-driven (Setup > AI > Knowledge Base's "Sync to
     # CoChat" button), this just catches anything missed (a doc edited

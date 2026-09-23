@@ -2405,3 +2405,189 @@ def etl_batches(year: int = None, month: int = None, full_refresh: bool = False)
         pg.close()
 
     return {"status": "success", "records": records}
+
+
+def _safe_float(value):
+    """loadavg arrives from SSH as a string and can be '-' or empty when the
+    host is unreachable; a bad parse must not sink the whole snapshot."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+@celery_app.task(name="app.tasks.etl_tasks.etl_it_monitoring")
+def etl_it_monitoring(year: int = None, month: int = None):
+    """Snapshot infrastructure health into the eis.fact_it_* tables so CoChat
+    can answer IT questions ("tablespace mana yang di atas 90%", "partisi apa
+    di server DB yang hampir penuh").
+
+    Four sources, all of which the IT dashboard already reads live:
+      - Oracle DBA_TABLESPACE_USAGE_METRICS        -> fact_it_tablespace
+      - SSH df -P on both servers                  -> fact_it_disk_usage
+      - SSH top/free/loadavg on both servers       -> fact_it_server_metrics
+      - Oracle v$session + FND_CONCURRENT_REQUESTS -> fact_it_oracle_activity
+
+    Unlike it_service.get_tablespace(), which is deliberately Top-5 for a
+    dashboard card, this takes every tablespace: "list the ones above 90%"
+    has no answer if the extract already truncated to five.
+
+    Runs every 15 minutes (see celery_app.py), the same cadence and for the
+    same reason as etl_open_pr - the value being tracked changes through the
+    day, so a nightly batch would answer yesterday's question. Each run is
+    append-only; the tools read the newest captured_at, and the history is
+    what makes growth questions answerable at all.
+
+    Partial failure is deliberately not fatal. Oracle being unreachable still
+    records the SSH-sourced rows and vice versa, because a monitoring job that
+    reports nothing when one source is down is worse than one that reports
+    what it could reach - and "Oracle was unreachable" is itself the answer
+    someone may be looking for. year/month are accepted for trigger-API
+    consistency with the other jobs and are unused.
+    """
+    pg = _get_pg()
+    job_id = _log_start(pg, "etl_it_monitoring", year, month)
+    records = 0
+    errors = []
+
+    try:
+        cur = pg.cursor()
+
+        # -- Oracle: tablespace headroom + database activity ------------------
+        try:
+            ora = get_oracle_connection()
+            cur_ora = ora.cursor()
+
+            # DBA_TABLESPACE_USAGE_METRICS reports against the tablespace's
+            # MAXIMUM size (its autoextend ceiling), which is the number that
+            # actually answers "am I about to run out". dba_data_files alone
+            # would show a tablespace at 100% of its current size while it
+            # still has plenty of room to grow.
+            cur_ora.execute("""
+                SELECT
+                    m.tablespace_name,
+                    ROUND(m.used_percent, 2) AS used_pct,
+                    ROUND(m.used_space      * t.block_size / 1024 / 1024 / 1024, 2) AS used_gb,
+                    ROUND(m.tablespace_size * t.block_size / 1024 / 1024 / 1024, 2) AS max_gb,
+                    t.status,
+                    t.contents
+                FROM dba_tablespace_usage_metrics m
+                JOIN dba_tablespaces t ON t.tablespace_name = m.tablespace_name
+                ORDER BY m.used_percent DESC
+            """)
+            ts_rows = cur_ora.fetchall()
+            for r in ts_rows:
+                cur.execute(
+                    "INSERT INTO eis.fact_it_tablespace "
+                    "(tablespace_name, used_pct, used_gb, max_gb, status, contents) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    (r[0], r[1], r[2], r[3], r[4], r[5]),
+                )
+            records += len(ts_rows)
+
+            cur_ora.execute("""
+                SELECT
+                    SUM(CASE WHEN status = 'ACTIVE'   THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN status = 'INACTIVE' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN blocking_session IS NOT NULL THEN 1 ELSE 0 END)
+                FROM v$session
+                WHERE type = 'USER'
+            """)
+            sess = cur_ora.fetchone() or (0, 0, 0)
+
+            cur_ora.execute("""
+                SELECT
+                    SUM(CASE WHEN phase_code = 'P' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN phase_code = 'R' THEN 1 ELSE 0 END)
+                FROM apps.fnd_concurrent_requests
+                WHERE phase_code IN ('P', 'R')
+            """)
+            reqs = cur_ora.fetchone() or (0, 0)
+
+            cur_ora.execute("""
+                SELECT event FROM (
+                    SELECT event, COUNT(*) c
+                      FROM v$session
+                     WHERE wait_class <> 'Idle' AND type = 'USER'
+                     GROUP BY event
+                     ORDER BY c DESC
+                ) WHERE ROWNUM = 1
+            """)
+            top_wait = cur_ora.fetchone()
+
+            cur.execute(
+                "INSERT INTO eis.fact_it_oracle_activity "
+                "(active_sessions, inactive_sessions, blocked_sessions, "
+                " pending_requests, running_requests, top_wait_event) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (
+                    sess[0] or 0, sess[1] or 0, sess[2] or 0,
+                    reqs[0] or 0, reqs[1] or 0,
+                    top_wait[0] if top_wait else None,
+                ),
+            )
+            records += 1
+            ora.close()
+        except Exception as e:
+            errors.append("oracle: " + str(e))
+            logger.warning("etl_it_monitoring oracle source failed: %s", e)
+
+        # -- SSH: CPU / memory / filesystems on both servers ------------------
+        try:
+            from app.services.it_service import ServerMonitorService
+            snap = ServerMonitorService().collect_snapshot()
+            if not snap["configured"]:
+                errors.append(
+                    "ssh: kredensial belum dikonfigurasi (Server Monitoring > Settings)"
+                )
+            else:
+                for m in snap["metrics"]:
+                    cur.execute(
+                        "INSERT INTO eis.fact_it_server_metrics "
+                        "(server_key, server_label, server_ip, status, cpu_pct, cpu_count, "
+                        " memory_pct, memory_used_gb, memory_total_gb, swap_pct, load_1, "
+                        " uptime, error_message) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (
+                            m.get("server_key"), m.get("server_label"), m.get("server_ip"),
+                            m.get("status"), m.get("cpu"), m.get("cpu_count"),
+                            m.get("memory_percent"), m.get("memory_used"),
+                            m.get("memory_total"), m.get("swap_percent"),
+                            _safe_float(m.get("load")),
+                            m.get("uptime"), m.get("error"),
+                        ),
+                    )
+                records += len(snap["metrics"])
+
+                for d in snap["disks"]:
+                    cur.execute(
+                        "INSERT INTO eis.fact_it_disk_usage "
+                        "(server_key, server_label, mount_point, filesystem, "
+                        " size_gb, used_gb, avail_gb, used_pct) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (
+                            d.get("server_key"), d.get("server_label"),
+                            d.get("mountpoint"), d.get("filesystem"),
+                            d.get("total_gb"), d.get("used_gb"),
+                            d.get("free_gb"), d.get("usage_percent"),
+                        ),
+                    )
+                records += len(snap["disks"])
+        except Exception as e:
+            errors.append("ssh: " + str(e))
+            logger.warning("etl_it_monitoring ssh source failed: %s", e)
+
+        pg.commit()
+
+        if errors and records == 0:
+            _log_end(pg, job_id, "failed", records, "; ".join(errors))
+        else:
+            _log_end(pg, job_id, "success", records, "; ".join(errors) if errors else None)
+        return {"records": records, "errors": errors}
+
+    except Exception as e:
+        pg.rollback()
+        _log_end(pg, job_id, "failed", records, str(e))
+        raise
+    finally:
+        pg.close()

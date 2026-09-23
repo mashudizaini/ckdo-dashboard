@@ -431,3 +431,117 @@ async def ensure_batch_table():
             "CREATE INDEX IF NOT EXISTS idx_fact_batch_product "
             "ON eis.fact_batch (product_item_code)"
         ))
+
+
+async def ensure_it_monitoring_tables():
+    """Create the eis.fact_it_* snapshot tables if missing.
+
+    These are the only eis tables whose source is not Oracle EBS business
+    data: they hold periodic snapshots of infrastructure health (Oracle
+    tablespace headroom, server CPU/memory, filesystem usage, active Oracle
+    sessions and pending concurrent requests), written by
+    app.tasks.eis_etl_tasks.etl_it_monitoring and read by eis_tools' IT
+    tools so CoChat can answer questions like "tablespace mana yang di atas
+    90%".
+
+    They live here rather than being queried live per question for two
+    reasons. The tool contract in eis_tools is one predefined SELECT against
+    this database — reaching out to Oracle or SSH from inside a tool-calling
+    loop would put production load behind an LLM that may call a tool
+    several times per answer. And snapshots answer the questions live
+    queries cannot: which tablespace is growing fastest, when a mount
+    started filling up. Same reasoning, and same 15-minute cadence, as
+    etl_open_pr.
+
+    Every table is append-only and carries captured_at; the tools read the
+    newest snapshot by default. Retention is left to a later decision rather
+    than assumed — at 15-minute granularity these grow slowly (a few hundred
+    rows a day) and the history is the point."""
+    from sqlalchemy import text
+    async with eis_async_engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eis.fact_it_tablespace (
+                id                SERIAL PRIMARY KEY,
+                captured_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+                tablespace_name   VARCHAR(60) NOT NULL,
+                used_pct          NUMERIC(6,2),
+                used_gb           NUMERIC(14,2),
+                allocated_gb      NUMERIC(14,2),
+                max_gb            NUMERIC(14,2),
+                autoextensible    BOOLEAN,
+                status            VARCHAR(20),
+                contents          VARCHAR(20)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_it_tablespace_captured "
+            "ON eis.fact_it_tablespace (captured_at DESC)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_it_tablespace_name "
+            "ON eis.fact_it_tablespace (tablespace_name, captured_at DESC)"
+        ))
+
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eis.fact_it_server_metrics (
+                id             SERIAL PRIMARY KEY,
+                captured_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                server_key     VARCHAR(20) NOT NULL,
+                server_label   VARCHAR(60),
+                server_ip      VARCHAR(45),
+                status         VARCHAR(20),
+                cpu_pct        NUMERIC(6,2),
+                cpu_count      INTEGER,
+                memory_pct     NUMERIC(6,2),
+                memory_used_gb NUMERIC(10,2),
+                memory_total_gb NUMERIC(10,2),
+                swap_pct       NUMERIC(6,2),
+                load_1         NUMERIC(8,2),
+                uptime         VARCHAR(120),
+                error_message  TEXT
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_it_server_metrics_captured "
+            "ON eis.fact_it_server_metrics (server_key, captured_at DESC)"
+        ))
+
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eis.fact_it_disk_usage (
+                id            SERIAL PRIMARY KEY,
+                captured_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                server_key    VARCHAR(20) NOT NULL,
+                server_label  VARCHAR(60),
+                mount_point   VARCHAR(200) NOT NULL,
+                filesystem    VARCHAR(200),
+                size_gb       NUMERIC(14,2),
+                used_gb       NUMERIC(14,2),
+                avail_gb      NUMERIC(14,2),
+                used_pct      NUMERIC(6,2)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_it_disk_captured "
+            "ON eis.fact_it_disk_usage (captured_at DESC)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_it_disk_mount "
+            "ON eis.fact_it_disk_usage (server_key, mount_point, captured_at DESC)"
+        ))
+
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eis.fact_it_oracle_activity (
+                id                 SERIAL PRIMARY KEY,
+                captured_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+                active_sessions    INTEGER,
+                inactive_sessions  INTEGER,
+                blocked_sessions   INTEGER,
+                pending_requests   INTEGER,
+                running_requests   INTEGER,
+                top_wait_event     VARCHAR(120)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_it_oracle_activity_captured "
+            "ON eis.fact_it_oracle_activity (captured_at DESC)"
+        ))

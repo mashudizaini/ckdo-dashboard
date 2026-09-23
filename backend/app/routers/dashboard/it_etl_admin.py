@@ -57,6 +57,7 @@ async def trigger_etl(job_name: str, params: TriggerParams):
         "etl_sales", "etl_cogs", "etl_production", "etl_financial",
         "etl_employee", "etl_inventory", "etl_ar_ap", "etl_budget", "etl_po",
         "etl_po_lines", "etl_open_pr", "etl_sales_orders", "etl_inventory_txn", "etl_batches",
+        "etl_it_monitoring",
     ]
     if job_name not in valid_jobs:
         raise HTTPException(status_code=400, detail=f"Unknown job. Valid: {valid_jobs}")
@@ -354,6 +355,10 @@ _JOB_META = {
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["gme_batch_header", "gme_material_details", "mtl_system_items_b"],
                         "destination_table": "eis.fact_batch"},
+    "etl_it_monitoring": {"frequency": "Every 15 min", "schedule": "*/15 min", "source": "Oracle DBA views + SSH (DB & App server)",
+                        "source_system": "Oracle EBS + Linux",
+                        "oracle_tables": ["dba_tablespace_usage_metrics", "dba_tablespaces", "v$session", "apps.fnd_concurrent_requests"],
+                        "destination_table": "eis.fact_it_tablespace, eis.fact_it_server_metrics, eis.fact_it_disk_usage, eis.fact_it_oracle_activity"},
 }
 
 

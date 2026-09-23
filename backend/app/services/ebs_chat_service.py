@@ -105,8 +105,39 @@ MODULE_TOOL_MAP: dict[str, list[str]] = {
     "HR":            ["get_employee_directory", "get_employee_headcount"],
     "Budget":        ["get_budget_vs_actual"],
     "Company Rules": ["search_company_documents"],
+    # Infrastructure health, read from the eis.fact_it_* snapshots that
+    # etl_it_monitoring writes every 15 minutes. See _OPT_IN_MODULES below —
+    # this one is never granted by omission.
+    "IT": [
+        "get_tablespace_usage",
+        "get_tablespace_trend",
+        "get_server_resources",
+        "get_disk_usage",
+        "get_oracle_activity",
+    ],
 }
-_ALL_TOOL_NAMES = {name for names in MODULE_TOOL_MAP.values() for name in names}
+
+# Modules an empty allowed_modules list does NOT grant.
+#
+# _tools_for_modules treats an empty list as "no restriction", because every
+# scope row predating that column has to keep working. That default was safe
+# while every tool returned business data: the worst case was a caller seeing
+# sales figures they had no business reading, which departments/RLS already
+# governed.
+#
+# The IT tools are a different kind of answer — server addresses, mount
+# points, filesystem headroom, which tablespace is closest to full. That is
+# reconnaissance material, and handing it to everyone who happens to have a
+# blank column is not a default anyone chose. So these are opt-in: a caller
+# reaches them by having "IT" listed explicitly, never by omission.
+_OPT_IN_MODULES = {"IT"}
+
+_ALL_TOOL_NAMES = {
+    name
+    for module, names in MODULE_TOOL_MAP.items()
+    if module not in _OPT_IN_MODULES
+    for name in names
+}
 
 
 def _tools_for_modules(modules: list[str]) -> set[str]:

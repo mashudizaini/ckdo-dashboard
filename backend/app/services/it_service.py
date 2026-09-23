@@ -461,8 +461,15 @@ class ServerMonitorService:
 
     # ── Server Metrics ───────────────────────────────────────────────────────
 
-    def _fetch_metrics(self) -> dict:
+    def _fetch_metrics(self, ip: str = None) -> dict:
+        """ip=None keeps the historical behaviour (the single server saved in
+        server_config.json, i.e. the DB server). The override exists so the
+        monitoring ETL can collect the same metrics from every host in
+        _DISK_SERVERS using the one shared SSH credential, which is already
+        how disk usage is gathered for both."""
         cfg = self.load_config()
+        if ip:
+            cfg = {**cfg, "ip": ip}
         if not cfg.get("username") or not cfg.get("password"):
             return {
                 "status": "not_configured",
@@ -613,6 +620,35 @@ class ServerMonitorService:
         except Exception as e:
             return {"key": server["key"], "label": server["label"], "ip": server["ip"],
                     "status": "error", "error": str(e), "rows": []}
+
+    def collect_snapshot(self) -> dict:
+        """Synchronous CPU/memory + filesystem collection for every host in
+        _DISK_SERVERS, for app.tasks.eis_etl_tasks.etl_it_monitoring.
+
+        Deliberately not async: Celery tasks are plain functions, and wrapping
+        this in asyncio just to unwrap it again in the worker buys nothing.
+        A host that is unreachable yields a row with status="error" rather
+        than aborting the run, so one dead server never costs the snapshot of
+        the other.
+        """
+        cfg = self.load_config()
+        if not cfg.get("username") or not cfg.get("password"):
+            return {"configured": False, "metrics": [], "disks": []}
+
+        metrics, disks = [], []
+        for server in self._DISK_SERVERS:
+            try:
+                m = self._fetch_metrics(ip=server["ip"])
+            except Exception as e:
+                m = {"status": "error", "error": str(e)}
+            m = {**m, "server_key": server["key"], "server_label": server["label"],
+                 "server_ip": server["ip"]}
+            metrics.append(m)
+
+            d = self._fetch_disk(server, cfg)
+            disks.extend(d.get("rows", []))
+
+        return {"configured": True, "metrics": metrics, "disks": disks}
 
     async def get_disk_usage_all(self) -> dict:
         """Fetch df -P from DB (172.21.2.201) and App (172.21.2.202) in parallel."""
