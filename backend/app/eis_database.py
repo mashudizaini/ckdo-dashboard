@@ -545,3 +545,33 @@ async def ensure_it_monitoring_tables():
             "CREATE INDEX IF NOT EXISTS idx_fact_it_oracle_activity_captured "
             "ON eis.fact_it_oracle_activity (captured_at DESC)"
         ))
+
+        # Read grants for the two chat roles, applied here rather than left to
+        # the runbook. The tables are created by this app on every startup, so
+        # a grant that lives only in a separate manual step is a grant that
+        # will be missing the first time anyone deploys this somewhere new —
+        # which is exactly how it failed on dev: the model picked the right
+        # tool, called it correctly, and got "permission denied".
+        #
+        # chat_readonly serves the Dashboard's own internal EBS chat,
+        # ebs_chat_reader serves CoChat. Both are SELECT-only by design (see
+        # eis_tools' module docstring); nothing here widens that.
+        #
+        # Guarded on pg_roles because neither role is guaranteed to exist in
+        # every environment, and a missing role must not abort startup.
+        # fact_it_grants
+        for role in ("chat_readonly", "ebs_chat_reader"):
+            await conn.execute(text(f"""
+                DO $$
+                BEGIN
+                    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') THEN
+                        GRANT USAGE ON SCHEMA eis TO {role};
+                        GRANT SELECT ON eis.fact_it_tablespace,
+                                        eis.fact_it_server_metrics,
+                                        eis.fact_it_disk_usage,
+                                        eis.fact_it_oracle_activity
+                              TO {role};
+                    END IF;
+                END
+                $$;
+            """))
