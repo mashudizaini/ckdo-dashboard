@@ -142,11 +142,26 @@ const EIS_ITEMS = [
 // Document Converter moved to Setup > AI (2026-09-03, alongside Knowledge
 // Base) — it's a content-management tool, not something every AI Tools
 // visitor needs a standalone entry for.
+// CoChat (Open WebUI) runs as its own application on its own host, one per
+// environment: production talks to cochat.ckd-otto.com (172.21.2.29), dev to
+// cochat-dev.ckd-otto.com (172.21.2.157). Each instance has its own accounts,
+// models and Knowledge collections, so pointing a dashboard at the wrong one
+// is not a cosmetic mistake.
+//
+// Deliberately no fallback URL. This entry used to hardcode the production
+// host, which meant dev silently linked users into production CoChat and
+// nothing about the UI gave that away. A missing menu entry is a loud,
+// harmless failure; a menu entry pointing at the wrong environment is a quiet,
+// harmful one. If VITE_COCHAT_URL is unset the entry simply does not render.
+const COCHAT_URL = import.meta.env.VITE_COCHAT_URL || "";
+
 const AI_ITEMS = [
   { label: "AI Chatbot",    path: "/ai/chatbot",        icon: RobotIcon, roles: [] },
   // Internal chat platform (Open WebUI) with SSO — plain external link,
   // opens in a new tab (see NavCard's `item.external` branch).
-  { label: "CoChat",        path: "http://cochat.ckd-otto.com:3010", icon: MessagesSquare, roles: [], external: true },
+  ...(COCHAT_URL
+    ? [{ label: "CoChat", path: COCHAT_URL, icon: MessagesSquare, roles: [], external: true }]
+    : []),
   { label: "Meeting Notes", path: "/ai/meeting-notes",  icon: FileText,  roles: [] },
 ];
 
