@@ -80,7 +80,7 @@ COLUMN_CATALOG: dict[str, dict[str, tuple[str, list[str]]]] = {
         "item_code": ("Kode item Oracle — cocokkan persis", ["kode barang", "item", "SKU"]),
         "item_desc": ("Nama/deskripsi item — cocokkan sebagian (ILIKE)", ["nama barang", "bahan", "material", "produk"]),
         "uom": ("Satuan stok (primary UOM) — selalu tampilkan bersama qty", ["satuan", "unit"]),
-        "item_category": ("Kategori item dari category set CKDO Inventory", ["kategori", "jenis barang", "bahan baku", "kemasan", "FG"]),
+        "item_category": ("Kategori item (CKDO Inventory): API, EXCIPIENT = bahan baku; PRIMER, SEKUNDER = bahan kemas; LIQUID, LYOPHILLIZED, NA", ["kategori", "jenis barang", "bahan baku", "kemasan", "bahan kemas"]),
         "subinventory_code": ("Kode subinventory (gudang)", ["gudang", "subinv", "lokasi gudang"]),
         "subinventory_desc": ("Deskripsi subinventory", []),
         "subinventory_type": ("Klasifikasi subinventory: GOOD, REJECT, QUARANTINE", ["stok bagus", "reject", "karantina", "quarantine"]),

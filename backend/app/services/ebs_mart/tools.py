@@ -280,39 +280,56 @@ def get_ap_holds(caller: Caller, supplier: str | None = None, hold_code: str | N
 
 _ITEM_FILTER = """(%(item)s::text IS NULL OR UPPER(item_code) = UPPER(%(item)s::text)
                    OR item_desc ILIKE '%%' || %(item)s::text || '%%')"""
+_CATEGORY_FILTER = "(%(cat)s::text[] IS NULL OR UPPER(item_category) = ANY(%(cat)s::text[]))"
+
+
+def _categories(v) -> list[str] | None:
+    """item_category arrives as a list from the tool server and as a comma
+    string from the admin playground; either way upper-cased exact values
+    (API, EXCIPIENT, PRIMER, ...) — a category is a code, not a phrase."""
+    if not v:
+        return None
+    items = v.split(",") if isinstance(v, str) else v
+    out = [str(x).strip().upper() for x in items if str(x).strip()]
+    return out or None
 
 
 def get_expiring_lots(caller: Caller, days: int = 90, item: str | None = None,
-                      subinventory_type: str | None = "GOOD", include_expired: bool = False) -> dict:
-    args = {"days": days, "item": item, "subinventory_type": subinventory_type, "include_expired": include_expired}
+                      subinventory_type: str | None = "GOOD", include_expired: bool = False,
+                      item_category=None) -> dict:
+    args = {"days": days, "item": item, "subinventory_type": subinventory_type, "include_expired": include_expired,
+            "item_category": item_category}
     sql = f"""
-        SELECT item_code, item_desc, lot_number, expiration_date, days_to_expiry, onhand_qty, uom,
+        SELECT item_code, item_desc, item_category, lot_number, expiration_date, days_to_expiry, onhand_qty, uom,
                subinventory_code, subinventory_type, lot_status
           FROM mart.inv_onhand_lot
          WHERE days_to_expiry <= %(days)s::int
            AND (%(incl)s::boolean OR days_to_expiry >= 0)
            AND (%(st)s::text IS NULL OR subinventory_type = UPPER(%(st)s::text))
            AND {_ITEM_FILTER}
+           AND {_CATEGORY_FILTER}
          ORDER BY expiration_date, item_code
     """
-    params = {"days": days, "incl": include_expired, "st": _val(subinventory_type), "item": _val(item)}
+    params = {"days": days, "incl": include_expired, "st": _val(subinventory_type), "item": _val(item),
+              "cat": _categories(item_category)}
     return _run(caller, "inv_onhand_lot", sql, params, "get_expiring_lots", args)
 
 
 def get_stock_onhand(caller: Caller, item: str | None = None, subinventory: str | None = None,
                      lot_number: str | None = None, subinventory_type: str | None = None,
-                     group_by: str = "item") -> dict:
+                     group_by: str = "item", item_category=None) -> dict:
     args = {"item": item, "subinventory": subinventory, "lot_number": lot_number,
-            "subinventory_type": subinventory_type, "group_by": group_by}
+            "subinventory_type": subinventory_type, "group_by": group_by, "item_category": item_category}
     where = f"""
          WHERE {_ITEM_FILTER}
+           AND {_CATEGORY_FILTER}
            AND (%(sub)s::text IS NULL OR UPPER(subinventory_code) = UPPER(%(sub)s::text))
            AND (%(lot)s::text IS NULL OR UPPER(lot_number) = UPPER(%(lot)s::text))
            AND (%(st)s::text  IS NULL OR subinventory_type = UPPER(%(st)s::text))
     """
     if group_by == "lot":
         sql = f"""
-            SELECT item_code, item_desc, subinventory_code, subinventory_type, locator, lot_number,
+            SELECT item_code, item_desc, item_category, subinventory_code, subinventory_type, locator, lot_number,
                    lot_status, expiration_date, days_to_expiry, onhand_qty, uom
               FROM mart.inv_onhand_lot {where}
              ORDER BY item_code, expiration_date NULLS LAST
@@ -337,7 +354,8 @@ def get_stock_onhand(caller: Caller, item: str | None = None, subinventory: str 
              GROUP BY item_code, item_desc, item_category, uom
              ORDER BY item_code
         """
-    params = {"item": _val(item), "sub": _val(subinventory), "lot": _val(lot_number), "st": _val(subinventory_type)}
+    params = {"item": _val(item), "sub": _val(subinventory), "lot": _val(lot_number), "st": _val(subinventory_type),
+              "cat": _categories(item_category)}
     return _run(caller, "inv_onhand_lot", sql, params, "get_stock_onhand", args)
 
 

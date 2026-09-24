@@ -23,11 +23,12 @@ const TOOLS = {
   get_ap_holds: [["supplier", "text"], ["hold_code", "text"]],
   get_expiring_lots: [
     ["days", "number", 90], ["item", "text"], ["subinventory_type", ["GOOD", "REJECT", "QUARANTINE", ""]],
-    ["include_expired", ["false", "true"]],
+    ["include_expired", ["false", "true"]], ["item_category", "text"],
   ],
   get_stock_onhand: [
     ["item", "text"], ["subinventory", "text"], ["lot_number", "text"],
     ["subinventory_type", ["", "GOOD", "REJECT", "QUARANTINE"]], ["group_by", ["item", "subinventory", "lot"]],
+    ["item_category", "text"],
   ],
   get_stock_movement: [
     ["item", "text"], ["date_from", "date"], ["date_to", "date"], ["transaction_type", "text"],

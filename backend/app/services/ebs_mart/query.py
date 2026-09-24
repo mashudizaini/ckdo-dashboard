@@ -7,6 +7,7 @@ meta.chat_query_log. The log write goes over the read-write connection: the
 reader role cannot write, and must not be able to.
 """
 import json
+import re
 import time
 from datetime import date, datetime
 from decimal import Decimal
@@ -171,18 +172,70 @@ def run(caller: Caller, sql: str, params: dict | None = None, *, tool: str, mart
     }
 
 
+_CAST = re.compile(r"('(?:[^']|'')*'|\b\d+(?:\.\d+)?|NULL|TRUE|FALSE|ARRAY\[[^\]]*\])::[a-z_\[\]]+")
+_OPTIONAL_LIT = re.compile(r"^\s*('(?:[^']|'')*'|ARRAY\[[^\]]*\]|\d+(?:\.\d+)?)\s+IS\s+NULL\s+OR\s+", re.I)
+
+
+def _matching_paren(s: str, start: int) -> int:
+    depth = 0
+    for i in range(start, len(s)):
+        if s[i] == "(":
+            depth += 1
+        elif s[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _drop_optional_filters(sql: str) -> str:
+    """Intent tools write every filter as (%(x)s IS NULL OR <condition>) so
+    one SQL serves every argument combination. Shown to a user, the unused
+    ones are noise — "(NULL IS NULL OR vendor_name ILIKE NULL)". Filters not
+    given become TRUE and disappear; given ones keep only <condition>."""
+    out, i = [], 0
+    while i < len(sql):
+        if sql[i] == "(":
+            end = _matching_paren(sql, i)
+            inner = sql[i + 1:end] if end > 0 else ""
+            if end > 0 and re.match(r"^\s*NULL\s+IS\s+NULL\s+OR\s", inner, re.I):
+                out.append("TRUE")
+                i = end + 1
+                continue
+            if end > 0 and _OPTIONAL_LIT.match(inner):
+                out.append("(" + _drop_optional_filters(_OPTIONAL_LIT.sub("", inner, count=1)) + ")")
+                i = end + 1
+                continue
+        out.append(sql[i])
+        i += 1
+    s = "".join(out)
+    s = re.sub(r"\(FALSE\s+OR\s+([^()]*)\)", r"(\1)", s, flags=re.I)
+    s = re.sub(r"\(TRUE\s+OR\s+[^()]*\)", "TRUE", s, flags=re.I)
+    s = re.sub(r"\s+AND\s+TRUE\b", "", s, flags=re.I)
+    s = re.sub(r"\bWHERE\s+TRUE\s+AND\s+", "WHERE ", s, flags=re.I)
+    s = re.sub(r"\bWHERE\s+TRUE\b\s*", "", s, flags=re.I)
+    return s
+
+
 def _inline_params(sql: str, params: dict | None) -> str:
     """SQL as the user should see it in the <details> block: placeholders
-    replaced by the values used. Display only — never executed."""
+    replaced by the values used, unused optional filters removed. Display
+    only — never executed; the audit log keeps the exact statement."""
     if not params:
         return " ".join(sql.split())
     out = sql
     for k, v in params.items():
         if v is None:
             lit = "NULL"
+        elif isinstance(v, bool):
+            lit = "TRUE" if v else "FALSE"
         elif isinstance(v, (int, float, Decimal)):
             lit = str(v)
+        elif isinstance(v, (list, tuple)):
+            lit = "ARRAY[" + ", ".join("'" + str(x).replace("'", "''") + "'" for x in v) + "]"
         else:
             lit = "'" + str(v).replace("'", "''") + "'"
         out = out.replace(f"%({k})s", lit)
-    return " ".join(out.replace("%%", "%").split())
+    out = " ".join(out.replace("%%", "%").split())
+    out = _CAST.sub(r"\1", out)
+    return _drop_optional_filters(out)

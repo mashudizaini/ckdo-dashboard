@@ -173,12 +173,20 @@ class HoldsIn(BaseModel):
     hold_code: Optional[str] = Field(None, description="Kode hold (awalan), mis. QTY atau PRICE")
 
 
+_CATEGORY_DESC = (
+    "Kategori item (category set CKDO Inventory), satu atau lebih, nilai persis: API, EXCIPIENT, PRIMER, "
+    "SEKUNDER, LIQUID, LYOPHILLIZED, NA. 'Bahan baku' = [API, EXCIPIENT]; 'bahan kemas' = [PRIMER, SEKUNDER]. "
+    "Kosongkan untuk semua kategori."
+)
+
+
 class ExpiringIn(BaseModel):
     days: int = Field(90, description="Lot yang ED-nya dalam N hari ke depan", ge=0, le=3650)
     item: Optional[str] = Field(None, description="Kode item persis ATAU nama bahan/barang (cocok sebagian)")
     subinventory_type: Optional[Literal["GOOD", "REJECT", "QUARANTINE"]] = Field(
         "GOOD", description="Klasifikasi subinventory; default GOOD (stok yang bisa dipakai). null = semua.")
     include_expired: bool = Field(False, description="true untuk ikut menampilkan lot yang sudah lewat ED")
+    item_category: Optional[list[str]] = Field(None, description=_CATEGORY_DESC)
 
 
 class OnhandIn(BaseModel):
@@ -188,6 +196,7 @@ class OnhandIn(BaseModel):
     subinventory_type: Optional[Literal["GOOD", "REJECT", "QUARANTINE"]] = Field(None, description="Filter klasifikasi subinventory")
     group_by: Literal["item", "subinventory", "lot"] = Field(
         "item", description="item = total per item dipecah GOOD/QUARANTINE/REJECT; subinventory = per item × subinventory; lot = detail per lot dengan ED")
+    item_category: Optional[list[str]] = Field(None, description=_CATEGORY_DESC)
 
 
 class MovementIn(BaseModel):

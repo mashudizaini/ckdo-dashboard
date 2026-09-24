@@ -18,6 +18,11 @@ gudang, subinventory, karantina, reject, mutasi, kartu stok, pemakaian, penerima
 
 ## Aturan bisnis
 - Parameter `item` menerima kode item (cocok persis) ATAU nama bahan (cocok sebagian).
+- Kategori item ada di kolom `item_category` (category set CKDO Inventory) dan bisa difilter lewat
+  parameter `item_category` di get_expiring_lots / get_stock_onhand. Nilai: API, EXCIPIENT, PRIMER,
+  SEKUNDER, LIQUID, LYOPHILLIZED, NA.
+  "Bahan baku" = API + EXCIPIENT; "bahan kemas" = PRIMER + SEKUNDER. Sebutkan pemetaan ini di jawaban.
+  LIQUID, LYOPHILLIZED dan NA: tampilkan apa adanya, jangan menebak artinya.
 - "Stok yang bisa dipakai" = subinventory_type = 'GOOD'. Stok karantina dan reject dilaporkan terpisah.
 - "Mendekati expired" tanpa angka → pakai 90 hari dan sebutkan asumsinya.
 - Quantity selalu dengan uom. Jangan menjumlahkan qty item berbeda yang satuannya berbeda.
