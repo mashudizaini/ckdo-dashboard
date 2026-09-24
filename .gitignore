@@ -41,3 +41,10 @@ backend/app/data/daily_sales.json
 .env.bak*
 *.bak-*
 e-magazine.pre-migration-*/
+
+# SSH credentials for Server Monitoring, written by the dashboard UI at
+# runtime. Was tracked, which meant every deploy fought the server's real
+# config and a real password could reach GitHub on the next commit. The file
+# is created on demand (it_service.DEFAULT_CONFIG) so nothing breaks when it
+# is absent.
+backend/data/server_config.json
