@@ -228,6 +228,21 @@ EIS_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_daily_sales",
+            "description": "Ambil data Daily Sales (penjualan harian per hari kerja) beserta akumulasi dan target bulanannya. Sumbernya unggahan Excel EIS Data Upload, bukan Oracle. Sebutkan tahun; bulan opsional dalam bahasa Inggris (january, february, ...).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "year": {"type": "integer", "description": "Tahun fiskal, misalnya 2025."},
+                    "month": {"type": "string", "description": "Nama bulan dalam bahasa Inggris, misalnya january. Kosongkan untuk seluruh tahun."},
+                },
+                "required": ["year"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_tablespace_usage",
             "description": "Ambil kondisi tablespace Oracle EBS terkini (persen terpakai terhadap ukuran maksimum/autoextend). Gunakan min_used_pct untuk menyaring, misalnya 90 untuk 'tablespace yang lebih dari 90%'.",
             "parameters": {
@@ -677,6 +692,28 @@ def get_oracle_activity() -> list[dict]:
     """
     return _query(sql, {})
 
+
+def get_daily_sales(year: int, month: str = None) -> list[dict]:
+    """Daily Sales grid — one row per working day, from eis.fact_daily_sales.
+
+    Working days a month never reached are dropped at ETL time rather than
+    returned as zeros, so a short month is short rather than padded with days
+    that look like they sold nothing.
+    """
+    sql = """
+        SELECT fiscal_year, month_name, month_num, working_day,
+               sales, acc, target, as_of
+          FROM eis.fact_daily_sales
+         WHERE fiscal_year = %(year)s
+    """
+    params = {"year": year}
+    if month:
+        sql += " AND LOWER(month_name) = LOWER(%(month)s)"
+        params["month"] = month
+    sql += " ORDER BY month_num, working_day"
+    return _query(sql, params)
+
+
 _DISPATCH = {
     "get_sales_performance": get_sales_performance,
     "get_production_performance": get_production_performance,
@@ -690,6 +727,7 @@ _DISPATCH = {
     "get_purchase_order_detail": get_purchase_order_detail,
     "get_sales_order_detail": get_sales_order_detail,
     "get_employee_directory": get_employee_directory,
+    "get_daily_sales": get_daily_sales,
     "get_tablespace_usage": get_tablespace_usage,
     "get_tablespace_trend": get_tablespace_trend,
     "get_server_resources": get_server_resources,

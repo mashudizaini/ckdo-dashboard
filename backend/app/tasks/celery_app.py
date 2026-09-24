@@ -47,6 +47,10 @@ celery_app.conf.beat_schedule = {
     # these track live conditions, so a nightly batch would answer yesterday's
     # question. See eis_etl_tasks.etl_it_monitoring.
     "etl-it-monitoring": {"task": "app.tasks.etl_tasks.etl_it_monitoring", "schedule": crontab(minute="*/15")},
+    # Daily Sales is refreshed on upload (see _save_store in
+    # eis_daily_sales.py); this is the safety net for a dispatch lost because
+    # the worker or broker was down, not the primary trigger.
+    "etl-daily-sales": {"task": "app.tasks.etl_tasks.etl_daily_sales", "schedule": crontab(minute=20)},
     # Nightly reconciliation for CoChat (Open WebUI) Knowledge Sync — the
     # main trigger is event-driven (Setup > AI > Knowledge Base's "Sync to
     # CoChat" button), this just catches anything missed (a doc edited

@@ -57,7 +57,7 @@ async def trigger_etl(job_name: str, params: TriggerParams):
         "etl_sales", "etl_cogs", "etl_production", "etl_financial",
         "etl_employee", "etl_inventory", "etl_ar_ap", "etl_budget", "etl_po",
         "etl_po_lines", "etl_open_pr", "etl_sales_orders", "etl_inventory_txn", "etl_batches",
-        "etl_it_monitoring",
+        "etl_it_monitoring", "etl_daily_sales",
     ]
     if job_name not in valid_jobs:
         raise HTTPException(status_code=400, detail=f"Unknown job. Valid: {valid_jobs}")
@@ -359,6 +359,10 @@ _JOB_META = {
                         "source_system": "Oracle EBS + Linux",
                         "oracle_tables": ["dba_tablespace_usage_metrics", "dba_tablespaces", "v$session", "apps.fnd_concurrent_requests"],
                         "destination_table": "eis.fact_it_tablespace, eis.fact_it_server_metrics, eis.fact_it_disk_usage, eis.fact_it_oracle_activity"},
+    "etl_daily_sales": {"frequency": "On upload + hourly", "schedule": "menit ke-20 tiap jam", "source": "EIS Data Upload (Excel -> app/data/daily_sales.json)",
+                        "source_system": "Excel upload (bukan Oracle)",
+                        "oracle_tables": [],
+                        "destination_table": "eis.fact_daily_sales"},
 }
 
 

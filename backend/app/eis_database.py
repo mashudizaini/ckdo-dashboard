@@ -433,6 +433,51 @@ async def ensure_batch_table():
         ))
 
 
+async def ensure_daily_sales_table():
+    """Create eis.fact_daily_sales if missing.
+
+    Daily Sales is the one EIS dataset with no Oracle source: it is uploaded
+    as Excel and kept as app/data/daily_sales.json, shaped for the dashboard
+    grid rather than for querying. app.tasks.eis_etl_tasks.etl_daily_sales
+    flattens it to one row per (year, month, working day) so a chat tool can
+    ask for a single month.
+
+    The unique key is the grain itself, which makes a re-run idempotent even
+    though the job reloads wholesale."""
+    from sqlalchemy import text
+    async with eis_async_engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eis.fact_daily_sales (
+                id           SERIAL PRIMARY KEY,
+                fiscal_year  INTEGER NOT NULL,
+                month_num    INTEGER NOT NULL,
+                month_name   VARCHAR(12) NOT NULL,
+                working_day  INTEGER NOT NULL,
+                sales        NUMERIC(18,4),
+                acc          NUMERIC(18,4),
+                target       NUMERIC(18,4),
+                as_of        VARCHAR(40),
+                updated_at   TIMESTAMPTZ DEFAULT now(),
+                CONSTRAINT uq_fact_daily_sales UNIQUE (fiscal_year, month_num, working_day)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_daily_sales_period "
+            "ON eis.fact_daily_sales (fiscal_year, month_num, working_day)"
+        ))
+        for role in ("chat_readonly", "ebs_chat_reader"):
+            await conn.execute(text(f"""
+                DO $$
+                BEGIN
+                    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') THEN
+                        GRANT USAGE ON SCHEMA eis TO {role};
+                        GRANT SELECT ON eis.fact_daily_sales TO {role};
+                    END IF;
+                END
+                $$;
+            """))
+
+
 async def ensure_it_monitoring_tables():
     """Create the eis.fact_it_* snapshot tables if missing.
 

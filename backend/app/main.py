@@ -140,7 +140,7 @@ async def lifespan(app: FastAPI):
     rag_service.ensure_schema()
 
     # EIS Data Upload — upload-history log table (separate `eis_dashboard` DB)
-    from app.eis_database import ensure_upload_log_table, ensure_purchasing_table, ensure_employee_dim_table, ensure_purchasing_migration_tables, ensure_sales_order_table, ensure_inventory_txn_table, ensure_batch_table, ensure_it_monitoring_tables
+    from app.eis_database import ensure_upload_log_table, ensure_purchasing_table, ensure_employee_dim_table, ensure_purchasing_migration_tables, ensure_sales_order_table, ensure_inventory_txn_table, ensure_batch_table, ensure_it_monitoring_tables, ensure_daily_sales_table
     await ensure_upload_log_table()
     await ensure_purchasing_table()
     await ensure_employee_dim_table()
@@ -151,6 +151,7 @@ async def lifespan(app: FastAPI):
     # Infrastructure snapshots (tablespace / CPU / disk / Oracle activity) that
     # back CoChat's IT tools — see ensure_it_monitoring_tables' docstring.
     await ensure_it_monitoring_tables()
+    await ensure_daily_sales_table()
 
     # EBS Backup Recovery — dedicated sync tables (ebs_*) + its own 60s
     # schedule poller (ported from the standalone ebs-backup-dashboard app).

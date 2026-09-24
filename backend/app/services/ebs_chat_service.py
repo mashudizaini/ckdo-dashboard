@@ -96,7 +96,7 @@ _BUDGET_GROUP_MAP = {
 # tool belongs to exactly one module here; keep in sync with EIS_TOOLS in
 # eis_tools.py if a new tool is ever added there.
 MODULE_TOOL_MAP: dict[str, list[str]] = {
-    "Sales":         ["get_sales_performance", "get_sales_order_detail"],
+    "Sales":         ["get_sales_performance", "get_sales_order_detail", "get_daily_sales"],
     "Production":    ["get_production_performance"],
     "Financial":     ["get_financial_summary", "get_ar_ap_summary"],
     "COGS":          ["get_cogs_performance"],

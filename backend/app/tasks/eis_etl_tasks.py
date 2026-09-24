@@ -2591,3 +2591,90 @@ def etl_it_monitoring(year: int = None, month: int = None):
         raise
     finally:
         pg.close()
+
+
+_MONTH_NUM = {
+    "january": 1, "february": 2, "march": 3, "april": 4,
+    "may": 5, "june": 6, "july": 7, "august": 8,
+    "september": 9, "october": 10, "november": 11, "december": 12,
+}
+
+
+@celery_app.task(name="app.tasks.etl_tasks.etl_daily_sales")
+def etl_daily_sales(year: int = None, month: int = None):
+    """Load the EIS Daily Sales grid into eis.fact_daily_sales.
+
+    Daily Sales is the one EIS dataset that never came from Oracle: it is
+    uploaded as an Excel sheet through EIS Data Upload and kept as a JSON file
+    (app/data/daily_sales.json), shaped as year -> rows -> one entry per
+    working day carrying {sales, acc, target} for each of the twelve months.
+    That shape is fine for the dashboard grid that renders it, but it cannot
+    be queried, which is why CoChat could not answer "daily sales Januari
+    2025" until now. This flattens it into one row per (year, month, working
+    day) so a tool can select a single month.
+
+    Full reload rather than upsert: the JSON file is the source of truth and
+    a re-upload replaces a whole year, so rows that disappear from the file
+    must disappear here too — the same reasoning as etl_open_pr.
+
+    Dispatched from _save_store() in eis_daily_sales.py on every upload or
+    delete, so an upload is queryable within seconds rather than at the next
+    scheduled run; the schedule is the safety net for a dispatch that was
+    missed because the worker was down. year/month are accepted for
+    trigger-API consistency and unused — the file is always loaded whole.
+    """
+    import os
+
+    pg = _get_pg()
+    job_id = _log_start(pg, "etl_daily_sales", year, month)
+    records = 0
+    try:
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "daily_sales.json")
+        if not os.path.exists(path):
+            _log_end(pg, job_id, "success", 0, "daily_sales.json belum ada (belum pernah ada unggahan)")
+            return {"records": 0}
+
+        with open(path, encoding="utf-8") as fh:
+            store = json.load(fh)
+
+        cur = pg.cursor()
+        cur.execute("TRUNCATE eis.fact_daily_sales")
+
+        for year_key, entry in (store or {}).items():
+            if not str(year_key).isdigit():
+                continue
+            fy = int(year_key)
+            as_of = (entry or {}).get("as_of") or None
+            for row in (entry or {}).get("rows", []):
+                wd = row.get("wd")
+                if wd is None:
+                    continue
+                for month_name, num in _MONTH_NUM.items():
+                    cell = row.get(month_name)
+                    if not isinstance(cell, dict):
+                        continue
+                    # A working day the month never reached is stored as zeros
+                    # rather than omitted. Keeping those rows would have the
+                    # model report a run of zero-sales days that never
+                    # happened, so a cell with no sales and no cumulative
+                    # total is treated as "no data for this day".
+                    if not cell.get("sales") and not cell.get("acc"):
+                        continue
+                    cur.execute(
+                        "INSERT INTO eis.fact_daily_sales "
+                        "(fiscal_year, month_num, month_name, working_day, sales, acc, target, as_of) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (fy, num, month_name.capitalize(), wd,
+                         cell.get("sales"), cell.get("acc"), cell.get("target"), as_of),
+                    )
+                    records += 1
+
+        pg.commit()
+        _log_end(pg, job_id, "success", records)
+        return {"records": records}
+    except Exception as e:
+        pg.rollback()
+        _log_end(pg, job_id, "failed", records, str(e))
+        raise
+    finally:
+        pg.close()

@@ -154,6 +154,18 @@ def _save_store(store: dict):
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
     DATA_FILE.write_text(json.dumps(store, ensure_ascii=False), encoding="utf-8")
 
+    # Refresh eis.fact_daily_sales so CoChat can answer about an upload within
+    # seconds instead of at the next scheduled run. Dispatched from the single
+    # write point rather than from the upload endpoint so a delete refreshes
+    # it too. Imported here, not at module scope, to keep the router free of a
+    # Celery import; a broker that is down must not fail the upload itself,
+    # since the scheduled run will still pick the file up.
+    try:
+        from app.tasks.celery_app import celery_app
+        celery_app.send_task("app.tasks.etl_tasks.etl_daily_sales")
+    except Exception:
+        pass
+
 
 def _parse_excel(content: bytes, filename: str = "") -> dict:
     try:
