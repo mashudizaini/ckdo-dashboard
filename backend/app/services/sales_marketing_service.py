@@ -1,7 +1,7 @@
 """
 Sales & Marketing Service
 ─────────────────────────────────────────
-Reads from the eis_dashboard Postgres warehouse only — no live Oracle
+Reads from the EIS warehouse (schema `eis`) only — no live Oracle
 queries here, deliberately. Sales Trend / Sales vs Budget read the
 existing eis.fact_sales (populated by etl_sales); Open Sales Order reads
 eis.fact_sales_order (populated by etl_sales_orders) — see the "Blueprint

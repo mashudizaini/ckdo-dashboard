@@ -1,7 +1,7 @@
 """
 Production Service — Batch Status / Batch Yield / Schedule Adherence
 ─────────────────────────────────────────
-Reads from the eis_dashboard Postgres warehouse only — no live Oracle
+Reads from the EIS warehouse (schema `eis`) only — no live Oracle
 queries here (same rationale as ppwh_service.py / sales_marketing_service.py).
 All three tabs read eis.fact_batch, populated by
 app.tasks.eis_etl_tasks.etl_batches (Oracle OPM gme_batch_header +

@@ -2,7 +2,7 @@
 EIS ETL Tasks — ported from the standalone eis-dashboard-v2 app into
 ckdo-dashboard-v2's own Celery worker. Extracts from Oracle EBS (via the
 same get_oracle_connection() the rest of this app already uses) and loads
-into the eis_dashboard Postgres database (schema `eis`), read by
+into schema `eis` of the main ckdo_dashboard Postgres, read by
 routers/dashboard/eis_*.py. Task names are kept identical to the original
 ("app.tasks.etl_tasks.*") so eis_etl_admin.py's send_task() calls work
 unchanged.

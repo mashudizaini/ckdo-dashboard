@@ -11,8 +11,8 @@ eis_tools.py already uses for the Dashboard's own internal Oracle EBS chat
 opened as the `ebs_chat_reader` role with `SET LOCAL app.full_access` /
 `app.allowed_departments` / `app.allowed_budget_groups` set from that
 resolved scope. Row Level Security policies on eis.dim_employee /
-eis.fact_employee / eis.fact_budget (created directly on the eis_dashboard
-Postgres, not by this app's own startup code — see the runbook) enforce the
+eis.fact_employee / eis.fact_budget (created directly in the database, not
+by this app's own startup code — see the runbook) enforce the
 actual filtering; the LLM never sees or decides who can see what, it just
 gets fewer/no rows back for tables outside its caller's scope.
 

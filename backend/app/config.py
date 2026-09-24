@@ -184,23 +184,28 @@ class Settings(BaseSettings):
 
     field_encryption_key: str = ""
 
-    # EIS (Postgres, ETL'd from Oracle EBS). Only reachable where EIS is
-    # deployed (currently dev, 172.21.2.209:5433).
+    # EIS (schema `eis`, ETL'd from Oracle EBS). Lives in the main dashboard
+    # Postgres — database ckdo_dashboard, the same one as DATABASE_URL — on
+    # both dev and prod; the standalone eis_dashboard database
+    # (eis_postgres, 172.21.2.209:5433) is retired. These are still separate
+    # URLs because each is a different role with different rights, not a
+    # different database. Defaults match the compose service name; .env on
+    # every host sets the real credentials.
     # Read-only — used by the Oracle EBS tool-calling chat (defense in depth:
     # even a compromised prompt/argument can't write, since the DB role can't).
-    eis_database_url: str = "postgresql://chat_readonly:CkdoChat_R0!2026@172.21.2.209:5433/eis_dashboard"
+    eis_database_url: str = "postgresql://chat_readonly:CkdoChat_R0!2026@postgres:5432/ckdo_dashboard"
     # Full read-write — used by the integrated EIS Dashboard tab and its ETL
     # (same credentials the standalone eis-dashboard-v2 app used). Plain
     # scheme like `database_url` above — the +asyncpg driver is added at the
     # point of use (see eis_database.py), same convention as app/database.py.
-    eis_database_url_rw: str = "postgresql://eis_user:eis_secret@172.21.2.209:5433/eis_dashboard"
+    eis_database_url_rw: str = "postgresql://eis_user:eis_secret@postgres:5432/ckdo_dashboard"
 
     # EBS Chat — CoChat (Open WebUI) <-> Oracle EBS integration (Track B).
-    # Separate, RLS-scoped role on the same eis_dashboard Postgres above:
+    # Separate, RLS-scoped role on the same database as above:
     # department-restricted callers get filtered rows enforced by Postgres
     # itself (RLS policies on eis.dim_employee/fact_employee/fact_budget),
     # not by trusting the LLM. See app/services/ebs_chat_service.py.
-    eis_ebs_chat_reader_url: str = "postgresql://ebs_chat_reader:N4YRkQnQmw7k3wm2nqShxFVutiY8fdav@172.21.2.209:5433/eis_dashboard"
+    eis_ebs_chat_reader_url: str = "postgresql://ebs_chat_reader:N4YRkQnQmw7k3wm2nqShxFVutiY8fdav@postgres:5432/ckdo_dashboard"
     # Shared secret CoChat's own Tool code sends as the X-Service-Key header
     # on POST /api/v1/ai/ebs-chat/query — this is a service-to-service call
     # (Open WebUI has its own separate login, not a Keycloak session), so

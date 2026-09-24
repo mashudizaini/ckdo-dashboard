@@ -25,8 +25,8 @@ class PurchasingService:
             return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
     def _query_eis(self, sql: str, params: dict = None) -> list[dict]:
-        """Same shape as _query() but against the eis_dashboard Postgres
-        warehouse (read-only role) instead of live Oracle — used by the
+        """Same shape as _query() but against the EIS warehouse (schema
+        `eis`, read-only role) instead of live Oracle — used by the
         methods below that were migrated off Oracle to eliminate the
         chatbot/dashboard drift risk (see eis_etl_tasks.py's etl_po_lines/
         etl_open_pr, which populate the tables these read from)."""

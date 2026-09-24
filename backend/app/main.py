@@ -140,7 +140,8 @@ async def lifespan(app: FastAPI):
     from app.services import rag_service
     rag_service.ensure_schema()
 
-    # EIS Data Upload — upload-history log table (separate `eis_dashboard` DB)
+    # EIS tables (schema `eis` in this same ckdo_dashboard database, created
+    # as eis_user through app/eis_database.py)
     from app.eis_database import ensure_upload_log_table, ensure_purchasing_table, ensure_employee_dim_table, ensure_purchasing_migration_tables, ensure_sales_order_table, ensure_inventory_txn_table, ensure_batch_table, ensure_it_monitoring_tables, ensure_daily_sales_table
     await ensure_upload_log_table()
     await ensure_purchasing_table()

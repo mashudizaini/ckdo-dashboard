@@ -2,8 +2,8 @@
 EIS Tool Calling — Oracle EBS Data Chat
 ─────────────────────────────────────────
 The chat model never sees or writes raw SQL. Every tool below maps to one
-predefined, parameterized SELECT against Postgres EIS (172.21.2.209:5433,
-schema `eis`, ETL'd from Oracle EBS) run as a dedicated `chat_readonly`
+predefined, parameterized SELECT against schema `eis` in the main
+ckdo_dashboard Postgres (ETL'd from Oracle EBS), run as a dedicated `chat_readonly`
 role that only has SELECT on schema `eis` — even a prompt-injected or
 hallucinated argument can't turn into a write, because the DB user itself
 can't write. See sumber/AI_Chat_Implementation_Guide.md section 5.

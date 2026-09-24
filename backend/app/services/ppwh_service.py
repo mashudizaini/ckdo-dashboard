@@ -1,7 +1,7 @@
 """
 PPWH Service — Inventory In / Inventory Out / Kartu Stok
 ─────────────────────────────────────────
-Reads from the eis_dashboard Postgres warehouse only — no live Oracle
+Reads from the EIS warehouse (schema `eis`) only — no live Oracle
 queries here, deliberately (see sales_marketing_service.py's docstring
 for why: this session spent a lot of time fixing dashboard/chatbot drift
 caused by independent live-Oracle queries elsewhere). All three tabs read

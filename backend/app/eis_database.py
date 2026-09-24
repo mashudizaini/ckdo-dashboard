@@ -1,9 +1,10 @@
 """
-EIS Postgres — SQLAlchemy Async connection to the `eis_dashboard` database
-(schema `eis`), separate from the main ckdo_dashboard database. This is the
-same database the standalone eis-dashboard-v2 app and the Oracle EBS
-tool-calling chat both use — see app/services/eis_tools.py for the
-read-only connection used there.
+EIS Postgres — SQLAlchemy Async connection for schema `eis`, which lives in
+the main ckdo_dashboard database (moved there from the standalone
+eis_dashboard database, now retired). A separate engine from
+app/database.py because it connects as the EIS role (eis_user), not as the
+database owner — see app/services/eis_tools.py for the read-only role the
+Oracle EBS tool-calling chat uses.
 
 Ported from eis-dashboard-v2/backend/app/database.py.
 """
