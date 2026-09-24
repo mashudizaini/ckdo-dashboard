@@ -187,7 +187,14 @@ _COMPANY_RULES_TOOL = {
 # only" (NOT unrestricted) — this is a brand new field nobody has set yet,
 # so there's no pre-existing access to preserve, and document content
 # warrants a safer default than structured tool output does.
-FINAL_ANSWER_MAX_TOKENS = 4096
+# Dinaikkan dari 4096 pada 2026-09-24. Jatah ini dipakai bersama oleh blok
+# thinking model dan teks jawabannya; sebuah pertanyaan sepanjang tahun
+# menghabiskan seluruhnya untuk berpikir dan selesai dengan stop_reason=
+# max_tokens tanpa satu pun blok teks, sehingga pemanggil hanya menerima
+# kalimat cadangan. Penyebab utamanya sudah diperbaiki (satu panggilan per
+# tahun, bukan dua belas), tapi jawaban yang memuat tabel dua belas bulan
+# memang butuh ruang lebih dari 4096 untuk ditulis.
+FINAL_ANSWER_MAX_TOKENS = 12000
 
 
 def _get_pg():

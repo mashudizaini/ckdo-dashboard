@@ -75,7 +75,7 @@ EIS_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "period": {"type": "string", "description": "Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                    "period": {"type": "string", "description": "Periode fiskal: YYYY-MM untuk satu bulan (contoh 2026-06), atau YYYY untuk satu tahun penuh (contoh 2025). Pakai bentuk tahun untuk pertanyaan sepanjang tahun \u2014 jangan memanggil tool ini dua belas kali."},
                     "product_code": {"type": "string", "description": "Opsional. Kode produk, contoh DOC01, PAC02"},
                     "business_type": {"type": "string", "description": "Opsional. Salah satu dari: Local, Export, CMO"},
                 },
@@ -91,7 +91,7 @@ EIS_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "period": {"type": "string", "description": "Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                    "period": {"type": "string", "description": "Periode fiskal: YYYY-MM untuk satu bulan (contoh 2026-06), atau YYYY untuk satu tahun penuh (contoh 2025). Pakai bentuk tahun untuk pertanyaan sepanjang tahun \u2014 jangan memanggil tool ini dua belas kali."},
                 },
                 "required": ["period"],
             },
@@ -105,7 +105,7 @@ EIS_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "period": {"type": "string", "description": "Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                    "period": {"type": "string", "description": "Periode fiskal: YYYY-MM untuk satu bulan (contoh 2026-06), atau YYYY untuk satu tahun penuh (contoh 2025). Pakai bentuk tahun untuk pertanyaan sepanjang tahun \u2014 jangan memanggil tool ini dua belas kali."},
                     "dept_group": {"type": "string", "description": "Opsional. Salah satu dari: Plant Direct, SM, Admin"},
                 },
                 "required": ["period"],
@@ -120,7 +120,7 @@ EIS_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "period": {"type": "string", "description": "Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                    "period": {"type": "string", "description": "Periode fiskal: YYYY-MM untuk satu bulan (contoh 2026-06), atau YYYY untuk satu tahun penuh (contoh 2025). Pakai bentuk tahun untuk pertanyaan sepanjang tahun \u2014 jangan memanggil tool ini dua belas kali."},
                 },
                 "required": ["period"],
             },
@@ -134,7 +134,7 @@ EIS_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "period": {"type": "string", "description": "Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                    "period": {"type": "string", "description": "Periode fiskal: YYYY-MM untuk satu bulan (contoh 2026-06), atau YYYY untuk satu tahun penuh (contoh 2025). Pakai bentuk tahun untuk pertanyaan sepanjang tahun \u2014 jangan memanggil tool ini dua belas kali."},
                     "product_code": {"type": "string", "description": "Opsional. Kode produk, contoh DOC01, PAC02"},
                     "business_type": {"type": "string", "description": "Opsional. Salah satu dari: Local, Export, CMO"},
                 },
@@ -150,7 +150,7 @@ EIS_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "period": {"type": "string", "description": "Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                    "period": {"type": "string", "description": "Periode fiskal: YYYY-MM untuk satu bulan (contoh 2026-06), atau YYYY untuk satu tahun penuh (contoh 2025). Pakai bentuk tahun untuk pertanyaan sepanjang tahun \u2014 jangan memanggil tool ini dua belas kali."},
                 },
                 "required": ["period"],
             },
@@ -164,7 +164,7 @@ EIS_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "period": {"type": "string", "description": "Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                    "period": {"type": "string", "description": "Periode fiskal: YYYY-MM untuk satu bulan (contoh 2026-06), atau YYYY untuk satu tahun penuh (contoh 2025). Pakai bentuk tahun untuk pertanyaan sepanjang tahun \u2014 jangan memanggil tool ini dua belas kali."},
                 },
                 "required": ["period"],
             },
@@ -178,7 +178,7 @@ EIS_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "period": {"type": "string", "description": "Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                    "period": {"type": "string", "description": "Periode fiskal: YYYY-MM untuk satu bulan (contoh 2026-06), atau YYYY untuk satu tahun penuh (contoh 2025). Pakai bentuk tahun untuk pertanyaan sepanjang tahun \u2014 jangan memanggil tool ini dua belas kali."},
                     "material_type": {"type": "string", "description": "Tipe material, dicocokkan sebagai awalan dan tidak peka huruf besar/kecil. Nilai yang ada: DIRECT MATERIAL, INDIRECT MATERIAL, Unclassified."},
                 },
                 "required": ["period"],
@@ -196,7 +196,7 @@ EIS_TOOLS = [
                     "supplier_name": {"type": "string", "description": "Opsional. Nama supplier (partial match), contoh IFORTE"},
                     "item_code": {"type": "string", "description": "Opsional. Kode item Oracle"},
                     "po_number": {"type": "string", "description": "Opsional. Nomor PO (partial match)"},
-                    "period": {"type": "string", "description": "Opsional. Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                    "period": {"type": "string", "description": "Opsional. Periode fiskal: YYYY-MM untuk satu bulan (contoh 2026-06), atau YYYY untuk satu tahun penuh (contoh 2025). Pakai bentuk tahun untuk pertanyaan sepanjang tahun \u2014 jangan memanggil tool ini dua belas kali."},
                 },
                 "required": [],
             },
@@ -245,7 +245,7 @@ EIS_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "period": {"type": "string", "description": "Periode fiskal, format YYYY-MM, contoh 2026-06"},
+                    "period": {"type": "string", "description": "Periode fiskal: YYYY-MM untuk satu bulan (contoh 2026-06), atau YYYY untuk satu tahun penuh (contoh 2025). Pakai bentuk tahun untuk pertanyaan sepanjang tahun \u2014 jangan memanggil tool ini dua belas kali."},
                     "dept_group": {"type": "string", "description": "Opsional. Grup departemen, contoh Plant Direct, SM, Admin"},
                 },
                 "required": ["period"],
@@ -336,14 +336,28 @@ EIS_TOOLS = [
     },
 ]
 
-_PERIOD_RE = re.compile(r"^(\d{4})-(\d{1,2})$")
+_PERIOD_RE = re.compile(r"^(\d{4})(?:-(\d{1,2}))?$")
 
 
-def _parse_period(period: str) -> tuple[int, int]:
+def _parse_period(period: str) -> tuple[int, "int | None"]:
+    """Accepts YYYY-MM for one month, or YYYY for a whole year.
+
+    The year form exists because without it "total pembelian sepanjang 2025"
+    forced the model to call the same tool twelve times, once per month. That
+    is slow, and the accumulated tool output crowded out the final answer:
+    on 2026-09-24 such a question came back as ten separate calls and then no
+    answer at all, because the reply hit max_tokens before any text was
+    written. One call per year fixes the cause rather than the symptom.
+
+    Returns (fiscal_year, None) for the year form; every query treats a None
+    month as "all periods in that year"."""
     m = _PERIOD_RE.match((period or "").strip())
     if not m:
-        raise ValueError(f"Invalid period format '{period}' — expected YYYY-MM")
-    fiscal_year, period_num = int(m.group(1)), int(m.group(2))
+        raise ValueError(f"Invalid period format '{period}' — expected YYYY-MM or YYYY")
+    fiscal_year = int(m.group(1))
+    if m.group(2) is None:
+        return fiscal_year, None
+    period_num = int(m.group(2))
     if not (1 <= period_num <= 12):
         raise ValueError(f"Invalid month in period '{period}'")
     return fiscal_year, period_num
@@ -388,7 +402,7 @@ def get_sales_performance(period: str, product_code: str = None, business_type: 
         FROM eis.fact_sales fs
         JOIN eis.dim_period per ON per.id = fs.period_id
         LEFT JOIN eis.dim_product dp ON dp.id = fs.product_id
-        WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
+        WHERE per.fiscal_year = %(fy)s AND (%(pnum)s IS NULL OR per.period_num = %(pnum)s)
           AND (%(product_code)s IS NULL OR UPPER(dp.product_code) = UPPER(%(product_code)s))
           AND (%(business_type)s IS NULL OR UPPER(fs.business_type) LIKE UPPER(%(business_type)s) || '%%')
         ORDER BY fs.actual_amount DESC
@@ -408,7 +422,7 @@ def get_production_performance(period: str) -> list[dict]:
                END AS achievement_pct
         FROM eis.fact_production fp
         JOIN eis.dim_period per ON per.id = fp.period_id
-        WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
+        WHERE per.fiscal_year = %(fy)s AND (%(pnum)s IS NULL OR per.period_num = %(pnum)s)
         """,
         {"fy": fy, "pnum": pnum},
     )
@@ -422,7 +436,7 @@ def get_budget_vs_actual(period: str, dept_group: str = None) -> list[dict]:
                (fb.actual_amount - fb.bp_amount) AS variance
         FROM eis.fact_budget fb
         JOIN eis.dim_period per ON per.id = fb.period_id
-        WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
+        WHERE per.fiscal_year = %(fy)s AND (%(pnum)s IS NULL OR per.period_num = %(pnum)s)
           AND (%(dept_group)s IS NULL OR UPPER(fb.dept_group) LIKE UPPER(%(dept_group)s) || '%%')
         ORDER BY fb.dept_group
         """,
@@ -440,7 +454,7 @@ def get_financial_summary(period: str) -> list[dict]:
                ff.cf_ending_balance_actual
         FROM eis.fact_financial ff
         JOIN eis.dim_period per ON per.id = ff.period_id
-        WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
+        WHERE per.fiscal_year = %(fy)s AND (%(pnum)s IS NULL OR per.period_num = %(pnum)s)
         """,
         {"fy": fy, "pnum": pnum},
     )
@@ -458,7 +472,7 @@ def get_cogs_performance(period: str, product_code: str = None, business_type: s
         FROM eis.fact_cogs fc
         JOIN eis.dim_period per ON per.id = fc.period_id
         JOIN eis.dim_product dp ON dp.id = fc.product_id
-        WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
+        WHERE per.fiscal_year = %(fy)s AND (%(pnum)s IS NULL OR per.period_num = %(pnum)s)
           AND (%(product_code)s IS NULL OR UPPER(dp.product_code) = UPPER(%(product_code)s))
           AND (%(business_type)s IS NULL OR UPPER(fc.business_type) LIKE UPPER(%(business_type)s) || '%%')
         ORDER BY fc.sales_amount DESC
@@ -476,7 +490,7 @@ def get_ar_ap_summary(period: str) -> list[dict]:
                round((r.dso_days + COALESCE(r.dio_days,0) - r.dpo_days)::numeric, 1) AS nwc_days
         FROM eis.fact_financial_ratio r
         JOIN eis.dim_period per ON per.id = r.period_id
-        WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
+        WHERE per.fiscal_year = %(fy)s AND (%(pnum)s IS NULL OR per.period_num = %(pnum)s)
         """,
         {"fy": fy, "pnum": pnum},
     )
@@ -490,7 +504,7 @@ def get_inventory_summary(period: str) -> list[dict]:
                r.dio_inv_avg, r.dio_cogs, r.dio_days
         FROM eis.fact_financial_ratio r
         JOIN eis.dim_period per ON per.id = r.period_id
-        WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
+        WHERE per.fiscal_year = %(fy)s AND (%(pnum)s IS NULL OR per.period_num = %(pnum)s)
           AND r.dio_days IS NOT NULL
         """,
         {"fy": fy, "pnum": pnum},
@@ -505,7 +519,7 @@ def get_purchasing_performance(period: str, material_type: str = None) -> list[d
                p.po_count, p.po_value
         FROM eis.fact_purchasing p
         JOIN eis.dim_period per ON per.id = p.period_id
-        WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
+        WHERE per.fiscal_year = %(fy)s AND (%(pnum)s IS NULL OR per.period_num = %(pnum)s)
           AND (%(material_type)s IS NULL OR UPPER(p.material_type) LIKE UPPER(%(material_type)s) || '%%')
         ORDER BY p.material_type
         """,
@@ -610,7 +624,7 @@ def get_employee_headcount(period: str, dept_group: str = None) -> list[dict]:
                e.headcount, e.plan_headcount, e.resigned_cumulative
         FROM eis.fact_employee e
         JOIN eis.dim_period per ON per.id = e.period_id
-        WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
+        WHERE per.fiscal_year = %(fy)s AND (%(pnum)s IS NULL OR per.period_num = %(pnum)s)
           AND (%(dept_group)s IS NULL OR UPPER(e.dept_group) LIKE UPPER(%(dept_group)s) || '%%')
         """,
         {"fy": fy, "pnum": pnum, "dept_group": dept_group},
