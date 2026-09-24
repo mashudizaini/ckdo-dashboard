@@ -500,7 +500,7 @@ async def openwebui_kit(user: CurrentUser = Depends(_admin)):
         "model_settings": {
             "name": "EBS Analyst",
             "function_calling": "Native",
-            "temperature": 0.1,
+            "temperature": "default (Claude Opus 5.5 menolak parameter temperature)",
             "context_length_min": 16384,
             "memory": "Nonaktif",
             "web_search": "Nonaktif",

@@ -155,7 +155,9 @@ def main():
         },
         "params": {
             "system": (KIT / "system_prompt.md").read_text(encoding="utf-8"),
-            "temperature": 0.1,
+            # No temperature: the blueprint asks for 0–0.2, but Claude Opus 5.5
+            # rejects the parameter outright ("temperature is deprecated for
+            # this model") and every chat fails with HTTP 400.
             "function_calling": "native",
             "max_tokens": 8000,
         },
