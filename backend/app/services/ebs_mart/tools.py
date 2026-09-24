@@ -401,3 +401,141 @@ def get_stock_movement(caller: Caller, item: str | None = None, date_from: date 
     params = {"item": _val(item), "df": date_from, "dt": date_to, "tt": _val(transaction_type),
               "sub": _val(subinventory)}
     return _run(caller, "inv_movement_daily", sql, params, "get_stock_movement", args)
+
+
+# ── PO / PR (phase 2) ────────────────────────────────────────────────────────
+
+def get_po_outstanding(caller: Caller, supplier: str | None = None, item: str | None = None,
+                       po_number: str | None = None, late_only: bool = False,
+                       group_by: str = "none") -> dict:
+    args = {"supplier": supplier, "item": item, "po_number": po_number, "late_only": late_only, "group_by": group_by}
+    where = f"""
+         WHERE (%(s)s::text  IS NULL OR vendor_name ILIKE %(s)s::text)
+           AND (%(po)s::text IS NULL OR UPPER(po_number) = UPPER(%(po)s::text))
+           AND (NOT %(late)s::boolean OR delivery_status = 'Terlambat')
+           AND {_ITEM_FILTER}
+    """
+    if group_by == "supplier":
+        sql = f"""
+            SELECT vendor_num, vendor_name, COUNT(DISTINCT po_number) AS jml_po, COUNT(*) AS jml_shipment,
+                   COUNT(*) FILTER (WHERE delivery_status = 'Terlambat') AS jml_terlambat,
+                   SUM(amount_outstanding_idr) AS outstanding_idr
+              FROM mart.po_outstanding {where}
+             GROUP BY vendor_num, vendor_name ORDER BY outstanding_idr DESC
+        """
+    else:
+        sql = f"""
+            SELECT po_number, release_num, line_num, shipment_num, po_date, vendor_name, item_code, item_desc, uom,
+                   qty_ordered, qty_received, qty_outstanding, currency_code, unit_price_entered,
+                   amount_outstanding_entered, amount_outstanding_idr, due_date, days_late, delivery_status
+              FROM mart.po_outstanding {where}
+             ORDER BY due_date NULLS LAST, po_number, line_num
+        """
+    params = {"s": _like(supplier), "po": _val(po_number), "late": bool(late_only), "item": _val(item)}
+    return _run(caller, "po_outstanding", sql, params, "get_po_outstanding", args)
+
+
+def get_po_match_status(caller: Caller, po_number: str | None = None, supplier: str | None = None,
+                        item: str | None = None, status: str | None = None, group_by: str = "none") -> dict:
+    """"PO ini sudah ditagih belum?" and uninvoiced receipts. status matches
+    match_status as a prefix, case-insensitively (e.g. "Diterima")."""
+    args = {"po_number": po_number, "supplier": supplier, "item": item, "status": status, "group_by": group_by}
+    where = f"""
+         WHERE (%(po)s::text IS NULL OR UPPER(po_number) = UPPER(%(po)s::text))
+           AND (%(s)s::text  IS NULL OR vendor_name ILIKE %(s)s::text)
+           AND (%(st)s::text IS NULL OR UPPER(match_status) LIKE UPPER(%(st)s::text) || '%%')
+           AND {_ITEM_FILTER}
+    """
+    if group_by == "supplier":
+        sql = f"""
+            SELECT vendor_name, match_status, COUNT(DISTINCT po_number) AS jml_po, COUNT(*) AS jml_distribusi,
+                   SUM(amount_received_not_billed_idr) AS diterima_belum_ditagih_idr,
+                   SUM(amount_billed_idr) AS sudah_ditagih_idr
+              FROM mart.po_receipt_vs_invoice {where}
+             GROUP BY vendor_name, match_status ORDER BY vendor_name, match_status
+        """
+    elif group_by == "status":
+        sql = f"""
+            SELECT match_status, COUNT(DISTINCT po_number) AS jml_po, COUNT(*) AS jml_distribusi,
+                   SUM(amount_received_not_billed_idr) AS diterima_belum_ditagih_idr
+              FROM mart.po_receipt_vs_invoice {where}
+             GROUP BY match_status ORDER BY 2 DESC
+        """
+    else:
+        sql = f"""
+            SELECT po_number, release_num, line_num, shipment_num, distribution_num, vendor_name, item_code,
+                   item_desc, uom, qty_ordered, qty_received, qty_billed, qty_received_not_billed,
+                   amount_received_not_billed_idr, match_type, match_status, invoice_count, last_invoice_num,
+                   last_invoice_date, currency_code
+              FROM mart.po_receipt_vs_invoice {where}
+             ORDER BY po_number, line_num, shipment_num, distribution_num
+        """
+    params = {"po": _val(po_number), "s": _like(supplier), "st": _val(status), "item": _val(item)}
+    return _run(caller, "po_receipt_vs_invoice", sql, params, "get_po_match_status", args)
+
+
+def get_pr_pending(caller: Caller, person: str | None = None, item: str | None = None,
+                   pr_number: str | None = None, min_days_waiting: int | None = None,
+                   group_by: str = "none") -> dict:
+    args = {"person": person, "item": item, "pr_number": pr_number, "min_days_waiting": min_days_waiting,
+            "group_by": group_by}
+    where = f"""
+         WHERE (%(p)s::text  IS NULL OR preparer ILIKE %(p)s::text OR requester ILIKE %(p)s::text)
+           AND (%(pr)s::text IS NULL OR UPPER(pr_number) = UPPER(%(pr)s::text))
+           AND (%(d)s::int   IS NULL OR days_waiting >= %(d)s::int)
+           AND {_ITEM_FILTER}
+    """
+    if group_by == "preparer":
+        sql = f"""
+            SELECT preparer, COUNT(DISTINCT pr_number) AS jml_pr, COUNT(*) AS jml_baris,
+                   MAX(days_waiting) AS terlama_hari, SUM(amount_idr) AS nilai_idr
+              FROM mart.pr_pending {where}
+             GROUP BY preparer ORDER BY jml_baris DESC
+        """
+    else:
+        sql = f"""
+            SELECT pr_number, line_num, pr_date, approved_date, days_waiting, preparer, requester, item_code,
+                   item_desc, uom, quantity, currency_code, unit_price_entered, amount_idr, need_by_date,
+                   need_by_passed, suggested_vendor
+              FROM mart.pr_pending {where}
+             ORDER BY days_waiting DESC, pr_number, line_num
+        """
+    params = {"p": _like(person), "pr": _val(pr_number), "d": min_days_waiting, "item": _val(item)}
+    return _run(caller, "pr_pending", sql, params, "get_pr_pending", args)
+
+
+def get_inventory_value(caller: Caller, item: str | None = None, item_category=None,
+                        subinventory_type: str | None = None, group_by: str = "category") -> dict:
+    args = {"item": item, "item_category": item_category, "subinventory_type": subinventory_type,
+            "group_by": group_by}
+    where = f"""
+         WHERE {_ITEM_FILTER}
+           AND {_CATEGORY_FILTER}
+           AND (%(st)s::text IS NULL OR subinventory_type = UPPER(%(st)s::text))
+    """
+    if group_by == "item":
+        sql = f"""
+            SELECT item_code, item_desc, item_category, uom, SUM(onhand_qty) AS onhand_qty,
+                   MAX(unit_cost_idr) AS unit_cost_idr, SUM(value_idr) AS value_idr,
+                   MAX(cost_period_code) AS cost_period, BOOL_AND(has_cost) AS has_cost
+              FROM mart.inv_valuation {where}
+             GROUP BY item_code, item_desc, item_category, uom ORDER BY value_idr DESC NULLS LAST
+        """
+    elif group_by == "subinventory_type":
+        sql = f"""
+            SELECT subinventory_type, COUNT(DISTINCT item_code) AS jml_item, SUM(value_idr) AS value_idr,
+                   COUNT(*) FILTER (WHERE NOT has_cost) AS baris_tanpa_biaya
+              FROM mart.inv_valuation {where}
+             GROUP BY subinventory_type ORDER BY value_idr DESC NULLS LAST
+        """
+    else:
+        sql = f"""
+            SELECT COALESCE(item_category, '(tanpa kategori)') AS item_category, COUNT(DISTINCT item_code) AS jml_item,
+                   SUM(value_idr) AS value_idr,
+                   COUNT(DISTINCT item_code) FILTER (WHERE NOT has_cost) AS item_tanpa_biaya,
+                   MAX(cost_period_code) AS cost_period_terbaru
+              FROM mart.inv_valuation {where}
+             GROUP BY 1 ORDER BY value_idr DESC NULLS LAST
+        """
+    params = {"item": _val(item), "cat": _categories(item_category), "st": _val(subinventory_type)}
+    return _run(caller, "inv_valuation", sql, params, "get_inventory_value", args)

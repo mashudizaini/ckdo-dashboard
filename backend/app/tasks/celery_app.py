@@ -65,6 +65,16 @@ celery_app.conf.beat_schedule = {
     },
     "etl-mart-inventory": {"task": "app.tasks.etl_tasks.etl_mart_inventory", "schedule": crontab(minute=50, hour="6-20")},
     "refresh-ebs-marts": {"task": "app.tasks.etl_tasks.refresh_ebs_marts", "schedule": crontab(hour=0, minute=10)},
+    # Phase 2. PO/PR hourly like AP (incremental; PR pending is a small full
+    # snapshot); Sunday's full reload reconciles deletes. OPM costs change at
+    # period close, so once a day is plenty.
+    "etl-mart-po": {"task": "app.tasks.etl_tasks.etl_mart_po", "schedule": crontab(minute=25)},
+    "etl-mart-po-reconcile": {
+        "task": "app.tasks.etl_tasks.etl_mart_po",
+        "schedule": crontab(hour=1, minute=30, day_of_week="sunday"),
+        "kwargs": {"full_refresh": True},
+    },
+    "etl-mart-item-cost": {"task": "app.tasks.etl_tasks.etl_mart_item_cost", "schedule": crontab(hour=4, minute=50)},
     # Nightly reconciliation for CoChat (Open WebUI) Knowledge Sync — the
     # main trigger is event-driven (Setup > AI > Knowledge Base's "Sync to
     # CoChat" button), this just catches anything missed (a doc edited

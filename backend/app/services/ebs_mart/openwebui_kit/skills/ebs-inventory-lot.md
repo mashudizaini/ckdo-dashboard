@@ -14,6 +14,7 @@ gudang, subinventory, karantina, reject, mutasi, kartu stok, pemakaian, penerima
 ## Intent tool (utamakan)
 - Lot yang ED dalam N hari → get_expiring_lots (days, default subinventory_type GOOD)
 - Stok item saat ini → get_stock_onhand (group_by: item | subinventory | lot)
+- Nilai persediaan (Rupiah) → get_inventory_value (group_by: category | item | subinventory_type)
 - Pemakaian/penerimaan per periode → get_stock_movement (group_by: type | item | day | month)
 
 ## Aturan bisnis
@@ -29,7 +30,10 @@ gudang, subinventory, karantina, reject, mutasi, kartu stok, pemakaian, penerima
 - days_to_expiry negatif = sudah expired.
 
 ## Jebakan umum
-- Nilai persediaan (Rupiah) BUKAN dari mart ini — mart inv_valuation (PMAC) masih fase 2.
+- Nilai persediaan (Rupiah) ada di mart.inv_valuation: qty on-hand SAAT INI × biaya OPM PMAC periode costing
+  terakhir tiap item (cost_period_code). Ini valuasi saat ini, bukan saldo tutup buku periode — sebutkan
+  periode costing yang dipakai. Item dengan has_cost = false belum punya biaya PMAC: nilainya kosong, bukan nol;
+  sebutkan jumlah item tanpa biaya bila ada.
 - inv_onhand_lot hanya org 121; inv_movement_daily memuat semua organisasi (kolom organization_code).
 - Stok adalah snapshot per as_of, bukan stok historis. Stok per tanggal lampau tidak tersedia.
 

@@ -34,6 +34,22 @@ const TOOLS = {
     ["item", "text"], ["date_from", "date"], ["date_to", "date"], ["transaction_type", "text"],
     ["subinventory", "text"], ["group_by", ["type", "item", "day", "month"]],
   ],
+  get_po_outstanding: [
+    ["supplier", "text"], ["item", "text"], ["po_number", "text"], ["late_only", ["false", "true"]],
+    ["group_by", ["none", "supplier"]],
+  ],
+  get_po_match_status: [
+    ["po_number", "text"], ["supplier", "text"], ["item", "text"], ["status", "text"],
+    ["group_by", ["none", "supplier", "status"]],
+  ],
+  get_pr_pending: [
+    ["person", "text"], ["item", "text"], ["pr_number", "text"], ["min_days_waiting", "number"],
+    ["group_by", ["none", "preparer"]],
+  ],
+  get_inventory_value: [
+    ["item", "text"], ["item_category", "text"], ["subinventory_type", ["", "GOOD", "REJECT", "QUARANTINE"]],
+    ["group_by", ["category", "item", "subinventory_type"]],
+  ],
   find_marts: [["keywords", "text"]],
   get_data_freshness: [],
 };

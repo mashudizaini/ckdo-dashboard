@@ -208,6 +208,39 @@ class MovementIn(BaseModel):
     group_by: Literal["type", "item", "day", "month"] = Field("type", description="Pengelompokan hasil")
 
 
+class PoOutstandingIn(BaseModel):
+    supplier: Optional[str] = Field(None, description="Nama supplier (cocok sebagian)")
+    item: Optional[str] = Field(None, description="Kode item persis ATAU nama barang (cocok sebagian)")
+    po_number: Optional[str] = Field(None, description="Nomor PO persis")
+    late_only: bool = Field(False, description="true = hanya shipment yang sudah lewat tanggal janji kirim")
+    group_by: Literal["none", "supplier"] = Field("none", description="none = detail per shipment; supplier = total per supplier")
+
+
+class PoMatchIn(BaseModel):
+    po_number: Optional[str] = Field(None, description="Nomor PO persis — untuk 'PO ini sudah ditagih belum?'")
+    supplier: Optional[str] = Field(None, description="Nama supplier (cocok sebagian)")
+    item: Optional[str] = Field(None, description="Kode item persis ATAU nama barang (cocok sebagian)")
+    status: Optional[str] = Field(None, description=(
+        "Filter match_status (awalan): 'Belum diterima', 'Diterima, belum ditagih penuh' (= uninvoiced receipts), "
+        "'Ditagih melebihi penerimaan', 'Ditagih (2-way', 'Sebagian', 'Lengkap', 'Dibatalkan'"))
+    group_by: Literal["none", "supplier", "status"] = Field("none", description="none = detail per distribusi; supplier / status = ringkasan")
+
+
+class PrPendingIn(BaseModel):
+    person: Optional[str] = Field(None, description="Nama/username pembuat (preparer) atau requester PR (cocok sebagian)")
+    item: Optional[str] = Field(None, description="Kode item persis ATAU nama barang (cocok sebagian)")
+    pr_number: Optional[str] = Field(None, description="Nomor PR persis")
+    min_days_waiting: Optional[int] = Field(None, description="Hanya PR yang sudah menunggu minimal N hari sejak approve")
+    group_by: Literal["none", "preparer"] = Field("none", description="none = detail per baris PR; preparer = ringkasan per pembuat")
+
+
+class InvValueIn(BaseModel):
+    item: Optional[str] = Field(None, description="Kode item persis ATAU nama barang (cocok sebagian)")
+    item_category: Optional[list[str]] = Field(None, description=_CATEGORY_DESC)
+    subinventory_type: Optional[Literal["GOOD", "REJECT", "QUARANTINE"]] = Field(None, description="Filter klasifikasi subinventory")
+    group_by: Literal["category", "item", "subinventory_type"] = Field("category", description="Pengelompokan hasil")
+
+
 # ── Operations ───────────────────────────────────────────────────────────────
 
 @app.post("/find_marts", operation_id="find_marts",
@@ -299,6 +332,30 @@ async def export_download(token: str):
         raise HTTPException(404, "Link sudah kedaluwarsa atau tidak valid.")
     return FileResponse(path, filename="ebs-analyst.xlsx",
                         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.post("/get_po_outstanding", operation_id="get_po_outstanding",
+          summary="PO yang belum diterima penuh (sisa qty & nilai), tanggal janji kirim, dan keterlambatan")
+async def get_po_outstanding(body: PoOutstandingIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_po_outstanding, caller, **body.model_dump())
+
+
+@app.post("/get_po_match_status", operation_id="get_po_match_status",
+          summary="Status PO: sudah diterima? sudah ditagih? invoice apa? (3-way match, uninvoiced receipts)")
+async def get_po_match_status(body: PoMatchIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_po_match_status, caller, **body.model_dump())
+
+
+@app.post("/get_pr_pending", operation_id="get_pr_pending",
+          summary="Purchase requisition (PR) yang sudah approved tetapi belum dibuatkan PO")
+async def get_pr_pending(body: PrPendingIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_pr_pending, caller, **body.model_dump())
+
+
+@app.post("/get_inventory_value", operation_id="get_inventory_value",
+          summary="Nilai persediaan org 121 (Rupiah) dengan biaya OPM PMAC, per kategori / item / klasifikasi subinventory")
+async def get_inventory_value(body: InvValueIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_inventory_value, caller, **body.model_dump())
 
 
 @app.get("/health", include_in_schema=False)

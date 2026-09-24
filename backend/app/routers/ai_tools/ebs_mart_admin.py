@@ -21,6 +21,7 @@ Route prefix: /api/v1/ai/ebs-mart (IT / admin only, gated in main.py).
   GET    /openwebui-kit              system prompt, skills, prompts, filter, action, URLs
 """
 import json
+import re
 from datetime import date
 from pathlib import Path
 from typing import Literal, Optional
@@ -46,6 +47,8 @@ JOBS = {
     "etl_mart_ap": "AP (incremental)",
     "etl_mart_inventory": "Inventory on-hand per lot (snapshot)",
     "etl_inventory_txn": "Mutasi inventory (sumber inv_movement_daily)",
+    "etl_mart_po": "PO & PR (incremental)",
+    "etl_mart_item_cost": "Biaya OPM PMAC (valuasi)",
     "refresh_ebs_marts": "Refresh semua mart",
 }
 
@@ -129,7 +132,7 @@ async def trigger(job: str, body: TriggerIn = TriggerIn(), user: CurrentUser = D
     kwargs: dict = {}
     if job != "etl_inventory_txn":
         kwargs = {"trigger_type": "MANUAL", "triggered_by": user.username or user.email}
-    if job == "etl_mart_ap" and body.full_refresh:
+    if job in ("etl_mart_ap", "etl_mart_po") and body.full_refresh:
         kwargs["full_refresh"] = True
     result = celery_app.send_task(f"app.tasks.etl_tasks.{job}", kwargs=kwargs)
     return {"message": f"{JOBS[job]} dijalankan", "task_id": result.id}
@@ -179,7 +182,9 @@ async def golden_list(user: CurrentUser = Depends(_admin)):
 
 def _check_sql(sql: str):
     try:
-        sql_guard.validate(sql.replace("<kode item>", "X"))
+        # Template placeholders like '<kode item>' / '<nomor PO>' stand for a
+        # value; they are always quoted literals, so only those are replaced.
+        sql_guard.validate(re.sub(r"'<[^'<>]+>'", "'X'", sql))
     except sql_guard.SqlRejected as e:
         raise HTTPException(400, f"SQL ditolak guardrail: {e}")
 
@@ -261,6 +266,10 @@ _INTENT_TOOLS = {
     "get_expiring_lots": tools.get_expiring_lots,
     "get_stock_onhand": tools.get_stock_onhand,
     "get_stock_movement": tools.get_stock_movement,
+    "get_po_outstanding": tools.get_po_outstanding,
+    "get_po_match_status": tools.get_po_match_status,
+    "get_pr_pending": tools.get_pr_pending,
+    "get_inventory_value": tools.get_inventory_value,
 }
 
 
@@ -278,13 +287,15 @@ async def call_tool(name: str, body: ToolIn, user: CurrentUser = Depends(_admin)
         raise HTTPException(400, "Grup tidak dikenal")
     # "" = not given (tool default); explicit null = "no filter".
     args = {k: v for k, v in body.args.items() if v != ""}
+    if isinstance(args.get("late_only"), str):
+        args["late_only"] = args["late_only"] == "true"
     for k in ("due_from", "due_to", "date_from", "date_to"):
         if args.get(k) is not None:
             try:
                 args[k] = date.fromisoformat(str(args[k]))
             except ValueError:
                 raise HTTPException(400, f"{k} harus YYYY-MM-DD")
-    for k in ("days", "min_days_overdue"):
+    for k in ("days", "min_days_overdue", "min_days_waiting"):
         if args.get(k) is not None:
             args[k] = int(args[k])
     caller = _admin_caller(user, body.group)

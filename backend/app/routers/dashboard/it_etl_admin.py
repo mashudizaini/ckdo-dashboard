@@ -58,13 +58,13 @@ async def trigger_etl(job_name: str, params: TriggerParams):
         "etl_employee", "etl_inventory", "etl_ar_ap", "etl_budget", "etl_po",
         "etl_po_lines", "etl_open_pr", "etl_sales_orders", "etl_inventory_txn", "etl_batches",
         "etl_it_monitoring", "etl_daily_sales",
-        "etl_mart_ap", "etl_mart_inventory", "refresh_ebs_marts",
+        "etl_mart_ap", "etl_mart_inventory", "refresh_ebs_marts", "etl_mart_po", "etl_mart_item_cost",
     ]
     if job_name not in valid_jobs:
         raise HTTPException(status_code=400, detail=f"Unknown job. Valid: {valid_jobs}")
 
     kwargs = {"year": params.year, "month": params.month}
-    if job_name in ("etl_mart_ap", "etl_mart_inventory", "refresh_ebs_marts"):
+    if job_name in ("etl_mart_ap", "etl_mart_inventory", "refresh_ebs_marts", "etl_mart_po", "etl_mart_item_cost"):
         kwargs["trigger_type"] = "MANUAL"
     result = celery_app.send_task(f"app.tasks.etl_tasks.{job_name}", kwargs=kwargs)
     _active_task_ids[job_name] = result.id
@@ -372,6 +372,14 @@ _JOB_META = {
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["mtl_onhand_quantities_detail", "mtl_lot_numbers", "mtl_secondary_inventories", "mtl_system_items_b"],
                         "destination_table": "core.snap_onhand_lot, core.dim_subinventory, core.dim_item -> mart.inv_onhand_lot"},
+    "etl_mart_po": {"frequency": "Hourly + weekly full", "schedule": "menit ke-25; Minggu 01:30 full", "source": "Oracle PO/PR (EBS Data Mart)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["po_headers_all", "po_lines_all", "po_line_locations_all", "po_distributions_all", "po_releases_all", "ap_invoice_distributions_all", "po_requisition_headers_all", "po_requisition_lines_all"],
+                        "destination_table": "core.fact_po_shipment, core.fact_po_distribution, core.snap_pr_pending -> mart.po_*, mart.pr_pending"},
+    "etl_mart_item_cost": {"frequency": "Daily", "schedule": "04:50 WIB", "source": "Oracle OPM cost (PMAC, org 121)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["cm_cmpt_dtl", "gmf_period_statuses", "cm_mthd_mst", "cm_cmpt_mst_b"],
+                        "destination_table": "core.fact_item_cost -> mart.inv_valuation"},
     "refresh_ebs_marts": {"frequency": "Daily", "schedule": "00:10 WIB", "source": "core.* (tanpa Oracle)",
                         "source_system": "PostgreSQL (ckdo_dashboard)",
                         "oracle_tables": [],

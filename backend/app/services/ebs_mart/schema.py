@@ -193,6 +193,122 @@ _CORE_DDL = [
     "ALTER TABLE core.fact_ap_hold ADD COLUMN IF NOT EXISTS invoice_amount numeric",
     "ALTER TABLE core.fact_ap_hold ADD COLUMN IF NOT EXISTS invoice_amount_idr numeric",
     "ALTER TABLE core.fact_ap_hold ADD COLUMN IF NOT EXISTS cancelled_date date",
+    # ── Phase 2: PO / PR / OPM cost ──────────────────────────────────────
+    # One row per PO shipment (PO_LINE_LOCATIONS_ALL). Not eis.fact_po_line:
+    # that table is keyed (po_number, line_num) although it is extracted per
+    # shipment, so a line with several shipments keeps only one of them, and
+    # it is refreshed on creation_date, so a receipt against an older PO
+    # never reaches it.
+    """
+    CREATE TABLE IF NOT EXISTS core.fact_po_shipment (
+        line_location_id   bigint PRIMARY KEY,
+        po_header_id       bigint,
+        po_line_id         bigint,
+        po_number          text,
+        po_type            text,
+        po_status          text,
+        po_date            date,
+        approved_date      date,
+        vendor_num         text,
+        vendor_name        text,
+        vendor_site_code   text,
+        buyer_name         text,
+        currency_code      text,
+        rate_idr           numeric,
+        line_num           int,
+        shipment_num       int,
+        release_num        int,
+        item_id            bigint,
+        item_code          text,
+        item_desc          text,
+        uom                text,
+        ship_to_org_id     bigint,
+        need_by_date       date,
+        promised_date      date,
+        unit_price         numeric,
+        quantity           numeric,
+        quantity_received  numeric,
+        quantity_accepted  numeric,
+        quantity_rejected  numeric,
+        quantity_billed    numeric,
+        quantity_cancelled numeric,
+        closed_code        text,
+        cancel_flag        text,
+        line_cancel_flag   text,
+        match_option       text,
+        receipt_required   text,
+        inspection_required text,
+        src_last_update    timestamp,
+        loaded_at          timestamptz DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_core_po_shipment_po ON core.fact_po_shipment (po_number)",
+    """
+    CREATE TABLE IF NOT EXISTS core.fact_po_distribution (
+        po_distribution_id bigint PRIMARY KEY,
+        line_location_id   bigint,
+        distribution_num   int,
+        quantity_ordered   numeric,
+        quantity_delivered numeric,
+        quantity_billed    numeric,
+        quantity_cancelled numeric,
+        amount_billed      numeric,
+        charge_account     text,
+        destination_type   text,
+        invoice_count      int,
+        last_invoice_num   text,
+        last_invoice_date  date,
+        src_last_update    timestamp,
+        loaded_at          timestamptz DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_core_po_dist_lloc ON core.fact_po_distribution (line_location_id)",
+    # Pending requisitions are a small, fast-changing set (a line leaves it
+    # the moment a PO is created), so it is reloaded whole each run.
+    """
+    CREATE TABLE IF NOT EXISTS core.snap_pr_pending (
+        requisition_line_id bigint PRIMARY KEY,
+        requisition_header_id bigint,
+        pr_number          text,
+        pr_type            text,
+        pr_date            date,
+        approved_date      date,
+        preparer           text,
+        requester          text,
+        pr_description     text,
+        line_num           int,
+        item_id            bigint,
+        item_code          text,
+        item_desc          text,
+        uom                text,
+        quantity           numeric,
+        unit_price         numeric,       -- functional currency (IDR)
+        currency_code      text,
+        currency_unit_price numeric,      -- in currency_code, when not IDR
+        need_by_date       date,
+        suggested_vendor   text,
+        destination_org_id bigint,
+        loaded_at          timestamptz DEFAULT now()
+    )
+    """,
+    # OPM actual cost (PMAC) per item and costing period, total and by
+    # component class. Kept for every period extracted, so the mart can use
+    # the latest while the history stays available.
+    """
+    CREATE TABLE IF NOT EXISTS core.fact_item_cost (
+        inventory_item_id  bigint,
+        period_id          bigint,
+        period_code        text,
+        period_start_date  date,
+        period_end_date    date,
+        period_status      text,
+        cost_method        text,
+        unit_cost          numeric,
+        cost_components    jsonb,
+        loaded_at          timestamptz DEFAULT now(),
+        PRIMARY KEY (inventory_item_id, period_id)
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS core.snap_onhand_lot (
         row_key           text PRIMARY KEY,

@@ -28,5 +28,25 @@
     "command": "/invoice-hold",
     "title": "Invoice yang di-hold",
     "content": "Daftar invoice supplier yang sedang di-hold beserta alasan dan lamanya, urut paling lama."
+  },
+  {
+    "command": "/po-outstanding",
+    "title": "PO belum diterima",
+    "content": "PO yang belum diterima penuh untuk supplier {{supplier | semua supplier}}, tandai yang terlambat, urut tanggal kirim."
+  },
+  {
+    "command": "/status-po",
+    "title": "Status terima & tagih PO",
+    "content": "Status penerimaan dan penagihan PO {{nomor_po}}: qty order, diterima, ditagih, dan invoice yang dicocokkan."
+  },
+  {
+    "command": "/pr-pending",
+    "title": "PR belum jadi PO",
+    "content": "PR yang sudah approved tetapi belum dibuatkan PO lebih dari {{hari | 7}} hari, urut paling lama."
+  },
+  {
+    "command": "/nilai-stok",
+    "title": "Nilai persediaan",
+    "content": "Nilai persediaan org 121 per kategori item (PMAC), sebutkan periode costing dan item yang belum punya biaya."
   }
 ]

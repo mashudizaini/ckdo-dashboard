@@ -27,12 +27,23 @@ AP_LEGACY_PAID_CUTOFF = "2021-12-31"
 # etl_po_lines) to classify items.
 INVENTORY_CATEGORY_SET = "CKDO Inventory"
 
+# OPM cost method whose component costs value org 121's stock (blueprint 4.3:
+# "Biaya OPM ada di CM_CMPT_DTL per item, periode, dan cost type (PMAC)").
+OPM_COST_METHOD = "PMAC"
+# How many months of costing periods to keep in core.fact_item_cost.
+OPM_COST_HISTORY_MONTHS = 24
+
+# Requisitions raised by these users are test/dummy data, excluded the same
+# way etl_open_pr (the Dashboard's Open PR report) excludes them, so the two
+# agree. SHERLIN's split PRs whose supplier is literally "ELLVIN" are dummy too.
+PR_DUMMY_USERS = ("ELLVIN", "AFNI")
+
 # Guardrails for run_sql and every intent tool (blueprint section 7).
 MAX_ROWS = 500
 STATEMENT_TIMEOUT = "15s"
 
-# One entry per mart in the blueprint's catalog (section 5). Only phase 1 is
-# built; later phases are listed so the admin overview shows the whole
+# One entry per mart in the blueprint's catalog (section 5). Phases 1 and 2
+# are built; later phases are listed so the admin overview shows the whole
 # roadmap and find_marts can say "not available yet" instead of nothing.
 #
 #   source_jobs: eis.etl_job_log job names whose last successful run is the
@@ -78,14 +89,38 @@ MARTS: dict[str, dict] = {
         "source_jobs": ["etl_inventory_txn"],
         "unique_key": ["row_key"],
     },
-    "inv_valuation": {"domain": "INV", "phase": 2, "built": False, "grain": "Item × periode (qty × PMAC)",
-                      "description": "Nilai persediaan OPM (PMAC dari CM_CMPT_DTL).", "sources": "CM_CMPT_DTL", "source_jobs": []},
-    "po_outstanding": {"domain": "PO", "phase": 2, "built": False, "grain": "Shipment PO yang belum diterima penuh",
-                       "description": "PO outstanding.", "sources": "PO_*", "source_jobs": []},
-    "po_receipt_vs_invoice": {"domain": "PO", "phase": 2, "built": False, "grain": "Distribution PO (3-way match)",
-                              "description": "Qty order/terima/tagih per distribution PO.", "sources": "PO_DISTRIBUTIONS_ALL, RCV_TRANSACTIONS, AP_INVOICE_DISTRIBUTIONS_ALL", "source_jobs": []},
-    "pr_pending": {"domain": "PO", "phase": 2, "built": False, "grain": "Requisition approved yang belum jadi PO",
-                   "description": "PR yang belum dibuatkan PO.", "sources": "PO_REQUISITION_*", "source_jobs": []},
+    "inv_valuation": {
+        "domain": "INV", "phase": 2, "built": True,
+        "grain": "Item × klasifikasi subinventory (stok saat ini × biaya PMAC periode costing terakhir)",
+        "description": "Nilai persediaan org 121 dengan biaya OPM PMAC (CM_CMPT_DTL), bukan standard cost. Qty = stok on-hand saat ini.",
+        "sources": "CM_CMPT_DTL, GMF_PERIOD_STATUSES, CM_MTHD_MST + mart.inv_onhand_lot",
+        "source_jobs": ["etl_mart_inventory", "etl_mart_item_cost"],
+        "unique_key": ["row_key"],
+    },
+    "po_outstanding": {
+        "domain": "PO", "phase": 2, "built": True,
+        "grain": "Shipment PO approved yang belum diterima penuh",
+        "description": "Sisa PO yang belum diterima (qty & nilai), tanggal janji kirim, dan status keterlambatan.",
+        "sources": "PO_HEADERS_ALL, PO_LINES_ALL, PO_LINE_LOCATIONS_ALL",
+        "source_jobs": ["etl_mart_po"],
+        "unique_key": ["line_location_id"],
+    },
+    "po_receipt_vs_invoice": {
+        "domain": "PO", "phase": 2, "built": True,
+        "grain": "Distribution PO dengan qty order / terima / tagih (status 3-way match)",
+        "description": "Apakah PO sudah diterima dan sudah ditagih, invoice yang dicocokkan, dan penerimaan yang belum ditagih (uninvoiced receipts).",
+        "sources": "PO_DISTRIBUTIONS_ALL, PO_LINE_LOCATIONS_ALL, AP_INVOICE_DISTRIBUTIONS_ALL",
+        "source_jobs": ["etl_mart_po"],
+        "unique_key": ["po_distribution_id"],
+    },
+    "pr_pending": {
+        "domain": "PO", "phase": 2, "built": True,
+        "grain": "Baris PR approved yang belum dibuatkan PO",
+        "description": "Purchase requisition yang sudah approved tetapi belum menjadi PO, dengan lama menunggu.",
+        "sources": "PO_REQUISITION_HEADERS_ALL, PO_REQUISITION_LINES_ALL",
+        "source_jobs": ["etl_mart_po"],
+        "unique_key": ["requisition_line_id"],
+    },
     "so_backlog": {"domain": "OM", "phase": 3, "built": False, "grain": "SO line yang masih open",
                    "description": "Backlog sales order.", "sources": "OE_ORDER_LINES_ALL", "source_jobs": []},
     "so_shipment_status": {"domain": "OM", "phase": 3, "built": False, "grain": "SO line + status delivery",
