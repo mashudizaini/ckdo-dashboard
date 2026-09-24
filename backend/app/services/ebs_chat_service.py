@@ -197,6 +197,22 @@ _COMPANY_RULES_TOOL = {
 FINAL_ANSWER_MAX_TOKENS = 12000
 
 
+def _cached_system(text: str) -> list[dict]:
+    """System prompt sebagai satu blok bertanda cache.
+
+    Prefix setiap panggilan (definisi 18 tool + SYSTEM_PROMPT) identik di semua
+    pertanyaan dan berukuran besar, tapi sebelumnya diproses ulang dari nol
+    setiap kali. Menandainya ephemeral membuat panggilan berikutnya dalam
+    jendela cache memakai hasil pemrosesan yang sudah ada — memangkas latensi
+    sekaligus biaya token input, tanpa mengubah satu pun kata yang dibaca model.
+
+    Instruksi bahasa untuk jawaban akhir sengaja TIDAK ikut di blok ini: ia
+    berbeda antara jawaban Indonesia dan Inggris, dan kalau digabung, prefix
+    kedua bahasa jadi berbeda sehingga tidak ada yang pernah kena cache.
+    """
+    return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+
+
 def _get_pg():
     m = re.match(r"postgresql://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)", settings.database_url)
     if not m:
@@ -446,10 +462,13 @@ async def _run_tool_calling_turn(
             "dimaksud, jangan mengarang."
         )
 
+    # Langkah pemilihan tool — model ringan (lihat
+    # settings.anthropic_tool_planning_model). Keluarannya tidak pernah dibaca
+    # user: hanya nama tool dan argumennya.
     response = await client.messages.create(
-        model=model,
+        model=settings.anthropic_tool_planning_model or model,
         max_tokens=1024,
-        system=turn_system,
+        system=_cached_system(turn_system),
         messages=messages,
         tools=_to_anthropic_tools(offered_tools),
     )
@@ -509,11 +528,14 @@ async def _run_tool_calling_turn(
         messages.append({"role": "user", "content": tool_result_blocks})
 
     lang = _detect_language(question)
-    final_system = turn_system + "\n\n" + (
-        "PENTING: Tulis balasan berikut dalam Bahasa Indonesia. Jangan gunakan Bahasa Inggris."
-        if lang == "id" else
-        "IMPORTANT: Write the following reply in English. Do not use Indonesian."
-    )
+    final_system = _cached_system(turn_system) + [{
+        "type": "text",
+        "text": (
+            "PENTING: Tulis balasan berikut dalam Bahasa Indonesia. Jangan gunakan Bahasa Inggris."
+            if lang == "id" else
+            "IMPORTANT: Write the following reply in English. Do not use Indonesian."
+        ),
+    }]
 
     final = await client.messages.create(
         model=model,

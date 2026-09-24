@@ -170,6 +170,18 @@ class Settings(BaseSettings):
     # currently only per-user Gemini API keys (see crypto.py). Distinct from
     # any auth secret; generate once per environment with
     # `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+    # Model untuk langkah PERTAMA percakapan EBS Chat: memilih tool mana yang
+    # dipakai dan dengan argumen apa. Langkah itu tidak menulis jawaban untuk
+    # user, jadi tidak perlu model sekuat penulis jawabannya — dan ia dipanggil
+    # di setiap pertanyaan, jadi selisih latensinya terasa langsung.
+    #
+    # Sengaja jadi setelan, bukan konstanta: pemilihan tool adalah bagian yang
+    # paling rentan kalau modelnya kurang mampu (salah tool, argumen tidak
+    # lengkap), dan kalau itu terjadi harus bisa dikembalikan lewat .env tanpa
+    # menunggu deploy. Isi dengan model yang sama seperti penulis jawaban untuk
+    # mengembalikan perilaku lama.
+    anthropic_tool_planning_model: str = "claude-haiku-4-5-20251001"
+
     field_encryption_key: str = ""
 
     # EIS (Postgres, ETL'd from Oracle EBS). Only reachable where EIS is
