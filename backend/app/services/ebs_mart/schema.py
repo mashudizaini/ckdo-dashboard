@@ -32,10 +32,10 @@ def _rw():
     return psycopg2.connect(settings.eis_database_url_rw)
 
 
+# Schemas themselves come from _ensure_schemas(): CREATE SCHEMA IF NOT EXISTS
+# checks the database CREATE privilege before it checks existence, so it
+# cannot live here.
 _META_DDL = [
-    "CREATE SCHEMA IF NOT EXISTS meta",
-    "CREATE SCHEMA IF NOT EXISTS core",
-    "CREATE SCHEMA IF NOT EXISTS mart",
     """
     CREATE TABLE IF NOT EXISTS meta.column_catalog (
         mart_name      text,
@@ -379,10 +379,64 @@ def grant_readers(cur):
             cur.execute(f"GRANT SELECT ON {', '.join(objects)} TO {role}")
 
 
+_SCHEMAS = ("meta", "core", "mart")
+
+
+def _ensure_schemas():
+    """Create meta/core/mart owned by the EIS read-write role.
+
+    That role cannot create schemas itself: on both hosts the EIS tables live
+    in the ckdo_dashboard database, owned by postgres, and eis_user has no
+    CREATE on it (found on first dev deploy, 2026-09-24). The backend's own
+    DATABASE_URL connects to that same database as its owner, so the schemas
+    are created there with AUTHORIZATION set to the EIS role — which then
+    owns everything inside and can grant on it. Doing it here rather than as
+    a runbook GRANT is deliberate: a manual step is the one that gets missed
+    on the next host."""
+    rw = _rw()
+    try:
+        with rw.cursor() as cur:
+            cur.execute("SELECT current_user, current_database()")
+            eis_role, eis_db = cur.fetchone()
+            cur.execute("SELECT nspname FROM pg_namespace WHERE nspname = ANY(%s)", (list(_SCHEMAS),))
+            missing = [s for s in _SCHEMAS if s not in {r[0] for r in cur.fetchall()}]
+            if not missing:
+                return
+            try:
+                for s in missing:
+                    cur.execute(f"CREATE SCHEMA IF NOT EXISTS {s}")
+                rw.commit()
+                return
+            except psycopg2.errors.InsufficientPrivilege:
+                rw.rollback()
+    finally:
+        rw.close()
+
+    owner = psycopg2.connect(settings.database_url)
+    try:
+        with owner.cursor() as cur:
+            cur.execute("SELECT current_database()")
+            if cur.fetchone()[0] != eis_db:
+                raise RuntimeError(
+                    f"{eis_role} cannot create schemas in {eis_db} and DATABASE_URL points elsewhere — "
+                    f"run: CREATE SCHEMA meta AUTHORIZATION {eis_role}; (same for core, mart)"
+                )
+            for s in missing:
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS {s} AUTHORIZATION "{eis_role}"')
+        owner.commit()
+        logger.info("[ebs_mart] created schemas %s owned by %s", missing, eis_role)
+    finally:
+        owner.close()
+
+
 def ensure_mart_schema():
     """Startup entry point. Each step commits on its own, so a failure in a
     later step (say, the ETL log ALTER on a host where another role owns
     eis.etl_job_log) cannot roll back the schemas the tool server needs."""
+    try:
+        _ensure_schemas()
+    except Exception as e:
+        logger.warning("[ebs_mart] schema creation failed: %s", e)
     steps = [
         ("meta/core schemas", lambda cur: _exec_each(cur, _META_DDL + _CORE_DDL, "meta/core ddl")),
         ("etl_job_log columns", lambda cur: _exec_each(cur, _ETL_LOG_COLUMNS, "etl_job_log columns")),
