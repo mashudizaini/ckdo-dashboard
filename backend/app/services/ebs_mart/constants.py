@@ -29,7 +29,10 @@ INVENTORY_CATEGORY_SET = "CKDO Inventory"
 
 # OPM cost method whose component costs value org 121's stock (blueprint 4.3:
 # "Biaya OPM ada di CM_CMPT_DTL per item, periode, dan cost type (PMAC)").
-OPM_COST_METHOD = "PMAC"
+# The code in this instance is CKDO_PMAC, not the generic PMAC — found by
+# etl_mart_item_cost's diagnostic on its first run (53,325 component rows
+# under CKDO_PMAC for org 121, none under PMAC).
+OPM_COST_METHOD = "CKDO_PMAC"
 # How many months of costing periods to keep in core.fact_item_cost.
 OPM_COST_HISTORY_MONTHS = 24
 

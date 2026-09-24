@@ -1,6 +1,6 @@
 """
-ETL for the EBS Data Mart (blueprint section 3, "Aturan ETL"), phase 1: AP
-and Inventory. Oracle EBS -> core.* -> REFRESH mart.*.
+ETL for the EBS Data Mart (blueprint section 3, "Aturan ETL"), phases 1-2.
+Oracle EBS -> core.* -> REFRESH mart.*.
 
   etl_mart_ap         incremental on a composite watermark
                       GREATEST(header, child last_update_date) with a 1-hour
@@ -9,8 +9,15 @@ and Inventory. Oracle EBS -> core.* -> REFRESH mart.*.
   etl_mart_inventory  full snapshot (on-hand is a balance, not a ledger — see
                       etl_inventory's docstring for what filtering it by date
                       did), plus the small masters: subinventory and item.
+  etl_mart_po         PO shipments and distributions, incremental like AP;
+                      pending requisitions as a full snapshot.
+  etl_mart_item_cost  OPM component costs (CKDO_PMAC) per item and period.
   refresh_ebs_marts   REFRESH every mart; scheduled daily because days_overdue
                       and days_to_expiry are computed at refresh time.
+
+Celery workers do not reload code: after a deploy that touches this file,
+restart celery (and celery-beat for schedule changes), or the next run still
+executes the old extract.
 
 Every run is logged in eis.etl_job_log (read as meta.etl_run_log) with
 trigger type, watermark range and rows upserted. A session advisory lock per
@@ -109,9 +116,14 @@ def _refresh_after(job: str):
 
 
 def refresh_marts_for_job(job: str):
-    """Hook for existing ETL jobs that feed a mart (etl_inventory_txn ->
-    inv_movement_daily). Never raises: a refresh failure must not turn a
-    successful load into a failed job."""
+    """Refresh the marts a job feeds. Never raises: a refresh failure must
+    not turn a successful load into a failed job.
+
+    Called after the load commits but BEFORE the run is marked successful.
+    A mart's as_of is its source job's last successful finish, so marking
+    the run done first would leave a window — about fifteen seconds for the
+    PO marts on dev — in which as_of already names the new load while the
+    mart still holds the old rows."""
     try:
         _refresh_after(job)
     except Exception as e:
@@ -298,7 +310,7 @@ def etl_mart_ap(year: int = None, month: int = None, full_refresh: bool = False,
         _set_watermark(cur, job, "payments", new_pay)
         wm_to = max([w for w in (new_sched, new_pay, wm_sched, wm_pay) if w], default=None)
         run.pg.commit()
-
+        refresh_marts_for_job(job)
         run.finish("success", rows_read, rows_upserted, wm_from=wm_from, wm_to=wm_to)
         logger.info("[%s] read=%s upserted=%s full=%s", job, rows_read, rows_upserted, full_refresh)
     except Exception as e:
@@ -308,7 +320,6 @@ def etl_mart_ap(year: int = None, month: int = None, full_refresh: bool = False,
         run.close()
         raise
     run.close()
-    _refresh_after(job)
     return {"status": "success", "rows_read": rows_read, "rows_upserted": rows_upserted}
 
 
@@ -443,6 +454,7 @@ def etl_mart_inventory(year: int = None, month: int = None,
 
         rows_loaded = len(onhand_rows) + len(subinv) + len(items)
         run.pg.commit()
+        refresh_marts_for_job(job)
         run.finish("success", rows_read, rows_loaded)
         logger.info("[%s] read=%s loaded=%s", job, rows_read, rows_loaded)
     except Exception as e:
@@ -452,7 +464,6 @@ def etl_mart_inventory(year: int = None, month: int = None,
         run.close()
         raise
     run.close()
-    _refresh_after(job)
     return {"status": "success", "rows_read": rows_read, "rows_loaded": rows_loaded}
 
 
@@ -678,6 +689,7 @@ def etl_mart_po(year: int = None, month: int = None, full_refresh: bool = False,
         _set_watermark(cur, job, "distributions", new_dist)
         wm_to = max([w for w in (new_ship, new_dist, wm_ship, wm_dist) if w], default=None)
         run.pg.commit()
+        refresh_marts_for_job(job)
         run.finish("success", rows_read, rows_upserted, wm_from=wm_from, wm_to=wm_to)
         logger.info("[%s] read=%s upserted=%s full=%s", job, rows_read, rows_upserted, full_refresh)
     except Exception as e:
@@ -687,7 +699,6 @@ def etl_mart_po(year: int = None, month: int = None, full_refresh: bool = False,
         run.close()
         raise
     run.close()
-    _refresh_after(job)
     return {"status": "success", "rows_read": rows_read, "rows_upserted": rows_upserted}
 
 
@@ -776,6 +787,7 @@ def etl_mart_item_cost(year: int = None, month: int = None,
                    json.dumps(v["components"])) for k, v in costs.items()], page_size=_BATCH)
         rows_loaded = len(costs)
         run.pg.commit()
+        refresh_marts_for_job(job)
         run.finish("success", rows_read, rows_loaded, error=note)
         logger.info("[%s] read=%s items×periods=%s %s", job, rows_read, rows_loaded, note or "")
     except Exception as e:
@@ -785,7 +797,6 @@ def etl_mart_item_cost(year: int = None, month: int = None,
         run.close()
         raise
     run.close()
-    _refresh_after(job)
     return {"status": "success", "rows_read": rows_read, "items_periods": rows_loaded, "note": note}
 
 
