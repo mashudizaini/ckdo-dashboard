@@ -39,6 +39,20 @@ def use_connection(conn):
     finally:
         _scoped_conn.reset(token)
 
+# Setiap perbandingan teks di bawah memakai UPPER() di kedua sisi.
+#
+# Nilai-nilai ini datang dari model, bukan dari daftar pilihan: ia menuliskan
+# "direct material" sementara Oracle menyimpan "DIRECT MATERIAL". Perbandingan
+# persis mengembalikan nol baris, dan nol baris dilaporkan sebagai "tidak ada
+# data untuk periode itu" — jawaban yang terdengar pasti padahal salah, dan
+# jauh lebih berbahaya daripada sebuah error. Persis itu yang terjadi pada
+# 2026-09-24: pembelian direct material Januari 2026 dinyatakan tidak ada,
+# padahal tabelnya berisi 19 PO senilai Rp 1,39 miliar.
+#
+# UPPER() memang membuat indeks pada kolom itu tidak terpakai. Tabel-tabel ini
+# kecil (fact_purchasing hanya berisi agregat per periode), dan menjawab benar
+# lebih penting daripada menghemat pemindaian tabel sekecil itu.
+
 EIS_TOOLS = [
     {
         "type": "function",
@@ -362,8 +376,8 @@ def get_sales_performance(period: str, product_code: str = None, business_type: 
         JOIN eis.dim_period per ON per.id = fs.period_id
         LEFT JOIN eis.dim_product dp ON dp.id = fs.product_id
         WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
-          AND (%(product_code)s IS NULL OR dp.product_code = %(product_code)s)
-          AND (%(business_type)s IS NULL OR fs.business_type = %(business_type)s)
+          AND (%(product_code)s IS NULL OR UPPER(dp.product_code) = UPPER(%(product_code)s))
+          AND (%(business_type)s IS NULL OR UPPER(fs.business_type) = UPPER(%(business_type)s))
         ORDER BY fs.actual_amount DESC
         """,
         {"fy": fy, "pnum": pnum, "product_code": product_code, "business_type": business_type},
@@ -396,7 +410,7 @@ def get_budget_vs_actual(period: str, dept_group: str = None) -> list[dict]:
         FROM eis.fact_budget fb
         JOIN eis.dim_period per ON per.id = fb.period_id
         WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
-          AND (%(dept_group)s IS NULL OR fb.dept_group = %(dept_group)s)
+          AND (%(dept_group)s IS NULL OR UPPER(fb.dept_group) = UPPER(%(dept_group)s))
         ORDER BY fb.dept_group
         """,
         {"fy": fy, "pnum": pnum, "dept_group": dept_group},
@@ -432,8 +446,8 @@ def get_cogs_performance(period: str, product_code: str = None, business_type: s
         JOIN eis.dim_period per ON per.id = fc.period_id
         JOIN eis.dim_product dp ON dp.id = fc.product_id
         WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
-          AND (%(product_code)s IS NULL OR dp.product_code = %(product_code)s)
-          AND (%(business_type)s IS NULL OR fc.business_type = %(business_type)s)
+          AND (%(product_code)s IS NULL OR UPPER(dp.product_code) = UPPER(%(product_code)s))
+          AND (%(business_type)s IS NULL OR UPPER(fc.business_type) = UPPER(%(business_type)s))
         ORDER BY fc.sales_amount DESC
         """,
         {"fy": fy, "pnum": pnum, "product_code": product_code, "business_type": business_type},
@@ -479,7 +493,7 @@ def get_purchasing_performance(period: str, material_type: str = None) -> list[d
         FROM eis.fact_purchasing p
         JOIN eis.dim_period per ON per.id = p.period_id
         WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
-          AND (%(material_type)s IS NULL OR p.material_type = %(material_type)s)
+          AND (%(material_type)s IS NULL OR UPPER(p.material_type) = UPPER(%(material_type)s))
         ORDER BY p.material_type
         """,
         {"fy": fy, "pnum": pnum, "material_type": material_type},
@@ -503,7 +517,7 @@ def get_purchase_order_detail(
                creation_date, closure_status
         FROM eis.fact_po_line
         WHERE (%(supplier_name)s IS NULL OR supplier_name ILIKE %(supplier_like)s)
-          AND (%(item_code)s    IS NULL OR item_code = %(item_code)s)
+          AND (%(item_code)s    IS NULL OR UPPER(item_code) = UPPER(%(item_code)s))
           AND (%(po_number)s    IS NULL OR po_number ILIKE %(po_like)s)
           AND (%(fy)s   IS NULL OR EXTRACT(YEAR FROM creation_date) = %(fy)s)
           AND (%(pnum)s IS NULL OR EXTRACT(MONTH FROM creation_date) = %(pnum)s)
@@ -536,9 +550,9 @@ def get_sales_order_detail(
                amount_orig, amount_idr, flow_status_code, ordered_date
         FROM eis.fact_sales_order
         WHERE (%(customer_name)s  IS NULL OR customer_name ILIKE %(customer_like)s)
-          AND (%(item_code)s      IS NULL OR item_code = %(item_code)s)
+          AND (%(item_code)s      IS NULL OR UPPER(item_code) = UPPER(%(item_code)s))
           AND (%(order_number)s   IS NULL OR order_number ILIKE %(order_like)s)
-          AND (%(business_type)s  IS NULL OR business_type = %(business_type)s)
+          AND (%(business_type)s  IS NULL OR UPPER(business_type) = UPPER(%(business_type)s))
           AND (%(year)s IS NULL OR EXTRACT(YEAR FROM ordered_date) = %(year)s)
         ORDER BY ordered_date DESC
         LIMIT 100
@@ -559,10 +573,10 @@ def get_employee_directory(department: str = None, team: str = None, full_name: 
         SELECT employee_number, full_name, department, division, team, position_title,
                hire_date, employment_status, resign_date, resign_reason
         FROM eis.dim_employee
-        WHERE (%(department)s IS NULL OR department = %(department)s)
+        WHERE (%(department)s IS NULL OR UPPER(department) = UPPER(%(department)s))
           AND (%(team_like)s IS NULL OR team ILIKE %(team_like)s)
           AND (%(name_like)s IS NULL OR full_name ILIKE %(name_like)s)
-          AND (%(employment_status)s IS NULL OR employment_status = %(employment_status)s)
+          AND (%(employment_status)s IS NULL OR UPPER(employment_status) = UPPER(%(employment_status)s))
         ORDER BY department, team, full_name
         LIMIT 500
         """,
@@ -584,7 +598,7 @@ def get_employee_headcount(period: str, dept_group: str = None) -> list[dict]:
         FROM eis.fact_employee e
         JOIN eis.dim_period per ON per.id = e.period_id
         WHERE per.fiscal_year = %(fy)s AND per.period_num = %(pnum)s
-          AND (%(dept_group)s IS NULL OR e.dept_group = %(dept_group)s)
+          AND (%(dept_group)s IS NULL OR UPPER(e.dept_group) = UPPER(%(dept_group)s))
         """,
         {"fy": fy, "pnum": pnum, "dept_group": dept_group},
     )
