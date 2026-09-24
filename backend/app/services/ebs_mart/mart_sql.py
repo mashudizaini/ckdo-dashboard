@@ -120,7 +120,10 @@ MART_SQL: dict[str, str] = {
                h.hold_desc,
                h.hold_reason,
                h.hold_date,
-               (CURRENT_DATE - h.hold_date::date)            AS days_on_hold
+               (CURRENT_DATE - h.hold_date::date)            AS days_on_hold,
+               -- FALSE = the hold points at an invoice that no longer exists
+               -- in AP_INVOICES_ALL (found on prod: two holds from 2021/2022).
+               COALESCE(h.invoice_num, i.invoice_num) IS NOT NULL           AS invoice_found
           FROM core.fact_ap_hold h
           LEFT JOIN ({_AP_INVOICE_HEADER}) i ON i.invoice_id = h.invoice_id
          WHERE COALESCE(h.cancelled_date, i.cancelled_date) IS NULL

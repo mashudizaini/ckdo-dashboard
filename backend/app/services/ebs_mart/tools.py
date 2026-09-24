@@ -266,7 +266,7 @@ def get_ap_holds(caller: Caller, supplier: str | None = None, hold_code: str | N
     args = {"supplier": supplier, "hold_code": hold_code}
     sql = """
         SELECT vendor_name, invoice_num, invoice_date, hold_code, hold_desc, hold_reason, hold_date,
-               days_on_hold, currency_code, invoice_amount_entered, invoice_amount_idr
+               days_on_hold, currency_code, invoice_amount_entered, invoice_amount_idr, invoice_found
           FROM mart.ap_invoice_hold
          WHERE (%(s)s::text IS NULL OR vendor_name ILIKE %(s)s::text)
            AND (%(h)s::text IS NULL OR UPPER(hold_code) LIKE UPPER(%(h)s::text) || '%%')

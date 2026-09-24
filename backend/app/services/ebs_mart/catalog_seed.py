@@ -73,6 +73,7 @@ COLUMN_CATALOG: dict[str, dict[str, tuple[str, list[str]]]] = {
         "hold_reason": ("Alasan hold yang tercatat", ["kenapa di-hold", "hold", "tertahan", "blokir"]),
         "hold_date": ("Tanggal hold dipasang", []),
         "days_on_hold": ("Sudah berapa hari invoice di-hold", ["lama hold"]),
+        "invoice_found": ("FALSE = hold yatim: invoice-nya sudah tidak ada di AP_INVOICES_ALL (dihapus/purge), sehingga supplier & nomor invoice kosong", ["hold yatim", "orphan"]),
     },
     "inv_onhand_lot": {
         "row_key": ("Kunci baris (item|subinventory|locator|lot)", []),

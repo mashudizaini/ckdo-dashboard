@@ -33,6 +33,9 @@ pelunasan, transfer ke supplier, hold, invoice tertahan, PPh supplier
 - Invoice cancelled sudah dikecualikan di mart.
 - Prepayment yang belum di-apply muncul sebagai saldo negatif/terpisah (invoice_type = PREPAYMENT).
 - Nama supplier dicocokkan sebagian: jika hasil memuat beberapa supplier mirip, tanyakan yang dimaksud.
+- Hold dengan invoice_found = false adalah hold yatim: invoice-nya sudah tidak ada di Oracle
+  (AP_INVOICES_ALL), jadi supplier dan nomor invoice memang kosong. Sebutkan begitu — jangan menebak
+  penyebab lain — dan sarankan dibersihkan di EBS.
 
 ## Contoh (golden queries)
 Q: hutang lewat jatuh tempo > 60 hari per supplier
