@@ -180,6 +180,19 @@ _CORE_DDL = [
         loaded_at   timestamptz DEFAULT now()
     )
     """,
+    # Invoice attributes carried on the hold itself (see _AP_HOLD_SQL in
+    # ebs_mart_tasks.py). ALTER rather than in the CREATE above: the table
+    # already exists on both hosts, and CREATE TABLE IF NOT EXISTS never adds
+    # a column to an existing table.
+    "ALTER TABLE core.fact_ap_hold ADD COLUMN IF NOT EXISTS invoice_num text",
+    "ALTER TABLE core.fact_ap_hold ADD COLUMN IF NOT EXISTS invoice_type text",
+    "ALTER TABLE core.fact_ap_hold ADD COLUMN IF NOT EXISTS invoice_date date",
+    "ALTER TABLE core.fact_ap_hold ADD COLUMN IF NOT EXISTS vendor_num text",
+    "ALTER TABLE core.fact_ap_hold ADD COLUMN IF NOT EXISTS vendor_name text",
+    "ALTER TABLE core.fact_ap_hold ADD COLUMN IF NOT EXISTS invoice_currency_code text",
+    "ALTER TABLE core.fact_ap_hold ADD COLUMN IF NOT EXISTS invoice_amount numeric",
+    "ALTER TABLE core.fact_ap_hold ADD COLUMN IF NOT EXISTS invoice_amount_idr numeric",
+    "ALTER TABLE core.fact_ap_hold ADD COLUMN IF NOT EXISTS cancelled_date date",
     """
     CREATE TABLE IF NOT EXISTS core.snap_onhand_lot (
         row_key           text PRIMARY KEY,

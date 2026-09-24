@@ -194,11 +194,20 @@ _AP_PAYMENT_COLS = [
 
 # Active holds only, reloaded whole each run: a release is an update that
 # removes the row from "active", and the set is small.
+#
+# Invoice and supplier come straight from AP_INVOICES_ALL here rather than
+# only from core.fact_ap_payment_schedule: a held invoice that was never
+# validated has no payment schedule yet, so on the first prod run two of five
+# holds showed with no supplier and no invoice number.
 _AP_HOLD_SQL = """
     SELECT ah.hold_id, ah.invoice_id, ah.hold_lookup_code, ahc.description, SUBSTR(ah.hold_reason, 1, 240),
-           ah.hold_date
+           ah.hold_date,
+           ai.invoice_num, ai.invoice_type_lookup_code, ai.invoice_date, sup.segment1, sup.vendor_name,
+           ai.invoice_currency_code, ai.invoice_amount, NVL(ai.base_amount, ai.invoice_amount), ai.cancelled_date
       FROM ap_holds_all ah
       LEFT JOIN ap_hold_codes ahc ON ahc.hold_lookup_code = ah.hold_lookup_code
+      LEFT JOIN ap_invoices_all ai ON ai.invoice_id = ah.invoice_id
+      LEFT JOIN ap_suppliers sup   ON sup.vendor_id = ai.vendor_id
      WHERE ah.org_id = :org_id
        AND ah.release_lookup_code IS NULL
 """
@@ -274,8 +283,11 @@ def etl_mart_ap(year: int = None, month: int = None, full_refresh: bool = False,
         if holds:
             execute_values(
                 cur,
-                "INSERT INTO core.fact_ap_hold (hold_id, invoice_id, hold_code, hold_desc, hold_reason, hold_date) VALUES %s",
-                [(int(h[0]), int(h[1]), h[2], h[3], h[4], h[5]) for h in holds],
+                """INSERT INTO core.fact_ap_hold (hold_id, invoice_id, hold_code, hold_desc, hold_reason, hold_date,
+                       invoice_num, invoice_type, invoice_date, vendor_num, vendor_name, invoice_currency_code,
+                       invoice_amount, invoice_amount_idr, cancelled_date) VALUES %s""",
+                [(int(h[0]), int(h[1]), h[2], h[3], h[4], h[5], h[6], h[7], h[8], h[9], h[10], h[11],
+                  _num(h[12]), _num(h[13]), h[14]) for h in holds],
             )
             rows_upserted += len(holds)
 

@@ -108,14 +108,14 @@ MART_SQL: dict[str, str] = {
     "ap_invoice_hold": f"""
         SELECT h.hold_id,
                h.invoice_id,
-               i.invoice_num,
-               i.invoice_type,
-               i.invoice_date,
-               i.vendor_num,
-               i.vendor_name,
-               i.invoice_currency_code                       AS currency_code,
-               i.invoice_amount                              AS invoice_amount_entered,
-               i.invoice_amount_idr,
+               COALESCE(h.invoice_num, i.invoice_num)                       AS invoice_num,
+               COALESCE(h.invoice_type, i.invoice_type)                     AS invoice_type,
+               COALESCE(h.invoice_date, i.invoice_date)                     AS invoice_date,
+               COALESCE(h.vendor_num, i.vendor_num)                         AS vendor_num,
+               COALESCE(h.vendor_name, i.vendor_name)                       AS vendor_name,
+               COALESCE(h.invoice_currency_code, i.invoice_currency_code)   AS currency_code,
+               COALESCE(h.invoice_amount, i.invoice_amount)                 AS invoice_amount_entered,
+               COALESCE(h.invoice_amount_idr, i.invoice_amount_idr)         AS invoice_amount_idr,
                h.hold_code,
                h.hold_desc,
                h.hold_reason,
@@ -123,7 +123,7 @@ MART_SQL: dict[str, str] = {
                (CURRENT_DATE - h.hold_date::date)            AS days_on_hold
           FROM core.fact_ap_hold h
           LEFT JOIN ({_AP_INVOICE_HEADER}) i ON i.invoice_id = h.invoice_id
-         WHERE i.cancelled_date IS NULL
+         WHERE COALESCE(h.cancelled_date, i.cancelled_date) IS NULL
     """,
 
     # Blueprint 6.4. subinventory_type comes from meta.subinventory_class when
