@@ -73,6 +73,27 @@ export const etlAdminApi = {
   getSource:   (jobName)        => api.get(`/dashboard/it/etl-admin/source/${jobName}`),
 };
 
+// EBS Data Mart — Setup > AI > EBS Data Mart (backend: routers/ai_tools/ebs_mart_admin.py)
+export const ebsMartApi = {
+  overview:        ()             => api.get("/ai/ebs-mart/overview"),
+  trigger:         (job, body)    => api.post(`/ai/ebs-mart/trigger/${job}`, body || {}),
+  catalog:         ()             => api.get("/ai/ebs-mart/catalog"),
+  updateCatalog:   (mart, col, b) => api.put(`/ai/ebs-mart/catalog/${mart}/${col}`, b),
+  goldenList:      ()             => api.get("/ai/ebs-mart/golden-queries"),
+  goldenAdd:       (b)            => api.post("/ai/ebs-mart/golden-queries", b),
+  goldenUpdate:    (id, b)        => api.put(`/ai/ebs-mart/golden-queries/${id}`, b),
+  goldenDelete:    (id)           => api.delete(`/ai/ebs-mart/golden-queries/${id}`),
+  goldenVerify:    (id)           => api.post(`/ai/ebs-mart/golden-queries/${id}/verify`),
+  runSql:          (sql, group)   => api.post("/ai/ebs-mart/sql", { sql, group }, { timeout: 60000 }),
+  callTool:        (name, args, group) => api.post(`/ai/ebs-mart/tool/${name}`, { args, group }, { timeout: 60000 }),
+  securityTest:    ()             => api.post("/ai/ebs-mart/security-test", {}, { timeout: 120000 }),
+  queryLog:        (params)       => api.get("/ai/ebs-mart/query-log", { params }),
+  queryStats:      (days)         => api.get("/ai/ebs-mart/query-log/stats", { params: { days } }),
+  subinventories:  ()             => api.get("/ai/ebs-mart/subinventories"),
+  setSubinventory: (code, b)      => api.put(`/ai/ebs-mart/subinventories/${encodeURIComponent(code)}`, b, { timeout: 60000 }),
+  kit:             ()             => api.get("/ai/ebs-mart/openwebui-kit"),
+};
+
 export const hikcentralApi = {
   getConfig:     ()      => api.get("/dashboard/it/hikcentral/config"),
   saveConfig:    (body)  => api.post("/dashboard/it/hikcentral/config", body),

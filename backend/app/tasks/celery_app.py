@@ -8,7 +8,7 @@ celery_app = Celery(
     "ckdo_dashboard",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.tasks.oracle_sync", "app.tasks.report_gen", "app.tasks.eis_etl_tasks", "app.tasks.document_converter_tasks", "app.tasks.document_translation_tasks", "app.tasks.openwebui_sync_tasks", "app.tasks.ap_invoice_gdrive_tasks"],
+    include=["app.tasks.oracle_sync", "app.tasks.report_gen", "app.tasks.eis_etl_tasks", "app.tasks.document_converter_tasks", "app.tasks.document_translation_tasks", "app.tasks.openwebui_sync_tasks", "app.tasks.ap_invoice_gdrive_tasks", "app.tasks.ebs_mart_tasks"],
 )
 
 celery_app.conf.update(
@@ -51,6 +51,20 @@ celery_app.conf.beat_schedule = {
     # eis_daily_sales.py); this is the safety net for a dispatch lost because
     # the worker or broker was down, not the primary trigger.
     "etl-daily-sales": {"task": "app.tasks.etl_tasks.etl_daily_sales", "schedule": crontab(minute=20)},
+    # EBS Data Mart (CoChat "EBS Analyst" tool server, see
+    # app/services/ebs_mart). AP is incremental on a composite watermark, so
+    # hourly is cheap; Sunday's full reload is the delete reconciliation.
+    # Inventory is a whole on-hand snapshot, so hourly during working hours
+    # only. The 00:10 refresh recomputes days_overdue/days_to_expiry for the
+    # new day even when no ETL brought new rows.
+    "etl-mart-ap": {"task": "app.tasks.etl_tasks.etl_mart_ap", "schedule": crontab(minute=40)},
+    "etl-mart-ap-reconcile": {
+        "task": "app.tasks.etl_tasks.etl_mart_ap",
+        "schedule": crontab(hour=1, minute=0, day_of_week="sunday"),
+        "kwargs": {"full_refresh": True},
+    },
+    "etl-mart-inventory": {"task": "app.tasks.etl_tasks.etl_mart_inventory", "schedule": crontab(minute=50, hour="6-20")},
+    "refresh-ebs-marts": {"task": "app.tasks.etl_tasks.refresh_ebs_marts", "schedule": crontab(hour=0, minute=10)},
     # Nightly reconciliation for CoChat (Open WebUI) Knowledge Sync — the
     # main trigger is event-driven (Setup > AI > Knowledge Base's "Sync to
     # CoChat" button), this just catches anything missed (a doc edited

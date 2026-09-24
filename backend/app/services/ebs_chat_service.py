@@ -245,6 +245,12 @@ def ensure_table():
         # FINAL_ANSWER_MAX_TOKENS for why empty here means "General only",
         # unlike departments/allowed_modules where empty means unrestricted.
         cur.execute("ALTER TABLE ebs_chat_scope ADD COLUMN IF NOT EXISTS kb_departments JSONB NOT NULL DEFAULT '[]'")
+        # ebs_groups: added 2026-09-24 for the EBS Data Tools server (blueprint
+        # "Pemetaan grup ke domain", see app/services/ebs_mart/access.py).
+        # Empty = no mart access at all — unlike allowed_modules there is no
+        # pre-existing access to preserve, and the marts carry invoice-level
+        # finance data.
+        cur.execute("ALTER TABLE ebs_chat_scope ADD COLUMN IF NOT EXISTS ebs_groups JSONB NOT NULL DEFAULT '[]'")
         conn.commit()
         conn.close()
     except Exception:
@@ -258,7 +264,8 @@ def list_scopes() -> list[dict]:
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT email, full_access, departments, allowed_modules, kb_departments, notes, created_by, created_at, updated_at
+            SELECT email, full_access, departments, allowed_modules, kb_departments, notes, created_by, created_at, updated_at,
+                   ebs_groups
             FROM ebs_chat_scope ORDER BY email
         """)
         rows = cur.fetchall()
@@ -268,6 +275,7 @@ def list_scopes() -> list[dict]:
                 "kb_departments": r[4] or [], "notes": r[5], "created_by": r[6],
                 "created_at": r[7].isoformat() if r[7] else None,
                 "updated_at": r[8].isoformat() if r[8] else None,
+                "ebs_groups": r[9] or [],
             }
             for r in rows
         ]
@@ -278,6 +286,7 @@ def list_scopes() -> list[dict]:
 def upsert_scope(
     email: str, full_access: bool, departments: list[str], notes: Optional[str], updated_by: str,
     allowed_modules: Optional[list[str]] = None, kb_departments: Optional[list[str]] = None,
+    ebs_groups: Optional[list[str]] = None,
 ) -> dict:
     email = (email or "").strip().lower()
     if not email:
@@ -291,29 +300,35 @@ def upsert_scope(
     bad_kb = [d for d in kb_departments or [] if d not in rag_service.DEPARTMENTS]
     if bad_kb:
         raise ValueError(f"Unknown KB department(s): {bad_kb} — must be one of {rag_service.DEPARTMENTS}")
+    from app.services.ebs_mart.constants import EBS_GROUPS
+    bad_groups = [g for g in ebs_groups or [] if g not in EBS_GROUPS]
+    if bad_groups:
+        raise ValueError(f"Unknown EBS group(s): {bad_groups} — must be one of {EBS_GROUPS}")
 
     from psycopg2.extras import Json
     conn = _get_pg()
     try:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO ebs_chat_scope (email, full_access, departments, allowed_modules, kb_departments, notes, created_by, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+            INSERT INTO ebs_chat_scope (email, full_access, departments, allowed_modules, kb_departments, ebs_groups, notes, created_by, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (email) DO UPDATE SET
                 full_access     = EXCLUDED.full_access,
                 departments     = EXCLUDED.departments,
                 allowed_modules = EXCLUDED.allowed_modules,
                 kb_departments  = EXCLUDED.kb_departments,
+                ebs_groups      = EXCLUDED.ebs_groups,
                 notes           = EXCLUDED.notes,
                 updated_at      = NOW()
         """, (
             email, full_access, Json(departments or []), Json(allowed_modules or []),
-            Json(kb_departments or []), notes, updated_by,
+            Json(kb_departments or []), Json(ebs_groups or []), notes, updated_by,
         ))
         conn.commit()
         return {
             "email": email, "full_access": full_access, "departments": departments or [],
-            "allowed_modules": allowed_modules or [], "kb_departments": kb_departments or [], "notes": notes,
+            "allowed_modules": allowed_modules or [], "kb_departments": kb_departments or [],
+            "ebs_groups": ebs_groups or [], "notes": notes,
         }
     finally:
         conn.close()

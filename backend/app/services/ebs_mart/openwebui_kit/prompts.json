@@ -1,0 +1,32 @@
+[
+  {
+    "command": "/aging-hutang",
+    "title": "Aging hutang supplier",
+    "content": "Tampilkan aging hutang {{supplier | semua supplier}} per bucket (Current, 1-30, 31-60, 61-90, >90), urut nilai terbesar."
+  },
+  {
+    "command": "/stok-expired",
+    "title": "Lot mendekati expired",
+    "content": "Lot yang expired dalam {{hari | 90}} hari di subinventory GOOD, urut tanggal expired, lengkap dengan qty dan satuan."
+  },
+  {
+    "command": "/stok-item",
+    "title": "Stok item saat ini",
+    "content": "Stok saat ini untuk item {{kode_atau_nama_item}}, dipecah GOOD / karantina / reject, dan ED terdekat."
+  },
+  {
+    "command": "/jatuh-tempo",
+    "title": "Invoice jatuh tempo",
+    "content": "Invoice supplier yang jatuh tempo dari {{tanggal_mulai | hari ini}} sampai {{tanggal_akhir | 7 hari ke depan}}, dengan sisa hutang valas dan IDR."
+  },
+  {
+    "command": "/pembayaran-supplier",
+    "title": "Pembayaran ke supplier",
+    "content": "Total pembayaran ke supplier {{supplier | semua supplier}} periode {{periode | bulan lalu}}, per supplier."
+  },
+  {
+    "command": "/invoice-hold",
+    "title": "Invoice yang di-hold",
+    "content": "Daftar invoice supplier yang sedang di-hold beserta alasan dan lamanya, urut paling lama."
+  }
+]

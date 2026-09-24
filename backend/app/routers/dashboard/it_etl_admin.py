@@ -58,14 +58,15 @@ async def trigger_etl(job_name: str, params: TriggerParams):
         "etl_employee", "etl_inventory", "etl_ar_ap", "etl_budget", "etl_po",
         "etl_po_lines", "etl_open_pr", "etl_sales_orders", "etl_inventory_txn", "etl_batches",
         "etl_it_monitoring", "etl_daily_sales",
+        "etl_mart_ap", "etl_mart_inventory", "refresh_ebs_marts",
     ]
     if job_name not in valid_jobs:
         raise HTTPException(status_code=400, detail=f"Unknown job. Valid: {valid_jobs}")
 
-    result = celery_app.send_task(
-        f"app.tasks.etl_tasks.{job_name}",
-        kwargs={"year": params.year, "month": params.month},
-    )
+    kwargs = {"year": params.year, "month": params.month}
+    if job_name in ("etl_mart_ap", "etl_mart_inventory", "refresh_ebs_marts"):
+        kwargs["trigger_type"] = "MANUAL"
+    result = celery_app.send_task(f"app.tasks.etl_tasks.{job_name}", kwargs=kwargs)
     _active_task_ids[job_name] = result.id
     return {"message": f"Job {job_name} triggered", "task_id": result.id}
 
@@ -363,6 +364,18 @@ _JOB_META = {
                         "source_system": "Excel upload (bukan Oracle)",
                         "oracle_tables": [],
                         "destination_table": "eis.fact_daily_sales"},
+    "etl_mart_ap": {"frequency": "Hourly + weekly full", "schedule": "menit ke-40; Minggu 01:00 full", "source": "Oracle AP (EBS Data Mart)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["ap_invoices_all", "ap_payment_schedules_all", "ap_invoice_payments_all", "ap_checks_all", "ap_holds_all", "ap_suppliers"],
+                        "destination_table": "core.fact_ap_payment_schedule, core.fact_ap_payment, core.fact_ap_hold -> mart.ap_*"},
+    "etl_mart_inventory": {"frequency": "Hourly 06-20", "schedule": "menit ke-50, 06:00-20:00", "source": "Oracle INV on-hand per lot (org 121)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["mtl_onhand_quantities_detail", "mtl_lot_numbers", "mtl_secondary_inventories", "mtl_system_items_b"],
+                        "destination_table": "core.snap_onhand_lot, core.dim_subinventory, core.dim_item -> mart.inv_onhand_lot"},
+    "refresh_ebs_marts": {"frequency": "Daily", "schedule": "00:10 WIB", "source": "core.* (tanpa Oracle)",
+                        "source_system": "PostgreSQL (eis_dashboard)",
+                        "oracle_tables": [],
+                        "destination_table": "mart.* (REFRESH MATERIALIZED VIEW CONCURRENTLY)"},
 }
 
 
@@ -379,8 +392,8 @@ async def get_etl_source(job_name: str):
     with what's really running (unlike a hand-maintained description)."""
     if job_name not in _JOB_META:
         raise HTTPException(400, f"Unknown job: {job_name}")
-    from app.tasks import eis_etl_tasks
-    fn = getattr(eis_etl_tasks, job_name, None)
+    from app.tasks import eis_etl_tasks, ebs_mart_tasks
+    fn = getattr(eis_etl_tasks, job_name, None) or getattr(ebs_mart_tasks, job_name, None)
     if fn is None:
         raise HTTPException(404, f"No source found for job: {job_name}")
     return {"job": job_name, "source": inspect.getsource(fn)}

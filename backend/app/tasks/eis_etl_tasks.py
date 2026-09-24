@@ -2260,6 +2260,11 @@ def etl_inventory_txn(year: int = None, month: int = None, full_refresh: bool = 
 
         _log_end(pg, job_id, "success", records)
 
+        # mart.inv_movement_daily is built on fact_inventory_txn; refresh it
+        # so the EBS Data Tools answer from the rows just loaded.
+        from app.tasks.ebs_mart_tasks import refresh_marts_for_job
+        refresh_marts_for_job("etl_inventory_txn")
+
     except Exception as e:
         logger.error(f"[etl_inventory_txn] Failed: {e}")
         pg.rollback()

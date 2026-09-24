@@ -58,6 +58,7 @@ class ScopeUpsert(BaseModel):
     departments: list[str] = []
     allowed_modules: list[str] = []
     kb_departments: list[str] = []
+    ebs_groups: list[str] = []
     notes: str | None = None
 
 
@@ -78,6 +79,14 @@ async def list_kb_departments(user: CurrentUser = Depends(require_role(Roles.ADM
     return rag_service.DEPARTMENTS
 
 
+@router.get("/ebs-groups")
+async def list_ebs_groups(user: CurrentUser = Depends(require_role(Roles.ADMIN))):
+    """ebs-* groups for the EBS Data Tools server (blueprint group -> domain
+    map). Empty selection means no mart access, not unrestricted."""
+    from app.services.ebs_mart.constants import GROUP_LABELS
+    return [{"group": g, "label": label} for g, label in GROUP_LABELS.items()]
+
+
 @router.get("/scope")
 async def list_scope(user: CurrentUser = Depends(require_role(Roles.ADMIN))):
     return ebs_chat_service.list_scopes()
@@ -89,7 +98,7 @@ async def upsert_scope(payload: ScopeUpsert, user: CurrentUser = Depends(require
         return ebs_chat_service.upsert_scope(
             payload.email, payload.full_access, payload.departments, payload.notes,
             updated_by=user.username or "admin", allowed_modules=payload.allowed_modules,
-            kb_departments=payload.kb_departments,
+            kb_departments=payload.kb_departments, ebs_groups=payload.ebs_groups,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))

@@ -66,7 +66,8 @@ from app.routers.dashboard import (
 from app.routers.coretax_router import coretax_router
 
 # ── AI Tools Routers ──
-from app.routers.ai_tools import chatbot, meeting_notes, user_settings, document_converter, ebs_chat
+from app.routers.ai_tools import chatbot, meeting_notes, user_settings, document_converter, ebs_chat, ebs_mart_admin
+from app.routers.ebs_tools_app import app as ebs_tools_app
 
 # ── Util Routers ──
 from app.routers import health
@@ -152,6 +153,18 @@ async def lifespan(app: FastAPI):
     # back CoChat's IT tools — see ensure_it_monitoring_tables' docstring.
     await ensure_it_monitoring_tables()
     await ensure_daily_sales_table()
+
+    # EBS Data Mart — meta/core/mart schemas, phase-1 marts, catalog and
+    # golden-query seed, reader grants (app/services/ebs_mart/schema.py).
+    # After the eis.* tables above: mart.inv_movement_daily reads
+    # eis.fact_inventory_txn. Never fatal — the rest of the dashboard does not
+    # depend on it.
+    try:
+        import asyncio as _asyncio
+        from app.services.ebs_mart.schema import ensure_mart_schema
+        await _asyncio.to_thread(ensure_mart_schema)
+    except Exception as e:
+        logger.warning("ebs_mart_schema_failed", error=str(e))
 
     # EBS Backup Recovery — dedicated sync tables (ebs_*) + its own 60s
     # schedule poller (ported from the standalone ebs-backup-dashboard app).
@@ -355,6 +368,13 @@ app.include_router(meeting_notes.router, prefix=f"{API_PREFIX}/ai/meeting-notes"
 app.include_router(user_settings.router, prefix=f"{API_PREFIX}/ai/settings",       tags=["AI - User Settings"])
 app.include_router(document_converter.router, prefix=f"{API_PREFIX}/ai/document-converter", tags=["AI - Document Converter"])
 app.include_router(ebs_chat.router, prefix=f"{API_PREFIX}/ai/ebs-chat", tags=["AI - EBS Chat"])
+app.include_router(
+    ebs_mart_admin.router, prefix=f"{API_PREFIX}/ai/ebs-mart", tags=["AI - EBS Data Mart"],
+    dependencies=[Depends(require_role(Roles.IT, Roles.ADMIN))],
+)
+# The blueprint's OpenAPI tool server for Open WebUI — a separate app so its
+# openapi.json lists only the EBS tools. See app/routers/ebs_tools_app.py.
+app.mount(f"{API_PREFIX}/ebs-tools", ebs_tools_app)
 
 # Coretax Bulk Downloader (prefix already set in router: /api/coretax)
 app.include_router(coretax_router)

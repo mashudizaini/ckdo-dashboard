@@ -5,7 +5,7 @@ import { useAuthStore } from "@/store/authStore";
 // Matches department_taxonomy.CANONICAL_DEPARTMENTS exactly.
 const DEPARTMENTS = ["Administration", "Sales & Marketing", "Strategy & Development", "Plant"];
 
-const EMPTY_FORM = { email: "", full_access: false, departments: [], allowed_modules: [], kb_departments: [], notes: "" };
+const EMPTY_FORM = { email: "", full_access: false, departments: [], allowed_modules: [], kb_departments: [], ebs_groups: [], notes: "" };
 
 export default function EbsChatAccessPanel() {
   const { token } = useAuthStore();
@@ -14,6 +14,7 @@ export default function EbsChatAccessPanel() {
   const [rows, setRows] = useState(null); // null while loading
   const [modules, setModules] = useState([]); // MODULE_TOOL_MAP keys
   const [kbDepartments, setKbDepartments] = useState([]); // rag_service.DEPARTMENTS
+  const [ebsGroups, setEbsGroups] = useState([]); // ebs_mart.constants.GROUP_LABELS
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingEmail, setDeletingEmail] = useState(null);
@@ -40,7 +41,14 @@ export default function EbsChatAccessPanel() {
     } catch (_) {}
   };
 
-  useEffect(() => { load(); loadModules(); loadKbDepartments(); }, []); // eslint-disable-line
+  const loadEbsGroups = async () => {
+    try {
+      const res = await fetch("/api/v1/ai/ebs-chat/ebs-groups", { headers });
+      if (res.ok) setEbsGroups(await res.json());
+    } catch (_) {}
+  };
+
+  useEffect(() => { load(); loadModules(); loadKbDepartments(); loadEbsGroups(); }, []); // eslint-disable-line
 
   const toggleDept = (d) => {
     setForm((f) => ({
@@ -60,6 +68,13 @@ export default function EbsChatAccessPanel() {
     setForm((f) => ({
       ...f,
       kb_departments: f.kb_departments.includes(d) ? f.kb_departments.filter((x) => x !== d) : [...f.kb_departments, d],
+    }));
+  };
+
+  const toggleEbsGroup = (g) => {
+    setForm((f) => ({
+      ...f,
+      ebs_groups: f.ebs_groups.includes(g) ? f.ebs_groups.filter((x) => x !== g) : [...f.ebs_groups, g],
     }));
   };
 
@@ -99,7 +114,8 @@ export default function EbsChatAccessPanel() {
 
   const editRow = (r) => setForm({
     email: r.email, full_access: r.full_access, departments: r.departments,
-    allowed_modules: r.allowed_modules || [], kb_departments: r.kb_departments || [], notes: r.notes || "",
+    allowed_modules: r.allowed_modules || [], kb_departments: r.kb_departments || [],
+    ebs_groups: r.ebs_groups || [], notes: r.notes || "",
   });
 
   if (rows === null) {
@@ -215,6 +231,24 @@ export default function EbsChatAccessPanel() {
             </div>
           )}
 
+          <div>
+            <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wider mb-1.5">
+              Grup EBS Data Mart (model "EBS Analyst" / tool server) — kosong = tidak ada akses mart
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {ebsGroups.map(({ group, label }) => (
+                <button key={group} type="button" onClick={() => toggleEbsGroup(group)} title={label}
+                  className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                    form.ebs_groups.includes(group)
+                      ? "border-violet-500/50 bg-violet-500/10 text-violet-300"
+                      : "border-gray-700 bg-gray-800 text-gray-400 hover:border-gray-600"
+                  }`}>
+                  {group}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <button type="submit" disabled={saving}
             className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white transition-colors">
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
@@ -236,6 +270,7 @@ export default function EbsChatAccessPanel() {
                   {r.allowed_modules?.length ? `Modul: ${r.allowed_modules.join(", ")}` : "Semua modul"}
                   {!r.full_access && r.allowed_modules?.includes("Company Rules") &&
                     ` · Dokumen: ${r.kb_departments?.length ? r.kb_departments.join(", ") : "General"}`}
+                  {r.ebs_groups?.length ? ` · Mart: ${r.ebs_groups.join(", ")}` : ""}
                   {r.notes ? ` — ${r.notes}` : ""}
                 </p>
               </button>

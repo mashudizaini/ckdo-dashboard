@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { BookOpen, FileStack, SlidersHorizontal, ShieldCheck } from "lucide-react";
+import { BookOpen, FileStack, SlidersHorizontal, ShieldCheck, DatabaseZap } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import KnowledgeBaseManager from "@/pages/setup/ai/KnowledgeBaseManager";
 import DocumentConverter from "@/pages/ai-tools/DocumentConverter";
 import ModelAccessPanel from "@/pages/setup/ai/ModelAccessPanel";
 import EbsChatAccessPanel from "@/pages/setup/ai/EbsChatAccessPanel";
+import EbsMartPanel from "@/pages/setup/ai/ebs-mart/EbsMartPanel";
 
 // Knowledge Base moved here from a button inside the AI Chatbot page, and
 // Document Converter from its own AI Tools nav entry (2026-09-03) — both
@@ -22,6 +23,9 @@ const TABS = [
   { id: "document-converter", icon: FileStack,          label: "Document Converter", visible: () => true },
   { id: "model-access",       icon: SlidersHorizontal,  label: "Model Access",       visible: (r) => r.isITorAdmin },
   { id: "ebs-chat-access",    icon: ShieldCheck,        label: "EBS Chat Access",    visible: (r) => r.isAdmin },
+  // EBS Data Mart (2026-09-24): the semantic layer + tool server behind the
+  // CoChat "EBS Analyst" model — IT/admin, matching the backend role gate.
+  { id: "ebs-data-mart",      icon: DatabaseZap,        label: "EBS Data Mart",      visible: (r) => r.isITorAdmin },
 ];
 
 export default function AiSetupPage() {
@@ -63,6 +67,7 @@ export default function AiSetupPage() {
       {activeId === "document-converter" && <DocumentConverter />}
       {activeId === "model-access"       && <ModelAccessPanel />}
       {activeId === "ebs-chat-access"    && <EbsChatAccessPanel />}
+      {activeId === "ebs-data-mart"      && <EbsMartPanel />}
     </div>
   );
 }

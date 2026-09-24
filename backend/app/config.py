@@ -207,6 +207,17 @@ class Settings(BaseSettings):
     # there's no Dashboard JWT to validate instead.
     ebs_chat_service_key: str = ""
 
+    # EBS Data Tools server (/api/v1/ebs-tools, see app/routers/ebs_tools_app.py)
+    # — the blueprint's OpenAPI tool server that Open WebUI calls directly.
+    # Key for the static-bearer / X-Service-Key path; empty falls back to
+    # ebs_chat_service_key so an existing CoChat valve key keeps working.
+    # Callers who forward their Keycloak token need no key at all.
+    ebs_tools_service_key: str = ""
+    # Dedicated SELECT-only role on mart.*/meta.* (backend/scripts/sql/
+    # ebs_mart_llm_ro.sql). Empty = use eis_database_url (chat_readonly),
+    # which schema.py grants the same mart access.
+    eis_llm_ro_url: str = ""
+
     # AP Autoinvoice — Google Drive polling. Path is inside the container
     # (backend/credentials/ on the host, bind-mounted to /app like the rest
     # of backend/ — see .gitignore, this file is deployed straight to the
