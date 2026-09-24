@@ -39,6 +39,15 @@ def use_connection(conn):
     finally:
         _scoped_conn.reset(token)
 
+# Setiap tool yang mengembalikan quantity WAJIB ikut mengembalikan uom.
+#
+# Bukan soal kerapian. Pada 2026-09-24 pembelian Bortezomib dilaporkan sebagai
+# "100 kg" padahal satuannya GR — meleset seribu kali. Kolom uom ada di tabel,
+# hanya tidak ikut di-SELECT, jadi model tidak punya satuan dan menuliskan yang
+# paling masuk akal menurutnya. Satuan di fact_po_line beragam (PKG, PCS, BOX,
+# BTL, PAK, UNT, GR, VL), jadi menebak hampir selalu salah, dan angka bersatuan
+# salah terbaca seperti angka yang benar.
+#
 # Perbandingan teks di bawah tidak peka huruf besar/kecil, dan untuk kolom
 # kategori dicocokkan sebagai awalan (LIKE 'nilai%') alih-alih persis.
 #
@@ -189,7 +198,7 @@ EIS_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_purchase_order_detail",
-            "description": "Cari data PO (Purchase Order) individual — nomor PO, item, supplier, quantity, harga per unit — berdasarkan supplier, nama barang, kode item, dan/atau nomor PO. Untuk pertanyaan 'PO apa saja dari supplier X', 'PO nomor berapa untuk item Y', bukan sekadar total/trend (untuk itu pakai get_purchasing_performance).",
+            "description": "Cari data PO (Purchase Order) individual — nomor PO, item, supplier, quantity beserta satuannya (uom), harga per unit — berdasarkan supplier, nama barang, kode item, dan/atau nomor PO. Untuk pertanyaan 'PO apa saja dari supplier X', 'PO nomor berapa untuk item Y', bukan sekadar total/trend (untuk itu pakai get_purchasing_performance).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -550,7 +559,7 @@ def get_purchase_order_detail(
     return _query(
         """
         SELECT po_number, line_num, item_code, item_description, supplier_name,
-               material_type, currency_code, quantity, unit_price, amount_orig, amount_idr,
+               material_type, currency_code, uom, quantity, unit_price, amount_orig, amount_idr,
                creation_date, closure_status
         FROM eis.fact_po_line
         WHERE (%(supplier_name)s IS NULL OR supplier_name ILIKE %(supplier_like)s)
@@ -585,7 +594,7 @@ def get_sales_order_detail(
     return _query(
         """
         SELECT order_number, line_num, item_code, item_description, customer_name,
-               business_type, currency_code, quantity, unit_selling_price,
+               business_type, currency_code, uom, quantity, unit_selling_price,
                amount_orig, amount_idr, flow_status_code, ordered_date
         FROM eis.fact_sales_order
         WHERE (%(customer_name)s  IS NULL OR customer_name ILIKE %(customer_like)s)
