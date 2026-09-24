@@ -189,12 +189,13 @@ EIS_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_purchase_order_detail",
-            "description": "Cari data PO (Purchase Order) individual — nomor PO, item, harga — berdasarkan supplier, kode item, dan/atau nomor PO. Untuk pertanyaan 'PO apa saja dari supplier X', 'PO nomor berapa untuk item Y', bukan sekadar total/trend (untuk itu pakai get_purchasing_performance).",
+            "description": "Cari data PO (Purchase Order) individual — nomor PO, item, supplier, quantity, harga per unit — berdasarkan supplier, nama barang, kode item, dan/atau nomor PO. Untuk pertanyaan 'PO apa saja dari supplier X', 'PO nomor berapa untuk item Y', bukan sekadar total/trend (untuk itu pakai get_purchasing_performance).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "supplier_name": {"type": "string", "description": "Opsional. Nama supplier (partial match), contoh IFORTE"},
-                    "item_code": {"type": "string", "description": "Opsional. Kode item Oracle"},
+                    "item_code": {"type": "string", "description": "Opsional. Kode item Oracle persis, contoh CKD21R0303. Jangan diisi nama bahan \u2014 untuk itu pakai item_name."},
+                    "item_name": {"type": "string", "description": "Opsional. Nama atau deskripsi barang (partial match), contoh Bortezomib, Paracetamol, LABEL. Pakai ini kalau yang disebut pengguna adalah nama bahan/barang, bukan kode."},
                     "po_number": {"type": "string", "description": "Opsional. Nomor PO (partial match)"},
                     "period": {"type": "string", "description": "Opsional. Periode fiskal: YYYY-MM untuk satu bulan (contoh 2026-06), atau YYYY untuk satu tahun penuh (contoh 2025). Pakai bentuk tahun untuk pertanyaan sepanjang tahun \u2014 jangan memanggil tool ini dua belas kali."},
                 },
@@ -528,12 +529,21 @@ def get_purchasing_performance(period: str, material_type: str = None) -> list[d
 
 
 def get_purchase_order_detail(
-    supplier_name: str = None, item_code: str = None, po_number: str = None, period: str = None,
+    supplier_name: str = None, item_code: str = None, item_name: str = None,
+    po_number: str = None, period: str = None,
 ) -> list[dict]:
     """Line-item PO search — backed by eis.fact_po_line (etl_po_lines),
     the same table Purchasing History/Price Analysis read from. Added so
     the chatbot can answer "which POs from supplier X" questions that
-    get_purchasing_performance's aggregate-only shape never could."""
+    get_purchasing_performance's aggregate-only shape never could.
+
+    item_name searches item_description; item_code stays an exact match on
+    the Oracle code. Both exist because people ask by substance name, not by
+    code: "pembelian API Bortezomib" sent Bortezomib into item_code, which
+    matched nothing and was reported as no purchases at all — while
+    item_description held five matching lines with supplier, quantity and
+    unit price. A name is not a code, and only one of them can be matched
+    exactly."""
     fy = pnum = None
     if period:
         fy, pnum = _parse_period(period)
@@ -545,6 +555,7 @@ def get_purchase_order_detail(
         FROM eis.fact_po_line
         WHERE (%(supplier_name)s IS NULL OR supplier_name ILIKE %(supplier_like)s)
           AND (%(item_code)s    IS NULL OR UPPER(item_code) = UPPER(%(item_code)s))
+          AND (%(item_name)s    IS NULL OR item_description ILIKE %(item_name_like)s)
           AND (%(po_number)s    IS NULL OR po_number ILIKE %(po_like)s)
           AND (%(fy)s   IS NULL OR EXTRACT(YEAR FROM creation_date) = %(fy)s)
           AND (%(pnum)s IS NULL OR EXTRACT(MONTH FROM creation_date) = %(pnum)s)
@@ -554,6 +565,7 @@ def get_purchase_order_detail(
         {
             "supplier_name": supplier_name, "supplier_like": f"%{supplier_name}%" if supplier_name else None,
             "item_code": item_code,
+            "item_name": item_name, "item_name_like": f"%{item_name}%" if item_name else None,
             "po_number": po_number, "po_like": f"%{po_number}%" if po_number else None,
             "fy": fy, "pnum": pnum,
         },
