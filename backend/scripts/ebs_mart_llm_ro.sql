@@ -2,11 +2,15 @@
 -- (blueprint section 7: "Role PostgreSQL llm_ro hanya punya SELECT di schema
 -- mart dan meta. Tidak ada akses ke raw dan core.")
 --
--- Run ONCE per environment, as a superuser, on the eis_dashboard database
--- (dev: 172.21.2.209:5433; prod: the prod stack's own postgres). Then set in
--- the backend .env:
+-- Run ONCE per environment, as postgres, on the main dashboard database
+-- ckdo_dashboard (container ckdo_postgres on both hosts — schema eis and the
+-- mart live there; the old eis_dashboard database is retired):
 --
---   EIS_LLM_RO_URL=postgresql://llm_ro:<password>@<host>:<port>/eis_dashboard
+--   docker exec -i ckdo_postgres psql -U postgres -d ckdo_dashboard < ebs_mart_llm_ro.sql
+--
+-- Then set in the .env:
+--
+--   EIS_LLM_RO_URL=postgresql://llm_ro:<password>@postgres:5432/ckdo_dashboard
 --
 -- and restart backend. Until then the tool server uses chat_readonly, which
 -- the backend grants the same mart access at startup — it works, but that
@@ -30,7 +34,7 @@ ALTER ROLE llm_ro SET idle_in_transaction_session_timeout = '30s';
 
 -- Only what follows: no eis, no core, no table in public (tables are not
 -- readable without an explicit grant).
-GRANT CONNECT ON DATABASE eis_dashboard TO llm_ro;
+GRANT CONNECT ON DATABASE ckdo_dashboard TO llm_ro;
 GRANT USAGE ON SCHEMA mart, meta TO llm_ro;
 GRANT SELECT ON ALL TABLES IN SCHEMA mart TO llm_ro;
 GRANT SELECT ON meta.column_catalog, meta.golden_query, meta.etl_run_log TO llm_ro;

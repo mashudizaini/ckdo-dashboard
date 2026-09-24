@@ -1,6 +1,8 @@
 """
-DDL for the meta / core / mart schemas in the eis_dashboard Postgres
-(blueprint sections 3 and 5), applied on every backend startup.
+DDL for the meta / core / mart schemas (blueprint sections 3 and 5), applied
+on every backend startup. They sit next to schema eis in the main dashboard
+Postgres (database ckdo_dashboard) — the standalone eis_dashboard database is
+retired, and EIS_DATABASE_URL* point here on both hosts.
 
 Everything here is idempotent. Mart views are recreated only when their SQL
 text changes (tracked by hash in meta.mart_definition), so a restart never

@@ -373,7 +373,7 @@ _JOB_META = {
                         "oracle_tables": ["mtl_onhand_quantities_detail", "mtl_lot_numbers", "mtl_secondary_inventories", "mtl_system_items_b"],
                         "destination_table": "core.snap_onhand_lot, core.dim_subinventory, core.dim_item -> mart.inv_onhand_lot"},
     "refresh_ebs_marts": {"frequency": "Daily", "schedule": "00:10 WIB", "source": "core.* (tanpa Oracle)",
-                        "source_system": "PostgreSQL (eis_dashboard)",
+                        "source_system": "PostgreSQL (ckdo_dashboard)",
                         "oracle_tables": [],
                         "destination_table": "mart.* (REFRESH MATERIALIZED VIEW CONCURRENTLY)"},
 }
