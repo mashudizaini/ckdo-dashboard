@@ -298,7 +298,7 @@ async def call_tool(name: str, body: ToolIn, user: CurrentUser = Depends(_admin)
     for flag in ("late_only", "include_reversed", "include_expired"):
         if isinstance(args.get(flag), str):
             args[flag] = args[flag] == "true"
-    for k in ("due_from", "due_to", "date_from", "date_to"):
+    for k in ("due_from", "due_to", "date_from", "date_to", "ordered_from", "ordered_to"):
         if args.get(k) is not None:
             try:
                 args[k] = date.fromisoformat(str(args[k]))

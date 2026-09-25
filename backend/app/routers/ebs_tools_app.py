@@ -275,7 +275,10 @@ class SoBacklogIn(BaseModel):
     order_number: Optional[str] = Field(None, description="Nomor sales order persis")
     business_type: Optional[Literal["Local", "Export", "CMO"]] = Field(None, description="Tipe bisnis")
     late_only: bool = Field(False, description="true = hanya baris yang lewat jadwal kirim dan masih ada sisa kirim")
-    group_by: Literal["none", "customer", "item"] = Field("none", description="none = detail per baris SO; customer / item = ringkasan")
+    ordered_from: Optional[date] = Field(None, description="Tanggal order mulai (YYYY-MM-DD) — pakai untuk memisahkan backlog aktif dari order lama")
+    ordered_to: Optional[date] = Field(None, description="Tanggal order sampai (YYYY-MM-DD)")
+    group_by: Literal["none", "customer", "item", "year"] = Field(
+        "none", description="none = detail per baris SO; customer / item = ringkasan; year = per tahun order (melihat backlog lama)")
 
 
 class SoShipIn(BaseModel):

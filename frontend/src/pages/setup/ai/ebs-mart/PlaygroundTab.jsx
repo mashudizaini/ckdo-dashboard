@@ -66,7 +66,7 @@ const TOOLS = {
   get_so_backlog: [
     ["customer", "text"], ["item", "text"], ["order_number", "text"],
     ["business_type", ["", "Local", "Export", "CMO"]], ["late_only", ["false", "true"]],
-    ["group_by", ["none", "customer", "item"]],
+    ["ordered_from", "date"], ["ordered_to", "date"], ["group_by", ["none", "customer", "item", "year"]],
   ],
   get_so_shipment_status: [["order_number", "text"], ["customer", "text"], ["item", "text"], ["status", "text"]],
   get_sales_by_customer: [

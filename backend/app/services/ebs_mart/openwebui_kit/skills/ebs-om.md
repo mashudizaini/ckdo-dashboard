@@ -30,6 +30,11 @@ penjualan, omzet, revenue, penjualan per customer / produk / bulan, top customer
 - Setiap qty wajib dengan uom.
 
 ## Jebakan umum
+- Sebagian besar backlog adalah order LAMA yang tidak pernah dikirim maupun ditutup (saat mart dibangun: 364 dari
+  468 baris berasal dari order 2020–2024). Untuk pertanyaan backlog, sebutkan pemisahan ini: pakai
+  group_by = year untuk melihat umur backlog, atau ordered_from untuk backlog aktif, dan sarankan order lama
+  ditutup/dibatalkan di EBS. Jadwal kirim banyak yang sama dengan tanggal order, jadi status "Terlambat" pada
+  order lama tidak berarti keterlambatan operasional saat ini.
 - "Penjualan bulan ini" berarti invoice dengan GL date bulan ini, bukan order yang dibuat bulan ini — kalau user
   sepertinya maksud order, tanyakan dulu.
 - Satu SO bisa punya banyak baris dan shipment; jumlahkan per order_number bila ditanya per order.

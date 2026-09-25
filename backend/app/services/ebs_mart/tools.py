@@ -673,14 +673,20 @@ def get_ar_receipts(caller: Caller, customer: str | None = None, receipt_number:
 
 def get_so_backlog(caller: Caller, customer: str | None = None, item: str | None = None,
                    order_number: str | None = None, business_type: str | None = None,
-                   late_only: bool = False, group_by: str = "none") -> dict:
+                   late_only: bool = False, ordered_from: date | None = None, ordered_to: date | None = None,
+                   group_by: str = "none") -> dict:
+    """ordered_from/ordered_to exist because most of the backlog is old: on
+    first load 364 of 468 open lines came from 2020–2024 orders never shipped
+    or closed. "Backlog bulan ini" should be answerable without them."""
     args = {"customer": customer, "item": item, "order_number": order_number, "business_type": business_type,
-            "late_only": late_only, "group_by": group_by}
+            "late_only": late_only, "ordered_from": ordered_from, "ordered_to": ordered_to, "group_by": group_by}
     where = f"""
          WHERE (%(s)s::text  IS NULL OR customer_name ILIKE %(s)s::text)
            AND (%(on)s::text IS NULL OR order_number = %(on)s::text)
            AND (%(bt)s::text IS NULL OR UPPER(business_type) = UPPER(%(bt)s::text))
            AND (NOT %(late)s::boolean OR delivery_status = 'Terlambat')
+           AND (%(of)s::date IS NULL OR ordered_date >= %(of)s::date)
+           AND (%(ot)s::date IS NULL OR ordered_date <= %(ot)s::date)
            AND {_ITEM_FILTER}
     """
     if group_by == "customer":
@@ -690,6 +696,13 @@ def get_so_backlog(caller: Caller, customer: str | None = None, item: str | None
                    SUM(amount_to_ship_idr) AS belum_dikirim_idr
               FROM mart.so_backlog {where}
              GROUP BY customer_name ORDER BY belum_dikirim_idr DESC NULLS LAST
+        """
+    elif group_by == "year":
+        sql = f"""
+            SELECT EXTRACT(YEAR FROM ordered_date)::int AS tahun_order, COUNT(DISTINCT order_number) AS jml_order,
+                   COUNT(*) AS jml_baris, SUM(amount_to_ship_idr) AS belum_dikirim_idr
+              FROM mart.so_backlog {where}
+             GROUP BY 1 ORDER BY 1
         """
     elif group_by == "item":
         sql = f"""
@@ -707,7 +720,7 @@ def get_so_backlog(caller: Caller, customer: str | None = None, item: str | None
              ORDER BY due_date NULLS LAST, order_number, line_number
         """
     params = {"s": _like(customer), "on": _val(order_number), "bt": _val(business_type), "late": bool(late_only),
-              "item": _val(item)}
+              "of": ordered_from, "ot": ordered_to, "item": _val(item)}
     return _run(caller, "so_backlog", sql, params, "get_so_backlog", args)
 
 
