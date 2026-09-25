@@ -23,6 +23,8 @@ saldo akun, neraca, kas & bank, jurnal, posting, jurnal dari invoice mana, akun 
   itu). Laba setelah pajak = (penjualan bersih − HPP) − beban operasional + pendapatan/beban lain + pajak.
 - Akun di rentang laba rugi yang belum terpetakan (UNMAPPED) tidak masuk total, sama seperti laporan dashboard —
   sebutkan bila ada.
+- get_pl sudah memberi baris 'TOTAL <section>' per section dan subtotal laporan (NET SALES, GROSS PROFIT, dst.).
+  Pakai angka itu apa adanya — JANGAN menjumlah baris sendiri.
 - Tahun penuh (period = YYYY) termasuk periode penyesuaian; YTD (ytd = true) tidak.
 - Nilai dalam Rupiah penuh.
 - Neraca (get_trial_balance group_by fs_line, tanpa filter akun/departemen): baris RETAINED EARNINGS - CURRENT

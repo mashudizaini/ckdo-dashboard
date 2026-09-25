@@ -976,7 +976,8 @@ _DEPT_FILTER = """(%(dept)s::text IS NULL OR dept_code = %(dept)s::text OR dept_
 def get_pl(caller: Caller, period: str, ytd: bool = False, department: str | None = None,
            compare_prior_year: bool = False, level: str = "line") -> dict:
     """Profit & loss in the Financial Statement report's layout: lines by
-    section, then the report's subtotals (net sales, gross profit, profit
+    section with a 'TOTAL <section>' row after each, then the report's
+    subtotals (net sales, gross profit, profit
     before / after tax, total comprehensive income). compare_prior_year
     adds the same period one year earlier."""
     args = {"period": period, "ytd": ytd, "department": department, "compare_prior_year": compare_prior_year,
@@ -988,6 +989,9 @@ def get_pl(caller: Caller, period: str, ytd: bool = False, department: str | Non
         prior_cond = cond.replace("%(py)s", "(%(py)s - 1)")
     grp = "section, section_order" if level == "section" else "section, section_order, line, line_order"
     sel = "section" if level == "section" else "section, line"
+    # At line level each section's total follows its lines, so the model reads
+    # the subtotal instead of adding lines itself (Haiku got operating
+    # expenses wrong by Rp 1,3 M doing exactly that).
     sql = f"""
         WITH base AS (
             SELECT section, section_order, line, line_order,
@@ -1021,6 +1025,9 @@ def get_pl(caller: Caller, period: str, ytd: bool = False, department: str | Non
         )
         SELECT {'section' if level == 'section' else 'section, line'}, amount_idr, amount_prior_year_idr, so, lo
           FROM lines
+        {'' if level == 'section' else '''
+        UNION ALL SELECT section, 'TOTAL ' || section, SUM(amount_idr), SUM(amount_prior_year_idr), MIN(so), 999
+          FROM lines GROUP BY section'''}
         UNION ALL SELECT {"'TOTAL'" if level == 'section' else "'TOTAL', 'NET SALES'"}, sales, p_sales, 10, 1 FROM tot
         UNION ALL SELECT {"'TOTAL'" if level == 'section' else "'TOTAL', 'GROSS PROFIT'"}, sales - cogs, p_sales - p_cogs, 10, 2 FROM tot
         UNION ALL SELECT {"'TOTAL'" if level == 'section' else "'TOTAL', 'PROFIT BEFORE TAX'"}, sales - cogs - opex + other,
