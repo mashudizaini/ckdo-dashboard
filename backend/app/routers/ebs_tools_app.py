@@ -327,6 +327,37 @@ class BatchMaterialIn(BaseModel):
     group_by: Literal["none", "ingredient"] = Field("none", description="none = detail per batch × bahan × lot; ingredient = ringkasan per bahan")
 
 
+class PlIn(BaseModel):
+    period: str = Field(..., description="YYYY = setahun penuh (termasuk periode penyesuaian); YYYY-MM atau JUL-26 = sebulan")
+    ytd: bool = Field(False, description="true = Januari s.d. bulan pada `period` (YTD), tanpa periode penyesuaian")
+    department: Optional[str] = Field(None, description="Kode atau nama departemen (segment3), cocok sebagian")
+    compare_prior_year: bool = Field(False, description="true = tambah kolom periode yang sama tahun sebelumnya")
+    level: Literal["line", "section"] = Field("line", description="line = per pos laba rugi; section = per bagian (Sales, COGS, OPEX, ...)")
+
+
+class TbIn(BaseModel):
+    period: str = Field(..., description="Satu periode bulan: YYYY-MM atau JUL-26")
+    account: Optional[str] = Field(None, description="Awalan nomor akun (mis. 6113) ATAU nama akun (cocok sebagian, mis. listrik)")
+    department: Optional[str] = Field(None, description="Kode atau nama departemen (cocok sebagian)")
+    statement: Optional[Literal["BS", "PL"]] = Field(None, description="BS = akun neraca, PL = akun laba rugi")
+    group_by: Literal["account", "fs_line", "department"] = Field(
+        "account", description="account = per akun; fs_line = per pos neraca/laba rugi; department = per departemen")
+
+
+class JournalIn(BaseModel):
+    period: Optional[str] = Field(None, description="YYYY-MM atau JUL-26 (hanya 13 bulan terakhir tersedia)")
+    date_from: Optional[date] = Field(None, description="Tanggal efektif mulai (YYYY-MM-DD)")
+    date_to: Optional[date] = Field(None, description="Tanggal efektif sampai (YYYY-MM-DD)")
+    account: Optional[str] = Field(None, description="Awalan nomor akun ATAU nama akun (cocok sebagian)")
+    department: Optional[str] = Field(None, description="Kode atau nama departemen")
+    source: Optional[str] = Field(None, description="Journal source (awalan), mis. Payables, Receivables, Manual, Inventory")
+    category: Optional[str] = Field(None, description="Journal category (awalan), mis. Purchase Invoices, Adjustment")
+    text: Optional[str] = Field(None, description="Cari di keterangan baris / nama jurnal (cocok sebagian)")
+    subledger_txn: Optional[str] = Field(None, description="Nomor transaksi subledger persis (mis. nomor invoice AP/AR) — jurnal dari transaksi ini")
+    min_amount: Optional[float] = Field(None, description="Hanya baris dengan nilai absolut minimal N Rupiah")
+    group_by: Literal["none", "source", "account"] = Field("none", description="none = detail baris; source / account = ringkasan")
+
+
 # ── Operations ───────────────────────────────────────────────────────────────
 
 @app.post("/find_marts", operation_id="find_marts",
@@ -496,6 +527,24 @@ async def get_batch_yield(body: BatchYieldIn, caller: Caller = Depends(current_c
           summary="Pemakaian bahan per batch (standar vs aktual) dan lot bahan yang dipakai — juga penelusuran lot → batch")
 async def get_batch_material_usage(body: BatchMaterialIn, caller: Caller = Depends(current_caller)):
     return await _call(tools.get_batch_material_usage, caller, **body.model_dump())
+
+
+@app.post("/get_pl", operation_id="get_pl",
+          summary="Laba rugi (P&L) per periode / YTD dengan subtotal — mapping sama dengan laporan Financial Statement dashboard")
+async def get_pl(body: PlIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_pl, caller, **body.model_dump())
+
+
+@app.post("/get_trial_balance", operation_id="get_trial_balance",
+          summary="Trial balance satu periode: saldo awal, mutasi, saldo akhir per akun / pos / departemen")
+async def get_trial_balance(body: TbIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_trial_balance, caller, **body.model_dump())
+
+
+@app.post("/get_gl_journals", operation_id="get_gl_journals",
+          summary="Detail jurnal GL posted (13 bulan terakhir) dan transaksi subledger asalnya (invoice/receipt)")
+async def get_gl_journals(body: JournalIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_gl_journals, caller, **body.model_dump())
 
 
 @app.get("/health", include_in_schema=False)

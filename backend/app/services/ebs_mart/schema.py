@@ -110,6 +110,21 @@ _META_DDL = [
         updated_at        timestamptz DEFAULT now()
     )
     """,
+    # Natural account -> financial statement line, regenerated from the
+    # Financial Statement module's rules on every GL load (gl_mapping.py).
+    """
+    CREATE TABLE IF NOT EXISTS meta.gl_account_map (
+        account_code  text PRIMARY KEY,
+        account_desc  text,
+        account_type  text,
+        statement     text,
+        section       text,
+        section_order int,
+        line          text,
+        line_order    int,
+        sign          int
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS meta.mart_definition (
         mart_name  text PRIMARY KEY,
@@ -492,6 +507,75 @@ _CORE_DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_core_batch_lot_batch ON core.fact_batch_lot (batch_id)",
     "CREATE INDEX IF NOT EXISTS idx_core_batch_lot_lot ON core.fact_batch_lot (lot_number)",
+    # ── Phase 5: GL ──────────────────────────────────────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS core.fact_gl_balance (
+        code_combination_id bigint,
+        period_name        text,
+        period_year        int,
+        period_num         int,
+        period_start_date  date,
+        is_adjustment      boolean,
+        segment1           text,
+        segment2           text,
+        segment3           text,
+        segment4           text,
+        segment5           text,
+        segment6           text,
+        account_type       text,
+        begin_balance_dr   numeric,
+        begin_balance_cr   numeric,
+        period_net_dr      numeric,
+        period_net_cr      numeric,
+        src_last_update    timestamp,
+        loaded_at          timestamptz DEFAULT now(),
+        PRIMARY KEY (code_combination_id, period_name)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_core_gl_bal_period ON core.fact_gl_balance (period_year, period_num)",
+    """
+    CREATE TABLE IF NOT EXISTS core.dim_gl_segment_value (
+        segment_name   text,
+        segment_column text,
+        value          text,
+        description    text,
+        loaded_at      timestamptz DEFAULT now(),
+        PRIMARY KEY (segment_column, value)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS core.fact_gl_journal_line (
+        row_key            text PRIMARY KEY,
+        je_header_id       bigint,
+        je_line_num        int,
+        period_name        text,
+        effective_date     date,
+        posted_date        date,
+        batch_name         text,
+        journal_name       text,
+        je_source          text,
+        je_category        text,
+        currency_code      text,
+        code_combination_id bigint,
+        segment1           text,
+        segment2           text,
+        segment3           text,
+        segment4           text,
+        segment5           text,
+        segment6           text,
+        line_description   text,
+        entered_dr         numeric,
+        entered_cr         numeric,
+        accounted_dr       numeric,
+        accounted_cr       numeric,
+        subledger_entity   text,
+        subledger_txn_number text,
+        subledger_txn_count int,
+        src_last_update    timestamp,
+        loaded_at          timestamptz DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_core_gl_je_period ON core.fact_gl_journal_line (period_name)",
     # Latest Corporate rate to IDR per currency — what the Dashboard's AR
     # Outstanding report converts open balances with (not the invoice rate).
     """

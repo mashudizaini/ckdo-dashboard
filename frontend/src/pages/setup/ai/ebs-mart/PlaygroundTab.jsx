@@ -87,6 +87,19 @@ const TOOLS = {
     ["batch_no", "text"], ["ingredient", "text"], ["lot_number", "text"], ["over_pct", "number"],
     ["group_by", ["none", "ingredient"]],
   ],
+  get_pl: [
+    ["period", "text"], ["ytd", ["false", "true"]], ["department", "text"],
+    ["compare_prior_year", ["false", "true"]], ["level", ["line", "section"]],
+  ],
+  get_trial_balance: [
+    ["period", "text"], ["account", "text"], ["department", "text"], ["statement", ["", "BS", "PL"]],
+    ["group_by", ["account", "fs_line", "department"]],
+  ],
+  get_gl_journals: [
+    ["period", "text"], ["date_from", "date"], ["date_to", "date"], ["account", "text"], ["department", "text"],
+    ["source", "text"], ["category", "text"], ["text", "text"], ["subledger_txn", "text"], ["min_amount", "number"],
+    ["group_by", ["none", "source", "account"]],
+  ],
   find_marts: [["keywords", "text"]],
   get_data_freshness: [],
 };

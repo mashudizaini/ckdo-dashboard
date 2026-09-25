@@ -1,8 +1,9 @@
 """
 Definitions of the built marts (blueprint sections 5 and 6): phase 1 (AP,
 stock per lot, movement), phase 2 (PO, PR, inventory valuation), phase 3
-(sales orders, shipping, invoiced sales, AR aging, receipts) and phase 4 (OPM
-batches: status, yield, material usage by lot).
+(sales orders, shipping, invoiced sales, AR aging, receipts), phase 4 (OPM
+batches: status, yield, material usage by lot) and phase 5 (GL: trial
+balance, journal detail with subledger source, monthly P&L).
 
 Each mart is a MATERIALIZED VIEW over core.*, refreshed CONCURRENTLY after
 its ETL succeeds and once a day regardless (days_overdue and days_to_expiry
@@ -753,6 +754,111 @@ MART_SQL: dict[str, str] = {
           LEFT JOIN core.dim_item c       ON c.inventory_item_id = m.item_id
          WHERE m.line_type = -1
     """,
+
+    # ── Phase 5 ─────────────────────────────────────────────────────────────
+
+    # Blueprint 4.5: closing balance = begin_dr - begin_cr + net_dr - net_cr,
+    # in GL's debit-positive convention; end_balance_fs flips credit-normal
+    # accounts so liabilities, equity and revenue read positive, as the
+    # financial statements show them. segment3 is the department (COA
+    # Company.LineOfBusiness.Department.Account.Future1.Future2).
+    "gl_trial_balance": """
+        SELECT MD5(CONCAT_WS('|', b.period_name, b.segment4, b.segment3))              AS row_key,
+               b.period_name,
+               b.period_year,
+               b.period_num,
+               MIN(b.period_start_date)                                                AS period_start_date,
+               b.is_adjustment,
+               b.segment4                                                              AS account_code,
+               m.account_desc,
+               MAX(b.account_type)                                                     AS account_type,
+               m.statement,
+               m.section,
+               m.section_order,
+               m.line                                                                  AS fs_line,
+               m.line_order,
+               b.segment3                                                              AS dept_code,
+               d.description                                                           AS dept_desc,
+               SUM(b.begin_balance_dr - b.begin_balance_cr)                            AS begin_balance,
+               SUM(b.period_net_dr)                                                    AS period_dr,
+               SUM(b.period_net_cr)                                                    AS period_cr,
+               SUM(b.begin_balance_dr - b.begin_balance_cr + b.period_net_dr - b.period_net_cr) AS end_balance,
+               SUM(b.begin_balance_dr - b.begin_balance_cr + b.period_net_dr - b.period_net_cr)
+                   * COALESCE(MAX(m.sign), 1)                                          AS end_balance_fs
+          FROM core.fact_gl_balance b
+          LEFT JOIN meta.gl_account_map m       ON m.account_code = b.segment4
+          LEFT JOIN core.dim_gl_segment_value d ON d.segment_column = 'SEGMENT3' AND d.value = b.segment3
+         GROUP BY b.period_name, b.period_year, b.period_num, b.is_adjustment, b.segment4, m.account_desc,
+                  m.statement, m.section, m.section_order, m.line, m.line_order, b.segment3, d.description
+        HAVING SUM(ABS(b.begin_balance_dr) + ABS(b.begin_balance_cr) + ABS(b.period_net_dr) + ABS(b.period_net_cr)) <> 0
+    """,
+
+    "gl_journal_detail": """
+        WITH p AS (
+            SELECT DISTINCT period_name, period_year, period_num, is_adjustment FROM core.fact_gl_balance
+        )
+        SELECT j.row_key,
+               j.je_header_id,
+               j.je_line_num,
+               j.period_name,
+               p.period_year,
+               p.period_num,
+               COALESCE(p.is_adjustment, FALSE)                    AS is_adjustment,
+               j.effective_date,
+               j.posted_date,
+               j.batch_name,
+               j.journal_name,
+               j.je_source,
+               j.je_category,
+               j.segment4                                          AS account_code,
+               m.account_desc,
+               m.statement,
+               m.line                                              AS fs_line,
+               j.segment3                                          AS dept_code,
+               d.description                                       AS dept_desc,
+               j.line_description,
+               COALESCE(j.accounted_dr, 0)                         AS debit_idr,
+               COALESCE(j.accounted_cr, 0)                         AS credit_idr,
+               COALESCE(j.accounted_dr, 0) - COALESCE(j.accounted_cr, 0) AS net_idr,
+               j.currency_code,
+               j.entered_dr,
+               j.entered_cr,
+               j.subledger_entity,
+               j.subledger_txn_number,
+               j.subledger_txn_count
+          FROM core.fact_gl_journal_line j
+          LEFT JOIN p                           ON p.period_name = j.period_name
+          LEFT JOIN meta.gl_account_map m       ON m.account_code = j.segment4
+          LEFT JOIN core.dim_gl_segment_value d ON d.segment_column = 'SEGMENT3' AND d.value = j.segment3
+    """,
+
+    # Same population and signs as the Financial Statement report's P&L:
+    # revenue/expense-typed accounts only (account_type R, E — _fetch_pl),
+    # classified by number range, period activity only (no begin balance).
+    # UNMAPPED lines are kept so they can be reported, and excluded from
+    # every total by the tools, as the report excludes them.
+    "pl_monthly": """
+        SELECT MD5(CONCAT_WS('|', b.period_name, m.line, b.segment3, m.section))       AS row_key,
+               b.period_name,
+               b.period_year,
+               b.period_num,
+               MIN(b.period_start_date)                                                AS period_start_date,
+               b.is_adjustment,
+               m.section,
+               m.section_order,
+               m.line,
+               m.line_order,
+               b.segment3                                                              AS dept_code,
+               d.description                                                           AS dept_desc,
+               SUM(b.period_net_dr - b.period_net_cr) * m.sign                         AS amount
+          FROM core.fact_gl_balance b
+          JOIN meta.gl_account_map m ON m.account_code = b.segment4 AND m.statement = 'PL'
+          LEFT JOIN core.dim_gl_segment_value d ON d.segment_column = 'SEGMENT3' AND d.value = b.segment3
+         WHERE b.account_type IN ('R', 'E')
+         GROUP BY b.period_name, b.period_year, b.period_num, b.is_adjustment, m.section, m.section_order,
+                  m.line, m.line_order, m.sign, b.segment3, d.description
+        HAVING SUM(b.period_net_dr - b.period_net_cr) <> 0
+    """,
 }
 
 # Unique index per mart: required by REFRESH MATERIALIZED VIEW CONCURRENTLY,
@@ -775,6 +881,9 @@ MART_UNIQUE_INDEX: dict[str, list[str]] = {
     "batch_status": ["batch_id"],
     "batch_yield_variance": ["material_detail_id"],
     "batch_material_usage": ["row_key"],
+    "gl_trial_balance": ["row_key"],
+    "gl_journal_detail": ["row_key"],
+    "pl_monthly": ["row_key"],
 }
 
 MART_EXTRA_INDEXES: dict[str, list[str]] = {
@@ -795,6 +904,9 @@ MART_EXTRA_INDEXES: dict[str, list[str]] = {
     "batch_status": ["batch_no", "product_code", "plan_start_date"],
     "batch_yield_variance": ["batch_no", "item_code"],
     "batch_material_usage": ["batch_no", "item_code", "lot_number"],
+    "gl_trial_balance": ["period_name", "account_code"],
+    "gl_journal_detail": ["period_name", "account_code", "subledger_txn_number"],
+    "pl_monthly": ["period_year", "period_num"],
 }
 
 # Which marts to refresh after which job succeeds.
@@ -807,4 +919,5 @@ MARTS_BY_JOB: dict[str, list[str]] = {
     "etl_mart_om": ["so_backlog", "so_shipment_status", "sales_by_customer_item_month"],
     "etl_mart_ar": ["ar_aging", "ar_receipt", "sales_by_customer_item_month"],
     "etl_mart_opm": ["batch_status", "batch_yield_variance", "batch_material_usage"],
+    "etl_mart_gl": ["gl_trial_balance", "gl_journal_detail", "pl_monthly"],
 }

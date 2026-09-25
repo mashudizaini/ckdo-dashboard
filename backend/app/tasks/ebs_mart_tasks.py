@@ -16,6 +16,8 @@ Oracle EBS -> core.* -> REFRESH mart.*.
   etl_mart_ar         AR schedules, invoice lines, cash receipts and their
                       applications, incremental; latest Corporate FX rates.
   etl_mart_opm        OPM batch material lines and lot consumption per line.
+  etl_mart_gl         GL balances, segment descriptions, posted journal lines
+                      with subledger references, account -> statement map.
   refresh_ebs_marts   REFRESH every mart; scheduled daily because days_overdue
                       and days_to_expiry are computed at refresh time.
 
@@ -43,6 +45,7 @@ from app.database import get_oracle_connection
 from app.services.ebs_mart.constants import (
     EBS_OPERATING_UNIT_ID, EBS_PROCESS_ORG_ID, INVENTORY_CATEGORY_SET,
     OPM_COST_HISTORY_MONTHS, OPM_COST_METHOD, PR_DUMMY_USERS, SO_ORDER_TYPES,
+    EBS_COA_ID, EBS_LEDGER_ID, GL_BALANCE_FROM_YEAR, GL_JOURNAL_MONTHS,
 )
 from app.services.ebs_mart.mart_sql import MARTS_BY_JOB
 from app.tasks.celery_app import celery_app
@@ -815,7 +818,11 @@ def _extract_wm(cur_ora, sql: str, wm_expr: str, watermark, full: bool, params: 
     else:
         params["wm"] = watermark
         clause = f"AND {wm_expr} >= :wm - 1/24"
-    cur_ora.execute(sql.format(wm=clause, wm_expr=wm_expr, **fmt), params)
+    text = sql.format(wm=clause, wm_expr=wm_expr, **fmt)
+    # python-oracledb refuses a bind name the statement does not contain, so
+    # pass only the ones this statement uses (the GL extracts have no org).
+    params = {k: v for k, v in params.items() if f":{k}" in text}
+    cur_ora.execute(text, params)
     return cur_ora.fetchall()
 
 
@@ -1308,6 +1315,205 @@ def etl_mart_opm(year: int = None, month: int = None, full_refresh: bool = False
         refresh_marts_for_job(job)
         run.finish("success", rows_read, rows_upserted, wm_from=wm_from, wm_to=wm_to)
         logger.info("[%s] read=%s upserted=%s full=%s", job, rows_read, rows_upserted, full_refresh)
+    except Exception as e:
+        run.pg.rollback()
+        logger.error("[%s] failed: %s", job, e)
+        run.finish("failed", rows_read, rows_upserted, error=str(e), wm_from=wm_from)
+        run.close()
+        raise
+    run.close()
+    return {"status": "success", "rows_read": rows_read, "rows_upserted": rows_upserted}
+
+
+# ── Phase 5: GL ──────────────────────────────────────────────────────────────
+
+# Blueprint 4.5 filters for GL_BALANCES, plus the two the Financial
+# Statement module found it needed (summary_flag, enabled_flag — rollup
+# combinations also carry balances and double-count otherwise).
+_GL_BAL_WM = "gb.last_update_date"
+_GL_BAL_SQL = """
+    SELECT gb.code_combination_id, gb.period_name, gp.period_year, gp.period_num, gp.start_date,
+           gp.adjustment_period_flag, gcc.segment1, gcc.segment2, gcc.segment3, gcc.segment4, gcc.segment5,
+           gcc.segment6, gcc.account_type, gb.begin_balance_dr, gb.begin_balance_cr, gb.period_net_dr,
+           gb.period_net_cr, {wm_expr}
+      FROM gl_balances gb
+      JOIN gl_code_combinations gcc ON gcc.code_combination_id = gb.code_combination_id
+      JOIN gl_ledgers gl            ON gl.ledger_id = gb.ledger_id
+      JOIN gl_periods gp            ON gp.period_set_name = gl.period_set_name AND gp.period_name = gb.period_name
+     WHERE gb.ledger_id = :ledger
+       AND gb.actual_flag = 'A'
+       AND gb.currency_code = 'IDR'
+       AND gb.translated_flag IS NULL
+       AND gb.template_id IS NULL
+       AND gcc.summary_flag = 'N'
+       AND NVL(gcc.enabled_flag, 'Y') = 'Y'
+       AND gp.period_year >= :from_year
+       {wm}
+"""
+_GL_BAL_COLS = [
+    "code_combination_id", "period_name", "period_year", "period_num", "period_start_date", "is_adjustment",
+    "segment1", "segment2", "segment3", "segment4", "segment5", "segment6", "account_type",
+    "begin_balance_dr", "begin_balance_cr", "period_net_dr", "period_net_cr", "src_last_update",
+]
+
+# Descriptions of every value of every segment in the chart of accounts
+# (blueprint: "supaya user bisa bertanya 'biaya listrik' tanpa hafal nomor akun").
+_GL_SEG_SQL = """
+    SELECT s.segment_name, s.application_column_name, ffv.flex_value, SUBSTR(ffv.description, 1, 240)
+      FROM fnd_id_flex_segments s
+      JOIN fnd_flex_values_vl ffv ON ffv.flex_value_set_id = s.flex_value_set_id
+     WHERE s.application_id = 101 AND s.id_flex_code = 'GL#' AND s.id_flex_num = :coa
+"""
+
+# Posted journal lines in the window, with the subledger transaction behind
+# them (blueprint: "jurnal ini dari invoice mana?"). The XLA lookup is a
+# scalar subquery on the gl_sl_link index, so it costs one probe per line
+# and only for lines that came from a subledger; returned as
+# "ENTITY|TRANSACTION_NUMBER|COUNT" because a summarized journal line can
+# carry many transactions.
+_GL_JE_WM = "GREATEST(jeh.last_update_date, jel.last_update_date)"
+_GL_JE_SQL = """
+    SELECT jel.je_header_id, jel.je_line_num, jeh.period_name, NVL(jel.effective_date, jeh.default_effective_date),
+           jeh.posted_date, SUBSTR(jeb.name, 1, 240), SUBSTR(jeh.name, 1, 240), jst.user_je_source_name,
+           jct.user_je_category_name, jeh.currency_code, jel.code_combination_id, gcc.segment1, gcc.segment2,
+           gcc.segment3, gcc.segment4, gcc.segment5, gcc.segment6, SUBSTR(jel.description, 1, 240),
+           jel.entered_dr, jel.entered_cr, jel.accounted_dr, jel.accounted_cr,
+           CASE WHEN jel.gl_sl_link_id IS NOT NULL THEN (
+               SELECT MIN(xte.entity_code) || '|' || MIN(xte.transaction_number) || '|' || COUNT(DISTINCT xte.entity_id)
+                 FROM xla_ae_lines xal
+                 JOIN xla_ae_headers xah ON xah.ae_header_id = xal.ae_header_id
+                                        AND xah.application_id = xal.application_id
+                 JOIN xla.xla_transaction_entities xte ON xte.entity_id = xah.entity_id
+                                                      AND xte.application_id = xah.application_id
+                WHERE xal.gl_sl_link_id = jel.gl_sl_link_id
+                  AND xal.gl_sl_link_table = jel.gl_sl_link_table) END,
+           {wm_expr}
+      FROM gl_je_headers jeh
+      JOIN gl_je_lines jel           ON jel.je_header_id = jeh.je_header_id
+      JOIN gl_je_batches jeb         ON jeb.je_batch_id = jeh.je_batch_id
+      JOIN gl_code_combinations gcc  ON gcc.code_combination_id = jel.code_combination_id
+      LEFT JOIN gl_je_sources_tl jst    ON jst.je_source_name = jeh.je_source AND jst.language = 'US'
+      LEFT JOIN gl_je_categories_tl jct ON jct.je_category_name = jeh.je_category AND jct.language = 'US'
+     WHERE jeh.ledger_id = :ledger
+       AND jeh.status = 'P'
+       AND jeh.actual_flag = 'A'
+       AND jeh.currency_code <> 'STAT'
+       AND jeh.default_effective_date >= ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -:months)
+       {wm}
+"""
+_GL_JE_COLS = [
+    "row_key", "je_header_id", "je_line_num", "period_name", "effective_date", "posted_date", "batch_name",
+    "journal_name", "je_source", "je_category", "currency_code", "code_combination_id", "segment1", "segment2",
+    "segment3", "segment4", "segment5", "segment6", "line_description", "entered_dr", "entered_cr",
+    "accounted_dr", "accounted_cr", "subledger_entity", "subledger_txn_number", "subledger_txn_count",
+    "src_last_update",
+]
+
+
+def _rebuild_gl_account_map(cur):
+    """meta.gl_account_map from the Financial Statement module's own rules
+    (see app/services/ebs_mart/gl_mapping.py), for every natural account
+    that has a balance or a description."""
+    from app.services.ebs_mart.gl_mapping import classify
+    cur.execute("""
+        SELECT a.account_code, MAX(a.account_type), MAX(d.description)
+          FROM (SELECT segment4 AS account_code, account_type FROM core.fact_gl_balance
+                UNION SELECT value, NULL FROM core.dim_gl_segment_value WHERE segment_column = 'SEGMENT4') a
+          LEFT JOIN core.dim_gl_segment_value d ON d.segment_column = 'SEGMENT4' AND d.value = a.account_code
+         GROUP BY a.account_code
+    """)
+    rows = []
+    for code, acct_type, desc in cur.fetchall():
+        c = classify(code, acct_type)
+        rows.append((code, desc, acct_type, c["statement"], c["section"], c["section_order"], c["line"],
+                     c["line_order"], c["sign"]))
+    cur.execute("TRUNCATE meta.gl_account_map")
+    if rows:
+        execute_values(cur, """
+            INSERT INTO meta.gl_account_map (account_code, account_desc, account_type, statement, section,
+                                             section_order, line, line_order, sign)
+            VALUES %s
+        """, rows, page_size=_BATCH)
+    return len(rows)
+
+
+@celery_app.task(name="app.tasks.etl_tasks.etl_mart_gl")
+def etl_mart_gl(year: int = None, month: int = None, full_refresh: bool = False,
+                trigger_type: str = "SCHEDULE", triggered_by: str | None = None):
+    """GL balances (incremental on gl_balances.last_update_date, from
+    GL_BALANCE_FROM_YEAR), segment value descriptions (full), posted journal
+    lines of the last GL_JOURNAL_MONTHS months with subledger references
+    (incremental), and the account -> statement-line map."""
+    job = "etl_mart_gl"
+    run = _Run(job, trigger_type, triggered_by, {"full_refresh": full_refresh, "ledger_id": EBS_LEDGER_ID})
+    if not run.locked:
+        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.close()
+        return {"status": "skipped"}
+
+    rows_read = rows_upserted = 0
+    wm_from = wm_to = None
+    try:
+        cur = run.cur
+        wm_bal = _get_watermark(cur, job, "balances")
+        wm_je = _get_watermark(cur, job, "journals")
+        wm_from = None if full_refresh else min((w for w in (wm_bal, wm_je) if w), default=None)
+
+        ora = get_oracle_connection()
+        try:
+            cur_ora = ora.cursor()
+            cur_ora.arraysize = _BATCH
+            bals = _extract_wm(cur_ora, _GL_BAL_SQL, _GL_BAL_WM, wm_bal, full_refresh,
+                               params={"ledger": EBS_LEDGER_ID, "from_year": GL_BALANCE_FROM_YEAR})
+            cur_ora.execute(_GL_SEG_SQL, {"coa": EBS_COA_ID})
+            segs = cur_ora.fetchall()
+            jes = _extract_wm(cur_ora, _GL_JE_SQL, _GL_JE_WM, wm_je, full_refresh,
+                              params={"ledger": EBS_LEDGER_ID, "months": GL_JOURNAL_MONTHS})
+        finally:
+            ora.close()
+        rows_read = len(bals) + len(segs) + len(jes)
+
+        if full_refresh:
+            cur.execute("TRUNCATE core.fact_gl_balance, core.fact_gl_journal_line")
+
+        bal_rows = [
+            (_int(r[0]), r[1], _int(r[2]), _int(r[3]), r[4], (r[5] == "Y"), r[6], r[7], r[8], r[9], r[10], r[11],
+             r[12], _num(r[13]), _num(r[14]), _num(r[15]), _num(r[16]), r[17])
+            for r in bals
+        ]
+        rows_upserted += _upsert(cur, "core.fact_gl_balance", _GL_BAL_COLS, ["code_combination_id", "period_name"],
+                                 bal_rows)
+
+        cur.execute("TRUNCATE core.dim_gl_segment_value")
+        if segs:
+            execute_values(cur, """
+                INSERT INTO core.dim_gl_segment_value (segment_name, segment_column, value, description) VALUES %s
+                ON CONFLICT (segment_column, value) DO UPDATE SET description = EXCLUDED.description
+            """, [(s[0], s[1], s[2], s[3]) for s in segs], page_size=_BATCH)
+
+        je_rows = []
+        for r in jes:
+            sub = (r[22] or "").split("|") if r[22] else []
+            entity, txn, cnt = (sub + [None, None, None])[:3]
+            je_rows.append((
+                f"{int(r[0])}|{int(r[1])}", _int(r[0]), _int(r[1]), r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9],
+                _int(r[10]), r[11], r[12], r[13], r[14], r[15], r[16], r[17], _num(r[18]), _num(r[19]),
+                _num(r[20]), _num(r[21]), entity or None, txn or None, int(cnt) if cnt else None, r[23],
+            ))
+        rows_upserted += _upsert(cur, "core.fact_gl_journal_line", _GL_JE_COLS, ["row_key"], je_rows)
+
+        mapped = _rebuild_gl_account_map(cur)
+
+        new_bal = max((r[-1] for r in bal_rows if r[-1]), default=None)
+        new_je = max((r[-1] for r in je_rows if r[-1]), default=None)
+        _set_watermark(cur, job, "balances", new_bal)
+        _set_watermark(cur, job, "journals", new_je)
+        wm_to = max([w for w in (new_bal, new_je, wm_bal, wm_je) if w], default=None)
+        run.pg.commit()
+        refresh_marts_for_job(job)
+        run.finish("success", rows_read, rows_upserted, wm_from=wm_from, wm_to=wm_to)
+        logger.info("[%s] read=%s upserted=%s accounts mapped=%s full=%s", job, rows_read, rows_upserted, mapped,
+                    full_refresh)
     except Exception as e:
         run.pg.rollback()
         logger.error("[%s] failed: %s", job, e)

@@ -421,6 +421,70 @@ COLUMN_CATALOG.update({
     },
 })
 
+_GLP = {
+    "row_key": ("Kunci baris", []),
+    "period_name": ("Periode GL, format JUL-26 (ADJ-26 = periode penyesuaian)", ["periode", "bulan"]),
+    "period_year": ("Tahun fiskal", ["tahun"]),
+    "period_num": ("Nomor bulan fiskal (13 = penyesuaian)", []),
+    "period_start_date": ("Tanggal awal periode", []),
+    "is_adjustment": ("TRUE = periode penyesuaian (ADJ)", []),
+}
+_DEPT = {
+    "dept_code": ("Kode departemen (segment3 COA)", ["departemen", "cost center", "bagian"]),
+    "dept_desc": ("Nama departemen", ["departemen", "divisi"]),
+}
+COLUMN_CATALOG.update({
+    "gl_trial_balance": {
+        **_GLP, **_DEPT,
+        "account_code": ("Nomor akun natural (segment4) — filter awalan", ["akun", "nomor akun", "COA"]),
+        "account_desc": ("Nama akun", ["nama akun", "listrik", "gaji", "biaya"]),
+        "account_type": ("Tipe akun Oracle: A aset, L kewajiban, O ekuitas, R pendapatan, E beban", []),
+        "statement": ("BS = neraca, PL = laba rugi", ["neraca", "laba rugi"]),
+        "section": ("Bagian laporan (CURRENT ASSETS, SALES, OPERATING EXPENSES, ...)", []),
+        "section_order": ("Urutan bagian", []),
+        "fs_line": ("Pos laporan keuangan (sama dengan laporan Financial Statement)", ["pos", "line item"]),
+        "line_order": ("Urutan pos", []),
+        "begin_balance": ("Saldo awal (debit positif)", ["saldo awal"]),
+        "period_dr": ("Mutasi debit periode", ["debit"]),
+        "period_cr": ("Mutasi kredit periode", ["kredit"]),
+        "end_balance": ("Saldo akhir (debit positif)", ["saldo akhir"]),
+        "end_balance_fs": ("Saldo akhir menurut penyajian laporan (kewajiban/ekuitas/pendapatan positif)", ["saldo"]),
+    },
+    "gl_journal_detail": {
+        **_GLP, **_DEPT,
+        "je_header_id": ("ID jurnal", []),
+        "je_line_num": ("Nomor baris jurnal", []),
+        "effective_date": ("Tanggal efektif", ["tanggal jurnal"]),
+        "posted_date": ("Tanggal posting", []),
+        "batch_name": ("Nama batch jurnal", []),
+        "journal_name": ("Nama jurnal", ["jurnal"]),
+        "je_source": ("Sumber jurnal (Payables, Receivables, Manual, Inventory, ...)", ["source", "sumber jurnal"]),
+        "je_category": ("Kategori jurnal", ["category"]),
+        "account_code": ("Nomor akun", ["akun"]),
+        "account_desc": ("Nama akun", ["nama akun"]),
+        "statement": ("BS atau PL", []),
+        "fs_line": ("Pos laporan keuangan", []),
+        "line_description": ("Keterangan baris jurnal", ["keterangan", "deskripsi"]),
+        "debit_idr": ("Debit (IDR, accounted)", ["debit"]),
+        "credit_idr": ("Kredit (IDR, accounted)", ["kredit"]),
+        "net_idr": ("Debit − kredit", []),
+        "currency_code": ("Mata uang jurnal", []),
+        "entered_dr": ("Debit mata uang jurnal", []),
+        "entered_cr": ("Kredit mata uang jurnal", []),
+        "subledger_entity": ("Jenis transaksi subledger (AP_INVOICES, TRANSACTIONS, RECEIPTS, ...)", ["subledger", "SLA"]),
+        "subledger_txn_number": ("Nomor transaksi subledger (mis. nomor invoice) di balik baris jurnal", ["invoice asal", "dokumen sumber", "drill down"]),
+        "subledger_txn_count": ("Jumlah transaksi subledger yang diringkas dalam baris ini", []),
+    },
+    "pl_monthly": {
+        **_GLP, **_DEPT,
+        "section": ("Bagian laba rugi: SALES, COGS, OPERATING EXPENSES, OTHER INCOME/EXPENSE, TAX, OTHER COMPREHENSIVE INCOME, UNMAPPED", ["bagian"]),
+        "section_order": ("Urutan bagian", []),
+        "line": ("Pos laba rugi (sama dengan laporan Financial Statement)", ["pos", "biaya", "pendapatan"]),
+        "line_order": ("Urutan pos", []),
+        "amount": ("Nilai IDR dengan tanda penyajian: pendapatan positif, biaya positif sebagai biaya", ["nilai", "laba rugi", "profit", "beban"]),
+    },
+})
+
 # Domain + mart-level synonyms, used by find_marts in addition to the column
 # synonyms above.
 MART_SYNONYMS: dict[str, list[str]] = {
@@ -441,6 +505,9 @@ MART_SYNONYMS: dict[str, list[str]] = {
     "batch_status": ["batch", "bets", "produksi", "status batch", "jadwal produksi", "on time", "OPM"],
     "batch_yield_variance": ["yield", "rendemen", "hasil produksi", "output batch", "by-product"],
     "batch_material_usage": ["pemakaian bahan", "konsumsi bahan", "lot bahan", "traceability", "penelusuran lot", "bahan baku batch"],
+    "gl_trial_balance": ["trial balance", "neraca saldo", "saldo akun", "TB", "neraca", "balance sheet", "COA"],
+    "gl_journal_detail": ["jurnal", "journal", "GL", "posting", "drill down", "sumber jurnal", "SLA"],
+    "pl_monthly": ["laba rugi", "profit", "P&L", "rugi laba", "beban", "biaya", "pendapatan", "income statement", "opex"],
 }
 
 # (domain, question, sql). Blueprint 6.5 plus common phase-1 questions.
@@ -536,6 +603,19 @@ GOLDEN_QUERIES: list[tuple[str, str, str]] = [
     ("OPM", "Lot bahan dipakai di batch mana",
      "SELECT batch_no, product_code, item_desc, lot_qty_consumed, lot_uom, last_txn_date FROM mart.batch_material_usage "
      "WHERE lot_number = '<nomor lot>' ORDER BY last_txn_date"),
+    ("GL", "Laba rugi per bagian tahun ini",
+     "SELECT section, SUM(amount) AS nilai_idr FROM mart.pl_monthly WHERE period_year = EXTRACT(YEAR FROM CURRENT_DATE) "
+     "AND section <> 'UNMAPPED' GROUP BY section, section_order ORDER BY section_order"),
+    ("GL", "Biaya operasional per departemen tahun ini",
+     "SELECT dept_desc, SUM(amount) AS biaya_idr FROM mart.pl_monthly WHERE section = 'OPERATING EXPENSES' "
+     "AND period_year = EXTRACT(YEAR FROM CURRENT_DATE) GROUP BY dept_desc ORDER BY 2 DESC"),
+    ("GL", "Saldo akun kas & bank akhir bulan lalu",
+     "SELECT account_code, account_desc, SUM(end_balance) AS saldo_idr FROM mart.gl_trial_balance "
+     "WHERE fs_line = 'CASH & CASH EQUIVALENTS' AND period_start_date = DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' "
+     "AND NOT is_adjustment GROUP BY account_code, account_desc ORDER BY account_code"),
+    ("GL", "Jurnal dari satu invoice",
+     "SELECT effective_date, je_source, account_code, account_desc, debit_idr, credit_idr FROM mart.gl_journal_detail "
+     "WHERE subledger_txn_number = '<nomor invoice>' ORDER BY effective_date"),
     ("INV", "Nilai persediaan per kategori",
      "SELECT item_category, SUM(value_idr) AS nilai_idr FROM mart.inv_valuation GROUP BY item_category ORDER BY 2 DESC"),
 ]

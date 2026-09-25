@@ -49,12 +49,21 @@ SO_ORDER_TYPES = ("SO-LOCAL", "SO-EXPORT")
 SO_EXPORT_TYPE = "SO-EXPORT"
 SO_CMO_LINE_TYPE = "SO-TOLL IN-LOCAL"
 
+# GL: balances from this fiscal year on (the Financial Statement report goes
+# back to 2015 for its annual columns, but chat questions are about recent
+# years and gl_balances grows by one row per account combination per period).
+GL_BALANCE_FROM_YEAR = 2020
+# Journal lines kept in the mart: the current month plus this many before.
+# GL_JE_LINES is the largest GL table and every subledger line carries an XLA
+# lookup, so the window is what keeps the extract gentle on production EBS.
+GL_JOURNAL_MONTHS = 13
+
 # Guardrails for run_sql and every intent tool (blueprint section 7).
 MAX_ROWS = 500
 STATEMENT_TIMEOUT = "15s"
 
-# One entry per mart in the blueprint's catalog (section 5). Phases 1-4
-# are built; later phases are listed so the admin overview shows the whole
+# One entry per mart in the blueprint's catalog (section 5). All five
+# phases are built; later phases are listed so the admin overview shows the whole
 # roadmap and find_marts can say "not available yet" instead of nothing.
 #
 #   source_jobs: eis.etl_job_log job names whose last successful run is the
@@ -196,12 +205,30 @@ MARTS: dict[str, dict] = {
         "source_jobs": ["etl_mart_opm"],
         "unique_key": ["row_key"],
     },
-    "gl_trial_balance": {"domain": "GL", "phase": 5, "built": False, "grain": "Akun × periode",
-                         "description": "Trial balance ledger 2022.", "sources": "GL_BALANCES, GL_CODE_COMBINATIONS", "source_jobs": []},
-    "gl_journal_detail": {"domain": "GL", "phase": 5, "built": False, "grain": "Baris jurnal posted",
-                          "description": "Detail jurnal GL.", "sources": "GL_JE_HEADERS, GL_JE_LINES", "source_jobs": []},
-    "pl_monthly": {"domain": "GL", "phase": 5, "built": False, "grain": "Pos laba rugi × bulan",
-                   "description": "Laba rugi bulanan.", "sources": "gl_trial_balance + mapping", "source_jobs": []},
+    "gl_trial_balance": {
+        "domain": "GL", "phase": 5, "built": True,
+        "grain": "Akun × departemen × periode GL (ledger 2022, IDR)",
+        "description": "Trial balance: saldo awal, mutasi debit/kredit, saldo akhir per akun dan departemen, dengan pos neraca / laba rugi.",
+        "sources": "GL_BALANCES, GL_CODE_COMBINATIONS, FND_FLEX_VALUES",
+        "source_jobs": ["etl_mart_gl"],
+        "unique_key": ["row_key"],
+    },
+    "gl_journal_detail": {
+        "domain": "GL", "phase": 5, "built": True,
+        "grain": "Baris jurnal posted (13 bulan terakhir) + transaksi subledger asal",
+        "description": "Detail jurnal GL: source, category, akun, departemen, debit/kredit IDR, dan transaksi subledger (invoice/receipt) di balik baris jurnal.",
+        "sources": "GL_JE_HEADERS, GL_JE_LINES, XLA_AE_LINES, XLA_TRANSACTION_ENTITIES",
+        "source_jobs": ["etl_mart_gl"],
+        "unique_key": ["row_key"],
+    },
+    "pl_monthly": {
+        "domain": "GL", "phase": 5, "built": True,
+        "grain": "Pos laba rugi × departemen × periode GL",
+        "description": "Laba rugi bulanan dengan mapping akun yang sama persis dengan laporan Financial Statement dashboard.",
+        "sources": "GL_BALANCES + mapping akun Financial Statement (meta.gl_account_map)",
+        "source_jobs": ["etl_mart_gl"],
+        "unique_key": ["row_key"],
+    },
 }
 
 BUILT_MARTS = [name for name, m in MARTS.items() if m.get("built")]

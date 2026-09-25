@@ -937,3 +937,194 @@ def get_batch_material_usage(caller: Caller, batch_no: str | None = None, ingred
         """
     params = {"bn": _val(batch_no), "i": _val(ingredient), "lot": _val(lot_number), "o": over_pct}
     return _run(caller, "batch_material_usage", sql, params, "get_batch_material_usage", args)
+
+
+# ── GL (phase 5) ─────────────────────────────────────────────────────────────
+
+_MON = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+
+
+def _gl_period_filter(period: str | None, ytd: bool = False) -> tuple[str, dict]:
+    """period YYYY -> every period of that fiscal year (including the
+    adjustment period, as the Financial Statement report's FY column does);
+    YYYY-MM -> that month; with ytd -> months 1..MM of that year, adjustment
+    period excluded (the report's YTD columns). MON-YY is accepted too."""
+    import re as _re
+    if not period:
+        return "TRUE", {}
+    p = str(period).strip().upper()
+    m = _re.match(r"^([A-Z]{3})-(\d{2})$", p)
+    if m and m.group(1) in _MON:
+        year, month = 2000 + int(m.group(2)), _MON.index(m.group(1)) + 1
+    else:
+        m = _re.match(r"^(\d{4})(?:-(\d{1,2}))?$", p)
+        if not m:
+            raise sql_guard.SqlRejected(f"Format periode '{period}' tidak dikenal — pakai YYYY, YYYY-MM, atau JUL-26.")
+        year, month = int(m.group(1)), int(m.group(2)) if m.group(2) else None
+    if month is None:
+        return "period_year = %(py)s", {"py": year}
+    if ytd:
+        return "period_year = %(py)s AND period_num <= %(pn)s AND NOT is_adjustment", {"py": year, "pn": month}
+    return "period_year = %(py)s AND period_num = %(pn)s AND NOT is_adjustment", {"py": year, "pn": month}
+
+
+_ACCOUNT_FILTER = """(%(acc)s::text IS NULL OR account_code LIKE %(acc)s::text || '%%'
+                      OR account_desc ILIKE '%%' || %(acc)s::text || '%%')"""
+_DEPT_FILTER = """(%(dept)s::text IS NULL OR dept_code = %(dept)s::text OR dept_desc ILIKE '%%' || %(dept)s::text || '%%')"""
+
+
+def get_pl(caller: Caller, period: str, ytd: bool = False, department: str | None = None,
+           compare_prior_year: bool = False, level: str = "line") -> dict:
+    """Profit & loss in the Financial Statement report's layout: lines by
+    section, then the report's subtotals (net sales, gross profit, profit
+    before / after tax, total comprehensive income). compare_prior_year
+    adds the same period one year earlier."""
+    args = {"period": period, "ytd": ytd, "department": department, "compare_prior_year": compare_prior_year,
+            "level": level}
+    cond, params = _gl_period_filter(period, ytd)
+    params.update({"dept": _val(department)})
+    prior_cond = "FALSE"
+    if compare_prior_year and "py" in params:
+        prior_cond = cond.replace("%(py)s", "(%(py)s - 1)")
+    grp = "section, section_order" if level == "section" else "section, section_order, line, line_order"
+    sel = "section" if level == "section" else "section, line"
+    sql = f"""
+        WITH base AS (
+            SELECT section, section_order, line, line_order,
+                   SUM(amount) FILTER (WHERE {cond})       AS amount_idr,
+                   SUM(amount) FILTER (WHERE {prior_cond}) AS amount_prior_year_idr
+              FROM mart.pl_monthly
+             WHERE ({cond} OR {prior_cond}) AND {_DEPT_FILTER}
+             GROUP BY section, section_order, line, line_order
+        ), lines AS (
+            SELECT {sel}, MIN(section_order) AS so, MIN({'0' if level == 'section' else 'line_order'}) AS lo,
+                   SUM(amount_idr) AS amount_idr, SUM(amount_prior_year_idr) AS amount_prior_year_idr
+              FROM base WHERE section <> 'UNMAPPED' GROUP BY {grp}
+        ), s AS (
+            SELECT section, SUM(amount_idr) a, SUM(amount_prior_year_idr) p FROM base GROUP BY section
+        ), tot AS (
+            SELECT
+              COALESCE(MAX(a) FILTER (WHERE section = 'SALES'), 0) AS sales,
+              COALESCE(MAX(a) FILTER (WHERE section = 'COGS'), 0) AS cogs,
+              COALESCE(MAX(a) FILTER (WHERE section = 'OPERATING EXPENSES'), 0) AS opex,
+              COALESCE(MAX(a) FILTER (WHERE section = 'OTHER INCOME/EXPENSE'), 0) AS other,
+              COALESCE(MAX(a) FILTER (WHERE section = 'TAX'), 0) AS tax,
+              COALESCE(MAX(a) FILTER (WHERE section = 'OTHER COMPREHENSIVE INCOME'), 0) AS oci,
+              COALESCE(MAX(p) FILTER (WHERE section = 'SALES'), 0) AS p_sales,
+              COALESCE(MAX(p) FILTER (WHERE section = 'COGS'), 0) AS p_cogs,
+              COALESCE(MAX(p) FILTER (WHERE section = 'OPERATING EXPENSES'), 0) AS p_opex,
+              COALESCE(MAX(p) FILTER (WHERE section = 'OTHER INCOME/EXPENSE'), 0) AS p_other,
+              COALESCE(MAX(p) FILTER (WHERE section = 'TAX'), 0) AS p_tax,
+              COALESCE(MAX(p) FILTER (WHERE section = 'OTHER COMPREHENSIVE INCOME'), 0) AS p_oci,
+              COALESCE(MAX(a) FILTER (WHERE section = 'UNMAPPED'), 0) AS unmapped
+            FROM s
+        )
+        SELECT {'section' if level == 'section' else 'section, line'}, amount_idr, amount_prior_year_idr, so, lo
+          FROM lines
+        UNION ALL SELECT {"'TOTAL'" if level == 'section' else "'TOTAL', 'NET SALES'"}, sales, p_sales, 10, 1 FROM tot
+        UNION ALL SELECT {"'TOTAL'" if level == 'section' else "'TOTAL', 'GROSS PROFIT'"}, sales - cogs, p_sales - p_cogs, 10, 2 FROM tot
+        UNION ALL SELECT {"'TOTAL'" if level == 'section' else "'TOTAL', 'PROFIT BEFORE TAX'"}, sales - cogs - opex + other,
+                         p_sales - p_cogs - p_opex + p_other, 10, 3 FROM tot
+        UNION ALL SELECT {"'TOTAL'" if level == 'section' else "'TOTAL', 'PROFIT AFTER TAX'"}, sales - cogs - opex + other + tax,
+                         p_sales - p_cogs - p_opex + p_other + p_tax, 10, 4 FROM tot
+        UNION ALL SELECT {"'TOTAL'" if level == 'section' else "'TOTAL', 'TOTAL COMPREHENSIVE INCOME'"},
+                         sales - cogs - opex + other + tax + oci, p_sales - p_cogs - p_opex + p_other + p_tax + p_oci, 10, 5 FROM tot
+        UNION ALL SELECT {"'UNMAPPED'" if level == 'section' else "'UNMAPPED', 'AKUN BELUM TERPETAKAN (tidak masuk total)'"},
+                         unmapped, NULL, 11, 1 FROM tot WHERE unmapped <> 0
+        ORDER BY so, lo
+    """
+    return _run(caller, "pl_monthly", sql, params, "get_pl", args)
+
+
+def get_trial_balance(caller: Caller, period: str, account: str | None = None, department: str | None = None,
+                      statement: str | None = None, group_by: str = "account") -> dict:
+    """Trial balance for one period (month or MON-YY). Balances in GL's
+    debit-positive convention (begin, dr, cr, end) plus end_balance_fs in the
+    statement's reading (liabilities/equity positive)."""
+    args = {"period": period, "account": account, "department": department, "statement": statement,
+            "group_by": group_by}
+    cond, params = _gl_period_filter(period)
+    if "pn" not in params:
+        raise sql_guard.SqlRejected("Trial balance butuh satu periode bulan (YYYY-MM atau JUL-26), bukan setahun.")
+    params.update({"acc": _val(account), "dept": _val(department), "st": _val(statement)})
+    where = f"""
+         WHERE {cond}
+           AND {_ACCOUNT_FILTER}
+           AND {_DEPT_FILTER}
+           AND (%(st)s::text IS NULL OR statement = UPPER(%(st)s::text))
+    """
+    measures = """SUM(begin_balance) AS begin_balance, SUM(period_dr) AS period_dr, SUM(period_cr) AS period_cr,
+                  SUM(end_balance) AS end_balance, SUM(end_balance_fs) AS end_balance_fs"""
+    if group_by == "fs_line":
+        sql = f"""
+            SELECT statement, section, fs_line, {measures}
+              FROM mart.gl_trial_balance {where}
+             GROUP BY statement, section, section_order, fs_line, line_order
+             ORDER BY statement, section_order, line_order
+        """
+    elif group_by == "department":
+        sql = f"""
+            SELECT dept_code, MAX(dept_desc) AS dept_desc, {measures}
+              FROM mart.gl_trial_balance {where}
+             GROUP BY dept_code ORDER BY dept_code
+        """
+    else:
+        sql = f"""
+            SELECT account_code, MAX(account_desc) AS account_desc, MAX(statement) AS statement,
+                   MAX(fs_line) AS fs_line, {measures}
+              FROM mart.gl_trial_balance {where}
+             GROUP BY account_code ORDER BY account_code
+        """
+    return _run(caller, "gl_trial_balance", sql, params, "get_trial_balance", args)
+
+
+def get_gl_journals(caller: Caller, period: str | None = None, date_from: date | None = None,
+                    date_to: date | None = None, account: str | None = None, department: str | None = None,
+                    source: str | None = None, category: str | None = None, text: str | None = None,
+                    subledger_txn: str | None = None, min_amount: float | None = None,
+                    group_by: str = "none") -> dict:
+    """Posted journal lines of the last months (see GL_JOURNAL_MONTHS), with
+    source, category and the subledger transaction behind each line."""
+    args = {"period": period, "date_from": date_from, "date_to": date_to, "account": account,
+            "department": department, "source": source, "category": category, "text": text,
+            "subledger_txn": subledger_txn, "min_amount": min_amount, "group_by": group_by}
+    cond, params = _gl_period_filter(period)
+    params.update({"df": date_from, "dt": date_to, "acc": _val(account), "dept": _val(department),
+                   "src": _val(source), "cat": _val(category), "txt": _val(text), "sub": _val(subledger_txn),
+                   "min": min_amount})
+    where = f"""
+         WHERE {cond}
+           AND (%(df)s::date IS NULL OR effective_date >= %(df)s::date)
+           AND (%(dt)s::date IS NULL OR effective_date <= %(dt)s::date)
+           AND {_ACCOUNT_FILTER}
+           AND {_DEPT_FILTER}
+           AND (%(src)s::text IS NULL OR je_source ILIKE %(src)s::text || '%%')
+           AND (%(cat)s::text IS NULL OR je_category ILIKE %(cat)s::text || '%%')
+           AND (%(txt)s::text IS NULL OR line_description ILIKE '%%' || %(txt)s::text || '%%'
+                                      OR journal_name ILIKE '%%' || %(txt)s::text || '%%')
+           AND (%(sub)s::text IS NULL OR UPPER(subledger_txn_number) = UPPER(%(sub)s::text))
+           AND (%(min)s::numeric IS NULL OR ABS(net_idr) >= %(min)s::numeric)
+    """
+    if group_by == "source":
+        sql = f"""
+            SELECT je_source, je_category, COUNT(*) AS jml_baris, SUM(debit_idr) AS debit_idr,
+                   SUM(credit_idr) AS credit_idr
+              FROM mart.gl_journal_detail {where}
+             GROUP BY je_source, je_category ORDER BY debit_idr DESC
+        """
+    elif group_by == "account":
+        sql = f"""
+            SELECT account_code, MAX(account_desc) AS account_desc, COUNT(*) AS jml_baris,
+                   SUM(debit_idr) AS debit_idr, SUM(credit_idr) AS credit_idr, SUM(net_idr) AS net_idr
+              FROM mart.gl_journal_detail {where}
+             GROUP BY account_code ORDER BY ABS(SUM(net_idr)) DESC
+        """
+    else:
+        sql = f"""
+            SELECT effective_date, period_name, je_source, je_category, journal_name, account_code, account_desc,
+                   dept_code, line_description, debit_idr, credit_idr, currency_code, subledger_entity,
+                   subledger_txn_number, subledger_txn_count
+              FROM mart.gl_journal_detail {where}
+             ORDER BY effective_date DESC, je_header_id, je_line_num
+        """
+    return _run(caller, "gl_journal_detail", sql, params, "get_gl_journals", args)

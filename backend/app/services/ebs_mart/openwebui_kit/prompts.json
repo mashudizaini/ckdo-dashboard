@@ -88,5 +88,25 @@
     "command": "/lacak-lot",
     "title": "Lot bahan dipakai di batch mana",
     "content": "Lot bahan {{nomor_lot}} dipakai di batch mana saja, berapa qty-nya, dan produk apa yang dihasilkan."
+  },
+  {
+    "command": "/laba-rugi",
+    "title": "Laba rugi",
+    "content": "Laba rugi periode {{periode | bulan lalu}} dibanding periode yang sama tahun lalu, per pos, dengan gross profit dan laba setelah pajak."
+  },
+  {
+    "command": "/tb",
+    "title": "Trial balance",
+    "content": "Trial balance periode {{periode | bulan lalu}}, per pos laporan keuangan (neraca dan laba rugi)."
+  },
+  {
+    "command": "/biaya-departemen",
+    "title": "Biaya per departemen",
+    "content": "Biaya operasional per departemen periode {{periode | tahun ini}} (YTD), urut terbesar."
+  },
+  {
+    "command": "/jurnal-invoice",
+    "title": "Jurnal dari dokumen",
+    "content": "Jurnal GL yang berasal dari transaksi {{nomor_invoice}}: tanggal, akun, debit/kredit."
   }
 ]
