@@ -25,8 +25,10 @@ saldo akun, neraca, kas & bank, jurnal, posting, jurnal dari invoice mana, akun 
   sebutkan bila ada.
 - Tahun penuh (period = YYYY) termasuk periode penyesuaian; YTD (ytd = true) tidak.
 - Nilai dalam Rupiah penuh.
-- Saldo akun di neraca dari trial balance TIDAK memuat laba tahun berjalan yang belum ditutup ke laba ditahan;
-  untuk neraca lengkap, arahkan ke laporan Financial Statement dashboard.
+- Neraca (get_trial_balance group_by fs_line, tanpa filter akun/departemen): baris RETAINED EARNINGS - CURRENT
+  YEAR dan OTHER COMPREHENSIVE INCOME - CURRENT YEAR diisi laba setelah pajak / OCI YTD tahun itu (belum ditutup
+  di GL) — sama dengan laporan Financial Statement dashboard. Per akun (group_by account) saldo akun itu masih 0
+  sampai tutup buku; jelaskan bila ditanya.
 
 ## Jebakan umum
 - "Biaya listrik" dll.: cari dengan nama akun di parameter account (cocok sebagian) — jangan menebak nomor akun.

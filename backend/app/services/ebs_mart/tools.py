@@ -1055,7 +1055,37 @@ def get_trial_balance(caller: Caller, period: str, account: str | None = None, d
     """
     measures = """SUM(begin_balance) AS begin_balance, SUM(period_dr) AS period_dr, SUM(period_cr) AS period_cr,
                   SUM(end_balance) AS end_balance, SUM(end_balance_fs) AS end_balance_fs"""
-    if group_by == "fs_line":
+    marts = ["gl_trial_balance"]
+    if group_by == "fs_line" and not account and not department and statement in (None, "", "BS", "bs"):
+        # Current-year retained earnings and OCI are not in the GL until the
+        # year is closed. The Financial Statement report fills them with the
+        # year-to-date P&L (get_balance_sheet); doing the same here makes the
+        # two balance sheets agree line for line (verified at SEP-26).
+        marts.append("pl_monthly")
+        sql = f"""
+            WITH tb AS (
+                SELECT statement, section, section_order, fs_line, line_order, {measures}
+                  FROM mart.gl_trial_balance {where}
+                 GROUP BY statement, section, section_order, fs_line, line_order
+            ), pl AS (
+                SELECT COALESCE(SUM(amount) FILTER (WHERE section IN ('SALES', 'OTHER INCOME/EXPENSE', 'TAX')), 0)
+                     - COALESCE(SUM(amount) FILTER (WHERE section IN ('COGS', 'OPERATING EXPENSES')), 0) AS pat,
+                       COALESCE(SUM(amount) FILTER (WHERE section = 'OTHER COMPREHENSIVE INCOME'), 0) AS oci
+                  FROM mart.pl_monthly
+                 WHERE period_year = %(py)s AND period_num <= %(pn)s AND NOT is_adjustment
+            )
+            SELECT statement, section, fs_line, begin_balance, period_dr, period_cr, end_balance, end_balance_fs
+              FROM (
+                SELECT * FROM tb
+                 WHERE fs_line NOT IN ('RETAINED EARNINGS - CURRENT YEAR', 'OTHER COMPREHENSIVE INCOME - CURRENT YEAR')
+                UNION ALL
+                SELECT 'BS', 'EQUITY', 5, 'RETAINED EARNINGS - CURRENT YEAR', 3, NULL, NULL, NULL, NULL, pat FROM pl
+                UNION ALL
+                SELECT 'BS', 'EQUITY', 5, 'OTHER COMPREHENSIVE INCOME - CURRENT YEAR', 5, NULL, NULL, NULL, NULL, oci FROM pl
+              ) x
+             ORDER BY statement, section_order, line_order
+        """
+    elif group_by == "fs_line":
         sql = f"""
             SELECT statement, section, fs_line, {measures}
               FROM mart.gl_trial_balance {where}
@@ -1075,7 +1105,7 @@ def get_trial_balance(caller: Caller, period: str, account: str | None = None, d
               FROM mart.gl_trial_balance {where}
              GROUP BY account_code ORDER BY account_code
         """
-    return _run(caller, "gl_trial_balance", sql, params, "get_trial_balance", args)
+    return _run(caller, marts, sql, params, "get_trial_balance", args)
 
 
 def get_gl_journals(caller: Caller, period: str | None = None, date_from: date | None = None,
