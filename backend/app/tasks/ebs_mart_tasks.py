@@ -1172,7 +1172,9 @@ def etl_mart_ar(year: int = None, month: int = None, full_refresh: bool = False,
 # ── Phase 4: OPM batches ─────────────────────────────────────────────────────
 
 # One row per batch material line (products, by-products and ingredients),
-# header columns repeated. Watermark over header and line: recording actual
+# header columns repeated. The line unit is DTL_UM: ITEM_UM is the 11i
+# column and is empty on every row in this instance (eis.fact_batch reads
+# it, which is why its product_uom is always NULL). Watermark over header and line: recording actual
 # consumption or yield updates GME_MATERIAL_DETAILS without touching the
 # header, which is why eis.fact_batch (header watermark only) misses it.
 _BATCH_MAT_WM = "GREATEST(gbh.last_update_date, gmd.last_update_date)"
@@ -1180,8 +1182,8 @@ _BATCH_MAT_SQL = """
     SELECT gmd.material_detail_id, gbh.batch_id, TO_CHAR(gbh.batch_no), gbh.organization_id, gbh.batch_status,
            ffm.formula_no, ffm.formula_vers, gbh.plan_start_date, gbh.actual_start_date, gbh.due_date,
            gbh.plan_cmplt_date, gbh.actual_cmplt_date, gbh.batch_close_date,
-           gmd.line_type, gmd.line_no, gmd.inventory_item_id, msi.segment1, msi.description, gmd.item_um,
-           msi.primary_uom_code,
+           gmd.line_type, gmd.line_no, gmd.inventory_item_id, msi.segment1, msi.description,
+           NVL(gmd.dtl_um, gmd.item_um), msi.primary_uom_code,
            gmd.plan_qty, gmd.original_qty, gmd.wip_plan_qty, gmd.actual_qty,
            {wm_expr}
       FROM gme_batch_header gbh
