@@ -48,5 +48,25 @@
     "command": "/nilai-stok",
     "title": "Nilai persediaan",
     "content": "Nilai persediaan org 121 per kategori item (PMAC), sebutkan periode costing dan item yang belum punya biaya."
+  },
+  {
+    "command": "/aging-piutang",
+    "title": "Aging piutang customer",
+    "content": "Tampilkan aging piutang {{customer | semua customer}} per bucket (Current, 1-30, 31-60, 61-90, >90), urut nilai terbesar."
+  },
+  {
+    "command": "/penerimaan-kas",
+    "title": "Penerimaan kas dari customer",
+    "content": "Penerimaan kas dari customer {{customer | semua customer}} periode {{periode | bulan ini}}, per customer, termasuk yang belum diaplikasikan."
+  },
+  {
+    "command": "/so-backlog",
+    "title": "SO belum dikirim",
+    "content": "Sales order yang belum dikirim untuk customer {{customer | semua customer}}, tandai yang terlambat, urut jadwal kirim."
+  },
+  {
+    "command": "/penjualan",
+    "title": "Penjualan per customer",
+    "content": "Penjualan terinvoice periode {{periode | tahun ini}} per customer, urut nilai terbesar, sebutkan kontribusi retur."
   }
 ]

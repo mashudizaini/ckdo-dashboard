@@ -539,3 +539,226 @@ def get_inventory_value(caller: Caller, item: str | None = None, item_category=N
         """
     params = {"item": _val(item), "cat": _categories(item_category), "st": _val(subinventory_type)}
     return _run(caller, "inv_valuation", sql, params, "get_inventory_value", args)
+
+
+# ── OM / AR (phase 3) ────────────────────────────────────────────────────────
+
+def _period_range(period: str | None) -> tuple:
+    """'2026' -> whole year, '2026-03' -> one month, None -> no filter."""
+    import re as _re
+    if not period:
+        return None, None
+    m = _re.match(r"^\s*(\d{4})(?:-(\d{1,2}))?\s*$", str(period))
+    if not m:
+        raise sql_guard.SqlRejected(f"Format periode '{period}' tidak dikenal — pakai YYYY atau YYYY-MM.")
+    y = int(m.group(1))
+    if m.group(2):
+        mo = int(m.group(2))
+        start = date(y, mo, 1)
+        end = date(y + (mo == 12), mo % 12 + 1, 1)
+    else:
+        start, end = date(y, 1, 1), date(y + 1, 1, 1)
+    return start, end
+
+
+def get_ar_aging(caller: Caller, customer: str | None = None, min_days_overdue: int | None = None,
+                 currency: str | None = None, group_by: str = "customer") -> dict:
+    args = {"customer": customer, "min_days_overdue": min_days_overdue, "currency": currency, "group_by": group_by}
+    params = {"s": _like(customer), "d": min_days_overdue, "c": _val(currency)}
+    where = """
+        WHERE (%(d)s::int  IS NULL OR days_overdue >= %(d)s::int)
+          AND (%(s)s::text IS NULL OR customer_name ILIKE %(s)s::text)
+          AND (%(c)s::text IS NULL OR UPPER(currency_code) = UPPER(%(c)s::text))
+    """
+    if group_by == "bucket":
+        sql = f"""
+            SELECT aging_bucket, COUNT(*) AS jml_invoice, COUNT(DISTINCT customer_num) AS jml_customer,
+                   SUM(amount_remaining_idr) AS total_idr
+              FROM mart.ar_aging {where}
+             GROUP BY aging_bucket, aging_bucket_order ORDER BY aging_bucket_order
+        """
+    elif group_by == "customer_bucket":
+        sql = f"""
+            SELECT customer_num, customer_name, aging_bucket, COUNT(*) AS jml_invoice,
+                   SUM(amount_remaining_idr) AS total_idr
+              FROM mart.ar_aging {where}
+             GROUP BY customer_num, customer_name, aging_bucket, aging_bucket_order
+             ORDER BY customer_name, aging_bucket_order
+        """
+    else:
+        sql = f"""
+            SELECT customer_num, customer_name,
+                   SUM(amount_remaining_idr) FILTER (WHERE aging_bucket = 'Current') AS current_idr,
+                   SUM(amount_remaining_idr) FILTER (WHERE aging_bucket = '1-30')    AS d1_30_idr,
+                   SUM(amount_remaining_idr) FILTER (WHERE aging_bucket = '31-60')   AS d31_60_idr,
+                   SUM(amount_remaining_idr) FILTER (WHERE aging_bucket = '61-90')   AS d61_90_idr,
+                   SUM(amount_remaining_idr) FILTER (WHERE aging_bucket = '>90')     AS over_90_idr,
+                   SUM(amount_remaining_idr)                                          AS total_idr,
+                   COUNT(*)                                                           AS jml_invoice
+              FROM mart.ar_aging {where}
+             GROUP BY customer_num, customer_name
+             ORDER BY total_idr DESC
+        """
+    return _run(caller, "ar_aging", sql, params, "get_ar_aging", args)
+
+
+def get_ar_open_invoices(caller: Caller, customer: str | None = None, invoice_num: str | None = None,
+                         min_days_overdue: int | None = None, due_from: date | None = None,
+                         due_to: date | None = None, currency: str | None = None) -> dict:
+    args = {"customer": customer, "invoice_num": invoice_num, "min_days_overdue": min_days_overdue,
+            "due_from": due_from, "due_to": due_to, "currency": currency}
+    sql = """
+        SELECT customer_name, trx_number, class, trx_type, trx_date, due_date, days_overdue, aging_bucket,
+               so_number, currency_code, amount_remaining_entered, amount_remaining_idr, fx_rate_used
+          FROM mart.ar_aging
+         WHERE (%(s)s::text   IS NULL OR customer_name ILIKE %(s)s::text)
+           AND (%(inv)s::text IS NULL OR UPPER(trx_number) = UPPER(%(inv)s::text))
+           AND (%(d)s::int    IS NULL OR days_overdue >= %(d)s::int)
+           AND (%(df)s::date  IS NULL OR due_date >= %(df)s::date)
+           AND (%(dt)s::date  IS NULL OR due_date <= %(dt)s::date)
+           AND (%(c)s::text   IS NULL OR UPPER(currency_code) = UPPER(%(c)s::text))
+         ORDER BY due_date, customer_name, trx_number
+    """
+    params = {"s": _like(customer), "inv": _val(invoice_num), "d": min_days_overdue,
+              "df": due_from, "dt": due_to, "c": _val(currency)}
+    return _run(caller, "ar_aging", sql, params, "get_ar_open_invoices", args)
+
+
+def get_ar_receipts(caller: Caller, customer: str | None = None, receipt_number: str | None = None,
+                    date_from: date | None = None, date_to: date | None = None,
+                    application_status: str | None = None, include_reversed: bool = False,
+                    group_by: str = "none") -> dict:
+    args = {"customer": customer, "receipt_number": receipt_number, "date_from": date_from, "date_to": date_to,
+            "application_status": application_status, "include_reversed": include_reversed, "group_by": group_by}
+    where = """
+         WHERE (%(s)s::text   IS NULL OR customer_name ILIKE %(s)s::text)
+           AND (%(rn)s::text  IS NULL OR UPPER(receipt_number) = UPPER(%(rn)s::text))
+           AND (%(df)s::date  IS NULL OR receipt_date >= %(df)s::date)
+           AND (%(dt)s::date  IS NULL OR receipt_date <= %(dt)s::date)
+           AND (%(st)s::text  IS NULL OR application_status = UPPER(%(st)s::text))
+           AND (%(rev)s::boolean OR NOT is_reversed)
+    """
+    # All application rows of a receipt sum to the receipt amount, so these
+    # totals never double count a receipt spread over several invoices.
+    totals = """
+                   SUM(amount_idr) FILTER (WHERE application_status = 'APP')   AS diaplikasikan_idr,
+                   SUM(amount_idr) FILTER (WHERE application_status = 'UNAPP') AS belum_diaplikasikan_idr,
+                   SUM(amount_idr) FILTER (WHERE application_status NOT IN ('APP', 'UNAPP')) AS on_account_lainnya_idr,
+                   SUM(amount_idr)                                             AS total_idr"""
+    if group_by == "customer":
+        sql = f"""
+            SELECT customer_name, COUNT(DISTINCT cash_receipt_id) AS jml_penerimaan, {totals}
+              FROM mart.ar_receipt {where}
+             GROUP BY customer_name ORDER BY total_idr DESC
+        """
+    elif group_by == "month":
+        sql = f"""
+            SELECT receipt_period_start_date, receipt_period_name, COUNT(DISTINCT cash_receipt_id) AS jml_penerimaan,
+                   {totals}
+              FROM mart.ar_receipt {where}
+             GROUP BY receipt_period_start_date, receipt_period_name ORDER BY receipt_period_start_date
+        """
+    else:
+        sql = f"""
+            SELECT receipt_number, receipt_date, customer_name, receipt_method, receipt_status, currency_code,
+                   receipt_amount_entered, receipt_amount_idr, application_status_desc, applied_invoice_num,
+                   amount_entered, amount_idr, is_reversed
+              FROM mart.ar_receipt {where}
+             ORDER BY receipt_date DESC, receipt_number, application_status
+        """
+    params = {"s": _like(customer), "rn": _val(receipt_number), "df": date_from, "dt": date_to,
+              "st": _val(application_status), "rev": bool(include_reversed)}
+    return _run(caller, "ar_receipt", sql, params, "get_ar_receipts", args)
+
+
+def get_so_backlog(caller: Caller, customer: str | None = None, item: str | None = None,
+                   order_number: str | None = None, business_type: str | None = None,
+                   late_only: bool = False, group_by: str = "none") -> dict:
+    args = {"customer": customer, "item": item, "order_number": order_number, "business_type": business_type,
+            "late_only": late_only, "group_by": group_by}
+    where = f"""
+         WHERE (%(s)s::text  IS NULL OR customer_name ILIKE %(s)s::text)
+           AND (%(on)s::text IS NULL OR order_number = %(on)s::text)
+           AND (%(bt)s::text IS NULL OR UPPER(business_type) = UPPER(%(bt)s::text))
+           AND (NOT %(late)s::boolean OR delivery_status = 'Terlambat')
+           AND {_ITEM_FILTER}
+    """
+    if group_by == "customer":
+        sql = f"""
+            SELECT customer_name, COUNT(DISTINCT order_number) AS jml_order, COUNT(*) AS jml_baris,
+                   COUNT(*) FILTER (WHERE delivery_status = 'Terlambat') AS jml_terlambat,
+                   SUM(amount_to_ship_idr) AS belum_dikirim_idr
+              FROM mart.so_backlog {where}
+             GROUP BY customer_name ORDER BY belum_dikirim_idr DESC NULLS LAST
+        """
+    elif group_by == "item":
+        sql = f"""
+            SELECT item_code, MAX(item_desc) AS item_desc, uom, SUM(qty_to_ship) AS qty_belum_dikirim,
+                   SUM(amount_to_ship_idr) AS belum_dikirim_idr, COUNT(DISTINCT order_number) AS jml_order
+              FROM mart.so_backlog {where}
+             GROUP BY item_code, uom ORDER BY belum_dikirim_idr DESC NULLS LAST
+        """
+    else:
+        sql = f"""
+            SELECT order_number, line_number, shipment_number, business_type, ordered_date, customer_name,
+                   item_code, item_desc, uom, ordered_qty, shipped_qty, qty_to_ship, currency_code,
+                   amount_to_ship_entered, amount_to_ship_idr, due_date, days_late, delivery_status, line_status
+              FROM mart.so_backlog {where}
+             ORDER BY due_date NULLS LAST, order_number, line_number
+        """
+    params = {"s": _like(customer), "on": _val(order_number), "bt": _val(business_type), "late": bool(late_only),
+              "item": _val(item)}
+    return _run(caller, "so_backlog", sql, params, "get_so_backlog", args)
+
+
+def get_so_shipment_status(caller: Caller, order_number: str | None = None, customer: str | None = None,
+                           item: str | None = None, status: str | None = None) -> dict:
+    args = {"order_number": order_number, "customer": customer, "item": item, "status": status}
+    sql = f"""
+        SELECT order_number, line_number, shipment_number, customer_name, item_code, item_desc, uom, ordered_qty,
+               qty_shipped, qty_staged, qty_released_to_warehouse, qty_ready_to_release, qty_backordered,
+               shipment_status, delivery_names, last_ship_confirm_date, lot_numbers, schedule_ship_date
+          FROM mart.so_shipment_status
+         WHERE (%(on)s::text IS NULL OR order_number = %(on)s::text)
+           AND (%(s)s::text  IS NULL OR customer_name ILIKE %(s)s::text)
+           AND (%(st)s::text IS NULL OR UPPER(shipment_status) LIKE UPPER(%(st)s::text) || '%%')
+           AND {_ITEM_FILTER}
+         ORDER BY order_number DESC, line_number, shipment_number
+    """
+    params = {"on": _val(order_number), "s": _like(customer), "st": _val(status), "item": _val(item)}
+    return _run(caller, "so_shipment_status", sql, params, "get_so_shipment_status", args)
+
+
+def get_sales_by_customer(caller: Caller, customer: str | None = None, item: str | None = None,
+                          item_category=None, period: str | None = None, business_type: str | None = None,
+                          group_by: str = "customer") -> dict:
+    args = {"customer": customer, "item": item, "item_category": item_category, "period": period,
+            "business_type": business_type, "group_by": group_by}
+    start, end = _period_range(period)
+    where = f"""
+         WHERE (%(s)s::text  IS NULL OR customer_name ILIKE %(s)s::text)
+           AND (%(bt)s::text IS NULL OR UPPER(business_type) = UPPER(%(bt)s::text))
+           AND (%(p0)s::date IS NULL OR period_start_date >= %(p0)s::date)
+           AND (%(p1)s::date IS NULL OR period_start_date <  %(p1)s::date)
+           AND {_ITEM_FILTER}
+           AND {_CATEGORY_FILTER}
+    """
+    groups = {
+        "customer": ("customer_num, customer_name", "customer_name, customer_num"),
+        "item": ("item_code, uom", "item_code, MAX(item_desc) AS item_desc, uom"),
+        "month": ("period_start_date, period_name", "period_start_date, period_name"),
+        "customer_item": ("customer_name, item_code, uom", "customer_name, item_code, MAX(item_desc) AS item_desc, uom"),
+        "business_type": ("business_type", "business_type"),
+    }
+    gcols, scols = groups.get(group_by, groups["customer"])
+    qty = "SUM(quantity) AS qty, " if group_by in ("item", "customer_item") else ""
+    order = "period_start_date" if group_by == "month" else "nilai_idr DESC"
+    sql = f"""
+        SELECT {scols}, {qty}SUM(amount_idr) AS nilai_idr, SUM(credit_memo_idr) AS credit_memo_idr,
+               SUM(invoice_count) AS jml_invoice
+          FROM mart.sales_by_customer_item_month {where}
+         GROUP BY {gcols} ORDER BY {order}
+    """
+    params = {"s": _like(customer), "bt": _val(business_type), "p0": start, "p1": end, "item": _val(item),
+              "cat": _categories(item_category)}
+    return _run(caller, "sales_by_customer_item_month", sql, params, "get_sales_by_customer", args)

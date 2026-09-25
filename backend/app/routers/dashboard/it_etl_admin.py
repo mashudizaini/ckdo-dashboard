@@ -59,12 +59,14 @@ async def trigger_etl(job_name: str, params: TriggerParams):
         "etl_po_lines", "etl_open_pr", "etl_sales_orders", "etl_inventory_txn", "etl_batches",
         "etl_it_monitoring", "etl_daily_sales",
         "etl_mart_ap", "etl_mart_inventory", "refresh_ebs_marts", "etl_mart_po", "etl_mart_item_cost",
+        "etl_mart_om", "etl_mart_ar",
     ]
     if job_name not in valid_jobs:
         raise HTTPException(status_code=400, detail=f"Unknown job. Valid: {valid_jobs}")
 
     kwargs = {"year": params.year, "month": params.month}
-    if job_name in ("etl_mart_ap", "etl_mart_inventory", "refresh_ebs_marts", "etl_mart_po", "etl_mart_item_cost"):
+    if job_name in ("etl_mart_ap", "etl_mart_inventory", "refresh_ebs_marts", "etl_mart_po", "etl_mart_item_cost",
+                    "etl_mart_om", "etl_mart_ar"):
         kwargs["trigger_type"] = "MANUAL"
     result = celery_app.send_task(f"app.tasks.etl_tasks.{job_name}", kwargs=kwargs)
     _active_task_ids[job_name] = result.id
@@ -380,6 +382,14 @@ _JOB_META = {
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["cm_cmpt_dtl", "gmf_period_statuses", "cm_mthd_mst", "cm_cmpt_mst_b"],
                         "destination_table": "core.fact_item_cost -> mart.inv_valuation"},
+    "etl_mart_om": {"frequency": "Hourly + weekly full", "schedule": "menit ke-10; Minggu 02:00 full", "source": "Oracle OM + Shipping (EBS Data Mart)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["oe_order_headers_all", "oe_order_lines_all", "oe_transaction_types_tl", "wsh_delivery_details", "wsh_delivery_assignments", "wsh_new_deliveries"],
+                        "destination_table": "core.fact_so_line, core.fact_so_delivery_detail -> mart.so_*"},
+    "etl_mart_ar": {"frequency": "Hourly + weekly full", "schedule": "menit ke-55; Minggu 02:30 full", "source": "Oracle AR (EBS Data Mart)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["ar_payment_schedules_all", "ra_customer_trx_all", "ra_customer_trx_lines_all", "ra_cust_trx_line_gl_dist_all", "ar_cash_receipts_all", "ar_receivable_applications_all", "gl_daily_rates"],
+                        "destination_table": "core.fact_ar_* , core.dim_fx_rate -> mart.ar_*, mart.sales_by_customer_item_month"},
     "refresh_ebs_marts": {"frequency": "Daily", "schedule": "00:10 WIB", "source": "core.* (tanpa Oracle)",
                         "source_system": "PostgreSQL (ckdo_dashboard)",
                         "oracle_tables": [],

@@ -241,6 +241,61 @@ class InvValueIn(BaseModel):
     group_by: Literal["category", "item", "subinventory_type"] = Field("category", description="Pengelompokan hasil")
 
 
+class ArAgingIn(BaseModel):
+    customer: Optional[str] = Field(None, description="Nama customer (cocok sebagian)")
+    min_days_overdue: Optional[int] = Field(None, description="Hanya piutang yang lewat jatuh tempo minimal N hari")
+    currency: Optional[str] = Field(None, description="Kode mata uang invoice, mis. USD")
+    group_by: Literal["customer", "bucket", "customer_bucket"] = Field(
+        "customer", description="customer = satu baris per customer dengan kolom per bucket; bucket = total per bucket; customer_bucket = customer × bucket")
+
+
+class ArOpenIn(BaseModel):
+    customer: Optional[str] = Field(None, description="Nama customer (cocok sebagian)")
+    invoice_num: Optional[str] = Field(None, description="Nomor invoice/transaksi AR persis")
+    min_days_overdue: Optional[int] = Field(None, description="Minimal hari lewat jatuh tempo")
+    due_from: Optional[date] = Field(None, description="Jatuh tempo mulai (YYYY-MM-DD)")
+    due_to: Optional[date] = Field(None, description="Jatuh tempo sampai (YYYY-MM-DD)")
+    currency: Optional[str] = Field(None, description="Kode mata uang")
+
+
+class ArReceiptIn(BaseModel):
+    customer: Optional[str] = Field(None, description="Nama customer (cocok sebagian)")
+    receipt_number: Optional[str] = Field(None, description="Nomor penerimaan persis")
+    date_from: Optional[date] = Field(None, description="Tanggal penerimaan mulai (YYYY-MM-DD)")
+    date_to: Optional[date] = Field(None, description="Tanggal penerimaan sampai (YYYY-MM-DD)")
+    application_status: Optional[Literal["APP", "UNAPP", "ACC", "UNID"]] = Field(
+        None, description="APP = sudah diaplikasikan ke invoice; UNAPP = belum diaplikasikan; ACC = on account; UNID = tidak teridentifikasi")
+    include_reversed: bool = Field(False, description="true untuk ikut menampilkan penerimaan yang di-reverse")
+    group_by: Literal["none", "customer", "month"] = Field("none", description="none = detail; customer / month = ringkasan")
+
+
+class SoBacklogIn(BaseModel):
+    customer: Optional[str] = Field(None, description="Nama customer (cocok sebagian)")
+    item: Optional[str] = Field(None, description="Kode item persis ATAU nama produk (cocok sebagian)")
+    order_number: Optional[str] = Field(None, description="Nomor sales order persis")
+    business_type: Optional[Literal["Local", "Export", "CMO"]] = Field(None, description="Tipe bisnis")
+    late_only: bool = Field(False, description="true = hanya baris yang lewat jadwal kirim dan masih ada sisa kirim")
+    group_by: Literal["none", "customer", "item"] = Field("none", description="none = detail per baris SO; customer / item = ringkasan")
+
+
+class SoShipIn(BaseModel):
+    order_number: Optional[str] = Field(None, description="Nomor sales order persis")
+    customer: Optional[str] = Field(None, description="Nama customer (cocok sebagian)")
+    item: Optional[str] = Field(None, description="Kode item persis ATAU nama produk (cocok sebagian)")
+    status: Optional[str] = Field(None, description=(
+        "Filter status kirim (awalan): Terkirim, Staged, Dirilis ke gudang, Belum dirilis, Backorder"))
+
+
+class SalesIn(BaseModel):
+    customer: Optional[str] = Field(None, description="Nama customer (cocok sebagian)")
+    item: Optional[str] = Field(None, description="Kode item persis ATAU nama produk (cocok sebagian)")
+    item_category: Optional[list[str]] = Field(None, description=_CATEGORY_DESC)
+    period: Optional[str] = Field(None, description="Periode GL invoice: YYYY (setahun) atau YYYY-MM (sebulan). Kosong = semua periode.")
+    business_type: Optional[Literal["Local", "Export", "CMO", "Non-SO"]] = Field(None, description="Tipe bisnis")
+    group_by: Literal["customer", "item", "month", "customer_item", "business_type"] = Field(
+        "customer", description="Pengelompokan hasil")
+
+
 # ── Operations ───────────────────────────────────────────────────────────────
 
 @app.post("/find_marts", operation_id="find_marts",
@@ -356,6 +411,42 @@ async def get_pr_pending(body: PrPendingIn, caller: Caller = Depends(current_cal
           summary="Nilai persediaan org 121 (Rupiah) dengan biaya OPM PMAC, per kategori / item / klasifikasi subinventory")
 async def get_inventory_value(body: InvValueIn, caller: Caller = Depends(current_caller)):
     return await _call(tools.get_inventory_value, caller, **body.model_dump())
+
+
+@app.post("/get_ar_aging", operation_id="get_ar_aging",
+          summary="Aging piutang usaha (AR) per customer dan bucket — sama dengan laporan AR Outstanding dashboard")
+async def get_ar_aging(body: ArAgingIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_ar_aging, caller, **body.model_dump())
+
+
+@app.post("/get_ar_open_invoices", operation_id="get_ar_open_invoices",
+          summary="Daftar invoice customer yang belum lunas, jatuh tempo dan sisa piutang (valas + IDR)")
+async def get_ar_open_invoices(body: ArOpenIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_ar_open_invoices, caller, **body.model_dump())
+
+
+@app.post("/get_ar_receipts", operation_id="get_ar_receipts",
+          summary="Penerimaan kas dari customer dan aplikasinya ke invoice (termasuk unapplied / on account)")
+async def get_ar_receipts(body: ArReceiptIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_ar_receipts, caller, **body.model_dump())
+
+
+@app.post("/get_so_backlog", operation_id="get_so_backlog",
+          summary="Sales order yang masih open: sisa qty & nilai belum dikirim, jadwal kirim, keterlambatan")
+async def get_so_backlog(body: SoBacklogIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_so_backlog, caller, **body.model_dump())
+
+
+@app.post("/get_so_shipment_status", operation_id="get_so_shipment_status",
+          summary="Status pengiriman per baris SO: terkirim, staged, backorder, nomor delivery, tanggal ship confirm")
+async def get_so_shipment_status(body: SoShipIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_so_shipment_status, caller, **body.model_dump())
+
+
+@app.post("/get_sales_by_customer", operation_id="get_sales_by_customer",
+          summary="Penjualan terinvoice per customer / item / bulan / tipe bisnis (nilai IDR, qty, credit memo)")
+async def get_sales_by_customer(body: SalesIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_sales_by_customer, caller, **body.model_dump())
 
 
 @app.get("/health", include_in_schema=False)

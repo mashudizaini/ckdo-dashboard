@@ -291,6 +291,167 @@ _CORE_DDL = [
         loaded_at          timestamptz DEFAULT now()
     )
     """,
+    # ── Phase 3: OM / AR ─────────────────────────────────────────────────
+    # One row per sales order line, restricted to the sales order types in
+    # constants.SO_ORDER_TYPES. Not eis.fact_sales_order: that table is
+    # refreshed on ordered_date (30 days), so shipping and closing an older
+    # order never reaches it — the same trap as eis.fact_po_line.
+    """
+    CREATE TABLE IF NOT EXISTS core.fact_so_line (
+        line_id            bigint PRIMARY KEY,
+        header_id          bigint,
+        order_number       text,
+        order_type         text,
+        line_type          text,
+        ordered_date       date,
+        booked_date        date,
+        header_status      text,
+        line_status        text,
+        customer_num       text,
+        customer_name      text,
+        line_number        int,
+        shipment_number    int,
+        item_id            bigint,
+        item_code          text,
+        item_desc          text,
+        uom                text,
+        ordered_qty        numeric,
+        shipped_qty        numeric,
+        fulfilled_qty      numeric,
+        invoiced_qty       numeric,
+        cancelled_qty      numeric,
+        unit_selling_price numeric,
+        currency_code      text,
+        rate_idr           numeric,
+        request_date       date,
+        schedule_ship_date date,
+        promise_date       date,
+        actual_shipment_date date,
+        open_flag          text,
+        cancelled_flag     text,
+        ship_from_org_id   bigint,
+        src_last_update    timestamp,
+        loaded_at          timestamptz DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_core_so_line_order ON core.fact_so_line (order_number)",
+    """
+    CREATE TABLE IF NOT EXISTS core.fact_so_delivery_detail (
+        delivery_detail_id bigint PRIMARY KEY,
+        source_line_id     bigint,
+        released_status    text,
+        requested_qty      numeric,
+        shipped_qty        numeric,
+        cancelled_qty      numeric,
+        uom                text,
+        lot_number         text,
+        subinventory       text,
+        delivery_id        bigint,
+        delivery_name      text,
+        delivery_status    text,
+        confirm_date       date,
+        pickup_date        date,
+        src_last_update    timestamp,
+        loaded_at          timestamptz DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_core_so_dd_line ON core.fact_so_delivery_detail (source_line_id)",
+    """
+    CREATE TABLE IF NOT EXISTS core.fact_ar_schedule (
+        payment_schedule_id bigint PRIMARY KEY,
+        customer_trx_id    bigint,
+        trx_number         text,
+        trx_date           date,
+        gl_date            date,
+        due_date           date,
+        class              text,
+        trx_type           text,
+        customer_num       text,
+        customer_name      text,
+        currency_code      text,
+        exchange_rate      numeric,
+        amount_due_original numeric,
+        amount_due_remaining numeric,
+        status             text,
+        so_number          text,
+        src_last_update    timestamp,
+        loaded_at          timestamptz DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_core_ar_sched_trx ON core.fact_ar_schedule (customer_trx_id)",
+    """
+    CREATE TABLE IF NOT EXISTS core.fact_ar_invoice_line (
+        customer_trx_line_id bigint PRIMARY KEY,
+        customer_trx_id    bigint,
+        trx_number         text,
+        trx_date           date,
+        gl_date            date,
+        class              text,
+        trx_type           text,
+        customer_num       text,
+        customer_name      text,
+        item_id            bigint,
+        item_code          text,
+        item_desc          text,
+        uom                text,
+        quantity           numeric,
+        unit_selling_price numeric,
+        extended_amount    numeric,
+        currency_code      text,
+        exchange_rate      numeric,
+        so_number          text,
+        so_order_type      text,
+        so_line_id         bigint,
+        src_last_update    timestamp,
+        loaded_at          timestamptz DEFAULT now()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS core.fact_ar_receipt (
+        cash_receipt_id    bigint PRIMARY KEY,
+        receipt_number     text,
+        receipt_date       date,
+        deposit_date       date,
+        receipt_type       text,
+        status             text,
+        customer_num       text,
+        customer_name      text,
+        receipt_method     text,
+        currency_code      text,
+        exchange_rate      numeric,
+        amount             numeric,
+        reversal_date      date,
+        comments           text,
+        src_last_update    timestamp,
+        loaded_at          timestamptz DEFAULT now()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS core.fact_ar_application (
+        receivable_application_id bigint PRIMARY KEY,
+        cash_receipt_id    bigint,
+        applied_customer_trx_id bigint,
+        applied_payment_schedule_id bigint,
+        status             text,
+        amount_applied     numeric,
+        acctd_amount_applied numeric,
+        apply_date         date,
+        gl_date            date,
+        src_last_update    timestamp,
+        loaded_at          timestamptz DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_core_ar_app_receipt ON core.fact_ar_application (cash_receipt_id)",
+    # Latest Corporate rate to IDR per currency — what the Dashboard's AR
+    # Outstanding report converts open balances with (not the invoice rate).
+    """
+    CREATE TABLE IF NOT EXISTS core.dim_fx_rate (
+        currency_code text PRIMARY KEY,
+        rate_date     date,
+        rate          numeric,
+        loaded_at     timestamptz DEFAULT now()
+    )
+    """,
     # OPM actual cost (PMAC) per item and costing period, total and by
     # component class. Kept for every period extracted, so the mart can use
     # the latest while the history stays available.

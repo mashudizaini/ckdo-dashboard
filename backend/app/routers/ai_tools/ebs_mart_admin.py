@@ -49,6 +49,8 @@ JOBS = {
     "etl_inventory_txn": "Mutasi inventory (sumber inv_movement_daily)",
     "etl_mart_po": "PO & PR (incremental)",
     "etl_mart_item_cost": "Biaya OPM PMAC (valuasi)",
+    "etl_mart_om": "Sales order & pengiriman (incremental)",
+    "etl_mart_ar": "Piutang, invoice & penerimaan kas (incremental)",
     "refresh_ebs_marts": "Refresh semua mart",
 }
 
@@ -132,7 +134,7 @@ async def trigger(job: str, body: TriggerIn = TriggerIn(), user: CurrentUser = D
     kwargs: dict = {}
     if job != "etl_inventory_txn":
         kwargs = {"trigger_type": "MANUAL", "triggered_by": user.username or user.email}
-    if job in ("etl_mart_ap", "etl_mart_po") and body.full_refresh:
+    if job in ("etl_mart_ap", "etl_mart_po", "etl_mart_om", "etl_mart_ar") and body.full_refresh:
         kwargs["full_refresh"] = True
     result = celery_app.send_task(f"app.tasks.etl_tasks.{job}", kwargs=kwargs)
     return {"message": f"{JOBS[job]} dijalankan", "task_id": result.id}
@@ -270,6 +272,12 @@ _INTENT_TOOLS = {
     "get_po_match_status": tools.get_po_match_status,
     "get_pr_pending": tools.get_pr_pending,
     "get_inventory_value": tools.get_inventory_value,
+    "get_ar_aging": tools.get_ar_aging,
+    "get_ar_open_invoices": tools.get_ar_open_invoices,
+    "get_ar_receipts": tools.get_ar_receipts,
+    "get_so_backlog": tools.get_so_backlog,
+    "get_so_shipment_status": tools.get_so_shipment_status,
+    "get_sales_by_customer": tools.get_sales_by_customer,
 }
 
 
@@ -287,8 +295,9 @@ async def call_tool(name: str, body: ToolIn, user: CurrentUser = Depends(_admin)
         raise HTTPException(400, "Grup tidak dikenal")
     # "" = not given (tool default); explicit null = "no filter".
     args = {k: v for k, v in body.args.items() if v != ""}
-    if isinstance(args.get("late_only"), str):
-        args["late_only"] = args["late_only"] == "true"
+    for flag in ("late_only", "include_reversed", "include_expired"):
+        if isinstance(args.get(flag), str):
+            args[flag] = args[flag] == "true"
     for k in ("due_from", "due_to", "date_from", "date_to"):
         if args.get(k) is not None:
             try:

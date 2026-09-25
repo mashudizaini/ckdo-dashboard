@@ -1,6 +1,7 @@
 """
 Definitions of the built marts (blueprint sections 5 and 6): phase 1 (AP,
-stock per lot, movement) and phase 2 (PO, PR, inventory valuation).
+stock per lot, movement), phase 2 (PO, PR, inventory valuation) and phase 3
+(sales orders, shipping, invoiced sales, AR aging, receipts).
 
 Each mart is a MATERIALIZED VIEW over core.*, refreshed CONCURRENTLY after
 its ETL succeeds and once a day regardless (days_overdue and days_to_expiry
@@ -18,7 +19,9 @@ Conventions (blueprint "Konvensi kolom mart"):
 schema.ensure_marts() hashes each SQL text and drops/recreates the view when
 the text changes, so editing a definition here is a deploy, not a migration.
 """
-from app.services.ebs_mart.constants import AP_COA_WHITELIST, AP_LEGACY_PAID_CUTOFF
+from app.services.ebs_mart.constants import (
+    AP_COA_WHITELIST, AP_LEGACY_PAID_CUTOFF, SO_CMO_LINE_TYPE, SO_EXPORT_TYPE,
+)
 
 _COA_LIST = ", ".join(f"'{c}'" for c in AP_COA_WHITELIST)
 
@@ -44,6 +47,14 @@ _MATCH_TYPE = (
 # Same rule as mart.inv_onhand_lot: an administrator's classification wins,
 # then the name heuristic, then GOOD.
 _SUBINV_TYPE = "COALESCE(sc.subinventory_type, s.guessed_type, 'GOOD')"
+
+# Business type exactly as the Dashboard's sales ETL derives it.
+_BUSINESS_TYPE = (
+    f"(CASE WHEN l.order_type = '{SO_EXPORT_TYPE}' THEN 'Export' "
+    f"WHEN l.line_type = '{SO_CMO_LINE_TYPE}' THEN 'CMO' ELSE 'Local' END)"
+)
+_SO_OPEN_QTY = "GREATEST(COALESCE(l.ordered_qty, 0) - COALESCE(l.shipped_qty, 0), 0)"
+_SO_DUE = "COALESCE(l.schedule_ship_date, l.promise_date, l.request_date)"
 
 MART_SQL: dict[str, str] = {
     # Same population as the Dashboard's AP Outstanding report
@@ -384,6 +395,231 @@ MART_SQL: dict[str, str] = {
           LEFT JOIN latest_cost lc ON lc.inventory_item_id = st.inventory_item_id
           LEFT JOIN core.dim_item c ON c.inventory_item_id = st.inventory_item_id
     """,
+
+    # ── Phase 3 ─────────────────────────────────────────────────────────────
+
+    # Blueprint 4.2: open = open_flag 'Y' and cancelled_flag 'N'. qty_to_ship
+    # is what has not left the warehouse yet; a shipped line stays open until
+    # it is invoiced and closed, so it can be in the backlog with nothing
+    # left to ship (line_status tells which).
+    "so_backlog": f"""
+        SELECT l.line_id,
+               l.order_number,
+               l.line_number,
+               l.shipment_number,
+               l.order_type,
+               {_BUSINESS_TYPE}                                       AS business_type,
+               l.ordered_date,
+               UPPER(TO_CHAR(l.ordered_date, 'MON-YY'))               AS ordered_period_name,
+               l.header_status,
+               l.line_status,
+               l.customer_num,
+               l.customer_name,
+               l.item_code,
+               l.item_desc,
+               c.item_category,
+               l.uom,
+               l.ordered_qty,
+               COALESCE(l.shipped_qty, 0)                             AS shipped_qty,
+               COALESCE(l.invoiced_qty, 0)                            AS invoiced_qty,
+               {_SO_OPEN_QTY}                                         AS qty_to_ship,
+               l.currency_code,
+               l.unit_selling_price                                   AS unit_price_entered,
+               {_SO_OPEN_QTY} * l.unit_selling_price                  AS amount_to_ship_entered,
+               {_SO_OPEN_QTY} * l.unit_selling_price * COALESCE(l.rate_idr, 1) AS amount_to_ship_idr,
+               l.ordered_qty * l.unit_selling_price * COALESCE(l.rate_idr, 1)  AS amount_ordered_idr,
+               l.request_date,
+               l.schedule_ship_date,
+               l.promise_date,
+               {_SO_DUE}                                              AS due_date,
+               CASE WHEN {_SO_OPEN_QTY} > 0 THEN CURRENT_DATE - {_SO_DUE} END AS days_late,
+               CASE WHEN {_SO_OPEN_QTY} = 0                     THEN 'Sudah dikirim, belum ditutup'
+                    WHEN {_SO_DUE} IS NULL                      THEN 'Tanpa tanggal'
+                    WHEN {_SO_DUE} < CURRENT_DATE               THEN 'Terlambat'
+                    WHEN {_SO_DUE} <= CURRENT_DATE + 7          THEN 'Jadwal kirim 7 hari'
+                    ELSE 'Belum jadwal kirim' END                     AS delivery_status
+          FROM core.fact_so_line l
+          LEFT JOIN core.dim_item c ON c.inventory_item_id = l.item_id
+         WHERE COALESCE(l.open_flag, 'N') = 'Y'
+           AND COALESCE(l.cancelled_flag, 'N') = 'N'
+    """,
+
+    # Blueprint 4.2: released_status C shipped, Y staged, B backordered,
+    # R ready to release; plus S released to warehouse, N not ready,
+    # I interfaced (shipped and passed on), D cancelled. Shipped counts both
+    # C and I. The line's status is its least advanced delivery detail.
+    "so_shipment_status": f"""
+        SELECT l.line_id,
+               l.order_number,
+               l.line_number,
+               l.shipment_number,
+               {_BUSINESS_TYPE}                                       AS business_type,
+               l.ordered_date,
+               l.customer_num,
+               l.customer_name,
+               l.item_code,
+               l.item_desc,
+               l.uom,
+               l.ordered_qty,
+               l.line_status,
+               l.schedule_ship_date,
+               SUM(d.requested_qty) FILTER (WHERE d.released_status IN ('C', 'I')) AS qty_shipped,
+               SUM(d.requested_qty) FILTER (WHERE d.released_status = 'Y')        AS qty_staged,
+               SUM(d.requested_qty) FILTER (WHERE d.released_status = 'S')        AS qty_released_to_warehouse,
+               SUM(d.requested_qty) FILTER (WHERE d.released_status = 'R')        AS qty_ready_to_release,
+               SUM(d.requested_qty) FILTER (WHERE d.released_status = 'B')        AS qty_backordered,
+               SUM(d.requested_qty) FILTER (WHERE d.released_status = 'N')        AS qty_not_ready,
+               CASE WHEN BOOL_OR(d.released_status = 'B') THEN 'Backorder'
+                    WHEN BOOL_OR(d.released_status IN ('N', 'R')) THEN 'Belum dirilis ke gudang'
+                    WHEN BOOL_OR(d.released_status = 'S') THEN 'Dirilis ke gudang (picking)'
+                    WHEN BOOL_OR(d.released_status = 'Y') THEN 'Staged (siap kirim)'
+                    WHEN BOOL_AND(d.released_status IN ('C', 'I', 'D')) THEN 'Terkirim'
+                    ELSE 'Lainnya' END                                AS shipment_status,
+               STRING_AGG(DISTINCT d.delivery_name, ', ')             AS delivery_names,
+               MAX(d.confirm_date)                                    AS last_ship_confirm_date,
+               STRING_AGG(DISTINCT d.lot_number, ', ')                AS lot_numbers
+          FROM core.fact_so_line l
+          JOIN core.fact_so_delivery_detail d ON d.source_line_id = l.line_id
+         WHERE COALESCE(l.cancelled_flag, 'N') = 'N'
+           AND d.released_status <> 'D'
+         GROUP BY l.line_id, l.order_number, l.line_number, l.shipment_number, l.order_type, l.line_type,
+                  l.ordered_date, l.customer_num, l.customer_name, l.item_code, l.item_desc, l.uom,
+                  l.ordered_qty, l.line_status, l.schedule_ship_date
+    """,
+
+    # Invoiced sales (blueprint: RA_CUSTOMER_TRX_LINES_ALL), by GL month of
+    # the invoice. Credit memos are negative lines of the same shape, so a
+    # return reduces the month it is credited in. Business type comes from
+    # the order line the invoice line was raised from; lines without one
+    # (manual invoices) are "Non-SO".
+    "sales_by_customer_item_month": """
+        SELECT MD5(CONCAT_WS('|', a.customer_num, a.item_code, a.period_start_date, a.currency_code, a.business_type)) AS row_key,
+               a.*
+          FROM (
+            SELECT i.customer_num,
+                   MAX(i.customer_name)                                AS customer_name,
+                   COALESCE(i.item_code, '(tanpa item)')               AS item_code,
+                   MAX(i.item_desc)                                    AS item_desc,
+                   MAX(c.item_category)                                AS item_category,
+                   MAX(i.uom)                                          AS uom,
+                   DATE_TRUNC('month', i.gl_date)::date                AS period_start_date,
+                   UPPER(TO_CHAR(i.gl_date, 'MON-YY'))                 AS period_name,
+                   EXTRACT(YEAR FROM i.gl_date)::int                   AS fiscal_year,
+                   i.currency_code,
+                   CASE WHEN s.line_id IS NULL THEN 'Non-SO'
+                        WHEN s.order_type = '""" + SO_EXPORT_TYPE + """' THEN 'Export'
+                        WHEN s.line_type = '""" + SO_CMO_LINE_TYPE + """' THEN 'CMO'
+                        ELSE 'Local' END                               AS business_type,
+                   SUM(i.quantity)                                     AS quantity,
+                   SUM(i.extended_amount)                              AS amount_entered,
+                   SUM(i.extended_amount * COALESCE(i.exchange_rate, 1)) AS amount_idr,
+                   SUM(i.extended_amount * COALESCE(i.exchange_rate, 1)) FILTER (WHERE i.class = 'CM') AS credit_memo_idr,
+                   COUNT(DISTINCT i.customer_trx_id)                   AS invoice_count
+              FROM core.fact_ar_invoice_line i
+              LEFT JOIN core.fact_so_line s ON s.line_id = i.so_line_id
+              LEFT JOIN core.dim_item c     ON c.inventory_item_id = i.item_id
+             WHERE i.gl_date IS NOT NULL
+             GROUP BY i.customer_num, COALESCE(i.item_code, '(tanpa item)'), DATE_TRUNC('month', i.gl_date)::date,
+                      UPPER(TO_CHAR(i.gl_date, 'MON-YY')), EXTRACT(YEAR FROM i.gl_date)::int, i.currency_code,
+                      CASE WHEN s.line_id IS NULL THEN 'Non-SO'
+                           WHEN s.order_type = '""" + SO_EXPORT_TYPE + """' THEN 'Export'
+                           WHEN s.line_type = '""" + SO_CMO_LINE_TYPE + """' THEN 'CMO'
+                           ELSE 'Local' END
+          ) a
+    """,
+
+    # Same population and conversion as the Dashboard's AR Outstanding report
+    # (accounting_service.get_ar_outstanding): classes INV/DM/CM, Oracle
+    # status OP, invoices after the legacy cutoff, and IDR at the LATEST
+    # Corporate rate rather than the invoice's own rate. Credit memos stay
+    # in (negative) so totals net them exactly as the report's summary does.
+    "ar_aging": f"""
+        SELECT s.payment_schedule_id,
+               s.customer_trx_id,
+               s.customer_num,
+               s.customer_name,
+               s.trx_number,
+               s.trx_type,
+               s.class,
+               s.trx_date,
+               s.gl_date,
+               UPPER(TO_CHAR(s.gl_date, 'MON-YY'))                 AS gl_period_name,
+               s.due_date,
+               s.so_number,
+               s.currency_code,
+               s.amount_due_original                               AS amount_original_entered,
+               s.amount_due_remaining                              AS amount_remaining_entered,
+               s.amount_due_remaining * CASE WHEN s.currency_code = 'IDR' THEN 1 ELSE COALESCE(fx.rate, 1) END
+                                                                   AS amount_remaining_idr,
+               s.amount_due_remaining * COALESCE(s.exchange_rate, 1) AS amount_remaining_idr_invoice_rate,
+               CASE WHEN s.currency_code = 'IDR' THEN 1 ELSE fx.rate END AS fx_rate_used,
+               fx.rate_date                                        AS fx_rate_date,
+               (CURRENT_DATE - s.due_date)                         AS days_overdue,
+               CASE WHEN s.due_date >= CURRENT_DATE      THEN 'Current'
+                    WHEN CURRENT_DATE - s.due_date <= 30 THEN '1-30'
+                    WHEN CURRENT_DATE - s.due_date <= 60 THEN '31-60'
+                    WHEN CURRENT_DATE - s.due_date <= 90 THEN '61-90'
+                    ELSE '>90' END                                 AS aging_bucket,
+               CASE WHEN s.due_date >= CURRENT_DATE      THEN 0
+                    WHEN CURRENT_DATE - s.due_date <= 30 THEN 1
+                    WHEN CURRENT_DATE - s.due_date <= 60 THEN 2
+                    WHEN CURRENT_DATE - s.due_date <= 90 THEN 3
+                    ELSE 4 END                                     AS aging_bucket_order
+          FROM core.fact_ar_schedule s
+          LEFT JOIN core.dim_fx_rate fx ON fx.currency_code = s.currency_code
+         WHERE s.status = 'OP'
+           AND s.class IN ('INV', 'DM', 'CM')
+           AND s.trx_date > DATE '{AP_LEGACY_PAID_CUTOFF}'
+    """,
+
+    # One row per receipt, application status and applied invoice. Applied
+    # (APP) amounts net reversals because both legs are rows; UNAPP rows are
+    # likewise recorded and reversed as money is applied, so their sum is
+    # what is still unapplied. IDR: acctd_amount_applied_from, the receipt's
+    # own accounted amount.
+    "ar_receipt": """
+        WITH inv AS (
+            SELECT DISTINCT ON (customer_trx_id) customer_trx_id, trx_number, trx_date, due_date
+              FROM core.fact_ar_schedule
+             ORDER BY customer_trx_id, payment_schedule_id
+        )
+        SELECT MD5(CONCAT_WS('|', r.cash_receipt_id, a.status, COALESCE(a.applied_customer_trx_id, 0))) AS row_key,
+               r.cash_receipt_id,
+               r.receipt_number,
+               r.receipt_date,
+               UPPER(TO_CHAR(r.receipt_date, 'MON-YY'))            AS receipt_period_name,
+               DATE_TRUNC('month', r.receipt_date)::date           AS receipt_period_start_date,
+               r.deposit_date,
+               r.receipt_type,
+               r.status                                            AS receipt_status,
+               r.reversal_date,
+               r.reversal_date IS NOT NULL                         AS is_reversed,
+               r.customer_num,
+               r.customer_name,
+               r.receipt_method,
+               r.currency_code,
+               r.amount                                            AS receipt_amount_entered,
+               r.amount * COALESCE(r.exchange_rate, 1)             AS receipt_amount_idr,
+               a.status                                            AS application_status,
+               CASE a.status WHEN 'APP'   THEN 'Diaplikasikan ke invoice'
+                             WHEN 'UNAPP' THEN 'Belum diaplikasikan'
+                             WHEN 'ACC'   THEN 'On account'
+                             WHEN 'UNID'  THEN 'Tidak teridentifikasi'
+                             ELSE 'Lainnya (' || a.status || ')' END AS application_status_desc,
+               inv.trx_number                                      AS applied_invoice_num,
+               inv.trx_date                                        AS applied_invoice_date,
+               inv.due_date                                        AS applied_invoice_due_date,
+               SUM(a.amount_applied)                               AS amount_entered,
+               SUM(a.acctd_amount_applied)                         AS amount_idr,
+               MAX(a.gl_date)                                      AS last_application_gl_date
+          FROM core.fact_ar_receipt r
+          JOIN core.fact_ar_application a ON a.cash_receipt_id = r.cash_receipt_id
+          LEFT JOIN inv ON inv.customer_trx_id = a.applied_customer_trx_id
+         GROUP BY r.cash_receipt_id, r.receipt_number, r.receipt_date, r.deposit_date, r.receipt_type, r.status,
+                  r.reversal_date, r.customer_num, r.customer_name, r.receipt_method, r.currency_code, r.amount,
+                  r.exchange_rate, a.status, a.applied_customer_trx_id, inv.trx_number, inv.trx_date, inv.due_date
+        HAVING SUM(a.amount_applied) <> 0
+    """,
 }
 
 # Unique index per mart: required by REFRESH MATERIALIZED VIEW CONCURRENTLY,
@@ -398,6 +634,11 @@ MART_UNIQUE_INDEX: dict[str, list[str]] = {
     "po_receipt_vs_invoice": ["po_distribution_id"],
     "pr_pending": ["requisition_line_id"],
     "inv_valuation": ["row_key"],
+    "so_backlog": ["line_id"],
+    "so_shipment_status": ["line_id"],
+    "sales_by_customer_item_month": ["row_key"],
+    "ar_aging": ["payment_schedule_id"],
+    "ar_receipt": ["row_key"],
 }
 
 MART_EXTRA_INDEXES: dict[str, list[str]] = {
@@ -410,6 +651,11 @@ MART_EXTRA_INDEXES: dict[str, list[str]] = {
     "po_receipt_vs_invoice": ["po_number", "vendor_name", "match_status"],
     "pr_pending": ["pr_number", "item_code"],
     "inv_valuation": ["item_code"],
+    "so_backlog": ["customer_name", "order_number", "item_code"],
+    "so_shipment_status": ["order_number", "customer_name"],
+    "sales_by_customer_item_month": ["customer_name", "item_code", "period_start_date"],
+    "ar_aging": ["customer_name", "due_date", "aging_bucket"],
+    "ar_receipt": ["customer_name", "receipt_date", "receipt_number"],
 }
 
 # Which marts to refresh after which job succeeds.
@@ -419,4 +665,6 @@ MARTS_BY_JOB: dict[str, list[str]] = {
     "etl_inventory_txn": ["inv_movement_daily"],
     "etl_mart_po": ["po_outstanding", "po_receipt_vs_invoice", "pr_pending"],
     "etl_mart_item_cost": ["inv_valuation"],
+    "etl_mart_om": ["so_backlog", "so_shipment_status", "sales_by_customer_item_month"],
+    "etl_mart_ar": ["ar_aging", "ar_receipt", "sales_by_customer_item_month"],
 }

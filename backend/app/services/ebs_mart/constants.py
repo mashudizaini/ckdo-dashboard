@@ -41,11 +41,19 @@ OPM_COST_HISTORY_MONTHS = 24
 # agree. SHERLIN's split PRs whose supplier is literally "ELLVIN" are dummy too.
 PR_DUMMY_USERS = ("ELLVIN", "AFNI")
 
+# Sales order types the Dashboard's sales ETL counts (etl_sales,
+# etl_sales_orders): export orders are Export, SO-LOCAL lines of the toll-in
+# line type are CMO, other SO-LOCAL lines are Local. Other order types
+# (internal, returns) are not sales and are left out of the OM marts.
+SO_ORDER_TYPES = ("SO-LOCAL", "SO-EXPORT")
+SO_EXPORT_TYPE = "SO-EXPORT"
+SO_CMO_LINE_TYPE = "SO-TOLL IN-LOCAL"
+
 # Guardrails for run_sql and every intent tool (blueprint section 7).
 MAX_ROWS = 500
 STATEMENT_TIMEOUT = "15s"
 
-# One entry per mart in the blueprint's catalog (section 5). Phases 1 and 2
+# One entry per mart in the blueprint's catalog (section 5). Phases 1-3
 # are built; later phases are listed so the admin overview shows the whole
 # roadmap and find_marts can say "not available yet" instead of nothing.
 #
@@ -124,16 +132,46 @@ MARTS: dict[str, dict] = {
         "source_jobs": ["etl_mart_po"],
         "unique_key": ["requisition_line_id"],
     },
-    "so_backlog": {"domain": "OM", "phase": 3, "built": False, "grain": "SO line yang masih open",
-                   "description": "Backlog sales order.", "sources": "OE_ORDER_LINES_ALL", "source_jobs": []},
-    "so_shipment_status": {"domain": "OM", "phase": 3, "built": False, "grain": "SO line + status delivery",
-                           "description": "Status pengiriman SO.", "sources": "WSH_DELIVERY_DETAILS", "source_jobs": []},
-    "sales_by_customer_item_month": {"domain": "OM", "phase": 3, "built": False, "grain": "Customer × item × bulan",
-                                     "description": "Penjualan per customer, item, bulan.", "sources": "RA_CUSTOMER_TRX_LINES_ALL", "source_jobs": []},
-    "ar_aging": {"domain": "AR", "phase": 3, "built": False, "grain": "Payment schedule AR outstanding + bucket",
-                 "description": "Aging piutang.", "sources": "AR_PAYMENT_SCHEDULES_ALL", "source_jobs": []},
-    "ar_receipt": {"domain": "AR", "phase": 3, "built": False, "grain": "Penerimaan kas + aplikasi",
-                   "description": "Penerimaan kas customer.", "sources": "AR_CASH_RECEIPTS_ALL, AR_RECEIVABLE_APPLICATIONS_ALL", "source_jobs": []},
+    "so_backlog": {
+        "domain": "OM", "phase": 3, "built": True,
+        "grain": "Baris SO yang masih open (belum closed / cancelled)",
+        "description": "Order penjualan yang belum selesai: sisa qty & nilai belum dikirim, jadwal kirim, keterlambatan.",
+        "sources": "OE_ORDER_HEADERS_ALL, OE_ORDER_LINES_ALL, OE_TRANSACTION_TYPES_TL",
+        "source_jobs": ["etl_mart_om"],
+        "unique_key": ["line_id"],
+    },
+    "so_shipment_status": {
+        "domain": "OM", "phase": 3, "built": True,
+        "grain": "Baris SO dengan status pengiriman (WSH delivery details)",
+        "description": "Status kirim per baris SO: terkirim, staged/pick, backorder, siap rilis; nomor delivery dan tanggal ship confirm.",
+        "sources": "WSH_DELIVERY_DETAILS, WSH_DELIVERY_ASSIGNMENTS, WSH_NEW_DELIVERIES",
+        "source_jobs": ["etl_mart_om"],
+        "unique_key": ["line_id"],
+    },
+    "sales_by_customer_item_month": {
+        "domain": "OM", "phase": 3, "built": True,
+        "grain": "Customer × item × bulan GL × mata uang × tipe bisnis (penjualan yang sudah diinvoice)",
+        "description": "Penjualan terinvoice (RA) per customer, item, bulan: qty dan nilai IDR (kurs invoice), termasuk credit memo sebagai pengurang.",
+        "sources": "RA_CUSTOMER_TRX_ALL, RA_CUSTOMER_TRX_LINES_ALL, RA_CUST_TRX_LINE_GL_DIST_ALL",
+        "source_jobs": ["etl_mart_ar", "etl_mart_om"],
+        "unique_key": ["row_key"],
+    },
+    "ar_aging": {
+        "domain": "AR", "phase": 3, "built": True,
+        "grain": "Payment schedule piutang yang masih open (INV, DM, CM)",
+        "description": "Piutang usaha terbuka per jadwal, dengan aging dari jatuh tempo — sama dengan laporan AR Outstanding dashboard (kurs Corporate terbaru).",
+        "sources": "AR_PAYMENT_SCHEDULES_ALL, RA_CUSTOMER_TRX_ALL, HZ_PARTIES, GL_DAILY_RATES",
+        "source_jobs": ["etl_mart_ar"],
+        "unique_key": ["payment_schedule_id"],
+    },
+    "ar_receipt": {
+        "domain": "AR", "phase": 3, "built": True,
+        "grain": "Penerimaan kas × status aplikasi × invoice yang dilunasi",
+        "description": "Penerimaan kas dari customer dan ke invoice mana diaplikasikan, termasuk sisa unapplied / on-account / unidentified.",
+        "sources": "AR_CASH_RECEIPTS_ALL, AR_RECEIVABLE_APPLICATIONS_ALL, AR_RECEIPT_METHODS",
+        "source_jobs": ["etl_mart_ar"],
+        "unique_key": ["row_key"],
+    },
     "batch_status": {"domain": "OPM", "phase": 4, "built": False, "grain": "Batch produksi",
                      "description": "Status batch produksi.", "sources": "GME_BATCH_HEADER", "source_jobs": []},
     "batch_yield_variance": {"domain": "OPM", "phase": 4, "built": False, "grain": "Batch × produk",

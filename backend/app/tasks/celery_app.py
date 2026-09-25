@@ -75,6 +75,19 @@ celery_app.conf.beat_schedule = {
         "kwargs": {"full_refresh": True},
     },
     "etl-mart-item-cost": {"task": "app.tasks.etl_tasks.etl_mart_item_cost", "schedule": crontab(hour=4, minute=50)},
+    # Phase 3: OM and AR hourly (incremental), full reload on Sunday.
+    "etl-mart-om": {"task": "app.tasks.etl_tasks.etl_mart_om", "schedule": crontab(minute=10)},
+    "etl-mart-om-reconcile": {
+        "task": "app.tasks.etl_tasks.etl_mart_om",
+        "schedule": crontab(hour=2, minute=0, day_of_week="sunday"),
+        "kwargs": {"full_refresh": True},
+    },
+    "etl-mart-ar": {"task": "app.tasks.etl_tasks.etl_mart_ar", "schedule": crontab(minute=55)},
+    "etl-mart-ar-reconcile": {
+        "task": "app.tasks.etl_tasks.etl_mart_ar",
+        "schedule": crontab(hour=2, minute=30, day_of_week="sunday"),
+        "kwargs": {"full_refresh": True},
+    },
     # Nightly reconciliation for CoChat (Open WebUI) Knowledge Sync — the
     # main trigger is event-driven (Setup > AI > Knowledge Base's "Sync to
     # CoChat" button), this just catches anything missed (a doc edited

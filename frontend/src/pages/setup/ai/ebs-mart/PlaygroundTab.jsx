@@ -50,6 +50,30 @@ const TOOLS = {
     ["item", "text"], ["item_category", "text"], ["subinventory_type", ["", "GOOD", "REJECT", "QUARANTINE"]],
     ["group_by", ["category", "item", "subinventory_type"]],
   ],
+  get_ar_aging: [
+    ["customer", "text"], ["min_days_overdue", "number"], ["currency", "text"],
+    ["group_by", ["customer", "bucket", "customer_bucket"]],
+  ],
+  get_ar_open_invoices: [
+    ["customer", "text"], ["invoice_num", "text"], ["min_days_overdue", "number"],
+    ["due_from", "date"], ["due_to", "date"], ["currency", "text"],
+  ],
+  get_ar_receipts: [
+    ["customer", "text"], ["receipt_number", "text"], ["date_from", "date"], ["date_to", "date"],
+    ["application_status", ["", "APP", "UNAPP", "ACC", "UNID"]], ["include_reversed", ["false", "true"]],
+    ["group_by", ["none", "customer", "month"]],
+  ],
+  get_so_backlog: [
+    ["customer", "text"], ["item", "text"], ["order_number", "text"],
+    ["business_type", ["", "Local", "Export", "CMO"]], ["late_only", ["false", "true"]],
+    ["group_by", ["none", "customer", "item"]],
+  ],
+  get_so_shipment_status: [["order_number", "text"], ["customer", "text"], ["item", "text"], ["status", "text"]],
+  get_sales_by_customer: [
+    ["customer", "text"], ["item", "text"], ["item_category", "text"], ["period", "text"],
+    ["business_type", ["", "Local", "Export", "CMO", "Non-SO"]],
+    ["group_by", ["customer", "item", "month", "customer_item", "business_type"]],
+  ],
   find_marts: [["keywords", "text"]],
   get_data_freshness: [],
 };

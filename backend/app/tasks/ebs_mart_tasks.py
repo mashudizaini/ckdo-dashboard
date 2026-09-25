@@ -12,6 +12,9 @@ Oracle EBS -> core.* -> REFRESH mart.*.
   etl_mart_po         PO shipments and distributions, incremental like AP;
                       pending requisitions as a full snapshot.
   etl_mart_item_cost  OPM component costs (CKDO_PMAC) per item and period.
+  etl_mart_om         sales order lines and delivery details, incremental.
+  etl_mart_ar         AR schedules, invoice lines, cash receipts and their
+                      applications, incremental; latest Corporate FX rates.
   refresh_ebs_marts   REFRESH every mart; scheduled daily because days_overdue
                       and days_to_expiry are computed at refresh time.
 
@@ -38,7 +41,7 @@ from app.config import get_settings
 from app.database import get_oracle_connection
 from app.services.ebs_mart.constants import (
     EBS_OPERATING_UNIT_ID, EBS_PROCESS_ORG_ID, INVENTORY_CATEGORY_SET,
-    OPM_COST_HISTORY_MONTHS, OPM_COST_METHOD, PR_DUMMY_USERS,
+    OPM_COST_HISTORY_MONTHS, OPM_COST_METHOD, PR_DUMMY_USERS, SO_ORDER_TYPES,
 )
 from app.services.ebs_mart.mart_sql import MARTS_BY_JOB
 from app.tasks.celery_app import celery_app
@@ -798,6 +801,371 @@ def etl_mart_item_cost(year: int = None, month: int = None,
         raise
     run.close()
     return {"status": "success", "rows_read": rows_read, "items_periods": rows_loaded, "note": note}
+
+
+# ── Phase 3: OM / AR ─────────────────────────────────────────────────────────
+
+def _extract_wm(cur_ora, sql: str, wm_expr: str, watermark, full: bool, params: dict | None = None, **fmt):
+    """Run an extract with the composite-watermark clause (1-hour overlap),
+    or without it on a full reload or a stream's first run."""
+    params = {"org_id": EBS_OPERATING_UNIT_ID, **(params or {})}
+    if full or watermark is None:
+        clause = ""
+    else:
+        params["wm"] = watermark
+        clause = f"AND {wm_expr} >= :wm - 1/24"
+    cur_ora.execute(sql.format(wm=clause, wm_expr=wm_expr, **fmt), params)
+    return cur_ora.fetchall()
+
+
+def _sql_list(values) -> str:
+    return ", ".join("'" + str(v).replace("'", "''") + "'" for v in values)
+
+
+# IDR per order: the Corporate rate at the order date — the conversion the
+# Dashboard's sales ETL (etl_sales_orders) uses, so order values agree.
+_SO_RATE = """
+    CASE WHEN ooh.transactional_curr_code = 'IDR' THEN 1
+         ELSE COALESCE((
+             SELECT gdr.conversion_rate FROM gl_daily_rates gdr
+              WHERE gdr.from_currency = ooh.transactional_curr_code
+                AND gdr.to_currency = 'IDR'
+                AND gdr.conversion_type = 'Corporate'
+                AND gdr.conversion_date = (
+                    SELECT MAX(gdr2.conversion_date) FROM gl_daily_rates gdr2
+                     WHERE gdr2.from_currency = ooh.transactional_curr_code
+                       AND gdr2.to_currency = 'IDR'
+                       AND gdr2.conversion_type = 'Corporate'
+                       AND gdr2.conversion_date <= TRUNC(ooh.ordered_date))
+         ), 1) END"""
+
+# Watermark over header and line: shipping, invoicing and closing all
+# update the line; a hold or a header status change updates the header.
+_SO_LINE_WM = "GREATEST(ooh.last_update_date, ool.last_update_date)"
+_SO_LINE_SQL = """
+    SELECT ool.line_id, ooh.header_id, TO_CHAR(ooh.order_number), ott.name, olt.name, ooh.ordered_date,
+           ooh.booked_date, ooh.flow_status_code, ool.flow_status_code, hca.account_number, hp.party_name,
+           ool.line_number, ool.shipment_number, ool.inventory_item_id, msi.segment1,
+           NVL(msi.description, ool.ordered_item), ool.order_quantity_uom, ool.ordered_quantity,
+           ool.shipped_quantity, ool.fulfilled_quantity, ool.invoiced_quantity, ool.cancelled_quantity,
+           ool.unit_selling_price, ooh.transactional_curr_code, {rate},
+           ool.request_date, ool.schedule_ship_date, ool.promise_date, ool.actual_shipment_date,
+           ool.open_flag, ool.cancelled_flag, ool.ship_from_org_id,
+           {wm_expr}
+      FROM oe_order_headers_all ooh
+      JOIN oe_order_lines_all ool        ON ool.header_id = ooh.header_id
+      JOIN oe_transaction_types_tl ott   ON ott.transaction_type_id = ooh.order_type_id AND ott.language = 'US'
+      LEFT JOIN oe_transaction_types_tl olt ON olt.transaction_type_id = ool.line_type_id AND olt.language = 'US'
+      LEFT JOIN mtl_system_items_b msi   ON msi.inventory_item_id = ool.inventory_item_id
+                                        AND msi.organization_id = ool.ship_from_org_id
+      LEFT JOIN hz_cust_accounts hca     ON hca.cust_account_id = ooh.sold_to_org_id
+      LEFT JOIN hz_parties hp            ON hp.party_id = hca.party_id
+     WHERE ooh.org_id = :org_id
+       AND ott.name IN ({order_types})
+       {wm}
+"""
+_SO_LINE_COLS = [
+    "line_id", "header_id", "order_number", "order_type", "line_type", "ordered_date", "booked_date",
+    "header_status", "line_status", "customer_num", "customer_name", "line_number", "shipment_number",
+    "item_id", "item_code", "item_desc", "uom", "ordered_qty", "shipped_qty", "fulfilled_qty", "invoiced_qty",
+    "cancelled_qty", "unit_selling_price", "currency_code", "rate_idr", "request_date", "schedule_ship_date",
+    "promise_date", "actual_shipment_date", "open_flag", "cancelled_flag", "ship_from_org_id", "src_last_update",
+]
+
+# Blueprint 4.2: WSH_DELIVERY_DETAILS.source_line_id = OE line_id. Ship
+# confirm changes the delivery (WSH_NEW_DELIVERIES), hence both dates.
+_SO_DD_WM = "GREATEST(wdd.last_update_date, NVL(wnd.last_update_date, wdd.last_update_date))"
+_SO_DD_SQL = """
+    SELECT wdd.delivery_detail_id, wdd.source_line_id, wdd.released_status, wdd.requested_quantity,
+           wdd.shipped_quantity, wdd.cancelled_quantity, wdd.requested_quantity_uom, wdd.lot_number,
+           wdd.subinventory, wnd.delivery_id, wnd.name, wnd.status_code, wnd.confirm_date, wnd.initial_pickup_date,
+           {wm_expr}
+      FROM wsh_delivery_details wdd
+      LEFT JOIN wsh_delivery_assignments wda ON wda.delivery_detail_id = wdd.delivery_detail_id
+      LEFT JOIN wsh_new_deliveries wnd       ON wnd.delivery_id = wda.delivery_id
+     WHERE wdd.source_code = 'OE'
+       AND wdd.org_id = :org_id
+       {wm}
+"""
+_SO_DD_COLS = [
+    "delivery_detail_id", "source_line_id", "released_status", "requested_qty", "shipped_qty", "cancelled_qty",
+    "uom", "lot_number", "subinventory", "delivery_id", "delivery_name", "delivery_status", "confirm_date",
+    "pickup_date", "src_last_update",
+]
+
+
+@celery_app.task(name="app.tasks.etl_tasks.etl_mart_om")
+def etl_mart_om(year: int = None, month: int = None, full_refresh: bool = False,
+                trigger_type: str = "SCHEDULE", triggered_by: str | None = None):
+    """Sales order lines and their delivery details, incremental on composite
+    watermarks with a weekly full reload (which also removes lines deleted in
+    OM — blueprint: "OE_ORDER_LINES_ALL ... bisa di-delete")."""
+    job = "etl_mart_om"
+    run = _Run(job, trigger_type, triggered_by, {"full_refresh": full_refresh})
+    if not run.locked:
+        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.close()
+        return {"status": "skipped"}
+
+    rows_read = rows_upserted = 0
+    wm_from = wm_to = None
+    try:
+        cur = run.cur
+        wm_line = _get_watermark(cur, job, "so_lines")
+        wm_dd = _get_watermark(cur, job, "deliveries")
+        wm_from = None if full_refresh else min((w for w in (wm_line, wm_dd) if w), default=None)
+
+        ora = get_oracle_connection()
+        try:
+            cur_ora = ora.cursor()
+            cur_ora.arraysize = _BATCH
+            lines = _extract_wm(cur_ora, _SO_LINE_SQL, _SO_LINE_WM, wm_line, full_refresh,
+                                rate=_SO_RATE, order_types=_sql_list(SO_ORDER_TYPES))
+            dds = _extract_wm(cur_ora, _SO_DD_SQL, _SO_DD_WM, wm_dd, full_refresh)
+        finally:
+            ora.close()
+        rows_read = len(lines) + len(dds)
+
+        if full_refresh:
+            cur.execute("TRUNCATE core.fact_so_line, core.fact_so_delivery_detail")
+
+        line_rows = [
+            (_int(r[0]), _int(r[1]), r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], _int(r[11]),
+             _int(r[12]), _int(r[13]), r[14], r[15], r[16], _num(r[17]), _num(r[18]), _num(r[19]), _num(r[20]),
+             _num(r[21]), _num(r[22]), r[23], _num(r[24]), r[25], r[26], r[27], r[28], r[29], r[30], _int(r[31]),
+             r[32])
+            for r in lines
+        ]
+        dd_rows = [
+            (_int(r[0]), _int(r[1]), r[2], _num(r[3]), _num(r[4]), _num(r[5]), r[6], r[7], r[8], _int(r[9]),
+             r[10], r[11], r[12], r[13], r[14])
+            for r in dds
+        ]
+        rows_upserted += _upsert(cur, "core.fact_so_line", _SO_LINE_COLS, ["line_id"], line_rows)
+        rows_upserted += _upsert(cur, "core.fact_so_delivery_detail", _SO_DD_COLS, ["delivery_detail_id"], dd_rows)
+
+        new_line = max((r[-1] for r in line_rows if r[-1]), default=None)
+        new_dd = max((r[-1] for r in dd_rows if r[-1]), default=None)
+        _set_watermark(cur, job, "so_lines", new_line)
+        _set_watermark(cur, job, "deliveries", new_dd)
+        wm_to = max([w for w in (new_line, new_dd, wm_line, wm_dd) if w], default=None)
+        run.pg.commit()
+        refresh_marts_for_job(job)
+        run.finish("success", rows_read, rows_upserted, wm_from=wm_from, wm_to=wm_to)
+        logger.info("[%s] read=%s upserted=%s full=%s", job, rows_read, rows_upserted, full_refresh)
+    except Exception as e:
+        run.pg.rollback()
+        logger.error("[%s] failed: %s", job, e)
+        run.finish("failed", rows_read, rows_upserted, error=str(e), wm_from=wm_from)
+        run.close()
+        raise
+    run.close()
+    return {"status": "success", "rows_read": rows_read, "rows_upserted": rows_upserted}
+
+
+# Same population as the Dashboard's AR Outstanding report: classes INV, DM,
+# CM. Applying a receipt updates the schedule (amount_due_remaining, status),
+# so the schedule's own date carries receipts into the watermark.
+_AR_SCHED_WM = "GREATEST(aps.last_update_date, rct.last_update_date)"
+_AR_SCHED_SQL = """
+    SELECT aps.payment_schedule_id, aps.customer_trx_id, aps.trx_number, aps.trx_date, aps.gl_date, aps.due_date,
+           aps.class, rcttt.name, hca.account_number, hp.party_name, aps.invoice_currency_code, rct.exchange_rate,
+           aps.amount_due_original, aps.amount_due_remaining, aps.status,
+           CASE WHEN rct.interface_header_context = 'ORDER ENTRY' THEN rct.interface_header_attribute1 END,
+           {wm_expr}
+      FROM ar_payment_schedules_all aps
+      JOIN ra_customer_trx_all rct     ON rct.customer_trx_id = aps.customer_trx_id
+      JOIN ra_cust_trx_types_all rcttt ON rcttt.cust_trx_type_id = rct.cust_trx_type_id AND rcttt.org_id = rct.org_id
+      JOIN hz_cust_accounts hca        ON hca.cust_account_id = rct.bill_to_customer_id
+      JOIN hz_parties hp               ON hp.party_id = hca.party_id
+     WHERE rct.org_id = :org_id
+       AND aps.class IN ('INV', 'DM', 'CM')
+       {wm}
+"""
+_AR_SCHED_COLS = [
+    "payment_schedule_id", "customer_trx_id", "trx_number", "trx_date", "gl_date", "due_date", "class",
+    "trx_type", "customer_num", "customer_name", "currency_code", "exchange_rate", "amount_due_original",
+    "amount_due_remaining", "status", "so_number", "src_last_update",
+]
+
+# Invoice lines for sales by customer × item × month. GL date from the
+# receivable distribution (REC, latest), which is the invoice's accounting
+# date. interface_line_attribute6 is the OM line_id when the line came from
+# an order (context ORDER ENTRY) — the link to the order line's type, hence
+# business type.
+_AR_LINE_WM = "GREATEST(rct.last_update_date, rctl.last_update_date)"
+_AR_LINE_SQL = """
+    SELECT rctl.customer_trx_line_id, rct.customer_trx_id, rct.trx_number, rct.trx_date, gd.gl_date,
+           rcttt.type, rcttt.name, hca.account_number, hp.party_name, rctl.inventory_item_id, msi.segment1,
+           SUBSTR(NVL(rctl.description, msi.description), 1, 240), rctl.uom_code,
+           NVL(rctl.quantity_invoiced, rctl.quantity_credited), rctl.unit_selling_price, rctl.extended_amount,
+           rct.invoice_currency_code, rct.exchange_rate,
+           CASE WHEN rctl.interface_line_context = 'ORDER ENTRY' THEN rctl.interface_line_attribute1 END,
+           CASE WHEN rctl.interface_line_context = 'ORDER ENTRY' THEN rctl.interface_line_attribute2 END,
+           CASE WHEN rctl.interface_line_context = 'ORDER ENTRY'
+                 AND REGEXP_LIKE(rctl.interface_line_attribute6, '^[0-9]+$')
+                THEN TO_NUMBER(rctl.interface_line_attribute6) END,
+           {wm_expr}
+      FROM ra_customer_trx_all rct
+      JOIN ra_customer_trx_lines_all rctl ON rctl.customer_trx_id = rct.customer_trx_id AND rctl.line_type = 'LINE'
+      JOIN ra_cust_trx_types_all rcttt    ON rcttt.cust_trx_type_id = rct.cust_trx_type_id AND rcttt.org_id = rct.org_id
+      JOIN hz_cust_accounts hca           ON hca.cust_account_id = rct.bill_to_customer_id
+      JOIN hz_parties hp                  ON hp.party_id = hca.party_id
+      LEFT JOIN ra_cust_trx_line_gl_dist_all gd ON gd.customer_trx_id = rct.customer_trx_id
+                                              AND gd.account_class = 'REC' AND gd.latest_rec_flag = 'Y'
+      LEFT JOIN mtl_system_items_b msi    ON msi.inventory_item_id = rctl.inventory_item_id
+                                         AND msi.organization_id = NVL(rctl.warehouse_id, {inv_org})
+     WHERE rct.org_id = :org_id
+       AND rct.complete_flag = 'Y'
+       AND rcttt.type IN ('INV', 'CM', 'DM')
+       {wm}
+"""
+_AR_LINE_COLS = [
+    "customer_trx_line_id", "customer_trx_id", "trx_number", "trx_date", "gl_date", "class", "trx_type",
+    "customer_num", "customer_name", "item_id", "item_code", "item_desc", "uom", "quantity", "unit_selling_price",
+    "extended_amount", "currency_code", "exchange_rate", "so_number", "so_order_type", "so_line_id",
+    "src_last_update",
+]
+
+_AR_RCPT_WM = "acr.last_update_date"
+_AR_RCPT_SQL = """
+    SELECT acr.cash_receipt_id, acr.receipt_number, acr.receipt_date, acr.deposit_date, acr.type, acr.status,
+           hca.account_number, hp.party_name, arm.name, acr.currency_code, acr.exchange_rate, acr.amount,
+           acr.reversal_date, SUBSTR(acr.comments, 1, 240),
+           {wm_expr}
+      FROM ar_cash_receipts_all acr
+      LEFT JOIN hz_cust_accounts hca  ON hca.cust_account_id = acr.pay_from_customer
+      LEFT JOIN hz_parties hp         ON hp.party_id = hca.party_id
+      LEFT JOIN ar_receipt_methods arm ON arm.receipt_method_id = acr.receipt_method_id
+     WHERE acr.org_id = :org_id
+       {wm}
+"""
+_AR_RCPT_COLS = [
+    "cash_receipt_id", "receipt_number", "receipt_date", "deposit_date", "receipt_type", "status",
+    "customer_num", "customer_name", "receipt_method", "currency_code", "exchange_rate", "amount",
+    "reversal_date", "comments", "src_last_update",
+]
+
+# Cash applications only (application_type CASH); credit-memo applications
+# are not money received.
+_AR_APP_WM = "araa.last_update_date"
+_AR_APP_SQL = """
+    SELECT araa.receivable_application_id, araa.cash_receipt_id, araa.applied_customer_trx_id,
+           araa.applied_payment_schedule_id, araa.status, araa.amount_applied,
+           NVL(araa.acctd_amount_applied_from, araa.amount_applied), araa.apply_date, araa.gl_date,
+           {wm_expr}
+      FROM ar_receivable_applications_all araa
+     WHERE araa.org_id = :org_id
+       AND araa.application_type = 'CASH'
+       {wm}
+"""
+_AR_APP_COLS = [
+    "receivable_application_id", "cash_receipt_id", "applied_customer_trx_id", "applied_payment_schedule_id",
+    "status", "amount_applied", "acctd_amount_applied", "apply_date", "gl_date", "src_last_update",
+]
+
+# Latest Corporate rate to IDR per currency, no later than today — the
+# conversion the AR Outstanding report applies to open balances.
+_FX_LATEST_SQL = """
+    SELECT from_currency, conversion_date, conversion_rate FROM (
+        SELECT g.from_currency, g.conversion_date, g.conversion_rate,
+               ROW_NUMBER() OVER (PARTITION BY g.from_currency ORDER BY g.conversion_date DESC) AS rn
+          FROM gl_daily_rates g
+         WHERE g.to_currency = 'IDR'
+           AND g.conversion_type = 'Corporate'
+           AND g.conversion_date <= TRUNC(SYSDATE)
+           AND g.conversion_date >= TRUNC(SYSDATE) - 400
+    ) WHERE rn = 1
+"""
+
+
+@celery_app.task(name="app.tasks.etl_tasks.etl_mart_ar")
+def etl_mart_ar(year: int = None, month: int = None, full_refresh: bool = False,
+                trigger_type: str = "SCHEDULE", triggered_by: str | None = None):
+    """AR schedules, invoice lines, cash receipts and their applications
+    (each incremental on its own watermark, weekly full reload) plus the
+    latest Corporate FX rates."""
+    job = "etl_mart_ar"
+    run = _Run(job, trigger_type, triggered_by, {"full_refresh": full_refresh})
+    if not run.locked:
+        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.close()
+        return {"status": "skipped"}
+
+    streams = ("schedules", "invoice_lines", "receipts", "applications")
+    rows_read = rows_upserted = 0
+    wm_from = wm_to = None
+    try:
+        cur = run.cur
+        wms = {s: _get_watermark(cur, job, s) for s in streams}
+        wm_from = None if full_refresh else min((w for w in wms.values() if w), default=None)
+
+        ora = get_oracle_connection()
+        try:
+            cur_ora = ora.cursor()
+            cur_ora.arraysize = _BATCH
+            scheds = _extract_wm(cur_ora, _AR_SCHED_SQL, _AR_SCHED_WM, wms["schedules"], full_refresh)
+            lines = _extract_wm(cur_ora, _AR_LINE_SQL, _AR_LINE_WM, wms["invoice_lines"], full_refresh,
+                                inv_org=EBS_PROCESS_ORG_ID)
+            rcpts = _extract_wm(cur_ora, _AR_RCPT_SQL, _AR_RCPT_WM, wms["receipts"], full_refresh)
+            apps = _extract_wm(cur_ora, _AR_APP_SQL, _AR_APP_WM, wms["applications"], full_refresh)
+            cur_ora.execute(_FX_LATEST_SQL)
+            fx = cur_ora.fetchall()
+        finally:
+            ora.close()
+        rows_read = len(scheds) + len(lines) + len(rcpts) + len(apps) + len(fx)
+
+        if full_refresh:
+            cur.execute("TRUNCATE core.fact_ar_schedule, core.fact_ar_invoice_line, "
+                        "core.fact_ar_receipt, core.fact_ar_application")
+
+        sched_rows = [
+            (_int(r[0]), _int(r[1]), r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], _num(r[11]),
+             _num(r[12]), _num(r[13]), r[14], r[15], r[16])
+            for r in scheds
+        ]
+        line_rows = [
+            (_int(r[0]), _int(r[1]), r[2], r[3], r[4], r[5], r[6], r[7], r[8], _int(r[9]), r[10], r[11], r[12],
+             _num(r[13]), _num(r[14]), _num(r[15]), r[16], _num(r[17]), r[18], r[19], _int(r[20]), r[21])
+            for r in lines
+        ]
+        rcpt_rows = [
+            (_int(r[0]), r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], _num(r[10]), _num(r[11]), r[12],
+             r[13], r[14])
+            for r in rcpts
+        ]
+        app_rows = [
+            (_int(r[0]), _int(r[1]), _int(r[2]), _int(r[3]), r[4], _num(r[5]), _num(r[6]), r[7], r[8], r[9])
+            for r in apps
+        ]
+        rows_upserted += _upsert(cur, "core.fact_ar_schedule", _AR_SCHED_COLS, ["payment_schedule_id"], sched_rows)
+        rows_upserted += _upsert(cur, "core.fact_ar_invoice_line", _AR_LINE_COLS, ["customer_trx_line_id"], line_rows)
+        rows_upserted += _upsert(cur, "core.fact_ar_receipt", _AR_RCPT_COLS, ["cash_receipt_id"], rcpt_rows)
+        rows_upserted += _upsert(cur, "core.fact_ar_application", _AR_APP_COLS, ["receivable_application_id"], app_rows)
+
+        cur.execute("TRUNCATE core.dim_fx_rate")
+        if fx:
+            execute_values(cur, "INSERT INTO core.dim_fx_rate (currency_code, rate_date, rate) VALUES %s",
+                           [(r[0], r[1], _num(r[2])) for r in fx])
+
+        new = {}
+        for stream, rows in (("schedules", sched_rows), ("invoice_lines", line_rows),
+                             ("receipts", rcpt_rows), ("applications", app_rows)):
+            new[stream] = max((r[-1] for r in rows if r[-1]), default=None)
+            _set_watermark(cur, job, stream, new[stream])
+        wm_to = max([w for w in list(new.values()) + list(wms.values()) if w], default=None)
+        run.pg.commit()
+        refresh_marts_for_job(job)
+        run.finish("success", rows_read, rows_upserted, wm_from=wm_from, wm_to=wm_to)
+        logger.info("[%s] read=%s upserted=%s full=%s", job, rows_read, rows_upserted, full_refresh)
+    except Exception as e:
+        run.pg.rollback()
+        logger.error("[%s] failed: %s", job, e)
+        run.finish("failed", rows_read, rows_upserted, error=str(e), wm_from=wm_from)
+        run.close()
+        raise
+    run.close()
+    return {"status": "success", "rows_read": rows_read, "rows_upserted": rows_upserted}
 
 
 @celery_app.task(name="app.tasks.etl_tasks.refresh_ebs_marts")
