@@ -51,6 +51,7 @@ JOBS = {
     "etl_mart_item_cost": "Biaya OPM PMAC (valuasi)",
     "etl_mart_om": "Sales order & pengiriman (incremental)",
     "etl_mart_ar": "Piutang, invoice & penerimaan kas (incremental)",
+    "etl_mart_opm": "Batch produksi OPM (incremental)",
     "refresh_ebs_marts": "Refresh semua mart",
 }
 
@@ -134,7 +135,7 @@ async def trigger(job: str, body: TriggerIn = TriggerIn(), user: CurrentUser = D
     kwargs: dict = {}
     if job != "etl_inventory_txn":
         kwargs = {"trigger_type": "MANUAL", "triggered_by": user.username or user.email}
-    if job in ("etl_mart_ap", "etl_mart_po", "etl_mart_om", "etl_mart_ar") and body.full_refresh:
+    if job in ("etl_mart_ap", "etl_mart_po", "etl_mart_om", "etl_mart_ar", "etl_mart_opm") and body.full_refresh:
         kwargs["full_refresh"] = True
     result = celery_app.send_task(f"app.tasks.etl_tasks.{job}", kwargs=kwargs)
     return {"message": f"{JOBS[job]} dijalankan", "task_id": result.id}
@@ -278,6 +279,9 @@ _INTENT_TOOLS = {
     "get_so_backlog": tools.get_so_backlog,
     "get_so_shipment_status": tools.get_so_shipment_status,
     "get_sales_by_customer": tools.get_sales_by_customer,
+    "get_batch_status": tools.get_batch_status,
+    "get_batch_yield": tools.get_batch_yield,
+    "get_batch_material_usage": tools.get_batch_material_usage,
 }
 
 
@@ -307,6 +311,9 @@ async def call_tool(name: str, body: ToolIn, user: CurrentUser = Depends(_admin)
     for k in ("days", "min_days_overdue", "min_days_waiting"):
         if args.get(k) is not None:
             args[k] = int(args[k])
+    for k in ("below_pct", "over_pct"):
+        if args.get(k) is not None:
+            args[k] = float(args[k])
     caller = _admin_caller(user, body.group)
     try:
         return await run_in_threadpool(_tool_call, fn, caller, **args)

@@ -15,6 +15,7 @@ Oracle EBS -> core.* -> REFRESH mart.*.
   etl_mart_om         sales order lines and delivery details, incremental.
   etl_mart_ar         AR schedules, invoice lines, cash receipts and their
                       applications, incremental; latest Corporate FX rates.
+  etl_mart_opm        OPM batch material lines and lot consumption per line.
   refresh_ebs_marts   REFRESH every mart; scheduled daily because days_overdue
                       and days_to_expiry are computed at refresh time.
 
@@ -1154,6 +1155,153 @@ def etl_mart_ar(year: int = None, month: int = None, full_refresh: bool = False,
             new[stream] = max((r[-1] for r in rows if r[-1]), default=None)
             _set_watermark(cur, job, stream, new[stream])
         wm_to = max([w for w in list(new.values()) + list(wms.values()) if w], default=None)
+        run.pg.commit()
+        refresh_marts_for_job(job)
+        run.finish("success", rows_read, rows_upserted, wm_from=wm_from, wm_to=wm_to)
+        logger.info("[%s] read=%s upserted=%s full=%s", job, rows_read, rows_upserted, full_refresh)
+    except Exception as e:
+        run.pg.rollback()
+        logger.error("[%s] failed: %s", job, e)
+        run.finish("failed", rows_read, rows_upserted, error=str(e), wm_from=wm_from)
+        run.close()
+        raise
+    run.close()
+    return {"status": "success", "rows_read": rows_read, "rows_upserted": rows_upserted}
+
+
+# ── Phase 4: OPM batches ─────────────────────────────────────────────────────
+
+# One row per batch material line (products, by-products and ingredients),
+# header columns repeated. Watermark over header and line: recording actual
+# consumption or yield updates GME_MATERIAL_DETAILS without touching the
+# header, which is why eis.fact_batch (header watermark only) misses it.
+_BATCH_MAT_WM = "GREATEST(gbh.last_update_date, gmd.last_update_date)"
+_BATCH_MAT_SQL = """
+    SELECT gmd.material_detail_id, gbh.batch_id, TO_CHAR(gbh.batch_no), gbh.organization_id, gbh.batch_status,
+           ffm.formula_no, ffm.formula_vers, gbh.plan_start_date, gbh.actual_start_date, gbh.due_date,
+           gbh.plan_cmplt_date, gbh.actual_cmplt_date, gbh.batch_close_date,
+           gmd.line_type, gmd.line_no, gmd.inventory_item_id, msi.segment1, msi.description, gmd.item_um,
+           msi.primary_uom_code,
+           gmd.plan_qty, gmd.original_qty, gmd.wip_plan_qty, gmd.actual_qty,
+           {wm_expr}
+      FROM gme_batch_header gbh
+      JOIN gme_material_details gmd   ON gmd.batch_id = gbh.batch_id
+      LEFT JOIN fm_form_mst_b ffm     ON ffm.formula_id = gbh.formula_id
+      LEFT JOIN mtl_system_items_b msi ON msi.inventory_item_id = gmd.inventory_item_id
+                                      AND msi.organization_id = gmd.organization_id
+     WHERE gbh.organization_id = :org_id
+       AND gbh.delete_mark = 0
+       {wm}
+"""
+_BATCH_MAT_COLS = [
+    "material_detail_id", "batch_id", "batch_no", "organization_id", "batch_status", "formula_no", "formula_vers",
+    "plan_start_date", "actual_start_date", "due_date", "plan_cmplt_date", "actual_cmplt_date", "batch_close_date",
+    "line_type", "line_no", "item_id", "item_code", "item_desc", "uom", "primary_uom", "plan_qty", "original_qty",
+    "wip_plan_qty", "actual_qty", "src_last_update",
+]
+
+# Lot-level material movement per batch line. OPM batch transactions are
+# Job-or-Schedule transactions (source type 5): transaction_source_id is the
+# batch, trx_source_line_id the material line. Aggregated in Oracle to one row
+# per line × lot; a line with no lot control shows as lot '-'.
+_BATCH_LOT_SQL = """
+    SELECT mmt.transaction_source_id, mmt.trx_source_line_id, NVL(mtln.lot_number, '-'),
+           SUM(NVL(mtln.primary_quantity, mmt.primary_quantity)), COUNT(DISTINCT mmt.transaction_id),
+           MAX(mmt.transaction_date)
+      FROM mtl_material_transactions mmt
+      LEFT JOIN mtl_transaction_lot_numbers mtln ON mtln.transaction_id = mmt.transaction_id
+     WHERE mmt.transaction_source_type_id = 5
+       AND mmt.organization_id = :org_id
+       {batch_filter}
+     GROUP BY mmt.transaction_source_id, mmt.trx_source_line_id, NVL(mtln.lot_number, '-')
+"""
+# Incremental: recompute every batch that had any transaction since the
+# watermark, whole — lot sums cannot be upserted piecewise.
+_BATCH_LOT_CHANGED = """
+    AND mmt.transaction_source_id IN (
+        SELECT DISTINCT m2.transaction_source_id FROM mtl_material_transactions m2
+         WHERE m2.transaction_source_type_id = 5
+           AND m2.organization_id = :org_id
+           AND m2.last_update_date >= :wm - 1/24)
+"""
+_BATCH_LOT_MAXWM = """
+    SELECT MAX(last_update_date) FROM mtl_material_transactions
+     WHERE transaction_source_type_id = 5 AND organization_id = :org_id
+"""
+
+
+@celery_app.task(name="app.tasks.etl_tasks.etl_mart_opm")
+def etl_mart_opm(year: int = None, month: int = None, full_refresh: bool = False,
+                 trigger_type: str = "SCHEDULE", triggered_by: str | None = None):
+    """OPM batch material lines (incremental, composite watermark) and lot
+    consumption/yield per line (incremental by changed batch); weekly full."""
+    job = "etl_mart_opm"
+    run = _Run(job, trigger_type, triggered_by, {"full_refresh": full_refresh, "organization_id": EBS_PROCESS_ORG_ID})
+    if not run.locked:
+        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.close()
+        return {"status": "skipped"}
+
+    rows_read = rows_upserted = 0
+    wm_from = wm_to = None
+    try:
+        cur = run.cur
+        wm_mat = _get_watermark(cur, job, "materials")
+        wm_lot = _get_watermark(cur, job, "lots")
+        wm_from = None if full_refresh else min((w for w in (wm_mat, wm_lot) if w), default=None)
+        org = {"org_id": EBS_PROCESS_ORG_ID}
+
+        ora = get_oracle_connection()
+        try:
+            cur_ora = ora.cursor()
+            cur_ora.arraysize = _BATCH
+            mats = _extract_wm(cur_ora, _BATCH_MAT_SQL, _BATCH_MAT_WM, wm_mat, full_refresh, params=org)
+            # Read the lot watermark BEFORE the lot extract, so a transaction
+            # committed while it runs is picked up next time, not skipped.
+            cur_ora.execute(_BATCH_LOT_MAXWM, org)
+            new_lot_wm = cur_ora.fetchone()[0]
+            if full_refresh or wm_lot is None:
+                cur_ora.execute(_BATCH_LOT_SQL.format(batch_filter=""), org)
+            else:
+                cur_ora.execute(_BATCH_LOT_SQL.format(batch_filter=_BATCH_LOT_CHANGED), {**org, "wm": wm_lot})
+            lots = cur_ora.fetchall()
+        finally:
+            ora.close()
+        rows_read = len(mats) + len(lots)
+
+        if full_refresh:
+            cur.execute("TRUNCATE core.fact_batch_material")
+        mat_rows = [
+            (_int(r[0]), _int(r[1]), r[2], _int(r[3]), _int(r[4]), r[5], _int(r[6]), r[7], r[8], r[9], r[10], r[11],
+             r[12], _int(r[13]), _int(r[14]), _int(r[15]), r[16], r[17], r[18], r[19], _num(r[20]), _num(r[21]),
+             _num(r[22]), _num(r[23]), r[24])
+            for r in mats
+        ]
+        rows_upserted += _upsert(cur, "core.fact_batch_material", _BATCH_MAT_COLS, ["material_detail_id"], mat_rows)
+
+        lot_rows = [
+            (f"{int(r[1])}|{r[2]}", _int(r[0]), _int(r[1]), r[2], _num(r[3]), _int(r[4]), r[5])
+            for r in lots if r[1] is not None
+        ]
+        if full_refresh or wm_lot is None:
+            cur.execute("TRUNCATE core.fact_batch_lot")
+        else:
+            batch_ids = sorted({r[1] for r in lot_rows})
+            if batch_ids:
+                cur.execute("DELETE FROM core.fact_batch_lot WHERE batch_id = ANY(%s)", (batch_ids,))
+        if lot_rows:
+            execute_values(cur, """
+                INSERT INTO core.fact_batch_lot (row_key, batch_id, material_detail_id, lot_number, qty,
+                                                 txn_count, last_txn_date) VALUES %s
+                ON CONFLICT (row_key) DO UPDATE SET qty = EXCLUDED.qty, txn_count = EXCLUDED.txn_count,
+                    last_txn_date = EXCLUDED.last_txn_date, loaded_at = now()
+            """, lot_rows, page_size=_BATCH)
+            rows_upserted += len(lot_rows)
+
+        new_mat = max((r[-1] for r in mat_rows if r[-1]), default=None)
+        _set_watermark(cur, job, "materials", new_mat)
+        _set_watermark(cur, job, "lots", new_lot_wm)
+        wm_to = max([w for w in (new_mat, new_lot_wm, wm_mat, wm_lot) if w], default=None)
         run.pg.commit()
         refresh_marts_for_job(job)
         run.finish("success", rows_read, rows_upserted, wm_from=wm_from, wm_to=wm_to)

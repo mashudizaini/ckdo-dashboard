@@ -83,6 +83,13 @@ celery_app.conf.beat_schedule = {
         "kwargs": {"full_refresh": True},
     },
     "etl-mart-ar": {"task": "app.tasks.etl_tasks.etl_mart_ar", "schedule": crontab(minute=55)},
+    # Phase 4: OPM batches hourly (incremental), full reload on Sunday.
+    "etl-mart-opm": {"task": "app.tasks.etl_tasks.etl_mart_opm", "schedule": crontab(minute=35)},
+    "etl-mart-opm-reconcile": {
+        "task": "app.tasks.etl_tasks.etl_mart_opm",
+        "schedule": crontab(hour=3, minute=0, day_of_week="sunday"),
+        "kwargs": {"full_refresh": True},
+    },
     "etl-mart-ar-reconcile": {
         "task": "app.tasks.etl_tasks.etl_mart_ar",
         "schedule": crontab(hour=2, minute=30, day_of_week="sunday"),

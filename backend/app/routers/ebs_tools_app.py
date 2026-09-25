@@ -299,6 +299,34 @@ class SalesIn(BaseModel):
         "customer", description="Pengelompokan hasil")
 
 
+class BatchStatusIn(BaseModel):
+    batch_no: Optional[str] = Field(None, description="Nomor batch persis")
+    product: Optional[str] = Field(None, description="Kode produk persis ATAU nama produk (cocok sebagian)")
+    status: Optional[Literal["Pending", "WIP", "Completed", "Closed", "Cancelled"]] = Field(None, description="Status batch")
+    date_from: Optional[date] = Field(None, description="Rencana mulai batch dari (YYYY-MM-DD)")
+    date_to: Optional[date] = Field(None, description="Rencana mulai batch sampai (YYYY-MM-DD)")
+    late_only: bool = Field(False, description="true = hanya batch yang selesai terlambat atau belum selesai lewat rencana")
+    group_by: Literal["none", "status", "schedule", "product", "month"] = Field(
+        "none", description="none = detail per batch; status = jumlah per status; schedule = ketepatan jadwal (on-time %); product / month = ringkasan")
+
+
+class BatchYieldIn(BaseModel):
+    product: Optional[str] = Field(None, description="Kode produk persis ATAU nama produk (cocok sebagian)")
+    batch_no: Optional[str] = Field(None, description="Nomor batch persis")
+    date_from: Optional[date] = Field(None, description="Rencana mulai batch dari (YYYY-MM-DD)")
+    date_to: Optional[date] = Field(None, description="Rencana mulai batch sampai (YYYY-MM-DD)")
+    below_pct: Optional[float] = Field(None, description="Hanya yield di bawah persen ini, mis. 95")
+    group_by: Literal["product", "batch", "month"] = Field("product", description="product = per produk; batch = per batch; month = per bulan")
+
+
+class BatchMaterialIn(BaseModel):
+    batch_no: Optional[str] = Field(None, description="Nomor batch persis")
+    ingredient: Optional[str] = Field(None, description="Kode bahan persis ATAU nama bahan (cocok sebagian)")
+    lot_number: Optional[str] = Field(None, description="Nomor lot bahan persis — untuk 'lot ini dipakai di batch mana'")
+    over_pct: Optional[float] = Field(None, description="Hanya bahan dengan selisih aktual vs standar minimal N persen (absolut)")
+    group_by: Literal["none", "ingredient"] = Field("none", description="none = detail per batch × bahan × lot; ingredient = ringkasan per bahan")
+
+
 # ── Operations ───────────────────────────────────────────────────────────────
 
 @app.post("/find_marts", operation_id="find_marts",
@@ -450,6 +478,24 @@ async def get_so_shipment_status(body: SoShipIn, caller: Caller = Depends(curren
           summary="Penjualan terinvoice per customer / item / bulan / tipe bisnis (nilai IDR, qty, credit memo)")
 async def get_sales_by_customer(body: SalesIn, caller: Caller = Depends(current_caller)):
     return await _call(tools.get_sales_by_customer, caller, **body.model_dump())
+
+
+@app.post("/get_batch_status", operation_id="get_batch_status",
+          summary="Status batch produksi OPM: status, formula, rencana vs aktual mulai/selesai, keterlambatan, ketepatan jadwal")
+async def get_batch_status(body: BatchStatusIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_batch_status, caller, **body.model_dump())
+
+
+@app.post("/get_batch_yield", operation_id="get_batch_yield",
+          summary="Yield batch (aktual ÷ rencana produk) per produk, per batch, atau per bulan — batch Completed/Closed")
+async def get_batch_yield(body: BatchYieldIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_batch_yield, caller, **body.model_dump())
+
+
+@app.post("/get_batch_material_usage", operation_id="get_batch_material_usage",
+          summary="Pemakaian bahan per batch (standar vs aktual) dan lot bahan yang dipakai — juga penelusuran lot → batch")
+async def get_batch_material_usage(body: BatchMaterialIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_batch_material_usage, caller, **body.model_dump())
 
 
 @app.get("/health", include_in_schema=False)

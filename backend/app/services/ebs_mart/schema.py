@@ -442,6 +442,56 @@ _CORE_DDL = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_core_ar_app_receipt ON core.fact_ar_application (cash_receipt_id)",
+    # ── Phase 4: OPM batches ─────────────────────────────────────────────
+    # One row per batch material line (line_type 1 product, 2 by-product,
+    # -1 ingredient) with the batch header repeated. uom is the line's own
+    # unit; primary_uom is the item's primary unit, which lot transactions
+    # (core.fact_batch_lot) are counted in — they can differ.
+    """
+    CREATE TABLE IF NOT EXISTS core.fact_batch_material (
+        material_detail_id bigint PRIMARY KEY,
+        batch_id           bigint,
+        batch_no           text,
+        organization_id    bigint,
+        batch_status       int,
+        formula_no         text,
+        formula_vers       int,
+        plan_start_date    timestamp,
+        actual_start_date  timestamp,
+        due_date           timestamp,
+        plan_cmplt_date    timestamp,
+        actual_cmplt_date  timestamp,
+        batch_close_date   timestamp,
+        line_type          int,
+        line_no            int,
+        item_id            bigint,
+        item_code          text,
+        item_desc          text,
+        uom                text,
+        primary_uom        text,
+        plan_qty           numeric,
+        original_qty       numeric,
+        wip_plan_qty       numeric,
+        actual_qty         numeric,
+        src_last_update    timestamp,
+        loaded_at          timestamptz DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_core_batch_mat_batch ON core.fact_batch_material (batch_id)",
+    """
+    CREATE TABLE IF NOT EXISTS core.fact_batch_lot (
+        row_key            text PRIMARY KEY,
+        batch_id           bigint,
+        material_detail_id bigint,
+        lot_number         text,
+        qty                numeric,
+        txn_count          int,
+        last_txn_date      timestamp,
+        loaded_at          timestamptz DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_core_batch_lot_batch ON core.fact_batch_lot (batch_id)",
+    "CREATE INDEX IF NOT EXISTS idx_core_batch_lot_lot ON core.fact_batch_lot (lot_number)",
     # Latest Corporate rate to IDR per currency — what the Dashboard's AR
     # Outstanding report converts open balances with (not the invoice rate).
     """

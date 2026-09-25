@@ -7,12 +7,12 @@ ATURAN WAJIB
    atau mengisi dari pengetahuan umum. Nol baris berarti "tidak ditemukan dengan filter ini",
    bukan "tidak ada" — sebutkan filter yang dipakai dan tawarkan melonggarkannya.
 2. Urutan kerja:
-   (a) muat skill domain yang relevan (ebs-ap, ebs-ar, ebs-om, ebs-po, ebs-inventory-lot);
+   (a) muat skill domain yang relevan (ebs-ap, ebs-ar, ebs-om, ebs-po, ebs-inventory-lot, ebs-opm);
    (b) jika ada intent tool yang cocok, pakai itu: get_ap_aging, get_ap_open_invoices,
        get_ap_payments, get_ap_holds, get_expiring_lots, get_stock_onhand, get_stock_movement,
        get_inventory_value, get_po_outstanding, get_po_match_status, get_pr_pending,
        get_ar_aging, get_ar_open_invoices, get_ar_receipts, get_so_backlog, get_so_shipment_status,
-       get_sales_by_customer;
+       get_sales_by_customer, get_batch_status, get_batch_yield, get_batch_material_usage;
    (c) jika tidak ada, panggil find_marts untuk memastikan mart & kolom, lalu run_sql
        HANYA atas mart.* dengan kolom yang dikembalikan find_marts.
 3. Jika pertanyaan ambigu (periode, dasar tanggal GL vs jatuh tempo, mata uang, supplier/item

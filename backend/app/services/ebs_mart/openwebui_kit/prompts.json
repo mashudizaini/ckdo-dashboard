@@ -68,5 +68,25 @@
     "command": "/penjualan",
     "title": "Penjualan per customer",
     "content": "Penjualan terinvoice periode {{periode | tahun ini}} per customer, urut nilai terbesar, sebutkan kontribusi retur."
+  },
+  {
+    "command": "/status-batch",
+    "title": "Status & yield batch",
+    "content": "Status, tanggal rencana/aktual, keterlambatan, dan yield batch {{nomor_batch}}, beserta pemakaian bahannya."
+  },
+  {
+    "command": "/jadwal-produksi",
+    "title": "Ketepatan jadwal produksi",
+    "content": "Ketepatan jadwal batch produksi periode {{periode | bulan ini}}: jumlah tepat waktu, terlambat, dan batch berjalan yang lewat rencana."
+  },
+  {
+    "command": "/yield-produk",
+    "title": "Yield per produk",
+    "content": "Yield batch per produk periode {{periode | tahun ini}}, urut dari yield terendah."
+  },
+  {
+    "command": "/lacak-lot",
+    "title": "Lot bahan dipakai di batch mana",
+    "content": "Lot bahan {{nomor_lot}} dipakai di batch mana saja, berapa qty-nya, dan produk apa yang dihasilkan."
   }
 ]

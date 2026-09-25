@@ -775,3 +775,165 @@ def get_sales_by_customer(caller: Caller, customer: str | None = None, item: str
     params = {"s": _like(customer), "bt": _val(business_type), "p0": start, "p1": end, "item": _val(item),
               "cat": _categories(item_category)}
     return _run(caller, "sales_by_customer_item_month", sql, params, "get_sales_by_customer", args)
+
+
+# ── OPM batches (phase 4) ────────────────────────────────────────────────────
+
+_BATCH_STATUS_CODES = {"pending": 1, "wip": 2, "completed": 3, "closed": 4, "cancelled": -1}
+
+
+def _status_code(status):
+    if status is None or str(status).strip() == "":
+        return None
+    s = str(status).strip().lower()
+    if s.lstrip("-").isdigit():
+        return int(s)
+    if s not in _BATCH_STATUS_CODES:
+        raise sql_guard.SqlRejected("Status batch tidak dikenal — pakai Pending, WIP, Completed, Closed, atau Cancelled.")
+    return _BATCH_STATUS_CODES[s]
+
+
+def get_batch_status(caller: Caller, batch_no: str | None = None, product: str | None = None,
+                     status: str | None = None, date_from: date | None = None, date_to: date | None = None,
+                     late_only: bool = False, group_by: str = "none") -> dict:
+    """Batches by plan start date, as the Production dashboard filters them."""
+    args = {"batch_no": batch_no, "product": product, "status": status, "date_from": date_from, "date_to": date_to,
+            "late_only": late_only, "group_by": group_by}
+    where = """
+         WHERE (%(bn)s::text  IS NULL OR batch_no = %(bn)s::text)
+           AND (%(p)s::text   IS NULL OR UPPER(product_code) = UPPER(%(p)s::text)
+                                      OR product_desc ILIKE '%%' || %(p)s::text || '%%')
+           AND (%(st)s::int   IS NULL OR batch_status = %(st)s::int)
+           AND (%(df)s::date  IS NULL OR plan_start_date >= %(df)s::date)
+           AND (%(dt)s::date  IS NULL OR plan_start_date <= %(dt)s::date)
+           AND (NOT %(late)s::boolean OR schedule_status IN ('Selesai terlambat', 'Belum selesai, lewat rencana'))
+    """
+    if group_by == "status":
+        sql = f"""
+            SELECT batch_status_desc, COUNT(*) AS jml_batch FROM mart.batch_status {where}
+             GROUP BY batch_status_desc ORDER BY 2 DESC
+        """
+    elif group_by == "schedule":
+        # Same definition as the Production dashboard's Schedule Adherence:
+        # completed batches, on time when actual <= planned completion.
+        sql = f"""
+            SELECT COUNT(*) FILTER (WHERE actual_cmplt_date IS NOT NULL AND plan_cmplt_date IS NOT NULL) AS batch_selesai,
+                   COUNT(*) FILTER (WHERE on_time)                                                AS tepat_waktu,
+                   ROUND(100.0 * COUNT(*) FILTER (WHERE on_time)
+                         / NULLIF(COUNT(*) FILTER (WHERE actual_cmplt_date IS NOT NULL AND plan_cmplt_date IS NOT NULL), 0), 1)
+                                                                                                  AS on_time_pct,
+                   ROUND(AVG(completion_delay_days) FILTER (WHERE actual_cmplt_date IS NOT NULL), 1) AS rata2_delay_hari,
+                   COUNT(*) FILTER (WHERE schedule_status = 'Belum selesai, lewat rencana')       AS berjalan_lewat_rencana
+              FROM mart.batch_status {where}
+        """
+    elif group_by == "product":
+        sql = f"""
+            SELECT product_code, MAX(product_desc) AS product_desc, product_uom, COUNT(*) AS jml_batch,
+                   SUM(product_plan_qty) AS plan_qty, SUM(product_actual_qty) AS actual_qty,
+                   COUNT(*) FILTER (WHERE on_time) AS tepat_waktu
+              FROM mart.batch_status {where}
+             GROUP BY product_code, product_uom ORDER BY jml_batch DESC
+        """
+    elif group_by == "month":
+        sql = f"""
+            SELECT plan_period_start_date, plan_period_name, COUNT(*) AS jml_batch,
+                   COUNT(*) FILTER (WHERE batch_status IN (3, 4)) AS selesai,
+                   COUNT(*) FILTER (WHERE batch_status = -1) AS batal,
+                   COUNT(*) FILTER (WHERE on_time) AS tepat_waktu
+              FROM mart.batch_status {where}
+             GROUP BY plan_period_start_date, plan_period_name ORDER BY plan_period_start_date
+        """
+    else:
+        sql = f"""
+            SELECT batch_no, batch_status_desc, formula, product_code, product_desc, product_uom, product_plan_qty,
+                   product_actual_qty, yield_pct, plan_start_date, actual_start_date, plan_cmplt_date,
+                   actual_cmplt_date, completion_delay_days, schedule_status
+              FROM mart.batch_status {where}
+             ORDER BY plan_start_date DESC, batch_no
+        """
+    params = {"bn": _val(batch_no), "p": _val(product), "st": _status_code(status), "df": date_from, "dt": date_to,
+              "late": bool(late_only)}
+    return _run(caller, "batch_status", sql, params, "get_batch_status", args)
+
+
+def get_batch_yield(caller: Caller, product: str | None = None, batch_no: str | None = None,
+                    date_from: date | None = None, date_to: date | None = None,
+                    below_pct: float | None = None, group_by: str = "product") -> dict:
+    """Yield of completed/closed batches (status 3, 4) — the Production
+    dashboard's definition: product actual ÷ product plan."""
+    args = {"product": product, "batch_no": batch_no, "date_from": date_from, "date_to": date_to,
+            "below_pct": below_pct, "group_by": group_by}
+    where = """
+         WHERE batch_status IN (3, 4)
+           AND line_type = 1
+           AND (%(bn)s::text  IS NULL OR batch_no = %(bn)s::text)
+           AND (%(p)s::text   IS NULL OR UPPER(item_code) = UPPER(%(p)s::text)
+                                      OR item_desc ILIKE '%%' || %(p)s::text || '%%')
+           AND (%(df)s::date  IS NULL OR plan_start_date >= %(df)s::date)
+           AND (%(dt)s::date  IS NULL OR plan_start_date <= %(dt)s::date)
+    """
+    if group_by == "batch":
+        sql = f"""
+            SELECT batch_no, item_code, item_desc, uom, plan_qty, standard_qty, actual_qty, variance_qty, yield_pct,
+                   plan_start_date, actual_cmplt_date
+              FROM mart.batch_yield_variance {where}
+               AND (%(b)s::numeric IS NULL OR yield_pct < %(b)s::numeric)
+             ORDER BY yield_pct NULLS LAST, batch_no
+        """
+    elif group_by == "month":
+        sql = f"""
+            SELECT plan_period_start_date, plan_period_name, COUNT(DISTINCT batch_id) AS jml_batch,
+                   ROUND(100.0 * SUM(actual_qty) / NULLIF(SUM(plan_qty), 0), 1) AS yield_pct
+              FROM mart.batch_yield_variance {where}
+             GROUP BY plan_period_start_date, plan_period_name ORDER BY plan_period_start_date
+        """
+    else:
+        sql = f"""
+            SELECT * FROM (
+                SELECT item_code, MAX(item_desc) AS item_desc, uom, COUNT(DISTINCT batch_id) AS jml_batch,
+                       SUM(plan_qty) AS plan_qty, SUM(actual_qty) AS actual_qty,
+                       ROUND(100.0 * SUM(actual_qty) / NULLIF(SUM(plan_qty), 0), 1) AS yield_pct,
+                       MIN(yield_pct) AS yield_min_pct, MAX(yield_pct) AS yield_max_pct
+                  FROM mart.batch_yield_variance {where}
+                 GROUP BY item_code, uom
+            ) t WHERE (%(b)s::numeric IS NULL OR yield_pct < %(b)s::numeric)
+             ORDER BY jml_batch DESC
+        """
+    params = {"bn": _val(batch_no), "p": _val(product), "df": date_from, "dt": date_to, "b": below_pct}
+    return _run(caller, "batch_yield_variance", sql, params, "get_batch_yield", args)
+
+
+def get_batch_material_usage(caller: Caller, batch_no: str | None = None, ingredient: str | None = None,
+                             lot_number: str | None = None, over_pct: float | None = None,
+                             group_by: str = "none") -> dict:
+    """Ingredient usage per batch and lot — also the traceability question
+    'lot X dipakai di batch mana' (lot_number without batch_no)."""
+    args = {"batch_no": batch_no, "ingredient": ingredient, "lot_number": lot_number, "over_pct": over_pct,
+            "group_by": group_by}
+    where = """
+         WHERE (%(bn)s::text  IS NULL OR batch_no = %(bn)s::text)
+           AND (%(i)s::text   IS NULL OR UPPER(item_code) = UPPER(%(i)s::text)
+                                      OR item_desc ILIKE '%%' || %(i)s::text || '%%')
+           AND (%(lot)s::text IS NULL OR UPPER(lot_number) = UPPER(%(lot)s::text))
+           AND (%(o)s::numeric IS NULL OR ABS(line_variance_pct) >= %(o)s::numeric)
+    """
+    if group_by == "ingredient":
+        # Line-level quantities repeat on each lot row: count each line once.
+        sql = f"""
+            SELECT item_code, MAX(item_desc) AS item_desc, uom, COUNT(DISTINCT batch_id) AS jml_batch,
+                   SUM(line_standard_qty) AS standard_qty, SUM(line_actual_qty) AS actual_qty,
+                   ROUND(100.0 * (SUM(line_actual_qty) - SUM(line_standard_qty)) / NULLIF(SUM(line_standard_qty), 0), 1)
+                                                                                     AS variance_pct
+              FROM (SELECT DISTINCT ON (material_detail_id) * FROM mart.batch_material_usage {where}
+                     ORDER BY material_detail_id) x
+             GROUP BY item_code, uom ORDER BY jml_batch DESC
+        """
+    else:
+        sql = f"""
+            SELECT batch_no, batch_status_desc, product_code, item_code, item_desc, uom, line_standard_qty,
+                   line_plan_qty, line_actual_qty, line_variance_pct, lot_number, lot_qty_consumed, last_txn_date
+              FROM mart.batch_material_usage {where}
+             ORDER BY batch_no DESC, item_code, lot_number
+        """
+    params = {"bn": _val(batch_no), "i": _val(ingredient), "lot": _val(lot_number), "o": over_pct}
+    return _run(caller, "batch_material_usage", sql, params, "get_batch_material_usage", args)

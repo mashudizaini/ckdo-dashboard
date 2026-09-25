@@ -74,6 +74,19 @@ const TOOLS = {
     ["business_type", ["", "Local", "Export", "CMO", "Non-SO"]],
     ["group_by", ["customer", "item", "month", "customer_item", "business_type"]],
   ],
+  get_batch_status: [
+    ["batch_no", "text"], ["product", "text"], ["status", ["", "Pending", "WIP", "Completed", "Closed", "Cancelled"]],
+    ["date_from", "date"], ["date_to", "date"], ["late_only", ["false", "true"]],
+    ["group_by", ["none", "status", "schedule", "product", "month"]],
+  ],
+  get_batch_yield: [
+    ["product", "text"], ["batch_no", "text"], ["date_from", "date"], ["date_to", "date"], ["below_pct", "number"],
+    ["group_by", ["product", "batch", "month"]],
+  ],
+  get_batch_material_usage: [
+    ["batch_no", "text"], ["ingredient", "text"], ["lot_number", "text"], ["over_pct", "number"],
+    ["group_by", ["none", "ingredient"]],
+  ],
   find_marts: [["keywords", "text"]],
   get_data_freshness: [],
 };

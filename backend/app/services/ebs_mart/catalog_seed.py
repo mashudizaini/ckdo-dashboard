@@ -351,6 +351,76 @@ COLUMN_CATALOG.update({
     },
 })
 
+_BATCH = {
+    "batch_id": ("ID batch (kunci)", []),
+    "batch_no": ("Nomor batch produksi", ["no batch", "bets", "nomor bets"]),
+    "batch_status": ("Kode status batch: 1 Pending, 2 WIP, 3 Completed, 4 Closed, -1 Cancelled", []),
+    "batch_status_desc": ("Status batch: Pending, WIP, Completed, Closed, Cancelled", ["status batch", "status produksi"]),
+}
+COLUMN_CATALOG.update({
+    "batch_status": {
+        **_BATCH,
+        "formula": ("Nomor dan versi formula", ["formula", "resep"]),
+        "product_code": ("Kode produk batch", ["kode produk"]),
+        "product_desc": ("Nama produk batch", ["produk", "nama produk", "obat"]),
+        "product_uom": ("Satuan produk", ["satuan"]),
+        "product_plan_qty": ("Qty produk rencana", ["rencana", "plan"]),
+        "product_actual_qty": ("Qty produk aktual", ["hasil", "aktual", "output"]),
+        "yield_pct": ("Yield % = aktual ÷ rencana (hanya Completed/Closed)", ["yield", "rendemen"]),
+        "plan_start_date": ("Rencana mulai", ["jadwal mulai"]),
+        "actual_start_date": ("Aktual mulai", []),
+        "due_date": ("Due date batch", []),
+        "plan_cmplt_date": ("Rencana selesai", ["jadwal selesai"]),
+        "actual_cmplt_date": ("Aktual selesai", ["tanggal selesai"]),
+        "batch_close_date": ("Tanggal batch ditutup", []),
+        "plan_period_name": ("Bulan rencana mulai, format JUL-26", ["periode", "bulan"]),
+        "plan_period_start_date": ("Tanggal awal bulan rencana mulai", []),
+        "start_delay_days": ("Hari selisih aktual mulai vs rencana (positif = terlambat)", []),
+        "completion_delay_days": ("Hari selisih selesai vs rencana; batch berjalan dihitung sampai sekarang", ["delay", "keterlambatan"]),
+        "on_time": ("TRUE = selesai tidak melewati rencana selesai (definisi dashboard Production)", ["tepat waktu", "on time"]),
+        "schedule_status": ("Selesai tepat waktu, Selesai terlambat, Belum selesai lewat rencana, Berjalan sesuai rencana, Dibatalkan", ["status jadwal", "schedule adherence"]),
+        "cycle_time_days": ("Lama proses aktual (hari)", ["lead time", "cycle time"]),
+        "ingredient_lines": ("Jumlah baris bahan", []),
+    },
+    "batch_yield_variance": {
+        "material_detail_id": ("ID baris material (kunci)", []),
+        **_BATCH,
+        "line_type": ("1 produk, 2 by-product", []),
+        "line_type_desc": ("Produk atau By-product", ["by-product", "produk samping"]),
+        "item_code": ("Kode produk", ["kode produk"]),
+        "item_desc": ("Nama produk", ["produk"]),
+        "uom": ("Satuan", ["satuan"]),
+        "plan_qty": ("Qty rencana", ["rencana"]),
+        "standard_qty": ("Qty standar formula saat batch dibuat", ["standar"]),
+        "actual_qty": ("Qty aktual", ["aktual", "hasil"]),
+        "variance_qty": ("Aktual − rencana", ["selisih"]),
+        "yield_pct": ("Aktual ÷ rencana × 100", ["yield", "rendemen"]),
+        "plan_start_date": ("Rencana mulai batch", []),
+        "actual_cmplt_date": ("Aktual selesai batch", []),
+        "plan_period_name": ("Bulan rencana mulai, format JUL-26", ["periode"]),
+        "plan_period_start_date": ("Tanggal awal bulan rencana mulai", []),
+    },
+    "batch_material_usage": {
+        "row_key": ("Kunci baris (baris material|lot)", []),
+        "material_detail_id": ("ID baris bahan", []),
+        **_BATCH,
+        "product_code": ("Kode produk batch", ["produk"]),
+        "item_code": ("Kode bahan", ["kode bahan", "ingredient"]),
+        "item_desc": ("Nama bahan", ["bahan", "bahan baku", "ingredient", "material"]),
+        "item_category": ("Kategori bahan (API, EXCIPIENT, PRIMER, SEKUNDER, ...)", ["kategori"]),
+        "uom": ("Satuan baris bahan (untuk line_*_qty)", ["satuan"]),
+        "line_standard_qty": ("Qty standar formula baris bahan — diulang per lot, jangan dijumlah per lot", ["standar"]),
+        "line_plan_qty": ("Qty rencana baris bahan — diulang per lot", ["rencana"]),
+        "line_actual_qty": ("Qty aktual baris bahan — diulang per lot", ["aktual", "pemakaian"]),
+        "line_variance_pct": ("(Aktual − standar) ÷ standar × 100, hanya batch Completed/Closed", ["selisih pemakaian", "variance"]),
+        "lot_number": ("Nomor lot bahan yang dikonsumsi", ["lot", "lot bahan", "traceability"]),
+        "lot_qty_consumed": ("Qty lot dikonsumsi, dalam lot_uom — boleh dijumlah", ["pemakaian lot"]),
+        "lot_uom": ("Satuan qty lot (satuan primer item) — bisa berbeda dengan uom baris", ["satuan lot"]),
+        "last_txn_date": ("Tanggal transaksi terakhir lot pada baris ini", []),
+        "plan_start_date": ("Rencana mulai batch", []),
+    },
+})
+
 # Domain + mart-level synonyms, used by find_marts in addition to the column
 # synonyms above.
 MART_SYNONYMS: dict[str, list[str]] = {
@@ -368,6 +438,9 @@ MART_SYNONYMS: dict[str, list[str]] = {
     "sales_by_customer_item_month": ["penjualan", "omzet", "sales", "revenue", "invoice penjualan", "top customer"],
     "ar_aging": ["piutang", "AR", "receivable", "aging piutang", "tagihan customer", "jatuh tempo customer"],
     "ar_receipt": ["penerimaan kas", "pembayaran customer", "receipt", "cash in", "unapplied", "pelunasan piutang"],
+    "batch_status": ["batch", "bets", "produksi", "status batch", "jadwal produksi", "on time", "OPM"],
+    "batch_yield_variance": ["yield", "rendemen", "hasil produksi", "output batch", "by-product"],
+    "batch_material_usage": ["pemakaian bahan", "konsumsi bahan", "lot bahan", "traceability", "penelusuran lot", "bahan baku batch"],
 }
 
 # (domain, question, sql). Blueprint 6.5 plus common phase-1 questions.
@@ -450,6 +523,19 @@ GOLDEN_QUERIES: list[tuple[str, str, str]] = [
     ("OM", "Penjualan per bulan dan tipe bisnis",
      "SELECT period_start_date, period_name, business_type, SUM(amount_idr) AS penjualan_idr "
      "FROM mart.sales_by_customer_item_month GROUP BY 1, 2, 3 ORDER BY 1, 3"),
+    ("OPM", "Status batch bulan ini",
+     "SELECT batch_status_desc, COUNT(*) AS jml_batch FROM mart.batch_status "
+     "WHERE plan_start_date >= DATE_TRUNC('month', CURRENT_DATE) GROUP BY 1 ORDER BY 2 DESC"),
+    ("OPM", "Ketepatan jadwal batch tahun ini",
+     "SELECT COUNT(*) FILTER (WHERE on_time) AS tepat_waktu, COUNT(*) FILTER (WHERE actual_cmplt_date IS NOT NULL) AS selesai "
+     "FROM mart.batch_status WHERE plan_start_date >= DATE_TRUNC('year', CURRENT_DATE)"),
+    ("OPM", "Yield per produk tahun ini",
+     "SELECT item_code, MAX(item_desc) AS produk, ROUND(100.0 * SUM(actual_qty) / NULLIF(SUM(plan_qty), 0), 1) AS yield_pct "
+     "FROM mart.batch_yield_variance WHERE line_type = 1 AND batch_status IN (3, 4) "
+     "AND plan_start_date >= DATE_TRUNC('year', CURRENT_DATE) GROUP BY item_code ORDER BY 3"),
+    ("OPM", "Lot bahan dipakai di batch mana",
+     "SELECT batch_no, product_code, item_desc, lot_qty_consumed, lot_uom, last_txn_date FROM mart.batch_material_usage "
+     "WHERE lot_number = '<nomor lot>' ORDER BY last_txn_date"),
     ("INV", "Nilai persediaan per kategori",
      "SELECT item_category, SUM(value_idr) AS nilai_idr FROM mart.inv_valuation GROUP BY item_category ORDER BY 2 DESC"),
 ]

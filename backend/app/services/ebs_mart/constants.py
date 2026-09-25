@@ -53,7 +53,7 @@ SO_CMO_LINE_TYPE = "SO-TOLL IN-LOCAL"
 MAX_ROWS = 500
 STATEMENT_TIMEOUT = "15s"
 
-# One entry per mart in the blueprint's catalog (section 5). Phases 1-3
+# One entry per mart in the blueprint's catalog (section 5). Phases 1-4
 # are built; later phases are listed so the admin overview shows the whole
 # roadmap and find_marts can say "not available yet" instead of nothing.
 #
@@ -172,12 +172,30 @@ MARTS: dict[str, dict] = {
         "source_jobs": ["etl_mart_ar"],
         "unique_key": ["row_key"],
     },
-    "batch_status": {"domain": "OPM", "phase": 4, "built": False, "grain": "Batch produksi",
-                     "description": "Status batch produksi.", "sources": "GME_BATCH_HEADER", "source_jobs": []},
-    "batch_yield_variance": {"domain": "OPM", "phase": 4, "built": False, "grain": "Batch × produk",
-                             "description": "Plan vs actual, yield %.", "sources": "GME_MATERIAL_DETAILS", "source_jobs": []},
-    "batch_material_usage": {"domain": "OPM", "phase": 4, "built": False, "grain": "Batch × ingredient × lot",
-                             "description": "Pemakaian bahan standar vs aktual.", "sources": "GME_MATERIAL_DETAILS, FM_MATL_DTL", "source_jobs": []},
+    "batch_status": {
+        "domain": "OPM", "phase": 4, "built": True,
+        "grain": "Batch produksi OPM (org 121)",
+        "description": "Status batch, formula, produk, qty rencana vs aktual, jadwal rencana vs aktual, keterlambatan dan yield.",
+        "sources": "GME_BATCH_HEADER, GME_MATERIAL_DETAILS, FM_FORM_MST_B",
+        "source_jobs": ["etl_mart_opm"],
+        "unique_key": ["batch_id"],
+    },
+    "batch_yield_variance": {
+        "domain": "OPM", "phase": 4, "built": True,
+        "grain": "Batch × baris produk / by-product",
+        "description": "Qty rencana, standar formula, dan aktual per produk batch, selisih dan yield %.",
+        "sources": "GME_MATERIAL_DETAILS",
+        "source_jobs": ["etl_mart_opm"],
+        "unique_key": ["material_detail_id"],
+    },
+    "batch_material_usage": {
+        "domain": "OPM", "phase": 4, "built": True,
+        "grain": "Batch × bahan (ingredient) × lot yang dikonsumsi",
+        "description": "Pemakaian bahan standar formula vs aktual per batch, dan lot bahan yang dipakai (penelusuran lot → batch).",
+        "sources": "GME_MATERIAL_DETAILS, MTL_MATERIAL_TRANSACTIONS, MTL_TRANSACTION_LOT_NUMBERS",
+        "source_jobs": ["etl_mart_opm"],
+        "unique_key": ["row_key"],
+    },
     "gl_trial_balance": {"domain": "GL", "phase": 5, "built": False, "grain": "Akun × periode",
                          "description": "Trial balance ledger 2022.", "sources": "GL_BALANCES, GL_CODE_COMBINATIONS", "source_jobs": []},
     "gl_journal_detail": {"domain": "GL", "phase": 5, "built": False, "grain": "Baris jurnal posted",

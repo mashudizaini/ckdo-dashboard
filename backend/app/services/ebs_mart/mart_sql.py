@@ -1,7 +1,8 @@
 """
 Definitions of the built marts (blueprint sections 5 and 6): phase 1 (AP,
-stock per lot, movement), phase 2 (PO, PR, inventory valuation) and phase 3
-(sales orders, shipping, invoiced sales, AR aging, receipts).
+stock per lot, movement), phase 2 (PO, PR, inventory valuation), phase 3
+(sales orders, shipping, invoiced sales, AR aging, receipts) and phase 4 (OPM
+batches: status, yield, material usage by lot).
 
 Each mart is a MATERIALIZED VIEW over core.*, refreshed CONCURRENTLY after
 its ETL succeeds and once a day regardless (days_overdue and days_to_expiry
@@ -55,6 +56,11 @@ _BUSINESS_TYPE = (
 )
 _SO_OPEN_QTY = "GREATEST(COALESCE(l.ordered_qty, 0) - COALESCE(l.shipped_qty, 0), 0)"
 _SO_DUE = "COALESCE(l.schedule_ship_date, l.promise_date, l.request_date)"
+
+_BATCH_STATUS_DESC = (
+    "CASE {c} WHEN 1 THEN 'Pending' WHEN 2 THEN 'WIP' WHEN 3 THEN 'Completed' WHEN 4 THEN 'Closed' "
+    "WHEN -1 THEN 'Cancelled' ELSE 'Status ' || {c} END"
+)
 
 MART_SQL: dict[str, str] = {
     # Same population as the Dashboard's AP Outstanding report
@@ -620,6 +626,133 @@ MART_SQL: dict[str, str] = {
                   r.exchange_rate, a.status, a.applied_customer_trx_id, inv.trx_number, inv.trx_date, inv.due_date
         HAVING SUM(a.amount_applied) <> 0
     """,
+
+    # ── Phase 4 ─────────────────────────────────────────────────────────────
+
+    # One row per batch. Product = the batch's product lines (line_type 1),
+    # first line's item as the batch product and all product lines' qty
+    # summed — the Dashboard's Production ETL does the same. Yield and "on
+    # time" follow the Production dashboard: yield only for Completed/Closed,
+    # on time when actual completion <= planned completion.
+    "batch_status": f"""
+        WITH b AS (
+            SELECT batch_id,
+                   MAX(batch_no)                         AS batch_no,
+                   MAX(batch_status)                     AS batch_status,
+                   MAX(formula_no)                       AS formula_no,
+                   MAX(formula_vers)                     AS formula_vers,
+                   MAX(plan_start_date)                  AS plan_start_date,
+                   MAX(actual_start_date)                AS actual_start_date,
+                   MAX(due_date)                         AS due_date,
+                   MAX(plan_cmplt_date)                  AS plan_cmplt_date,
+                   MAX(actual_cmplt_date)                AS actual_cmplt_date,
+                   MAX(batch_close_date)                 AS batch_close_date,
+                   (ARRAY_AGG(item_code ORDER BY line_no) FILTER (WHERE line_type = 1))[1] AS product_code,
+                   (ARRAY_AGG(item_desc ORDER BY line_no) FILTER (WHERE line_type = 1))[1] AS product_desc,
+                   (ARRAY_AGG(uom ORDER BY line_no) FILTER (WHERE line_type = 1))[1]       AS product_uom,
+                   SUM(plan_qty)   FILTER (WHERE line_type = 1) AS product_plan_qty,
+                   SUM(actual_qty) FILTER (WHERE line_type = 1) AS product_actual_qty,
+                   COUNT(*) FILTER (WHERE line_type = -1)       AS ingredient_lines
+              FROM core.fact_batch_material
+             GROUP BY batch_id
+        )
+        SELECT b.batch_id,
+               b.batch_no,
+               b.batch_status,
+               {_BATCH_STATUS_DESC.format(c='b.batch_status')}      AS batch_status_desc,
+               b.formula_no || COALESCE(' v' || b.formula_vers, '')  AS formula,
+               b.product_code,
+               b.product_desc,
+               b.product_uom,
+               b.product_plan_qty,
+               b.product_actual_qty,
+               CASE WHEN b.batch_status IN (3, 4) AND b.product_plan_qty > 0
+                    THEN ROUND(100.0 * b.product_actual_qty / b.product_plan_qty, 1) END AS yield_pct,
+               b.plan_start_date,
+               b.actual_start_date,
+               b.due_date,
+               b.plan_cmplt_date,
+               b.actual_cmplt_date,
+               b.batch_close_date,
+               UPPER(TO_CHAR(b.plan_start_date, 'MON-YY'))          AS plan_period_name,
+               DATE_TRUNC('month', b.plan_start_date)::date         AS plan_period_start_date,
+               ROUND((EXTRACT(EPOCH FROM (b.actual_start_date - b.plan_start_date)) / 86400.0)::numeric, 1)
+                                                                    AS start_delay_days,
+               ROUND((EXTRACT(EPOCH FROM (COALESCE(b.actual_cmplt_date,
+                          CASE WHEN b.batch_status IN (1, 2) THEN now()::timestamp END) - b.plan_cmplt_date)) / 86400.0)::numeric, 1)
+                                                                    AS completion_delay_days,
+               (b.actual_cmplt_date IS NOT NULL AND b.plan_cmplt_date IS NOT NULL
+                AND b.actual_cmplt_date <= b.plan_cmplt_date)       AS on_time,
+               CASE WHEN b.batch_status = -1 THEN 'Dibatalkan'
+                    WHEN b.actual_cmplt_date IS NOT NULL AND b.plan_cmplt_date IS NULL THEN 'Selesai (tanpa rencana)'
+                    WHEN b.actual_cmplt_date IS NOT NULL AND b.actual_cmplt_date <= b.plan_cmplt_date THEN 'Selesai tepat waktu'
+                    WHEN b.actual_cmplt_date IS NOT NULL THEN 'Selesai terlambat'
+                    WHEN b.batch_status IN (1, 2) AND b.plan_cmplt_date < now()::timestamp THEN 'Belum selesai, lewat rencana'
+                    WHEN b.batch_status IN (1, 2) THEN 'Berjalan sesuai rencana'
+                    ELSE 'Lainnya' END                              AS schedule_status,
+               ROUND((EXTRACT(EPOCH FROM (b.actual_cmplt_date - b.actual_start_date)) / 86400.0)::numeric, 1)
+                                                                    AS cycle_time_days,
+               b.ingredient_lines
+          FROM b
+    """,
+
+    "batch_yield_variance": f"""
+        SELECT m.material_detail_id,
+               m.batch_id,
+               m.batch_no,
+               m.batch_status,
+               {_BATCH_STATUS_DESC.format(c='m.batch_status')}      AS batch_status_desc,
+               m.line_type,
+               CASE m.line_type WHEN 1 THEN 'Produk' WHEN 2 THEN 'By-product' END AS line_type_desc,
+               m.item_code,
+               m.item_desc,
+               m.uom,
+               m.plan_qty,
+               m.original_qty                                       AS standard_qty,
+               m.actual_qty,
+               m.actual_qty - m.plan_qty                            AS variance_qty,
+               CASE WHEN m.plan_qty > 0 THEN ROUND(100.0 * m.actual_qty / m.plan_qty, 1) END AS yield_pct,
+               m.plan_start_date,
+               m.actual_cmplt_date,
+               UPPER(TO_CHAR(m.plan_start_date, 'MON-YY'))          AS plan_period_name,
+               DATE_TRUNC('month', m.plan_start_date)::date         AS plan_period_start_date
+          FROM core.fact_batch_material m
+         WHERE m.line_type IN (1, 2)
+    """,
+
+    # Ingredient lines × lots actually issued. Line-level quantities are in
+    # the line's uom and repeat on every lot row of the line; lot quantities
+    # are in the item's primary uom (lot_uom) and are what was consumed —
+    # issues are negative in Oracle, so the sign is flipped. A line with no
+    # issue transaction yet has one row with no lot.
+    "batch_material_usage": f"""
+        SELECT m.material_detail_id || '|' || COALESCE(l.lot_number, '(belum ada transaksi)') AS row_key,
+               m.material_detail_id,
+               m.batch_id,
+               m.batch_no,
+               m.batch_status,
+               {_BATCH_STATUS_DESC.format(c='m.batch_status')}      AS batch_status_desc,
+               (SELECT p.item_code FROM core.fact_batch_material p
+                 WHERE p.batch_id = m.batch_id AND p.line_type = 1 ORDER BY p.line_no LIMIT 1) AS product_code,
+               m.item_code,
+               m.item_desc,
+               c.item_category,
+               m.uom,
+               m.original_qty                                       AS line_standard_qty,
+               m.plan_qty                                           AS line_plan_qty,
+               m.actual_qty                                         AS line_actual_qty,
+               CASE WHEN m.original_qty > 0 AND m.batch_status IN (3, 4)
+                    THEN ROUND(100.0 * (m.actual_qty - m.original_qty) / m.original_qty, 1) END AS line_variance_pct,
+               l.lot_number,
+               -l.qty                                               AS lot_qty_consumed,
+               m.primary_uom                                        AS lot_uom,
+               l.last_txn_date,
+               m.plan_start_date
+          FROM core.fact_batch_material m
+          LEFT JOIN core.fact_batch_lot l ON l.material_detail_id = m.material_detail_id
+          LEFT JOIN core.dim_item c       ON c.inventory_item_id = m.item_id
+         WHERE m.line_type = -1
+    """,
 }
 
 # Unique index per mart: required by REFRESH MATERIALIZED VIEW CONCURRENTLY,
@@ -639,6 +772,9 @@ MART_UNIQUE_INDEX: dict[str, list[str]] = {
     "sales_by_customer_item_month": ["row_key"],
     "ar_aging": ["payment_schedule_id"],
     "ar_receipt": ["row_key"],
+    "batch_status": ["batch_id"],
+    "batch_yield_variance": ["material_detail_id"],
+    "batch_material_usage": ["row_key"],
 }
 
 MART_EXTRA_INDEXES: dict[str, list[str]] = {
@@ -656,6 +792,9 @@ MART_EXTRA_INDEXES: dict[str, list[str]] = {
     "sales_by_customer_item_month": ["customer_name", "item_code", "period_start_date"],
     "ar_aging": ["customer_name", "due_date", "aging_bucket"],
     "ar_receipt": ["customer_name", "receipt_date", "receipt_number"],
+    "batch_status": ["batch_no", "product_code", "plan_start_date"],
+    "batch_yield_variance": ["batch_no", "item_code"],
+    "batch_material_usage": ["batch_no", "item_code", "lot_number"],
 }
 
 # Which marts to refresh after which job succeeds.
@@ -667,4 +806,5 @@ MARTS_BY_JOB: dict[str, list[str]] = {
     "etl_mart_item_cost": ["inv_valuation"],
     "etl_mart_om": ["so_backlog", "so_shipment_status", "sales_by_customer_item_month"],
     "etl_mart_ar": ["ar_aging", "ar_receipt", "sales_by_customer_item_month"],
+    "etl_mart_opm": ["batch_status", "batch_yield_variance", "batch_material_usage"],
 }
