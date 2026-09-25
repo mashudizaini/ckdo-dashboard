@@ -989,6 +989,12 @@ def get_pl(caller: Caller, period: str, ytd: bool = False, department: str | Non
         prior_cond = cond.replace("%(py)s", "(%(py)s - 1)")
     grp = "section, section_order" if level == "section" else "section, section_order, line, line_order"
     sel = "section" if level == "section" else "section, line"
+    # With a comparison the tool also returns the difference, for the same
+    # reason: models round it when they subtract themselves.
+    diff = ""
+    if prior_cond != "FALSE":
+        diff = (", amount_idr - amount_prior_year_idr AS selisih_idr, ROUND(100.0 * (amount_idr - amount_prior_year_idr)"
+                " / NULLIF(ABS(amount_prior_year_idr), 0), 1) AS perubahan_pct")
     # At line level each section's total follows its lines, so the model reads
     # the subtotal instead of adding lines itself (Haiku got operating
     # expenses wrong by Rp 1,3 M doing exactly that).
@@ -1022,7 +1028,7 @@ def get_pl(caller: Caller, period: str, ytd: bool = False, department: str | Non
               COALESCE(MAX(p) FILTER (WHERE section = 'OTHER COMPREHENSIVE INCOME'), 0) AS p_oci,
               COALESCE(MAX(a) FILTER (WHERE section = 'UNMAPPED'), 0) AS unmapped
             FROM s
-        )
+        ), rpt AS (
         SELECT {'section' if level == 'section' else 'section, line'}, amount_idr, amount_prior_year_idr, so, lo
           FROM lines
         {'' if level == 'section' else '''
@@ -1038,7 +1044,8 @@ def get_pl(caller: Caller, period: str, ytd: bool = False, department: str | Non
                          sales - cogs - opex + other + tax + oci, p_sales - p_cogs - p_opex + p_other + p_tax + p_oci, 10, 5 FROM tot
         UNION ALL SELECT {"'UNMAPPED'" if level == 'section' else "'UNMAPPED', 'AKUN BELUM TERPETAKAN (tidak masuk total)'"},
                          unmapped, NULL, 11, 1 FROM tot WHERE unmapped <> 0
-        ORDER BY so, lo
+        )
+        SELECT *{diff} FROM rpt ORDER BY so, lo
     """
     return _run(caller, "pl_monthly", sql, params, "get_pl", args)
 
