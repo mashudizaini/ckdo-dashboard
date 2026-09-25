@@ -1034,13 +1034,13 @@ def get_pl(caller: Caller, period: str, ytd: bool = False, department: str | Non
         {'' if level == 'section' else '''
         UNION ALL SELECT section, 'TOTAL ' || section, SUM(amount_idr), SUM(amount_prior_year_idr), MIN(so), 999
           FROM lines GROUP BY section'''}
-        UNION ALL SELECT {"'TOTAL'" if level == 'section' else "'TOTAL', 'NET SALES'"}, sales, p_sales, 10, 1 FROM tot
-        UNION ALL SELECT {"'TOTAL'" if level == 'section' else "'TOTAL', 'GROSS PROFIT'"}, sales - cogs, p_sales - p_cogs, 10, 2 FROM tot
-        UNION ALL SELECT {"'TOTAL'" if level == 'section' else "'TOTAL', 'PROFIT BEFORE TAX'"}, sales - cogs - opex + other,
+        UNION ALL SELECT {"'NET SALES'" if level == 'section' else "'TOTAL', 'NET SALES'"}, sales, p_sales, 10, 1 FROM tot
+        UNION ALL SELECT {"'GROSS PROFIT'" if level == 'section' else "'TOTAL', 'GROSS PROFIT'"}, sales - cogs, p_sales - p_cogs, 10, 2 FROM tot
+        UNION ALL SELECT {"'PROFIT BEFORE TAX'" if level == 'section' else "'TOTAL', 'PROFIT BEFORE TAX'"}, sales - cogs - opex + other,
                          p_sales - p_cogs - p_opex + p_other, 10, 3 FROM tot
-        UNION ALL SELECT {"'TOTAL'" if level == 'section' else "'TOTAL', 'PROFIT AFTER TAX'"}, sales - cogs - opex + other + tax,
+        UNION ALL SELECT {"'PROFIT AFTER TAX'" if level == 'section' else "'TOTAL', 'PROFIT AFTER TAX'"}, sales - cogs - opex + other + tax,
                          p_sales - p_cogs - p_opex + p_other + p_tax, 10, 4 FROM tot
-        UNION ALL SELECT {"'TOTAL'" if level == 'section' else "'TOTAL', 'TOTAL COMPREHENSIVE INCOME'"},
+        UNION ALL SELECT {"'TOTAL COMPREHENSIVE INCOME'" if level == 'section' else "'TOTAL', 'TOTAL COMPREHENSIVE INCOME'"},
                          sales - cogs - opex + other + tax + oci, p_sales - p_cogs - p_opex + p_other + p_tax + p_oci, 10, 5 FROM tot
         UNION ALL SELECT {"'UNMAPPED'" if level == 'section' else "'UNMAPPED', 'AKUN BELUM TERPETAKAN (tidak masuk total)'"},
                          unmapped, NULL, 11, 1 FROM tot WHERE unmapped <> 0
