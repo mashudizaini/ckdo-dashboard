@@ -56,29 +56,28 @@ SA_META_DDL = [
 
 # Blueprint v2's examples: supplier maintenance vs payment, PO entry vs
 # receiving, AR invoice vs receipt, user administration vs financial
-# transactions — plus AP invoice vs payment and GL journal entry vs
-# posting-free approval, the classic pairs auditors ask for first.
-# Function codes are the standard R12 form functions; seed rows are
-# replaced on every startup, rows added by hand (created_by <> 'seed') stay.
+# transactions — plus AP invoice vs payment and GL journal entry vs posting,
+# the classic pairs auditors ask for first. Patterns name the ENTRY
+# functions exactly (found in this instance's FND_FORM_FUNCTIONS on the first
+# run, 2026-09-28): a broad AR_ARXTWMAI% would also catch "Invoice: View" and
+# flag every inquiry-only user. Seed rows are replaced on every startup; rows
+# added by hand (created_by <> 'seed') stay.
+_SUPPLIER_EDIT = ("AP_APXVDMVD", "POS_HT_SP_B_ORG_CRT", "POS_HT_SP_B_PAY")
 SOD_SEED = [
-    ("Supplier master vs pembayaran", "AP_APXVDMVD%", "AP_APXPAWKB%", "High",
-     "Bisa membuat/mengubah supplier (termasuk rekening bank) sekaligus membuat pembayaran."),
-    ("Supplier master vs pembayaran", "POS_HT_SP%", "AP_APXPAWKB%", "High",
-     "Bisa membuat/mengubah supplier (halaman Supplier R12) sekaligus membuat pembayaran."),
-    ("Supplier master vs pembayaran", "AP_APXVDMVD%", "IBY_FD_%", "High",
-     "Bisa membuat/mengubah supplier sekaligus memproses payment batch (Payment Manager)."),
-    ("Invoice AP vs pembayaran", "AP_APXINWKB%", "AP_APXPAWKB%", "High",
+    *[("Supplier master vs pembayaran", a, "AP_APXPAWKB", "High",
+       "Bisa membuat/mengubah supplier (termasuk rekening bank) sekaligus membuat pembayaran.")
+      for a in _SUPPLIER_EDIT],
+    ("Invoice AP vs pembayaran", "AP_APXINWKB", "AP_APXPAWKB", "High",
      "Bisa memasukkan invoice supplier sekaligus membayarnya."),
-    ("PO vs penerimaan barang", "PO_POXPOEPO%", "RCV_RCVRCERC%", "High",
+    ("PO vs penerimaan barang", "PO_POXPOEPO", "RCV_RCVRCERC", "High",
      "Bisa membuat PO sekaligus mencatat penerimaan barangnya."),
-    ("Invoice AR vs receipt", "AR_ARXTWMAI%", "AR_ARXRWMAI%", "Medium",
-     "Bisa membuat invoice customer sekaligus mencatat dan mengaplikasikan penerimaan kas."),
-    ("Administrasi user vs transaksi keuangan", "FND_FNDSCAUS%", "AP_APXINWKB%", "Critical",
-     "Bisa membuat user/memberi responsibility sekaligus memasukkan invoice AP."),
-    ("Administrasi user vs transaksi keuangan", "FND_FNDSCAUS%", "AP_APXPAWKB%", "Critical",
-     "Bisa membuat user/memberi responsibility sekaligus membuat pembayaran."),
-    ("Administrasi user vs transaksi keuangan", "FND_FNDSCAUS%", "GL_GLXJEENT%", "Critical",
-     "Bisa membuat user/memberi responsibility sekaligus membuat jurnal GL."),
+    ("Invoice AR vs receipt", "AR_ARXTWMAI_INVOICES_ENTER", "AR_ARXRWMAI_CASH_ENTER", "Medium",
+     "Bisa membuat invoice customer sekaligus mencatat penerimaan kasnya."),
+    ("Jurnal GL: buat vs posting", "GLXJEENT_A", "GLXJEPST", "Medium",
+     "Bisa membuat jurnal GL sekaligus mem-posting-nya sendiri."),
+    *[("Administrasi user vs transaksi keuangan", "FND_FNDSCAUS", b, "Critical",
+       "Bisa membuat user/memberi responsibility sekaligus menjalankan transaksi keuangan.")
+      for b in ("AP_APXINWKB", "AP_APXPAWKB", "GLXJEENT_A", "AR_ARXRWMAI_CASH_ENTER")],
 ]
 
 RISK_ORDER = "CASE risk WHEN 'Critical' THEN 1 WHEN 'High' THEN 2 WHEN 'Medium' THEN 3 ELSE 4 END"

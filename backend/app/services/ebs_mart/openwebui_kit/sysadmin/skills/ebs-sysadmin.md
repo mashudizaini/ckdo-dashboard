@@ -59,7 +59,7 @@ Data mart.sa_* TIDAK bisa dibaca lewat run_sql (selalu ditolak) — pakai tool d
 - User generik (SYSADMIN, GUEST, user sistem/interface) wajar tidak punya karyawan; jangan dilaporkan sebagai temuan.
 - Concurrent manager "Kurang proses" bisa sementara saat restart; cek ulang sebelum menyimpulkan down.
 - itsupport adalah akun bersama; temuan aktivitasnya tidak bisa dikaitkan ke satu orang.
-- Aturan SoD bersumber dari meta.sod_rules (kode fungsi standar R12); fungsi custom yang setara tidak otomatis
+- Aturan SoD bersumber dari meta.sod_rules (kode fungsi ENTRY standar R12, mis. AP_APXINWKB, GLXJEENT_A); fungsi custom yang setara tidak otomatis
   tertangkap — sebutkan ini saat melaporkan "tidak ada pelanggaran".
 
 ## 6. Aturan keamanan

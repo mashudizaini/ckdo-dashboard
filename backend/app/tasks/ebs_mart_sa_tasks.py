@@ -391,15 +391,17 @@ _WF_SQL = """
            (SELECT it.display_name FROM wf_item_types_vl it WHERE it.name = n.message_type),
            n.message_name, n.recipient_role, SUBSTR(n.to_user, 1, 240), n.original_recipient,
            SUBSTR(n.from_user, 1, 240), n.more_info_role, n.mail_status, n.begin_date, n.due_date,
-           SUBSTR(n.subject, 1, 240), n.item_key,
-           (SELECT i.user_key FROM wf_items i WHERE i.item_type = n.item_type AND i.item_key = n.item_key),
+           SUBSTR(n.subject, 1, 240), n.ctx_item_key,
+           (SELECT i.user_key FROM wf_items i WHERE i.item_type = n.ctx_item_type AND i.item_key = n.ctx_item_key),
            CASE WHEN EXISTS (SELECT 1 FROM wf_message_attributes ma
                               WHERE ma.message_type = n.message_type AND ma.message_name = n.message_name
                                 AND ma.subtype = 'RESPOND') THEN 'Y' ELSE 'N' END
-      FROM (SELECT wn.*,
-                   SUBSTR(wn.context, 1, INSTR(wn.context, ':') - 1) AS item_type,
+      FROM (SELECT wn.notification_id, wn.message_type, wn.message_name, wn.recipient_role, wn.to_user,
+                   wn.original_recipient, wn.from_user, wn.more_info_role, wn.mail_status, wn.begin_date,
+                   wn.due_date, wn.subject,
+                   SUBSTR(wn.context, 1, INSTR(wn.context, ':') - 1) AS ctx_item_type,
                    SUBSTR(wn.context, INSTR(wn.context, ':') + 1,
-                          INSTR(wn.context, ':', -1) - INSTR(wn.context, ':') - 1) AS item_key
+                          INSTR(wn.context, ':', -1) - INSTR(wn.context, ':') - 1) AS ctx_item_key
               FROM wf_notifications wn
              WHERE wn.status = 'OPEN') n
 """
