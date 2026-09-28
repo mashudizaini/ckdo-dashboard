@@ -281,12 +281,14 @@ def etl_mart_close(year: int = None, month: int = None, full_refresh: bool = Fal
                       ["row_key", "kind", "application", "period_name", "txn_date", "event_type", "entity_code",
                        "transaction_number", "amount_idr", "detail"], gap)
 
+        # interface_line_id is only filled when AutoInvoice picks a line up,
+        # so lines still waiting are keyed by position in this snapshot.
         ai = []
         for i, r in enumerate(autoinv):
             so_line = _int(r[4]) if r[4] and str(r[4]).isdigit() else None
             rate = float(r[10]) if r[10] else None
             amt_idr = float(r[9]) * rate if (r[9] is not None and rate) else _idr(r[9], r[8], fx)
-            ai.append((f"{int(r[0])}|{i}", _int(r[0]), r[1], r[2], r[3], so_line, r[5], r[6], r[7], r[8], _num(r[9]),
+            ai.append((f"{_int(r[0]) or 'new'}|{i}", _int(r[0]), r[1], r[2], r[3], so_line, r[5], r[6], r[7], r[8], _num(r[9]),
                        amt_idr, r[11], _int(r[12]), r[13], r[14], r[15]))
         n += _replace(cur, "core.ar_interface_line",
                       ["row_key", "interface_line_id", "batch_source_name", "line_context", "so_number", "so_line_id",
