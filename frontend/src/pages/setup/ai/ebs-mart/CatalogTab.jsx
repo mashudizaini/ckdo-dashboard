@@ -14,7 +14,7 @@ export default function CatalogTab() {
   const load = async () => {
     try {
       const r = await ebsMartApi.catalog();
-      setRows(r.data);
+      setRows(r);
     } catch (e) {
       setError(errMsg(e));
     }

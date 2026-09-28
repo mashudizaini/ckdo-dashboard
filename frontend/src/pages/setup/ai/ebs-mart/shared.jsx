@@ -1,7 +1,14 @@
 import { useState } from "react";
 import { Check, Copy, Loader2 } from "lucide-react";
 
-export const errMsg = (e) => e?.response?.data?.detail || e?.message || "Terjadi kesalahan";
+// The shared API client (src/api/client.js) resolves to the response body and
+// rejects with the error body ({detail: ...}) when the server answered, or
+// with the axios error (network, timeout) when it did not.
+export const errMsg = (e) => {
+  const d = e?.detail ?? e?.response?.data?.detail;
+  if (d) return typeof d === "string" ? d : JSON.stringify(d);
+  return e?.message || "Terjadi kesalahan";
+};
 
 export const fmtNum = (v) =>
   typeof v === "number" ? v.toLocaleString("id-ID", { maximumFractionDigits: 2 }) : v ?? "—";

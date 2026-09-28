@@ -20,7 +20,7 @@ export default function KitTab() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    ebsMartApi.kit().then((r) => setKit(r.data)).catch((e) => setError(errMsg(e)));
+    ebsMartApi.kit().then((r) => setKit(r)).catch((e) => setError(errMsg(e)));
   }, []);
 
   if (!kit && !error) return <Spinner />;

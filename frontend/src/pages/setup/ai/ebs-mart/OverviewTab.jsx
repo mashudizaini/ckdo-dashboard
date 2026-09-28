@@ -17,7 +17,7 @@ export default function OverviewTab() {
   const load = async () => {
     try {
       const r = await ebsMartApi.overview();
-      setData(r.data);
+      setData(r);
       setError(null);
     } catch (e) {
       setError(errMsg(e));
@@ -35,7 +35,7 @@ export default function OverviewTab() {
     setNotice(null);
     try {
       const r = await ebsMartApi.trigger(job, { full_refresh: fullRefresh });
-      setNotice(r.data.message + " — status muncul di riwayat di bawah.");
+      setNotice(r.message + " — status muncul di riwayat di bawah.");
       setTimeout(load, 1500);
     } catch (e) {
       setError(errMsg(e));

@@ -12,7 +12,7 @@ export default function SubinventoryTab() {
 
   const load = async () => {
     try {
-      setRows((await ebsMartApi.subinventories()).data);
+      setRows(await ebsMartApi.subinventories());
     } catch (e) {
       setError(errMsg(e));
     }

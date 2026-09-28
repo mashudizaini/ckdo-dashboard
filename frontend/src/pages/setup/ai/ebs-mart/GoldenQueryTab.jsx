@@ -16,7 +16,7 @@ export default function GoldenQueryTab() {
   const load = async () => {
     try {
       const r = await ebsMartApi.goldenList();
-      setRows(r.data);
+      setRows(r);
     } catch (e) {
       setError(errMsg(e));
     }
@@ -45,7 +45,7 @@ export default function GoldenQueryTab() {
     setResult(null);
     try {
       const r = await ebsMartApi.runSql(g.sql_text, "ebs-management");
-      setResult({ id: g.id, data: r.data });
+      setResult({ id: g.id, data: r });
     } catch (e) {
       setError(errMsg(e));
     } finally {

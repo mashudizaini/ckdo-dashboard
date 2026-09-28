@@ -17,8 +17,8 @@ export default function AuditTab() {
     try {
       const params = Object.fromEntries(Object.entries(filters).filter(([, v]) => v));
       const [s, l] = await Promise.all([ebsMartApi.queryStats(30), ebsMartApi.queryLog({ ...params, limit: 200 })]);
-      setStats(s.data);
-      setRows(l.data);
+      setStats(s);
+      setRows(l);
       setError(null);
     } catch (e) {
       setError(errMsg(e));

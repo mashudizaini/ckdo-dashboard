@@ -182,7 +182,7 @@ export default function PlaygroundTab() {
   const runSql = async () => {
     setSqlBusy(true); setSqlErr(null); setSqlResult(null);
     try {
-      setSqlResult((await ebsMartApi.runSql(sql, sqlGroup)).data);
+      setSqlResult(await ebsMartApi.runSql(sql, sqlGroup));
     } catch (e) {
       setSqlErr(`${e?.response?.status || ""} ${errMsg(e)}`);
     } finally {
@@ -199,7 +199,7 @@ export default function PlaygroundTab() {
       .filter(([k, v]) => v !== "" || selects.has(k))
       .map(([k, v]) => [k, v === "" ? null : v === "true" ? true : v === "false" ? false : v]));
     try {
-      setToolResult((await ebsMartApi.callTool(tool, clean, toolGroup)).data);
+      setToolResult(await ebsMartApi.callTool(tool, clean, toolGroup));
     } catch (e) {
       setToolErr(`${e?.response?.status || ""} ${errMsg(e)}`);
     } finally {
@@ -210,7 +210,7 @@ export default function PlaygroundTab() {
   const runSec = async () => {
     setSecBusy(true); setSecErr(null);
     try {
-      setSec((await ebsMartApi.securityTest()).data);
+      setSec(await ebsMartApi.securityTest());
     } catch (e) {
       setSecErr(errMsg(e));
     } finally {
