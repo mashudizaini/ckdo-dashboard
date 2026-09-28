@@ -156,7 +156,10 @@ const EIS_ITEMS = [
 const COCHAT_URL = import.meta.env.VITE_COCHAT_URL || "";
 
 const AI_ITEMS = [
-  { label: "AI Chatbot",    path: "/ai/chatbot",        icon: RobotIcon, roles: [] },
+  // AI Chatbot hidden from the menu for now (2026-09-28): users are pointed
+  // at CoChat instead. The /ai/chatbot route still exists; put this back to
+  // show it again.
+  // { label: "AI Chatbot",    path: "/ai/chatbot",        icon: RobotIcon, roles: [] },
   // Internal chat platform (Open WebUI) with SSO — plain external link,
   // opens in a new tab (see NavCard's `item.external` branch).
   ...(COCHAT_URL
@@ -435,6 +438,18 @@ export default function Sidebar() {
           </div>
         )}
 
+        {/* AI Tools */}
+        <div>
+          <p style={{ fontSize: 13, fontWeight: 800, color: "#334155", letterSpacing: "0.07em", marginBottom: 8, paddingLeft: 8 }}>
+            AI TOOLS
+          </p>
+          <div className="space-y-1.5">
+            {visibleItems(AI_ITEMS).map((item) => (
+              <NavCard key={item.path} item={item} />
+            ))}
+          </div>
+        </div>
+
         {/* SETUP — team names mirrored from DASHBOARD, one flat level of
             per-team configuration entries. */}
         {visibleItems(SETUP_ITEMS).length > 0 && (
@@ -451,18 +466,6 @@ export default function Sidebar() {
             </div>
           </div>
         )}
-
-        {/* AI Tools */}
-        <div>
-          <p style={{ fontSize: 13, fontWeight: 800, color: "#334155", letterSpacing: "0.07em", marginBottom: 8, paddingLeft: 8 }}>
-            AI TOOLS
-          </p>
-          <div className="space-y-1.5">
-            {visibleItems(AI_ITEMS).map((item) => (
-              <NavCard key={item.path} item={item} />
-            ))}
-          </div>
-        </div>
       </nav>
 
       {/* ── User + Logout ── */}
