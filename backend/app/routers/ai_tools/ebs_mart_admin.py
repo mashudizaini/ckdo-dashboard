@@ -653,6 +653,20 @@ async def openwebui_kit(user: CurrentUser = Depends(_admin)):
 _ROLE_CODE = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
 
 
+def _scope_rows(sql: str, params=None) -> list[dict]:
+    """ebs_chat_scope belongs to the dashboard's own database role, not the
+    EIS role _rows connects as — read it the way ebs_chat_service does."""
+    from app.services.ebs_chat_service import _get_pg
+    conn = _get_pg()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        cols = [d.name for d in cur.description]
+        return [dict(zip(cols, r)) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 def _money_columns() -> dict[str, list[str]]:
     from app.services.ebs_mart.schema import mart_columns
     out = {}
@@ -674,7 +688,7 @@ async def access_policy(user: CurrentUser = Depends(_admin)):
     marts = [{"mart": m, "domain": MARTS[m]["domain"], "phase": MARTS[m]["phase"],
               "description": MARTS[m]["description"], "money_columns": money.get(m, [])}
              for m in policy._mart_names()]
-    users = await run_in_threadpool(_rows, """
+    users = await run_in_threadpool(_scope_rows, """
         SELECT g AS role_code, COUNT(*) AS users FROM ebs_chat_scope, jsonb_array_elements_text(ebs_groups) g
          GROUP BY g""")
     return {"roles": [{"role_code": c, **r, "users": next((u["users"] for u in users if u["role_code"] == c), 0)}
@@ -708,7 +722,7 @@ async def upsert_role(code: str, body: RoleIn, user: CurrentUser = Depends(_admi
 
 @router.delete("/access-policy/roles/{code}")
 async def delete_role(code: str, user: CurrentUser = Depends(_admin)):
-    used = await run_in_threadpool(_rows, """
+    used = await run_in_threadpool(_scope_rows, """
         SELECT email FROM ebs_chat_scope WHERE ebs_groups ? %s ORDER BY email""", (code,))
     if used:
         raise HTTPException(400, f"Peran {code} masih dipakai {len(used)} user ("
