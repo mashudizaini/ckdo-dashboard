@@ -82,11 +82,13 @@ class RespFunctionsIn(BaseModel):
     responsibility: str = Field(..., description="Nama responsibility (cocok sebagian)")
     function: Optional[str] = Field(None, description="Saring nama/kode fungsi (cocok sebagian)")
     function_type: Optional[str] = Field(None, description="Tipe fungsi persis: FORM, JSP, SUBFUNCTION, WWW, ...")
+    include_unheld: bool = Field(False, description="true = ikut responsibility yang saat ini tidak dipegang user aktif mana pun")
 
 
 class RespProgramsIn(BaseModel):
     responsibility: Optional[str] = Field(None, description="Nama responsibility (cocok sebagian)")
     program: Optional[str] = Field(None, description="Nama atau kode program concurrent (cocok sebagian)")
+    include_unheld: bool = Field(False, description="true = ikut responsibility yang saat ini tidak dipegang user aktif mana pun")
 
 
 class DormantIn(BaseModel):
@@ -124,6 +126,7 @@ class ApprovalIn(BaseModel):
     item_type: Optional[str] = Field(None, description="Tipe workflow: kode persis (POAPPRV = approval PO, REQAPPRV = "
                                                        "requisition, APINVAPR = invoice AP) atau nama (cocok sebagian)")
     include_fyi: bool = Field(False, description="true = ikut notifikasi FYI yang tidak butuh respons")
+    include_errors: bool = Field(False, description="true = ikut notifikasi error workflow (WFERROR, POERROR, ...) — bukan approval")
     group_by: Literal["none", "recipient", "item_type"] = Field(
         "none", description="none = detail per notifikasi; recipient = jumlah per penerima; item_type = per jenis workflow")
 

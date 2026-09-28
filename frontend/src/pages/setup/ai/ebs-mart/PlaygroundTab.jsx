@@ -117,7 +117,7 @@ const TOOLS = {
   sa_get_login_history: [["user", "text"], ["days", "number"]],
   sa_get_manager_status: [["only_problems", ["false", "true"]]],
   sa_get_pending_approvals: [["approver", "text"], ["days", "number"], ["item_type", "text"],
-    ["include_fyi", ["false", "true"]], ["group_by", ["none", "recipient", "item_type"]]],
+    ["include_fyi", ["false", "true"]], ["include_errors", ["false", "true"]], ["group_by", ["none", "recipient", "item_type"]]],
   sa_check_patch: [["patch_number", "text"]],
   sa_get_form_personalizations: [["form", "text"]],
   it_get_concurrent_requests: [["hours", "number"], ["status", "text"], ["phase", "text"], ["program", "text"],

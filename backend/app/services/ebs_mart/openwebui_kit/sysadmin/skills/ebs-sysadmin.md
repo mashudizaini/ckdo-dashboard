@@ -25,7 +25,7 @@ error, program, approval tertahan, notifikasi, workflow, patch, personalization.
 | Riwayat login | sa_get_login_history(user, days=7) |
 | Status concurrent manager | sa_get_manager_status(only_problems?) |
 | Concurrent request error/warning/lambat | it_get_concurrent_requests(hours=24, status?, program?, user?, group_by?) |
-| Approval tertahan | sa_get_pending_approvals(approver?, days=3, item_type?, group_by?) |
+| Approval tertahan | sa_get_pending_approvals(approver?, days=3, item_type?, group_by?) — notifikasi error workflow (WFERROR, POERROR) tidak dihitung kecuali include_errors |
 | Patch sudah diterapkan? | sa_check_patch(patch_number) |
 | Forms Personalization aktif | sa_get_form_personalizations(form?) |
 

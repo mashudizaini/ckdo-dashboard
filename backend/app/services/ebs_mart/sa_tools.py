@@ -19,6 +19,9 @@ from app.services.ebs_mart import access, query
 from app.services.ebs_mart.access import Caller
 from app.services.ebs_mart.tools import _like, _val
 
+# EBS's wall clock (WIB) — Oracle times are stored in it, PostgreSQL runs UTC.
+_NOW = "(now() AT TIME ZONE 'Asia/Jakarta')"
+
 
 def _run(caller: Caller, marts: str | list[str], sql: str, params: dict, tool: str, args: dict) -> dict:
     marts = [marts] if isinstance(marts, str) else marts
@@ -90,40 +93,55 @@ def sa_who_has_resp(caller: Caller, responsibility: str, include_inactive: bool 
 
 def sa_who_has_function(caller: Caller, function: str, include_seeded: bool = False) -> dict:
     """Active users who can open a function, through which responsibility,
-    and whether that grant is direct or indirect."""
+    and whether that grant is direct or indirect — one row per user ×
+    responsibility. A function name that exists exactly ("Payments") is
+    matched exactly; only when none does is it matched as a substring, so
+    "Payments" does not also return "Invoice Apply Prepayments"."""
     args = {"function": function, "include_seeded": include_seeded}
     sql = """
-        SELECT f.user_function_name, f.function_name, ur.user_name, ur.employee_name, ur.responsibility_name,
-               ur.grant_type, ur.is_seeded
-          FROM mart.sa_resp_function f
-          JOIN mart.sa_user_resp ur ON ur.responsibility_id = f.responsibility_id
-                                   AND ur.application_id = f.application_id
+        WITH fn AS (
+            SELECT DISTINCT function_id FROM mart.sa_resp_function
+             WHERE UPPER(function_name) = UPPER(%(f)s::text) OR UPPER(user_function_name) = UPPER(%(f)s::text)
+        ), hit AS (
+            SELECT f.* FROM mart.sa_resp_function f
+             WHERE f.function_id IN (SELECT function_id FROM fn)
+                OR (NOT EXISTS (SELECT 1 FROM fn) AND f.user_function_name ILIKE %(fl)s::text)
+        )
+        SELECT ur.user_name, ur.employee_name, ur.responsibility_name, ur.grant_type,
+               STRING_AGG(DISTINCT hit.user_function_name, '; ') AS functions, ur.is_seeded
+          FROM hit
+          JOIN mart.sa_user_resp ur ON ur.responsibility_id = hit.responsibility_id
+                                   AND ur.application_id = hit.application_id
          WHERE ur.is_active
            AND (%(seeded)s OR NOT ur.is_seeded)
-           AND (UPPER(f.function_name) = UPPER(%(f)s::text) OR f.user_function_name ILIKE %(fl)s::text)
-         ORDER BY f.user_function_name, ur.user_name, ur.responsibility_name
+         GROUP BY ur.user_name, ur.employee_name, ur.responsibility_name, ur.grant_type, ur.is_seeded
+         ORDER BY ur.user_name, ur.responsibility_name
     """
     return _run(caller, ["sa_resp_function", "sa_user_resp"], sql,
                 {"f": _val(function), "fl": _like(function), "seeded": include_seeded}, "sa_who_has_function", args)
 
 
 def sa_get_resp_functions(caller: Caller, responsibility: str, function: str | None = None,
-                          function_type: str | None = None) -> dict:
-    args = {"responsibility": responsibility, "function": function, "function_type": function_type}
+                          function_type: str | None = None, include_unheld: bool = False) -> dict:
+    args = {"responsibility": responsibility, "function": function, "function_type": function_type,
+            "include_unheld": include_unheld}
     sql = """
-        SELECT responsibility_name, menu_name, user_function_name, function_name, function_type, is_resp_active
+        SELECT responsibility_name, menu_name, user_function_name, function_name, function_type, is_resp_active,
+               active_holders
           FROM mart.sa_resp_function
          WHERE responsibility_name ILIKE %(r)s::text
+           AND (%(unheld)s OR active_holders > 0)
            AND (%(f)s::text IS NULL OR user_function_name ILIKE %(f)s::text OR function_name ILIKE %(f)s::text)
            AND (%(t)s::text IS NULL OR function_type = UPPER(%(t)s::text))
          ORDER BY responsibility_name, user_function_name
     """
     return _run(caller, "sa_resp_function", sql,
-                {"r": _like(responsibility), "f": _like(function), "t": _val(function_type)},
-                "sa_get_resp_functions", args)
+                {"r": _like(responsibility), "f": _like(function), "t": _val(function_type),
+                 "unheld": include_unheld}, "sa_get_resp_functions", args)
 
 
-def sa_get_resp_programs(caller: Caller, responsibility: str | None = None, program: str | None = None) -> dict:
+def sa_get_resp_programs(caller: Caller, responsibility: str | None = None, program: str | None = None,
+                         include_unheld: bool = False) -> dict:
     """What a responsibility may submit, or which responsibilities may submit
     a program. 'Semua program aplikasi' rows cover every program of that
     application and are returned for a program search when the program
@@ -131,12 +149,13 @@ def sa_get_resp_programs(caller: Caller, responsibility: str | None = None, prog
     if not _val(responsibility) and not _val(program):
         from app.services.ebs_mart.sql_guard import SqlRejected
         raise SqlRejected("Isi responsibility atau program (salah satu).")
-    args = {"responsibility": responsibility, "program": program}
+    args = {"responsibility": responsibility, "program": program, "include_unheld": include_unheld}
     sql = """
         SELECT g.responsibility_name, g.request_group_name, g.unit_type, g.unit_short_name, g.unit_name,
-               g.unit_app_short_name, g.program_enabled, g.is_resp_active
+               g.unit_app_short_name, g.program_enabled, g.active_holders
           FROM mart.sa_resp_request_group g
          WHERE (%(r)s::text IS NULL OR g.responsibility_name ILIKE %(r)s::text)
+           AND (%(unheld)s OR g.active_holders > 0)
            AND (%(p)s::text IS NULL
                 OR g.unit_name ILIKE %(p)s::text OR g.unit_short_name ILIKE %(p)s::text
                 OR (g.unit_type = 'Semua program aplikasi' AND g.unit_app_short_name IN (
@@ -148,7 +167,8 @@ def sa_get_resp_programs(caller: Caller, responsibility: str | None = None, prog
          ORDER BY g.responsibility_name, g.unit_type, g.unit_name
     """
     return _run(caller, ["sa_resp_request_group", "sa_concurrent_request"], sql,
-                {"r": _like(responsibility), "p": _like(program)}, "sa_get_resp_programs", args)
+                {"r": _like(responsibility), "p": _like(program), "unheld": include_unheld},
+                "sa_get_resp_programs", args)
 
 
 def sa_get_dormant_users(caller: Caller, days: int = 90, exclude_seeded: bool = True) -> dict:
@@ -231,7 +251,7 @@ def sa_get_login_history(caller: Caller, user: str, days: int = 7) -> dict:
                user_form_name, form_name, form_start
           FROM mart.sa_login_audit u
          WHERE {_user_match('u')}
-           AND login_start >= CURRENT_DATE - %(d)s
+           AND login_start >= {_NOW}::date - %(d)s
          ORDER BY login_start DESC, form_start DESC NULLS LAST
     """
     return _run(caller, "sa_login_audit", sql, {"u": _val(user), "ul": _like(user), "d": days},
@@ -253,13 +273,16 @@ def sa_get_manager_status(caller: Caller, only_problems: bool = False) -> dict:
 
 def sa_get_pending_approvals(caller: Caller, approver: str | None = None, days: int = 3,
                              item_type: str | None = None, include_fyi: bool = False,
-                             group_by: str = "none") -> dict:
-    """Open workflow notifications waiting at least N days."""
+                             include_errors: bool = False, group_by: str = "none") -> dict:
+    """Open workflow notifications waiting at least N days. Workflow error
+    notifications (WFERROR, POERROR, ... — tens of thousands sit open at
+    SYSADMIN) are not approvals and are left out unless asked for."""
     args = {"approver": approver, "days": days, "item_type": item_type, "include_fyi": include_fyi,
-            "group_by": group_by}
+            "include_errors": include_errors, "group_by": group_by}
     where = """
          WHERE days_open >= %(d)s
            AND (%(fyi)s OR requires_response)
+           AND (%(err)s OR item_type NOT LIKE '%%ERROR')
            AND (%(a)s::text IS NULL OR recipient_role ILIKE %(a)s::text OR recipient_name ILIKE %(a)s::text)
            AND (%(it)s::text IS NULL OR item_type = UPPER(%(it)s::text) OR item_type_name ILIKE %(itl)s::text)
     """
@@ -285,7 +308,8 @@ def sa_get_pending_approvals(caller: Caller, approver: str | None = None, days: 
              ORDER BY days_open DESC
         """
     return _run(caller, "sa_wf_open_notification", sql,
-                {"d": days, "fyi": include_fyi, "a": _like(approver), "it": _val(item_type), "itl": _like(item_type)},
+                {"d": days, "fyi": include_fyi, "err": include_errors, "a": _like(approver), "it": _val(item_type),
+                 "itl": _like(item_type)},
                 "sa_get_pending_approvals", args)
 
 
@@ -328,8 +352,8 @@ def it_get_concurrent_requests(caller: Caller, hours: int = 24, status: str | No
     status_map = {"error": ["E"], "warning": ["G"], "normal": ["C", "I", "R"], "terminated": ["X"],
                   "cancelled": ["D"], "hold": ["H"], "no manager": ["M"], "gagal": ["E", "X"]}
     codes = status_map.get((status or "").strip().lower()) if _val(status) else None
-    where = """
-         WHERE request_date >= LOCALTIMESTAMP - make_interval(hours => %(h)s)
+    where = f"""
+         WHERE request_date >= {_NOW} - make_interval(hours => %(h)s)
            AND ((%(sc)s::text[] IS NULL AND %(sl)s::text IS NULL)
                 OR status_code = ANY(%(sc)s::text[]) OR status ILIKE %(sl)s::text)
            AND (%(ph)s::text IS NULL OR phase ILIKE %(ph)s::text)

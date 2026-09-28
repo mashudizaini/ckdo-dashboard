@@ -26,10 +26,15 @@ PROFILE_BLACKLIST_REGEX = "PASSWORD|PASSWD|PWD|SECRET|TOKEN|CREDENTIAL|WALLET|PR
 # while signed in as SYSADMIN (created_by 0) is not caught here.
 _SEEDED = "(u.user_id < 1000 OR u.created_by IN (1, 2))"
 
+# Today in EBS's clock. Oracle stores WIB wall-clock times while this
+# PostgreSQL runs in UTC, so CURRENT_DATE is yesterday until 07:00 WIB.
+TODAY = "(now() AT TIME ZONE 'Asia/Jakarta')::date"
+
+
 # "Aktif" as the blueprint defines it: end_date empty or after today.
 def _active(alias: str) -> str:
-    return (f"(({alias}.start_date IS NULL OR {alias}.start_date <= CURRENT_DATE) "
-            f"AND ({alias}.end_date IS NULL OR {alias}.end_date > CURRENT_DATE))")
+    return (f"(({alias}.start_date IS NULL OR {alias}.start_date <= {TODAY}) "
+            f"AND ({alias}.end_date IS NULL OR {alias}.end_date > {TODAY}))")
 
 
 SA_META_DDL = [
@@ -360,6 +365,13 @@ _STATUS = """CASE {c}.status_code WHEN 'A' THEN 'Waiting' WHEN 'B' THEN 'Resumin
 # marts are limited to these: the ~thousands of seeded responsibilities
 # nobody holds would multiply the rows without answering any question.
 _ASSIGNED = "EXISTS (SELECT 1 FROM core.sa_user_resp x WHERE x.resp_id = r.resp_id AND x.app_id = r.app_id)"
+# How many active users hold it right now (active user, active assignment):
+# the tools default to responsibilities someone actually uses, not the
+# seeded ones a retired account still carries.
+_HOLDERS = f"""LEFT JOIN (SELECT ur.resp_id, ur.app_id, COUNT(DISTINCT ur.user_id) AS n
+                     FROM core.sa_user_resp ur JOIN core.sa_user u ON u.user_id = ur.user_id
+                    WHERE {_active('u')} AND {_active('ur')}
+                    GROUP BY ur.resp_id, ur.app_id) h ON h.resp_id = r.resp_id AND h.app_id = r.app_id"""
 
 # Order matters: sa_user reads mart.sa_user_resp, and sa_sod_violation reads
 # sa_user_resp and sa_resp_function, so those are created (and refreshed)
@@ -397,7 +409,7 @@ SA_MART_SQL: dict[str, str] = {
                u.end_date,
                {_active('u')}                                     AS is_active,
                u.last_logon_date,
-               CURRENT_DATE - u.last_logon_date::date             AS days_since_login,
+               {TODAY} - u.last_logon_date::date             AS days_since_login,
                u.last_logon_date IS NULL                          AS never_logged_in,
                u.password_date,
                u.employee_id,
@@ -405,7 +417,7 @@ SA_MART_SQL: dict[str, str] = {
                u.employee_name,
                CASE WHEN u.employee_id IS NULL THEN 'Tanpa karyawan'
                     WHEN u.current_employee_flag = 'Y' THEN 'Aktif'
-                    WHEN u.termination_date IS NOT NULL AND u.termination_date <= CURRENT_DATE THEN 'Keluar'
+                    WHEN u.termination_date IS NOT NULL AND u.termination_date <= {TODAY} THEN 'Keluar'
                     ELSE 'Tidak aktif' END                        AS employee_status,
                u.termination_date,
                {_SEEDED}                                          AS is_seeded,
@@ -433,11 +445,13 @@ SA_MART_SQL: dict[str, str] = {
                f.function_name,
                f.user_function_name,
                f.function_type,
-               {_active('r')}                                    AS is_resp_active
+               {_active('r')}                                    AS is_resp_active,
+               COALESCE(h.n, 0)                                  AS active_holders
           FROM core.sa_resp r
           JOIN core.sa_menu_function mf ON mf.menu_id = r.menu_id
           JOIN core.sa_function f       ON f.function_id = mf.function_id
           LEFT JOIN core.sa_menu m      ON m.menu_id = r.menu_id
+          {_HOLDERS}
          WHERE {_ASSIGNED}
            AND NOT EXISTS (SELECT 1 FROM core.sa_resp_exclusion x
                             WHERE x.resp_id = r.resp_id AND x.app_id = r.app_id
@@ -463,13 +477,15 @@ SA_MART_SQL: dict[str, str] = {
                CASE u.unit_type WHEN 'P' THEN p.program_name WHEN 'S' THEN rs.set_name
                                 WHEN 'A' THEN 'Semua program ' || COALESCE(ua.name, ua.short_name) END AS unit_name,
                p.enabled_flag                                     AS program_enabled,
-               {_active('r')}                                     AS is_resp_active
+               {_active('r')}                                     AS is_resp_active,
+               COALESCE(h.n, 0)                                   AS active_holders
           FROM core.sa_resp r
           JOIN core.sa_request_group_unit u ON u.request_group_id = r.request_group_id
                                            AND u.rg_app_id = r.group_application_id
           LEFT JOIN core.sa_conc_program p  ON u.unit_type = 'P' AND p.program_id = u.unit_id AND p.app_id = u.unit_app_id
           LEFT JOIN core.sa_request_set rs  ON u.unit_type = 'S' AND rs.set_id = u.unit_id AND rs.app_id = u.unit_app_id
           LEFT JOIN core.sa_application ua  ON ua.app_id = u.unit_app_id
+          {_HOLDERS}
          WHERE {_ASSIGNED}
     """,
 
@@ -495,7 +511,7 @@ SA_MART_SQL: dict[str, str] = {
           FROM core.sa_profile_value p
     """,
 
-    "sa_login_audit": """
+    "sa_login_audit": f"""
         SELECT l.row_key,
                l.login_id,
                l.user_id,
@@ -516,7 +532,7 @@ SA_MART_SQL: dict[str, str] = {
           FROM core.sa_login l
           LEFT JOIN core.sa_user u ON u.user_id = l.user_id
           LEFT JOIN core.sa_resp r ON r.resp_id = l.resp_id AND r.app_id = l.resp_app_id
-         WHERE l.login_start >= CURRENT_DATE - 90
+         WHERE l.login_start >= {TODAY} - 90
     """,
 
     # run_minutes only for finished requests: Oracle stores local time and
@@ -579,7 +595,7 @@ SA_MART_SQL: dict[str, str] = {
                       WHERE phase_code = 'R' GROUP BY queue_name) q ON q.queue_name = m.manager_name
     """,
 
-    "sa_wf_open_notification": """
+    "sa_wf_open_notification": f"""
         SELECT n.notification_id,
                n.item_type,
                n.item_type_name,
@@ -592,7 +608,7 @@ SA_MART_SQL: dict[str, str] = {
                n.subject,
                n.begin_date,
                n.due_date,
-               CURRENT_DATE - n.begin_date::date                  AS days_open,
+               {TODAY} - n.begin_date::date                       AS days_open,
                n.requires_response,
                n.item_key,
                n.user_key,
