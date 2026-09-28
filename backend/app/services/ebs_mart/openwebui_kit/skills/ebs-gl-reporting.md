@@ -44,6 +44,8 @@ saldo akun, neraca, kas & bank, jurnal, posting, jurnal dari invoice mana, akun 
   Nama akun COA berbahasa Inggris (611311 ELECTRICITY); kata umum Indonesia (listrik, gaji, sewa, penyusutan,
   bunga, pajak, perjalanan, asuransi, ...) diterjemahkan otomatis. Jika tidak ketemu, coba lookup_master(type=account)
   dengan istilah Inggris.
+- Departemen (segment3) ditulis lengkap di COA (14 HUMAN RESOURCE AND GENERAL AFFAIR, 31 QUALITY ASSURANCE, ...);
+  singkatan umum (HRGA, HR, GA, QA, QC, PPIC, RA, BD, SM) diterjemahkan otomatis. Kalau ragu: lookup_master(type=department).
 - Detail jurnal hanya 13 bulan terakhir; untuk periode lebih lama pakai trial balance / laba rugi.
 - Satu baris jurnal ringkasan bisa berasal dari banyak transaksi subledger (subledger_txn_count > 1).
 

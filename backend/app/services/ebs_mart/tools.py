@@ -1005,6 +1005,33 @@ _ACCOUNT_TERMS = {
 }
 
 
+# Department names in the COA (segment3) are spelled out; people use the
+# usual abbreviations or Indonesian names. A term that is one of these keys is
+# searched by the COA spelling instead.
+_DEPT_TERMS = {
+    "hrga": "HUMAN RESOURCE", "hr": "HUMAN RESOURCE", "sdm": "HUMAN RESOURCE", "personalia": "HUMAN RESOURCE",
+    "ga": "GENERAL AFFAIR", "umum": "GENERAL AFFAIR", "qa": "QUALITY ASSURANCE", "qc": "QUALITY CONTROL",
+    "ppic": "PRODUCTION PLANNING", "gudang": "WAREHOUSE", "produksi": "PRODUCTION", "pajak": "TAX",
+    "akuntansi": "ACCOUNTING", "finance": "ACCOUNTING", "keuangan": "ACCOUNTING", "fa": "ACCOUNTING",
+    "pembelian": "PURCHASING", "sm": "SALES MARKETING", "penjualan": "SALES", "pemasaran": "MARKETING",
+    "ra": "REGULATORY AFFAIR", "regulatory": "REGULATORY AFFAIR", "bd": "BUSINESS DEVELOPMENT",
+    "sd": "STRATEGY DEVELOPMENT", "direksi": "DIRECTOR", "teknik": "ENGINEERING", "validasi": "VALIDATION",
+    "hbc": "HEALTH BEAUTY COSMETIC", "ma": "MEDICAL AFFAIR", "medical": "MEDICAL AFFAIR",
+}
+
+
+def _dept_term(text):
+    """Department abbreviation / Indonesian name -> the COA spelling; else as given."""
+    t = _val(text)
+    if not isinstance(t, str):
+        return t
+    key = t.strip().lower()
+    for prefix in ("departemen ", "department ", "dept ", "divisi "):
+        if key.startswith(prefix):
+            key = key[len(prefix):]
+    return _DEPT_TERMS.get(key, t)
+
+
 def _account_term(text):
     """Indonesian account word -> the English stem the COA uses; else as given."""
     t = _val(text)
@@ -1032,7 +1059,7 @@ def gl_get_pl(caller: Caller, period: str, ytd: bool = False, department: str | 
     args = {"period": period, "ytd": ytd, "department": department, "compare_prior_year": compare_prior_year,
             "level": level}
     cond, params = _gl_period_filter(period, ytd)
-    params.update({"dept": _val(department)})
+    params.update({"dept": _dept_term(department)})
     prior_cond = "FALSE"
     if compare_prior_year and "py" in params:
         prior_cond = cond.replace("%(py)s", "(%(py)s - 1)")
@@ -1109,7 +1136,7 @@ def gl_get_trial_balance(caller: Caller, period: str, account: str | None = None
     cond, params = _gl_period_filter(period)
     if "pn" not in params:
         raise sql_guard.SqlRejected("Trial balance butuh satu periode bulan (YYYY-MM atau JUL-26), bukan setahun.")
-    params.update({"acc": _account_term(account), "dept": _val(department), "st": _val(statement)})
+    params.update({"acc": _account_term(account), "dept": _dept_term(department), "st": _val(statement)})
     where = f"""
          WHERE {cond}
            AND {_ACCOUNT_FILTER}
@@ -1182,7 +1209,7 @@ def gl_get_journals(caller: Caller, period: str | None = None, date_from: date |
             "department": department, "source": source, "category": category, "text": text,
             "subledger_txn": subledger_txn, "min_amount": min_amount, "group_by": group_by}
     cond, params = _gl_period_filter(period)
-    params.update({"df": date_from, "dt": date_to, "acc": _account_term(account), "dept": _val(department),
+    params.update({"df": date_from, "dt": date_to, "acc": _account_term(account), "dept": _dept_term(department),
                    "src": _val(source), "cat": _val(category), "txt": _val(text), "sub": _val(subledger_txn),
                    "min": min_amount})
     where = f"""
@@ -1510,7 +1537,14 @@ def lookup_master(caller: Caller, text: str, type: str | None = None) -> dict:
            AND (UPPER(code) = UPPER(%(x)s::text) OR name ILIKE %(xl)s::text OR code ILIKE %(xl)s::text)
          ORDER BY (UPPER(code) = UPPER(%(x)s::text)) DESC, type, name
     """
-    term = _account_term(text) if (type or "account") in ("account",) else _val(text)
+    if type == "account":
+        term = _account_term(text)
+    elif type == "department":
+        term = _dept_term(text)
+    elif type is None:
+        term = _dept_term(text) if _dept_term(text) != _val(text) else _account_term(text)
+    else:
+        term = _val(text)
     return _run(caller, "master_lookup", sql, {"t": _val(type), "x": _val(text), "xl": _like(term)},
                 "lookup_master", args)
 
@@ -1792,7 +1826,7 @@ def gl_get_account_movement(caller: Caller, account: str, period_from: str, peri
          ORDER BY account_code, period_year, period_num
     """
     return _run(caller, "gl_trial_balance", sql,
-                {"kf": key(pf), "kt": key(pt), "acc": _account_term(account), "dept": _val(department)},
+                {"kf": key(pf), "kt": key(pt), "acc": _account_term(account), "dept": _dept_term(department)},
                 "gl_get_account_movement", args)
 
 
@@ -1813,7 +1847,7 @@ def gl_get_budget_vs_actual(caller: Caller, period: str, ytd: bool = False, depa
     cond, params = _gl_period_filter(period, ytd)
     dim = {"account": "account_code, account_desc", "section": "pl_section, pl_line",
            "month": "period_name, period_year, period_num"}.get(group_by, "dept_code, dept_desc")
-    params.update({"dept": _val(department), "acc": _account_term(account), "bn": _val(budget_name),
+    params.update({"dept": _dept_term(department), "acc": _account_term(account), "bn": _val(budget_name),
                    "rev": include_revenue})
     sql = f"""
         WITH f AS (
