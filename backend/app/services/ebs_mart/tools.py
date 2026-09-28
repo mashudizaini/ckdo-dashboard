@@ -1191,3 +1191,266 @@ def get_gl_journals(caller: Caller, period: str | None = None, date_from: date |
              ORDER BY effective_date DESC, je_header_id, je_line_num
         """
     return _run(caller, "gl_journal_detail", sql, params, "get_gl_journals", args)
+
+
+# ── Finance close, Cash Management, Fixed Assets (library v2 12-13) ─────────
+
+def _period_name(period: str | None) -> str | None:
+    """'AUG-26', '2026-08' or 'Aug 2026' -> 'AUG-26' (CKDO_GL_CAL names)."""
+    import re as _re
+    if not period or not str(period).strip():
+        return None
+    p = str(period).strip().upper()
+    if _re.match(r"^[A-Z]{3}-\d{2}$", p) and p[:3] in _MON:
+        return p
+    m = _re.match(r"^(\d{4})-(\d{1,2})$", p)
+    if m and 1 <= int(m.group(2)) <= 12:
+        return f"{_MON[int(m.group(2)) - 1]}-{m.group(1)[2:]}"
+    m = _re.match(r"^([A-Z]{3})[A-Z]*\s+(\d{4})$", p)
+    if m and m.group(1) in _MON:
+        return f"{m.group(1)}-{m.group(2)[2:]}"
+    raise sql_guard.SqlRejected(f"Format periode '{period}' tidak dikenal — pakai AUG-26 atau 2026-08.")
+
+
+def gl_get_period_status(caller: Caller, period: str | None = None, application: str | None = None) -> dict:
+    """Status of a period in every application (GL, AP, AR, PO, INV, OPM
+    costing, FA with depreciation run). Without a period: the current month
+    and the two before it."""
+    args = {"period": period, "application": application}
+    sql = """
+        SELECT period_name, application, book_type_code, status, deprn_run, start_date, end_date, last_update_date
+          FROM mart.gl_period_status
+         WHERE ((%(p)s::text IS NULL AND start_date BETWEEN (now() AT TIME ZONE 'Asia/Jakarta')::date - 70
+                                                        AND (now() AT TIME ZONE 'Asia/Jakarta')::date)
+                OR period_name = %(p)s::text)
+           AND (%(a)s::text IS NULL OR application = UPPER(%(a)s::text))
+         ORDER BY start_date DESC, application_order, book_type_code
+    """
+    return _run(caller, "gl_period_status", sql, {"p": _period_name(period), "a": _val(application)},
+                "gl_get_period_status", args)
+
+
+def gl_get_subledger_gap(caller: Caller, period: str | None = None, application: str | None = None,
+                         group_by: str = "summary") -> dict:
+    """What keeps a subledger from agreeing with GL: events not accounted or
+    in error, entries still draft or final but not transferred, and GL
+    journals not posted. summary = count, amount and oldest per kind ×
+    application × period; detail = the documents."""
+    args = {"period": period, "application": application, "group_by": group_by}
+    where = """
+         WHERE (%(p)s::text IS NULL OR period_name = %(p)s::text)
+           AND (%(a)s::text IS NULL OR application ILIKE %(a)s::text)
+    """
+    if group_by == "detail":
+        sql = f"""
+            SELECT application, kind_desc, period_name, txn_date, age_days, event_type, entity_code,
+                   transaction_number, amount_idr, detail
+              FROM mart.sla_gl_gap {where}
+             ORDER BY age_days DESC
+        """
+    else:
+        sql = f"""
+            SELECT application, kind_desc, period_name, COUNT(*) AS jumlah, SUM(amount_idr) AS amount_idr,
+                   MIN(txn_date) AS tertua, (ARRAY_AGG(transaction_number ORDER BY txn_date))[1:5] AS contoh
+              FROM mart.sla_gl_gap {where}
+             GROUP BY application, kind_desc, period_name
+             ORDER BY period_name, application, kind_desc
+        """
+    return _run(caller, "sla_gl_gap", sql, {"p": _period_name(period), "a": _val(application)},
+                "gl_get_subledger_gap", args)
+
+
+def po_get_uninvoiced_receipts(caller: Caller, as_of_period: str | None = None, supplier: str | None = None,
+                               group_by: str = "supplier") -> dict:
+    """Received-not-billed PO distributions (the accrual base) as of now.
+    as_of_period limits to POs dated up to the end of that period — the mart
+    holds today's received and billed quantities, not a history of them."""
+    args = {"as_of_period": as_of_period, "supplier": supplier, "group_by": group_by}
+    end = None
+    pn = _period_name(as_of_period)
+    if pn:
+        import calendar
+        y, m = 2000 + int(pn[4:]), _MON.index(pn[:3]) + 1
+        end = date(y, m, calendar.monthrange(y, m)[1])
+    where = """
+         WHERE qty_received_not_billed > 0
+           AND (%(end)s::date IS NULL OR po_date <= %(end)s::date)
+           AND (%(s)s::text IS NULL OR vendor_name ILIKE %(s)s::text)
+    """
+    if group_by == "po":
+        sql = f"""
+            SELECT po_number, vendor_name, item_code, item_desc, uom, qty_received_not_billed,
+                   amount_received_not_billed_idr, po_date, match_type
+              FROM mart.po_receipt_vs_invoice {where}
+             ORDER BY amount_received_not_billed_idr DESC
+        """
+    else:
+        sql = f"""
+            SELECT vendor_name, COUNT(DISTINCT po_number) AS jml_po, COUNT(*) AS jml_baris,
+                   SUM(amount_received_not_billed_idr) AS amount_received_not_billed_idr, MIN(po_date) AS po_tertua
+              FROM mart.po_receipt_vs_invoice {where}
+             GROUP BY vendor_name ORDER BY amount_received_not_billed_idr DESC
+        """
+    return _run(caller, "po_receipt_vs_invoice", sql, {"end": end, "s": _like(supplier)},
+                "po_get_uninvoiced_receipts", args)
+
+
+def so_get_shipped_not_invoiced(caller: Caller, date_from: date | None = None, customer: str | None = None) -> dict:
+    args = {"date_from": date_from, "customer": customer}
+    sql = """
+        SELECT order_number, line_number, business_type, customer_name, item_code, item_desc, uom, shipped_qty,
+               actual_shipment_date, days_since_ship, currency_code, amount_idr, line_status, autoinvoice_errors
+          FROM mart.so_shipped_not_invoiced
+         WHERE (%(df)s::date IS NULL OR actual_shipment_date >= %(df)s::date)
+           AND (%(c)s::text IS NULL OR customer_name ILIKE %(c)s::text)
+         ORDER BY actual_shipment_date
+    """
+    return _run(caller, "so_shipped_not_invoiced", sql, {"df": date_from, "c": _like(customer)},
+                "so_get_shipped_not_invoiced", args)
+
+
+def ar_get_unapplied_receipts(caller: Caller, customer: str | None = None) -> dict:
+    """Customer receipts (or parts of them) not applied to an invoice:
+    unapplied and on-account amounts."""
+    args = {"customer": customer}
+    sql = """
+        SELECT customer_name, receipt_number, receipt_date, receipt_method, currency_code,
+               SUM(amount_entered) AS amount_entered, SUM(amount_idr) AS amount_idr,
+               STRING_AGG(DISTINCT application_status_desc, '; ') AS status
+          FROM mart.ar_receipt
+         WHERE application_status IN ('UNAPP', 'ONACC')
+           AND NOT is_reversed
+           AND (%(c)s::text IS NULL OR customer_name ILIKE %(c)s::text)
+         GROUP BY customer_name, receipt_number, receipt_date, receipt_method, currency_code
+        HAVING SUM(amount_idr) <> 0
+         ORDER BY receipt_date
+    """
+    return _run(caller, "ar_receipt", sql, {"c": _like(customer)}, "ar_get_unapplied_receipts", args)
+
+
+def ar_get_autoinvoice_errors(caller: Caller, date_from: date | None = None, so_number: str | None = None,
+                              group_by: str = "none") -> dict:
+    args = {"date_from": date_from, "so_number": so_number, "group_by": group_by}
+    where = """
+         WHERE (%(df)s::date IS NULL OR created_date >= %(df)s::date)
+           AND (%(so)s::text IS NULL OR so_number = %(so)s::text)
+    """
+    if group_by == "error":
+        sql = f"""
+            SELECT status, error_message, COUNT(DISTINCT interface_line_id) AS jml_baris,
+                   COUNT(DISTINCT so_number) AS jml_so, SUM(amount_idr) AS amount_idr, MIN(created_date) AS tertua
+              FROM mart.ar_autoinvoice_error {where}
+             GROUP BY status, error_message ORDER BY jml_baris DESC
+        """
+    else:
+        sql = f"""
+            SELECT so_number, customer_name, batch_source_name, status, error_message, invalid_value, trx_date,
+                   gl_date, currency_code, amount, amount_idr, age_days
+              FROM mart.ar_autoinvoice_error {where}
+             ORDER BY created_date
+        """
+    return _run(caller, "ar_autoinvoice_error", sql, {"df": date_from, "so": _val(so_number)},
+                "ar_get_autoinvoice_errors", args)
+
+
+def opm_get_open_batches(caller: Caller, status: str | None = None, days_open: int | None = None) -> dict:
+    """Batches not yet Closed (Pending, WIP, Completed), with how long they
+    have been open since actual — or planned — start."""
+    args = {"status": status, "days_open": days_open}
+    sql = """
+        SELECT batch_no, batch_status_desc AS status, product_code, product_desc, plan_start_date,
+               actual_start_date, actual_cmplt_date,
+               (now() AT TIME ZONE 'Asia/Jakarta')::date - COALESCE(actual_start_date, plan_start_date)::date AS days_open,
+               product_plan_qty, product_actual_qty, product_uom
+          FROM mart.batch_status
+         WHERE batch_status_desc IN ('Pending', 'WIP', 'Completed')
+           AND (%(s)s::text IS NULL OR batch_status_desc ILIKE %(s)s::text)
+           AND (%(d)s::int IS NULL
+                OR (now() AT TIME ZONE 'Asia/Jakarta')::date - COALESCE(actual_start_date, plan_start_date)::date >= %(d)s::int)
+         ORDER BY days_open DESC NULLS LAST
+    """
+    return _run(caller, "batch_status", sql, {"s": _val(status), "d": days_open}, "opm_get_open_batches", args)
+
+
+def ce_get_unreconciled(caller: Caller, bank_account_name: str | None = None, date_to: date | None = None,
+                        side: str | None = None, group_by: str = "summary") -> dict:
+    """Unreconciled bank items: statement lines with no system match (BANK),
+    and AP payments / AR receipts / bank transfers not yet on a statement
+    (SYSTEM). The summary shows each account's last statement date — when
+    statements stop being loaded, everything after looks unreconciled."""
+    args = {"bank_account_name": bank_account_name, "date_to": date_to, "side": side, "group_by": group_by}
+    where = """
+         WHERE (%(b)s::text IS NULL OR bank_account_name ILIKE %(b)s::text OR bank_name ILIKE %(b)s::text)
+           AND (%(dt)s::date IS NULL OR trx_date <= %(dt)s::date)
+           AND (%(sd)s::text IS NULL OR side = UPPER(%(sd)s::text))
+    """
+    if group_by == "detail":
+        sql = f"""
+            SELECT bank_account_name, side_desc, source, doc_number, trx_date, age_days, currency_code,
+                   amount_entered, amount_idr, status, description, statement_number
+              FROM mart.ce_unreconciled {where}
+             ORDER BY bank_account_name, trx_date
+        """
+    else:
+        sql = f"""
+            SELECT bank_account_name, side_desc, source, COUNT(*) AS jumlah, SUM(amount_idr) AS amount_idr,
+                   MIN(trx_date) AS tertua, MAX(last_statement_date) AS statement_terakhir
+              FROM mart.ce_unreconciled {where}
+             GROUP BY bank_account_name, side_desc, source
+             ORDER BY bank_account_name, side_desc, source
+        """
+    return _run(caller, "ce_unreconciled", sql,
+                {"b": _like(bank_account_name), "dt": date_to, "sd": _val(side)}, "ce_get_unreconciled", args)
+
+
+def fa_get_assets(caller: Caller, category: str | None = None, location: str | None = None,
+                  asset: str | None = None, status: str | None = None, group_by: str = "category") -> dict:
+    args = {"category": category, "location": location, "asset": asset, "status": status, "group_by": group_by}
+    where = """
+         WHERE (%(c)s::text IS NULL OR category ILIKE %(c)s::text OR category_desc ILIKE %(c)s::text)
+           AND (%(l)s::text IS NULL OR location ILIKE %(l)s::text)
+           AND (%(a)s::text IS NULL OR asset_number = %(av)s::text OR description ILIKE %(a)s::text
+                OR tag_number = %(av)s::text)
+           AND (%(st)s::text IS NULL OR asset_status ILIKE %(st)s::text)
+    """
+    if group_by == "asset":
+        sql = f"""
+            SELECT asset_number, description, category, location, date_placed_in_service, asset_status, cost,
+                   accumulated_depreciation, nbv, ytd_deprn, last_deprn_period, life_in_months, tag_number
+              FROM mart.fa_asset_register {where}
+             ORDER BY category, asset_number
+        """
+    else:
+        dim = {"location": "location", "status": "asset_status"}.get(group_by, "category, category_desc")
+        sql = f"""
+            SELECT {dim}, COUNT(*) AS jml_aset, SUM(cost) AS cost, SUM(accumulated_depreciation) AS akumulasi_penyusutan,
+                   SUM(nbv) AS nbv, SUM(ytd_deprn) AS penyusutan_ytd
+              FROM mart.fa_asset_register {where}
+             GROUP BY {dim} ORDER BY cost DESC
+        """
+    return _run(caller, "fa_asset_register", sql,
+                {"c": _like(category), "l": _like(location), "a": _like(asset), "av": _val(asset),
+                 "st": _like(status)}, "fa_get_assets", args)
+
+
+def fa_get_depreciation(caller: Caller, period: str, category: str | None = None, group_by: str = "category") -> dict:
+    args = {"period": period, "category": category, "group_by": group_by}
+    where = """
+         WHERE period_name = %(p)s::text
+           AND (%(c)s::text IS NULL OR category ILIKE %(c)s::text OR category_desc ILIKE %(c)s::text)
+    """
+    if group_by == "asset":
+        sql = f"""
+            SELECT asset_number, description, category, location, deprn_amount, ytd_deprn, deprn_reserve
+              FROM mart.fa_depreciation {where}
+             ORDER BY deprn_amount DESC
+        """
+    else:
+        sql = f"""
+            SELECT category, category_desc, COUNT(*) AS jml_aset, SUM(deprn_amount) AS penyusutan_periode,
+                   SUM(ytd_deprn) AS penyusutan_ytd, SUM(deprn_reserve) AS akumulasi
+              FROM mart.fa_depreciation {where}
+             GROUP BY category, category_desc ORDER BY penyusutan_periode DESC
+        """
+    return _run(caller, "fa_depreciation", sql, {"p": _period_name(period), "c": _like(category)},
+                "fa_get_depreciation", args)

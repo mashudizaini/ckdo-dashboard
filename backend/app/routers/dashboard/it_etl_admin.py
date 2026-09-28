@@ -60,13 +60,15 @@ async def trigger_etl(job_name: str, params: TriggerParams):
         "etl_it_monitoring", "etl_daily_sales",
         "etl_mart_ap", "etl_mart_inventory", "refresh_ebs_marts", "etl_mart_po", "etl_mart_item_cost",
         "etl_mart_om", "etl_mart_ar", "etl_mart_opm", "etl_mart_gl", "etl_mart_sa", "etl_mart_sa_ops",
+        "etl_mart_close", "etl_mart_fa",
     ]
     if job_name not in valid_jobs:
         raise HTTPException(status_code=400, detail=f"Unknown job. Valid: {valid_jobs}")
 
     kwargs = {"year": params.year, "month": params.month}
     if job_name in ("etl_mart_ap", "etl_mart_inventory", "refresh_ebs_marts", "etl_mart_po", "etl_mart_item_cost",
-                    "etl_mart_om", "etl_mart_ar", "etl_mart_opm", "etl_mart_gl", "etl_mart_sa", "etl_mart_sa_ops"):
+                    "etl_mart_om", "etl_mart_ar", "etl_mart_opm", "etl_mart_gl", "etl_mart_sa", "etl_mart_sa_ops",
+                    "etl_mart_close", "etl_mart_fa"):
         kwargs["trigger_type"] = "MANUAL"
     result = celery_app.send_task(f"app.tasks.etl_tasks.{job_name}", kwargs=kwargs)
     _active_task_ids[job_name] = result.id
@@ -398,6 +400,17 @@ _JOB_META = {
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["gl_balances", "gl_code_combinations", "gl_periods", "fnd_flex_values_vl", "gl_je_headers", "gl_je_lines", "xla_ae_lines", "xla_transaction_entities"],
                         "destination_table": "core.fact_gl_balance, core.fact_gl_journal_line, meta.gl_account_map -> mart.gl_*, mart.pl_monthly"},
+    "etl_mart_close": {"frequency": "Hourly (06-20)", "schedule": "menit ke-15, 06:15-20:15",
+                       "source": "Oracle GL/XLA/AR/CE (EBS Data Mart — closing)", "source_system": "Oracle EBS",
+                       "oracle_tables": ["gl_period_statuses", "org_acct_periods", "gmf_period_statuses", "xla_events",
+                                         "xla_ae_headers", "gl_je_headers", "ra_interface_lines_all", "ra_interface_errors_all",
+                                         "ce_statement_lines", "ap_checks_all", "ar_cash_receipts_all", "ce_cashflows"],
+                       "destination_table": "core.fin_*, core.ar_interface_line, core.ce_* -> mart.gl_period_status, sla_gl_gap, ar_autoinvoice_error, so_shipped_not_invoiced, ce_unreconciled"},
+    "etl_mart_fa": {"frequency": "Daily", "schedule": "04:40 WIB", "source": "Oracle FA (EBS Data Mart)",
+                    "source_system": "Oracle EBS",
+                    "oracle_tables": ["fa_book_controls", "fa_additions_b", "fa_books", "fa_categories_b", "fa_distribution_history",
+                                      "fa_locations", "fa_deprn_summary", "fa_deprn_periods"],
+                    "destination_table": "core.fa_asset, core.fa_deprn -> mart.fa_asset_register, mart.fa_depreciation"},
     "etl_mart_sa": {"frequency": "Daily", "schedule": "05:40 WIB", "source": "Oracle FND/AD (EBS Data Mart — System Administration)",
                     "source_system": "Oracle EBS",
                     "oracle_tables": ["fnd_user", "per_all_people_f", "fnd_user_resp_groups_direct", "fnd_user_resp_groups_indirect",

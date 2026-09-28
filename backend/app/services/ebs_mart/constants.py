@@ -62,7 +62,7 @@ GL_JOURNAL_MONTHS = 13
 MAX_ROWS = 500
 STATEMENT_TIMEOUT = "15s"
 
-# One entry per mart in the blueprint's catalog (section 5). All six
+# One entry per mart in the blueprint's catalog (section 5). All seven
 # phases are built; later phases are listed so the admin overview shows the whole
 # roadmap and find_marts can say "not available yet" instead of nothing.
 #
@@ -229,6 +229,63 @@ MARTS: dict[str, dict] = {
         "source_jobs": ["etl_mart_gl"],
         "unique_key": ["row_key"],
     },
+    # ── Phase 7: finance close, Cash Management, Fixed Assets (library v2 12-13) ──
+    "gl_period_status": {
+        "domain": "GL", "phase": 7, "built": True,
+        "grain": "Aplikasi × periode (GL, AP, AR, PO, INV org 121, OPM costing, FA)",
+        "description": "Status periode tiap aplikasi (Open/Closed/Future/Frozen) dan apakah penyusutan FA sudah dijalankan.",
+        "sources": "GL_PERIOD_STATUSES, ORG_ACCT_PERIODS, GMF_PERIOD_STATUSES, FA_DEPRN_PERIODS",
+        "source_jobs": ["etl_mart_close", "etl_mart_fa"],
+        "unique_key": ["row_key"],
+    },
+    "sla_gl_gap": {
+        "domain": "GL", "phase": 7, "built": True,
+        "grain": "Event / entry / jurnal yang belum sampai ke GL",
+        "description": "Selisih subledger vs GL: event belum di-account, accounting error, entry draft, final belum transfer ke GL, jurnal GL belum posting.",
+        "sources": "XLA_EVENTS, XLA_AE_HEADERS, XLA_AE_LINES, XLA_TRANSACTION_ENTITIES, GL_JE_HEADERS",
+        "source_jobs": ["etl_mart_close"],
+        "unique_key": ["row_key"],
+    },
+    "ar_autoinvoice_error": {
+        "domain": "AR", "phase": 7, "built": True,
+        "grain": "Baris interface AutoInvoice (× pesan error)",
+        "description": "Baris RA_INTERFACE yang menunggu AutoInvoice atau ditolak, dengan pesan error dan nomor SO.",
+        "sources": "RA_INTERFACE_LINES_ALL, RA_INTERFACE_ERRORS_ALL",
+        "source_jobs": ["etl_mart_close"],
+        "unique_key": ["row_key"],
+    },
+    "so_shipped_not_invoiced": {
+        "domain": "OM", "phase": 7, "built": True,
+        "grain": "Baris SO yang sudah dikirim tetapi belum ada invoice AR",
+        "description": "SO terkirim belum jadi invoice: qty & nilai, tanggal kirim, umur, dan error AutoInvoice jika ada.",
+        "sources": "OE_ORDER_LINES_ALL + RA_CUSTOMER_TRX_LINES_ALL + RA_INTERFACE_*",
+        "source_jobs": ["etl_mart_om", "etl_mart_ar", "etl_mart_close"],
+        "unique_key": ["line_id"],
+    },
+    "ce_unreconciled": {
+        "domain": "CE", "phase": 7, "built": True,
+        "grain": "Baris rekening koran atau transaksi sistem yang belum rekon",
+        "description": "Rekonsiliasi bank: baris statement belum rekon, dan pembayaran AP / penerimaan AR / transfer bank yang belum muncul di statement (24 bulan). Tanpa nomor rekening.",
+        "sources": "CE_STATEMENT_HEADERS, CE_STATEMENT_LINES, AP_CHECKS_ALL, AR_CASH_RECEIPTS_ALL, CE_CASHFLOWS",
+        "source_jobs": ["etl_mart_close"],
+        "unique_key": ["row_key"],
+    },
+    "fa_asset_register": {
+        "domain": "FA", "phase": 7, "built": True,
+        "grain": "Aset tetap × buku corporate",
+        "description": "Daftar aset tetap: kategori, lokasi, tanggal mulai dipakai, harga perolehan, akumulasi penyusutan, nilai buku (NBV), status (aktif/CIP/retired/fully reserved).",
+        "sources": "FA_ADDITIONS, FA_BOOKS, FA_CATEGORIES, FA_DISTRIBUTION_HISTORY, FA_LOCATIONS, FA_DEPRN_SUMMARY",
+        "source_jobs": ["etl_mart_fa"],
+        "unique_key": ["row_key"],
+    },
+    "fa_depreciation": {
+        "domain": "FA", "phase": 7, "built": True,
+        "grain": "Aset × periode FA (24 bulan terakhir)",
+        "description": "Penyusutan per aset per periode: beban periode, YTD, akumulasi.",
+        "sources": "FA_DEPRN_SUMMARY, FA_DEPRN_PERIODS",
+        "source_jobs": ["etl_mart_fa"],
+        "unique_key": ["row_key"],
+    },
     # ── Phase 6: System Administration (blueprint v2 4.7) — restricted ──
     # Not reachable through any ebs-* group, ebs-management included: only
     # the SYSADMIN_ALLOWLIST emails below, through the sa_* tools, over the
@@ -338,11 +395,12 @@ BUILT_MARTS = [name for name, m in MARTS.items() if m.get("built")]
 # would over-grant: warehouse gets the two stock marts but not inv_valuation
 # (a Finance number), purchasing gets ap_open_invoice but not payment detail.
 DOMAIN_BY_GROUP: dict[str, set[str]] = {
-    "ebs-finance":    {"ap_", "ar_", "gl_", "pl_", "inv_valuation", "po_", "pr_"},
+    "ebs-finance":    {"ap_", "ar_", "gl_", "pl_", "inv_valuation", "po_", "pr_", "sla_", "ce_", "fa_",
+                       "so_shipped_not_invoiced", "batch_status"},
     "ebs-purchasing": {"po_", "pr_", "ap_open_invoice"},
     "ebs-warehouse":  {"inv_onhand_lot", "inv_movement_daily"},
     "ebs-production": {"batch_", "inv_onhand_lot"},
-    "ebs-sales":      {"so_", "sales_", "ar_aging"},
+    "ebs-sales":      {"so_", "sales_", "ar_aging", "ar_autoinvoice_error"},
     "ebs-management": {""},
 }
 
@@ -370,7 +428,7 @@ SA_REQUEST_DAYS = 30
 SA_LOGIN_DAYS = 90
 
 GROUP_LABELS = {
-    "ebs-finance": "Finance — AP, AR, GL, valuasi persediaan, PO",
+    "ebs-finance": "Finance — AP, AR, GL, closing, bank, aset tetap, valuasi persediaan, PO",
     "ebs-purchasing": "Purchasing — PO, PR, hutang terbuka (tanpa detail pembayaran)",
     "ebs-warehouse": "Gudang — stok per lot & mutasi (tanpa valuasi)",
     "ebs-production": "Produksi — batch & stok per lot",

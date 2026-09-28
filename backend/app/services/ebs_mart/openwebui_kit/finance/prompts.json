@@ -1,0 +1,47 @@
+[
+  {
+    "command": "/cek-closing",
+    "title": "Checklist closing periode",
+    "content": "Checklist hambatan closing periode {{periode}} semua modul (PO, AP, OM/AR, INV, OPM, CE/FA, GL) dengan status ✅/⚠️/❌ dan pemilik tindakan."
+  },
+  {
+    "command": "/status-periode",
+    "title": "Status periode per aplikasi",
+    "content": "Status periode {{periode}} di GL, AP, AR, PO, Inventory, OPM costing dan FA (termasuk apakah penyusutan sudah dijalankan)."
+  },
+  {
+    "command": "/selisih-subledger",
+    "title": "Selisih subledger vs GL",
+    "content": "Selisih subledger vs GL periode {{periode}} per aplikasi: event belum di-account, entry draft/belum transfer, jurnal GL belum posting, dengan 10 dokumen tertua."
+  },
+  {
+    "command": "/accrual",
+    "title": "Receipt belum ditagih (accrual)",
+    "content": "Barang/jasa sudah diterima tetapi belum ditagih supplier per {{periode}}, per supplier, nilai IDR."
+  },
+  {
+    "command": "/so-belum-invoice",
+    "title": "SO terkirim belum invoice",
+    "content": "SO yang sudah dikirim tetapi belum menjadi invoice AR beserta alasan error AutoInvoice."
+  },
+  {
+    "command": "/batch-open",
+    "title": "Batch belum Closed",
+    "content": "Batch yang masih Pending/WIP/Completed belum Closed lebih dari {{hari | 30}} hari."
+  },
+  {
+    "command": "/rekon-bank",
+    "title": "Item bank belum rekon",
+    "content": "Item belum rekon rekening {{rekening | semua rekening}} sampai {{tanggal}}, ringkas per sisi (bank/sistem) dengan tanggal statement terakhir."
+  },
+  {
+    "command": "/penyusutan",
+    "title": "Penyusutan per kategori",
+    "content": "Penyusutan periode {{periode}} per kategori aset, beserta total YTD dan akumulasi."
+  },
+  {
+    "command": "/aset-tetap",
+    "title": "Ringkasan aset tetap",
+    "content": "Ringkasan aset tetap per {{kategori/lokasi/status}}: harga perolehan, akumulasi penyusutan, nilai buku."
+  }
+]

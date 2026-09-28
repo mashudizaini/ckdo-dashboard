@@ -54,6 +54,8 @@ JOBS = {
     "etl_mart_ar": "Piutang, invoice & penerimaan kas (incremental)",
     "etl_mart_opm": "Batch produksi OPM (incremental)",
     "etl_mart_gl": "GL: saldo, jurnal & laba rugi (incremental)",
+    "etl_mart_close": "Closing: status periode, selisih SLA-GL, AutoInvoice, rekon bank (per jam)",
+    "etl_mart_fa": "Aset tetap & penyusutan (harian)",
     "etl_mart_sa": "System Administration: user, akses, profile, login, patch (harian)",
     "etl_mart_sa_ops": "System Administration: concurrent request/manager & workflow (10 menit)",
     "refresh_ebs_marts": "Refresh semua mart",
@@ -289,6 +291,7 @@ _INTENT_TOOLS = {
     "get_pl": tools.get_pl,
     "get_trial_balance": tools.get_trial_balance,
     "get_gl_journals": tools.get_gl_journals,
+    **{name: getattr(tools, name) for name in ("gl_get_period_status", "gl_get_subledger_gap", "po_get_uninvoiced_receipts", "so_get_shipped_not_invoiced", "ar_get_unapplied_receipts", "ar_get_autoinvoice_errors", "opm_get_open_batches", "ce_get_unreconciled", "fa_get_assets", "fa_get_depreciation")},
     # System Administration: allowed only when the signed-in admin's own email
     # is in SYSADMIN_ALLOWLIST — the group chosen here does not matter.
     **{name: getattr(sa_tools, name) for name in (
@@ -324,7 +327,7 @@ async def call_tool(name: str, body: ToolIn, user: CurrentUser = Depends(_admin)
                 args[k] = date.fromisoformat(str(args[k]))
             except ValueError:
                 raise HTTPException(400, f"{k} harus YYYY-MM-DD")
-    for k in ("days", "min_days_overdue", "min_days_waiting", "hours"):
+    for k in ("days", "min_days_overdue", "min_days_waiting", "hours", "days_open"):
         if args.get(k) is not None:
             args[k] = int(args[k])
     for k in ("below_pct", "over_pct", "min_amount"):

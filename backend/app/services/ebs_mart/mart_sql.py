@@ -932,3 +932,16 @@ MART_SQL.update(SA_MART_SQL)
 MART_UNIQUE_INDEX.update(SA_UNIQUE_INDEX)
 MART_EXTRA_INDEXES.update(SA_EXTRA_INDEXES)
 MARTS_BY_JOB.update(SA_MARTS_BY_JOB)
+
+# Finance close, Cash Management and Fixed Assets (fin_sql.py). The shipped-
+# not-invoiced mart reads OM and AR core tables, so those jobs refresh it too.
+from app.services.ebs_mart.fin_sql import (  # noqa: E402
+    FIN_EXTRA_INDEXES, FIN_MART_SQL, FIN_MARTS_BY_JOB, FIN_UNIQUE_INDEX,
+)
+
+MART_SQL.update(FIN_MART_SQL)
+MART_UNIQUE_INDEX.update(FIN_UNIQUE_INDEX)
+MART_EXTRA_INDEXES.update(FIN_EXTRA_INDEXES)
+MARTS_BY_JOB.update(FIN_MARTS_BY_JOB)
+MARTS_BY_JOB["etl_mart_om"] = MARTS_BY_JOB["etl_mart_om"] + ["so_shipped_not_invoiced"]
+MARTS_BY_JOB["etl_mart_ar"] = MARTS_BY_JOB["etl_mart_ar"] + ["so_shipped_not_invoiced"]

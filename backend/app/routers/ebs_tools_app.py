@@ -547,6 +547,133 @@ async def get_gl_journals(body: JournalIn, caller: Caller = Depends(current_call
     return await _call(tools.get_gl_journals, caller, **body.model_dump())
 
 
+# ── Finance close, Cash Management, Fixed Assets ─────────────────────────────
+
+_PERIOD_DESC = "Periode GL, format AUG-26 atau 2026-08"
+
+
+class PeriodStatusIn(BaseModel):
+    period: Optional[str] = Field(None, description=_PERIOD_DESC + ". Kosong = bulan berjalan dan dua bulan sebelumnya")
+    application: Optional[Literal["GL", "AP", "AR", "PO", "INV", "OPM", "FA"]] = Field(
+        None, description="Satu aplikasi saja; kosong = semua (INV = org 121, OPM = periode costing CKDO_PMAC)")
+
+
+class SubledgerGapIn(BaseModel):
+    period: Optional[str] = Field(None, description=_PERIOD_DESC + ". Kosong = semua periode (13 bulan terakhir)")
+    application: Optional[str] = Field(None, description="AP, AR, PO, Cost Mgmt, OPM, FA, CE, GL (cocok sebagian)")
+    group_by: Literal["summary", "detail"] = Field(
+        "summary", description="summary = jumlah, nilai, dokumen tertua per jenis × aplikasi × periode; detail = daftar dokumen")
+
+
+class UninvoicedIn(BaseModel):
+    as_of_period: Optional[str] = Field(None, description=_PERIOD_DESC + " — hanya PO bertanggal sampai akhir periode ini")
+    supplier: Optional[str] = Field(None, description="Nama supplier (cocok sebagian)")
+    group_by: Literal["supplier", "po"] = Field("supplier", description="supplier = total per supplier; po = detail per baris PO")
+
+
+class ShippedNotInvoicedIn(BaseModel):
+    date_from: Optional[date] = Field(None, description="Tanggal kirim mulai (YYYY-MM-DD)")
+    customer: Optional[str] = Field(None, description="Nama customer (cocok sebagian)")
+
+
+class UnappliedIn(BaseModel):
+    customer: Optional[str] = Field(None, description="Nama customer (cocok sebagian)")
+
+
+class AutoInvoiceIn(BaseModel):
+    date_from: Optional[date] = Field(None, description="Baris interface dibuat mulai tanggal (YYYY-MM-DD)")
+    so_number: Optional[str] = Field(None, description="Nomor SO persis")
+    group_by: Literal["none", "error"] = Field("none", description="none = per baris; error = jumlah per pesan error")
+
+
+class OpenBatchIn(BaseModel):
+    status: Optional[Literal["Pending", "WIP", "Completed"]] = Field(None, description="Satu status saja; kosong = semua yang belum Closed")
+    days_open: Optional[int] = Field(None, ge=0, description="Hanya batch yang terbuka minimal N hari sejak mulai (aktual, atau rencana)")
+
+
+class UnreconciledIn(BaseModel):
+    bank_account_name: Optional[str] = Field(None, description="Nama rekening atau nama bank (cocok sebagian), mis. BCA")
+    date_to: Optional[date] = Field(None, description="Transaksi sampai tanggal (YYYY-MM-DD)")
+    side: Optional[Literal["BANK", "SYSTEM"]] = Field(
+        None, description="BANK = di rekening koran belum ada di sistem; SYSTEM = di sistem belum muncul di rekening koran")
+    group_by: Literal["summary", "detail"] = Field("summary", description="summary = per rekening × sisi × sumber; detail = per transaksi")
+
+
+class AssetsIn(BaseModel):
+    category: Optional[str] = Field(None, description="Kategori aset (kode atau deskripsi, cocok sebagian)")
+    location: Optional[str] = Field(None, description="Lokasi aset (cocok sebagian)")
+    asset: Optional[str] = Field(None, description="Nomor aset / tag persis, atau deskripsi (cocok sebagian)")
+    status: Optional[Literal["Aktif", "CIP", "Retired", "Fully reserved"]] = Field(None, description="Status aset")
+    group_by: Literal["category", "location", "status", "asset"] = Field(
+        "category", description="Ringkas per kategori / lokasi / status, atau asset = daftar per aset")
+
+
+class DeprnIn(BaseModel):
+    period: str = Field(..., description="Periode FA, format AUG-26 atau 2026-08")
+    category: Optional[str] = Field(None, description="Kategori aset (cocok sebagian)")
+    group_by: Literal["category", "asset"] = Field("category", description="category = total per kategori; asset = per aset")
+
+
+@app.post("/gl_get_period_status", operation_id="gl_get_period_status",
+          summary="Status periode per aplikasi (GL, AP, AR, PO, INV, OPM costing, FA) — Open/Closed, penyusutan sudah dijalankan")
+async def gl_get_period_status(body: PeriodStatusIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.gl_get_period_status, caller, **body.model_dump())
+
+
+@app.post("/gl_get_subledger_gap", operation_id="gl_get_subledger_gap",
+          summary="Selisih subledger vs GL: event belum di-account/error, entry draft, final belum transfer, jurnal GL belum posting")
+async def gl_get_subledger_gap(body: SubledgerGapIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.gl_get_subledger_gap, caller, **body.model_dump())
+
+
+@app.post("/po_get_uninvoiced_receipts", operation_id="po_get_uninvoiced_receipts",
+          summary="Barang sudah diterima tetapi belum ditagih supplier (dasar accrual), per supplier atau per PO, nilai IDR")
+async def po_get_uninvoiced_receipts(body: UninvoicedIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.po_get_uninvoiced_receipts, caller, **body.model_dump())
+
+
+@app.post("/so_get_shipped_not_invoiced", operation_id="so_get_shipped_not_invoiced",
+          summary="Baris SO yang sudah dikirim tetapi belum menjadi invoice AR, dengan error AutoInvoice jika ada")
+async def so_get_shipped_not_invoiced(body: ShippedNotInvoicedIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.so_get_shipped_not_invoiced, caller, **body.model_dump())
+
+
+@app.post("/ar_get_unapplied_receipts", operation_id="ar_get_unapplied_receipts",
+          summary="Penerimaan customer yang belum di-apply ke invoice (unapplied / on account)")
+async def ar_get_unapplied_receipts(body: UnappliedIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.ar_get_unapplied_receipts, caller, **body.model_dump())
+
+
+@app.post("/ar_get_autoinvoice_errors", operation_id="ar_get_autoinvoice_errors",
+          summary="Baris interface AutoInvoice yang ditolak atau masih menunggu, dengan pesan error dan nomor SO")
+async def ar_get_autoinvoice_errors(body: AutoInvoiceIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.ar_get_autoinvoice_errors, caller, **body.model_dump())
+
+
+@app.post("/opm_get_open_batches", operation_id="opm_get_open_batches",
+          summary="Batch OPM yang belum Closed (Pending/WIP/Completed) dan sudah berapa hari terbuka")
+async def opm_get_open_batches(body: OpenBatchIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.opm_get_open_batches, caller, **body.model_dump())
+
+
+@app.post("/ce_get_unreconciled", operation_id="ce_get_unreconciled",
+          summary="Rekonsiliasi bank: item rekening koran dan transaksi sistem yang belum rekon, dengan tanggal statement terakhir")
+async def ce_get_unreconciled(body: UnreconciledIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.ce_get_unreconciled, caller, **body.model_dump())
+
+
+@app.post("/fa_get_assets", operation_id="fa_get_assets",
+          summary="Aset tetap: harga perolehan, akumulasi penyusutan, nilai buku (NBV) per kategori / lokasi / status / aset")
+async def fa_get_assets(body: AssetsIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.fa_get_assets, caller, **body.model_dump())
+
+
+@app.post("/fa_get_depreciation", operation_id="fa_get_depreciation",
+          summary="Penyusutan aset tetap satu periode per kategori atau per aset (beban periode, YTD, akumulasi)")
+async def fa_get_depreciation(body: DeprnIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.fa_get_depreciation, caller, **body.model_dump())
+
+
 @app.get("/health", include_in_schema=False)
 async def health():
     return {"status": "ok"}

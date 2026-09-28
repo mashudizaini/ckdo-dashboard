@@ -32,6 +32,13 @@ removed if they are no longer listed): the "CKDO EBS System Administration
 Tools" server, the EBS Support model, the ebs-sysadmin skill and the SA
 prompts are all granted to that group only. The dashboard checks the same
 allowlist on every call, so this is the first of three fences, not the only.
+
+EBS Finance Controller (library v2 2.3, 12-13) is granted to the Open WebUI
+group ebs-finance — members synced from Setup > AI > EBS Chat Access (emails
+holding ebs-finance or ebs-management) — and to ebs-sysadmin (IT runs the
+closing checks too). The shared skills and the EBS Data Tools server get the
+same two grants so those users can load them; the dashboard still checks each
+caller's ebs-* groups on every tool call.
 """
 import argparse
 import json
@@ -46,10 +53,27 @@ from app.services.ebs_mart.constants import SYSADMIN_ALLOWLIST  # noqa: E402
 
 KIT = Path(__file__).resolve().parents[1] / "app" / "services" / "ebs_mart" / "openwebui_kit"
 SA_KIT = KIT / "sysadmin"
+FIN_KIT = KIT / "finance"
 SERVER_ID = "ebs-data-tools"
 SA_SERVER_ID = "ebs-sysadmin-tools"
 SA_GROUP = "ebs-sysadmin"
 SUPPORT_MODEL_ID = "ebs-support"
+FIN_GROUP = "ebs-finance"
+FIN_MODEL_ID = "ebs-finance-controller"
+
+
+def finance_emails() -> set[str]:
+    """Emails granted ebs-finance or ebs-management in Setup > AI > EBS Chat
+    Access (ebs_chat_scope.ebs_groups)."""
+    from app.services.ebs_chat_service import _get_pg
+    conn = _get_pg()
+    try:
+        cur = conn.cursor()
+        cur.execute("""SELECT lower(email) FROM ebs_chat_scope
+                        WHERE ebs_groups ?| array['ebs-finance', 'ebs-management']""")
+        return {r[0] for r in cur.fetchall()}
+    finally:
+        conn.close()
 MODEL_ID = "ebs-analyst"
 FILTER_ID = "ebs_context"
 ACTION_ID = "ebs_export_excel"
@@ -76,26 +100,32 @@ def main():
     def exists(path):
         return c.get(path).status_code == 200
 
-    # 0. ebs-sysadmin group, members = SYSADMIN_ALLOWLIST (those with an account)
-    group = next((g for g in call("GET", "/groups/") if g["name"] == SA_GROUP), None)
-    if not group:
-        group = call("POST", "/groups/create", json={
-            "name": SA_GROUP,
-            "description": "Tim IT allowlist System Administration EBS (mashudi, utomo, itsupport). "
-                           "Anggota disinkronkan oleh configure_openwebui_ebs_analyst.py dari SYSADMIN_ALLOWLIST."})
-    gid = group["id"]
+    # 0. Groups: members synced from the dashboard (allowlist / EBS Chat Access)
     users = call("GET", "/users/all")
     users = users.get("users", users) if isinstance(users, dict) else users
     by_email = {(u.get("email") or "").lower(): u["id"] for u in users}
-    want = {by_email[e] for e in SYSADMIN_ALLOWLIST if e in by_email}
-    have = {u["id"] for u in call("POST", f"/groups/id/{gid}/users")}
-    if want - have:
-        call("POST", f"/groups/id/{gid}/users/add", json={"user_ids": sorted(want - have)})
-    if have - want:
-        call("POST", f"/groups/id/{gid}/users/remove", json={"user_ids": sorted(have - want)})
-    missing = sorted(e for e in SYSADMIN_ALLOWLIST if e not in by_email)
-    print(f"group {SA_GROUP}: {len(want)} member(s)" + (f"; belum punya akun CoChat: {missing}" if missing else ""))
-    sa_grants = [{"principal_type": "group", "principal_id": gid, "permission": "read"}]
+
+    def sync_group(name, description, emails):
+        group = next((g for g in call("GET", "/groups/") if g["name"] == name), None)
+        if not group:
+            group = call("POST", "/groups/create", json={"name": name, "description": description})
+        gid = group["id"]
+        want = {by_email[e] for e in emails if e in by_email}
+        have = {u["id"] for u in call("POST", f"/groups/id/{gid}/users")}
+        if want - have:
+            call("POST", f"/groups/id/{gid}/users/add", json={"user_ids": sorted(want - have)})
+        if have - want:
+            call("POST", f"/groups/id/{gid}/users/remove", json={"user_ids": sorted(have - want)})
+        missing = sorted(e for e in emails if e not in by_email)
+        print(f"group {name}: {len(want)} member(s)" + (f"; belum punya akun CoChat: {missing}" if missing else ""))
+        return [{"principal_type": "group", "principal_id": gid, "permission": "read"}]
+
+    sa_grants = sync_group(SA_GROUP, "Tim IT allowlist System Administration EBS (mashudi, utomo, itsupport). "
+                           "Anggota disinkronkan oleh configure_openwebui_ebs_analyst.py dari SYSADMIN_ALLOWLIST.",
+                           SYSADMIN_ALLOWLIST)
+    fin_grants = sync_group(FIN_GROUP, "Finance & Accounting — model EBS Finance Controller. Anggota disinkronkan "
+                            "dari Setup > AI > EBS Chat Access (grup ebs-finance / ebs-management).",
+                            finance_emails())
 
     # 1. Tool server connections
     conn = {
@@ -105,10 +135,10 @@ def main():
         "auth_type": "bearer",
         "key": service_key,
         "headers": {"X-OpenWebUI-User-Email": "{{USER_EMAIL}}", "X-OpenWebUI-Chat-Id": "{{CHAT_ID}}"},
-        # ebs-sysadmin may use it through EBS Support; anyone else still needs
-        # an admin role or a grant added by hand (the dashboard checks ebs-*
-        # groups on every call regardless).
-        "config": {"enable": True, "access_grants": sa_grants},
+        # ebs-sysadmin (EBS Support) and ebs-finance (Finance Controller) may
+        # use it; anyone else still needs an admin role or a grant added by
+        # hand (the dashboard checks ebs-* groups on every call regardless).
+        "config": {"enable": True, "access_grants": sa_grants + fin_grants},
         "info": {
             "id": SERVER_ID,
             "name": "CKDO EBS Data Tools",
@@ -164,7 +194,7 @@ def main():
         text = p.read_text(encoding="utf-8")
         title = text.splitlines()[0].lstrip("# ").strip()
         body = {"id": p.stem, "name": p.stem, "description": title, "content": text,
-                "meta": {"tags": ["ebs"]}, "is_active": True}
+                "meta": {"tags": ["ebs"]}, "is_active": True, "access_grants": sa_grants + fin_grants}
         if exists(f"/skills/id/{p.stem}"):
             call("POST", f"/skills/id/{p.stem}/update", json=body)
         else:
@@ -230,6 +260,30 @@ def main():
           f"skills={meta.get('skillIds')} filters={meta.get('filterIds')} actions={meta.get('actionIds')} "
           f"function_calling={(got.get('params') or {}).get('function_calling')}")
 
+    # 6a. Finance: skills and prompts for EBS Finance Controller (and Support)
+    fin_skill_ids = []
+    for p in sorted((FIN_KIT / "skills").glob("*.md")):
+        text = p.read_text(encoding="utf-8")
+        title = text.splitlines()[0].lstrip("# ").strip()
+        body = {"id": p.stem, "name": p.stem, "description": title, "content": text,
+                "meta": {"tags": ["ebs", "finance"]}, "is_active": True, "access_grants": sa_grants + fin_grants}
+        if exists(f"/skills/id/{p.stem}"):
+            call("POST", f"/skills/id/{p.stem}/update", json=body)
+        else:
+            call("POST", "/skills/create", json=body)
+        fin_skill_ids.append(p.stem)
+        print(f"skill {p.stem} (finance): ok")
+    existing = {p["command"]: p for p in call("GET", "/prompts/")}
+    for pr in json.loads((FIN_KIT / "prompts.json").read_text(encoding="utf-8")):
+        command = pr["command"].lstrip("/")
+        body = {"command": command, "name": pr["title"], "content": pr["content"], "tags": ["ebs", "finance"],
+                "access_grants": sa_grants + fin_grants}
+        if command in existing:
+            call("POST", f"/prompts/id/{existing[command]['id']}/update", json=body)
+        else:
+            call("POST", "/prompts/create", json=body)
+        print(f"prompt /{command} (finance): ok")
+
     # 6. System Administration: skill, prompts, EBS Support model — all
     #    granted to the ebs-sysadmin group only.
     sa_skill_ids = []
@@ -267,7 +321,7 @@ def main():
                            "Hanya untuk tim IT allowlist.",
             "capabilities": {**model["meta"]["capabilities"]},
             "toolIds": [f"server:{SERVER_ID}", f"server:{SA_SERVER_ID}"],
-            "skillIds": skill_ids + sa_skill_ids,
+            "skillIds": skill_ids + fin_skill_ids + sa_skill_ids,
             "filterIds": [FILTER_ID],
             "actionIds": [ACTION_ID],
             "tags": [{"name": "EBS"}, {"name": "IT"}],
@@ -294,6 +348,48 @@ def main():
     meta = got.get("meta") or {}
     grants = [(g.get("principal_type"), g.get("permission")) for g in (got.get("access_grants") or [])]
     print(f"model {SUPPORT_MODEL_ID}: base={got.get('base_model_id')} tools={meta.get('toolIds')} "
+          f"skills={meta.get('skillIds')} grants={grants}")
+
+    # 7. EBS Finance Controller (library v2 2.3): Finance skills only.
+    fc_skills = [s_ for s_ in ["ebs-core", "ebs-ap", "ebs-ar", "ebs-gl-reporting", "ebs-po", "ebs-om",
+                               "ebs-inventory-lot", "ebs-opm"] if s_ in skill_ids] + fin_skill_ids
+    fc = {
+        "id": FIN_MODEL_ID,
+        "base_model_id": args.base_model,
+        "name": "EBS Finance Controller",
+        "meta": {
+            "profile_image_url": "/static/favicon.png",
+            "description": "Asisten Finance & Accounting: closing bulanan, selisih subledger vs GL, rekonsiliasi bank, "
+                           "aset tetap, laba rugi, trial balance, AP/AR. Setiap angka menyebut waktu data dan SQL-nya.",
+            "capabilities": {**model["meta"]["capabilities"]},
+            "toolIds": [f"server:{SERVER_ID}"],
+            "skillIds": fc_skills,
+            "filterIds": [FILTER_ID],
+            "actionIds": [ACTION_ID],
+            "tags": [{"name": "EBS"}, {"name": "Finance"}],
+            "suggestion_prompts": [
+                {"content": "Apa yang masih menghalangi closing bulan lalu?"},
+                {"content": "Selisih subledger vs GL bulan lalu"},
+                {"content": "Item bank yang belum rekon"},
+                {"content": "Penyusutan aset tetap bulan lalu per kategori"},
+            ],
+        },
+        "params": {
+            "system": (FIN_KIT / "system_prompt_finance.md").read_text(encoding="utf-8"),
+            "function_calling": "native",
+            "max_tokens": 8000,
+        },
+        "access_grants": sa_grants + fin_grants,
+        "is_active": True,
+    }
+    if exists(f"/models/model?id={FIN_MODEL_ID}"):
+        call("POST", f"/models/model/update?id={FIN_MODEL_ID}", json=fc)
+    else:
+        call("POST", "/models/create", json=fc)
+    got = call("GET", f"/models/model?id={FIN_MODEL_ID}")
+    meta = got.get("meta") or {}
+    grants = [(g.get("principal_type"), g.get("permission")) for g in (got.get("access_grants") or [])]
+    print(f"model {FIN_MODEL_ID}: base={got.get('base_model_id')} tools={meta.get('toolIds')} "
           f"skills={meta.get('skillIds')} grants={grants}")
 
 

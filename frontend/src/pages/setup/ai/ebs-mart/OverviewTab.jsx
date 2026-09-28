@@ -5,7 +5,7 @@ import { Badge, Button, Card, ErrorBox, Spinner, errMsg, fmtDate, fmtNum } from 
 
 const DOMAIN_TONE = {
   AP: "text-sky-300", AR: "text-teal-300", INV: "text-emerald-300", PO: "text-violet-300",
-  OM: "text-pink-300", OPM: "text-amber-300", GL: "text-orange-300", SA: "text-red-300",
+  OM: "text-pink-300", OPM: "text-amber-300", GL: "text-orange-300", SA: "text-red-300", CE: "text-cyan-300", FA: "text-lime-300",
 };
 
 export default function OverviewTab() {
