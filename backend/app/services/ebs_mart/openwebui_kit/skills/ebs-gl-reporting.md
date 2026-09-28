@@ -19,6 +19,9 @@ saldo akun, neraca, kas & bank, jurnal, posting, jurnal dari invoice mana, akun 
 - Mutasi akun beberapa bulan (saldo awal, debit, kredit, saldo akhir) → gl_get_account_movement (account, period_from, period_to)
 - Budget vs realisasi vs encumbrance, sisa budget → gl_get_budget_vs_actual (period, ytd, department, group_by: department | account | section | month). Hanya akun biaya kecuali include_revenue; versi budget yang dipakai tertulis di kolom budget_name — sebutkan.
 - Kode akun / departemen dari nama → lookup_master (type=account / department)
+- Budget: angka budget sama dengan laporan budget dashboard. Encumbrance = saldo reservasi di akhir periode; di
+  ledger ini beberapa departemen punya encumbrance negatif (relief melebihi reservasi) — tool tidak mengurangkannya
+  dari sisa budget dan menulis kolom catatan; sampaikan catatan itu ke user.
 
 ## Aturan bisnis
 - Ledger 2022, IDR fungsional, kalender CKDO_GL_CAL (periode JUL-26; ADJ-xx = periode penyesuaian).

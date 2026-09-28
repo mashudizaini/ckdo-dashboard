@@ -1805,7 +1805,9 @@ def gl_get_budget_vs_actual(caller: Caller, period: str, ytd: bool = False, depa
     are summed over the periods; encumbrance is a balance — what is still
     reserved at the end of the last period (reservations are relieved over
     later periods and years, so its movements do not sum). available =
-    budget − encumbrance − actual."""
+    budget − encumbrance − actual; a negative encumbrance (this ledger has
+    departments where relief exceeds reservations, e.g. HRGA 2025-2026) is
+    shown but not subtracted, with a note in the row."""
     args = {"period": period, "ytd": ytd, "department": department, "account": account, "budget_name": budget_name,
             "include_revenue": include_revenue, "group_by": group_by}
     cond, params = _gl_period_filter(period, ytd)
@@ -1834,8 +1836,12 @@ def gl_get_budget_vs_actual(caller: Caller, period: str, ytd: bool = False, depa
               FROM f GROUP BY {dim}
         )
         SELECT agg.*,
-               COALESCE(budget_idr, 0) - COALESCE(encumbrance_idr, 0) - COALESCE(actual_idr, 0) AS available_idr,
+               COALESCE(budget_idr, 0) - GREATEST(COALESCE(encumbrance_idr, 0), 0) - COALESCE(actual_idr, 0)
+                                                                                       AS available_idr,
                ROUND(100.0 * actual_idr / NULLIF(budget_idr, 0), 1) AS realisasi_pct,
+               CASE WHEN encumbrance_idr < 0
+                    THEN 'Encumbrance negatif di GL (relief melebihi reservasi) — tidak dikurangkan dari sisa budget'
+               END AS catatan,
                (SELECT bv FROM v) AS budget_name
           FROM agg
          WHERE COALESCE(budget_idr, 0) <> 0 OR COALESCE(actual_idr, 0) <> 0 OR COALESCE(encumbrance_idr, 0) <> 0
