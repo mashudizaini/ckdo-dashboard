@@ -92,7 +92,7 @@ export default function EbsChatAccessPanel() {
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        throw new Error(d.detail || `Gagal menyimpan (${res.status})`);
+        throw new Error((typeof d.detail === "string" ? d.detail : null) || `Could not save (HTTP ${res.status})`);
       }
       setForm(EMPTY_FORM);
       await load();
@@ -132,9 +132,8 @@ export default function EbsChatAccessPanel() {
           <div>
             <h3 className="text-sm font-semibold text-gray-200">EBS Chat Access</h3>
             <p className="text-xs text-gray-500 mt-1">
-              Kontrol siapa yang boleh bertanya data Oracle EBS lewat CoChat, dan departemen apa saja yang
-              terlihat untuk mereka. Email di sini harus sama persis dengan email login user tersebut di CoChat.
-              Email yang tidak terdaftar akan ditolak (403).
+              Controls who may ask about Oracle EBS data in CoChat and what they can see. The email here must be
+              exactly the email the person signs in to CoChat with. Emails not listed here are refused (403).
             </p>
           </div>
         </div>
@@ -142,12 +141,14 @@ export default function EbsChatAccessPanel() {
         <div className="px-5 py-3 border-b border-gray-800 bg-blue-500/5 flex items-start gap-2">
           <Info size={14} className="text-blue-400 shrink-0 mt-0.5" />
           <p className="text-xs text-gray-400">
-            Tiga lapis pembatasan, independen: <b>Departemen</b> membatasi baris data yang terlihat, tapi hanya
-            berlaku untuk Employee Directory/Headcount dan Budget vs Actual (data lain tidak punya kolom departemen).
-            <b> Modul</b> membatasi jenis data Oracle EBS apa saja yang boleh ditanyakan sama sekali — termasuk
-            "Company Rules" (tanya-jawab dokumen kebijakan perusahaan, bukan data Oracle). <b>Dokumen Perusahaan</b>
-            di bawah lalu membatasi kategori dokumen mana yang boleh dibaca (kosong = hanya "General", BUKAN semua —
-            beda dari dua yang di atas). Kosongkan Departemen &amp; Modul untuk akses tanpa batasan (mis. Direksi/Admin).
+            <b>Data access roles</b> decide which EBS data sets a person reaches through the EBS Analyst,
+            EBS Finance Controller and EBS Support models — see the matrix above. The other settings apply to the
+            older "CoChat Ass Oracle EBS" assistant: <b>Departments</b> limit the rows visible, but only for Employee
+            Directory/Headcount and Budget vs Actual (other data has no department column). <b>Modules</b> limit
+            which kinds of Oracle EBS data may be asked about at all, including "Company Rules" (questions about
+            company policy documents, not Oracle data). <b>Company documents</b> then limit which document categories
+            may be read (empty = "General" only, NOT all — unlike the two above). Leave Departments and Modules empty
+            for unrestricted access (e.g. Directors/Admin).
           </p>
         </div>
 
@@ -162,7 +163,7 @@ export default function EbsChatAccessPanel() {
               className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs text-gray-200 outline-none focus:border-blue-500"
             />
             <input
-              type="text" placeholder="Catatan (opsional)" value={form.notes}
+              type="text" placeholder="Note (optional)" value={form.notes}
               onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
               className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs text-gray-200 outline-none focus:border-blue-500"
             />
@@ -174,12 +175,12 @@ export default function EbsChatAccessPanel() {
               onChange={(e) => setForm((f) => ({ ...f, full_access: e.target.checked }))}
               className="w-4 h-4 accent-blue-600 cursor-pointer"
             />
-            Full access (lihat semua departemen — untuk Direksi/Admin)
+            Full access (all departments — for Directors/Admin)
           </label>
 
           {!form.full_access && (
             <div>
-              <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wider mb-1.5">Departemen (baris data)</p>
+              <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wider mb-1.5">Departments (data rows)</p>
               <div className="flex flex-wrap gap-2">
                 {DEPARTMENTS.map((d) => (
                   <button key={d} type="button" onClick={() => toggleDept(d)}
@@ -197,7 +198,7 @@ export default function EbsChatAccessPanel() {
 
           <div>
             <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wider mb-1.5">
-              Modul (jenis data yang boleh ditanyakan) — kosong = semua modul
+              Modules (kinds of data that may be asked about) — empty = all modules
             </p>
             <div className="flex flex-wrap gap-2">
               {modules.map((m) => (
@@ -216,7 +217,7 @@ export default function EbsChatAccessPanel() {
           {!form.full_access && (
             <div>
               <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wider mb-1.5">
-                Dokumen Perusahaan yang boleh dibaca (berlaku jika modul "Company Rules" aktif) — kosong = hanya "General"
+                Company documents that may be read (applies when the "Company Rules" module is on) — empty = "General" only
               </p>
               <div className="flex flex-wrap gap-2">
                 {kbDepartments.map((d) => (
@@ -235,7 +236,7 @@ export default function EbsChatAccessPanel() {
 
           <div>
             <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wider mb-1.5">
-              Peran akses data (lihat matriks di atas) — kosong = tidak ada akses data EBS
+              Data access roles (see the matrix above) — empty = no access to EBS data
             </p>
             <div className="flex flex-wrap gap-2">
               {ebsGroups.map(({ group, label }) => (
@@ -254,25 +255,25 @@ export default function EbsChatAccessPanel() {
           <button type="submit" disabled={saving}
             className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white transition-colors">
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-            Simpan
+            Save
           </button>
         </form>
 
         <div className="divide-y divide-gray-800">
           {rows.length === 0 && (
-            <p className="px-5 py-6 text-xs text-gray-500 text-center">Belum ada email yang dikonfigurasi.</p>
+            <p className="px-5 py-6 text-xs text-gray-500 text-center">No emails configured yet.</p>
           )}
           {rows.map((r) => (
             <div key={r.email} className="px-5 py-3 flex items-center justify-between gap-4">
               <button onClick={() => editRow(r)} className="min-w-0 text-left">
                 <p className="text-sm text-gray-200 truncate">{r.email}</p>
                 <p className="text-xs text-gray-500 truncate">
-                  {r.full_access ? "Full access" : (r.departments.join(", ") || "Semua departemen")}
+                  {r.full_access ? "Full access" : (r.departments.join(", ") || "All departments")}
                   {" · "}
-                  {r.allowed_modules?.length ? `Modul: ${r.allowed_modules.join(", ")}` : "Semua modul"}
+                  {r.allowed_modules?.length ? `Modules: ${r.allowed_modules.join(", ")}` : "All modules"}
                   {!r.full_access && r.allowed_modules?.includes("Company Rules") &&
-                    ` · Dokumen: ${r.kb_departments?.length ? r.kb_departments.join(", ") : "General"}`}
-                  {r.ebs_groups?.length ? ` · Mart: ${r.ebs_groups.join(", ")}` : ""}
+                    ` · Documents: ${r.kb_departments?.length ? r.kb_departments.join(", ") : "General"}`}
+                  {r.ebs_groups?.length ? ` · Roles: ${r.ebs_groups.join(", ")}` : ""}
                   {r.notes ? ` — ${r.notes}` : ""}
                 </p>
               </button>

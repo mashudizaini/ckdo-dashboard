@@ -707,9 +707,9 @@ class RoleIn(BaseModel):
 async def upsert_role(code: str, body: RoleIn, user: CurrentUser = Depends(_admin)):
     code = code.strip().lower()
     if not _ROLE_CODE.match(code):
-        raise HTTPException(400, "Kode peran: huruf kecil, angka dan tanda hubung, 2–41 karakter (mis. ebs-purchasing-stok).")
+        raise HTTPException(400, "Role code: lowercase letters, digits and hyphens, 2–41 characters (e.g. ebs-purchasing-stock).")
     if not body.label.strip():
-        raise HTTPException(400, "Nama peran wajib diisi.")
+        raise HTTPException(400, "Role name is required.")
     await run_in_threadpool(_exec, """
         INSERT INTO meta.access_role (role_code, label, description, all_access, updated_by, updated_at)
         VALUES (%s, %s, %s, %s, %s, now())
@@ -717,7 +717,7 @@ async def upsert_role(code: str, body: RoleIn, user: CurrentUser = Depends(_admi
                all_access = EXCLUDED.all_access, updated_by = EXCLUDED.updated_by, updated_at = now()""",
         (code, body.label.strip(), body.description, body.all_access, user.email or user.username))
     policy.invalidate()
-    return {"message": f"Peran {code} disimpan"}
+    return {"message": f"Role {code} saved"}
 
 
 @router.delete("/access-policy/roles/{code}")
@@ -725,14 +725,14 @@ async def delete_role(code: str, user: CurrentUser = Depends(_admin)):
     used = await run_in_threadpool(_scope_rows, """
         SELECT email FROM ebs_chat_scope WHERE ebs_groups ? %s ORDER BY email""", (code,))
     if used:
-        raise HTTPException(400, f"Peran {code} masih dipakai {len(used)} user ("
+        raise HTTPException(400, f"Role {code} is still assigned to {len(used)} user(s) ("
                                  f"{', '.join(u['email'] for u in used[:5])}{'…' if len(used) > 5 else ''}). "
-                                 "Lepas dulu dari user tersebut.")
+                                 "Remove it from them first.")
     n = await run_in_threadpool(_exec, "DELETE FROM meta.access_role WHERE role_code = %s", (code,))
     policy.invalidate()
     if not n:
-        raise HTTPException(404, "Peran tidak ditemukan")
-    return {"message": f"Peran {code} dihapus"}
+        raise HTTPException(404, "Role not found")
+    return {"message": f"Role {code} deleted"}
 
 
 class GrantIn(BaseModel):
@@ -744,9 +744,9 @@ class GrantIn(BaseModel):
 @router.put("/access-policy/grant")
 async def set_grant(body: GrantIn, user: CurrentUser = Depends(_admin)):
     if body.mart not in policy._mart_names():
-        raise HTTPException(400, "Mart tidak dikenal (mart System Administration diatur lewat allowlist, bukan di sini).")
+        raise HTTPException(400, "Unknown data set (System Administration data is governed by the IT allowlist, not here).")
     if body.role_code not in policy.role_codes():
-        raise HTTPException(400, "Peran tidak dikenal")
+        raise HTTPException(400, "Unknown role")
     if body.level is None:
         await run_in_threadpool(_exec, "DELETE FROM meta.access_grant WHERE role_code = %s AND mart_name = %s",
                                 (body.role_code, body.mart))
@@ -758,4 +758,4 @@ async def set_grant(body: GrantIn, user: CurrentUser = Depends(_admin)):
                    updated_by = EXCLUDED.updated_by, updated_at = now()""",
             (body.role_code, body.mart, body.level, user.email or user.username))
     policy.invalidate()
-    return {"message": "Disimpan"}
+    return {"message": "Saved"}
