@@ -921,3 +921,14 @@ MARTS_BY_JOB: dict[str, list[str]] = {
     "etl_mart_opm": ["batch_status", "batch_yield_variance", "batch_material_usage"],
     "etl_mart_gl": ["gl_trial_balance", "gl_journal_detail", "pl_monthly"],
 }
+
+
+# System Administration (phase 6) lives in sa_sql.py — fenced off by its own
+# reader role — and joins the common registries here so creation, refresh
+# and the catalog treat it like every other mart.
+from app.services.ebs_mart.sa_sql import SA_EXTRA_INDEXES, SA_MART_SQL, SA_MARTS_BY_JOB, SA_UNIQUE_INDEX  # noqa: E402
+
+MART_SQL.update(SA_MART_SQL)
+MART_UNIQUE_INDEX.update(SA_UNIQUE_INDEX)
+MART_EXTRA_INDEXES.update(SA_EXTRA_INDEXES)
+MARTS_BY_JOB.update(SA_MARTS_BY_JOB)

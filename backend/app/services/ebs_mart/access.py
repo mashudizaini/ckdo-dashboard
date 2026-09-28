@@ -16,7 +16,7 @@ ebs_chat_service where an empty list predates the column and means
 """
 from dataclasses import dataclass, field
 
-from app.services.ebs_mart.constants import BUILT_MARTS, DOMAIN_BY_GROUP, EBS_GROUPS
+from app.services.ebs_mart.constants import BUILT_MARTS, DOMAIN_BY_GROUP, EBS_GROUPS, SA_PREFIX, SYSADMIN_ALLOWLIST
 
 
 @dataclass
@@ -33,7 +33,15 @@ class Caller:
             out |= DOMAIN_BY_GROUP.get(g, set())
         return out
 
+    @property
+    def is_sysadmin(self) -> bool:
+        return (self.email or "").strip().lower() in SYSADMIN_ALLOWLIST
+
     def can_read(self, mart: str) -> bool:
+        # System Administration marts follow the email allowlist only — no
+        # group reaches them, not even ebs-management's "" prefix.
+        if mart.startswith(SA_PREFIX):
+            return self.is_sysadmin
         return any(mart.startswith(p) for p in self.prefixes)
 
     def readable_marts(self) -> list[str]:
@@ -77,6 +85,9 @@ class AccessDenied(PermissionError):
 
 
 def require(caller: Caller, mart: str):
+    if mart.startswith(SA_PREFIX) and not caller.is_sysadmin:
+        raise AccessDenied("Data System Administration hanya untuk tim IT tertentu "
+                           f"(allowlist email). {caller.email or 'User ini'} tidak termasuk — jangan mencari jalur lain.")
     if not caller.can_read(mart):
         groups = ", ".join(sorted(caller.groups)) or "tidak ada"
         raise AccessDenied(

@@ -1,0 +1,62 @@
+[
+  {
+    "command": "/info-user",
+    "title": "Info user EBS",
+    "content": "Profil user {{user}}: status, last login, karyawan terkait, dan semua responsibility aktif (direct/indirect)."
+  },
+  {
+    "command": "/siapa-punya-resp",
+    "title": "Pemegang responsibility",
+    "content": "Daftar user aktif yang memegang responsibility {{responsibility}}, dengan jenis grant (direct/indirect)."
+  },
+  {
+    "command": "/siapa-bisa",
+    "title": "Siapa yang bisa mengakses fungsi",
+    "content": "User yang bisa mengakses fungsi {{fungsi}} dan lewat responsibility apa."
+  },
+  {
+    "command": "/user-dormant",
+    "title": "User dormant",
+    "content": "User aktif yang tidak login {{hari | 90}} hari, tanpa user seeded."
+  },
+  {
+    "command": "/user-resign-aktif",
+    "title": "User resign masih aktif",
+    "content": "User EBS yang masih aktif padahal karyawannya sudah tidak aktif."
+  },
+  {
+    "command": "/cek-sod",
+    "title": "Pelanggaran SoD",
+    "content": "Pelanggaran segregation of duties per aturan, urut risiko tertinggi."
+  },
+  {
+    "command": "/profile",
+    "title": "Nilai profile option",
+    "content": "Nilai profile {{profile}} di semua level dan nilai efektifnya."
+  },
+  {
+    "command": "/riwayat-login",
+    "title": "Riwayat login user",
+    "content": "Riwayat login {{user}} {{hari | 7}} hari terakhir beserta responsibility dan form."
+  },
+  {
+    "command": "/approval-tertahan",
+    "title": "Approval workflow tertahan",
+    "content": "Notifikasi approval yang terbuka lebih dari {{hari | 3}} hari per penerima."
+  },
+  {
+    "command": "/status-manager",
+    "title": "Status concurrent manager",
+    "content": "Status concurrent manager dan request yang error {{jam | 24}} jam terakhir."
+  },
+  {
+    "command": "/cek-patch",
+    "title": "Cek patch",
+    "content": "Apakah patch {{nomor_patch}} sudah diterapkan."
+  },
+  {
+    "command": "/cek-request",
+    "title": "Concurrent request error",
+    "content": "Concurrent request error/warning {{jam | 24}} jam terakhir, dikelompokkan per program, dengan pesan penyelesaiannya."
+  }
+]

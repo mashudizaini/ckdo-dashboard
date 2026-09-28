@@ -16,7 +16,7 @@ from datetime import date
 
 from app.services.ebs_mart import access, query, sql_guard
 from app.services.ebs_mart.access import Caller
-from app.services.ebs_mart.constants import MARTS
+from app.services.ebs_mart.constants import MARTS, SA_PREFIX
 
 
 def _like(v: str | None) -> str | None:
@@ -71,7 +71,10 @@ def find_marts(caller: Caller, keywords: str) -> dict:
 
     scored = []
     for name, rows in by_mart.items():
-        if not caller.can_read(name) or not MARTS.get(name, {}).get("built"):
+        # sa_* are left out even for the allowlist: they are read through the
+        # sa_* tools, never run_sql, so offering their columns only invites a
+        # query that will be refused.
+        if name.startswith(SA_PREFIX) or not caller.can_read(name) or not MARTS.get(name, {}).get("built"):
             continue
         meta = MARTS[name]
         haystack = " ".join(
@@ -128,6 +131,16 @@ def run_sql(caller: Caller, sql: str, question: str = "") -> dict:
     except sql_guard.SqlRejected as e:
         query.log_call(caller, tool="run_sql", question=question, sql=sql, status="REJECTED", error=str(e))
         raise
+    sa = [m for m in guarded.tables if m.startswith(SA_PREFIX)]
+    if sa:
+        # System Administration data is reachable through the sa_* tools only,
+        # even for the allowlist: run_sql reads as llm_ro, which holds no
+        # grant on mart.sa_* anyway (third layer) — refuse before trying.
+        e = access.AccessDenied(f"mart.{sa[0]} tidak bisa dibaca lewat run_sql. "
+                                "Data System Administration hanya lewat tool sa_* (tim IT tertentu).")
+        query.log_call(caller, tool="run_sql", question=question, sql=sql, marts=guarded.tables,
+                       status="DENIED", error=str(e))
+        raise e
     for m in guarded.tables:
         try:
             access.require(caller, m)
@@ -144,16 +157,22 @@ def get_data_freshness(caller: Caller) -> dict:
     many rows it holds — for "data per kapan?" and for the model to check
     before trusting an empty answer."""
     out = []
-    conn = query._reader()
-    try:
-        with conn.cursor() as cur:
-            for name in caller.readable_marts():
-                cur.execute(f"SELECT COUNT(*) FROM mart.{name}")
-                out.append({"mart": f"mart.{name}", "domain": MARTS[name]["domain"],
-                            "row_count": cur.fetchone()[0], "as_of": query.as_of([name])})
-        conn.rollback()
-    finally:
-        conn.close()
+    marts = caller.readable_marts()
+    # sa_* marts are counted over the SA reader: llm_ro cannot see them.
+    for reader, names in ((query._reader, [m for m in marts if not m.startswith(SA_PREFIX)]),
+                          (query._sa_reader, [m for m in marts if m.startswith(SA_PREFIX)])):
+        if not names:
+            continue
+        conn = reader()
+        try:
+            with conn.cursor() as cur:
+                for name in names:
+                    cur.execute(f"SELECT COUNT(*) FROM mart.{name}")
+                    out.append({"mart": f"mart.{name}", "domain": MARTS[name]["domain"],
+                                "row_count": cur.fetchone()[0], "as_of": query.as_of([name])})
+            conn.rollback()
+        finally:
+            conn.close()
     query.log_call(caller, tool="get_data_freshness", row_count=len(out), status="OK")
     return {"marts": out}
 

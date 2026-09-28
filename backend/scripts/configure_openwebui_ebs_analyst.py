@@ -24,6 +24,14 @@ needs no ENABLE_FORWARD_USER_INFO_HEADERS env change or container restart.
 The model is created without public access grants: only admins see it until
 an Open WebUI group for ebs-* users is added (blueprint: "Akses: hanya grup
 ebs-*").
+
+System Administration (blueprint v2 4.7 / library v2 2.4, 3.2b, 13b) is set
+up in the same run, fenced to the Open WebUI group ebs-sysadmin whose members
+are synced to SYSADMIN_ALLOWLIST (added if they have a CoChat account,
+removed if they are no longer listed): the "CKDO EBS System Administration
+Tools" server, the EBS Support model, the ebs-sysadmin skill and the SA
+prompts are all granted to that group only. The dashboard checks the same
+allowlist on every call, so this is the first of three fences, not the only.
 """
 import argparse
 import json
@@ -33,8 +41,15 @@ from pathlib import Path
 
 import httpx
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app.services.ebs_mart.constants import SYSADMIN_ALLOWLIST  # noqa: E402
+
 KIT = Path(__file__).resolve().parents[1] / "app" / "services" / "ebs_mart" / "openwebui_kit"
+SA_KIT = KIT / "sysadmin"
 SERVER_ID = "ebs-data-tools"
+SA_SERVER_ID = "ebs-sysadmin-tools"
+SA_GROUP = "ebs-sysadmin"
+SUPPORT_MODEL_ID = "ebs-support"
 MODEL_ID = "ebs-analyst"
 FILTER_ID = "ebs_context"
 ACTION_ID = "ebs_export_excel"
@@ -61,7 +76,28 @@ def main():
     def exists(path):
         return c.get(path).status_code == 200
 
-    # 1. Tool server connection
+    # 0. ebs-sysadmin group, members = SYSADMIN_ALLOWLIST (those with an account)
+    group = next((g for g in call("GET", "/groups/") if g["name"] == SA_GROUP), None)
+    if not group:
+        group = call("POST", "/groups/create", json={
+            "name": SA_GROUP,
+            "description": "Tim IT allowlist System Administration EBS (mashudi, utomo, itsupport). "
+                           "Anggota disinkronkan oleh configure_openwebui_ebs_analyst.py dari SYSADMIN_ALLOWLIST."})
+    gid = group["id"]
+    users = call("GET", "/users/all")
+    users = users.get("users", users) if isinstance(users, dict) else users
+    by_email = {(u.get("email") or "").lower(): u["id"] for u in users}
+    want = {by_email[e] for e in SYSADMIN_ALLOWLIST if e in by_email}
+    have = {u["id"] for u in call("POST", f"/groups/id/{gid}/users")}
+    if want - have:
+        call("POST", f"/groups/id/{gid}/users/add", json={"user_ids": sorted(want - have)})
+    if have - want:
+        call("POST", f"/groups/id/{gid}/users/remove", json={"user_ids": sorted(have - want)})
+    missing = sorted(e for e in SYSADMIN_ALLOWLIST if e not in by_email)
+    print(f"group {SA_GROUP}: {len(want)} member(s)" + (f"; belum punya akun CoChat: {missing}" if missing else ""))
+    sa_grants = [{"principal_type": "group", "principal_id": gid, "permission": "read"}]
+
+    # 1. Tool server connections
     conn = {
         "url": f"{dash}/api/v1/ebs-tools",
         "path": "openapi.json",
@@ -69,18 +105,38 @@ def main():
         "auth_type": "bearer",
         "key": service_key,
         "headers": {"X-OpenWebUI-User-Email": "{{USER_EMAIL}}", "X-OpenWebUI-Chat-Id": "{{CHAT_ID}}"},
-        "config": {"enable": True},
+        # ebs-sysadmin may use it through EBS Support; anyone else still needs
+        # an admin role or a grant added by hand (the dashboard checks ebs-*
+        # groups on every call regardless).
+        "config": {"enable": True, "access_grants": sa_grants},
         "info": {
             "id": SERVER_ID,
             "name": "CKDO EBS Data Tools",
             "description": "Data mart Oracle EBS (AP, stok per lot): find_marts, run_sql read-only, intent tools.",
         },
     }
+    sa_conn = {
+        "url": f"{dash}/api/v1/ebs-sa-tools",
+        "path": "openapi.json",
+        "type": "openapi",
+        "auth_type": "bearer",
+        "key": service_key,
+        "headers": {"X-OpenWebUI-User-Email": "{{USER_EMAIL}}", "X-OpenWebUI-Chat-Id": "{{CHAT_ID}}"},
+        "config": {"enable": True, "access_grants": sa_grants},
+        "info": {
+            "id": SA_SERVER_ID,
+            "name": "CKDO EBS System Administration Tools",
+            "description": "User, responsibility, akses fungsi, SoD, profile, login, concurrent, workflow, patch "
+                           "(hanya tim IT allowlist).",
+        },
+    }
     current = call("GET", "/configs/tool_servers")["TOOL_SERVER_CONNECTIONS"]
-    others = [s for s in current if (s.get("info") or {}).get("id") != SERVER_ID]
-    call("POST", "/configs/tool_servers", json={"TOOL_SERVER_CONNECTIONS": others + [conn]})
+    others = [s for s in current if (s.get("info") or {}).get("id") not in (SERVER_ID, SA_SERVER_ID)]
+    call("POST", "/configs/tool_servers", json={"TOOL_SERVER_CONNECTIONS": others + [conn, sa_conn]})
     verify = c.post("/configs/tool_servers/verify", json=conn)
-    print(f"tool server: {len(others)} other connection(s) kept; verify -> {verify.status_code}")
+    sa_verify = c.post("/configs/tool_servers/verify", json=sa_conn)
+    print(f"tool server: {len(others)} other connection(s) kept; verify -> {verify.status_code}, "
+          f"{SA_SERVER_ID} -> {sa_verify.status_code}")
 
     # 2. Functions (filter + action)
     for fid, name, fname, desc, valves in [
@@ -173,6 +229,72 @@ def main():
     print(f"model {MODEL_ID}: base={got.get('base_model_id')} tools={meta.get('toolIds')} "
           f"skills={meta.get('skillIds')} filters={meta.get('filterIds')} actions={meta.get('actionIds')} "
           f"function_calling={(got.get('params') or {}).get('function_calling')}")
+
+    # 6. System Administration: skill, prompts, EBS Support model — all
+    #    granted to the ebs-sysadmin group only.
+    sa_skill_ids = []
+    for p in sorted((SA_KIT / "skills").glob("*.md")):
+        text = p.read_text(encoding="utf-8")
+        title = text.splitlines()[0].lstrip("# ").strip()
+        body = {"id": p.stem, "name": p.stem, "description": title, "content": text,
+                "meta": {"tags": ["ebs", "sysadmin"]}, "is_active": True, "access_grants": sa_grants}
+        if exists(f"/skills/id/{p.stem}"):
+            call("POST", f"/skills/id/{p.stem}/update", json=body)
+        else:
+            call("POST", "/skills/create", json=body)
+        sa_skill_ids.append(p.stem)
+        print(f"skill {p.stem} (ebs-sysadmin only): ok")
+
+    existing = {p["command"]: p for p in call("GET", "/prompts/")}
+    for pr in json.loads((SA_KIT / "prompts.json").read_text(encoding="utf-8")):
+        command = pr["command"].lstrip("/")
+        body = {"command": command, "name": pr["title"], "content": pr["content"], "tags": ["ebs", "sysadmin"],
+                "access_grants": sa_grants}
+        if command in existing:
+            call("POST", f"/prompts/id/{existing[command]['id']}/update", json=body)
+        else:
+            call("POST", "/prompts/create", json=body)
+        print(f"prompt /{command} (ebs-sysadmin only): ok")
+
+    support = {
+        "id": SUPPORT_MODEL_ID,
+        "base_model_id": args.base_model,
+        "name": "EBS Support",
+        "meta": {
+            "profile_image_url": "/static/favicon.png",
+            "description": "Asisten diagnosa tim IT EBS: user, responsibility, akses fungsi, SoD, profile, login, "
+                           "concurrent request/manager, approval tertahan, patch — plus semua data mart EBS. "
+                           "Hanya untuk tim IT allowlist.",
+            "capabilities": {**model["meta"]["capabilities"]},
+            "toolIds": [f"server:{SERVER_ID}", f"server:{SA_SERVER_ID}"],
+            "skillIds": skill_ids + sa_skill_ids,
+            "filterIds": [FILTER_ID],
+            "actionIds": [ACTION_ID],
+            "tags": [{"name": "EBS"}, {"name": "IT"}],
+            "suggestion_prompts": [
+                {"content": "Concurrent request yang error 24 jam terakhir"},
+                {"content": "Status concurrent manager"},
+                {"content": "User EBS yang tidak login 90 hari"},
+                {"content": "Pelanggaran segregation of duties"},
+            ],
+        },
+        "params": {
+            "system": (SA_KIT / "system_prompt_support.md").read_text(encoding="utf-8"),
+            "function_calling": "native",
+            "max_tokens": 8000,
+        },
+        "access_grants": sa_grants,
+        "is_active": True,
+    }
+    if exists(f"/models/model?id={SUPPORT_MODEL_ID}"):
+        call("POST", f"/models/model/update?id={SUPPORT_MODEL_ID}", json=support)
+    else:
+        call("POST", "/models/create", json=support)
+    got = call("GET", f"/models/model?id={SUPPORT_MODEL_ID}")
+    meta = got.get("meta") or {}
+    grants = [(g.get("principal_type"), g.get("permission")) for g in (got.get("access_grants") or [])]
+    print(f"model {SUPPORT_MODEL_ID}: base={got.get('base_model_id')} tools={meta.get('toolIds')} "
+          f"skills={meta.get('skillIds')} grants={grants}")
 
 
 if __name__ == "__main__":

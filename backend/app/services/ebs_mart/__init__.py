@@ -13,11 +13,16 @@ never sees core.* or eis.*: run_sql only accepts SELECTs over mart.*.
   access.py      — who may read which mart (Keycloak groups + ebs_chat_scope)
   query.py       — guarded execution: read-only, timeout, row cap, as_of, audit
   tools.py       — intent tools (get_ap_aging, get_expiring_lots, ...)
+  sa_sql.py      — System Administration (phase 6): core.sa_*, SoD rules,
+                   mart.sa_* — readable only by llm_sa_ro
+  sa_tools.py    — the sa_* tools, for SYSADMIN_ALLOWLIST emails only
   openwebui_kit/ — system prompt, skills, prompts, filter and action for the
-                   "EBS Analyst" model preset in Open WebUI
+                   "EBS Analyst" model preset in Open WebUI; sysadmin/ holds
+                   the "EBS Support" model, ebs-sysadmin skill and SA prompts
 
-The ETL jobs live in app/tasks/ebs_mart_tasks.py, the OpenAPI tool server in
-app/routers/ebs_tools_app.py, and the admin API in
+The ETL jobs live in app/tasks/ebs_mart_tasks.py (System Administration:
+ebs_mart_sa_tasks.py), the OpenAPI tool servers in app/routers/ebs_tools_app.py
+and ebs_sa_tools_app.py, and the admin API in
 app/routers/ai_tools/ebs_mart_admin.py.
 
 Why raw.* from the blueprint is not a schema here: the extracts already select

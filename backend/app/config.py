@@ -222,6 +222,10 @@ class Settings(BaseSettings):
     # ebs_mart_llm_ro.sql). Empty = use eis_database_url (chat_readonly),
     # which schema.py grants the same mart access.
     eis_llm_ro_url: str = ""
+    # Optional login DSN for llm_sa_ro, the only role granted mart.sa_*
+    # (System Administration). Empty = connect as the EIS owner role and
+    # SET ROLE llm_sa_ro, which the backend creates NOLOGIN at startup.
+    eis_llm_sa_ro_url: str = ""
 
     # AP Autoinvoice — Google Drive polling. Path is inside the container
     # (backend/credentials/ on the host, bind-mounted to /app like the rest

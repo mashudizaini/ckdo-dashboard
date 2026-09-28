@@ -32,10 +32,11 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.dependencies import CurrentUser, Roles, require_role
-from app.services.ebs_mart import query, sql_guard, tools
+from app.services.ebs_mart import query, sa_tools, sql_guard, tools
 from app.services.ebs_mart.access import AccessDenied, Caller
 from app.services.ebs_mart.constants import (
-    DOMAIN_BY_GROUP, EBS_GROUPS, GROUP_LABELS, MARTS, MAX_ROWS, STATEMENT_TIMEOUT,
+    DOMAIN_BY_GROUP, EBS_GROUPS, GROUP_LABELS, MARTS, MAX_ROWS, SA_READER_ROLE, STATEMENT_TIMEOUT,
+    SYSADMIN_ALLOWLIST,
 )
 from app.services.ebs_mart.query import QueryFailed
 
@@ -53,6 +54,8 @@ JOBS = {
     "etl_mart_ar": "Piutang, invoice & penerimaan kas (incremental)",
     "etl_mart_opm": "Batch produksi OPM (incremental)",
     "etl_mart_gl": "GL: saldo, jurnal & laba rugi (incremental)",
+    "etl_mart_sa": "System Administration: user, akses, profile, login, patch (harian)",
+    "etl_mart_sa_ops": "System Administration: concurrent request/manager & workflow (10 menit)",
     "refresh_ebs_marts": "Refresh semua mart",
 }
 
@@ -286,6 +289,13 @@ _INTENT_TOOLS = {
     "get_pl": tools.get_pl,
     "get_trial_balance": tools.get_trial_balance,
     "get_gl_journals": tools.get_gl_journals,
+    # System Administration: allowed only when the signed-in admin's own email
+    # is in SYSADMIN_ALLOWLIST — the group chosen here does not matter.
+    **{name: getattr(sa_tools, name) for name in (
+        "sa_get_user", "sa_get_user_resps", "sa_who_has_resp", "sa_who_has_function", "sa_get_resp_functions",
+        "sa_get_resp_programs", "sa_get_dormant_users", "sa_get_terminated_active_users", "sa_get_sod_violations",
+        "sa_get_profile_value", "sa_get_login_history", "sa_get_manager_status", "sa_get_pending_approvals",
+        "sa_check_patch", "sa_get_form_personalizations", "it_get_concurrent_requests")},
 }
 
 
@@ -303,7 +313,8 @@ async def call_tool(name: str, body: ToolIn, user: CurrentUser = Depends(_admin)
         raise HTTPException(400, "Grup tidak dikenal")
     # "" = not given (tool default); explicit null = "no filter".
     args = {k: v for k, v in body.args.items() if v != ""}
-    for flag in ("late_only", "include_reversed", "include_expired", "ytd", "compare_prior_year"):
+    for flag in ("late_only", "include_reversed", "include_expired", "ytd", "compare_prior_year",
+                 "include_inactive", "exclude_seeded", "include_seeded", "only_problems", "include_fyi"):
         if isinstance(args.get(flag), str):
             args[flag] = args[flag] == "true"
     for k in ("due_from", "due_to", "date_from", "date_to", "ordered_from", "ordered_to"):
@@ -312,7 +323,7 @@ async def call_tool(name: str, body: ToolIn, user: CurrentUser = Depends(_admin)
                 args[k] = date.fromisoformat(str(args[k]))
             except ValueError:
                 raise HTTPException(400, f"{k} harus YYYY-MM-DD")
-    for k in ("days", "min_days_overdue", "min_days_waiting"):
+    for k in ("days", "min_days_overdue", "min_days_waiting", "hours"):
         if args.get(k) is not None:
             args[k] = int(args[k])
     for k in ("below_pct", "over_pct", "min_amount"):
@@ -382,6 +393,52 @@ def _security_test(user: CurrentUser) -> dict:
     except AccessDenied as e:
         results.append({"test": "User tanpa grup EBS ditolak", "passed": True, "detail": str(e)})
 
+    # System Administration: three fences (blueprint v2 section 7).
+    outsider = Caller(email="bukan-sysadmin@ckd-otto.com", groups={"ebs-management"}, source="security-test")
+    try:
+        sa_tools.sa_get_user(outsider, "SYSADMIN")
+        results.append({"test": "SA: email di luar allowlist ditolak (walau grup ebs-management)", "passed": False,
+                        "detail": "Tidak ditolak"})
+    except AccessDenied as e:
+        results.append({"test": "SA: email di luar allowlist ditolak (walau grup ebs-management)", "passed": True,
+                        "detail": str(e)})
+    sa_admin = Caller(email=sorted(SYSADMIN_ALLOWLIST)[0], groups=set(), source="security-test")
+    try:
+        tools.run_sql(sa_admin, "SELECT COUNT(*) FROM mart.sa_user", "security-test")
+        results.append({"test": "SA: run_sql ke mart.sa_* ditolak (juga untuk allowlist)", "passed": False,
+                        "detail": "Tidak ditolak"})
+    except (AccessDenied, sql_guard.SqlRejected) as e:
+        results.append({"test": "SA: run_sql ke mart.sa_* ditolak (juga untuk allowlist)", "passed": True,
+                        "detail": str(e)})
+    conn = query._reader()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT current_user, has_table_privilege(current_user, 'mart.sa_user', 'SELECT')")
+            role, can = cur.fetchone()
+        conn.rollback()
+    finally:
+        conn.close()
+    results.append({"test": "SA: role reader biasa tanpa grant ke mart.sa_*", "passed": not can,
+                    "detail": f"role={role}, SELECT mart.sa_user={can}"})
+    try:
+        conn = query._sa_reader()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""SELECT current_user,
+                                      has_table_privilege(current_user, 'mart.sa_user', 'SELECT'),
+                                      has_table_privilege(current_user, 'mart.ap_open_invoice', 'SELECT'),
+                                      has_schema_privilege(current_user, 'core', 'USAGE')""")
+                sa_role, sa_can, sa_ap, sa_core = cur.fetchone()
+            conn.rollback()
+        finally:
+            conn.close()
+        results.append({"test": f"SA: tool sa_* membaca sebagai {SA_READER_ROLE}, hanya mart.sa_*",
+                        "passed": sa_role == SA_READER_ROLE and sa_can and not sa_ap and not sa_core,
+                        "detail": f"role={sa_role}, sa_user={sa_can}, ap_open_invoice={sa_ap}, core={sa_core}"})
+    except Exception as e:
+        results.append({"test": f"SA: tool sa_* membaca sebagai {SA_READER_ROLE}, hanya mart.sa_*", "passed": False,
+                        "detail": f"Koneksi {SA_READER_ROLE} gagal: {e}"})
+
     # The reader connection itself: read-only, timeout, and no write grant.
     conn = query._reader()
     try:
@@ -417,7 +474,7 @@ def _security_test(user: CurrentUser) -> dict:
     # Every call above must be in the audit log.
     logged = _rows("""SELECT COUNT(*) AS n FROM meta.chat_query_log
                        WHERE id > %s AND source = 'security-test'""", (before,))[0]["n"]
-    expected = len(_NEGATIVE_SQL) + 3 + 1
+    expected = len(_NEGATIVE_SQL) + 3 + 1 + 2
     results.append({"test": "Setiap panggilan tercatat di meta.chat_query_log", "passed": logged >= expected,
                     "detail": f"{logged} baris tercatat (diharapkan ≥ {expected})"})
 

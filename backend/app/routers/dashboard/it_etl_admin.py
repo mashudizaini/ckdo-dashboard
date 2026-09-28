@@ -59,14 +59,14 @@ async def trigger_etl(job_name: str, params: TriggerParams):
         "etl_po_lines", "etl_open_pr", "etl_sales_orders", "etl_inventory_txn", "etl_batches",
         "etl_it_monitoring", "etl_daily_sales",
         "etl_mart_ap", "etl_mart_inventory", "refresh_ebs_marts", "etl_mart_po", "etl_mart_item_cost",
-        "etl_mart_om", "etl_mart_ar", "etl_mart_opm", "etl_mart_gl",
+        "etl_mart_om", "etl_mart_ar", "etl_mart_opm", "etl_mart_gl", "etl_mart_sa", "etl_mart_sa_ops",
     ]
     if job_name not in valid_jobs:
         raise HTTPException(status_code=400, detail=f"Unknown job. Valid: {valid_jobs}")
 
     kwargs = {"year": params.year, "month": params.month}
     if job_name in ("etl_mart_ap", "etl_mart_inventory", "refresh_ebs_marts", "etl_mart_po", "etl_mart_item_cost",
-                    "etl_mart_om", "etl_mart_ar", "etl_mart_opm", "etl_mart_gl"):
+                    "etl_mart_om", "etl_mart_ar", "etl_mart_opm", "etl_mart_gl", "etl_mart_sa", "etl_mart_sa_ops"):
         kwargs["trigger_type"] = "MANUAL"
     result = celery_app.send_task(f"app.tasks.etl_tasks.{job_name}", kwargs=kwargs)
     _active_task_ids[job_name] = result.id
@@ -398,6 +398,16 @@ _JOB_META = {
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["gl_balances", "gl_code_combinations", "gl_periods", "fnd_flex_values_vl", "gl_je_headers", "gl_je_lines", "xla_ae_lines", "xla_transaction_entities"],
                         "destination_table": "core.fact_gl_balance, core.fact_gl_journal_line, meta.gl_account_map -> mart.gl_*, mart.pl_monthly"},
+    "etl_mart_sa": {"frequency": "Daily", "schedule": "05:40 WIB", "source": "Oracle FND/AD (EBS Data Mart — System Administration)",
+                    "source_system": "Oracle EBS",
+                    "oracle_tables": ["fnd_user", "per_all_people_f", "fnd_user_resp_groups_direct", "fnd_user_resp_groups_indirect",
+                                      "fnd_responsibility", "fnd_compiled_menu_functions", "fnd_form_functions_vl", "fnd_resp_functions",
+                                      "fnd_request_group_units", "fnd_profile_option_values", "fnd_logins", "ad_bugs", "fnd_form_custom_rules"],
+                    "destination_table": "core.sa_* -> mart.sa_* (akses terbatas: llm_sa_ro)"},
+    "etl_mart_sa_ops": {"frequency": "Every 10 minutes", "schedule": "*/10", "source": "Oracle FND/WF (EBS Data Mart — System Administration)",
+                        "source_system": "Oracle EBS",
+                        "oracle_tables": ["fnd_concurrent_requests", "fnd_concurrent_queues_vl", "wf_notifications", "wf_items"],
+                        "destination_table": "core.sa_conc_request, core.sa_conc_manager, core.sa_wf_notification -> mart.sa_*"},
     "refresh_ebs_marts": {"frequency": "Daily", "schedule": "00:10 WIB", "source": "core.* (tanpa Oracle)",
                         "source_system": "PostgreSQL (ckdo_dashboard)",
                         "oracle_tables": [],

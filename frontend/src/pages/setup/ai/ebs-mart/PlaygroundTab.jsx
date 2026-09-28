@@ -102,6 +102,26 @@ const TOOLS = {
   ],
   find_marts: [["keywords", "text"]],
   get_data_freshness: [],
+  // System Administration — dijalankan sebagai email Anda sendiri; hanya
+  // email di SYSADMIN_ALLOWLIST yang lolos, grup yang dipilih tidak berpengaruh.
+  sa_get_user: [["user", "text"]],
+  sa_get_user_resps: [["user", "text"], ["include_inactive", ["false", "true"]]],
+  sa_who_has_resp: [["responsibility", "text"], ["include_inactive", ["false", "true"]]],
+  sa_who_has_function: [["function", "text"], ["include_seeded", ["false", "true"]]],
+  sa_get_resp_functions: [["responsibility", "text"], ["function", "text"], ["function_type", "text"]],
+  sa_get_resp_programs: [["responsibility", "text"], ["program", "text"]],
+  sa_get_dormant_users: [["days", "number"], ["exclude_seeded", ["true", "false"]]],
+  sa_get_terminated_active_users: [],
+  sa_get_sod_violations: [["rule_name", "text"], ["user", "text"], ["include_seeded", ["false", "true"]]],
+  sa_get_profile_value: [["profile", "text"], ["level", "text"], ["value_owner", "text"]],
+  sa_get_login_history: [["user", "text"], ["days", "number"]],
+  sa_get_manager_status: [["only_problems", ["false", "true"]]],
+  sa_get_pending_approvals: [["approver", "text"], ["days", "number"], ["item_type", "text"],
+    ["include_fyi", ["false", "true"]], ["group_by", ["none", "recipient", "item_type"]]],
+  sa_check_patch: [["patch_number", "text"]],
+  sa_get_form_personalizations: [["form", "text"]],
+  it_get_concurrent_requests: [["hours", "number"], ["status", "text"], ["phase", "text"], ["program", "text"],
+    ["user", "text"], ["group_by", ["none", "program", "status"]]],
 };
 
 function GroupSelect({ value, onChange }) {

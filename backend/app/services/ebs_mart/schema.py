@@ -15,8 +15,9 @@ import psycopg2
 
 from app.config import get_settings
 from app.services.ebs_mart.catalog_seed import COLUMN_CATALOG, GOLDEN_QUERIES
-from app.services.ebs_mart.constants import MARTS
+from app.services.ebs_mart.constants import MARTS, SA_PREFIX, SA_READER_ROLE
 from app.services.ebs_mart.mart_sql import MART_EXTRA_INDEXES, MART_SQL, MART_UNIQUE_INDEX
+from app.services.ebs_mart.sa_sql import SA_CORE_DDL, SA_META_DDL, SOD_SEED
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -788,14 +789,23 @@ def seed_golden_queries(cur):
 def grant_readers(cur):
     """SELECT on mart.* and the readable meta objects for each reader role
     that exists. Objects are listed from the catalog rather than hard-coded,
-    so one missing view cannot make the whole GRANT fail."""
+    so one missing view cannot make the whole GRANT fail.
+
+    mart.sa_* is excluded and actively revoked — from these roles and from
+    PUBLIC — so a grant made by hand (the llm_ro runbook's GRANT ... ON ALL
+    TABLES IN SCHEMA mart) cannot leave System Administration data readable
+    by run_sql. Only grant_sa_reader's role gets those."""
     cur.execute(
-        """SELECT quote_ident(n.nspname) || '.' || quote_ident(c.relname)
+        """SELECT n.nspname, c.relname
              FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE (n.nspname = 'mart' AND c.relkind IN ('m', 'v', 'r'))
                OR (n.nspname = 'meta' AND c.relname IN ('column_catalog', 'golden_query', 'etl_run_log'))"""
     )
-    objects = [r[0] for r in cur.fetchall()]
+    rows = cur.fetchall()
+    objects = [f'{ns}."{name}"' for ns, name in rows if not name.startswith(SA_PREFIX)]
+    sa_objects = [f'mart."{name}"' for ns, name in rows if ns == "mart" and name.startswith(SA_PREFIX)]
+    if sa_objects:
+        cur.execute(f"REVOKE ALL ON {', '.join(sa_objects)} FROM PUBLIC")
     for role in READER_ROLES:
         cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,))
         if not cur.fetchone():
@@ -803,6 +813,67 @@ def grant_readers(cur):
         cur.execute(f"GRANT USAGE ON SCHEMA mart, meta TO {role}")
         if objects:
             cur.execute(f"GRANT SELECT ON {', '.join(objects)} TO {role}")
+        if sa_objects:
+            cur.execute(f"REVOKE ALL ON {', '.join(sa_objects)} FROM {role}")
+
+
+def ensure_sa_reader_role():
+    """Create llm_sa_ro (NOLOGIN) and make the EIS owner role a member, so
+    query._sa_reader can SET ROLE to it. Needs CREATEROLE, hence the
+    DATABASE_URL owner connection, like _ensure_schemas. A login password is
+    only needed if EIS_LLM_SA_RO_URL is used instead — set it by hand then."""
+    rw = _rw()
+    try:
+        with rw.cursor() as cur:
+            cur.execute("SELECT current_user")
+            eis_role = cur.fetchone()[0]
+            cur.execute("SELECT pg_has_role(current_user, rolname, 'MEMBER') FROM pg_roles WHERE rolname = %s",
+                        (SA_READER_ROLE,))
+            row = cur.fetchone()
+            if row and row[0]:
+                return
+    finally:
+        rw.close()
+    owner = psycopg2.connect(settings.database_url)
+    try:
+        with owner.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (SA_READER_ROLE,))
+            if not cur.fetchone():
+                cur.execute(f"CREATE ROLE {SA_READER_ROLE} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT")
+            cur.execute(f'GRANT {SA_READER_ROLE} TO "{eis_role}"')
+        owner.commit()
+        logger.info("[ebs_mart] role %s ready, granted to %s", SA_READER_ROLE, eis_role)
+    finally:
+        owner.close()
+
+
+def grant_sa_reader(cur):
+    """SELECT on mart.sa_* for llm_sa_ro — the only role that gets it. No
+    core, no meta, no other mart: the sa_* tools read nothing else."""
+    cur.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (SA_READER_ROLE,))
+    if not cur.fetchone():
+        return
+    cur.execute(
+        """SELECT c.relname
+             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'mart' AND c.relkind IN ('m', 'v', 'r')"""
+    )
+    objects = [f'mart."{r[0]}"' for r in cur.fetchall() if r[0].startswith(SA_PREFIX)]
+    cur.execute(f"GRANT USAGE ON SCHEMA mart TO {SA_READER_ROLE}")
+    if objects:
+        cur.execute(f"GRANT SELECT ON {', '.join(objects)} TO {SA_READER_ROLE}")
+
+
+def seed_sod_rules(cur):
+    """The blueprint's SoD rules as created_by='seed' rows: replaced on every
+    startup, so a corrected seed takes effect; rules added by hand stay."""
+    cur.execute("DELETE FROM meta.sod_rules WHERE created_by = 'seed'")
+    for rule_name, fa, fb, risk, desc in SOD_SEED:
+        cur.execute(
+            """INSERT INTO meta.sod_rules (rule_name, function_a, function_b, risk, description, created_by)
+               VALUES (%s, %s, %s, %s, %s, 'seed') ON CONFLICT (rule_name, function_a, function_b) DO NOTHING""",
+            (rule_name, fa, fb, risk, desc),
+        )
 
 
 _SCHEMAS = ("meta", "core", "mart")
@@ -863,14 +934,21 @@ def ensure_mart_schema():
         _ensure_schemas()
     except Exception as e:
         logger.warning("[ebs_mart] schema creation failed: %s", e)
+    try:
+        ensure_sa_reader_role()
+    except Exception as e:
+        logger.warning("[ebs_mart] role %s not created (sa_* tools will fail): %s", SA_READER_ROLE, e)
     steps = [
         ("meta/core schemas", lambda cur: _exec_each(cur, _META_DDL + _CORE_DDL, "meta/core ddl")),
+        ("system administration ddl", lambda cur: _exec_each(cur, SA_META_DDL + SA_CORE_DDL, "sa ddl")),
+        ("sod rules", seed_sod_rules),
         ("etl_job_log columns", lambda cur: _exec_each(cur, _ETL_LOG_COLUMNS, "etl_job_log columns")),
         ("etl_run_log view", create_etl_run_log_view),
         ("marts", ensure_marts),
         ("catalog", sync_catalog),
         ("golden queries", seed_golden_queries),
         ("grants", grant_readers),
+        ("sa grants", grant_sa_reader),
     ]
     conn = _rw()
     try:
@@ -924,6 +1002,10 @@ def update_sample_values(cur, names: list[str]):
     the catalog."""
     keep_codes = {"currency_code", "hold_code", "organization_code"}
     for name in names:
+        if name.startswith(SA_PREFIX):
+            # The catalog is readable by llm_ro; System Administration values
+            # (statuses, levels, user flags) stay out of it.
+            continue
         for col, dtype in mart_columns(cur, name):
             if not dtype.startswith(("text", "character varying")) or col in ("row_key", "description"):
                 continue

@@ -8,7 +8,7 @@ celery_app = Celery(
     "ckdo_dashboard",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.tasks.oracle_sync", "app.tasks.report_gen", "app.tasks.eis_etl_tasks", "app.tasks.document_converter_tasks", "app.tasks.document_translation_tasks", "app.tasks.openwebui_sync_tasks", "app.tasks.ap_invoice_gdrive_tasks", "app.tasks.ebs_mart_tasks"],
+    include=["app.tasks.oracle_sync", "app.tasks.report_gen", "app.tasks.eis_etl_tasks", "app.tasks.document_converter_tasks", "app.tasks.document_translation_tasks", "app.tasks.openwebui_sync_tasks", "app.tasks.ap_invoice_gdrive_tasks", "app.tasks.ebs_mart_tasks", "app.tasks.ebs_mart_sa_tasks"],
 )
 
 celery_app.conf.update(
@@ -97,6 +97,11 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=3, minute=0, day_of_week="sunday"),
         "kwargs": {"full_refresh": True},
     },
+    # Phase 6: System Administration — identity/access daily (full snapshot,
+    # logins incremental), concurrent requests/managers and open workflow
+    # notifications every 10 minutes (blueprint v2 4.7).
+    "etl-mart-sa": {"task": "app.tasks.etl_tasks.etl_mart_sa", "schedule": crontab(hour=5, minute=40)},
+    "etl-mart-sa-ops": {"task": "app.tasks.etl_tasks.etl_mart_sa_ops", "schedule": crontab(minute="*/10")},
     "etl-mart-ar-reconcile": {
         "task": "app.tasks.etl_tasks.etl_mart_ar",
         "schedule": crontab(hour=2, minute=30, day_of_week="sunday"),

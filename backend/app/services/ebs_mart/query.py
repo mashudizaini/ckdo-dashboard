@@ -18,7 +18,7 @@ import structlog
 
 from app.config import get_settings
 from app.services.ebs_mart.access import Caller
-from app.services.ebs_mart.constants import MARTS, MAX_ROWS, STATEMENT_TIMEOUT
+from app.services.ebs_mart.constants import MARTS, MAX_ROWS, SA_PREFIX, SA_READER_ROLE, STATEMENT_TIMEOUT
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -33,6 +33,24 @@ def _reader():
     """llm_ro when configured (blueprint), else the existing chat_readonly
     role — both are SELECT-only and both are granted mart.* by schema.py."""
     conn = psycopg2.connect(settings.eis_llm_ro_url or settings.eis_database_url)
+    conn.set_session(readonly=True)
+    return conn
+
+
+def _sa_reader():
+    """The System Administration reader: role llm_sa_ro, the only role granted
+    mart.sa_* (schema.grant_sa_reader). With EIS_LLM_SA_RO_URL set it logs in
+    as that role; otherwise it connects as the EIS owner role — a member of
+    llm_sa_ro — and SET ROLE drops every privilege but llm_sa_ro's for the
+    session. Only intent-tool SQL written in sa_tools.py runs here (bound
+    parameters, never the model's text), so nothing can RESET ROLE."""
+    if settings.eis_llm_sa_ro_url:
+        conn = psycopg2.connect(settings.eis_llm_sa_ro_url)
+    else:
+        conn = psycopg2.connect(settings.eis_database_url_rw)
+        with conn.cursor() as cur:
+            cur.execute(f"SET ROLE {SA_READER_ROLE}")
+        conn.commit()
     conn.set_session(readonly=True)
     return conn
 
@@ -128,11 +146,14 @@ def run(caller: Caller, sql: str, params: dict | None = None, *, tool: str, mart
         question: str = "", args: dict | None = None) -> dict:
     """Execute one SELECT (already validated or written by us) and shape the
     tool result. params=None for run_sql so a literal % in the model's LIKE
-    pattern is not read as a placeholder."""
+    pattern is not read as a placeholder. A query over sa_* marts goes
+    through the System Administration reader, any other through llm_ro —
+    never mixed: the sa_* tools read no other mart."""
     wrapped = f"SELECT * FROM ({sql}) AS q LIMIT {MAX_ROWS + 1}"
+    sa = any(m.startswith(SA_PREFIX) for m in marts)
     t0 = time.monotonic()
     try:
-        conn = _reader()
+        conn = _sa_reader() if sa else _reader()
         try:
             with conn.cursor() as cur:
                 cur.execute(f"SET LOCAL statement_timeout = '{STATEMENT_TIMEOUT}'")

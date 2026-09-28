@@ -62,7 +62,7 @@ GL_JOURNAL_MONTHS = 13
 MAX_ROWS = 500
 STATEMENT_TIMEOUT = "15s"
 
-# One entry per mart in the blueprint's catalog (section 5). All five
+# One entry per mart in the blueprint's catalog (section 5). All six
 # phases are built; later phases are listed so the admin overview shows the whole
 # roadmap and find_marts can say "not available yet" instead of nothing.
 #
@@ -229,6 +229,106 @@ MARTS: dict[str, dict] = {
         "source_jobs": ["etl_mart_gl"],
         "unique_key": ["row_key"],
     },
+    # ── Phase 6: System Administration (blueprint v2 4.7) — restricted ──
+    # Not reachable through any ebs-* group, ebs-management included: only
+    # the SYSADMIN_ALLOWLIST emails below, through the sa_* tools, over the
+    # llm_sa_ro role (see access.py and query.run(sa=True)).
+    "sa_user": {
+        "domain": "SA", "phase": 6, "built": True,
+        "grain": "User EBS (FND_USER)",
+        "description": "User EBS: status aktif, last login, karyawan terkait dan status karyawannya, flag user seeded, jumlah responsibility aktif.",
+        "sources": "FND_USER, PER_ALL_PEOPLE_F, PER_PERIODS_OF_SERVICE",
+        "source_jobs": ["etl_mart_sa"],
+        "unique_key": ["user_id"],
+    },
+    "sa_user_resp": {
+        "domain": "SA", "phase": 6, "built": True,
+        "grain": "User × responsibility (direct + indirect)",
+        "description": "Responsibility yang dimiliki user, grant direct atau indirect (role UMX), tanggal mulai/akhir dan status aktif.",
+        "sources": "FND_USER_RESP_GROUPS_DIRECT, FND_USER_RESP_GROUPS_INDIRECT, FND_RESPONSIBILITY_TL",
+        "source_jobs": ["etl_mart_sa"],
+        "unique_key": ["row_key"],
+    },
+    "sa_resp_function": {
+        "domain": "SA", "phase": 6, "built": True,
+        "grain": "Responsibility × fungsi efektif (setelah exclusion)",
+        "description": "Fungsi (menu/form/halaman) yang bisa diakses sebuah responsibility, setelah exclusion fungsi dan menu. Hanya responsibility yang pernah di-assign ke user.",
+        "sources": "FND_RESPONSIBILITY, FND_COMPILED_MENU_FUNCTIONS, FND_FORM_FUNCTIONS_VL, FND_RESP_FUNCTIONS",
+        "source_jobs": ["etl_mart_sa"],
+        "unique_key": ["row_key"],
+    },
+    "sa_resp_request_group": {
+        "domain": "SA", "phase": 6, "built": True,
+        "grain": "Responsibility × program / request set yang boleh dijalankan",
+        "description": "Isi request group tiap responsibility: program concurrent, request set, atau semua program satu aplikasi.",
+        "sources": "FND_REQUEST_GROUPS, FND_REQUEST_GROUP_UNITS, FND_CONCURRENT_PROGRAMS_VL, FND_REQUEST_SETS_VL",
+        "source_jobs": ["etl_mart_sa"],
+        "unique_key": ["row_key"],
+    },
+    "sa_profile_value": {
+        "domain": "SA", "phase": 6, "built": True,
+        "grain": "Profile option × level × nilai",
+        "description": "Nilai profile option per level (Site, Application, Responsibility, User, ...). Profile berisi password/kredensial tidak pernah ditarik.",
+        "sources": "FND_PROFILE_OPTIONS_VL, FND_PROFILE_OPTION_VALUES",
+        "source_jobs": ["etl_mart_sa"],
+        "unique_key": ["row_key"],
+    },
+    "sa_login_audit": {
+        "domain": "SA", "phase": 6, "built": True,
+        "grain": "Sesi login × responsibility × form (90 hari terakhir)",
+        "description": "Riwayat login user: waktu masuk/keluar, responsibility dan form yang dibuka (detail hanya ada jika Sign-On:Audit Level di-set).",
+        "sources": "FND_LOGINS, FND_LOGIN_RESPONSIBILITIES, FND_LOGIN_RESP_FORMS",
+        "source_jobs": ["etl_mart_sa"],
+        "unique_key": ["row_key"],
+    },
+    "sa_concurrent_request": {
+        "domain": "SA", "phase": 6, "built": True,
+        "grain": "Concurrent request (30 hari terakhir)",
+        "description": "Concurrent request: program, user, responsibility, fase/status, waktu mulai/selesai, durasi, pesan penyelesaian, manager.",
+        "sources": "FND_CONCURRENT_REQUESTS, FND_CONCURRENT_PROGRAMS_VL, FND_CONCURRENT_PROCESSES",
+        "source_jobs": ["etl_mart_sa_ops", "etl_mart_sa"],
+        "unique_key": ["request_id"],
+    },
+    "sa_concurrent_manager": {
+        "domain": "SA", "phase": 6, "built": True,
+        "grain": "Concurrent manager (queue)",
+        "description": "Status concurrent manager: proses target vs aktual, status kontrol, node, request yang sedang berjalan.",
+        "sources": "FND_CONCURRENT_QUEUES_VL",
+        "source_jobs": ["etl_mart_sa_ops"],
+        "unique_key": ["queue_key"],
+    },
+    "sa_wf_open_notification": {
+        "domain": "SA", "phase": 6, "built": True,
+        "grain": "Notifikasi workflow berstatus OPEN × penerima",
+        "description": "Notifikasi workflow yang masih terbuka (approval tertahan): tipe, dokumen, penerima, lama menunggu, perlu respons atau FYI.",
+        "sources": "WF_NOTIFICATIONS, WF_ITEMS, WF_MESSAGE_ATTRIBUTES",
+        "source_jobs": ["etl_mart_sa_ops"],
+        "unique_key": ["notification_id"],
+    },
+    "sa_sod_violation": {
+        "domain": "SA", "phase": 6, "built": True,
+        "grain": "User × aturan SoD yang dilanggar",
+        "description": "Konflik segregation of duties: user aktif yang punya akses ke dua fungsi yang bentrok menurut meta.sod_rules, lewat responsibility apa.",
+        "sources": "mart.sa_user_resp, mart.sa_resp_function, meta.sod_rules",
+        "source_jobs": ["etl_mart_sa"],
+        "unique_key": ["row_key"],
+    },
+    "sa_patch": {
+        "domain": "SA", "phase": 6, "built": True,
+        "grain": "Patch / bug fix yang diterapkan",
+        "description": "Patch (nomor bug) yang sudah diterapkan ke instance EBS dan tanggalnya.",
+        "sources": "AD_BUGS",
+        "source_jobs": ["etl_mart_sa"],
+        "unique_key": ["row_key"],
+    },
+    "sa_form_personalization": {
+        "domain": "SA", "phase": 6, "built": True,
+        "grain": "Rule Forms Personalization aktif",
+        "description": "Rule Forms Personalization yang aktif per form/fungsi, dengan event pemicu, kondisi dan jumlah action aktif.",
+        "sources": "FND_FORM_CUSTOM_RULES, FND_FORM_CUSTOM_ACTIONS",
+        "source_jobs": ["etl_mart_sa"],
+        "unique_key": ["rule_id"],
+    },
 }
 
 BUILT_MARTS = [name for name, m in MARTS.items() if m.get("built")]
@@ -247,6 +347,27 @@ DOMAIN_BY_GROUP: dict[str, set[str]] = {
 }
 
 EBS_GROUPS = list(DOMAIN_BY_GROUP)
+
+# System Administration (blueprint v2 section 7, "Pengecualian domain System
+# Administration"). The sa_* marts ignore DOMAIN_BY_GROUP — even
+# ebs-management's "" prefix does not reach them — and open only to these
+# emails. Kept in code on purpose: adding someone to a Keycloak group or to
+# Setup > AI > EBS Chat Access must not be enough to read user, login and
+# access data; changing this list takes a reviewed commit.
+SA_PREFIX = "sa_"
+SYSADMIN_ALLOWLIST = frozenset({
+    "mashudi@ckd-otto.com",
+    "utomo@ckd-otto.com",
+    "itsupport@ckd-otto.com",
+})
+# The PostgreSQL role the sa_* tools read as. Only it is granted mart.sa_*;
+# llm_ro / chat_readonly are not, so run_sql cannot read them even if every
+# check above it failed (third layer).
+SA_READER_ROLE = "llm_sa_ro"
+
+# Rows the concurrent-request and login extracts keep.
+SA_REQUEST_DAYS = 30
+SA_LOGIN_DAYS = 90
 
 GROUP_LABELS = {
     "ebs-finance": "Finance — AP, AR, GL, valuasi persediaan, PO",

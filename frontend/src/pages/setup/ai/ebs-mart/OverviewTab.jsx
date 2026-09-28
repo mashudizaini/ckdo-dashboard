@@ -5,7 +5,7 @@ import { Badge, Button, Card, ErrorBox, Spinner, errMsg, fmtDate, fmtNum } from 
 
 const DOMAIN_TONE = {
   AP: "text-sky-300", AR: "text-teal-300", INV: "text-emerald-300", PO: "text-violet-300",
-  OM: "text-pink-300", OPM: "text-amber-300", GL: "text-orange-300",
+  OM: "text-pink-300", OPM: "text-amber-300", GL: "text-orange-300", SA: "text-red-300",
 };
 
 export default function OverviewTab() {
@@ -46,7 +46,7 @@ export default function OverviewTab() {
 
   if (!data && !error) return <Spinner />;
 
-  const phases = [1, 2, 3, 4, 5];
+  const phases = data ? [...new Set(data.marts.map((m) => m.phase))].sort((a, b) => a - b) : [];
   return (
     <div className="space-y-4">
       <ErrorBox>{error}</ErrorBox>
@@ -62,7 +62,8 @@ export default function OverviewTab() {
                 return (
                   <div key={ph}>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-gray-600 mb-2">
-                      Fase {ph} {ph === 1 ? "· aktif" : "· direncanakan"}
+                      Fase {ph} {marts.every((m) => m.built) ? "· aktif" : "· direncanakan"}
+                      {ph === 6 && " · System Administration — hanya tim IT allowlist (llm_sa_ro)"}
                     </p>
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                       {marts.map((m) => (
