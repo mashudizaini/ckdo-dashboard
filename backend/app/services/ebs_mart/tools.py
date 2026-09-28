@@ -1801,8 +1801,11 @@ def gl_get_budget_vs_actual(caller: Caller, period: str, ytd: bool = False, depa
                             include_revenue: bool = False, group_by: str = "department") -> dict:
     """Budget vs encumbrance vs actual (ledger 2022, expense accounts unless
     include_revenue). Without budget_name the budget version with the most
-    rows in that period is used and named in every row. available = budget −
-    encumbrance − actual."""
+    rows in that period is used and named in every row. Budget and actual
+    are summed over the periods; encumbrance is a balance — what is still
+    reserved at the end of the last period (reservations are relieved over
+    later periods and years, so its movements do not sum). available =
+    budget − encumbrance − actual."""
     args = {"period": period, "ytd": ytd, "department": department, "account": account, "budget_name": budget_name,
             "include_revenue": include_revenue, "group_by": group_by}
     cond, params = _gl_period_filter(period, ytd)
@@ -1819,11 +1822,14 @@ def gl_get_budget_vs_actual(caller: Caller, period: str, ytd: bool = False, depa
                AND {_DEPT_FILTER}
         ), v AS (
             SELECT COALESCE(%(bn)s::text, (SELECT version_name FROM f WHERE kind = 'BUDGET'
-                                            GROUP BY version_name ORDER BY COUNT(*) DESC LIMIT 1)) AS bv
+                                            GROUP BY version_name ORDER BY COUNT(*) DESC LIMIT 1)) AS bv,
+                   (SELECT MAX(period_year * 100 + period_num) FROM f) AS last_period
         ), agg AS (
             SELECT {dim},
                    SUM(amount) FILTER (WHERE kind = 'BUDGET' AND version_name ILIKE (SELECT bv FROM v)) AS budget_idr,
-                   SUM(amount) FILTER (WHERE kind = 'ENCUMBRANCE') AS encumbrance_idr,
+                   SUM(end_balance) FILTER (WHERE kind = 'ENCUMBRANCE'
+                                              AND period_year * 100 + period_num = (SELECT last_period FROM v))
+                                                                                       AS encumbrance_idr,
                    SUM(amount) FILTER (WHERE kind = 'ACTUAL') AS actual_idr
               FROM f GROUP BY {dim}
         )

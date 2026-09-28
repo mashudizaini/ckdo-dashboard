@@ -124,7 +124,8 @@ _BUDGET_SQL = """
            (SELECT et.encumbrance_type FROM gl_encumbrance_types et WHERE et.encumbrance_type_id = gb.encumbrance_type_id),
            gb.code_combination_id, gb.period_name, gp.period_year, gp.period_num, gp.start_date,
            gcc.segment3, gcc.segment4, gcc.account_type,
-           NVL(gb.period_net_dr, 0) - NVL(gb.period_net_cr, 0)
+           NVL(gb.period_net_dr, 0) - NVL(gb.period_net_cr, 0),
+           NVL(gb.begin_balance_dr, 0) - NVL(gb.begin_balance_cr, 0)
       FROM gl_balances gb
       JOIN gl_code_combinations gcc ON gcc.code_combination_id = gb.code_combination_id
       JOIN gl_ledgers gl            ON gl.ledger_id = gb.ledger_id
@@ -136,7 +137,8 @@ _BUDGET_SQL = """
        AND gcc.summary_flag = 'N'
        AND NVL(gp.adjustment_period_flag, 'N') = 'N'
        AND gp.period_year >= EXTRACT(YEAR FROM SYSDATE) - 1
-       AND (NVL(gb.period_net_dr, 0) <> 0 OR NVL(gb.period_net_cr, 0) <> 0)
+       AND (NVL(gb.period_net_dr, 0) <> 0 OR NVL(gb.period_net_cr, 0) <> 0
+            OR NVL(gb.begin_balance_dr, 0) <> 0 OR NVL(gb.begin_balance_cr, 0) <> 0)
 """
 
 # ── Interface rows (IT) ──────────────────────────────────────────────────────
@@ -256,9 +258,10 @@ def etl_mart_ext(year: int = None, month: int = None, full_refresh: bool = False
         n += _replace(cur, "core.fact_gl_budget",
                       ["row_key", "kind", "budget_name", "encumbrance_type", "code_combination_id", "period_name",
                        "period_year", "period_num", "period_start_date", "segment3", "segment4", "account_type",
-                       "period_net"],
+                       "period_net", "begin_balance"],
                       [(f"{r[0]}|{r[1] or r[2] or ''}|{int(r[3])}|{r[4]}", "BUDGET" if r[0] == "B" else "ENCUMBRANCE",
-                        r[1], r[2], _int(r[3]), r[4], _int(r[5]), _int(r[6]), r[7], r[8], r[9], r[10], _num(r[11]))
+                        r[1], r[2], _int(r[3]), r[4], _int(r[5]), _int(r[6]), r[7], r[8], r[9], r[10], _num(r[11]),
+                        _num(r[12]))
                        for r in budget])
 
         intf = []

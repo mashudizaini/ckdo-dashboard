@@ -93,6 +93,9 @@ EXT_CORE_DDL = [
         loaded_at        timestamptz DEFAULT now()
     )
     """,
+    # Encumbrance is a balance (reserved, then relieved across periods and
+    # years), so its opening balance is kept next to the period movement.
+    "ALTER TABLE core.fact_gl_budget ADD COLUMN IF NOT EXISTS begin_balance numeric",
     """
     CREATE TABLE IF NOT EXISTS core.it_interface_row (
         row_key        text PRIMARY KEY,
@@ -251,11 +254,13 @@ EXT_MART_SQL: dict[str, str] = {
     "gl_budget_vs_actual": """
         WITH src AS (
             SELECT kind, COALESCE(budget_name, encumbrance_type) AS version_name, period_name, period_year,
-                   period_num, period_start_date, segment3, segment4, account_type, period_net
+                   period_num, period_start_date, segment3, segment4, account_type, period_net,
+                   COALESCE(begin_balance, 0) + period_net AS end_balance
               FROM core.fact_gl_budget
             UNION ALL
             SELECT 'ACTUAL', NULL, period_name, period_year, period_num, period_start_date, segment3, segment4,
-                   account_type, period_net_dr - period_net_cr
+                   account_type, period_net_dr - period_net_cr,
+                   begin_balance_dr - begin_balance_cr + period_net_dr - period_net_cr
               FROM core.fact_gl_balance
              WHERE account_type IN ('E', 'R') AND NOT is_adjustment
                AND period_year >= COALESCE((SELECT MIN(period_year) FROM core.fact_gl_budget),
@@ -267,13 +272,14 @@ EXT_MART_SQL: dict[str, str] = {
                MAX(s.account_type) AS account_type, MAX(m.section) AS pl_section, MAX(m.line) AS pl_line,
                s.segment3 AS dept_code, MAX(d.description) AS dept_desc,
                FALSE AS is_adjustment,
-               SUM(s.period_net) * COALESCE(MAX(m.sign), CASE WHEN MAX(s.account_type) = 'R' THEN -1 ELSE 1 END) AS amount
+               SUM(s.period_net) * COALESCE(MAX(m.sign), CASE WHEN MAX(s.account_type) = 'R' THEN -1 ELSE 1 END) AS amount,
+               SUM(s.end_balance) * COALESCE(MAX(m.sign), CASE WHEN MAX(s.account_type) = 'R' THEN -1 ELSE 1 END) AS end_balance
           FROM src s
           LEFT JOIN meta.gl_account_map m       ON m.account_code = s.segment4
           LEFT JOIN core.dim_gl_segment_value a ON a.segment_column = 'SEGMENT4' AND a.value = s.segment4
           LEFT JOIN core.dim_gl_segment_value d ON d.segment_column = 'SEGMENT3' AND d.value = s.segment3
          GROUP BY s.kind, s.version_name, s.period_name, s.period_year, s.period_num, s.segment3, s.segment4
-        HAVING SUM(s.period_net) <> 0
+        HAVING SUM(s.period_net) <> 0 OR SUM(s.end_balance) <> 0
     """,
 
     # IT only (sa_ prefix → llm_sa_ro, allowlist). AR comes from the AutoInvoice
