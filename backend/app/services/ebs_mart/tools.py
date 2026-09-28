@@ -988,6 +988,35 @@ def _gl_period_filter(period: str | None, ytd: bool = False) -> tuple[str, dict]
     return "period_year = %(py)s AND period_num = %(pn)s AND NOT is_adjustment", {"py": year, "pn": month}
 
 
+# The chart of accounts is in English (611311 ELECTRICITY); people ask in
+# Indonesian ("biaya listrik"). A search term that is one of these words is
+# searched by its English stem instead.
+_ACCOUNT_TERMS = {
+    "listrik": "ELECTRIC", "air": "WATER", "gaji": "SALAR", "upah": "WAGE", "sewa": "RENT", "penyusutan": "DEPRECIATION",
+    "depresiasi": "DEPRECIATION", "amortisasi": "AMORTI", "bunga": "INTEREST", "pajak": "TAX", "telepon": "TELEPHONE",
+    "perjalanan": "TRAVEL", "dinas": "TRAVEL", "bensin": "FUEL", "bbm": "FUEL", "iklan": "ADVERTIS", "promosi": "PROMOTION",
+    "asuransi": "INSURANCE", "perbaikan": "REPAIR", "pemeliharaan": "MAINTENANCE", "konsultan": "CONSULT",
+    "pelatihan": "TRAINING", "rekrutmen": "RECRUIT", "kurs": "EXCHANGE", "selisih kurs": "EXCHANGE", "penjualan": "SALES",
+    "piutang": "RECEIVABLE", "hutang": "PAYABLE", "utang": "PAYABLE", "persediaan": "INVENTOR", "kas": "CASH",
+    "bank": "BANK", "sumbangan": "DONATION", "entertain": "ENTERTAIN", "jamuan": "ENTERTAIN", "pengiriman": "FREIGHT",
+    "ongkos kirim": "FREIGHT", "listrik dan air": "UTILIT", "utilitas": "UTILIT", "lisensi": "LICENSE",
+    "riset": "RESEARCH", "penelitian": "RESEARCH", "alat tulis": "STATIONER", "kebersihan": "CLEANING",
+    "keamanan": "SECURITY", "tunjangan": "ALLOWANCE", "bonus": "BONUS", "lembur": "OVERTIME", "pesangon": "SEVERANCE",
+}
+
+
+def _account_term(text):
+    """Indonesian account word -> the English stem the COA uses; else as given."""
+    t = _val(text)
+    if not isinstance(t, str):
+        return t
+    key = t.strip().lower()
+    for prefix in ("biaya ", "beban ", "akun "):
+        if key.startswith(prefix):
+            key = key[len(prefix):]
+    return _ACCOUNT_TERMS.get(key, t)
+
+
 _ACCOUNT_FILTER = """(%(acc)s::text IS NULL OR account_code LIKE %(acc)s::text || '%%'
                       OR account_desc ILIKE '%%' || %(acc)s::text || '%%')"""
 _DEPT_FILTER = """(%(dept)s::text IS NULL OR dept_code = %(dept)s::text OR dept_desc ILIKE '%%' || %(dept)s::text || '%%')"""
@@ -1080,7 +1109,7 @@ def gl_get_trial_balance(caller: Caller, period: str, account: str | None = None
     cond, params = _gl_period_filter(period)
     if "pn" not in params:
         raise sql_guard.SqlRejected("Trial balance butuh satu periode bulan (YYYY-MM atau JUL-26), bukan setahun.")
-    params.update({"acc": _val(account), "dept": _val(department), "st": _val(statement)})
+    params.update({"acc": _account_term(account), "dept": _val(department), "st": _val(statement)})
     where = f"""
          WHERE {cond}
            AND {_ACCOUNT_FILTER}
@@ -1153,7 +1182,7 @@ def gl_get_journals(caller: Caller, period: str | None = None, date_from: date |
             "department": department, "source": source, "category": category, "text": text,
             "subledger_txn": subledger_txn, "min_amount": min_amount, "group_by": group_by}
     cond, params = _gl_period_filter(period)
-    params.update({"df": date_from, "dt": date_to, "acc": _val(account), "dept": _val(department),
+    params.update({"df": date_from, "dt": date_to, "acc": _account_term(account), "dept": _val(department),
                    "src": _val(source), "cat": _val(category), "txt": _val(text), "sub": _val(subledger_txn),
                    "min": min_amount})
     where = f"""
@@ -1481,7 +1510,8 @@ def lookup_master(caller: Caller, text: str, type: str | None = None) -> dict:
            AND (UPPER(code) = UPPER(%(x)s::text) OR name ILIKE %(xl)s::text OR code ILIKE %(xl)s::text)
          ORDER BY (UPPER(code) = UPPER(%(x)s::text)) DESC, type, name
     """
-    return _run(caller, "master_lookup", sql, {"t": _val(type), "x": _val(text), "xl": _like(text)},
+    term = _account_term(text) if (type or "account") in ("account",) else _val(text)
+    return _run(caller, "master_lookup", sql, {"t": _val(type), "x": _val(text), "xl": _like(term)},
                 "lookup_master", args)
 
 
@@ -1506,18 +1536,23 @@ def po_get_document(caller: Caller, po_number: str) -> dict:
 
 
 def po_get_pending_approval(caller: Caller, min_days: int | None = None, doc_type: str | None = None,
-                            approver: str | None = None) -> dict:
-    args = {"min_days": min_days, "doc_type": doc_type, "approver": approver}
+                            approver: str | None = None, include_incomplete: bool = False) -> dict:
+    """Documents submitted and waiting for an approver (In Process,
+    Pre-Approved, Requires Reapproval). Incomplete = a draft never submitted —
+    hundreds of them sit since 2019 — only with include_incomplete."""
+    args = {"min_days": min_days, "doc_type": doc_type, "approver": approver, "include_incomplete": include_incomplete}
     sql = """
         SELECT doc_type, doc_number, authorization_status, pending_approver, preparer, days_waiting, submitted_date,
                last_action, vendor_name, currency_code, amount_entered, amount_idr, description
           FROM mart.po_approval_pending
          WHERE (%(d)s::int IS NULL OR days_waiting >= %(d)s::int)
+           AND (%(inc)s OR authorization_status <> 'INCOMPLETE')
            AND (%(t)s::text IS NULL OR doc_type = UPPER(%(t)s::text))
            AND (%(a)s::text IS NULL OR pending_approver ILIKE %(a)s::text)
          ORDER BY days_waiting DESC
     """
-    return _run(caller, "po_approval_pending", sql, {"d": min_days, "t": _val(doc_type), "a": _like(approver)},
+    return _run(caller, "po_approval_pending", sql, {"d": min_days, "t": _val(doc_type), "a": _like(approver),
+                                                     "inc": include_incomplete},
                 "po_get_pending_approval", args)
 
 
@@ -1757,7 +1792,7 @@ def gl_get_account_movement(caller: Caller, account: str, period_from: str, peri
          ORDER BY account_code, period_year, period_num
     """
     return _run(caller, "gl_trial_balance", sql,
-                {"kf": key(pf), "kt": key(pt), "acc": _val(account), "dept": _val(department)},
+                {"kf": key(pf), "kt": key(pt), "acc": _account_term(account), "dept": _val(department)},
                 "gl_get_account_movement", args)
 
 
@@ -1773,7 +1808,8 @@ def gl_get_budget_vs_actual(caller: Caller, period: str, ytd: bool = False, depa
     cond, params = _gl_period_filter(period, ytd)
     dim = {"account": "account_code, account_desc", "section": "pl_section, pl_line",
            "month": "period_name, period_year, period_num"}.get(group_by, "dept_code, dept_desc")
-    params.update({"dept": _val(department), "acc": _val(account), "bn": _val(budget_name), "rev": include_revenue})
+    params.update({"dept": _val(department), "acc": _account_term(account), "bn": _val(budget_name),
+                   "rev": include_revenue})
     sql = f"""
         WITH f AS (
             SELECT * FROM mart.gl_budget_vs_actual

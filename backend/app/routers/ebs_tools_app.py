@@ -695,6 +695,7 @@ class PendingApprovalIn(BaseModel):
     min_days: Optional[int] = Field(None, ge=0, description="Hanya yang menunggu minimal N hari")
     doc_type: Optional[Literal["PO", "PR"]] = Field(None, description="PO atau PR (requisition); kosong = keduanya")
     approver: Optional[str] = Field(None, description="Nama approver yang ditunggu (cocok sebagian)")
+    include_incomplete: bool = Field(False, description="true = ikut draft yang belum pernah di-submit (status Incomplete)")
 
 
 class ApInvoiceIn(BaseModel):

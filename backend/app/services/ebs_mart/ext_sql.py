@@ -266,6 +266,7 @@ EXT_MART_SQL: dict[str, str] = {
                s.segment4 AS account_code, MAX(COALESCE(m.account_desc, a.description)) AS account_desc,
                MAX(s.account_type) AS account_type, MAX(m.section) AS pl_section, MAX(m.line) AS pl_line,
                s.segment3 AS dept_code, MAX(d.description) AS dept_desc,
+               FALSE AS is_adjustment,
                SUM(s.period_net) * COALESCE(MAX(m.sign), CASE WHEN MAX(s.account_type) = 'R' THEN -1 ELSE 1 END) AS amount
           FROM src s
           LEFT JOIN meta.gl_account_map m       ON m.account_code = s.segment4

@@ -38,6 +38,9 @@ saldo akun, neraca, kas & bank, jurnal, posting, jurnal dari invoice mana, akun 
 
 ## Jebakan umum
 - "Biaya listrik" dll.: cari dengan nama akun di parameter account (cocok sebagian) — jangan menebak nomor akun.
+  Nama akun COA berbahasa Inggris (611311 ELECTRICITY); kata umum Indonesia (listrik, gaji, sewa, penyusutan,
+  bunga, pajak, perjalanan, asuransi, ...) diterjemahkan otomatis. Jika tidak ketemu, coba lookup_master(type=account)
+  dengan istilah Inggris.
 - Detail jurnal hanya 13 bulan terakhir; untuk periode lebih lama pakai trial balance / laba rugi.
 - Satu baris jurnal ringkasan bisa berasal dari banyak transaksi subledger (subledger_txn_count > 1).
 

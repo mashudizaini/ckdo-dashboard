@@ -320,7 +320,7 @@ async def call_tool(name: str, body: ToolIn, user: CurrentUser = Depends(_admin)
     args = {k: v for k, v in body.args.items() if v != ""}
     for flag in ("late_only", "include_reversed", "include_expired", "ytd", "compare_prior_year",
                  "include_inactive", "exclude_seeded", "include_seeded", "only_problems", "include_fyi",
-                 "include_unheld", "include_errors", "include_revenue"):
+                 "include_unheld", "include_errors", "include_revenue", "include_incomplete"):
         if isinstance(args.get(flag), str):
             args[flag] = args[flag] == "true"
     for k in ("due_from", "due_to", "date_from", "date_to", "ordered_from", "ordered_to"):
