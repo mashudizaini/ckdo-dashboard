@@ -37,6 +37,9 @@ transfer antar bank, aset, aset tetap, fixed asset, penyusutan, depresiasi, nila
 - Aset CIP belum disusutkan; pisahkan dari aset capitalized.
 - Penyusutan periode yang belum dijalankan (Run Depreciation) belum ada; nilai periode berjalan bisa nol — cek
   deprn_run di gl_get_period_status(application="FA").
+- Penyusutan FA suatu periode bisa lebih besar dari jurnal GL kategori "Depreciation": catch-up penyusutan aset yang
+  ditambahkan mundur (tanggal mulai dipakai di periode lalu) masuk jurnal "Addition". Contoh JUL-26: FA
+  Rp 1.655.056.248 vs jurnal Depreciation Rp 1.399.861.248 — sisanya ikut jurnal Addition.
 - PO CAPEX → aset melalui Mass Additions; aset yang belum di-post dari Mass Additions belum muncul di register.
 
 ## 6. Tanya balik jika
