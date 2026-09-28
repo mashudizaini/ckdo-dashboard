@@ -228,6 +228,9 @@ FIN_MART_SQL: dict[str, str] = {
                a.created_date,
                {TODAY} - a.created_date::date                      AS age_days
           FROM core.ar_interface_line a
+         -- interface_status P = already processed into an invoice; the rows
+         -- stay in the interface table until purged and are not pending work.
+         WHERE COALESCE(a.interface_status, '-') <> 'P'
     """,
 
     # Shipped, not cancelled, and no AR invoice line points back to it (nor
@@ -258,7 +261,8 @@ FIN_MART_SQL: dict[str, str] = {
           FROM core.fact_so_line l
           LEFT JOIN (SELECT so_line_id, COUNT(DISTINCT interface_line_id) AS lines_in_interface,
                             STRING_AGG(DISTINCT error_message, '; ') AS errors
-                       FROM core.ar_interface_line GROUP BY so_line_id) e ON e.so_line_id = l.line_id
+                       FROM core.ar_interface_line WHERE COALESCE(interface_status, '-') <> 'P'
+                      GROUP BY so_line_id) e ON e.so_line_id = l.line_id
          WHERE COALESCE(l.shipped_qty, 0) > 0
            AND COALESCE(l.cancelled_flag, 'N') <> 'Y'
            AND l.order_type IN ({_SO_TYPES})

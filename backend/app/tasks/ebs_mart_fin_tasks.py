@@ -79,6 +79,8 @@ _XLA_EVENT_SQL = """
        AND e.event_date >= ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -24)
        AND ROWNUM <= 50000
 """
+# Actual entries only (balance type A): Purchasing's encumbrance entries are
+# never transferred when encumbrance accounting is off, and are not a gap.
 _XLA_HEADER_SQL = """
     SELECT fa.application_short_name, h.ae_header_id, h.accounting_date, h.period_name, h.event_type_code,
            h.accounting_entry_status_code, NVL(h.gl_transfer_status_code, 'N'), te.entity_code, te.transaction_number,
@@ -88,6 +90,7 @@ _XLA_HEADER_SQL = """
       JOIN xla.xla_transaction_entities te ON te.entity_id = h.entity_id AND te.application_id = h.application_id
       JOIN fnd_application fa              ON fa.application_id = h.application_id
      WHERE h.ledger_id = :ledger
+       AND h.balance_type_code = 'A'
        AND h.accounting_date >= ADD_MONTHS(TRUNC(SYSDATE, 'MM'), -13)
        AND (h.accounting_entry_status_code <> 'F' OR NVL(h.gl_transfer_status_code, 'N') <> 'Y')
        AND ROWNUM <= 50000
@@ -429,17 +432,20 @@ def etl_mart_fa(year: int = None, month: int = None, full_refresh: bool = False,
                       "salvage_value", "life_in_months", "deprn_method", "units", "is_retired", "deprn_reserve",
                       "ytd_deprn", "last_deprn_period"],
                      [(_int(r[0]), r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], _num(r[10]), _num(r[11]),
-                       _num(r[12]), _int(r[13]), r[14], _num(r[15]), r[16] == "Y", _num(r[17]), _num(r[18]), r[19])
+                       _num(r[12]), _int(r[13]), r[14], _num(r[15]), r[16] == "Y", _num(r[17]), _num(r[18]),
+                       (r[19] or "").upper() or None)
                       for r in assets])
         n += _replace(cur, "core.fa_deprn",
                       ["asset_id", "book_type_code", "period_counter", "period_name", "period_start", "deprn_amount",
                        "ytd_deprn", "deprn_reserve"],
-                      [(_int(r[1]), r[0], _int(r[2]), r[3], r[4], _num(r[5]), _num(r[6]), _num(r[7])) for r in deprn])
+                      [(_int(r[1]), r[0], _int(r[2]), (r[3] or "").upper(), r[4], _num(r[5]), _num(r[6]), _num(r[7]))
+                       for r in deprn])
         cur.execute("DELETE FROM core.fin_period_status WHERE application = 'FA'")
         n += _replace_rows(cur, "core.fin_period_status",
                            ["row_key", "application", "book_type_code", "period_name", "period_year", "period_num",
                             "start_date", "end_date", "status_code", "deprn_run", "last_update_date"],
-                           [(f"FA|{r[0]}|{r[1]}", "FA", r[0], r[1], _int(r[3]), _int(r[4]), r[5], r[6],
+                           # FA calendars name periods "Aug-26"; GL and the tools use "AUG-26".
+                           [(f"FA|{r[0]}|{r[1]}", "FA", r[0], (r[1] or "").upper(), _int(r[3]), _int(r[4]), r[5], r[6],
                              "C" if r[7] else "O", r[8], None) for r in periods])
         rows_loaded = n
         run.pg.commit()

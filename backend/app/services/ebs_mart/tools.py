@@ -1274,6 +1274,7 @@ def po_get_uninvoiced_receipts(caller: Caller, as_of_period: str | None = None, 
         end = date(y, m, calendar.monthrange(y, m)[1])
     where = """
          WHERE qty_received_not_billed > 0
+           AND COALESCE(closed_code, 'OPEN') NOT IN ('CLOSED', 'FINALLY CLOSED', 'CLOSED FOR INVOICE')
            AND (%(end)s::date IS NULL OR po_date <= %(end)s::date)
            AND (%(s)s::text IS NULL OR vendor_name ILIKE %(s)s::text)
     """
@@ -1322,7 +1323,7 @@ def ar_get_unapplied_receipts(caller: Caller, customer: str | None = None) -> di
            AND NOT is_reversed
            AND (%(c)s::text IS NULL OR customer_name ILIKE %(c)s::text)
          GROUP BY customer_name, receipt_number, receipt_date, receipt_method, currency_code
-        HAVING SUM(amount_idr) <> 0
+        HAVING ABS(SUM(amount_idr)) >= 1
          ORDER BY receipt_date
     """
     return _run(caller, "ar_receipt", sql, {"c": _like(customer)}, "ar_get_unapplied_receipts", args)
