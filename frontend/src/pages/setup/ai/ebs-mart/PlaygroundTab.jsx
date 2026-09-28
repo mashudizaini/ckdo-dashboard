@@ -8,94 +8,94 @@ const GROUPS = ["ebs-management", "ebs-finance", "ebs-purchasing", "ebs-warehous
 // Argument form per intent tool — mirrors the request models in
 // backend/app/routers/ebs_tools_app.py.
 const TOOLS = {
-  get_ap_aging: [
+  ap_get_aging: [
     ["supplier", "text"], ["min_days_overdue", "number"], ["currency", "text"],
     ["group_by", ["supplier", "bucket", "supplier_bucket"]],
   ],
-  get_ap_open_invoices: [
+  ap_get_open_invoices: [
     ["supplier", "text"], ["invoice_num", "text"], ["min_days_overdue", "number"],
     ["due_from", "date"], ["due_to", "date"], ["currency", "text"],
   ],
-  get_ap_payments: [
+  ap_get_payments: [
     ["supplier", "text"], ["invoice_num", "text"], ["payment_number", "text"],
     ["date_from", "date"], ["date_to", "date"], ["group_by", ["none", "supplier", "month"]],
   ],
-  get_ap_holds: [["supplier", "text"], ["hold_code", "text"]],
-  get_expiring_lots: [
+  ap_get_holds: [["supplier", "text"], ["hold_code", "text"]],
+  inv_get_expiring_lots: [
     ["days", "number", 90], ["item", "text"], ["subinventory_type", ["GOOD", "REJECT", "QUARANTINE", ""]],
     ["include_expired", ["false", "true"]], ["item_category", "text"],
   ],
-  get_stock_onhand: [
+  inv_get_onhand: [
     ["item", "text"], ["subinventory", "text"], ["lot_number", "text"],
     ["subinventory_type", ["", "GOOD", "REJECT", "QUARANTINE"]], ["group_by", ["item", "subinventory", "lot"]],
     ["item_category", "text"],
   ],
-  get_stock_movement: [
+  inv_get_movements: [
     ["item", "text"], ["date_from", "date"], ["date_to", "date"], ["transaction_type", "text"],
     ["subinventory", "text"], ["group_by", ["type", "item", "day", "month"]],
   ],
-  get_po_outstanding: [
+  po_get_outstanding: [
     ["supplier", "text"], ["item", "text"], ["po_number", "text"], ["late_only", ["false", "true"]],
     ["group_by", ["none", "supplier"]],
   ],
-  get_po_match_status: [
+  po_get_match_status: [
     ["po_number", "text"], ["supplier", "text"], ["item", "text"], ["status", "text"],
     ["group_by", ["none", "supplier", "status"]],
   ],
-  get_pr_pending: [
+  pr_get_pending: [
     ["person", "text"], ["item", "text"], ["pr_number", "text"], ["min_days_waiting", "number"],
     ["group_by", ["none", "preparer"]],
   ],
-  get_inventory_value: [
+  inv_get_valuation: [
     ["item", "text"], ["item_category", "text"], ["subinventory_type", ["", "GOOD", "REJECT", "QUARANTINE"]],
     ["group_by", ["category", "item", "subinventory_type"]],
   ],
-  get_ar_aging: [
+  ar_get_aging: [
     ["customer", "text"], ["min_days_overdue", "number"], ["currency", "text"],
     ["group_by", ["customer", "bucket", "customer_bucket"]],
   ],
-  get_ar_open_invoices: [
+  ar_get_open_invoices: [
     ["customer", "text"], ["invoice_num", "text"], ["min_days_overdue", "number"],
     ["due_from", "date"], ["due_to", "date"], ["currency", "text"],
   ],
-  get_ar_receipts: [
+  ar_get_receipts: [
     ["customer", "text"], ["receipt_number", "text"], ["date_from", "date"], ["date_to", "date"],
     ["application_status", ["", "APP", "UNAPP", "ACC", "UNID"]], ["include_reversed", ["false", "true"]],
     ["group_by", ["none", "customer", "month"]],
   ],
-  get_so_backlog: [
+  so_get_backlog: [
     ["customer", "text"], ["item", "text"], ["order_number", "text"],
     ["business_type", ["", "Local", "Export", "CMO"]], ["late_only", ["false", "true"]],
     ["ordered_from", "date"], ["ordered_to", "date"], ["group_by", ["none", "customer", "item", "year"]],
   ],
-  get_so_shipment_status: [["order_number", "text"], ["customer", "text"], ["item", "text"], ["status", "text"]],
-  get_sales_by_customer: [
+  so_get_shipment_status: [["order_number", "text"], ["customer", "text"], ["item", "text"], ["status", "text"]],
+  sales_get_summary: [
     ["customer", "text"], ["item", "text"], ["item_category", "text"], ["period", "text"],
     ["business_type", ["", "Local", "Export", "CMO", "Non-SO"]],
     ["group_by", ["customer", "item", "month", "customer_item", "business_type"]],
   ],
-  get_batch_status: [
+  opm_get_batch: [
     ["batch_no", "text"], ["product", "text"], ["status", ["", "Pending", "WIP", "Completed", "Closed", "Cancelled"]],
     ["date_from", "date"], ["date_to", "date"], ["late_only", ["false", "true"]],
     ["group_by", ["none", "status", "schedule", "product", "month"]],
   ],
-  get_batch_yield: [
+  opm_get_yield: [
     ["product", "text"], ["batch_no", "text"], ["date_from", "date"], ["date_to", "date"], ["below_pct", "number"],
     ["group_by", ["product", "batch", "month"]],
   ],
-  get_batch_material_usage: [
+  opm_get_material_usage: [
     ["batch_no", "text"], ["ingredient", "text"], ["lot_number", "text"], ["over_pct", "number"],
     ["group_by", ["none", "ingredient"]],
   ],
-  get_pl: [
+  gl_get_pl: [
     ["period", "text"], ["ytd", ["false", "true"]], ["department", "text"],
     ["compare_prior_year", ["false", "true"]], ["level", ["line", "section"]],
   ],
-  get_trial_balance: [
+  gl_get_trial_balance: [
     ["period", "text"], ["account", "text"], ["department", "text"], ["statement", ["", "BS", "PL"]],
     ["group_by", ["account", "fs_line", "department"]],
   ],
-  get_gl_journals: [
+  gl_get_journals: [
     ["period", "text"], ["date_from", "date"], ["date_to", "date"], ["account", "text"], ["department", "text"],
     ["source", "text"], ["category", "text"], ["text", "text"], ["subledger_txn", "text"], ["min_amount", "number"],
     ["group_by", ["none", "source", "account"]],
@@ -112,8 +112,25 @@ const TOOLS = {
   fa_get_assets: [["category", "text"], ["location", "text"], ["asset", "text"],
     ["status", ["", "Aktif", "CIP", "Retired", "Fully reserved"]], ["group_by", ["category", "location", "status", "asset"]]],
   fa_get_depreciation: [["period", "text"], ["category", "text"], ["group_by", ["category", "asset"]]],
+  lookup_master: [["text", "text"], ["type", ["", "item", "supplier", "customer", "account", "department"]]],
+  po_get_document: [["po_number", "text"]],
+  po_get_pending_approval: [["min_days", "number"], ["doc_type", ["", "PO", "PR"]], ["approver", "text"]],
+  ap_get_invoice: [["invoice_num", "text"], ["supplier", "text"]],
+  ap_get_due_forecast: [["weeks_ahead", "number"], ["supplier", "text"]],
+  ap_get_withholding: [["period", "text"], ["tax_code", "text"], ["supplier", "text"], ["group_by", ["tax", "supplier", "invoice"]]],
+  so_get_order: [["order_number", "text"]],
+  so_get_holds: [["hold_name", "text"], ["customer", "text"]],
+  ar_get_customer_balance: [["customer", "text"]],
+  inv_get_stock_card: [["item", "text"], ["period", "text"], ["subinventory", "text"]],
+  inv_get_slow_moving: [["days_no_movement", "number"], ["subinventory_type", ["GOOD", "", "REJECT", "QUARANTINE"]]],
+  opm_get_item_cost: [["item", "text"], ["period", "text"]],
+  gl_get_account_movement: [["account", "text"], ["period_from", "text"], ["period_to", "text"], ["department", "text"]],
+  gl_get_budget_vs_actual: [["period", "text"], ["ytd", ["false", "true"]], ["department", "text"], ["account", "text"],
+    ["budget_name", "text"], ["include_revenue", ["false", "true"]], ["group_by", ["department", "account", "section", "month"]]],
+  it_get_interface_errors: [["interface", ["", "AP", "AR", "GL", "INV", "RCV"]], ["status", ["", "ERROR", "PENDING"]],
+    ["days", "number"], ["group_by", ["summary", "detail"]]],
   find_marts: [["keywords", "text"]],
-  get_data_freshness: [],
+  get_data_freshness: [["domain", "text"]],
   // System Administration — dijalankan sebagai email Anda sendiri; hanya
   // email di SYSADMIN_ALLOWLIST yang lolos, grup yang dipilih tidak berpengaruh.
   sa_get_user: [["user", "text"]],
@@ -151,7 +168,7 @@ export default function PlaygroundTab() {
   const [sqlErr, setSqlErr] = useState(null);
   const [sqlBusy, setSqlBusy] = useState(false);
 
-  const [tool, setTool] = useState("get_ap_aging");
+  const [tool, setTool] = useState("ap_get_aging");
   const [args, setArgs] = useState({});
   const [toolGroup, setToolGroup] = useState("ebs-management");
   const [toolResult, setToolResult] = useState(null);

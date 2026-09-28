@@ -58,5 +58,10 @@
     "command": "/cek-request",
     "title": "Concurrent request error",
     "content": "Concurrent request error/warning {{jam | 24}} jam terakhir, dikelompokkan per program, dengan pesan penyelesaiannya."
+  },
+  {
+    "command": "/cek-interface",
+    "title": "Error open interface",
+    "content": "Error interface {{AP/AR/GL/INV/RCV | semua}} dengan pesan error, jumlah baris dan yang tertua."
   }
 ]

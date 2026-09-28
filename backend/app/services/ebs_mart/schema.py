@@ -19,6 +19,7 @@ from app.services.ebs_mart.constants import MARTS, SA_PREFIX, SA_READER_ROLE
 from app.services.ebs_mart.mart_sql import MART_EXTRA_INDEXES, MART_SQL, MART_UNIQUE_INDEX
 from app.services.ebs_mart.sa_sql import SA_CORE_DDL, SA_META_DDL, SOD_SEED
 from app.services.ebs_mart.fin_sql import FIN_CORE_DDL
+from app.services.ebs_mart.ext_sql import EXT_CORE_DDL
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -943,6 +944,7 @@ def ensure_mart_schema():
         ("meta/core schemas", lambda cur: _exec_each(cur, _META_DDL + _CORE_DDL, "meta/core ddl")),
         ("system administration ddl", lambda cur: _exec_each(cur, SA_META_DDL + SA_CORE_DDL, "sa ddl")),
         ("finance close ddl", lambda cur: _exec_each(cur, FIN_CORE_DDL, "finance close ddl")),
+        ("catalog extension ddl", lambda cur: _exec_each(cur, EXT_CORE_DDL, "catalog extension ddl")),
         ("sod rules", seed_sod_rules),
         ("etl_job_log columns", lambda cur: _exec_each(cur, _ETL_LOG_COLUMNS, "etl_job_log columns")),
         ("etl_run_log view", create_etl_run_log_view),

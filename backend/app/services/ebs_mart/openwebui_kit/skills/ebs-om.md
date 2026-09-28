@@ -13,10 +13,13 @@ penjualan, omzet, revenue, penjualan per customer / produk / bulan, top customer
   yang SUDAH DIINVOICE). Kolom kunci: amount_idr, quantity, credit_memo_idr, period_name, business_type.
 
 ## Intent tool (utamakan)
-- Order yang belum dikirim / terlambat → get_so_backlog (late_only, group_by: none | customer | item)
-- Status kirim SO tertentu, backorder → get_so_shipment_status (order_number / status)
-- Penjualan / omzet → get_sales_by_customer (period YYYY atau YYYY-MM; group_by: customer | item | month |
+- Order yang belum dikirim / terlambat → so_get_backlog (late_only, group_by: none | customer | item)
+- Status kirim SO tertentu, backorder → so_get_shipment_status (order_number / status)
+- Penjualan / omzet → sales_get_summary (period YYYY atau YYYY-MM; group_by: customer | item | month |
   customer_item | business_type)
+- Detail satu SO (open atau closed): baris, delivery, lot, nomor invoice → so_get_order (order_number)
+- SO yang di-hold (credit hold dll.) → so_get_holds
+- Sudah dikirim belum jadi invoice → so_get_shipped_not_invoiced
 
 ## Aturan bisnis
 - Hanya order tipe SO-LOCAL dan SO-EXPORT (sama dengan ETL penjualan dashboard). Tipe bisnis: SO-EXPORT = Export;

@@ -108,5 +108,50 @@
     "command": "/jurnal-invoice",
     "title": "Jurnal dari dokumen",
     "content": "Jurnal GL yang berasal dari transaksi {{nomor_invoice}}: tanggal, akun, debit/kredit."
+  },
+  {
+    "command": "/kartu-stok",
+    "title": "Kartu stok item",
+    "content": "Kartu stok {{item}} periode {{periode}}: saldo awal, masuk, keluar, saldo akhir per transaksi."
+  },
+  {
+    "command": "/mutasi-akun",
+    "title": "Mutasi akun",
+    "content": "Mutasi akun {{akun}} dari {{periode_awal}} sampai {{periode_akhir}} dengan jurnal terbesar."
+  },
+  {
+    "command": "/budget",
+    "title": "Budget vs realisasi",
+    "content": "Budget vs realisasi vs encumbrance departemen {{departemen}} periode {{periode}}, dengan sisa budget dan % realisasi."
+  },
+  {
+    "command": "/hpp-item",
+    "title": "Biaya PMAC item",
+    "content": "Biaya PMAC item {{item}} periode {{periode}} per komponen, bandingkan dengan periode sebelumnya."
+  },
+  {
+    "command": "/detail-po",
+    "title": "Detail PO",
+    "content": "Tampilkan PO {{nomor_po}}: semua baris, qty diterima dan ditagih, serta invoice terkait."
+  },
+  {
+    "command": "/detail-so",
+    "title": "Detail SO",
+    "content": "Tampilkan SO {{nomor_so}}: semua baris, status kirim, delivery, lot, dan nomor invoice."
+  },
+  {
+    "command": "/approval-po",
+    "title": "PO/PR menunggu approval",
+    "content": "PO dan PR yang menunggu approval lebih dari {{hari | 3}} hari, per approver."
+  },
+  {
+    "command": "/slow-moving",
+    "title": "Stok slow moving",
+    "content": "Item di subinventory GOOD yang tidak bergerak {{hari | 180}} hari, urut paling lama."
+  },
+  {
+    "command": "/proyeksi-bayar",
+    "title": "Proyeksi pembayaran supplier",
+    "content": "Proyeksi pembayaran supplier {{minggu | 8}} minggu ke depan per minggu, termasuk yang sudah lewat jatuh tempo."
   }
 ]

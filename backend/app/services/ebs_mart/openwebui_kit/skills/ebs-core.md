@@ -24,16 +24,16 @@ Produksi (OPM):
 Tool per tahap:
 | Tahap | Tool |
 |---|---|
-| PR belum PO | get_pr_pending |
-| PO belum diterima | get_po_outstanding |
-| Sudah diterima / sudah ditagih | get_po_match_status, po_get_uninvoiced_receipts |
-| Hutang, hold, pembayaran | get_ap_aging, get_ap_open_invoices, get_ap_holds, get_ap_payments |
-| SO belum kirim / status kirim | get_so_backlog, get_so_shipment_status |
+| PR belum PO | pr_get_pending |
+| PO belum diterima / detail PO / menunggu approval | po_get_outstanding, po_get_document, po_get_pending_approval |
+| Sudah diterima / sudah ditagih | po_get_match_status, po_get_uninvoiced_receipts |
+| Hutang, hold, pembayaran | ap_get_aging, ap_get_open_invoices, ap_get_invoice, ap_get_holds, ap_get_payments, ap_get_due_forecast, ap_get_withholding |
+| SO belum kirim / status kirim / detail SO / hold | so_get_backlog, so_get_shipment_status, so_get_order, so_get_holds |
 | Sudah kirim belum invoice | so_get_shipped_not_invoiced, ar_get_autoinvoice_errors |
-| Piutang & penerimaan | get_ar_aging, get_ar_open_invoices, get_ar_receipts, ar_get_unapplied_receipts |
-| Stok, lot, mutasi, nilai | get_stock_onhand, get_expiring_lots, get_stock_movement, get_inventory_value |
-| Batch produksi | get_batch_status, get_batch_yield, get_batch_material_usage, opm_get_open_batches |
-| GL | get_trial_balance, get_pl, get_gl_journals, gl_get_period_status, gl_get_subledger_gap |
+| Piutang & penerimaan | ar_get_aging, ar_get_customer_balance, ar_get_open_invoices, ar_get_receipts, ar_get_unapplied_receipts |
+| Stok, lot, mutasi, nilai | inv_get_onhand, inv_get_expiring_lots, inv_get_movements, inv_get_stock_card, inv_get_slow_moving, inv_get_valuation |
+| Batch produksi & biaya | opm_get_batch, opm_get_yield, opm_get_material_usage, opm_get_open_batches, opm_get_item_cost |
+| GL | gl_get_trial_balance, gl_get_account_movement, gl_get_pl, gl_get_journals, gl_get_budget_vs_actual, gl_get_period_status, gl_get_subledger_gap |
 | Bank & aset | ce_get_unreconciled, fa_get_assets, fa_get_depreciation |
 
 ## 3. Istilah yang sering tertukar
@@ -50,7 +50,8 @@ Tool per tahap:
 ## 4. Aturan query umum
 - Periode relatif: "bulan ini" = periode berjalan menurut tanggal hari ini (WIB); "bulan lalu" = periode sebelumnya.
   Sebutkan nama periode yang dipakai di jawaban.
-- Nama mirip (supplier/customer/item): jika hasil tool memuat beberapa nama yang cocok, tanyakan user memilih yang mana.
+- Nama mirip (supplier/customer/item/akun): panggil lookup_master(text, type) dulu; jika >1 kandidat, tanyakan user
+  memilih yang mana, lalu pakai kode persisnya di tool berikutnya.
 - Pertanyaan lintas modul (mis. "PO ini sudah dibayar?") dijawab berurutan mengikuti alur dokumen di atas, satu tool
   per tahap.
 

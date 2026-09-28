@@ -14,9 +14,11 @@ batch mana, penelusuran lot, traceability
   diulang per lot, satuan uom), line_variance_pct, lot_number, lot_qty_consumed (satuan lot_uom).
 
 ## Intent tool (utamakan)
-- Status batch, batch terlambat, ketepatan jadwal → get_batch_status (group_by: none | status | schedule | product | month)
-- Yield → get_batch_yield (group_by: product | batch | month; below_pct untuk yield rendah)
-- Pemakaian bahan, selisih vs standar, lot bahan → get_batch_material_usage (lot_number untuk penelusuran lot → batch)
+- Status batch, batch terlambat, ketepatan jadwal → opm_get_batch (group_by: none | status | schedule | product | month)
+- Yield → opm_get_yield (group_by: product | batch | month; below_pct untuk yield rendah)
+- Pemakaian bahan, selisih vs standar, lot bahan → opm_get_material_usage (lot_number untuk penelusuran lot → batch)
+- Batch belum Closed dan lamanya → opm_get_open_batches
+- Biaya PMAC item per periode dan perubahannya, per komponen → opm_get_item_cost (item, period)
 
 ## Aturan bisnis
 - Definisi sama dengan dashboard Production: periode batch = tanggal RENCANA MULAI (plan_start_date);

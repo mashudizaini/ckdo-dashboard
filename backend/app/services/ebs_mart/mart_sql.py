@@ -945,3 +945,15 @@ MART_EXTRA_INDEXES.update(FIN_EXTRA_INDEXES)
 MARTS_BY_JOB.update(FIN_MARTS_BY_JOB)
 MARTS_BY_JOB["etl_mart_om"] = MARTS_BY_JOB["etl_mart_om"] + ["so_shipped_not_invoiced"]
 MARTS_BY_JOB["etl_mart_ar"] = MARTS_BY_JOB["etl_mart_ar"] + ["so_shipped_not_invoiced"]
+
+# Rest of the library v2 catalog (ext_sql.py).
+from app.services.ebs_mart.ext_sql import (  # noqa: E402
+    EXT_EXTRA_INDEXES, EXT_EXTRA_REFRESH, EXT_MART_SQL, EXT_MARTS_BY_JOB, EXT_UNIQUE_INDEX,
+)
+
+MART_SQL.update(EXT_MART_SQL)
+MART_UNIQUE_INDEX.update(EXT_UNIQUE_INDEX)
+MART_EXTRA_INDEXES.update(EXT_EXTRA_INDEXES)
+MARTS_BY_JOB.update(EXT_MARTS_BY_JOB)
+for _job, _marts in EXT_EXTRA_REFRESH.items():
+    MARTS_BY_JOB[_job] = MARTS_BY_JOB.get(_job, []) + [m for m in _marts if m not in MARTS_BY_JOB.get(_job, [])]

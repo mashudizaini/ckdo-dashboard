@@ -12,9 +12,11 @@ penerimaan kas, pembayaran dari customer, cash in, receipt, unapplied, on accoun
   Kolom kunci: receipt_number, receipt_date, customer_name, application_status, applied_invoice_num, amount_idr.
 
 ## Intent tool (utamakan)
-- Aging piutang per customer / per bucket → get_ar_aging (group_by: customer | bucket | customer_bucket)
-- Invoice customer belum lunas, jatuh tempo minggu ini → get_ar_open_invoices
-- Penerimaan kas, siapa bayar invoice apa, unapplied → get_ar_receipts (group_by: none | customer | month)
+- Aging piutang per customer / per bucket → ar_get_aging (group_by: customer | bucket | customer_bucket)
+- Invoice customer belum lunas, jatuh tempo minggu ini → ar_get_open_invoices
+- Penerimaan kas, siapa bayar invoice apa, unapplied → ar_get_receipts (group_by: none | customer | month)
+- Saldo satu customer (total, overdue, jatuh tempo tertua, unapplied) → ar_get_customer_balance (customer)
+- Receipt belum di-apply → ar_get_unapplied_receipts
 
 ## Aturan bisnis
 - Populasi ar_aging sama dengan laporan AR Outstanding dashboard: kelas INV/DM/CM, status OP, invoice
@@ -29,7 +31,7 @@ penerimaan kas, pembayaran dari customer, cash in, receipt, unapplied, on accoun
 ## Jebakan umum
 - "Customer X sudah bayar belum?" → cek dua sisi: sisa di ar_aging DAN penerimaan di ar_receipt.
 - Nama customer dicocokkan sebagian; bila beberapa customer mirip, tanyakan yang dimaksud.
-- Piutang dan penjualan berbeda: penjualan (omzet) pakai skill ebs-om / get_sales_by_customer.
+- Piutang dan penjualan berbeda: penjualan (omzet) pakai skill ebs-om / sales_get_summary.
 
 ## Contoh (golden queries)
 Q: total piutang per aging bucket

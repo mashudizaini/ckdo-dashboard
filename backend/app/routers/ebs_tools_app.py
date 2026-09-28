@@ -372,52 +372,57 @@ async def run_sql(body: SqlIn, caller: Caller = Depends(current_caller)):
     return await _call(tools.run_sql, caller, body.sql, body.question)
 
 
+class FreshIn(BaseModel):
+    domain: Optional[str] = Field(None, description="Satu domain saja: AP, AR, PO, OM, INV, OPM, GL, CE, FA, MASTER. "
+                                                    "Kosong = semua mart yang bisa Anda akses")
+
+
 @app.post("/get_data_freshness", operation_id="get_data_freshness",
-          summary="Daftar mart yang bisa Anda akses, jumlah baris, dan waktu data terakhir (as_of)")
-async def get_data_freshness(caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_data_freshness, caller)
+          summary="Daftar mart yang bisa Anda akses, jumlah baris, dan waktu data terakhir (as_of), opsional per domain")
+async def get_data_freshness(body: Optional[FreshIn] = None, caller: Caller = Depends(current_caller)):
+    return await _call(tools.get_data_freshness, caller, body.domain if body else None)
 
 
-@app.post("/get_ap_aging", operation_id="get_ap_aging",
+@app.post("/ap_get_aging", operation_id="ap_get_aging",
           summary="Aging hutang usaha (AP) per supplier dan bucket umur: Current, 1-30, 31-60, 61-90, >90 hari")
-async def get_ap_aging(body: AgingIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_ap_aging, caller, **body.model_dump())
+async def ap_get_aging(body: AgingIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.ap_get_aging, caller, **body.model_dump())
 
 
-@app.post("/get_ap_open_invoices", operation_id="get_ap_open_invoices",
+@app.post("/ap_get_open_invoices", operation_id="ap_get_open_invoices",
           summary="Daftar invoice supplier yang belum lunas, dengan jatuh tempo dan sisa hutang (valas + IDR)")
-async def get_ap_open_invoices(body: OpenInvoiceIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_ap_open_invoices, caller, **body.model_dump())
+async def ap_get_open_invoices(body: OpenInvoiceIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.ap_get_open_invoices, caller, **body.model_dump())
 
 
-@app.post("/get_ap_payments", operation_id="get_ap_payments",
+@app.post("/ap_get_payments", operation_id="ap_get_payments",
           summary="Riwayat pembayaran ke supplier (per pembayaran, per supplier, atau per bulan)")
-async def get_ap_payments(body: PaymentsIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_ap_payments, caller, **body.model_dump())
+async def ap_get_payments(body: PaymentsIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.ap_get_payments, caller, **body.model_dump())
 
 
-@app.post("/get_ap_holds", operation_id="get_ap_holds",
+@app.post("/ap_get_holds", operation_id="ap_get_holds",
           summary="Invoice supplier yang sedang di-hold (belum di-release) beserta alasannya")
-async def get_ap_holds(body: HoldsIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_ap_holds, caller, **body.model_dump())
+async def ap_get_holds(body: HoldsIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.ap_get_holds, caller, **body.model_dump())
 
 
-@app.post("/get_expiring_lots", operation_id="get_expiring_lots",
+@app.post("/inv_get_expiring_lots", operation_id="inv_get_expiring_lots",
           summary="Lot persediaan yang akan (atau sudah) kedaluwarsa dalam N hari, dengan qty dan satuan")
-async def get_expiring_lots(body: ExpiringIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_expiring_lots, caller, **body.model_dump())
+async def inv_get_expiring_lots(body: ExpiringIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.inv_get_expiring_lots, caller, **body.model_dump())
 
 
-@app.post("/get_stock_onhand", operation_id="get_stock_onhand",
+@app.post("/inv_get_onhand", operation_id="inv_get_onhand",
           summary="Stok on-hand saat ini per item, per subinventory, atau per lot (org 121)")
-async def get_stock_onhand(body: OnhandIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_stock_onhand, caller, **body.model_dump())
+async def inv_get_onhand(body: OnhandIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.inv_get_onhand, caller, **body.model_dump())
 
 
-@app.post("/get_stock_movement", operation_id="get_stock_movement",
+@app.post("/inv_get_movements", operation_id="inv_get_movements",
           summary="Mutasi stok (masuk/keluar) per tipe transaksi, item, hari, atau bulan")
-async def get_stock_movement(body: MovementIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_stock_movement, caller, **body.model_dump())
+async def inv_get_movements(body: MovementIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.inv_get_movements, caller, **body.model_dump())
 
 
 # ── Export (Open WebUI "Export Excel" action) — not a tool, kept out of the spec ──
@@ -451,100 +456,100 @@ async def export_download(token: str):
                         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
-@app.post("/get_po_outstanding", operation_id="get_po_outstanding",
+@app.post("/po_get_outstanding", operation_id="po_get_outstanding",
           summary="PO yang belum diterima penuh (sisa qty & nilai), tanggal janji kirim, dan keterlambatan")
-async def get_po_outstanding(body: PoOutstandingIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_po_outstanding, caller, **body.model_dump())
+async def po_get_outstanding(body: PoOutstandingIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.po_get_outstanding, caller, **body.model_dump())
 
 
-@app.post("/get_po_match_status", operation_id="get_po_match_status",
+@app.post("/po_get_match_status", operation_id="po_get_match_status",
           summary="Status PO: sudah diterima? sudah ditagih? invoice apa? (3-way match, uninvoiced receipts)")
-async def get_po_match_status(body: PoMatchIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_po_match_status, caller, **body.model_dump())
+async def po_get_match_status(body: PoMatchIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.po_get_match_status, caller, **body.model_dump())
 
 
-@app.post("/get_pr_pending", operation_id="get_pr_pending",
+@app.post("/pr_get_pending", operation_id="pr_get_pending",
           summary="Purchase requisition (PR) yang sudah approved tetapi belum dibuatkan PO")
-async def get_pr_pending(body: PrPendingIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_pr_pending, caller, **body.model_dump())
+async def pr_get_pending(body: PrPendingIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.pr_get_pending, caller, **body.model_dump())
 
 
-@app.post("/get_inventory_value", operation_id="get_inventory_value",
+@app.post("/inv_get_valuation", operation_id="inv_get_valuation",
           summary="Nilai persediaan org 121 (Rupiah) dengan biaya OPM PMAC, per kategori / item / klasifikasi subinventory")
-async def get_inventory_value(body: InvValueIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_inventory_value, caller, **body.model_dump())
+async def inv_get_valuation(body: InvValueIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.inv_get_valuation, caller, **body.model_dump())
 
 
-@app.post("/get_ar_aging", operation_id="get_ar_aging",
+@app.post("/ar_get_aging", operation_id="ar_get_aging",
           summary="Aging piutang usaha (AR) per customer dan bucket — sama dengan laporan AR Outstanding dashboard")
-async def get_ar_aging(body: ArAgingIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_ar_aging, caller, **body.model_dump())
+async def ar_get_aging(body: ArAgingIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.ar_get_aging, caller, **body.model_dump())
 
 
-@app.post("/get_ar_open_invoices", operation_id="get_ar_open_invoices",
+@app.post("/ar_get_open_invoices", operation_id="ar_get_open_invoices",
           summary="Daftar invoice customer yang belum lunas, jatuh tempo dan sisa piutang (valas + IDR)")
-async def get_ar_open_invoices(body: ArOpenIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_ar_open_invoices, caller, **body.model_dump())
+async def ar_get_open_invoices(body: ArOpenIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.ar_get_open_invoices, caller, **body.model_dump())
 
 
-@app.post("/get_ar_receipts", operation_id="get_ar_receipts",
+@app.post("/ar_get_receipts", operation_id="ar_get_receipts",
           summary="Penerimaan kas dari customer dan aplikasinya ke invoice (termasuk unapplied / on account)")
-async def get_ar_receipts(body: ArReceiptIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_ar_receipts, caller, **body.model_dump())
+async def ar_get_receipts(body: ArReceiptIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.ar_get_receipts, caller, **body.model_dump())
 
 
-@app.post("/get_so_backlog", operation_id="get_so_backlog",
+@app.post("/so_get_backlog", operation_id="so_get_backlog",
           summary="Sales order yang masih open: sisa qty & nilai belum dikirim, jadwal kirim, keterlambatan")
-async def get_so_backlog(body: SoBacklogIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_so_backlog, caller, **body.model_dump())
+async def so_get_backlog(body: SoBacklogIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.so_get_backlog, caller, **body.model_dump())
 
 
-@app.post("/get_so_shipment_status", operation_id="get_so_shipment_status",
+@app.post("/so_get_shipment_status", operation_id="so_get_shipment_status",
           summary="Status pengiriman per baris SO: terkirim, staged, backorder, nomor delivery, tanggal ship confirm")
-async def get_so_shipment_status(body: SoShipIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_so_shipment_status, caller, **body.model_dump())
+async def so_get_shipment_status(body: SoShipIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.so_get_shipment_status, caller, **body.model_dump())
 
 
-@app.post("/get_sales_by_customer", operation_id="get_sales_by_customer",
+@app.post("/sales_get_summary", operation_id="sales_get_summary",
           summary="Penjualan terinvoice per customer / item / bulan / tipe bisnis (nilai IDR, qty, credit memo)")
-async def get_sales_by_customer(body: SalesIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_sales_by_customer, caller, **body.model_dump())
+async def sales_get_summary(body: SalesIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.sales_get_summary, caller, **body.model_dump())
 
 
-@app.post("/get_batch_status", operation_id="get_batch_status",
+@app.post("/opm_get_batch", operation_id="opm_get_batch",
           summary="Status batch produksi OPM: status, formula, rencana vs aktual mulai/selesai, keterlambatan, ketepatan jadwal")
-async def get_batch_status(body: BatchStatusIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_batch_status, caller, **body.model_dump())
+async def opm_get_batch(body: BatchStatusIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.opm_get_batch, caller, **body.model_dump())
 
 
-@app.post("/get_batch_yield", operation_id="get_batch_yield",
+@app.post("/opm_get_yield", operation_id="opm_get_yield",
           summary="Yield batch (aktual ÷ rencana produk) per produk, per batch, atau per bulan — batch Completed/Closed")
-async def get_batch_yield(body: BatchYieldIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_batch_yield, caller, **body.model_dump())
+async def opm_get_yield(body: BatchYieldIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.opm_get_yield, caller, **body.model_dump())
 
 
-@app.post("/get_batch_material_usage", operation_id="get_batch_material_usage",
+@app.post("/opm_get_material_usage", operation_id="opm_get_material_usage",
           summary="Pemakaian bahan per batch (standar vs aktual) dan lot bahan yang dipakai — juga penelusuran lot → batch")
-async def get_batch_material_usage(body: BatchMaterialIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_batch_material_usage, caller, **body.model_dump())
+async def opm_get_material_usage(body: BatchMaterialIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.opm_get_material_usage, caller, **body.model_dump())
 
 
-@app.post("/get_pl", operation_id="get_pl",
+@app.post("/gl_get_pl", operation_id="gl_get_pl",
           summary="Laba rugi (P&L) per periode / YTD dengan subtotal — mapping sama dengan laporan Financial Statement dashboard")
-async def get_pl(body: PlIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_pl, caller, **body.model_dump())
+async def gl_get_pl(body: PlIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.gl_get_pl, caller, **body.model_dump())
 
 
-@app.post("/get_trial_balance", operation_id="get_trial_balance",
+@app.post("/gl_get_trial_balance", operation_id="gl_get_trial_balance",
           summary="Trial balance satu periode: saldo awal, mutasi, saldo akhir per akun / pos / departemen")
-async def get_trial_balance(body: TbIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_trial_balance, caller, **body.model_dump())
+async def gl_get_trial_balance(body: TbIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.gl_get_trial_balance, caller, **body.model_dump())
 
 
-@app.post("/get_gl_journals", operation_id="get_gl_journals",
+@app.post("/gl_get_journals", operation_id="gl_get_journals",
           summary="Detail jurnal GL posted (13 bulan terakhir) dan transaksi subledger asalnya (invoice/receipt)")
-async def get_gl_journals(body: JournalIn, caller: Caller = Depends(current_caller)):
-    return await _call(tools.get_gl_journals, caller, **body.model_dump())
+async def gl_get_journals(body: JournalIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.gl_get_journals, caller, **body.model_dump())
 
 
 # ── Finance close, Cash Management, Fixed Assets ─────────────────────────────
@@ -672,6 +677,171 @@ async def fa_get_assets(body: AssetsIn, caller: Caller = Depends(current_caller)
           summary="Penyusutan aset tetap satu periode per kategori atau per aset (beban periode, YTD, akumulasi)")
 async def fa_get_depreciation(body: DeprnIn, caller: Caller = Depends(current_caller)):
     return await _call(tools.fa_get_depreciation, caller, **body.model_dump())
+
+
+# ── Rest of the library v2 catalog ───────────────────────────────────────────
+
+class LookupIn(BaseModel):
+    text: str = Field(..., description="Nama sebagian atau kode, mis. 'mannitol', 'kyongbo', 'listrik', '511111'")
+    type: Optional[Literal["item", "supplier", "customer", "account", "department"]] = Field(
+        None, description="Jenis master; kosong = semua jenis")
+
+
+class PoDocIn(BaseModel):
+    po_number: str = Field(..., description="Nomor PO persis")
+
+
+class PendingApprovalIn(BaseModel):
+    min_days: Optional[int] = Field(None, ge=0, description="Hanya yang menunggu minimal N hari")
+    doc_type: Optional[Literal["PO", "PR"]] = Field(None, description="PO atau PR (requisition); kosong = keduanya")
+    approver: Optional[str] = Field(None, description="Nama approver yang ditunggu (cocok sebagian)")
+
+
+class ApInvoiceIn(BaseModel):
+    invoice_num: str = Field(..., description="Nomor invoice supplier persis")
+    supplier: Optional[str] = Field(None, description="Nama supplier (cocok sebagian) jika nomor invoice dipakai beberapa supplier")
+
+
+class DueForecastIn(BaseModel):
+    weeks_ahead: int = Field(8, ge=1, le=52, description="Berapa minggu ke depan (default 8)")
+    supplier: Optional[str] = Field(None, description="Nama supplier (cocok sebagian)")
+
+
+class WithholdingIn(BaseModel):
+    period: Optional[str] = Field(None, description="Periode GL, format AUG-26 atau 2026-08 (24 bulan terakhir)")
+    tax_code: Optional[str] = Field(None, description="Nama kode pajak withholding (cocok sebagian), mis. PPh 23")
+    supplier: Optional[str] = Field(None, description="Nama supplier (cocok sebagian)")
+    group_by: Literal["tax", "supplier", "invoice"] = Field("tax", description="tax = per kode pajak; supplier = per supplier; invoice = detail")
+
+
+class SoOrderIn(BaseModel):
+    order_number: str = Field(..., description="Nomor sales order persis")
+
+
+class SoHoldIn(BaseModel):
+    hold_name: Optional[str] = Field(None, description="Nama hold (cocok sebagian), mis. Credit Check")
+    customer: Optional[str] = Field(None, description="Nama customer (cocok sebagian)")
+
+
+class CustomerBalanceIn(BaseModel):
+    customer: str = Field(..., description="Nama customer (cocok sebagian)")
+
+
+class StockCardIn(BaseModel):
+    item: str = Field(..., description="Kode item persis (pakai lookup_master jika hanya tahu nama)")
+    period: str = Field(..., description="Bulan, format AUG-26 atau 2026-08")
+    subinventory: Optional[str] = Field(None, description="Kode subinventory persis; kosong = semua")
+
+
+class SlowMovingIn(BaseModel):
+    days_no_movement: int = Field(180, ge=1, le=3650, description="Tidak ada mutasi minimal N hari (default 180)")
+    subinventory_type: Optional[Literal["GOOD", "REJECT", "QUARANTINE"]] = Field("GOOD", description="Default GOOD; null = semua")
+
+
+class ItemCostIn(BaseModel):
+    item: str = Field(..., description="Kode item persis atau nama (cocok sebagian)")
+    period: Optional[str] = Field(None, description="Bulan, format AUG-26 atau 2026-08; kosong = 13 periode terakhir")
+
+
+class AccountMovementIn(BaseModel):
+    account: str = Field(..., description="Kode akun (awalan, mis. 5111) atau nama akun (cocok sebagian, mis. 'listrik')")
+    period_from: str = Field(..., description="Periode awal, format AUG-26 atau 2026-08")
+    period_to: Optional[str] = Field(None, description="Periode akhir; kosong = sama dengan period_from")
+    department: Optional[str] = Field(None, description="Kode departemen (segment3) atau nama (cocok sebagian)")
+
+
+class BudgetIn(BaseModel):
+    period: str = Field(..., description="YYYY (setahun), YYYY-MM atau AUG-26 (sebulan)")
+    ytd: bool = Field(False, description="true = Januari s.d. bulan period")
+    department: Optional[str] = Field(None, description="Kode departemen (segment3) atau nama (cocok sebagian)")
+    account: Optional[str] = Field(None, description="Kode akun (awalan) atau nama akun (cocok sebagian)")
+    budget_name: Optional[str] = Field(None, description="Nama versi budget; kosong = versi dengan data terbanyak di periode itu")
+    include_revenue: bool = Field(False, description="true = ikut akun pendapatan; default hanya biaya")
+    group_by: Literal["department", "account", "section", "month"] = Field("department", description="Dimensi ringkasan")
+
+
+@app.post("/lookup_master", operation_id="lookup_master",
+          summary="Cari kode dari nama sebagian (atau nama dari kode): item, supplier, customer, akun, departemen")
+async def lookup_master(body: LookupIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.lookup_master, caller, **body.model_dump())
+
+
+@app.post("/po_get_document", operation_id="po_get_document",
+          summary="Detail satu PO (open atau closed): semua baris/shipment, qty pesan/terima/tagih/batal, invoice terkait")
+async def po_get_document(body: PoDocIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.po_get_document, caller, **body.model_dump())
+
+
+@app.post("/po_get_pending_approval", operation_id="po_get_pending_approval",
+          summary="PO dan PR yang masih menunggu approval: approver yang ditunggu dan sudah berapa hari")
+async def po_get_pending_approval(body: PendingApprovalIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.po_get_pending_approval, caller, **body.model_dump())
+
+
+@app.post("/ap_get_invoice", operation_id="ap_get_invoice",
+          summary="Detail satu invoice supplier (lunas atau belum): nilai, status bayar, jatuh tempo, pembayaran, hold")
+async def ap_get_invoice(body: ApInvoiceIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.ap_get_invoice, caller, **body.model_dump())
+
+
+@app.post("/ap_get_due_forecast", operation_id="ap_get_due_forecast",
+          summary="Proyeksi kebutuhan kas pembayaran supplier per minggu ke depan (plus yang sudah lewat jatuh tempo)")
+async def ap_get_due_forecast(body: DueForecastIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.ap_get_due_forecast, caller, **body.model_dump())
+
+
+@app.post("/ap_get_withholding", operation_id="ap_get_withholding",
+          summary="Pajak dipotong (withholding/PPh) dari invoice supplier per kode pajak, supplier, atau invoice")
+async def ap_get_withholding(body: WithholdingIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.ap_get_withholding, caller, **body.model_dump())
+
+
+@app.post("/so_get_order", operation_id="so_get_order",
+          summary="Detail satu sales order (open atau closed): baris, qty pesan/kirim/invoice, delivery, lot, nomor invoice")
+async def so_get_order(body: SoOrderIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.so_get_order, caller, **body.model_dump())
+
+
+@app.post("/so_get_holds", operation_id="so_get_holds",
+          summary="Sales order yang sedang di-hold (credit hold, hold manual) dan sudah berapa lama")
+async def so_get_holds(body: SoHoldIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.so_get_holds, caller, **body.model_dump())
+
+
+@app.post("/ar_get_customer_balance", operation_id="ar_get_customer_balance",
+          summary="Saldo piutang satu customer per mata uang: total, overdue, jatuh tempo tertua, dan receipt unapplied")
+async def ar_get_customer_balance(body: CustomerBalanceIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.ar_get_customer_balance, caller, **body.model_dump())
+
+
+@app.post("/inv_get_stock_card", operation_id="inv_get_stock_card",
+          summary="Kartu stok satu item satu bulan: saldo awal, masuk/keluar per hari × tipe transaksi, saldo berjalan, saldo akhir")
+async def inv_get_stock_card(body: StockCardIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.inv_get_stock_card, caller, **body.model_dump())
+
+
+@app.post("/inv_get_slow_moving", operation_id="inv_get_slow_moving",
+          summary="Item slow moving: masih ada stok tetapi tidak bergerak N hari, dengan qty dan tanggal gerak terakhir")
+async def inv_get_slow_moving(body: SlowMovingIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.inv_get_slow_moving, caller, **body.model_dump())
+
+
+@app.post("/opm_get_item_cost", operation_id="opm_get_item_cost",
+          summary="Biaya aktual OPM (PMAC) satu item per periode costing, perbandingan periode sebelumnya, dan komponen biaya")
+async def opm_get_item_cost(body: ItemCostIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.opm_get_item_cost, caller, **body.model_dump())
+
+
+@app.post("/gl_get_account_movement", operation_id="gl_get_account_movement",
+          summary="Mutasi akun per bulan dalam rentang periode: saldo awal, debit, kredit, saldo akhir")
+async def gl_get_account_movement(body: AccountMovementIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.gl_get_account_movement, caller, **body.model_dump())
+
+
+@app.post("/gl_get_budget_vs_actual", operation_id="gl_get_budget_vs_actual",
+          summary="Budget vs encumbrance vs realisasi per departemen / akun / pos / bulan, sisa budget dan % realisasi")
+async def gl_get_budget_vs_actual(body: BudgetIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.gl_get_budget_vs_actual, caller, **body.model_dump())
 
 
 @app.get("/health", include_in_schema=False)

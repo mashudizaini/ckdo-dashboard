@@ -8,7 +8,7 @@ celery_app = Celery(
     "ckdo_dashboard",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.tasks.oracle_sync", "app.tasks.report_gen", "app.tasks.eis_etl_tasks", "app.tasks.document_converter_tasks", "app.tasks.document_translation_tasks", "app.tasks.openwebui_sync_tasks", "app.tasks.ap_invoice_gdrive_tasks", "app.tasks.ebs_mart_tasks", "app.tasks.ebs_mart_sa_tasks", "app.tasks.ebs_mart_fin_tasks"],
+    include=["app.tasks.oracle_sync", "app.tasks.report_gen", "app.tasks.eis_etl_tasks", "app.tasks.document_converter_tasks", "app.tasks.document_translation_tasks", "app.tasks.openwebui_sync_tasks", "app.tasks.ap_invoice_gdrive_tasks", "app.tasks.ebs_mart_tasks", "app.tasks.ebs_mart_sa_tasks", "app.tasks.ebs_mart_fin_tasks", "app.tasks.ebs_mart_ext_tasks"],
 )
 
 celery_app.conf.update(
@@ -107,6 +107,9 @@ celery_app.conf.beat_schedule = {
     # daily (library v2 12-13).
     "etl-mart-close": {"task": "app.tasks.etl_tasks.etl_mart_close", "schedule": crontab(minute=15, hour="6-20")},
     "etl-mart-fa": {"task": "app.tasks.etl_tasks.etl_mart_fa", "schedule": crontab(hour=4, minute=40)},
+    # Phase 8: approvals pending, SO holds, AP withholding, GL budget and
+    # interface rows (rest of the library v2 catalog), hourly in working hours.
+    "etl-mart-ext": {"task": "app.tasks.etl_tasks.etl_mart_ext", "schedule": crontab(minute=45, hour="6-20")},
     "etl-mart-ar-reconcile": {
         "task": "app.tasks.etl_tasks.etl_mart_ar",
         "schedule": crontab(hour=2, minute=30, day_of_week="sunday"),

@@ -13,10 +13,13 @@ pelunasan, transfer ke supplier, hold, invoice tertahan, PPh supplier
 - mart.ap_invoice_hold: 1 baris = hold aktif. Kolom kunci: hold_code, hold_reason, hold_date, days_on_hold.
 
 ## Intent tool (utamakan)
-- Aging per supplier / per bucket → get_ap_aging (group_by: supplier | bucket | supplier_bucket)
-- Daftar invoice belum lunas, jatuh tempo minggu ini → get_ap_open_invoices (due_from/due_to)
-- Pembayaran minggu/bulan lalu, total per supplier → get_ap_payments (group_by: none | supplier | month)
-- Invoice di-hold → get_ap_holds
+- Aging per supplier / per bucket → ap_get_aging (group_by: supplier | bucket | supplier_bucket)
+- Daftar invoice belum lunas, jatuh tempo minggu ini → ap_get_open_invoices (due_from/due_to)
+- Pembayaran minggu/bulan lalu, total per supplier → ap_get_payments (group_by: none | supplier | month)
+- Invoice di-hold → ap_get_holds
+- Detail satu invoice (lunas atau belum, sudah dibayar kapan, hold apa) → ap_get_invoice (invoice_num)
+- Kebutuhan kas bayar supplier per minggu ke depan → ap_get_due_forecast (weeks_ahead)
+- PPh / withholding yang dipotong → ap_get_withholding (period, tax_code; group_by: tax | supplier | invoice)
 
 ## Aturan bisnis
 - "Hutang" / "outstanding" = amount_remaining_idr <> 0 di mart.ap_open_invoice.

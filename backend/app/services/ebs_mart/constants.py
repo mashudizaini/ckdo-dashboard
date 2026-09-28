@@ -62,7 +62,7 @@ GL_JOURNAL_MONTHS = 13
 MAX_ROWS = 500
 STATEMENT_TIMEOUT = "15s"
 
-# One entry per mart in the blueprint's catalog (section 5). All seven
+# One entry per mart in the blueprint's catalog (section 5). All eight
 # phases are built; later phases are listed so the admin overview shows the whole
 # roadmap and find_marts can say "not available yet" instead of nothing.
 #
@@ -286,6 +286,87 @@ MARTS: dict[str, dict] = {
         "source_jobs": ["etl_mart_fa"],
         "unique_key": ["row_key"],
     },
+    # ── Phase 8: rest of the library v2 catalog (ext_sql.py) ──
+    "master_lookup": {
+        "domain": "MASTER", "phase": 8, "built": True,
+        "grain": "Kode × nama (item, supplier, customer, akun, departemen)",
+        "description": "Daftar kode dan nama untuk mencari kode dari nama sebagian (lookup_master).",
+        "sources": "core.dim_item, AP/PO/AR/OM core, meta.gl_account_map, FND flex values",
+        "source_jobs": ["etl_mart_ap", "etl_mart_ext"],
+        "unique_key": ["row_key"],
+    },
+    "ap_invoice": {
+        "domain": "AP", "phase": 8, "built": True,
+        "grain": "Satu invoice AP (lunas, terbuka, cancelled)",
+        "description": "Semua invoice supplier dengan status bayar, sisa, jatuh tempo berikutnya, pembayaran dan hold aktif.",
+        "sources": "AP_INVOICES_ALL, AP_PAYMENT_SCHEDULES_ALL, AP_INVOICE_PAYMENTS_ALL, AP_HOLDS_ALL",
+        "source_jobs": ["etl_mart_ap"],
+        "unique_key": ["invoice_id"],
+    },
+    "po_shipment": {
+        "domain": "PO", "phase": 8, "built": True,
+        "grain": "Shipment PO (semua status)",
+        "description": "Semua baris/shipment PO termasuk yang sudah closed: qty pesan, terima, tagih, batal, nilai IDR.",
+        "sources": "PO_HEADERS_ALL, PO_LINES_ALL, PO_LINE_LOCATIONS_ALL",
+        "source_jobs": ["etl_mart_po"],
+        "unique_key": ["line_location_id"],
+    },
+    "po_approval_pending": {
+        "domain": "PO", "phase": 8, "built": True,
+        "grain": "PO / PR yang menunggu approval",
+        "description": "Dokumen PO dan requisition berstatus In Process / Requires Reapproval / Incomplete, approver yang ditunggu dan lama menunggu.",
+        "sources": "PO_HEADERS_ALL, PO_REQUISITION_HEADERS_ALL, PO_ACTION_HISTORY",
+        "source_jobs": ["etl_mart_ext"],
+        "unique_key": ["row_key"],
+    },
+    "ap_withholding": {
+        "domain": "AP", "phase": 8, "built": True,
+        "grain": "Distribusi withholding (PPh) invoice AP, 24 bulan",
+        "description": "Potongan pajak (withholding) per invoice: kode pajak, tarif, nilai IDR, periode.",
+        "sources": "AP_INVOICE_DISTRIBUTIONS_ALL (AWT), AP_AWT_TAX_RATES_ALL",
+        "source_jobs": ["etl_mart_ext"],
+        "unique_key": ["invoice_distribution_id"],
+    },
+    "so_order_line": {
+        "domain": "OM", "phase": 8, "built": True,
+        "grain": "Baris SO (semua status)",
+        "description": "Semua baris sales order termasuk closed: qty pesan/kirim/invoice, delivery, lot, nomor invoice AR.",
+        "sources": "OE_ORDER_LINES_ALL, WSH_DELIVERY_DETAILS, RA_CUSTOMER_TRX_LINES_ALL",
+        "source_jobs": ["etl_mart_om"],
+        "unique_key": ["line_id"],
+    },
+    "so_hold": {
+        "domain": "OM", "phase": 8, "built": True,
+        "grain": "Hold aktif pada SO (order atau line)",
+        "description": "Sales order yang di-hold (credit hold, hold manual): nama hold, sejak kapan, komentar, nilai order.",
+        "sources": "OE_ORDER_HOLDS_ALL, OE_HOLD_SOURCES_ALL, OE_HOLD_DEFINITIONS",
+        "source_jobs": ["etl_mart_ext"],
+        "unique_key": ["order_hold_id"],
+    },
+    "opm_item_cost": {
+        "domain": "OPM", "phase": 8, "built": True,
+        "grain": "Item × periode costing OPM (CKDO_PMAC)",
+        "description": "Biaya aktual PMAC per item per periode costing, per komponen biaya.",
+        "sources": "CM_CMPT_DTL, GMF_PERIOD_STATUSES",
+        "source_jobs": ["etl_mart_item_cost"],
+        "unique_key": ["row_key"],
+    },
+    "gl_budget_vs_actual": {
+        "domain": "GL", "phase": 8, "built": True,
+        "grain": "Jenis (budget/encumbrance/actual) × akun × departemen × periode",
+        "description": "Budget, encumbrance dan realisasi per akun dan departemen (ledger 2022), tanda sesuai laporan (biaya dan pendapatan positif).",
+        "sources": "GL_BALANCES (actual_flag B, E, A), GL_BUDGET_VERSIONS",
+        "source_jobs": ["etl_mart_ext", "etl_mart_gl"],
+        "unique_key": ["row_key"],
+    },
+    "sa_interface_error": {
+        "domain": "SA", "phase": 8, "built": True,
+        "grain": "Baris interface yang error / menunggu (AP, AR, GL, INV, RCV)",
+        "description": "Error dan antrean open interface: invoice AP, AutoInvoice AR, GL interface, transaksi inventory, receiving. Hanya tim IT allowlist.",
+        "sources": "AP_INVOICES_INTERFACE, AP_INTERFACE_REJECTIONS, GL_INTERFACE, MTL_TRANSACTIONS_INTERFACE, MTL_MATERIAL_TRANSACTIONS_TEMP, RCV_TRANSACTIONS_INTERFACE, PO_INTERFACE_ERRORS, RA_INTERFACE_*",
+        "source_jobs": ["etl_mart_ext", "etl_mart_close"],
+        "unique_key": ["row_key"],
+    },
     # ── Phase 6: System Administration (blueprint v2 4.7) — restricted ──
     # Not reachable through any ebs-* group, ebs-management included: only
     # the SYSADMIN_ALLOWLIST emails below, through the sa_* tools, over the
@@ -396,11 +477,11 @@ BUILT_MARTS = [name for name, m in MARTS.items() if m.get("built")]
 # (a Finance number), purchasing gets ap_open_invoice but not payment detail.
 DOMAIN_BY_GROUP: dict[str, set[str]] = {
     "ebs-finance":    {"ap_", "ar_", "gl_", "pl_", "inv_valuation", "po_", "pr_", "sla_", "ce_", "fa_",
-                       "so_shipped_not_invoiced", "batch_status"},
-    "ebs-purchasing": {"po_", "pr_", "ap_open_invoice"},
-    "ebs-warehouse":  {"inv_onhand_lot", "inv_movement_daily"},
-    "ebs-production": {"batch_", "inv_onhand_lot"},
-    "ebs-sales":      {"so_", "sales_", "ar_aging", "ar_autoinvoice_error"},
+                       "so_shipped_not_invoiced", "batch_status", "opm_item_cost", "master_"},
+    "ebs-purchasing": {"po_", "pr_", "ap_open_invoice", "master_"},
+    "ebs-warehouse":  {"inv_onhand_lot", "inv_movement_daily", "master_"},
+    "ebs-production": {"batch_", "inv_onhand_lot", "master_"},
+    "ebs-sales":      {"so_", "sales_", "ar_aging", "ar_autoinvoice_error", "master_"},
     "ebs-management": {""},
 }
 

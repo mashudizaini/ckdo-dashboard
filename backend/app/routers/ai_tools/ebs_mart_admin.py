@@ -56,6 +56,7 @@ JOBS = {
     "etl_mart_gl": "GL: saldo, jurnal & laba rugi (incremental)",
     "etl_mart_close": "Closing: status periode, selisih SLA-GL, AutoInvoice, rekon bank (per jam)",
     "etl_mart_fa": "Aset tetap & penyusutan (harian)",
+    "etl_mart_ext": "Approval PO/PR, hold SO, withholding, budget, interface (per jam)",
     "etl_mart_sa": "System Administration: user, akses, profile, login, patch (harian)",
     "etl_mart_sa_ops": "System Administration: concurrent request/manager & workflow (10 menit)",
     "refresh_ebs_marts": "Refresh semua mart",
@@ -268,29 +269,29 @@ async def run_sql(body: SqlIn, user: CurrentUser = Depends(_admin)):
 _INTENT_TOOLS = {
     "find_marts": tools.find_marts,
     "get_data_freshness": tools.get_data_freshness,
-    "get_ap_aging": tools.get_ap_aging,
-    "get_ap_open_invoices": tools.get_ap_open_invoices,
-    "get_ap_payments": tools.get_ap_payments,
-    "get_ap_holds": tools.get_ap_holds,
-    "get_expiring_lots": tools.get_expiring_lots,
-    "get_stock_onhand": tools.get_stock_onhand,
-    "get_stock_movement": tools.get_stock_movement,
-    "get_po_outstanding": tools.get_po_outstanding,
-    "get_po_match_status": tools.get_po_match_status,
-    "get_pr_pending": tools.get_pr_pending,
-    "get_inventory_value": tools.get_inventory_value,
-    "get_ar_aging": tools.get_ar_aging,
-    "get_ar_open_invoices": tools.get_ar_open_invoices,
-    "get_ar_receipts": tools.get_ar_receipts,
-    "get_so_backlog": tools.get_so_backlog,
-    "get_so_shipment_status": tools.get_so_shipment_status,
-    "get_sales_by_customer": tools.get_sales_by_customer,
-    "get_batch_status": tools.get_batch_status,
-    "get_batch_yield": tools.get_batch_yield,
-    "get_batch_material_usage": tools.get_batch_material_usage,
-    "get_pl": tools.get_pl,
-    "get_trial_balance": tools.get_trial_balance,
-    "get_gl_journals": tools.get_gl_journals,
+    "ap_get_aging": tools.ap_get_aging,
+    "ap_get_open_invoices": tools.ap_get_open_invoices,
+    "ap_get_payments": tools.ap_get_payments,
+    "ap_get_holds": tools.ap_get_holds,
+    "inv_get_expiring_lots": tools.inv_get_expiring_lots,
+    "inv_get_onhand": tools.inv_get_onhand,
+    "inv_get_movements": tools.inv_get_movements,
+    "po_get_outstanding": tools.po_get_outstanding,
+    "po_get_match_status": tools.po_get_match_status,
+    "pr_get_pending": tools.pr_get_pending,
+    "inv_get_valuation": tools.inv_get_valuation,
+    "ar_get_aging": tools.ar_get_aging,
+    "ar_get_open_invoices": tools.ar_get_open_invoices,
+    "ar_get_receipts": tools.ar_get_receipts,
+    "so_get_backlog": tools.so_get_backlog,
+    "so_get_shipment_status": tools.so_get_shipment_status,
+    "sales_get_summary": tools.sales_get_summary,
+    "opm_get_batch": tools.opm_get_batch,
+    "opm_get_yield": tools.opm_get_yield,
+    "opm_get_material_usage": tools.opm_get_material_usage,
+    "gl_get_pl": tools.gl_get_pl,
+    "gl_get_trial_balance": tools.gl_get_trial_balance,
+    "gl_get_journals": tools.gl_get_journals,
     **{name: getattr(tools, name) for name in ("gl_get_period_status", "gl_get_subledger_gap", "po_get_uninvoiced_receipts", "so_get_shipped_not_invoiced", "ar_get_unapplied_receipts", "ar_get_autoinvoice_errors", "opm_get_open_batches", "ce_get_unreconciled", "fa_get_assets", "fa_get_depreciation")},
     # System Administration: allowed only when the signed-in admin's own email
     # is in SYSADMIN_ALLOWLIST — the group chosen here does not matter.
@@ -298,7 +299,8 @@ _INTENT_TOOLS = {
         "sa_get_user", "sa_get_user_resps", "sa_who_has_resp", "sa_who_has_function", "sa_get_resp_functions",
         "sa_get_resp_programs", "sa_get_dormant_users", "sa_get_terminated_active_users", "sa_get_sod_violations",
         "sa_get_profile_value", "sa_get_login_history", "sa_get_manager_status", "sa_get_pending_approvals",
-        "sa_check_patch", "sa_get_form_personalizations", "it_get_concurrent_requests")},
+        "sa_check_patch", "sa_get_form_personalizations", "it_get_concurrent_requests", "it_get_interface_errors")},
+    **{name: getattr(tools, name) for name in ("lookup_master", "po_get_document", "po_get_pending_approval", "ap_get_invoice", "ap_get_due_forecast", "ap_get_withholding", "so_get_order", "so_get_holds", "ar_get_customer_balance", "inv_get_stock_card", "inv_get_slow_moving", "opm_get_item_cost", "gl_get_account_movement", "gl_get_budget_vs_actual")},
 }
 
 
@@ -318,7 +320,7 @@ async def call_tool(name: str, body: ToolIn, user: CurrentUser = Depends(_admin)
     args = {k: v for k, v in body.args.items() if v != ""}
     for flag in ("late_only", "include_reversed", "include_expired", "ytd", "compare_prior_year",
                  "include_inactive", "exclude_seeded", "include_seeded", "only_problems", "include_fyi",
-                 "include_unheld", "include_errors"):
+                 "include_unheld", "include_errors", "include_revenue"):
         if isinstance(args.get(flag), str):
             args[flag] = args[flag] == "true"
     for k in ("due_from", "due_to", "date_from", "date_to", "ordered_from", "ordered_to"):
@@ -327,7 +329,8 @@ async def call_tool(name: str, body: ToolIn, user: CurrentUser = Depends(_admin)
                 args[k] = date.fromisoformat(str(args[k]))
             except ValueError:
                 raise HTTPException(400, f"{k} harus YYYY-MM-DD")
-    for k in ("days", "min_days_overdue", "min_days_waiting", "hours", "days_open"):
+    for k in ("days", "min_days_overdue", "min_days_waiting", "hours", "days_open", "weeks_ahead", "min_days",
+              "days_no_movement"):
         if args.get(k) is not None:
             args[k] = int(args[k])
     for k in ("below_pct", "over_pct", "min_amount"):
@@ -386,7 +389,7 @@ def _security_test(user: CurrentUser) -> dict:
     except AccessDenied as e:
         results.append({"test": "Grup gudang ditolak membaca mart AP", "passed": True, "detail": str(e)})
     try:
-        tools.get_ap_aging(wh)
+        tools.ap_get_aging(wh)
         results.append({"test": "Grup gudang ditolak intent tool AP", "passed": False, "detail": "Tidak ditolak"})
     except AccessDenied as e:
         results.append({"test": "Grup gudang ditolak intent tool AP", "passed": True, "detail": str(e)})

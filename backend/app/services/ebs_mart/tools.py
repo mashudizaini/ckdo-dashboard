@@ -152,12 +152,13 @@ def run_sql(caller: Caller, sql: str, question: str = "") -> dict:
                      args={"sql": sql})
 
 
-def get_data_freshness(caller: Caller) -> dict:
+def get_data_freshness(caller: Caller, domain: str | None = None) -> dict:
     """Which marts this caller can read, when each was last loaded, and how
     many rows it holds — for "data per kapan?" and for the model to check
     before trusting an empty answer."""
     out = []
-    marts = caller.readable_marts()
+    marts = [m for m in caller.readable_marts()
+             if not domain or MARTS[m]["domain"].upper() == domain.strip().upper()]
     # sa_* marts are counted over the SA reader: llm_ro cannot see them.
     for reader, names in ((query._reader, [m for m in marts if not m.startswith(SA_PREFIX)]),
                           (query._sa_reader, [m for m in marts if m.startswith(SA_PREFIX)])):
@@ -173,13 +174,13 @@ def get_data_freshness(caller: Caller) -> dict:
             conn.rollback()
         finally:
             conn.close()
-    query.log_call(caller, tool="get_data_freshness", row_count=len(out), status="OK")
+    query.log_call(caller, tool="get_data_freshness", args={"domain": domain}, row_count=len(out), status="OK")
     return {"marts": out}
 
 
 # ── AP ───────────────────────────────────────────────────────────────────────
 
-def get_ap_aging(caller: Caller, supplier: str | None = None, min_days_overdue: int | None = None,
+def ap_get_aging(caller: Caller, supplier: str | None = None, min_days_overdue: int | None = None,
                  currency: str | None = None, group_by: str = "supplier") -> dict:
     args = {"supplier": supplier, "min_days_overdue": min_days_overdue, "currency": currency, "group_by": group_by}
     params = {"s": _like(supplier), "d": min_days_overdue, "c": _val(currency)}
@@ -218,10 +219,10 @@ def get_ap_aging(caller: Caller, supplier: str | None = None, min_days_overdue: 
              GROUP BY vendor_num, vendor_name
              ORDER BY total_idr DESC
         """
-    return _run(caller, "ap_open_invoice", sql, params, "get_ap_aging", args)
+    return _run(caller, "ap_open_invoice", sql, params, "ap_get_aging", args)
 
 
-def get_ap_open_invoices(caller: Caller, supplier: str | None = None, invoice_num: str | None = None,
+def ap_get_open_invoices(caller: Caller, supplier: str | None = None, invoice_num: str | None = None,
                          min_days_overdue: int | None = None, due_from: date | None = None,
                          due_to: date | None = None, currency: str | None = None) -> dict:
     args = {"supplier": supplier, "invoice_num": invoice_num, "min_days_overdue": min_days_overdue,
@@ -240,10 +241,10 @@ def get_ap_open_invoices(caller: Caller, supplier: str | None = None, invoice_nu
     """
     params = {"s": _like(supplier), "inv": _val(invoice_num), "d": min_days_overdue,
               "df": due_from, "dt": due_to, "c": _val(currency)}
-    return _run(caller, "ap_open_invoice", sql, params, "get_ap_open_invoices", args)
+    return _run(caller, "ap_open_invoice", sql, params, "ap_get_open_invoices", args)
 
 
-def get_ap_payments(caller: Caller, supplier: str | None = None, invoice_num: str | None = None,
+def ap_get_payments(caller: Caller, supplier: str | None = None, invoice_num: str | None = None,
                     payment_number: str | None = None, date_from: date | None = None,
                     date_to: date | None = None, group_by: str = "none") -> dict:
     args = {"supplier": supplier, "invoice_num": invoice_num, "payment_number": payment_number,
@@ -278,10 +279,10 @@ def get_ap_payments(caller: Caller, supplier: str | None = None, invoice_num: st
         """
     params = {"s": _like(supplier), "inv": _val(invoice_num), "pn": _val(payment_number),
               "df": date_from, "dt": date_to}
-    return _run(caller, "ap_payment_history", sql, params, "get_ap_payments", args)
+    return _run(caller, "ap_payment_history", sql, params, "ap_get_payments", args)
 
 
-def get_ap_holds(caller: Caller, supplier: str | None = None, hold_code: str | None = None) -> dict:
+def ap_get_holds(caller: Caller, supplier: str | None = None, hold_code: str | None = None) -> dict:
     args = {"supplier": supplier, "hold_code": hold_code}
     sql = """
         SELECT vendor_name, invoice_num, invoice_date, hold_code, hold_desc, hold_reason, hold_date,
@@ -292,7 +293,7 @@ def get_ap_holds(caller: Caller, supplier: str | None = None, hold_code: str | N
          ORDER BY days_on_hold DESC
     """
     return _run(caller, "ap_invoice_hold", sql, {"s": _like(supplier), "h": _val(hold_code)},
-                "get_ap_holds", args)
+                "ap_get_holds", args)
 
 
 # ── Inventory ────────────────────────────────────────────────────────────────
@@ -313,7 +314,7 @@ def _categories(v) -> list[str] | None:
     return out or None
 
 
-def get_expiring_lots(caller: Caller, days: int = 90, item: str | None = None,
+def inv_get_expiring_lots(caller: Caller, days: int = 90, item: str | None = None,
                       subinventory_type: str | None = "GOOD", include_expired: bool = False,
                       item_category=None) -> dict:
     args = {"days": days, "item": item, "subinventory_type": subinventory_type, "include_expired": include_expired,
@@ -331,10 +332,10 @@ def get_expiring_lots(caller: Caller, days: int = 90, item: str | None = None,
     """
     params = {"days": days, "incl": include_expired, "st": _val(subinventory_type), "item": _val(item),
               "cat": _categories(item_category)}
-    return _run(caller, "inv_onhand_lot", sql, params, "get_expiring_lots", args)
+    return _run(caller, "inv_onhand_lot", sql, params, "inv_get_expiring_lots", args)
 
 
-def get_stock_onhand(caller: Caller, item: str | None = None, subinventory: str | None = None,
+def inv_get_onhand(caller: Caller, item: str | None = None, subinventory: str | None = None,
                      lot_number: str | None = None, subinventory_type: str | None = None,
                      group_by: str = "item", item_category=None) -> dict:
     args = {"item": item, "subinventory": subinventory, "lot_number": lot_number,
@@ -375,10 +376,10 @@ def get_stock_onhand(caller: Caller, item: str | None = None, subinventory: str 
         """
     params = {"item": _val(item), "sub": _val(subinventory), "lot": _val(lot_number), "st": _val(subinventory_type),
               "cat": _categories(item_category)}
-    return _run(caller, "inv_onhand_lot", sql, params, "get_stock_onhand", args)
+    return _run(caller, "inv_onhand_lot", sql, params, "inv_get_onhand", args)
 
 
-def get_stock_movement(caller: Caller, item: str | None = None, date_from: date | None = None,
+def inv_get_movements(caller: Caller, item: str | None = None, date_from: date | None = None,
                        date_to: date | None = None, transaction_type: str | None = None,
                        subinventory: str | None = None, group_by: str = "type") -> dict:
     args = {"item": item, "date_from": date_from, "date_to": date_to, "transaction_type": transaction_type,
@@ -419,12 +420,12 @@ def get_stock_movement(caller: Caller, item: str | None = None, date_from: date 
         """
     params = {"item": _val(item), "df": date_from, "dt": date_to, "tt": _val(transaction_type),
               "sub": _val(subinventory)}
-    return _run(caller, "inv_movement_daily", sql, params, "get_stock_movement", args)
+    return _run(caller, "inv_movement_daily", sql, params, "inv_get_movements", args)
 
 
 # ── PO / PR (phase 2) ────────────────────────────────────────────────────────
 
-def get_po_outstanding(caller: Caller, supplier: str | None = None, item: str | None = None,
+def po_get_outstanding(caller: Caller, supplier: str | None = None, item: str | None = None,
                        po_number: str | None = None, late_only: bool = False,
                        group_by: str = "none") -> dict:
     args = {"supplier": supplier, "item": item, "po_number": po_number, "late_only": late_only, "group_by": group_by}
@@ -451,10 +452,10 @@ def get_po_outstanding(caller: Caller, supplier: str | None = None, item: str | 
              ORDER BY due_date NULLS LAST, po_number, line_num
         """
     params = {"s": _like(supplier), "po": _val(po_number), "late": bool(late_only), "item": _val(item)}
-    return _run(caller, "po_outstanding", sql, params, "get_po_outstanding", args)
+    return _run(caller, "po_outstanding", sql, params, "po_get_outstanding", args)
 
 
-def get_po_match_status(caller: Caller, po_number: str | None = None, supplier: str | None = None,
+def po_get_match_status(caller: Caller, po_number: str | None = None, supplier: str | None = None,
                         item: str | None = None, status: str | None = None, group_by: str = "none") -> dict:
     """"PO ini sudah ditagih belum?" and uninvoiced receipts. status matches
     match_status as a prefix, case-insensitively (e.g. "Diterima")."""
@@ -490,10 +491,10 @@ def get_po_match_status(caller: Caller, po_number: str | None = None, supplier: 
              ORDER BY po_number, line_num, shipment_num, distribution_num
         """
     params = {"po": _val(po_number), "s": _like(supplier), "st": _val(status), "item": _val(item)}
-    return _run(caller, "po_receipt_vs_invoice", sql, params, "get_po_match_status", args)
+    return _run(caller, "po_receipt_vs_invoice", sql, params, "po_get_match_status", args)
 
 
-def get_pr_pending(caller: Caller, person: str | None = None, item: str | None = None,
+def pr_get_pending(caller: Caller, person: str | None = None, item: str | None = None,
                    pr_number: str | None = None, min_days_waiting: int | None = None,
                    group_by: str = "none") -> dict:
     args = {"person": person, "item": item, "pr_number": pr_number, "min_days_waiting": min_days_waiting,
@@ -520,10 +521,10 @@ def get_pr_pending(caller: Caller, person: str | None = None, item: str | None =
              ORDER BY days_waiting DESC, pr_number, line_num
         """
     params = {"p": _like(person), "pr": _val(pr_number), "d": min_days_waiting, "item": _val(item)}
-    return _run(caller, "pr_pending", sql, params, "get_pr_pending", args)
+    return _run(caller, "pr_pending", sql, params, "pr_get_pending", args)
 
 
-def get_inventory_value(caller: Caller, item: str | None = None, item_category=None,
+def inv_get_valuation(caller: Caller, item: str | None = None, item_category=None,
                         subinventory_type: str | None = None, group_by: str = "category") -> dict:
     args = {"item": item, "item_category": item_category, "subinventory_type": subinventory_type,
             "group_by": group_by}
@@ -557,7 +558,7 @@ def get_inventory_value(caller: Caller, item: str | None = None, item_category=N
              GROUP BY 1 ORDER BY value_idr DESC NULLS LAST
         """
     params = {"item": _val(item), "cat": _categories(item_category), "st": _val(subinventory_type)}
-    return _run(caller, "inv_valuation", sql, params, "get_inventory_value", args)
+    return _run(caller, "inv_valuation", sql, params, "inv_get_valuation", args)
 
 
 # ── OM / AR (phase 3) ────────────────────────────────────────────────────────
@@ -580,7 +581,7 @@ def _period_range(period: str | None) -> tuple:
     return start, end
 
 
-def get_ar_aging(caller: Caller, customer: str | None = None, min_days_overdue: int | None = None,
+def ar_get_aging(caller: Caller, customer: str | None = None, min_days_overdue: int | None = None,
                  currency: str | None = None, group_by: str = "customer") -> dict:
     args = {"customer": customer, "min_days_overdue": min_days_overdue, "currency": currency, "group_by": group_by}
     params = {"s": _like(customer), "d": min_days_overdue, "c": _val(currency)}
@@ -618,10 +619,10 @@ def get_ar_aging(caller: Caller, customer: str | None = None, min_days_overdue: 
              GROUP BY customer_num, customer_name
              ORDER BY total_idr DESC
         """
-    return _run(caller, "ar_aging", sql, params, "get_ar_aging", args)
+    return _run(caller, "ar_aging", sql, params, "ar_get_aging", args)
 
 
-def get_ar_open_invoices(caller: Caller, customer: str | None = None, invoice_num: str | None = None,
+def ar_get_open_invoices(caller: Caller, customer: str | None = None, invoice_num: str | None = None,
                          min_days_overdue: int | None = None, due_from: date | None = None,
                          due_to: date | None = None, currency: str | None = None) -> dict:
     args = {"customer": customer, "invoice_num": invoice_num, "min_days_overdue": min_days_overdue,
@@ -640,10 +641,10 @@ def get_ar_open_invoices(caller: Caller, customer: str | None = None, invoice_nu
     """
     params = {"s": _like(customer), "inv": _val(invoice_num), "d": min_days_overdue,
               "df": due_from, "dt": due_to, "c": _val(currency)}
-    return _run(caller, "ar_aging", sql, params, "get_ar_open_invoices", args)
+    return _run(caller, "ar_aging", sql, params, "ar_get_open_invoices", args)
 
 
-def get_ar_receipts(caller: Caller, customer: str | None = None, receipt_number: str | None = None,
+def ar_get_receipts(caller: Caller, customer: str | None = None, receipt_number: str | None = None,
                     date_from: date | None = None, date_to: date | None = None,
                     application_status: str | None = None, include_reversed: bool = False,
                     group_by: str = "none") -> dict:
@@ -687,10 +688,10 @@ def get_ar_receipts(caller: Caller, customer: str | None = None, receipt_number:
         """
     params = {"s": _like(customer), "rn": _val(receipt_number), "df": date_from, "dt": date_to,
               "st": _val(application_status), "rev": bool(include_reversed)}
-    return _run(caller, "ar_receipt", sql, params, "get_ar_receipts", args)
+    return _run(caller, "ar_receipt", sql, params, "ar_get_receipts", args)
 
 
-def get_so_backlog(caller: Caller, customer: str | None = None, item: str | None = None,
+def so_get_backlog(caller: Caller, customer: str | None = None, item: str | None = None,
                    order_number: str | None = None, business_type: str | None = None,
                    late_only: bool = False, ordered_from: date | None = None, ordered_to: date | None = None,
                    group_by: str = "none") -> dict:
@@ -740,10 +741,10 @@ def get_so_backlog(caller: Caller, customer: str | None = None, item: str | None
         """
     params = {"s": _like(customer), "on": _val(order_number), "bt": _val(business_type), "late": bool(late_only),
               "of": ordered_from, "ot": ordered_to, "item": _val(item)}
-    return _run(caller, "so_backlog", sql, params, "get_so_backlog", args)
+    return _run(caller, "so_backlog", sql, params, "so_get_backlog", args)
 
 
-def get_so_shipment_status(caller: Caller, order_number: str | None = None, customer: str | None = None,
+def so_get_shipment_status(caller: Caller, order_number: str | None = None, customer: str | None = None,
                            item: str | None = None, status: str | None = None) -> dict:
     args = {"order_number": order_number, "customer": customer, "item": item, "status": status}
     sql = f"""
@@ -758,10 +759,10 @@ def get_so_shipment_status(caller: Caller, order_number: str | None = None, cust
          ORDER BY order_number DESC, line_number, shipment_number
     """
     params = {"on": _val(order_number), "s": _like(customer), "st": _val(status), "item": _val(item)}
-    return _run(caller, "so_shipment_status", sql, params, "get_so_shipment_status", args)
+    return _run(caller, "so_shipment_status", sql, params, "so_get_shipment_status", args)
 
 
-def get_sales_by_customer(caller: Caller, customer: str | None = None, item: str | None = None,
+def sales_get_summary(caller: Caller, customer: str | None = None, item: str | None = None,
                           item_category=None, period: str | None = None, business_type: str | None = None,
                           group_by: str = "customer") -> dict:
     args = {"customer": customer, "item": item, "item_category": item_category, "period": period,
@@ -793,7 +794,7 @@ def get_sales_by_customer(caller: Caller, customer: str | None = None, item: str
     """
     params = {"s": _like(customer), "bt": _val(business_type), "p0": start, "p1": end, "item": _val(item),
               "cat": _categories(item_category)}
-    return _run(caller, "sales_by_customer_item_month", sql, params, "get_sales_by_customer", args)
+    return _run(caller, "sales_by_customer_item_month", sql, params, "sales_get_summary", args)
 
 
 # ── OPM batches (phase 4) ────────────────────────────────────────────────────
@@ -812,7 +813,7 @@ def _status_code(status):
     return _BATCH_STATUS_CODES[s]
 
 
-def get_batch_status(caller: Caller, batch_no: str | None = None, product: str | None = None,
+def opm_get_batch(caller: Caller, batch_no: str | None = None, product: str | None = None,
                      status: str | None = None, date_from: date | None = None, date_to: date | None = None,
                      late_only: bool = False, group_by: str = "none") -> dict:
     """Batches by plan start date, as the Production dashboard filters them."""
@@ -872,10 +873,10 @@ def get_batch_status(caller: Caller, batch_no: str | None = None, product: str |
         """
     params = {"bn": _val(batch_no), "p": _val(product), "st": _status_code(status), "df": date_from, "dt": date_to,
               "late": bool(late_only)}
-    return _run(caller, "batch_status", sql, params, "get_batch_status", args)
+    return _run(caller, "batch_status", sql, params, "opm_get_batch", args)
 
 
-def get_batch_yield(caller: Caller, product: str | None = None, batch_no: str | None = None,
+def opm_get_yield(caller: Caller, product: str | None = None, batch_no: str | None = None,
                     date_from: date | None = None, date_to: date | None = None,
                     below_pct: float | None = None, group_by: str = "product") -> dict:
     """Yield of completed/closed batches (status 3, 4) — the Production
@@ -919,10 +920,10 @@ def get_batch_yield(caller: Caller, product: str | None = None, batch_no: str | 
              ORDER BY jml_batch DESC
         """
     params = {"bn": _val(batch_no), "p": _val(product), "df": date_from, "dt": date_to, "b": below_pct}
-    return _run(caller, "batch_yield_variance", sql, params, "get_batch_yield", args)
+    return _run(caller, "batch_yield_variance", sql, params, "opm_get_yield", args)
 
 
-def get_batch_material_usage(caller: Caller, batch_no: str | None = None, ingredient: str | None = None,
+def opm_get_material_usage(caller: Caller, batch_no: str | None = None, ingredient: str | None = None,
                              lot_number: str | None = None, over_pct: float | None = None,
                              group_by: str = "none") -> dict:
     """Ingredient usage per batch and lot — also the traceability question
@@ -955,7 +956,7 @@ def get_batch_material_usage(caller: Caller, batch_no: str | None = None, ingred
              ORDER BY batch_no DESC, item_code, lot_number
         """
     params = {"bn": _val(batch_no), "i": _val(ingredient), "lot": _val(lot_number), "o": over_pct}
-    return _run(caller, "batch_material_usage", sql, params, "get_batch_material_usage", args)
+    return _run(caller, "batch_material_usage", sql, params, "opm_get_material_usage", args)
 
 
 # ── GL (phase 5) ─────────────────────────────────────────────────────────────
@@ -992,7 +993,7 @@ _ACCOUNT_FILTER = """(%(acc)s::text IS NULL OR account_code LIKE %(acc)s::text |
 _DEPT_FILTER = """(%(dept)s::text IS NULL OR dept_code = %(dept)s::text OR dept_desc ILIKE '%%' || %(dept)s::text || '%%')"""
 
 
-def get_pl(caller: Caller, period: str, ytd: bool = False, department: str | None = None,
+def gl_get_pl(caller: Caller, period: str, ytd: bool = False, department: str | None = None,
            compare_prior_year: bool = False, level: str = "line") -> dict:
     """Profit & loss in the Financial Statement report's layout: lines by
     section with a 'TOTAL <section>' row after each, then the report's
@@ -1066,10 +1067,10 @@ def get_pl(caller: Caller, period: str, ytd: bool = False, department: str | Non
         )
         SELECT *{diff} FROM rpt ORDER BY so, lo
     """
-    return _run(caller, "pl_monthly", sql, params, "get_pl", args)
+    return _run(caller, "pl_monthly", sql, params, "gl_get_pl", args)
 
 
-def get_trial_balance(caller: Caller, period: str, account: str | None = None, department: str | None = None,
+def gl_get_trial_balance(caller: Caller, period: str, account: str | None = None, department: str | None = None,
                       statement: str | None = None, group_by: str = "account") -> dict:
     """Trial balance for one period (month or MON-YY). Balances in GL's
     debit-positive convention (begin, dr, cr, end) plus end_balance_fs in the
@@ -1138,10 +1139,10 @@ def get_trial_balance(caller: Caller, period: str, account: str | None = None, d
               FROM mart.gl_trial_balance {where}
              GROUP BY account_code ORDER BY account_code
         """
-    return _run(caller, marts, sql, params, "get_trial_balance", args)
+    return _run(caller, marts, sql, params, "gl_get_trial_balance", args)
 
 
-def get_gl_journals(caller: Caller, period: str | None = None, date_from: date | None = None,
+def gl_get_journals(caller: Caller, period: str | None = None, date_from: date | None = None,
                     date_to: date | None = None, account: str | None = None, department: str | None = None,
                     source: str | None = None, category: str | None = None, text: str | None = None,
                     subledger_txn: str | None = None, min_amount: float | None = None,
@@ -1190,7 +1191,7 @@ def get_gl_journals(caller: Caller, period: str | None = None, date_from: date |
               FROM mart.gl_journal_detail {where}
              ORDER BY effective_date DESC, je_header_id, je_line_num
         """
-    return _run(caller, "gl_journal_detail", sql, params, "get_gl_journals", args)
+    return _run(caller, "gl_journal_detail", sql, params, "gl_get_journals", args)
 
 
 # ── Finance close, Cash Management, Fixed Assets (library v2 12-13) ─────────
@@ -1455,3 +1456,347 @@ def fa_get_depreciation(caller: Caller, period: str, category: str | None = None
         """
     return _run(caller, "fa_depreciation", sql, {"p": _period_name(period), "c": _like(category)},
                 "fa_get_depreciation", args)
+
+
+# ── Rest of the library v2 catalog (ext_sql.py) ─────────────────────────────
+
+def _month_range(period: str | None):
+    """(first day, last day) of a period given as AUG-26 / 2026-08."""
+    import calendar
+    pn = _period_name(period)
+    if not pn:
+        return None, None
+    y, m = 2000 + int(pn[4:]), _MON.index(pn[:3]) + 1
+    return date(y, m, 1), date(y, m, calendar.monthrange(y, m)[1])
+
+
+def lookup_master(caller: Caller, text: str, type: str | None = None) -> dict:
+    """Codes for a partial name (or names for a code): item, supplier,
+    customer, account, department. An exact code match comes first."""
+    args = {"text": text, "type": type}
+    sql = """
+        SELECT type, code, name, extra
+          FROM mart.master_lookup
+         WHERE (%(t)s::text IS NULL OR type = LOWER(%(t)s::text))
+           AND (UPPER(code) = UPPER(%(x)s::text) OR name ILIKE %(xl)s::text OR code ILIKE %(xl)s::text)
+         ORDER BY (UPPER(code) = UPPER(%(x)s::text)) DESC, type, name
+    """
+    return _run(caller, "master_lookup", sql, {"t": _val(type), "x": _val(text), "xl": _like(text)},
+                "lookup_master", args)
+
+
+def po_get_document(caller: Caller, po_number: str) -> dict:
+    """One PO, open or closed: every shipment with ordered, received, billed
+    and cancelled quantities, and the invoices matched to it."""
+    args = {"po_number": po_number}
+    sql = """
+        SELECT s.po_number, s.po_type, s.po_status, s.po_date, s.approved_date, s.vendor_name, s.buyer_name,
+               s.line_num, s.shipment_num, s.item_code, s.item_desc, s.uom, s.qty_ordered, s.qty_received,
+               s.qty_billed, s.qty_cancelled, s.currency_code, s.unit_price_entered, s.amount_idr,
+               s.need_by_date, s.promised_date, s.closed_code, i.invoices
+          FROM mart.po_shipment s
+          LEFT JOIN (SELECT line_location_id, STRING_AGG(DISTINCT last_invoice_num, ', ') AS invoices
+                       FROM mart.po_receipt_vs_invoice GROUP BY line_location_id) i
+                 ON i.line_location_id = s.line_location_id
+         WHERE UPPER(s.po_number) = UPPER(%(po)s::text)
+         ORDER BY s.release_num NULLS FIRST, s.line_num, s.shipment_num
+    """
+    return _run(caller, ["po_shipment", "po_receipt_vs_invoice"], sql, {"po": _val(po_number)},
+                "po_get_document", args)
+
+
+def po_get_pending_approval(caller: Caller, min_days: int | None = None, doc_type: str | None = None,
+                            approver: str | None = None) -> dict:
+    args = {"min_days": min_days, "doc_type": doc_type, "approver": approver}
+    sql = """
+        SELECT doc_type, doc_number, authorization_status, pending_approver, preparer, days_waiting, submitted_date,
+               last_action, vendor_name, currency_code, amount_entered, amount_idr, description
+          FROM mart.po_approval_pending
+         WHERE (%(d)s::int IS NULL OR days_waiting >= %(d)s::int)
+           AND (%(t)s::text IS NULL OR doc_type = UPPER(%(t)s::text))
+           AND (%(a)s::text IS NULL OR pending_approver ILIKE %(a)s::text)
+         ORDER BY days_waiting DESC
+    """
+    return _run(caller, "po_approval_pending", sql, {"d": min_days, "t": _val(doc_type), "a": _like(approver)},
+                "po_get_pending_approval", args)
+
+
+def ap_get_invoice(caller: Caller, invoice_num: str, supplier: str | None = None) -> dict:
+    """One supplier invoice, paid or not: amounts, payment status, next due
+    date, payments made and holds still active."""
+    args = {"invoice_num": invoice_num, "supplier": supplier}
+    sql = """
+        SELECT invoice_num, vendor_name, invoice_type, invoice_date, gl_date, currency_code, invoice_amount_entered,
+               invoice_amount_idr, payment_status, amount_remaining_entered, amount_remaining_idr, next_due_date,
+               days_overdue, payment_count, paid_amount_idr, last_payment_date, payment_numbers, active_holds,
+               hold_codes, cancelled_date, description
+          FROM mart.ap_invoice
+         WHERE UPPER(invoice_num) = UPPER(%(i)s::text)
+           AND (%(s)s::text IS NULL OR vendor_name ILIKE %(s)s::text)
+         ORDER BY invoice_date DESC
+    """
+    return _run(caller, "ap_invoice", sql, {"i": _val(invoice_num), "s": _like(supplier)}, "ap_get_invoice", args)
+
+
+def ap_get_due_forecast(caller: Caller, weeks_ahead: int = 8, supplier: str | None = None) -> dict:
+    """Cash needed for supplier invoices falling due, per week (Monday
+    start), with everything already overdue in one row at the top."""
+    weeks_ahead = max(1, min(int(weeks_ahead or 8), 52))
+    args = {"weeks_ahead": weeks_ahead, "supplier": supplier}
+    sql = """
+        WITH t AS (SELECT (now() AT TIME ZONE 'Asia/Jakarta')::date AS d)
+        SELECT CASE WHEN o.due_date < t.d THEN 'Sudah lewat jatuh tempo'
+                    ELSE 'Minggu mulai ' || TO_CHAR(DATE_TRUNC('week', o.due_date), 'DD-Mon-YYYY') END AS periode,
+               MIN(CASE WHEN o.due_date < t.d THEN DATE '1900-01-01' ELSE DATE_TRUNC('week', o.due_date)::date END) AS urut,
+               COUNT(*) AS jml_invoice, COUNT(DISTINCT o.vendor_name) AS jml_supplier,
+               SUM(o.amount_remaining_idr) AS amount_idr
+          FROM mart.ap_open_invoice o, t
+         WHERE o.due_date <= t.d + %(w)s::int * 7
+           AND (%(s)s::text IS NULL OR o.vendor_name ILIKE %(s)s::text)
+         GROUP BY 1 ORDER BY urut
+    """
+    return _run(caller, "ap_open_invoice", sql, {"w": weeks_ahead, "s": _like(supplier)}, "ap_get_due_forecast", args)
+
+
+def ap_get_withholding(caller: Caller, period: str | None = None, tax_code: str | None = None,
+                       supplier: str | None = None, group_by: str = "tax") -> dict:
+    """Withholding tax (PPh) deducted from supplier invoices, 24 months."""
+    args = {"period": period, "tax_code": tax_code, "supplier": supplier, "group_by": group_by}
+    where = """
+         WHERE (%(p)s::text IS NULL OR period_name = %(p)s::text)
+           AND (%(t)s::text IS NULL OR tax_name ILIKE %(t)s::text)
+           AND (%(s)s::text IS NULL OR vendor_name ILIKE %(s)s::text)
+    """
+    if group_by == "invoice":
+        sql = f"""
+            SELECT period_name, vendor_name, invoice_num, invoice_date, tax_name, tax_rate, amount_idr, account_code
+              FROM mart.ap_withholding {where} ORDER BY accounting_date, vendor_name
+        """
+    else:
+        dim = "vendor_name" if group_by == "supplier" else "tax_name, tax_rate"
+        sql = f"""
+            SELECT {dim}, COUNT(DISTINCT invoice_id) AS jml_invoice, SUM(amount_idr) AS amount_idr
+              FROM mart.ap_withholding {where} GROUP BY {dim} ORDER BY amount_idr DESC
+        """
+    return _run(caller, "ap_withholding", sql, {"p": _period_name(period), "t": _like(tax_code), "s": _like(supplier)},
+                "ap_get_withholding", args)
+
+
+def so_get_order(caller: Caller, order_number: str) -> dict:
+    """One sales order, open or closed: each line with ordered, shipped and
+    invoiced quantities, delivery, lot and AR invoice numbers."""
+    args = {"order_number": order_number}
+    sql = """
+        SELECT order_number, order_type, ordered_date, header_status, customer_name, line_number, shipment_number,
+               item_code, item_desc, uom, ordered_qty, shipped_qty, invoiced_qty, cancelled_qty, line_status,
+               currency_code, unit_selling_price, amount_ordered_idr, schedule_ship_date, actual_shipment_date,
+               delivery_names, lot_numbers, invoice_numbers
+          FROM mart.so_order_line
+         WHERE order_number = %(o)s::text
+         ORDER BY line_number, shipment_number
+    """
+    return _run(caller, "so_order_line", sql, {"o": _val(order_number)}, "so_get_order", args)
+
+
+def so_get_holds(caller: Caller, hold_name: str | None = None, customer: str | None = None) -> dict:
+    args = {"hold_name": hold_name, "customer": customer}
+    sql = """
+        SELECT order_number, order_type, customer_name, hold_name, hold_type, hold_level, line_number, applied_date,
+               days_on_hold, hold_until_date, applied_by, hold_comment, order_amount_idr
+          FROM mart.so_hold
+         WHERE (%(h)s::text IS NULL OR hold_name ILIKE %(h)s::text)
+           AND (%(c)s::text IS NULL OR customer_name ILIKE %(c)s::text)
+         ORDER BY days_on_hold DESC
+    """
+    return _run(caller, "so_hold", sql, {"h": _like(hold_name), "c": _like(customer)}, "so_get_holds", args)
+
+
+def ar_get_customer_balance(caller: Caller, customer: str) -> dict:
+    """A customer's open receivable by currency (total, overdue, oldest due
+    date) and — for callers who may read receipts — unapplied cash."""
+    args = {"customer": customer}
+    with_unapplied = caller.can_read("ar_receipt")
+    unapplied = """
+        , u AS (SELECT customer_name, SUM(amount_idr) AS unapplied_idr FROM mart.ar_receipt
+                 WHERE application_status IN ('UNAPP', 'ONACC') AND NOT is_reversed
+                   AND customer_name ILIKE %(c)s::text GROUP BY customer_name)""" if with_unapplied else ""
+    sql = f"""
+        WITH a AS (
+            SELECT customer_num, customer_name, currency_code, COUNT(*) AS jml_dokumen,
+                   SUM(amount_remaining_entered) AS sisa_entered, SUM(amount_remaining_idr) AS sisa_idr,
+                   SUM(amount_remaining_idr) FILTER (WHERE days_overdue > 0) AS overdue_idr,
+                   MIN(due_date) AS jatuh_tempo_tertua, MAX(days_overdue) AS overdue_terlama_hari
+              FROM mart.ar_aging WHERE customer_name ILIKE %(c)s::text
+             GROUP BY customer_num, customer_name, currency_code
+        ){unapplied}
+        SELECT a.*{", u.unapplied_idr" if with_unapplied else ""}
+          FROM a {"LEFT JOIN u ON u.customer_name = a.customer_name" if with_unapplied else ""}
+         ORDER BY a.sisa_idr DESC
+    """
+    marts = ["ar_aging"] + (["ar_receipt"] if with_unapplied else [])
+    return _run(caller, marts, sql, {"c": _like(customer)}, "ar_get_customer_balance", args)
+
+
+def inv_get_stock_card(caller: Caller, item: str, period: str, subinventory: str | None = None) -> dict:
+    """Stock card of one item code for one month: opening balance, each day ×
+    transaction type in/out with running balance, closing balance. Opening =
+    today's on-hand minus every movement since the period start. Movements
+    are per day and type (no lot)."""
+    args = {"item": item, "period": period, "subinventory": subinventory}
+    start, end = _month_range(period)
+    if not start:
+        raise sql_guard.SqlRejected("Periode wajib, format AUG-26 atau 2026-08.")
+    sql = """
+        WITH orgs AS (SELECT DISTINCT organization_code FROM mart.inv_onhand_lot),
+        mv AS (
+            SELECT txn_date, transaction_type, SUM(qty_in) AS qty_in, SUM(qty_out) AS qty_out, SUM(net_qty) AS net_qty,
+                   MAX(uom) AS uom
+              FROM mart.inv_movement_daily
+             WHERE UPPER(item_code) = UPPER(%(i)s::text)
+               AND organization_code IN (SELECT organization_code FROM orgs)
+               AND (%(sub)s::text IS NULL OR subinventory_code = %(sub)s::text)
+               AND txn_date >= %(s)s::date
+             GROUP BY txn_date, transaction_type
+        ), oh AS (
+            SELECT COALESCE(SUM(onhand_qty), 0) AS q, MAX(uom) AS uom FROM mart.inv_onhand_lot
+             WHERE UPPER(item_code) = UPPER(%(i)s::text)
+               AND (%(sub)s::text IS NULL OR subinventory_code = %(sub)s::text)
+        ), op AS (
+            SELECT oh.q - COALESCE((SELECT SUM(net_qty) FROM mv), 0) AS opening, oh.uom FROM oh
+        ), rows AS (
+            SELECT txn_date, transaction_type, qty_in, qty_out,
+                   (SELECT opening FROM op) + SUM(net_qty) OVER (ORDER BY txn_date, transaction_type) AS saldo
+              FROM mv WHERE txn_date <= %(e)s::date
+        )
+        SELECT NULL::date AS tanggal, 'SALDO AWAL' AS keterangan, NULL::numeric AS masuk, NULL::numeric AS keluar,
+               (SELECT opening FROM op) AS saldo, (SELECT uom FROM op) AS uom, 0 AS urut
+        UNION ALL
+        SELECT txn_date, transaction_type, qty_in, qty_out, saldo, (SELECT uom FROM op), 1 FROM rows
+        UNION ALL
+        SELECT %(e)s::date, 'SALDO AKHIR', (SELECT SUM(qty_in) FROM rows), (SELECT SUM(qty_out) FROM rows),
+               (SELECT opening FROM op) + COALESCE((SELECT SUM(net_qty) FROM mv WHERE txn_date <= %(e)s::date), 0),
+               (SELECT uom FROM op), 2
+        ORDER BY urut, tanggal, keterangan
+    """
+    return _run(caller, ["inv_movement_daily", "inv_onhand_lot"], sql,
+                {"i": _val(item), "s": start, "e": end, "sub": _val(subinventory)}, "inv_get_stock_card", args)
+
+
+def inv_get_slow_moving(caller: Caller, days_no_movement: int = 180, subinventory_type: str | None = "GOOD") -> dict:
+    """Items with stock on hand and no movement for N days (or none on
+    record), with quantity and last movement date."""
+    args = {"days_no_movement": days_no_movement, "subinventory_type": subinventory_type}
+    sql = """
+        WITH last_mv AS (
+            SELECT item_code, MAX(txn_date) AS last_txn FROM mart.inv_movement_daily GROUP BY item_code
+        )
+        SELECT o.item_code, MAX(o.item_desc) AS item_desc, MAX(o.item_category) AS item_category, MAX(o.uom) AS uom,
+               SUM(o.onhand_qty) AS onhand_qty, COUNT(DISTINCT o.lot_number) AS jml_lot, MAX(l.last_txn) AS gerak_terakhir,
+               (now() AT TIME ZONE 'Asia/Jakarta')::date - MAX(l.last_txn) AS hari_diam, MIN(o.expiration_date) AS ed_terdekat
+          FROM mart.inv_onhand_lot o
+          LEFT JOIN last_mv l ON l.item_code = o.item_code
+         WHERE o.onhand_qty > 0
+           AND (%(st)s::text IS NULL OR o.subinventory_type = %(st)s::text)
+         GROUP BY o.item_code
+        HAVING MAX(l.last_txn) IS NULL
+            OR (now() AT TIME ZONE 'Asia/Jakarta')::date - MAX(l.last_txn) >= %(d)s::int
+         ORDER BY hari_diam DESC NULLS FIRST
+    """
+    return _run(caller, ["inv_onhand_lot", "inv_movement_daily"], sql,
+                {"d": int(days_no_movement or 180), "st": _val(subinventory_type)}, "inv_get_slow_moving", args)
+
+
+def opm_get_item_cost(caller: Caller, item: str, period: str | None = None) -> dict:
+    """OPM actual cost (CKDO_PMAC) of an item per costing period, with the
+    previous period's cost and the change, and the cost per component.
+    Without a period: the last 13 periods."""
+    args = {"item": item, "period": period}
+    start, end = _month_range(period)
+    sql = """
+        WITH c AS (
+            SELECT item_code, item_desc, uom, period_code, period_start_date, period_end_date, period_status,
+                   unit_cost, cost_components,
+                   LAG(unit_cost) OVER (PARTITION BY item_code ORDER BY period_start_date) AS unit_cost_prev,
+                   ROW_NUMBER() OVER (PARTITION BY item_code ORDER BY period_start_date DESC) AS rn
+              FROM mart.opm_item_cost
+             WHERE UPPER(item_code) = UPPER(%(i)s::text) OR item_desc ILIKE %(il)s::text
+        )
+        SELECT item_code, item_desc, uom, period_code, period_start_date, period_status, unit_cost, unit_cost_prev,
+               unit_cost - unit_cost_prev AS selisih,
+               ROUND(100.0 * (unit_cost - unit_cost_prev) / NULLIF(unit_cost_prev, 0), 1) AS perubahan_pct,
+               cost_components
+          FROM c
+         WHERE (%(s)s::date IS NULL AND rn <= 13)
+            OR (period_start_date <= %(e)s::date AND period_end_date >= %(s)s::date)
+         ORDER BY item_code, period_start_date DESC
+    """
+    return _run(caller, "opm_item_cost", sql, {"i": _val(item), "il": _like(item), "s": start, "e": end},
+                "opm_get_item_cost", args)
+
+
+def gl_get_account_movement(caller: Caller, account: str, period_from: str, period_to: str | None = None,
+                            department: str | None = None) -> dict:
+    """Month-by-month movement of an account (code prefix or name): opening,
+    debit, credit, closing — from the trial balance."""
+    args = {"account": account, "period_from": period_from, "period_to": period_to, "department": department}
+    pf = _period_name(period_from)
+    pt = _period_name(period_to) or pf
+    if not pf:
+        raise sql_guard.SqlRejected("period_from wajib, format AUG-26 atau 2026-08.")
+    key = lambda p: (2000 + int(p[4:])) * 100 + _MON.index(p[:3]) + 1  # noqa: E731
+    sql = f"""
+        SELECT period_name, account_code, MAX(account_desc) AS account_desc,
+               SUM(begin_balance) AS saldo_awal, SUM(period_dr) AS debit, SUM(period_cr) AS kredit,
+               SUM(period_dr) - SUM(period_cr) AS mutasi_net, SUM(end_balance) AS saldo_akhir
+          FROM mart.gl_trial_balance
+         WHERE period_year * 100 + period_num BETWEEN %(kf)s AND %(kt)s
+           AND NOT is_adjustment
+           AND {_ACCOUNT_FILTER}
+           AND {_DEPT_FILTER}
+         GROUP BY period_name, period_year, period_num, account_code
+         ORDER BY account_code, period_year, period_num
+    """
+    return _run(caller, "gl_trial_balance", sql,
+                {"kf": key(pf), "kt": key(pt), "acc": _val(account), "dept": _val(department)},
+                "gl_get_account_movement", args)
+
+
+def gl_get_budget_vs_actual(caller: Caller, period: str, ytd: bool = False, department: str | None = None,
+                            account: str | None = None, budget_name: str | None = None,
+                            include_revenue: bool = False, group_by: str = "department") -> dict:
+    """Budget vs encumbrance vs actual (ledger 2022, expense accounts unless
+    include_revenue). Without budget_name the budget version with the most
+    rows in that period is used and named in every row. available = budget −
+    encumbrance − actual."""
+    args = {"period": period, "ytd": ytd, "department": department, "account": account, "budget_name": budget_name,
+            "include_revenue": include_revenue, "group_by": group_by}
+    cond, params = _gl_period_filter(period, ytd)
+    dim = {"account": "account_code, account_desc", "section": "pl_section, pl_line",
+           "month": "period_name, period_year, period_num"}.get(group_by, "dept_code, dept_desc")
+    params.update({"dept": _val(department), "acc": _val(account), "bn": _val(budget_name), "rev": include_revenue})
+    sql = f"""
+        WITH f AS (
+            SELECT * FROM mart.gl_budget_vs_actual
+             WHERE {cond}
+               AND (%(rev)s OR account_type = 'E')
+               AND {_ACCOUNT_FILTER}
+               AND {_DEPT_FILTER}
+        ), v AS (
+            SELECT COALESCE(%(bn)s::text, (SELECT version_name FROM f WHERE kind = 'BUDGET'
+                                            GROUP BY version_name ORDER BY COUNT(*) DESC LIMIT 1)) AS bv
+        ), agg AS (
+            SELECT {dim},
+                   SUM(amount) FILTER (WHERE kind = 'BUDGET' AND version_name ILIKE (SELECT bv FROM v)) AS budget_idr,
+                   SUM(amount) FILTER (WHERE kind = 'ENCUMBRANCE') AS encumbrance_idr,
+                   SUM(amount) FILTER (WHERE kind = 'ACTUAL') AS actual_idr
+              FROM f GROUP BY {dim}
+        )
+        SELECT agg.*,
+               COALESCE(budget_idr, 0) - COALESCE(encumbrance_idr, 0) - COALESCE(actual_idr, 0) AS available_idr,
+               ROUND(100.0 * actual_idr / NULLIF(budget_idr, 0), 1) AS realisasi_pct,
+               (SELECT bv FROM v) AS budget_name
+          FROM agg
+         WHERE COALESCE(budget_idr, 0) <> 0 OR COALESCE(actual_idr, 0) <> 0 OR COALESCE(encumbrance_idr, 0) <> 0
+         ORDER BY COALESCE(budget_idr, 0) + COALESCE(actual_idr, 0) DESC
+    """
+    return _run(caller, "gl_budget_vs_actual", sql, params, "gl_get_budget_vs_actual", args)

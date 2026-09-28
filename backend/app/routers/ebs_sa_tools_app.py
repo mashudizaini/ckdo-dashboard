@@ -248,6 +248,21 @@ async def it_get_concurrent_requests(body: ConcRequestIn, caller: Caller = Depen
     return await _call(sa_tools.it_get_concurrent_requests, caller, **body.model_dump())
 
 
+class InterfaceIn(BaseModel):
+    interface: Optional[Literal["AP", "AR", "GL", "INV", "RCV"]] = Field(
+        None, description="AP = import invoice, AR = AutoInvoice, GL = journal import, INV = transaksi inventory "
+                          "(interface + pending MMTT), RCV = receiving. Kosong = semua")
+    status: Optional[Literal["ERROR", "PENDING"]] = Field(None, description="ERROR = ditolak; PENDING = belum diproses")
+    days: Optional[int] = Field(None, ge=1, le=3650, description="Hanya baris yang dibuat N hari terakhir")
+    group_by: Literal["summary", "detail"] = Field("summary", description="summary = per interface × status × pesan error; detail = per baris")
+
+
+@app.post("/it_get_interface_errors", operation_id="it_get_interface_errors",
+          summary="Error dan antrean open interface (AP, AR AutoInvoice, GL, inventory, receiving) dengan pesan error")
+async def it_get_interface_errors(body: InterfaceIn, caller: Caller = Depends(require_sysadmin)):
+    return await _call(sa_tools.it_get_interface_errors, caller, **body.model_dump())
+
+
 @app.get("/health", include_in_schema=False)
 async def health():
     return {"status": "ok"}

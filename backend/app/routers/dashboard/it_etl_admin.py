@@ -60,7 +60,7 @@ async def trigger_etl(job_name: str, params: TriggerParams):
         "etl_it_monitoring", "etl_daily_sales",
         "etl_mart_ap", "etl_mart_inventory", "refresh_ebs_marts", "etl_mart_po", "etl_mart_item_cost",
         "etl_mart_om", "etl_mart_ar", "etl_mart_opm", "etl_mart_gl", "etl_mart_sa", "etl_mart_sa_ops",
-        "etl_mart_close", "etl_mart_fa",
+        "etl_mart_close", "etl_mart_fa", "etl_mart_ext",
     ]
     if job_name not in valid_jobs:
         raise HTTPException(status_code=400, detail=f"Unknown job. Valid: {valid_jobs}")
@@ -68,7 +68,7 @@ async def trigger_etl(job_name: str, params: TriggerParams):
     kwargs = {"year": params.year, "month": params.month}
     if job_name in ("etl_mart_ap", "etl_mart_inventory", "refresh_ebs_marts", "etl_mart_po", "etl_mart_item_cost",
                     "etl_mart_om", "etl_mart_ar", "etl_mart_opm", "etl_mart_gl", "etl_mart_sa", "etl_mart_sa_ops",
-                    "etl_mart_close", "etl_mart_fa"):
+                    "etl_mart_close", "etl_mart_fa", "etl_mart_ext"):
         kwargs["trigger_type"] = "MANUAL"
     result = celery_app.send_task(f"app.tasks.etl_tasks.{job_name}", kwargs=kwargs)
     _active_task_ids[job_name] = result.id
@@ -406,6 +406,13 @@ _JOB_META = {
                                          "xla_ae_headers", "gl_je_headers", "ra_interface_lines_all", "ra_interface_errors_all",
                                          "ce_statement_lines", "ap_checks_all", "ar_cash_receipts_all", "ce_cashflows"],
                        "destination_table": "core.fin_*, core.ar_interface_line, core.ce_* -> mart.gl_period_status, sla_gl_gap, ar_autoinvoice_error, so_shipped_not_invoiced, ce_unreconciled"},
+    "etl_mart_ext": {"frequency": "Hourly (06-20)", "schedule": "menit ke-45, 06:45-20:45",
+                     "source": "Oracle PO/OM/AP/GL + open interface (EBS Data Mart — katalog lanjutan)",
+                     "source_system": "Oracle EBS",
+                     "oracle_tables": ["po_headers_all", "po_requisition_headers_all", "po_action_history", "oe_order_holds_all",
+                                       "ap_invoice_distributions_all", "gl_balances", "ap_invoices_interface", "gl_interface",
+                                       "mtl_transactions_interface", "mtl_material_transactions_temp", "rcv_transactions_interface"],
+                     "destination_table": "core.doc_approval_pending, so_hold, ap_withholding, fact_gl_budget, it_interface_row -> mart.*"},
     "etl_mart_fa": {"frequency": "Daily", "schedule": "04:40 WIB", "source": "Oracle FA (EBS Data Mart)",
                     "source_system": "Oracle EBS",
                     "oracle_tables": ["fa_book_controls", "fa_additions_b", "fa_books", "fa_categories_b", "fa_distribution_history",

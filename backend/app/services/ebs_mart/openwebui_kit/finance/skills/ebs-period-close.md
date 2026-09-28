@@ -12,10 +12,10 @@ periode.
 2. gl_get_period_status(period) — tampilkan status tiap aplikasi (GL, AP, AR, PO, INV, OPM, FA).
 3. Jalankan pemeriksaan berurutan:
    a. PO: po_get_uninvoiced_receipts(as_of_period=period) — dasar accrual
-   b. AP: get_ap_holds, gl_get_subledger_gap(period, application="AP")
+   b. AP: ap_get_holds, gl_get_subledger_gap(period, application="AP")
    c. OM/AR: so_get_shipped_not_invoiced, ar_get_autoinvoice_errors(group_by="error"), ar_get_unapplied_receipts,
       gl_get_subledger_gap(period, application="AR")
-   d. INV: get_stock_onhand (qty negatif), get_expiring_lots(include_expired=true) untuk lot sudah expired di GOOD
+   d. INV: inv_get_onhand (qty negatif), inv_get_expiring_lots(include_expired=true) untuk lot sudah expired di GOOD
    e. OPM: opm_get_open_batches, status periode costing (OPM) dan INV dari langkah 2
    f. CE/FA: ce_get_unreconciled(date_to=akhir periode), gl_get_period_status(application="FA") → deprn_run,
       fa_get_depreciation(period)

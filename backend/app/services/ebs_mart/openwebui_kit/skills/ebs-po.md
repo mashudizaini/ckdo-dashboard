@@ -16,10 +16,13 @@ permintaan pembelian, PR belum jadi PO
   Kolom kunci: pr_number, preparer, requester, item_desc, quantity, uom, days_waiting, amount_idr.
 
 ## Intent tool (utamakan)
-- PO yang belum datang / terlambat → get_po_outstanding (late_only, group_by: none | supplier)
-- "PO X sudah ditagih belum?", uninvoiced receipts → get_po_match_status
+- PO yang belum datang / terlambat → po_get_outstanding (late_only, group_by: none | supplier)
+- "PO X sudah ditagih belum?", uninvoiced receipts → po_get_match_status
   (po_number; status 'Diterima, belum ditagih penuh' untuk uninvoiced; group_by: none | supplier | status)
-- PR yang belum jadi PO → get_pr_pending (person, min_days_waiting, group_by: none | preparer)
+- PR yang belum jadi PO → pr_get_pending (person, min_days_waiting, group_by: none | preparer)
+- Detail satu PO (open atau closed): semua baris, qty terima/tagih, invoice → po_get_document (po_number)
+- PO / PR yang menunggu approval, siapa approver-nya → po_get_pending_approval (min_days, doc_type, approver)
+- Receipt belum ditagih (accrual) → po_get_uninvoiced_receipts
 
 ## Aturan bisnis
 - Outstanding = qty order − qty batal − qty diterima, di level shipment. Shipment CLOSED / FINALLY CLOSED /

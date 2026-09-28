@@ -12,7 +12,7 @@ never sees core.* or eis.*: run_sql only accepts SELECTs over mart.*.
   sql_guard.py   — sqlglot validation for run_sql (one SELECT, mart.* only)
   access.py      — who may read which mart (Keycloak groups + ebs_chat_scope)
   query.py       — guarded execution: read-only, timeout, row cap, as_of, audit
-  tools.py       — intent tools (get_ap_aging, get_expiring_lots, ...)
+  tools.py       — intent tools (ap_get_aging, inv_get_expiring_lots, ...)
   sa_sql.py      — System Administration (phase 6): core.sa_*, SoD rules,
                    mart.sa_* — readable only by llm_sa_ro
   sa_tools.py    — the sa_* tools, for SYSADMIN_ALLOWLIST emails only

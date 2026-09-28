@@ -386,3 +386,37 @@ def it_get_concurrent_requests(caller: Caller, hours: int = 24, status: str | No
                 {"h": hours, "sc": codes, "sl": _like(status) if _val(status) and not codes else None,
                  "ph": _val(phase), "p": _val(program), "pl": _like(program), "u": _val(user), "ul": _like(user)},
                 "it_get_concurrent_requests", args)
+
+
+def it_get_interface_errors(caller: Caller, interface: str | None = None, status: str | None = None,
+                            days: int | None = None, group_by: str = "summary") -> dict:
+    """Open-interface rows in error or still waiting: AP invoice import, AR
+    AutoInvoice, GL journal import, inventory (MTI and pending MMTT) and
+    receiving. summary = count, oldest and example per interface × status ×
+    error; detail = the rows."""
+    args = {"interface": interface, "status": status, "days": days, "group_by": group_by}
+    where = """
+         WHERE (%(i)s::text IS NULL OR interface_name ILIKE %(il)s::text)
+           AND (%(s)s::text IS NULL OR status = UPPER(%(s)s::text))
+           AND (%(d)s::int IS NULL OR age_days <= %(d)s::int)
+           AND status <> 'PROCESSED'
+    """
+    if group_by == "detail":
+        sql = f"""
+            SELECT interface_name, source, doc_ref, status, error_code, error_message, txn_date, created_date, age_days,
+                   amount, quantity, item_code, request_id, row_count
+              FROM mart.sa_interface_error {where}
+             ORDER BY interface_name, created_date
+        """
+    else:
+        sql = f"""
+            SELECT interface_name, status, COALESCE(error_message, error_code) AS error, SUM(row_count) AS jml_baris,
+                   MIN(created_date) AS tertua, MAX(created_date) AS terbaru,
+                   (ARRAY_AGG(doc_ref ORDER BY created_date))[1:3] AS contoh
+              FROM mart.sa_interface_error {where}
+             GROUP BY interface_name, status, COALESCE(error_message, error_code)
+             ORDER BY interface_name, jml_baris DESC
+        """
+    return _run(caller, "sa_interface_error", sql,
+                {"i": _val(interface), "il": _like(interface), "s": _val(status), "d": days},
+                "it_get_interface_errors", args)

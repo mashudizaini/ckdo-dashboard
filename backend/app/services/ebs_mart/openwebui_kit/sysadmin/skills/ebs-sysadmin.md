@@ -24,6 +24,7 @@ error, program, approval tertahan, notifikasi, workflow, patch, personalization.
 | Nilai profile option | sa_get_profile_value(profile, level?, value_owner?) |
 | Riwayat login | sa_get_login_history(user, days=7) |
 | Status concurrent manager | sa_get_manager_status(only_problems?) |
+| Error / antrean open interface (AP, AR AutoInvoice, GL, INV, RCV) | it_get_interface_errors(interface?, status?, group_by?) |
 | Concurrent request error/warning/lambat | it_get_concurrent_requests(hours=24, status?, program?, user?, group_by?) |
 | Approval tertahan | sa_get_pending_approvals(approver?, days=3, item_type?, group_by?) — notifikasi error workflow (WFERROR, POERROR) tidak dihitung kecuali include_errors |
 | Patch sudah diterapkan? | sa_check_patch(patch_number) |

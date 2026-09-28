@@ -12,15 +12,18 @@ gudang, subinventory, karantina, reject, mutasi, kartu stok, pemakaian, penerima
   Kolom kunci: txn_date, period_name, item_code, uom, transaction_type, qty_in, qty_out, net_qty.
 
 ## Intent tool (utamakan)
-- Lot yang ED dalam N hari → get_expiring_lots (days, default subinventory_type GOOD)
-- Stok item saat ini → get_stock_onhand (group_by: item | subinventory | lot)
-- Nilai persediaan (Rupiah) → get_inventory_value (group_by: category | item | subinventory_type)
-- Pemakaian/penerimaan per periode → get_stock_movement (group_by: type | item | day | month)
+- Lot yang ED dalam N hari → inv_get_expiring_lots (days, default subinventory_type GOOD)
+- Stok item saat ini → inv_get_onhand (group_by: item | subinventory | lot)
+- Nilai persediaan (Rupiah) → inv_get_valuation (group_by: category | item | subinventory_type)
+- Pemakaian/penerimaan per periode → inv_get_movements (group_by: type | item | day | month)
+- Kartu stok item satu bulan (saldo awal, masuk, keluar, saldo akhir) → inv_get_stock_card (item = kode persis, period)
+- Stok slow moving / tidak bergerak N hari → inv_get_slow_moving (days_no_movement, default 180)
+- Kode item dari nama sebagian → lookup_master (type=item)
 
 ## Aturan bisnis
 - Parameter `item` menerima kode item (cocok persis) ATAU nama bahan (cocok sebagian).
 - Kategori item ada di kolom `item_category` (category set CKDO Inventory) dan bisa difilter lewat
-  parameter `item_category` di get_expiring_lots / get_stock_onhand. Nilai: API, EXCIPIENT, PRIMER,
+  parameter `item_category` di inv_get_expiring_lots / inv_get_onhand. Nilai: API, EXCIPIENT, PRIMER,
   SEKUNDER, LIQUID, LYOPHILLIZED, NA.
   "Bahan baku" = API + EXCIPIENT; "bahan kemas" = PRIMER + SEKUNDER. Sebutkan pemetaan ini di jawaban.
   LIQUID, LYOPHILLIZED dan NA: tampilkan apa adanya, jangan menebak artinya.
