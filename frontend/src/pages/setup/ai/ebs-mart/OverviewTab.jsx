@@ -141,13 +141,13 @@ export default function OverviewTab() {
           </Card>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Card title="Grup → domain mart" icon={Users}
-              subtitle="Diberikan per email di tab EBS Chat Access, atau lewat claim groups token Keycloak.">
+            <Card title="Peran akses data" icon={Users}
+              subtitle="Isi aksesnya diatur di matriks EBS Chat Access; peran diberikan per email di sana atau lewat claim groups token Keycloak.">
               <div className="divide-y divide-gray-800">
                 {data.groups.map((g) => (
                   <div key={g.group} className="px-4 py-2 text-xs">
                     <p className="font-mono text-gray-200">{g.group}</p>
-                    <p className="text-gray-500">{g.label}</p>
+                    <p className="text-gray-500">{g.label} · {g.all_access ? "semua data" : `${g.marts.length} data`}</p>
                   </div>
                 ))}
               </div>
@@ -156,7 +156,8 @@ export default function OverviewTab() {
               <ul className="p-4 space-y-1.5 text-xs text-gray-400 list-disc list-inside">
                 <li>run_sql: satu SELECT, semua tabel harus mart.* (diperiksa dengan sqlglot; SQL hasil parse yang dieksekusi)</li>
                 <li>Koneksi read-only, statement_timeout <b className="text-gray-200">{data.guardrails.statement_timeout}</b>, maksimal <b className="text-gray-200">{data.guardrails.max_rows}</b> baris (flag truncated)</li>
-                <li>Akses per grup ebs-* dicek sebelum query — 403 tidak bergantung pada kepatuhan model</li>
+                <li>Akses per peran dicek sebelum query (matriks EBS Chat Access) — 403 tidak bergantung pada kepatuhan model</li>
+                <li>Akses "Qty": kolom nilai/harga dibuang dari hasil, dan run_sql yang menyentuhnya ditolak</li>
                 <li>Setiap panggilan (termasuk yang ditolak) dicatat di meta.chat_query_log</li>
                 <li>Setiap hasil membawa as_of, sql_used, row_count</li>
               </ul>

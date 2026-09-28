@@ -148,6 +148,24 @@ def run_sql(caller: Caller, sql: str, question: str = "") -> dict:
             query.log_call(caller, tool="run_sql", question=question, sql=sql, marts=guarded.tables,
                            status="DENIED", error=str(e))
             raise
+    qty = [m for m in guarded.tables if caller.level(m) == "qty"]
+    if qty:
+        # Quantity-only access: the query may not read a money column at all
+        # (aliasing one would slip past the result masking in query.run).
+        import sqlglot
+        from sqlglot import exp
+        from app.services.ebs_mart.policy import is_money
+        tree = sqlglot.parse_one(guarded.sql, read="postgres")
+        star = any(True for _ in tree.find_all(exp.Star))
+        money = sorted({c.name for c in tree.find_all(exp.Column) if is_money(c.name)})
+        if star or money:
+            e = access.AccessDenied(
+                f"Akses Anda untuk mart.{', mart.'.join(qty)} hanya kuantitas. "
+                + ("Sebutkan kolom satu per satu (tanpa SELECT *). " if star else "")
+                + (f"Kolom nilai/harga tidak boleh dipakai: {', '.join(money)}." if money else ""))
+            query.log_call(caller, tool="run_sql", question=question, sql=sql, marts=guarded.tables,
+                           status="DENIED", error=str(e))
+            raise e
     return query.run(caller, guarded.sql, None, tool="run_sql", marts=guarded.tables, question=question,
                      args={"sql": sql})
 

@@ -19,6 +19,10 @@ Route prefix: /api/v1/ai/ebs-mart (IT / admin only, gated in main.py).
   GET    /subinventories             core.dim_subinventory + classification
   PUT    /subinventories/{code}      set GOOD / REJECT / QUARANTINE (then refresh the mart)
   GET    /openwebui-kit              system prompt, skills, prompts, filter, action, URLs
+  GET    /access-policy              roles, grants (mart x level), marts with their money columns
+  PUT    /access-policy/roles/{code} create / edit an access role
+  DELETE /access-policy/roles/{code} remove a role (its grants go with it)
+  PUT    /access-policy/grant        set one role x mart to full / qty / none
 """
 import json
 import re
@@ -32,7 +36,7 @@ from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from app.dependencies import CurrentUser, Roles, require_role
-from app.services.ebs_mart import query, sa_tools, sql_guard, tools
+from app.services.ebs_mart import policy, query, sa_tools, sql_guard, tools
 from app.services.ebs_mart.access import AccessDenied, Caller
 from app.services.ebs_mart.constants import (
     DOMAIN_BY_GROUP, EBS_GROUPS, GROUP_LABELS, MARTS, MAX_ROWS, SA_READER_ROLE, STATEMENT_TIMEOUT,
@@ -121,7 +125,9 @@ def _overview() -> dict:
     )
     watermarks = _rows("SELECT job_name, stream, watermark, updated_at FROM meta.etl_watermark ORDER BY 1, 2")
     return {"marts": marts, "runs": runs, "watermarks": watermarks, "jobs": JOBS,
-            "groups": [{"group": g, "label": GROUP_LABELS[g], "prefixes": sorted(DOMAIN_BY_GROUP[g])} for g in EBS_GROUPS],
+            "groups": [{"group": code, "label": r["label"], "all_access": r["all_access"],
+                        "marts": sorted(policy.load()["grants"].get(code, {}))}
+                       for code, r in sorted(policy.load()["roles"].items())],
             "guardrails": {"max_rows": MAX_ROWS, "statement_timeout": STATEMENT_TIMEOUT}}
 
 
@@ -260,7 +266,7 @@ def _tool_call(fn, *args, **kwargs):
 
 @router.post("/sql")
 async def run_sql(body: SqlIn, user: CurrentUser = Depends(_admin)):
-    if body.group not in EBS_GROUPS:
+    if body.group not in policy.role_codes():
         raise HTTPException(400, "Grup tidak dikenal")
     caller = _admin_caller(user, body.group)
     return await run_in_threadpool(_tool_call, tools.run_sql, caller, body.sql, "admin playground")
@@ -314,7 +320,7 @@ async def call_tool(name: str, body: ToolIn, user: CurrentUser = Depends(_admin)
     fn = _INTENT_TOOLS.get(name)
     if not fn:
         raise HTTPException(400, f"Tool tidak dikenal: {name}")
-    if body.group not in EBS_GROUPS:
+    if body.group not in policy.role_codes():
         raise HTTPException(400, "Grup tidak dikenal")
     # "" = not given (tool default); explicit null = "no filter".
     args = {k: v for k, v in body.args.items() if v != ""}
@@ -364,6 +370,16 @@ _NEGATIVE_SQL = [
 ]
 
 
+def _mart_cols(mart: str):
+    from app.services.ebs_mart.schema import mart_columns
+    conn = query._rw()
+    try:
+        with conn.cursor() as cur:
+            return mart_columns(cur, mart)
+    finally:
+        conn.close()
+
+
 def _security_test(user: CurrentUser) -> dict:
     results = []
     # Test calls are tagged source='security-test' so they stay out of the
@@ -399,6 +415,34 @@ def _security_test(user: CurrentUser) -> dict:
         results.append({"test": "User tanpa grup EBS ditolak", "passed": False, "detail": "Tidak ditolak"})
     except AccessDenied as e:
         results.append({"test": "User tanpa grup EBS ditolak", "passed": True, "detail": str(e)})
+
+    # Quantity-only access (policy): money columns never leave the dashboard.
+    qty_cases = [(r, m) for r, g in policy.load()["grants"].items() for m, lv in g.items() if lv == "qty"]
+    if qty_cases:
+        role, mart = qty_cases[0]
+        qc = Caller(email="qty-check@ckd-otto.com", groups={role}, source="security-test")
+        try:
+            tools.run_sql(qc, f"SELECT * FROM mart.{mart}", "security-test")
+            results.append({"test": f"Akses kuantitas ({role} → {mart}): SELECT * ditolak", "passed": False,
+                            "detail": "Tidak ditolak"})
+        except AccessDenied as e:
+            results.append({"test": f"Akses kuantitas ({role} → {mart}): SELECT * ditolak", "passed": True,
+                            "detail": str(e)})
+        cols = [c for c, _ in _mart_cols(mart)]
+        money = [c for c in cols if policy.is_money(c)]
+        plain = [c for c in cols if not policy.is_money(c)][:3]
+        if money:
+            try:
+                tools.run_sql(qc, f"SELECT {money[0]} AS x FROM mart.{mart}", "security-test")
+                results.append({"test": f"Akses kuantitas: kolom nilai {money[0]} ditolak walau di-alias",
+                                "passed": False, "detail": "Tidak ditolak"})
+            except AccessDenied as e:
+                results.append({"test": f"Akses kuantitas: kolom nilai {money[0]} ditolak walau di-alias",
+                                "passed": True, "detail": str(e)})
+        if plain:
+            r = tools.run_sql(qc, f"SELECT {', '.join(plain)} FROM mart.{mart}", "security-test")
+            results.append({"test": "Akses kuantitas: kolom non-nilai tetap terbaca", "passed": r["row_count"] >= 0,
+                            "detail": f"{r['row_count']} baris, kolom {r['columns']}"})
 
     # System Administration: three fences (blueprint v2 section 7).
     outsider = Caller(email="bukan-sysadmin@ckd-otto.com", groups={"ebs-management"}, source="security-test")
@@ -602,3 +646,102 @@ async def openwebui_kit(user: CurrentUser = Depends(_admin)):
             "access": "Grup ebs-* saja",
         },
     }
+
+
+# ── Access policy (Setup > AI > EBS Chat Access) ─────────────────────────────
+
+_ROLE_CODE = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
+
+
+def _money_columns() -> dict[str, list[str]]:
+    from app.services.ebs_mart.schema import mart_columns
+    out = {}
+    conn = query._rw()
+    try:
+        with conn.cursor() as cur:
+            for name in policy._mart_names():
+                out[name] = [c for c, _ in mart_columns(cur, name) if policy.is_money(c)]
+    finally:
+        conn.close()
+    return out
+
+
+@router.get("/access-policy")
+async def access_policy(user: CurrentUser = Depends(_admin)):
+    policy.invalidate()
+    p = await run_in_threadpool(policy.load)
+    money = await run_in_threadpool(_money_columns)
+    marts = [{"mart": m, "domain": MARTS[m]["domain"], "phase": MARTS[m]["phase"],
+              "description": MARTS[m]["description"], "money_columns": money.get(m, [])}
+             for m in policy._mart_names()]
+    users = await run_in_threadpool(_rows, """
+        SELECT g AS role_code, COUNT(*) AS users FROM ebs_chat_scope, jsonb_array_elements_text(ebs_groups) g
+         GROUP BY g""")
+    return {"roles": [{"role_code": c, **r, "users": next((u["users"] for u in users if u["role_code"] == c), 0)}
+                      for c, r in sorted(p["roles"].items())],
+            "grants": [{"role_code": c, "mart": m, "level": lv} for c, g in p["grants"].items() for m, lv in g.items()],
+            "marts": marts, "levels": list(policy.LEVELS)}
+
+
+class RoleIn(BaseModel):
+    label: str
+    description: Optional[str] = None
+    all_access: bool = False
+
+
+@router.put("/access-policy/roles/{code}")
+async def upsert_role(code: str, body: RoleIn, user: CurrentUser = Depends(_admin)):
+    code = code.strip().lower()
+    if not _ROLE_CODE.match(code):
+        raise HTTPException(400, "Kode peran: huruf kecil, angka dan tanda hubung, 2–41 karakter (mis. ebs-purchasing-stok).")
+    if not body.label.strip():
+        raise HTTPException(400, "Nama peran wajib diisi.")
+    await run_in_threadpool(_exec, """
+        INSERT INTO meta.access_role (role_code, label, description, all_access, updated_by, updated_at)
+        VALUES (%s, %s, %s, %s, %s, now())
+        ON CONFLICT (role_code) DO UPDATE SET label = EXCLUDED.label, description = EXCLUDED.description,
+               all_access = EXCLUDED.all_access, updated_by = EXCLUDED.updated_by, updated_at = now()""",
+        (code, body.label.strip(), body.description, body.all_access, user.email or user.username))
+    policy.invalidate()
+    return {"message": f"Peran {code} disimpan"}
+
+
+@router.delete("/access-policy/roles/{code}")
+async def delete_role(code: str, user: CurrentUser = Depends(_admin)):
+    used = await run_in_threadpool(_rows, """
+        SELECT email FROM ebs_chat_scope WHERE ebs_groups ? %s ORDER BY email""", (code,))
+    if used:
+        raise HTTPException(400, f"Peran {code} masih dipakai {len(used)} user ("
+                                 f"{', '.join(u['email'] for u in used[:5])}{'…' if len(used) > 5 else ''}). "
+                                 "Lepas dulu dari user tersebut.")
+    n = await run_in_threadpool(_exec, "DELETE FROM meta.access_role WHERE role_code = %s", (code,))
+    policy.invalidate()
+    if not n:
+        raise HTTPException(404, "Peran tidak ditemukan")
+    return {"message": f"Peran {code} dihapus"}
+
+
+class GrantIn(BaseModel):
+    role_code: str
+    mart: str
+    level: Optional[Literal["full", "qty"]] = None  # None = no access
+
+
+@router.put("/access-policy/grant")
+async def set_grant(body: GrantIn, user: CurrentUser = Depends(_admin)):
+    if body.mart not in policy._mart_names():
+        raise HTTPException(400, "Mart tidak dikenal (mart System Administration diatur lewat allowlist, bukan di sini).")
+    if body.role_code not in policy.role_codes():
+        raise HTTPException(400, "Peran tidak dikenal")
+    if body.level is None:
+        await run_in_threadpool(_exec, "DELETE FROM meta.access_grant WHERE role_code = %s AND mart_name = %s",
+                                (body.role_code, body.mart))
+    else:
+        await run_in_threadpool(_exec, """
+            INSERT INTO meta.access_grant (role_code, mart_name, level, updated_by, updated_at)
+            VALUES (%s, %s, %s, %s, now())
+            ON CONFLICT (role_code, mart_name) DO UPDATE SET level = EXCLUDED.level,
+                   updated_by = EXCLUDED.updated_by, updated_at = now()""",
+            (body.role_code, body.mart, body.level, user.email or user.username))
+    policy.invalidate()
+    return {"message": "Disimpan"}

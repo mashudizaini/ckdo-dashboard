@@ -83,8 +83,9 @@ async def list_kb_departments(user: CurrentUser = Depends(require_role(Roles.ADM
 async def list_ebs_groups(user: CurrentUser = Depends(require_role(Roles.ADMIN))):
     """ebs-* groups for the EBS Data Tools server (blueprint group -> domain
     map). Empty selection means no mart access, not unrestricted."""
-    from app.services.ebs_mart.constants import GROUP_LABELS
-    return [{"group": g, "label": label} for g, label in GROUP_LABELS.items()]
+    from app.services.ebs_mart import policy
+    roles = policy.load()["roles"]
+    return [{"group": code, "label": r["label"]} for code, r in sorted(roles.items())]
 
 
 @router.get("/scope")

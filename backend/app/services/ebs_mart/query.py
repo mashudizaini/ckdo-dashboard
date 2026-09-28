@@ -179,6 +179,19 @@ def run(caller: Caller, sql: str, params: dict | None = None, *, tool: str, mart
     ms = int((time.monotonic() - t0) * 1000)
     truncated = len(rows) > MAX_ROWS
     rows = rows[:MAX_ROWS]
+
+    # Quantity-only access (policy.py): drop every money column before the
+    # result leaves the dashboard. Applies when any mart in the query is
+    # granted at qty level to this caller.
+    masked = []
+    qty_marts = [m for m in marts if caller is not None and caller.level(m) == "qty"]
+    if qty_marts:
+        from app.services.ebs_mart.policy import is_money
+        keep = [i for i, c in enumerate(columns) if not is_money(c)]
+        masked = [c for i, c in enumerate(columns) if i not in keep]
+        if masked:
+            columns = [columns[i] for i in keep]
+            rows = [tuple(r[i] for i in keep) for r in rows]
     log_call(caller, tool=tool, question=question, sql=sql, marts=marts, args=args,
              row_count=len(rows), truncated=truncated, duration_ms=ms, status="OK")
 
@@ -190,6 +203,9 @@ def run(caller: Caller, sql: str, params: dict | None = None, *, tool: str, mart
         "row_count": len(rows),
         "truncated": truncated,
         "sql_used": _inline_params(sql, params),
+        **({"masked_columns": masked,
+            "note": "Akses Anda untuk data ini hanya kuantitas: kolom nilai/harga disembunyikan ("
+                    + ", ".join(masked) + ")."} if masked else {}),
     }
 
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { ShieldCheck, Loader2, Trash2, Plus, Info } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
+import DataAccessMatrix from "./DataAccessMatrix";
 
 // Matches department_taxonomy.CANONICAL_DEPARTMENTS exactly.
 const DEPARTMENTS = ["Administration", "Sales & Marketing", "Strategy & Development", "Plant"];
@@ -14,7 +15,7 @@ export default function EbsChatAccessPanel() {
   const [rows, setRows] = useState(null); // null while loading
   const [modules, setModules] = useState([]); // MODULE_TOOL_MAP keys
   const [kbDepartments, setKbDepartments] = useState([]); // rag_service.DEPARTMENTS
-  const [ebsGroups, setEbsGroups] = useState([]); // ebs_mart.constants.GROUP_LABELS
+  const [ebsGroups, setEbsGroups] = useState([]); // meta.access_role (see DataAccessMatrix)
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingEmail, setDeletingEmail] = useState(null);
@@ -124,6 +125,7 @@ export default function EbsChatAccessPanel() {
 
   return (
     <div className="space-y-4">
+      <DataAccessMatrix onRolesChange={loadEbsGroups} />
       <div className="rounded-xl border border-gray-800 bg-gray-900">
         <div className="px-5 py-4 border-b border-gray-800 flex items-start gap-3">
           <ShieldCheck size={18} className="text-blue-400 shrink-0 mt-0.5" />
@@ -233,7 +235,7 @@ export default function EbsChatAccessPanel() {
 
           <div>
             <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wider mb-1.5">
-              Grup EBS Data Mart (model "EBS Analyst" / tool server) — kosong = tidak ada akses mart
+              Peran akses data (lihat matriks di atas) — kosong = tidak ada akses data EBS
             </p>
             <div className="flex flex-wrap gap-2">
               {ebsGroups.map(({ group, label }) => (

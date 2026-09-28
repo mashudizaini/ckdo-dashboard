@@ -300,7 +300,8 @@ def upsert_scope(
     bad_kb = [d for d in kb_departments or [] if d not in rag_service.DEPARTMENTS]
     if bad_kb:
         raise ValueError(f"Unknown KB department(s): {bad_kb} — must be one of {rag_service.DEPARTMENTS}")
-    from app.services.ebs_mart.constants import EBS_GROUPS
+    from app.services.ebs_mart.policy import role_codes
+    EBS_GROUPS = role_codes()
     bad_groups = [g for g in ebs_groups or [] if g not in EBS_GROUPS]
     if bad_groups:
         raise ValueError(f"Unknown EBS group(s): {bad_groups} — must be one of {EBS_GROUPS}")

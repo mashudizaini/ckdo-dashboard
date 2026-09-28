@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FlaskConical, Play, ShieldCheck, TerminalSquare } from "lucide-react";
 import { ebsMartApi } from "@/api/dashboard";
 import { Badge, Button, Card, ErrorBox, ResultTable, errMsg, inputCls } from "./shared";
 
-const GROUPS = ["ebs-management", "ebs-finance", "ebs-purchasing", "ebs-warehouse", "ebs-production", "ebs-sales"];
+// Access roles come from the policy (Setup > AI > EBS Chat Access matrix);
+// this list is only the fallback until the overview has loaded.
+let GROUPS = ["ebs-management", "ebs-finance", "ebs-purchasing", "ebs-warehouse", "ebs-production", "ebs-sales"];
 
 // Argument form per intent tool — mirrors the request models in
 // backend/app/routers/ebs_tools_app.py.
@@ -154,9 +156,16 @@ const TOOLS = {
 };
 
 function GroupSelect({ value, onChange }) {
+  const [groups, setGroups] = useState(GROUPS);
+  useEffect(() => {
+    ebsMartApi.overview().then((r) => {
+      const g = (r?.groups || []).map((x) => x.group);
+      if (g.length) { GROUPS = g; setGroups(g); }
+    }).catch(() => {});
+  }, []);
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)} className={inputCls} title="Jalankan sebagai grup ini">
-      {GROUPS.map((g) => <option key={g} value={g}>sebagai {g}</option>)}
+      {groups.map((g) => <option key={g} value={g}>sebagai {g}</option>)}
     </select>
   );
 }

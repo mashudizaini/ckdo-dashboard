@@ -27,11 +27,20 @@ class Caller:
     chat_id: str | None = None
 
     @property
-    def prefixes(self) -> set[str]:
-        out: set[str] = set()
-        for g in self.groups:
-            out |= DOMAIN_BY_GROUP.get(g, set())
-        return out
+    def levels(self) -> dict[str, str]:
+        """mart -> "full" | "qty" from the access policy (policy.py) for this
+        caller's roles; computed once per caller."""
+        cached = self.__dict__.get("_levels")
+        if cached is None:
+            from app.services.ebs_mart import policy
+            cached = policy.levels_for(self.groups)
+            self.__dict__["_levels"] = cached
+        return cached
+
+    def level(self, mart: str) -> str | None:
+        if mart.startswith(SA_PREFIX):
+            return "full" if self.is_sysadmin else None
+        return self.levels.get(mart)
 
     @property
     def is_sysadmin(self) -> bool:
@@ -42,7 +51,7 @@ class Caller:
         # group reaches them, not even ebs-management's "" prefix.
         if mart.startswith(SA_PREFIX):
             return self.is_sysadmin
-        return any(mart.startswith(p) for p in self.prefixes)
+        return mart in self.levels
 
     def readable_marts(self) -> list[str]:
         return [m for m in BUILT_MARTS if self.can_read(m)]
@@ -51,11 +60,13 @@ class Caller:
 def normalize_groups(raw) -> set[str]:
     """Keycloak's group-membership mapper emits full paths ("/ebs-finance")
     unless "Full group path" is switched off; accept both, keep only the
-    groups this module knows."""
+    access roles the policy knows (meta.access_role)."""
+    from app.services.ebs_mart import policy
+    known = set(policy.role_codes())
     out = set()
     for g in raw or []:
         name = str(g).strip().strip("/").split("/")[-1].lower()
-        if name in DOMAIN_BY_GROUP:
+        if name in known:
             out.add(name)
     return out
 
