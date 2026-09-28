@@ -385,11 +385,40 @@ def _open_scoped_connection(scope: dict):
     return conn
 
 
+def _ebs_identity(email: str) -> Optional[str]:
+    """Where Oracle EBS knows this email from: an active employee in
+    PER_ALL_PEOPLE_F (core.hr_ebs_employee, synced daily by etl_mart_sa) or an
+    active EBS user account's email (core.sa_user). None when neither."""
+    conn = _get_pg()
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT 1 FROM core.hr_ebs_employee WHERE email = %s LIMIT 1", (email,))
+            if cur.fetchone():
+                return "per_all_people_f"
+            cur.execute(
+                """SELECT 1 FROM core.sa_user WHERE LOWER(email_address) = %s
+                    AND (end_date IS NULL OR end_date > CURRENT_DATE) LIMIT 1""",
+                (email,),
+            )
+            if cur.fetchone():
+                return "fnd_user"
+        except psycopg2.Error:
+            # core.* not created yet on this host — the Employee table decides.
+            conn.rollback()
+        return None
+    finally:
+        conn.close()
+
+
 async def _employee_exists(email: str) -> bool:
-    """True if `email` matches an employee's company/personal email in
-    this app's own Employee table — the real, actively-maintained HR
-    source of truth (eis.dim_employee is itself mirrored FROM this table,
-    not from Oracle EBS's per_people_f — see etl_employee)."""
+    """True if `email` belongs to a real employee: this app's own Employee
+    table (company/personal email — HR's actively maintained master), or
+    Oracle EBS itself (active PER_ALL_PEOPLE_F employee, or active FND_USER
+    email). The EBS sources close the gap the EBS Chat runbook's step 10
+    found: an employee present in EBS but not in the Dashboard's Employee
+    table was answered "user_not_found_in_ebs" instead of
+    "scope_not_configured"."""
     email = (email or "").strip().lower()
     if not email:
         return False
@@ -400,7 +429,9 @@ async def _employee_exists(email: str) -> bool:
                 | (func.lower(Employee.personal_email) == email)
             ).limit(1)
         )
-        return result.scalar() is not None
+        if result.scalar() is not None:
+            return True
+    return _ebs_identity(email) is not None
 
 
 # ── Answering a question ────────────────────────────────────────────────
@@ -532,7 +563,8 @@ async def _run_tool_calling_turn(
                     error = str(e)
                     logger.warning("ebs_chat_tool_execution_error", tool=tool_name, arguments=arguments, error=error)
 
-            sources.append({"tool": tool_name, "arguments": arguments, "row_count": len(data), "error": error})
+            sources.append({"tool": tool_name, "arguments": arguments, "row_count": len(data), "error": error,
+                            "rows": data[:_FALLBACK_ROWS] if not error else []})
             tool_result_blocks.append({
                 "type": "tool_result",
                 "tool_use_id": block.id,
@@ -552,12 +584,19 @@ async def _run_tool_calling_turn(
         ),
     }]
 
-    final = await client.messages.create(
-        model=model,
-        max_tokens=FINAL_ANSWER_MAX_TOKENS,
-        system=final_system,
-        messages=messages,
-    )
+    # The final turn keeps the tool definitions but forbids using them
+    # (tool_choice none). Without the definitions, a conversation that
+    # already holds tool_use/tool_result blocks left the model — typically
+    # after a scoped, one-row result it wanted to follow up on — with no way
+    # to act and nothing it had to say, and it ended the turn with no text
+    # (runbook step 9: full-access callers got 6 rows answered, scoped
+    # callers "answer": ""). tool_choice none makes a text answer the only
+    # possible output.
+    final_kwargs = {"model": model, "max_tokens": FINAL_ANSWER_MAX_TOKENS, "system": final_system,
+                    "messages": messages}
+    if tool_use_blocks:
+        final_kwargs.update(tools=_to_anthropic_tools(offered_tools), tool_choice={"type": "none"})
+    final = await client.messages.create(**final_kwargs)
     answer = "".join(b.text for b in final.content if b.type == "text")
 
     if not answer.strip():
@@ -567,12 +606,7 @@ async def _run_tool_calling_turn(
             block_types=[b.type for b in final.content],
             question=question,
         )
-        final = await client.messages.create(
-            model=model,
-            max_tokens=FINAL_ANSWER_MAX_TOKENS,
-            system=final_system,
-            messages=messages,
-        )
+        final = await client.messages.create(**final_kwargs)
         answer = "".join(b.text for b in final.content if b.type == "text")
 
     if not answer.strip():
@@ -584,20 +618,42 @@ async def _run_tool_calling_turn(
         )
         answer = _fallback_answer(sources, lang)
 
+    for s_ in sources:
+        s_.pop("rows", None)  # only for the fallback; not part of the API response
     return {"answer": answer, "sources": sources}
+
+
+# Rows per tool kept for the deterministic fallback below.
+_FALLBACK_ROWS = 20
+
+
+def _fallback_table(rows: list[dict]) -> str:
+    cols = list(rows[0].keys())[:8]
+    def cell(v):
+        return str(v).replace("|", "/").replace("\n", " ")[:60] if v is not None else ""
+    out = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
+    out += ["| " + " | ".join(cell(r.get(c)) for c in cols) + " |" for r in rows]
+    return "\n".join(out)
 
 
 def _fallback_answer(sources: list[dict], lang: str) -> str:
     """Deterministic non-empty answer built from tool results, used only
     when the model's final turn returns no text (retried once first) —
-    never surface a literal empty string to the user."""
-    rows_found = [s for s in sources if not s.get("error") and s.get("row_count", 0) > 0]
+    never surface a literal empty string to the user. When rows came back,
+    they are shown as they are (first rows per tool), so a caller whose
+    scoped query found one row still gets that row."""
+    rows_found = [s for s in sources if not s.get("error") and s.get("row_count", 0) > 0 and s.get("rows")]
     if rows_found:
-        if lang == "id":
-            parts = [f"{s['row_count']} baris dari {s['tool']}" for s in rows_found]
-            return "Data ditemukan (" + "; ".join(parts) + "), tetapi jawaban tidak berhasil dibuat. Silakan coba tanyakan ulang dengan kalimat yang lebih spesifik."
-        parts = [f"{s['row_count']} row(s) from {s['tool']}" for s in rows_found]
-        return "Data was found (" + "; ".join(parts) + ") but an answer could not be generated. Please try rephrasing your question."
+        head = ("Berikut data yang ditemukan (disajikan apa adanya):" if lang == "id"
+                else "Here is the data that was found (shown as returned):")
+        parts = [head]
+        for s_ in rows_found:
+            more = s_["row_count"] - len(s_["rows"])
+            parts.append(f"**{s_['tool']}** — {s_['row_count']} " + ("baris" if lang == "id" else "row(s)"))
+            parts.append(_fallback_table(s_["rows"]))
+            if more > 0:
+                parts.append((f"… dan {more} baris lainnya." if lang == "id" else f"… and {more} more row(s)."))
+        return "\n\n".join(parts)
     if lang == "id":
         return "Maaf, tidak dapat membuat jawaban untuk pertanyaan ini. Silakan coba tanyakan ulang dengan kalimat yang lebih spesifik."
     return "Sorry, an answer could not be generated for this question. Please try rephrasing it."

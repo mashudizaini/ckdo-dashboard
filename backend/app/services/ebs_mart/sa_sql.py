@@ -88,6 +88,21 @@ SOD_SEED = [
 RISK_ORDER = "CASE risk WHEN 'Critical' THEN 1 WHEN 'High' THEN 2 WHEN 'Medium' THEN 3 ELSE 4 END"
 
 SA_CORE_DDL = [
+    # Active employees with an email, from Oracle HR (PER_ALL_PEOPLE_F, the
+    # row effective today, current employees only). An identity source for
+    # EBS Chat: an email found here is a real employee, so a missing
+    # ebs_chat_scope row means "access not configured yet", not "unknown
+    # person" (EBS Chat runbook step 10).
+    """
+    CREATE TABLE IF NOT EXISTS core.hr_ebs_employee (
+        person_id        bigint PRIMARY KEY,
+        employee_number  text,
+        full_name        text,
+        email            text,
+        loaded_at        timestamptz DEFAULT now()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_core_hr_ebs_employee_email ON core.hr_ebs_employee (email)",
     """
     CREATE TABLE IF NOT EXISTS core.sa_user (
         user_id               bigint PRIMARY KEY,

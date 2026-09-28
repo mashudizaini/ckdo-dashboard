@@ -74,6 +74,17 @@ _USER_COLS = ["user_id", "user_name", "description", "email_address", "start_dat
               "password_date", "employee_id", "employee_number", "employee_name", "current_employee_flag",
               "termination_date", "created_by", "creation_date"]
 
+# Active employees with an email (the row effective today of a current
+# employee) — EBS Chat's identity source, see core.hr_ebs_employee.
+_EMPLOYEE_SQL = """
+    SELECT papf.person_id, papf.employee_number, SUBSTR(papf.full_name, 1, 240),
+           LOWER(TRIM(papf.email_address))
+      FROM per_all_people_f papf
+     WHERE TRUNC(SYSDATE) BETWEEN papf.effective_start_date AND papf.effective_end_date
+       AND papf.current_employee_flag = 'Y'
+       AND papf.email_address IS NOT NULL
+"""
+
 _RESP_SQL = """
     SELECT fr.responsibility_id, fr.application_id, fa.application_short_name, fr.responsibility_key,
            frt.responsibility_name, SUBSTR(frt.description, 1, 240), fr.menu_id, fr.request_group_id,
@@ -250,6 +261,7 @@ def etl_mart_sa(year: int = None, month: int = None, full_refresh: bool = False,
             co = ora.cursor()
             co.arraysize = _BATCH
             users = _q(co, "fnd_user", _USER_SQL)
+            employees = _q(co, "per_all_people_f", _EMPLOYEE_SQL)
             resps = _q(co, "fnd_responsibility", _RESP_SQL)
             user_resps = _q(co, "fnd_user_resp_groups", _USER_RESP_SQL)
             menu_fns = _q(co, "fnd_compiled_menu_functions", _MENU_FN_SQL)
@@ -270,13 +282,15 @@ def etl_mart_sa(year: int = None, month: int = None, full_refresh: bool = False,
             form_rules = _q(co, "fnd_form_custom_rules", _FORM_RULE_SQL)
         finally:
             ora.close()
-        rows_read = sum(map(len, (users, resps, user_resps, menu_fns, functions, menus, excls, apps, programs,
+        rows_read = sum(map(len, (users, employees, resps, user_resps, menu_fns, functions, menus, excls, apps, programs,
                                   reqsets, rg_units, profiles, logins, patches, form_rules)))
         if not menu_fns:
             raise RuntimeError("FND_COMPILED_MENU_FUNCTIONS kosong untuk menu responsibility yang dipakai — "
                                "jalankan concurrent program 'Compile Security' di EBS, lalu ulangi job ini.")
 
         n = 0
+        n += _replace(cur, "core.hr_ebs_employee", ["person_id", "employee_number", "full_name", "email"],
+                      [(_int(r[0]), r[1], r[2], r[3]) for r in employees])
         n += _replace(cur, "core.sa_user", _USER_COLS, [
             (_int(r[0]), r[1], r[2], r[3], r[4], r[5], r[6], r[7], _int(r[8]), r[9], r[10], r[11], r[12],
              _int(r[13]), r[14]) for r in users])
