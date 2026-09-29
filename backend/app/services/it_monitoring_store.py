@@ -25,7 +25,7 @@ import psycopg2
 import structlog
 from sqlalchemy import text
 
-from app.config import settings
+from app.config import get_settings
 from app.database import sync_engine
 from app.services import crypto
 
@@ -194,7 +194,7 @@ def _run(write, cur, n: int) -> int:
         write(cur)
         return n
     try:
-        pg = psycopg2.connect(settings.eis_database_url_rw)
+        pg = psycopg2.connect(get_settings().eis_database_url_rw)
         try:
             with pg, pg.cursor() as c:
                 write(c)
