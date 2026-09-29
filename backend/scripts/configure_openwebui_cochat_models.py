@@ -81,6 +81,8 @@ PROMPT_COMPANY_RULES = (
     "## Aturan\n"
     "- SELALU panggil tool search_company_documents terlebih dahulu untuk setiap pertanyaan tentang aturan "
     "atau prosedur, meskipun kamu merasa tahu jawabannya.\n"
+    "- Sebutkan sumber cukup dengan NAMA dokumennya (mis. 'Peraturan Perusahaan (2025 - 2027)'). JANGAN "
+    "membuat tautan atau URL apa pun — dokumen ini tidak punya alamat web.\\n"
     "- Jawab HANYA berdasarkan kutipan yang dikembalikan tool, dan sebutkan nama dokumen sumbernya. Jika "
     "tidak ada kutipan yang relevan, katakan terus terang aturan tersebut tidak ditemukan di dokumen yang "
     "bisa diakses user — jangan mengarang atau memakai pengetahuan umum.\n"
