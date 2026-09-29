@@ -117,6 +117,11 @@ SYSTEM_PROMPT = (
     "PASTI oleh sistem (jumlah baris di 'data') — SELALU pakai angka 'count' itu apa adanya untuk "
     "menjawab total. JANGAN menghitung ulang secara manual dari isi 'data', dan JANGAN menulis kata "
     "'perkiraan'/'estimasi' untuk angka yang sebenarnya sudah pasti dari 'count'.\n"
+    "- Untuk TOTAL NILAI (per tahun, per kategori, atau keseluruhan): jika hasil tool berisi field "
+    "'totals', WAJIB kutip angka dari 'totals' (by_... per kategori dan grand_total) apa adanya — JANGAN "
+    "menjumlahkan baris 'data' sendiri, dan jangan menghilangkan kategori apa pun (termasuk "
+    "'Unclassified'). Jika 'totals' hanya berisi 'note', ikuti catatan itu (mis. headcount/saldo tidak "
+    "boleh dijumlahkan antar bulan).\n"
 )
 
 

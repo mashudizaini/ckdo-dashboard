@@ -411,6 +411,11 @@ def _query(sql: str, params: dict) -> list[dict]:
             conn.close()
 
 
+# dim_product.product_code holds Oracle's numeric item id (e.g. 206043) and
+# product_name holds the item code people use (e.g. EXP05BOR03), so the
+# product filter matches either — exactly, never as a prefix: a partial code
+# would match other products. Before 2026-09-30 it matched product_code only,
+# and every filter by the code users actually know returned no rows.
 def get_sales_performance(period: str, product_code: str = None, business_type: str = None) -> list[dict]:
     fy, pnum = _parse_period(period)
     # LEFT JOIN dim_product — some fact_sales rows have no product_id resolved
@@ -428,7 +433,8 @@ def get_sales_performance(period: str, product_code: str = None, business_type: 
         JOIN eis.dim_period per ON per.id = fs.period_id
         LEFT JOIN eis.dim_product dp ON dp.id = fs.product_id
         WHERE per.fiscal_year = %(fy)s AND (%(pnum)s IS NULL OR per.period_num = %(pnum)s)
-          AND (%(product_code)s IS NULL OR UPPER(dp.product_code) = UPPER(%(product_code)s))
+          AND (%(product_code)s IS NULL OR UPPER(dp.product_code) = UPPER(%(product_code)s)
+               OR UPPER(dp.product_name) = UPPER(%(product_code)s))
           AND (%(business_type)s IS NULL OR UPPER(fs.business_type) LIKE UPPER(%(business_type)s) || '%%')
         ORDER BY fs.actual_amount DESC
         """,
@@ -489,7 +495,7 @@ def get_cogs_performance(period: str, product_code: str = None, business_type: s
     fy, pnum = _parse_period(period)
     return _query(
         """
-        SELECT dp.product_code, dp.product_name, fc.business_type,
+        SELECT dp.product_code, dp.product_name, dp.business_type,
                fc.sales_amount, fc.cogs_total, fc.ebit_amount,
                CASE WHEN fc.sales_amount > 0
                     THEN round((fc.ebit_amount / fc.sales_amount * 100)::numeric, 1)
@@ -498,8 +504,9 @@ def get_cogs_performance(period: str, product_code: str = None, business_type: s
         JOIN eis.dim_period per ON per.id = fc.period_id
         JOIN eis.dim_product dp ON dp.id = fc.product_id
         WHERE per.fiscal_year = %(fy)s AND (%(pnum)s IS NULL OR per.period_num = %(pnum)s)
-          AND (%(product_code)s IS NULL OR UPPER(dp.product_code) = UPPER(%(product_code)s))
-          AND (%(business_type)s IS NULL OR UPPER(fc.business_type) LIKE UPPER(%(business_type)s) || '%%')
+          AND (%(product_code)s IS NULL OR UPPER(dp.product_code) = UPPER(%(product_code)s)
+               OR UPPER(dp.product_name) = UPPER(%(product_code)s))
+          AND (%(business_type)s IS NULL OR UPPER(dp.business_type) LIKE UPPER(%(business_type)s) || '%%')
         ORDER BY fc.sales_amount DESC
         """,
         {"fy": fy, "pnum": pnum, "product_code": product_code, "business_type": business_type},
@@ -884,3 +891,108 @@ def execute_tool(tool_name: str, arguments: dict) -> list[dict]:
     if fn is None:
         raise ValueError(f"Unknown tool: {tool_name}")
     return fn(**arguments)
+
+
+# ── Exact totals next to the rows ─────────────────────────────────────────────
+# A year question ("total pembelian 2025 per material type") returns one row
+# per month per category, and the model had to add them up itself. On
+# 2026-09-30 both Sonnet 5 and Haiku 4.5 got it wrong from the same 26 rows:
+# one dropped the "Unclassified" rows (Rp 190,45 M instead of 207,12 M), the
+# other mis-added the PO counts. So the sum is done here, exactly, and handed
+# over as `totals`; the prompt tells the model to quote it rather than add.
+#
+# Only flows are summed. Balances and ratios (AR/AP days, inventory days,
+# headcount, cash balances) are month-end positions — adding twelve of them
+# gives a number that means nothing — so those tools get a note instead.
+
+# tool -> (group-by column or None, additive columns, derived ratios,
+#          column groups are ordered by — largest first; None = row order)
+_TOTALS = {
+    "get_purchasing_performance": ("material_type", ["po_count", "po_value"], {}, "po_value"),
+    "get_sales_performance": ("business_type", ["bp_amount", "actual_amount", "prior_year_actual"],
+                              {"variance_vs_budget": ("actual_amount", "-", "bp_amount")}, "actual_amount"),
+    "get_cogs_performance": ("business_type", ["sales_amount", "cogs_total", "ebit_amount"],
+                             {"ebit_pct": ("ebit_amount", "%", "sales_amount")}, "sales_amount"),
+    "get_production_performance": ("segment", ["bp_qty", "actual_qty", "yield_qty"],
+                                   {"achievement_pct": ("actual_qty", "%", "bp_qty")}, "actual_qty"),
+    "get_budget_vs_actual": ("dept_group", ["bp_amount", "actual_amount"],
+                             {"variance": ("actual_amount", "-", "bp_amount")}, "actual_amount"),
+    "get_financial_summary": (None, ["net_profit_bp", "net_profit_actual", "cf_cash_in_actual",
+                                     "cf_cash_out_actual"], {}, None),
+    # Rows arrive in calendar order; keep it.
+    "get_daily_sales": ("month_name", ["sales"], {}, None),
+}
+# Tables that carry their own subtotal rows next to the detail. fact_sales has
+# one row per business type with no product (the official total) plus the
+# per-product rows that break it down; adding both doubles the sales. When the
+# subtotal rows are present the totals use only them.
+_SUBTOTAL_ROWS = {
+    "get_sales_performance": (lambda r: r.get("product_code") is None,
+                              "Rows in data without product_code are the official business-type totals; the "
+                              "product rows break them down. Never add both kinds of rows together."),
+}
+
+_NOT_ADDITIVE = {
+    "get_ar_ap_summary": "Days and average balances per month — do not add months together; quote the "
+                         "month asked for, or the latest month for a year question.",
+    "get_inventory_summary": "Inventory days and average balances per month — do not add months together.",
+    "get_employee_headcount": "Headcount is a month-end count — do not add months together; for a year "
+                              "question use the latest month. resigned_cumulative is already cumulative.",
+}
+
+
+def _num(v):
+    try:
+        return float(v) if v is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _derive(acc: dict, derived: dict) -> dict:
+    for name, (a, op, b) in derived.items():
+        if op == "-":
+            acc[name] = round(acc[a] - acc[b], 2)
+        elif op == "%":
+            acc[name] = round(acc[a] / acc[b] * 100, 1) if acc[b] else None
+    return acc
+
+
+def summarize(tool_name: str, rows: list[dict]) -> dict | None:
+    """Exact totals for `rows`, grouped by the tool's category column, plus a
+    grand total — or a note for balance/ratio tools. None for tools where a
+    sum means nothing (detail lists, snapshots) or when there are no rows."""
+    if tool_name in _NOT_ADDITIVE:
+        return {"note": _NOT_ADDITIVE[tool_name]} if rows else None
+    spec = _TOTALS.get(tool_name)
+    if not spec or not rows:
+        return None
+    group_col, cols, derived, order_by = spec
+    sub = _SUBTOTAL_ROWS.get(tool_name)
+    extra_note = ""
+    if sub:
+        subtotal_rows = [r for r in rows if sub[0](r)]
+        if subtotal_rows:
+            rows = subtotal_rows
+        extra_note = " " + sub[1]
+    grand = {c: 0.0 for c in cols}
+    groups: dict = {}
+    for r in rows:
+        key = (r.get(group_col) or "Unclassified") if group_col else None
+        g = groups.setdefault(key, {c: 0.0 for c in cols} | {"rows": 0})
+        g["rows"] += 1
+        for c in cols:
+            v = _num(r.get(c))
+            g[c] += v
+            grand[c] += v
+    def fmt(d):
+        return {k: (int(v) if isinstance(v, float) and v.is_integer() else round(v, 2) if isinstance(v, float)
+                    else v) for k, v in d.items()}
+    out = {"note": "Exact sums of every row returned (all months in the period). Quote these for totals "
+                   "instead of adding the rows yourself. Units are the same as the columns in data." + extra_note}
+    if group_col:
+        items = list(groups.items())
+        if order_by:
+            items.sort(key=lambda kv: -abs(kv[1][order_by]))
+        out["by_" + group_col] = [{group_col: k, **fmt(_derive(dict(v), derived))} for k, v in items]
+    out["grand_total"] = fmt(_derive(dict(grand) | {"rows": len(rows)}, derived))
+    return out

@@ -159,7 +159,12 @@ def _add_data_route(tool: dict):
         except ValueError as e:   # bad period format and similar argument errors
             raise HTTPException(422, str(e))
         logger.info("eis_tool_call", tool=name, email=caller.email, arguments=args, rows=len(rows))
-        return {"tool": name, "count": len(rows), "data": rows}
+        out = {"tool": name, "count": len(rows)}
+        totals = eis_tools.summarize(name, rows)
+        if totals:
+            out["totals"] = totals   # before data, so the model reads the exact sums first
+        out["data"] = rows
+        return out
 
     data_app.post(f"/{name}", operation_id=name, summary=name,
                   description=tool["function"].get("description", ""))(endpoint)

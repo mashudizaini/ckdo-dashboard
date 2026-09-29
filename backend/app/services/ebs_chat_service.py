@@ -571,7 +571,10 @@ async def _run_tool_calling_turn(
                 "type": "tool_result",
                 "tool_use_id": block.id,
                 "content": json.dumps(
-                    {"error": error} if error else {"data": data, "count": len(data)}, default=str
+                    {"error": error} if error else
+                    {"count": len(data), **({"totals": t} if (t := eis_tools.summarize(tool_name, data)) else {}),
+                     "data": data},
+                    default=str,
                 ),
             })
         messages.append({"role": "user", "content": tool_result_blocks})
