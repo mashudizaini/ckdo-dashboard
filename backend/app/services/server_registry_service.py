@@ -9,11 +9,44 @@ reveal_credential() does, and only that one function ever calls crypto.decrypt()
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.server_registry import ServerCredential, ServerCredentialAccessLog, ServerEntry
+from app.database import async_engine
 from app.services import crypto
+
+
+async def ensure_monitoring_columns():
+    """Add the monitoring columns to server_registry_entries (create_all never
+    ALTERs an existing table). The first time they appear, the two Oracle EBS
+    hosts that Server Monitoring used to poll from server_config.json are
+    switched on with their "Server Login" credential, so monitoring keeps
+    working across the deploy without anyone re-entering a password. After
+    that first run the flags are the admin's to change — this never re-seeds.
+    """
+    async with async_engine.begin() as conn:
+        existed = (await conn.execute(text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'server_registry_entries' AND column_name = 'monitor_enabled'"
+        ))).first() is not None
+        await conn.execute(text(
+            "ALTER TABLE server_registry_entries "
+            "ADD COLUMN IF NOT EXISTS monitor_enabled BOOLEAN NOT NULL DEFAULT FALSE, "
+            "ADD COLUMN IF NOT EXISTS monitor_credential_id INTEGER, "
+            "ADD COLUMN IF NOT EXISTS ssh_port INTEGER NOT NULL DEFAULT 22"
+        ))
+        if not existed:
+            await conn.execute(text("""
+                UPDATE server_registry_entries e
+                   SET monitor_enabled = TRUE,
+                       monitor_credential_id = (
+                           SELECT c.id FROM server_registry_credentials c
+                            WHERE c.server_id = e.id
+                            ORDER BY (LOWER(COALESCE(c.label, '')) LIKE '%server%') DESC, c.id
+                            LIMIT 1)
+                 WHERE TRIM(e.address) IN ('172.21.2.201', '172.21.2.202')
+            """))
 
 
 def _credential_dict(c: ServerCredential) -> dict:
@@ -29,6 +62,8 @@ def _server_dict(s: ServerEntry, credentials: list[ServerCredential]) -> dict:
     return {
         "id": s.id, "name": s.name, "category": s.category, "address": s.address,
         "notes": s.notes, "sequence": s.sequence, "created_by": s.created_by,
+        "monitor_enabled": bool(s.monitor_enabled), "monitor_credential_id": s.monitor_credential_id,
+        "ssh_port": s.ssh_port or 22,
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "updated_at": s.updated_at.isoformat() if s.updated_at else None,
         "credentials": [_credential_dict(c) for c in credentials],
@@ -54,9 +89,13 @@ async def list_categories(db: AsyncSession) -> list[str]:
 async def create_server(
     db: AsyncSession, name: str, category: str, address: Optional[str],
     notes: Optional[str], sequence: int, created_by: str,
+    monitor_enabled: bool = False, ssh_port: int = 22,
 ) -> dict:
+    # A new server has no credentials yet, so monitor_credential_id stays
+    # NULL — monitoring then uses the first credential added.
     s = ServerEntry(name=name, category=category or "Other", address=address, notes=notes,
-                     sequence=sequence, created_by=created_by)
+                     sequence=sequence, created_by=created_by,
+                     monitor_enabled=monitor_enabled, ssh_port=ssh_port or 22)
     db.add(s)
     await db.commit()
     await db.refresh(s)
@@ -66,14 +105,18 @@ async def create_server(
 async def update_server(
     db: AsyncSession, server_id: int, name: str, category: str, address: Optional[str],
     notes: Optional[str], sequence: int,
+    monitor_enabled: bool = False, monitor_credential_id: Optional[int] = None, ssh_port: int = 22,
 ) -> Optional[dict]:
     s = await db.get(ServerEntry, server_id)
     if not s:
         return None
+    creds = (await db.execute(select(ServerCredential).where(ServerCredential.server_id == server_id))).scalars().all()
+    if monitor_credential_id is not None and monitor_credential_id not in {c.id for c in creds}:
+        raise ValueError("The monitoring credential must belong to this server")
     s.name, s.category, s.address, s.notes, s.sequence = name, category or "Other", address, notes, sequence
+    s.monitor_enabled, s.monitor_credential_id, s.ssh_port = monitor_enabled, monitor_credential_id, ssh_port or 22
     s.updated_at = datetime.utcnow()
     await db.commit()
-    creds = (await db.execute(select(ServerCredential).where(ServerCredential.server_id == server_id))).scalars().all()
     return _server_dict(s, creds)
 
 

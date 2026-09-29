@@ -4,24 +4,12 @@ IT Service
 Business logic untuk IT Dashboard.
 """
 import asyncio
-import json
-import os
 from datetime import datetime
 from app.database import get_oracle_connection
+from app.services import it_monitoring_store as store
 import structlog
 
 logger = structlog.get_logger()
-
-# Config stored in /app/data/server_config.json (persisted via Docker volume)
-CONFIG_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
-CONFIG_FILE = os.path.join(CONFIG_DIR, "server_config.json")
-
-DEFAULT_CONFIG = {
-    "ip": "172.21.2.201",
-    "port": 22,
-    "username": "",
-    "password": "",
-}
 
 
 class ITService:
@@ -373,123 +361,76 @@ class OracleITService:
 
 
 class ServerMonitorService:
-    """SSH-based server monitoring — mirrors CKDO_DASHBOARD monitor_bp logic."""
+    """SSH-based monitoring for Server Process Monitoring and Server Storage
+    Monitoring. Hosts and logins come from Server Control (every entry with
+    monitor_enabled — see app.services.it_monitoring_store); each server uses
+    its own credential. Every reading is also appended to the eis.fact_it_*
+    tables so CoChat can answer from it."""
 
-    # ── Config ──────────────────────────────────────────────────────────────
+    # ── Servers ─────────────────────────────────────────────────────────────
 
-    def load_config(self) -> dict:
-        os.makedirs(CONFIG_DIR, exist_ok=True)
-        if os.path.exists(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, "r") as f:
-                    return json.load(f)
-            except Exception:
-                pass
-        return DEFAULT_CONFIG.copy()
+    def servers_public(self) -> list[dict]:
+        """Monitored servers without secrets, for the page's server picker."""
+        return store.monitored_servers(with_secret=False)
 
-    def save_config(self, config: dict) -> None:
-        os.makedirs(CONFIG_DIR, exist_ok=True)
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(config, f, indent=2)
+    @staticmethod
+    def _tag(srv: dict) -> dict:
+        return {"server_id": srv["id"], "server_key": srv["key"], "server_label": srv["name"],
+                "server_ip": srv["ip"]}
 
-    def get_config_public(self) -> dict:
-        """Return config with password masked."""
-        cfg = self.load_config()
-        return {
-            "ip": cfg.get("ip", ""),
-            "port": cfg.get("port", 22),
-            "username": cfg.get("username", ""),
-            "has_password": bool(cfg.get("password")),
-        }
+    @staticmethod
+    def _not_ready(srv: dict | None) -> str | None:
+        if srv is None:
+            return "No server is enabled for monitoring. Turn it on in IT > Server Control."
+        return srv.get("problem")
 
     # ── SSH ─────────────────────────────────────────────────────────────────
 
-    def _ssh(self, command: str, config: dict | None = None) -> str:
+    def _connect(self, srv: dict):
         import paramiko
-
-        cfg = config or self.load_config()
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(
-            cfg["ip"],
-            port=int(cfg.get("port", 22)),
-            username=cfg["username"],
-            password=cfg["password"],
-            timeout=8,
-        )
-        _, stdout, stderr = client.exec_command(command)
-        out = stdout.read().decode("utf-8").strip()
-        err = stderr.read().decode("utf-8").strip()
-        client.close()
-        if err:
-            raise Exception(err)
-        return out
+        client.connect(srv["ip"], port=int(srv.get("port") or 22), username=srv["username"],
+                       password=srv.get("password"), timeout=8)
+        return client
 
-    def _ssh_multi(self, commands: list[str], config: dict | None = None) -> list[str]:
-        """Run multiple commands on ONE SSH connection — avoids repeated auth handshakes."""
-        import paramiko
-        cfg = config or self.load_config()
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(
-            cfg["ip"],
-            port=int(cfg.get("port", 22)),
-            username=cfg["username"],
-            password=cfg["password"],
-            timeout=8,
-        )
+    def _ssh_multi(self, srv: dict, commands: list[str]) -> list[str]:
+        """Run several commands on ONE SSH connection — avoids repeated auth handshakes.
+        stderr is ignored: df and ps print harmless warnings (bind mounts, squashfs)."""
+        client = self._connect(srv)
         results = []
         try:
             for cmd in commands:
                 _, stdout, _ = client.exec_command(cmd)
-                results.append(stdout.read().decode("utf-8").strip())
+                results.append(stdout.read().decode("utf-8", "replace").strip())
         finally:
             client.close()
         return results
 
     # ── Test connection ──────────────────────────────────────────────────────
 
-    async def test_connection(self) -> dict:
-        cfg = self.load_config()
-        if not cfg.get("username") or not cfg.get("password"):
-            return {"success": False, "error": "Username/password belum dikonfigurasi"}
+    async def test_connection(self, server_id: int | None = None) -> dict:
+        srv = await asyncio.to_thread(store.get_server, server_id, True)
+        problem = self._not_ready(srv)
+        if problem:
+            return {"success": False, "error": problem}
         try:
-            result = await asyncio.to_thread(self._ssh, 'echo "Connection OK"')
-            return {"success": True, "message": "Koneksi berhasil", "response": result}
+            out = await asyncio.to_thread(self._ssh_multi, srv, ['echo "Connection OK"'])
+            return {"success": True, "message": f"Connected to {srv['name']} ({srv['ip']})", "response": out[0]}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
     # ── Server Metrics ───────────────────────────────────────────────────────
 
-    def _fetch_metrics(self, ip: str = None) -> dict:
-        """ip=None keeps the historical behaviour (the single server saved in
-        server_config.json, i.e. the DB server). The override exists so the
-        monitoring ETL can collect the same metrics from every host in
-        _DISK_SERVERS using the one shared SSH credential, which is already
-        how disk usage is gathered for both."""
-        cfg = self.load_config()
-        if ip:
-            cfg = {**cfg, "ip": ip}
-        if not cfg.get("username") or not cfg.get("password"):
-            return {
-                "status": "not_configured",
-                "error": "Username/password belum dikonfigurasi",
-                "cpu": 0, "memory_percent": 0,
-                "memory_used": 0, "memory_total": 0,
-                "load": "0.0", "uptime": "-",
-                "swap_percent": 0, "swap_used_mb": 0, "swap_total_mb": 0,
-                "cpu_count": 4,
-            }
-
-        # All 6 commands in ONE SSH connection (was 4 separate connections before)
-        cpu_raw, mem_raw, swap_raw, load_raw, uptime_raw, ncpu_raw = self._ssh_multi([
+    def _fetch_metrics(self, srv: dict) -> dict:
+        cpu_raw, mem_raw, swap_raw, load_raw, uptime_raw, ncpu_raw = self._ssh_multi(srv, [
             "top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | cut -d'%' -f1",
             "free -g | grep Mem | awk '{print $3,$2}'",
             "free -m | grep Swap | awk '{print $2,$3}'",
             "cat /proc/loadavg | awk '{print $1}'",
             "uptime -p",
             "nproc 2>/dev/null || grep -c processor /proc/cpuinfo 2>/dev/null || echo 4",
-        ], cfg)
+        ])
 
         mem_parts   = mem_raw.split()
         mem_used    = float(mem_parts[0]) if mem_parts else 0
@@ -504,194 +445,146 @@ class ServerMonitorService:
         cpu_count   = int(ncpu_raw) if (ncpu_raw or "").strip().isdigit() else 4
 
         return {
-            "status":       "online",
-            "cpu":          round(float(cpu_raw or 0), 1),
+            "status":         "online",
+            "cpu":            round(float(cpu_raw or 0), 1),
             "memory_percent": mem_pct,
-            "memory_used":  round(mem_used, 2),
-            "memory_total": round(mem_total, 2),
-            "load":         load_raw or "0.0",
-            "uptime":       uptime_raw or "-",
-            "swap_percent": swap_pct,
-            "swap_used_mb": round(swap_used, 0),
-            "swap_total_mb": round(swap_total, 0),
-            "cpu_count":    cpu_count,
-            "timestamp":    datetime.now().isoformat(),
+            "memory_used":    round(mem_used, 2),
+            "memory_total":   round(mem_total, 2),
+            "load":           load_raw or "0.0",
+            "uptime":         uptime_raw or "-",
+            "swap_percent":   swap_pct,
+            "swap_used_mb":   round(swap_used, 0),
+            "swap_total_mb":  round(swap_total, 0),
+            "cpu_count":      cpu_count,
+            "timestamp":      datetime.now().isoformat(),
         }
+
+    def _metrics_row(self, srv: dict) -> dict:
+        """Metrics for one server, never raising — an unreachable server is a
+        row with status="error", which is itself worth recording."""
+        try:
+            m = self._fetch_metrics(srv)
+        except Exception as e:
+            m = {"status": "error", "error": str(e)}
+        return {**m, **self._tag(srv)}
+
+    async def get_metrics(self, server_id: int | None = None) -> dict:
+        srv = await asyncio.to_thread(store.get_server, server_id, True)
+        problem = self._not_ready(srv)
+        if problem:
+            return {"success": True, "data": {
+                "status": "not_configured", "error": problem,
+                "cpu": 0, "memory_percent": 0, "memory_used": 0, "memory_total": 0,
+                "load": "0.0", "uptime": "-", **(self._tag(srv) if srv else {}),
+            }}
+        m = await asyncio.to_thread(self._metrics_row, srv)
+        await asyncio.to_thread(store.save_metrics, [m], "dashboard")
+        if m["status"] == "error":
+            logger.error("server_metrics_error", server=srv["name"], error=m.get("error"))
+            m = {"cpu": 0, "memory_percent": 0, "memory_used": 0, "memory_total": 0,
+                 "load": "0.0", "uptime": "Error", **m}
+        return {"success": True, "data": m}
 
     # ── Top Processes ────────────────────────────────────────────────────────
 
-    def _fetch_top_processes(self) -> dict:
-        cfg = self.load_config()
-        if not cfg.get("username") or not cfg.get("password"):
-            return {"status": "not_configured", "cpu": [], "mem": []}
-
-        cpu_raw, mem_raw = self._ssh_multi([
+    def _fetch_top_processes(self, srv: dict) -> dict:
+        cpu_raw, mem_raw = self._ssh_multi(srv, [
             "ps -eo user:15,pid:7,pcpu:6,pmem:6,comm:20 --no-headers --sort=-%cpu 2>/dev/null | head -8",
             "ps -eo user:15,pid:7,pcpu:6,pmem:6,comm:20 --no-headers --sort=-%mem 2>/dev/null | head -8",
-        ], cfg)
+        ])
 
         def parse(raw: str) -> list[dict]:
             rows = []
             for line in (raw or "").strip().splitlines():
                 parts = line.split()
                 if len(parts) >= 5:
-                    rows.append({
-                        "user":    parts[0],
-                        "pid":     parts[1],
-                        "cpu":     parts[2],
-                        "mem":     parts[3],
-                        "command": parts[4],
-                    })
+                    rows.append({"user": parts[0], "pid": parts[1], "cpu": parts[2],
+                                 "mem": parts[3], "command": parts[4]})
             return rows
 
         return {"status": "online", "cpu": parse(cpu_raw), "mem": parse(mem_raw)}
 
-    async def get_top_processes(self) -> dict:
-        cfg = self.load_config()
-        if not cfg.get("username") or not cfg.get("password"):
-            return {"success": False, "error": "SSH credentials not configured", "cpu": [], "mem": []}
+    async def get_top_processes(self, server_id: int | None = None) -> dict:
+        srv = await asyncio.to_thread(store.get_server, server_id, True)
+        problem = self._not_ready(srv)
+        if problem:
+            return {"success": False, "error": problem, "cpu": [], "mem": []}
         try:
-            data = await asyncio.to_thread(self._fetch_top_processes)
-            return {"success": True, **data}
+            data = await asyncio.to_thread(self._fetch_top_processes, srv)
         except Exception as e:
-            logger.error("top_processes_error", error=str(e))
+            logger.error("top_processes_error", server=srv["name"], error=str(e))
             return {"success": False, "error": str(e), "cpu": [], "mem": []}
+        await asyncio.to_thread(store.save_processes, self._tag(srv), data["cpu"], data["mem"], "dashboard")
+        return {"success": True, **data}
 
-    # ── Disk Usage (both servers) ────────────────────────────────────────────
+    # ── Disk Usage ───────────────────────────────────────────────────────────
 
-    _DISK_SERVERS = [
-        {"key": "db",  "label": "DB Server",  "ip": "172.21.2.201"},
-        {"key": "app", "label": "App Server", "ip": "172.21.2.202"},
-    ]
-
-    def _fetch_disk(self, server: dict, cfg: dict) -> dict:
-        """Run `df -P` on one server and return parsed mount-point rows."""
-        import paramiko
-
-        server_cfg = {**cfg, "ip": server["ip"]}
+    def _fetch_disk(self, srv: dict) -> dict:
+        """`df -P` on one server, parsed into mount-point rows. Never raises."""
+        head = {"id": srv["id"], "key": srv["key"], "label": srv["name"], "ip": srv["ip"]}
+        problem = srv.get("problem")
+        if problem:
+            return {**head, "status": "not_configured", "error": problem, "rows": []}
         try:
-            # Use a direct SSH call here so we can ignore df's non-fatal stderr
-            # (e.g. bind mounts / squashfs generate warnings that aren't errors)
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            client.connect(
-                server_cfg["ip"],
-                port=int(server_cfg.get("port", 22)),
-                username=server_cfg["username"],
-                password=server_cfg["password"],
-                timeout=8,
-            )
-            _, stdout, _ = client.exec_command("df -P 2>/dev/null | grep -v '^Filesystem'")
-            raw = stdout.read().decode("utf-8").strip()
-            client.close()
-
-            rows = []
-            for line in raw.splitlines():
-                parts = line.split()
-                if len(parts) < 6:
-                    continue
-                filesystem  = parts[0]
-                blocks      = parts[1]
-                used        = parts[2]
-                available   = parts[3]
-                capacity    = parts[4]
-                mountpoint  = parts[5]
-                cap_str = capacity.replace("%", "")
-                pct      = int(cap_str)     if cap_str.isdigit()  else 0
-                used_gb  = round(int(used)      / 1024 / 1024, 2) if used.isdigit()      else 0
-                total_gb = round(int(blocks)    / 1024 / 1024, 2) if blocks.isdigit()    else 0
-                free_gb  = round(int(available) / 1024 / 1024, 2) if available.isdigit() else 0
-                if total_gb < 0.1:   # skip virtual/tiny fs
-                    continue
-                rows.append({
-                    "server_key":    server["key"],
-                    "server_label":  server["label"],
-                    "server_ip":     server["ip"],
-                    "filesystem":    filesystem,
-                    "mountpoint":    mountpoint,
-                    "used_gb":       used_gb,
-                    "free_gb":       free_gb,
-                    "total_gb":      total_gb,
-                    "usage_percent": pct,
-                    "status": "Critical" if pct >= 90 else "Warning" if pct >= 70 else "Normal",
-                })
-            return {"key": server["key"], "label": server["label"], "ip": server["ip"],
-                    "status": "online", "rows": rows}
+            raw, = self._ssh_multi(srv, ["df -P 2>/dev/null | grep -v '^Filesystem'"])
         except Exception as e:
-            return {"key": server["key"], "label": server["label"], "ip": server["ip"],
-                    "status": "error", "error": str(e), "rows": []}
+            return {**head, "status": "error", "error": str(e), "rows": []}
 
-    def collect_snapshot(self) -> dict:
-        """Synchronous CPU/memory + filesystem collection for every host in
-        _DISK_SERVERS, for app.tasks.eis_etl_tasks.etl_it_monitoring.
-
-        Deliberately not async: Celery tasks are plain functions, and wrapping
-        this in asyncio just to unwrap it again in the worker buys nothing.
-        A host that is unreachable yields a row with status="error" rather
-        than aborting the run, so one dead server never costs the snapshot of
-        the other.
-        """
-        cfg = self.load_config()
-        if not cfg.get("username") or not cfg.get("password"):
-            return {"configured": False, "metrics": [], "disks": []}
-
-        metrics, disks = [], []
-        for server in self._DISK_SERVERS:
-            try:
-                m = self._fetch_metrics(ip=server["ip"])
-            except Exception as e:
-                m = {"status": "error", "error": str(e)}
-            m = {**m, "server_key": server["key"], "server_label": server["label"],
-                 "server_ip": server["ip"]}
-            metrics.append(m)
-
-            d = self._fetch_disk(server, cfg)
-            disks.extend(d.get("rows", []))
-
-        return {"configured": True, "metrics": metrics, "disks": disks}
+        rows = []
+        for line in raw.splitlines():
+            parts = line.split()
+            if len(parts) < 6:
+                continue
+            filesystem, blocks, used, available, capacity, mountpoint = parts[:6]
+            cap_str  = capacity.replace("%", "")
+            pct      = int(cap_str) if cap_str.isdigit() else 0
+            used_gb  = round(int(used)      / 1024 / 1024, 2) if used.isdigit()      else 0
+            total_gb = round(int(blocks)    / 1024 / 1024, 2) if blocks.isdigit()    else 0
+            free_gb  = round(int(available) / 1024 / 1024, 2) if available.isdigit() else 0
+            if total_gb < 0.1:   # skip virtual/tiny fs
+                continue
+            rows.append({
+                "server_key": srv["key"], "server_label": srv["name"], "server_ip": srv["ip"],
+                "filesystem": filesystem, "mountpoint": mountpoint,
+                "used_gb": used_gb, "free_gb": free_gb, "total_gb": total_gb, "usage_percent": pct,
+                "status": "Critical" if pct >= 90 else "Warning" if pct >= 70 else "Normal",
+            })
+        return {**head, "status": "online", "rows": rows}
 
     async def get_disk_usage_all(self) -> dict:
-        """Fetch df -P from DB (172.21.2.201) and App (172.21.2.202) in parallel."""
-        cfg = self.load_config()
-        if not cfg.get("username") or not cfg.get("password"):
-            return {
-                "success": False,
-                "error": "SSH credentials not configured. Go to Server Monitoring → Settings.",
-                "servers": [],
-            }
-        results = await asyncio.gather(
-            *[asyncio.to_thread(self._fetch_disk, s, cfg) for s in self._DISK_SERVERS],
-            return_exceptions=False,
-        )
-        servers = list(results)
-        all_rows = [r for s in servers for r in s.get("rows", [])]
-        return {"success": True, "servers": servers, "data": all_rows}
+        """df -P from every monitored server, in parallel."""
+        servers = await asyncio.to_thread(store.monitored_servers, True)
+        if not servers:
+            return {"success": False, "servers": [], "data": [],
+                    "error": "No server is enabled for monitoring. Turn it on in IT > Server Control."}
+        results = list(await asyncio.gather(*[asyncio.to_thread(self._fetch_disk, s) for s in servers]))
+        for srv, res in zip(servers, results):
+            if res["rows"]:
+                await asyncio.to_thread(store.save_disks, self._tag(srv), res["rows"], "dashboard")
+        return {"success": True, "servers": results, "data": [r for s in results for r in s["rows"]]}
 
-    async def get_metrics(self) -> dict:
-        cfg = self.load_config()
-        if not cfg.get("username") or not cfg.get("password"):
-            return {
-                "success": True,
-                "data": {
-                    "status": "not_configured",
-                    "error": "Username/password belum dikonfigurasi",
-                    "cpu": 0, "memory_percent": 0,
-                    "memory_used": 0, "memory_total": 0,
-                    "load": "0.0", "uptime": "-",
-                },
-            }
-        try:
-            data = await asyncio.to_thread(self._fetch_metrics)
-            return {"success": True, "data": data}
-        except Exception as e:
-            logger.error("server_metrics_error", error=str(e))
-            return {
-                "success": True,
-                "data": {
-                    "status": "error",
-                    "error": str(e),
-                    "cpu": 0, "memory_percent": 0,
-                    "memory_used": 0, "memory_total": 0,
-                    "load": "0.0", "uptime": "Error",
-                },
-            }
+    # ── Snapshot for the ETL ─────────────────────────────────────────────────
+
+    def collect_snapshot(self) -> dict:
+        """Metrics, filesystems and top processes for every monitored server,
+        for app.tasks.eis_etl_tasks.etl_it_monitoring. Synchronous on purpose
+        (Celery tasks are plain functions). One unreachable server yields an
+        error row and never costs the others their snapshot."""
+        servers = store.monitored_servers(with_secret=True)
+        out = []
+        for srv in servers:
+            if srv.get("problem"):
+                out.append({"server": self._tag(srv), "metrics": {
+                    "status": "not_configured", "error": srv["problem"], **self._tag(srv)},
+                    "disks": [], "processes": None})
+                continue
+            metrics = self._metrics_row(srv)
+            disks = self._fetch_disk(srv)["rows"] if metrics["status"] == "online" else []
+            processes = None
+            if metrics["status"] == "online":
+                try:
+                    processes = self._fetch_top_processes(srv)
+                except Exception as e:
+                    logger.warning("snapshot_top_processes_failed", server=srv["name"], error=str(e))
+            out.append({"server": self._tag(srv), "metrics": metrics, "disks": disks, "processes": processes})
+        return {"configured": bool(servers), "servers": out}

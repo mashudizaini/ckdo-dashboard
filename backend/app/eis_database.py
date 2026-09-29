@@ -592,6 +592,45 @@ async def ensure_it_monitoring_tables():
             "ON eis.fact_it_oracle_activity (captured_at DESC)"
         ))
 
+        # Top processes per server (2026-09-29), written alongside the
+        # metrics by the ETL and by Server Process Monitoring refreshes.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eis.fact_it_top_process (
+                id            SERIAL PRIMARY KEY,
+                captured_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                server_key    VARCHAR(60) NOT NULL,
+                server_label  VARCHAR(150),
+                server_ip     VARCHAR(45),
+                sort_by       VARCHAR(3) NOT NULL,   -- 'cpu' | 'mem'
+                rank          SMALLINT NOT NULL,
+                os_user       VARCHAR(60),
+                pid           INTEGER,
+                cpu_pct       NUMERIC(6,2),
+                mem_pct       NUMERIC(6,2),
+                command       VARCHAR(200),
+                source        VARCHAR(20) NOT NULL DEFAULT 'schedule'
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_it_top_process_server "
+            "ON eis.fact_it_top_process (server_key, captured_at DESC)"
+        ))
+
+        # Servers now come from Server Control (any number of them, keyed by
+        # name) instead of the fixed 'db'/'app' pair, and the dashboard pages
+        # write readings too — hence a wider key, the server's IP on disk rows,
+        # and `source` ('schedule' = etl_it_monitoring, 'dashboard' = a page
+        # refresh).
+        for tbl in ("fact_it_server_metrics", "fact_it_disk_usage"):
+            await conn.execute(text(
+                f"ALTER TABLE eis.{tbl} ALTER COLUMN server_key TYPE VARCHAR(60), "
+                f"ALTER COLUMN server_label TYPE VARCHAR(150), "
+                f"ADD COLUMN IF NOT EXISTS source VARCHAR(20) NOT NULL DEFAULT 'schedule'"
+            ))
+        await conn.execute(text(
+            "ALTER TABLE eis.fact_it_disk_usage ADD COLUMN IF NOT EXISTS server_ip VARCHAR(45)"
+        ))
+
         # Read grants for the two chat roles, applied here rather than left to
         # the runbook. The tables are created by this app on every startup, so
         # a grant that lives only in a separate manual step is a grant that
@@ -615,9 +654,38 @@ async def ensure_it_monitoring_tables():
                         GRANT SELECT ON eis.fact_it_tablespace,
                                         eis.fact_it_server_metrics,
                                         eis.fact_it_disk_usage,
-                                        eis.fact_it_oracle_activity
+                                        eis.fact_it_oracle_activity,
+                                        eis.fact_it_top_process
                               TO {role};
                     END IF;
                 END
                 $$;
             """))
+
+    await _remap_legacy_it_server_keys()
+
+
+async def _remap_legacy_it_server_keys():
+    """Rows written before 2026-09-29 carry server_key 'db'/'app'. Rename them
+    to the Server Control key of the server at the same address, so each
+    server's history is one series — otherwise "latest per server" would show
+    the database server twice for a day and trend questions would split at
+    the switch. Idempotent: once renamed, nothing matches 'db'/'app' again."""
+    from sqlalchemy import text
+    from app.database import async_engine
+    from app.services.it_monitoring_store import server_key
+    async with async_engine.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT name, TRIM(address) AS address FROM server_registry_entries "
+            "WHERE TRIM(address) IN ('172.21.2.201', '172.21.2.202')"
+        ))).all()
+    legacy = {"172.21.2.201": "db", "172.21.2.202": "app"}
+    async with eis_async_engine.begin() as conn:
+        for name, address in rows:
+            params = {"old": legacy[address], "key": server_key(name), "label": name, "ip": address}
+            await conn.execute(text(
+                "UPDATE eis.fact_it_server_metrics SET server_key = :key, server_label = :label "
+                "WHERE server_key = :old"), params)
+            await conn.execute(text(
+                "UPDATE eis.fact_it_disk_usage SET server_key = :key, server_label = :label, "
+                "server_ip = COALESCE(server_ip, :ip) WHERE server_key = :old"), params)

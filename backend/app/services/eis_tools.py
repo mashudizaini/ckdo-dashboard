@@ -311,11 +311,11 @@ EIS_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_server_resources",
-            "description": "Kondisi CPU, memori, swap, load, dan uptime server terkini. Tanpa argumen mengembalikan semua server (DB dan Aplikasi).",
+            "description": "Kondisi CPU, memori, swap, load, dan uptime terkini tiap server yang dimonitor (daftar server diatur di Server Control, mis. Oracle EBS - Database, Oracle EBS - Application). Tanpa argumen mengembalikan semua server. captured_at = waktu pengukuran.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "server": {"type": "string", "description": "Saring per server: 'db', 'app', atau sebagian nama labelnya."},
+                    "server": {"type": "string", "description": "Saring per server: sebagian nama (mis. 'database', 'application'), server_key, atau IP."},
                 },
                 "required": [],
             },
@@ -325,11 +325,11 @@ EIS_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_disk_usage",
-            "description": "Pemakaian filesystem per mount point di server DB dan Aplikasi. Gunakan min_used_pct untuk mencari partisi yang hampir penuh.",
+            "description": "Pemakaian filesystem (storage) per mount point di tiap server yang dimonitor. Gunakan min_used_pct untuk mencari partisi yang hampir penuh.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "server": {"type": "string", "description": "Saring per server: 'db', 'app', atau sebagian nama labelnya."},
+                    "server": {"type": "string", "description": "Saring per server: sebagian nama (mis. 'database', 'application'), server_key, atau IP."},
                     "min_used_pct": {"type": "number", "description": "Hanya tampilkan mount point dengan pemakaian >= nilai ini (persen)."},
                 },
                 "required": [],
@@ -342,6 +342,21 @@ EIS_TOOLS = [
             "name": "get_oracle_activity",
             "description": "Jumlah sesi Oracle aktif/idle/terblokir dan antrean concurrent request (pending/running) terkini, beserta wait event teratas.",
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_server_top_processes",
+            "description": "Proses teratas (8 besar) di tiap server yang dimonitor, menurut pemakaian CPU atau memori — untuk pertanyaan 'proses apa yang bikin CPU/memori tinggi'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "server": {"type": "string", "description": "Saring per server: sebagian nama (mis. 'database', 'application'), server_key, atau IP."},
+                    "sort_by": {"type": "string", "enum": ["cpu", "mem"], "description": "Urutkan menurut CPU (default) atau memori."},
+                },
+                "required": [],
+            },
         },
     },
 ]
@@ -705,41 +720,76 @@ def get_tablespace_trend(tablespace_name: str, days: int = 30) -> list[dict]:
     return _query(sql, {"days": days, "tablespace_name": f"%{tablespace_name}%"})
 
 
+# Server rows are written per server — by the 15-minute ETL and by every
+# refresh of the Server Process / Storage Monitoring pages — so "the newest
+# snapshot" is the newest one PER SERVER, not the table's single MAX
+# (captured_at), which would drop every server but the last one refreshed.
+# A server not seen for a day (monitoring switched off) drops out.
+def _latest_per_server(table: str, extra_key: str = "") -> str:
+    return f"""
+        JOIN (SELECT server_key, {extra_key} MAX(captured_at) AS latest_at
+                FROM eis.{table}
+               WHERE captured_at >= NOW() - INTERVAL '1 day'
+               GROUP BY server_key {', ' + extra_key.rstrip(', ') if extra_key else ''}) l
+          ON l.server_key = t.server_key AND l.latest_at = t.captured_at
+             {'AND l.' + extra_key.rstrip(', ') + ' = t.' + extra_key.rstrip(', ') if extra_key else ''}
+    """
+
+
+def _server_filter(server: str, params: dict) -> str:
+    if not server:
+        return ""
+    params["server"] = server
+    params["server_like"] = f"%{server}%"
+    return (" AND (UPPER(t.server_key) = UPPER(%(server)s) OR t.server_ip = %(server)s"
+            " OR UPPER(t.server_label) LIKE UPPER(%(server_like)s)"
+            " OR UPPER(t.server_key) LIKE UPPER(%(server_like)s))")
+
+
 def get_server_resources(server: str = None) -> list[dict]:
     """Latest CPU / memory / swap / load / uptime per server."""
-    sql = """
-        SELECT server_key, server_label, server_ip, status,
-               cpu_pct, cpu_count, memory_pct, memory_used_gb, memory_total_gb,
-               swap_pct, load_1, uptime, error_message, captured_at
-          FROM eis.fact_it_server_metrics
-         WHERE captured_at = (SELECT MAX(captured_at) FROM eis.fact_it_server_metrics)
-    """
     params = {}
-    if server:
-        sql += " AND (UPPER(server_key) = UPPER(%(server)s) OR UPPER(server_label) LIKE UPPER(%(server_like)s))"
-        params["server"] = server
-        params["server_like"] = f"%{server}%"
-    sql += " ORDER BY server_key"
+    sql = f"""
+        SELECT t.server_key, t.server_label, t.server_ip, t.status,
+               t.cpu_pct, t.cpu_count, t.memory_pct, t.memory_used_gb, t.memory_total_gb,
+               t.swap_pct, t.load_1, t.uptime, t.error_message, t.captured_at
+          FROM eis.fact_it_server_metrics t
+          {_latest_per_server("fact_it_server_metrics")}
+         WHERE TRUE {_server_filter(server, params)}
+         ORDER BY t.server_label
+    """
+    return _query(sql, params)
+
+
+def get_server_top_processes(server: str = None, sort_by: str = "cpu") -> list[dict]:
+    """Latest top-8 processes per server, by CPU or by memory."""
+    sort_by = "mem" if (sort_by or "").lower().startswith("mem") else "cpu"
+    params = {"sort_by": sort_by}
+    sql = f"""
+        SELECT t.server_key, t.server_label, t.server_ip, t.sort_by, t.rank,
+               t.os_user, t.pid, t.cpu_pct, t.mem_pct, t.command, t.captured_at
+          FROM eis.fact_it_top_process t
+          {_latest_per_server("fact_it_top_process", "sort_by, ")}
+         WHERE t.sort_by = %(sort_by)s {_server_filter(server, params)}
+         ORDER BY t.server_label, t.rank
+    """
     return _query(sql, params)
 
 
 def get_disk_usage(server: str = None, min_used_pct: float = None) -> list[dict]:
     """Latest filesystem usage per mount point, optionally filtered."""
-    sql = """
-        SELECT server_key, server_label, mount_point, filesystem,
-               size_gb, used_gb, avail_gb, used_pct, captured_at
-          FROM eis.fact_it_disk_usage
-         WHERE captured_at = (SELECT MAX(captured_at) FROM eis.fact_it_disk_usage)
-    """
     params = {}
-    if server:
-        sql += " AND (UPPER(server_key) = UPPER(%(server)s) OR UPPER(server_label) LIKE UPPER(%(server_like)s))"
-        params["server"] = server
-        params["server_like"] = f"%{server}%"
+    sql = f"""
+        SELECT t.server_key, t.server_label, t.server_ip, t.mount_point, t.filesystem,
+               t.size_gb, t.used_gb, t.avail_gb, t.used_pct, t.captured_at
+          FROM eis.fact_it_disk_usage t
+          {_latest_per_server("fact_it_disk_usage")}
+         WHERE TRUE {_server_filter(server, params)}
+    """
     if min_used_pct is not None:
-        sql += " AND used_pct >= %(min_used_pct)s"
+        sql += " AND t.used_pct >= %(min_used_pct)s"
         params["min_used_pct"] = min_used_pct
-    sql += " ORDER BY used_pct DESC"
+    sql += " ORDER BY t.used_pct DESC"
     return _query(sql, params)
 
 
@@ -795,6 +845,7 @@ _DISPATCH = {
     "get_server_resources": get_server_resources,
     "get_disk_usage": get_disk_usage,
     "get_oracle_activity": get_oracle_activity,
+    "get_server_top_processes": get_server_top_processes,
 }
 
 

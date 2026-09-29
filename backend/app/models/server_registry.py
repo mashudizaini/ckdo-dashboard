@@ -14,7 +14,7 @@ that makes centralizing it defensible.
 """
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 
 from app.database import Base
 
@@ -33,6 +33,14 @@ class ServerEntry(Base):
     address    = Column(String(300))  # IP / hostname / URL
     notes      = Column(Text)
     sequence   = Column(Integer, nullable=False, default=0)
+    # Server Process / Server Storage Monitoring read their SSH targets from
+    # here (2026-09-29) instead of a separate server_config.json: a server
+    # with monitor_enabled is polled over SSH at `address`:`ssh_port` using
+    # monitor_credential_id (NULL = the server's first credential). One place
+    # to rotate a password, and each server logs in with its own account.
+    monitor_enabled       = Column(Boolean, nullable=False, default=False)
+    monitor_credential_id = Column(Integer)
+    ssh_port              = Column(Integer, nullable=False, default=22)
     created_by = Column(String(150))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

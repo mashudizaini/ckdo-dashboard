@@ -51,20 +51,29 @@ class ServerRequest(BaseModel):
     address: Optional[str] = None
     notes: Optional[str] = None
     sequence: int = 0
+    # Server Process / Storage Monitoring (see ServerEntry.monitor_enabled)
+    monitor_enabled: bool = False
+    monitor_credential_id: Optional[int] = None
+    ssh_port: int = 22
 
 
 @router.post("")
 async def create_server(body: ServerRequest, user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     if not body.name.strip():
         raise HTTPException(400, "name is required")
-    return await svc.create_server(db, body.name.strip(), body.category, body.address, body.notes, body.sequence, user.username or "it")
+    return await svc.create_server(db, body.name.strip(), body.category, body.address, body.notes, body.sequence,
+                                   user.username or "it", body.monitor_enabled, body.ssh_port)
 
 
 @router.put("/{server_id}")
 async def update_server(server_id: int, body: ServerRequest, user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     if not body.name.strip():
         raise HTTPException(400, "name is required")
-    result = await svc.update_server(db, server_id, body.name.strip(), body.category, body.address, body.notes, body.sequence)
+    try:
+        result = await svc.update_server(db, server_id, body.name.strip(), body.category, body.address, body.notes,
+                                         body.sequence, body.monitor_enabled, body.monitor_credential_id, body.ssh_port)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     if not result:
         raise HTTPException(404, "Server not found")
     return result

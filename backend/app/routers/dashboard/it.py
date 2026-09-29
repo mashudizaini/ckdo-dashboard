@@ -6,18 +6,21 @@ Required role: it_staff OR admin
 
 Endpoints:
   GET  /summary                       — KPI cards
-  GET  /server-monitoring/config      — SSH config (password masked)
-  POST /server-monitoring/config      — Save SSH config
-  GET  /server-monitoring/test        — Test SSH connection
-  GET  /server-monitoring/metrics     — CPU / Memory / Load / Uptime
+  GET  /server-monitoring/servers     — servers with monitoring on (from Server Control)
+  GET  /server-monitoring/test        — Test SSH connection (?server_id=)
+  GET  /server-monitoring/metrics     — CPU / Memory / Load / Uptime (?server_id=)
+  GET  /server-monitoring/top-processes — top processes by CPU / memory (?server_id=)
   GET  /tablespace-usage              — Top-5 tablespace (Oracle)
   GET  /tablespace-datafiles          — Existing datafiles for a tablespace
   POST /tablespace-add-datafile       — ALTER TABLESPACE ADD DATAFILE
-  GET  /disk-usage                    — Disk usage via SSH df
+  GET  /disk-usage                    — Disk usage via SSH df, every monitored server
   GET  /pending-jobs                  — Concurrent requests Oracle
 """
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from app.dependencies import require_role, CurrentUser, Roles
 from app.services.it_service import ITService, OracleITService, ServerMonitorService
@@ -47,48 +50,33 @@ async def get_weekly_report(user: CurrentUser = Depends(require_role(Roles.IT)))
     return await ITService().get_weekly_report_data()
 
 
-# ── Server Monitoring ────────────────────────────────────────────────────────
+# ── Server Process Monitoring ────────────────────────────────────────────────
+# Hosts and SSH logins come from Server Control (entries with monitoring on);
+# every reading is also stored for CoChat — see app.services.it_monitoring_store.
 
-class ServerConfigIn(BaseModel):
-    ip: str
-    port: int = 22
-    username: str
-    password: str
-
-
-@router.get("/server-monitoring/config")
-async def get_server_config(user: CurrentUser = Depends(require_role(Roles.IT))):
-    """Return current SSH config (password masked)."""
-    return {"success": True, "data": ServerMonitorService().get_config_public()}
-
-
-@router.post("/server-monitoring/config")
-async def save_server_config(
-    body: ServerConfigIn,
-    user: CurrentUser = Depends(require_role(Roles.IT)),
-):
-    """Save SSH credentials to config file."""
-    svc = ServerMonitorService()
-    svc.save_config(body.model_dump())
-    return {"success": True, "message": "Konfigurasi disimpan"}
+@router.get("/server-monitoring/servers")
+async def get_monitored_servers(user: CurrentUser = Depends(require_role(Roles.IT))):
+    """Servers enabled for monitoring in Server Control (no secrets)."""
+    servers = await run_in_threadpool(ServerMonitorService().servers_public)
+    return {"success": True, "data": servers}
 
 
 @router.get("/server-monitoring/test")
-async def test_connection(user: CurrentUser = Depends(require_role(Roles.IT))):
-    """Test SSH connection with saved config."""
-    return await ServerMonitorService().test_connection()
+async def test_connection(server_id: Optional[int] = None, user: CurrentUser = Depends(require_role(Roles.IT))):
+    """Test the SSH login Server Control holds for this server."""
+    return await ServerMonitorService().test_connection(server_id)
 
 
 @router.get("/server-monitoring/metrics")
-async def get_metrics(user: CurrentUser = Depends(require_role(Roles.IT))):
-    """Get CPU / Memory / Load / Uptime / Swap / CPU-count from server via SSH."""
-    return await ServerMonitorService().get_metrics()
+async def get_metrics(server_id: Optional[int] = None, user: CurrentUser = Depends(require_role(Roles.IT))):
+    """CPU / Memory / Load / Uptime / Swap / CPU-count via SSH (default: first monitored server)."""
+    return await ServerMonitorService().get_metrics(server_id)
 
 
 @router.get("/server-monitoring/top-processes")
-async def get_top_processes(user: CurrentUser = Depends(require_role(Roles.IT))):
+async def get_top_processes(server_id: Optional[int] = None, user: CurrentUser = Depends(require_role(Roles.IT))):
     """Top 8 processes by CPU and by Memory via SSH ps."""
-    return await ServerMonitorService().get_top_processes()
+    return await ServerMonitorService().get_top_processes(server_id)
 
 
 # ── Tablespace ───────────────────────────────────────────────────────────────
@@ -170,7 +158,7 @@ async def kill_oracle_session(
 
 @router.get("/disk-usage")
 async def get_disk_usage(user: CurrentUser = Depends(require_role(Roles.IT))):
-    """Disk usage per mount point — SSH df -P from DB (172.21.2.201) + App (172.21.2.202)."""
+    """Disk usage per mount point — SSH df -P on every server with monitoring on in Server Control."""
     return await ServerMonitorService().get_disk_usage_all()
 
 

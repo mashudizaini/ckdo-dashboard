@@ -14,12 +14,11 @@ export const itApi = {
   getTickets:       () => api.get("/dashboard/it/tickets"),
   getWeeklyReport:  () => api.get("/dashboard/it/weekly-report"),
 
-  // Server Monitoring
-  getServerConfig:  () => api.get("/dashboard/it/server-monitoring/config"),
-  saveServerConfig: (cfg) => api.post("/dashboard/it/server-monitoring/config", cfg),
-  testConnection:   () => api.get("/dashboard/it/server-monitoring/test"),
-  getServerMetrics:  () => api.get("/dashboard/it/server-monitoring/metrics"),
-  getTopProcesses:   () => api.get("/dashboard/it/server-monitoring/top-processes"),
+  // Server Process / Storage Monitoring — servers + SSH logins come from Server Control
+  getMonitoredServers: () => api.get("/dashboard/it/server-monitoring/servers"),
+  testConnection:   (serverId) => api.get("/dashboard/it/server-monitoring/test", { params: { server_id: serverId } }),
+  getServerMetrics:  (serverId) => api.get("/dashboard/it/server-monitoring/metrics", { params: { server_id: serverId } }),
+  getTopProcesses:   (serverId) => api.get("/dashboard/it/server-monitoring/top-processes", { params: { server_id: serverId } }),
 
   // Other sections
   getOracleSessions:       () => api.get("/dashboard/it/oracle-sessions"),

@@ -15,7 +15,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Server, Plus, Trash2, Pencil, Eye, EyeOff, Copy, Check, Search,
-  Loader2, X, KeyRound, History, ExternalLink, ShieldAlert, ChevronDown, ChevronRight,
+  Loader2, X, KeyRound, History, ExternalLink, ShieldAlert, ChevronDown, ChevronRight, Activity,
 } from "lucide-react";
 import { serverRegistryApi } from "@/api/dashboard";
 
@@ -94,7 +94,10 @@ function Modal({ title, onClose, children, footer }) {
 
 /* ─── Main ──────────────────────────────────────────────────────────── */
 
-const EMPTY_SERVER = { name: "", category: "", address: "", notes: "", sequence: 0 };
+const EMPTY_SERVER = {
+  name: "", category: "", address: "", notes: "", sequence: 0,
+  monitor_enabled: false, monitor_credential_id: null, ssh_port: 22, credentials: [],
+};
 const EMPTY_CRED = { label: "", username: "", password: "", notes: "" };
 const REVEAL_TIMEOUT_MS = 20_000;
 
@@ -321,7 +324,16 @@ function ServerRow({
     <div style={{ borderRadius: 12, border: "1px solid rgba(15,23,42,0.08)", overflow: "hidden" }}>
       <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 flex-wrap" style={{ background: "#f8fafc" }}>
         <div className="min-w-0">
-          <p style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{server.name}</p>
+          <p className="flex items-center gap-2" style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
+            {server.name}
+            {server.monitor_enabled && (
+              <span title="Polled by Server Process / Storage Monitoring"
+                className="inline-flex items-center gap-1"
+                style={{ fontSize: 10, fontWeight: 700, color: "#15803d", background: "rgba(34,197,94,0.12)", borderRadius: 999, padding: "1px 7px" }}>
+                <Activity size={10} /> Monitored
+              </span>
+            )}
+          </p>
           {server.address && (
             looksLikeUrl(server.address) ? (
               <a href={server.address} target="_blank" rel="noreferrer" className="flex items-center gap-1"
@@ -386,7 +398,10 @@ function ServerModal({ mode, initial, categories, saving, onSave, onClose }) {
   const [form, setForm] = useState({
     name: initial.name || "", category: initial.category || "", address: initial.address || "",
     notes: initial.notes || "", sequence: initial.sequence || 0,
+    monitor_enabled: !!initial.monitor_enabled, monitor_credential_id: initial.monitor_credential_id ?? null,
+    ssh_port: initial.ssh_port || 22,
   });
+  const creds = initial.credentials || [];
   return (
     <Modal title={mode === "edit" ? "Edit Server" : "Tambah Server"} onClose={onClose}
       footer={<>
@@ -409,6 +424,37 @@ function ServerModal({ mode, initial, categories, saving, onSave, onClose }) {
         <textarea style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} value={form.notes}
           onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
       </Field>
+      <div style={{ borderTop: "1px solid rgba(15,23,42,0.08)", paddingTop: 12, marginTop: 4 }}>
+        <label className="flex items-center gap-2" style={{ fontSize: 12.5, fontWeight: 700, color: "#334155", cursor: "pointer" }}>
+          <input type="checkbox" checked={form.monitor_enabled}
+            onChange={(e) => setForm((f) => ({ ...f, monitor_enabled: e.target.checked }))} />
+          Monitoring (Server Process &amp; Server Storage Monitoring)
+        </label>
+        <p style={{ fontSize: 11, color: "#94a3b8", margin: "4px 0 8px 22px" }}>
+          The dashboard logs in over SSH to the address above with the credential below. Readings are also saved for CoChat.
+        </p>
+        {form.monitor_enabled && (
+          <div className="flex gap-3" style={{ marginLeft: 22 }}>
+            <div style={{ flex: 1 }}>
+              <Field label="SSH credential">
+                <select style={inputStyle} value={form.monitor_credential_id ?? ""} disabled={creds.length === 0}
+                  onChange={(e) => setForm((f) => ({ ...f, monitor_credential_id: e.target.value ? Number(e.target.value) : null }))}>
+                  <option value="">{creds.length ? "First credential" : "Add a credential after saving"}</option>
+                  {creds.map((c) => (
+                    <option key={c.id} value={c.id}>{c.label ? `${c.label}: ` : ""}{c.username || "—"}</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div style={{ width: 90 }}>
+              <Field label="SSH port">
+                <input style={inputStyle} type="number" min={1} max={65535} value={form.ssh_port}
+                  onChange={(e) => setForm((f) => ({ ...f, ssh_port: Number(e.target.value) || 22 }))} />
+              </Field>
+            </div>
+          </div>
+        )}
+      </div>
     </Modal>
   );
 }

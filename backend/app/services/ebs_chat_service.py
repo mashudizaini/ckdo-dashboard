@@ -114,6 +114,7 @@ MODULE_TOOL_MAP: dict[str, list[str]] = {
         "get_server_resources",
         "get_disk_usage",
         "get_oracle_activity",
+        "get_server_top_processes",
     ],
 }
 

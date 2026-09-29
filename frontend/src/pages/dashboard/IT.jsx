@@ -26,9 +26,9 @@ import ServerControl from "@/pages/dashboard/it/ServerControl";
 
 const TABS = [
   { id: "server-control",    icon: KeyRound,      color: "text-indigo-400", bg: "bg-indigo-500/10", activeBorder: "border-indigo-500/40", label: "Server Control" },
-  { id: "server-monitoring", icon: Server,        color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Oracle Server Monitoring" },
+  { id: "server-monitoring", icon: Server,        color: "text-green-400",  bg: "bg-green-500/10",  activeBorder: "border-green-500/40",  label: "Server Process Monitoring" },
+  { id: "disk-usage",        icon: HardDrive,     color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Server Storage Monitoring" },
   { id: "tablespace-usage",  icon: Activity,      color: "text-blue-400",   bg: "bg-blue-500/10",   activeBorder: "border-blue-500/40",   label: "Oracle Tablespace Monitoring"  },
-  { id: "disk-usage",        icon: HardDrive,     color: "text-yellow-400", bg: "bg-yellow-500/10", activeBorder: "border-yellow-500/40", label: "Oracle Storage Monitoring"        },
   { id: "db-browser",        icon: Database,      color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Postgre DB Browser"  },
   { id: "ebs-backup-recovery", icon: RefreshCw,   color: "text-red-400",    bg: "bg-red-500/10",    activeBorder: "border-red-500/40",    label: "Oracle EBS Backup Recovery" },
   { id: "vpn-monitoring",    icon: ShieldCheck,   color: "text-teal-400",  bg: "bg-teal-500/10",   activeBorder: "border-teal-500/40",   label: "VPN Access Monitoring" },
@@ -474,7 +474,9 @@ function KillSessionModal({ session, loading, onClose, onConfirm }) {
 // ── Main section ─────────────────────────────────────────────────────────
 
 function ServerMonitoringSection() {
-  const [config,        setConfig]        = useState(null);
+  const navigate = useNavigate();
+  const [servers,       setServers]       = useState(null); // monitored servers from Server Control
+  const [serverId,      setServerId]      = useState(null);
   const [metrics,       setMetrics]       = useState(null);
   const [history,       setHistory]       = useState([]);
   const [loading,       setLoading]       = useState(false);
@@ -485,18 +487,44 @@ function ServerMonitoringSection() {
   const [sessLoading,   setSessLoading]   = useState(false);
   const [killTarget,    setKillTarget]    = useState(null);
   const [killLoading,   setKillLoading]   = useState(false);
-  const [showModal,     setShowModal]     = useState(false);
+  const [testing,       setTesting]       = useState(false);
   const [testResult,    setTestResult]    = useState(null);
   const sessionsRef = useRef(null);
 
   useEffect(() => {
-    itApi.getServerConfig().then(res => setConfig(res.data)).catch(() => {});
+    itApi.getMonitoredServers()
+      .then(res => {
+        const list = res.data ?? [];
+        setServers(list);
+        setServerId(prev => prev ?? list[0]?.id ?? null);
+      })
+      .catch(() => setServers([]));
   }, []);
 
+  const server = servers?.find(s => s.id === serverId) ?? null;
+
+  // A different server starts a fresh chart, table and connection test.
+  const selectServer = (id) => {
+    if (id === serverId) return;
+    setServerId(id);
+    setMetrics(null);
+    setHistory([]);
+    setProcesses(null);
+    setTestResult(null);
+  };
+
+  const runTest = async () => {
+    setTesting(true);
+    try { setTestResult(await itApi.testConnection(serverId)); }
+    catch (e) { setTestResult({ success: false, error: e?.detail || e?.message || "Connection test failed" }); }
+    finally { setTesting(false); }
+  };
+
   const fetchMetrics = useCallback(async () => {
+    if (!serverId) return;
     setLoading(true);
     try {
-      const res = await itApi.getServerMetrics();
+      const res = await itApi.getServerMetrics(serverId);
       const d = res.data;
       setMetrics(d);
       if (d.status === "online") {
@@ -510,16 +538,17 @@ function ServerMonitoringSection() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [serverId]);
 
   const fetchProcesses = useCallback(async () => {
+    if (!serverId) return;
     setProcLoading(true);
     try {
-      const res = await itApi.getTopProcesses();
+      const res = await itApi.getTopProcesses(serverId);
       if (res?.success) setProcesses({ cpu: res.cpu, mem: res.mem });
     } catch (_) {}
     finally { setProcLoading(false); }
-  }, []);
+  }, [serverId]);
 
   // Fetch both metrics + processes in parallel on every refresh
   const fetchAll = useCallback(async () => {
@@ -573,7 +602,8 @@ function ServerMonitoringSection() {
   return (
     <>
       <SectionCard
-        title="Real-time Server Monitoring"
+        title="Server Process Monitoring"
+        subtitle="Servers and SSH logins come from Server Control · every refresh is also saved for CoChat"
         action={
           <div className="flex items-center gap-2">
             <AutoRefreshSelector value={autoInterval} onChange={setAutoInterval} />
@@ -581,15 +611,54 @@ function ServerMonitoringSection() {
           </div>
         }
       >
-        {/* Config bar */}
-        <div className="mb-5 flex items-center justify-between p-4 rounded-lg bg-gray-800/50 border border-gray-700">
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-400">Server</span>
-            <span className="text-sm font-medium text-gray-200">{config ? `${config.ip}:${config.port}` : "—"}</span>
-            {config?.username && <span className="text-xs text-gray-500">({config.username})</span>}
-            {config?.has_password === false && <span className="text-xs text-amber-400">Password not set</span>}
+        {/* Server picker — the list is the Server Control entries with monitoring on */}
+        <div className="mb-5 p-4 rounded-lg bg-gray-800/50 border border-gray-700">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
+              {servers === null && <Loader2 size={14} className="animate-spin text-gray-500" />}
+              {servers?.length === 0 && (
+                <span className="text-sm text-amber-400">No server has monitoring turned on yet.</span>
+              )}
+              {servers?.map(s => (
+                <button key={s.id} onClick={() => selectServer(s.id)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                    s.id === serverId
+                      ? "bg-green-500/10 border-green-500/40 text-green-400"
+                      : "bg-gray-800/60 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300"
+                  }`}>
+                  <span className="font-semibold">{s.name}</span>
+                  <span className="font-mono opacity-60">{s.ip}</span>
+                  {s.problem && <span className="text-amber-400" title={s.problem}>!</span>}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              {server && !server.problem && (
+                <ActionBtn icon={testing ? Loader2 : Wifi} label={testing ? "Testing..." : "Test Connection"}
+                  color="bg-gray-700 hover:bg-gray-600" onClick={runTest} />
+              )}
+              <ActionBtn icon={Settings} label="Manage in Server Control" color="bg-gray-700 hover:bg-gray-600"
+                onClick={() => navigate("/dashboard/it/server-control")} />
+            </div>
           </div>
-          <ActionBtn icon={Settings} label="Configure" color="bg-gray-700 hover:bg-gray-600" onClick={() => setShowModal(true)} />
+          {server && (
+            <p className="mt-2 text-xs text-gray-500">
+              SSH {server.ip}:{server.port}
+              {server.username && <> · login <span className="font-mono">{server.username}</span></>}
+              {server.credential_label && <> ({server.credential_label})</>}
+              {server.problem && <span className="text-amber-400"> · {server.problem}</span>}
+            </p>
+          )}
+          {testResult && (
+            <div className={`mt-2 flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${
+              testResult.success
+                ? "bg-green-500/10 border border-green-500/30 text-green-400"
+                : "bg-red-500/10 border border-red-500/30 text-red-400"
+            }`}>
+              {testResult.success ? <CheckCircle size={13} /> : <X size={13} />}
+              {testResult.success ? testResult.message : testResult.error}
+            </div>
+          )}
         </div>
 
         {/* Status banners */}
@@ -600,7 +669,7 @@ function ServerMonitoringSection() {
         )}
         {statusNotConf && (
           <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
-            <Settings size={14} /> SSH not configured. Click Configure to enter credentials.
+            <Settings size={14} /> {metrics.error || "This server cannot be polled yet."} Fix it in Server Control.
           </div>
         )}
 
@@ -675,114 +744,7 @@ function ServerMonitoringSection() {
         />
       )}
 
-      {showModal && (
-        <ConfigModal
-          initial={config}
-          onClose={() => { setShowModal(false); setTestResult(null); }}
-          onSaved={(cfg) => { setConfig(cfg); setShowModal(false); setTestResult(null); }}
-          onTest={async (cfg) => {
-            await itApi.saveServerConfig(cfg);
-            const res = await itApi.testConnection();
-            setTestResult(res);
-          }}
-          testResult={testResult}
-        />
-      )}
     </>
-  );
-}
-
-/* ─── Configure Modal ─────────────────────────────── */
-
-function ConfigModal({ initial, onClose, onSaved, onTest, testResult }) {
-  const [form,    setForm]    = useState({
-    ip:       initial?.ip       ?? "172.21.2.201",
-    port:     initial?.port     ?? 22,
-    username: initial?.username ?? "",
-    password: "",
-  });
-  const [saving,  setSaving]  = useState(false);
-  const [testing, setTesting] = useState(false);
-
-  const set = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await itApi.saveServerConfig({ ...form, port: Number(form.port) });
-      onSaved({ ip: form.ip, port: Number(form.port), username: form.username, has_password: true });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleTest = async () => {
-    setTesting(true);
-    try {
-      await onTest({ ...form, port: Number(form.port) });
-    } finally {
-      setTesting(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.3)", backdropFilter: "blur(4px)" }}>
-      <div style={{
-        width: "100%", maxWidth: 420, borderRadius: 20,
-        background: "#ffffff",
-        boxShadow: "0 20px 40px rgba(15,23,42,0.16), 0 8px 20px rgba(15,23,42,0.08)",
-      }}>
-        <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: "#1e293b" }}>SSH Server Configuration</h3>
-          <button onClick={onClose} style={{ color: "#94a3b8", transition: "color 0.15s" }}
-            onMouseEnter={e => e.currentTarget.style.color = "#1e293b"}
-            onMouseLeave={e => e.currentTarget.style.color = "#94a3b8"}>
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="p-5 space-y-4">
-          <Field label="Server IP">
-            <input className={INPUT} value={form.ip}       onChange={set("ip")}       placeholder="172.21.2.201" />
-          </Field>
-          <Field label="Port">
-            <input className={INPUT} value={form.port}     onChange={set("port")}     type="number" placeholder="22" />
-          </Field>
-          <Field label="Username">
-            <input className={INPUT} value={form.username} onChange={set("username")} placeholder="oraprod" />
-          </Field>
-          <Field label="Password">
-            <input className={INPUT} value={form.password} onChange={set("password")} type="password" placeholder="Leave blank to keep existing" />
-          </Field>
-
-          {testResult && (
-            <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
-              testResult.success
-                ? "bg-green-500/10 border border-green-500/30 text-green-400"
-                : "bg-red-500/10 border border-red-500/30 text-red-400"
-            }`}>
-              {testResult.success ? <CheckCircle size={14} /> : <X size={14} />}
-              {testResult.success ? testResult.message : testResult.error}
-            </div>
-          )}
-        </div>
-
-        <div className="flex justify-end gap-2 px-5 py-4" style={{ borderTop: "1px solid rgba(0,0,0,0.06)" }}>
-          <ActionBtn
-            icon={testing ? Loader2 : Wifi}
-            label={testing ? "Testing..." : "Test Connection"}
-            color="bg-gray-700 hover:bg-gray-600"
-            onClick={handleTest}
-          />
-          <ActionBtn
-            icon={saving ? Loader2 : CheckCircle}
-            label={saving ? "Saving..." : "Save"}
-            color="bg-blue-600 hover:bg-blue-700"
-            onClick={handleSave}
-          />
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -1594,16 +1556,24 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
 
 /* ─── Section: Disk Usage ─────────────────────────── */
 
-const DISK_SERVERS_CFG = [
-  { key: "db",  label: "DB Server",  ip: "172.21.2.201" },
-  { key: "app", label: "App Server", ip: "172.21.2.202" },
-];
 
 function DiskUsageSection() {
-  const [serverData, setServerData] = useState({ db: null, app: null }); // null=not loaded, {status,rows,error}
+  const navigate = useNavigate();
+  const [servers,    setServers]    = useState(null); // monitored servers from Server Control
+  const [serverData, setServerData] = useState({});   // key -> {status, rows, error} once loaded
   const [loading,    setLoading]    = useState(false);
   const [globalErr,  setGlobalErr]  = useState("");
-  const [activeTab,  setActiveTab]  = useState("db");
+  const [activeTab,  setActiveTab]  = useState(null);
+
+  useEffect(() => {
+    itApi.getMonitoredServers()
+      .then(res => {
+        const list = res.data ?? [];
+        setServers(list);
+        setActiveTab(prev => prev ?? list[0]?.key ?? null);
+      })
+      .catch(() => setServers([]));
+  }, []);
 
   const refresh = async () => {
     setLoading(true); setGlobalErr("");
@@ -1612,7 +1582,11 @@ function DiskUsageSection() {
       if (res?.success) {
         const map = {};
         (res.servers ?? []).forEach(s => { map[s.key] = s; });
-        setServerData(prev => ({ ...prev, ...map }));
+        setServerData(map);
+        // The list may have changed in Server Control since the page opened.
+        const list = (res.servers ?? []).map(s => ({ id: s.id, key: s.key, name: s.label, ip: s.ip }));
+        setServers(list);
+        setActiveTab(prev => (list.some(s => s.key === prev) ? prev : list[0]?.key ?? null));
       } else {
         setGlobalErr(res?.error || "Failed to fetch disk usage");
       }
@@ -1635,13 +1609,17 @@ function DiskUsageSection() {
 
   return (
     <SectionCard
-      title="Disk Usage — DB & App Servers"
-      subtitle="SSH df -P  ·  172.21.2.201 (DB)  ·  172.21.2.202 (App)"
+      title="Server Storage Monitoring"
+      subtitle="SSH df -P on every server with monitoring on in Server Control · every refresh is also saved for CoChat"
       action={<ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-yellow-600 hover:bg-yellow-700" onClick={refresh} />}
     >
       {/* ── Server tabs — always visible ── */}
       <div className="flex gap-2 mb-4">
-        {DISK_SERVERS_CFG.map(s => {
+        {servers === null && <Loader2 size={14} className="animate-spin text-gray-500" />}
+        {servers?.length === 0 && (
+          <span className="text-xs text-amber-500 py-2">No server has monitoring turned on yet.</span>
+        )}
+        {(servers ?? []).map(s => {
           const sd = serverData[s.key];
           const dotColor = !sd ? "bg-gray-600" : sd.status === "online" ? "bg-green-400" : "bg-red-400";
           return (
@@ -1652,7 +1630,7 @@ function DiskUsageSection() {
                   : "bg-gray-800/60 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300"
               }`}>
               <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} />
-              <span className="font-semibold">{s.label}</span>
+              <span className="font-semibold">{s.name}</span>
               <span className="font-mono opacity-60">{s.ip}</span>
             </button>
           );
@@ -1669,7 +1647,7 @@ function DiskUsageSection() {
       {/* ── Loading ── */}
       {loading && (
         <div className="flex items-center justify-center py-10 text-gray-500 text-sm gap-2">
-          <Loader2 size={16} className="animate-spin" /> Connecting to both servers via SSH…
+          <Loader2 size={16} className="animate-spin" /> Connecting to {servers?.length || ""} server(s) via SSH…
         </div>
       )}
 
@@ -1677,8 +1655,16 @@ function DiskUsageSection() {
       {!loading && !active && !globalErr && (
         <p className="text-xs text-gray-500 py-6 text-center">
           Click <strong>Refresh</strong> to fetch disk usage via SSH.
-          Ensure SSH credentials are set in <span className="text-blue-400">Server Monitoring → Settings</span>.
+          Servers and logins are managed in{" "}
+          <button className="text-blue-400 hover:underline" onClick={() => navigate("/dashboard/it/server-control")}>Server Control</button>.
         </p>
+      )}
+
+      {/* ── Server not usable as configured (no credential / host) ── */}
+      {!loading && active?.status === "not_configured" && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-4 text-sm text-amber-500">
+          {active.label}: {active.error}. Fix it in Server Control.
+        </div>
       )}
 
       {/* ── Per-server error ── */}
@@ -1699,7 +1685,7 @@ function DiskUsageSection() {
               boxShadow: "inset 0 2px 5px rgba(15,23,42,0.09)",
             }}>
               <p style={{ fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 12 }}>
-                {DISK_SERVERS_CFG.find(s => s.key === activeTab)?.label} — Disk Usage per Mount Point (GB)
+                {active.label} — Disk Usage per Mount Point (GB)
               </p>
               <ResponsiveContainer width="100%" height={Math.max(180, chartData.length * 40)}>
                 <BarChart data={chartData} layout="vertical"

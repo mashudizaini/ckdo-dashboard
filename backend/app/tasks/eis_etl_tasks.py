@@ -2429,8 +2429,11 @@ def etl_it_monitoring(year: int = None, month: int = None):
 
     Four sources, all of which the IT dashboard already reads live:
       - Oracle DBA_TABLESPACE_USAGE_METRICS        -> fact_it_tablespace
-      - SSH df -P on both servers                  -> fact_it_disk_usage
-      - SSH top/free/loadavg on both servers       -> fact_it_server_metrics
+      - SSH df -P on each monitored server         -> fact_it_disk_usage
+      - SSH top/free/loadavg on each server        -> fact_it_server_metrics
+      - SSH ps (top 8 by CPU and by memory)        -> fact_it_top_process
+    The servers and their logins are the Server Control entries with
+    monitoring on; the dashboard pages write the same tables on refresh.
       - Oracle v$session + FND_CONCURRENT_REQUESTS -> fact_it_oracle_activity
 
     Unlike it_service.get_tablespace(), which is deliberately Top-5 for a
@@ -2537,47 +2540,24 @@ def etl_it_monitoring(year: int = None, month: int = None):
             errors.append("oracle: " + str(e))
             logger.warning("etl_it_monitoring oracle source failed: %s", e)
 
-        # -- SSH: CPU / memory / filesystems on both servers ------------------
+        # -- SSH: CPU / memory / filesystems / top processes -----------------
+        # Every server with monitoring on in Server Control, each with its own
+        # login (see app.services.it_monitoring_store).
         try:
+            from app.services import it_monitoring_store as store
             from app.services.it_service import ServerMonitorService
             snap = ServerMonitorService().collect_snapshot()
             if not snap["configured"]:
-                errors.append(
-                    "ssh: kredensial belum dikonfigurasi (Server Monitoring > Settings)"
-                )
-            else:
-                for m in snap["metrics"]:
-                    cur.execute(
-                        "INSERT INTO eis.fact_it_server_metrics "
-                        "(server_key, server_label, server_ip, status, cpu_pct, cpu_count, "
-                        " memory_pct, memory_used_gb, memory_total_gb, swap_pct, load_1, "
-                        " uptime, error_message) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                        (
-                            m.get("server_key"), m.get("server_label"), m.get("server_ip"),
-                            m.get("status"), m.get("cpu"), m.get("cpu_count"),
-                            m.get("memory_percent"), m.get("memory_used"),
-                            m.get("memory_total"), m.get("swap_percent"),
-                            _safe_float(m.get("load")),
-                            m.get("uptime"), m.get("error"),
-                        ),
-                    )
-                records += len(snap["metrics"])
-
-                for d in snap["disks"]:
-                    cur.execute(
-                        "INSERT INTO eis.fact_it_disk_usage "
-                        "(server_key, server_label, mount_point, filesystem, "
-                        " size_gb, used_gb, avail_gb, used_pct) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                        (
-                            d.get("server_key"), d.get("server_label"),
-                            d.get("mountpoint"), d.get("filesystem"),
-                            d.get("total_gb"), d.get("used_gb"),
-                            d.get("free_gb"), d.get("usage_percent"),
-                        ),
-                    )
-                records += len(snap["disks"])
+                errors.append("ssh: no server has monitoring enabled in Server Control")
+            for s in snap["servers"]:
+                m = s["metrics"]
+                records += store.save_metrics([m], "schedule", cur)
+                records += store.save_disks(s["server"], s["disks"], "schedule", cur)
+                if s["processes"]:
+                    records += store.save_processes(
+                        s["server"], s["processes"]["cpu"], s["processes"]["mem"], "schedule", cur)
+                if m.get("status") != "online":
+                    errors.append(f"ssh {s['server']['server_label']}: {m.get('error')}")
         except Exception as e:
             errors.append("ssh: " + str(e))
             logger.warning("etl_it_monitoring ssh source failed: %s", e)

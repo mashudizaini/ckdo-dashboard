@@ -110,6 +110,11 @@ async def lifespan(app: FastAPI):
     from app.routers.emagazine import ensure_edition_type_column
     await ensure_edition_type_column()
 
+    # Server Control carries the SSH targets for Server Process / Storage
+    # Monitoring — see ensure_monitoring_columns' docstring.
+    from app.services.server_registry_service import ensure_monitoring_columns
+    await ensure_monitoring_columns()
+
     # Initialize Oracle Thick Mode
     init_oracle_client()
 

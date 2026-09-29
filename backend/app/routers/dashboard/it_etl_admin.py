@@ -363,7 +363,7 @@ _JOB_META = {
     "etl_it_monitoring": {"frequency": "Every 15 min", "schedule": "*/15 min", "source": "Oracle DBA views + SSH (DB & App server)",
                         "source_system": "Oracle EBS + Linux",
                         "oracle_tables": ["dba_tablespace_usage_metrics", "dba_tablespaces", "v$session", "apps.fnd_concurrent_requests"],
-                        "destination_table": "eis.fact_it_tablespace, eis.fact_it_server_metrics, eis.fact_it_disk_usage, eis.fact_it_oracle_activity"},
+                        "destination_table": "eis.fact_it_tablespace, eis.fact_it_server_metrics, eis.fact_it_disk_usage, eis.fact_it_top_process, eis.fact_it_oracle_activity"},
     "etl_daily_sales": {"frequency": "On upload + hourly", "schedule": "menit ke-20 tiap jam", "source": "EIS Data Upload (Excel -> app/data/daily_sales.json)",
                         "source_system": "Excel upload (bukan Oracle)",
                         "oracle_tables": [],

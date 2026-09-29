@@ -17,9 +17,9 @@ import { oracleEnvApi } from "@/api/dashboard";
 const NAV_ITEMS = [
   { label: "IT", path: "/dashboard/it", icon: Monitor, roles: ["it_staff"], children: [
     { label: "Server Control", path: "/dashboard/it/server-control" },
-    { label: "Oracle Server Monitoring", path: "/dashboard/it/server-monitoring" },
+    { label: "Server Process Monitoring", path: "/dashboard/it/server-monitoring" },
+    { label: "Server Storage Monitoring", path: "/dashboard/it/disk-usage" },
     { label: "Oracle Tablespace Monitoring", path: "/dashboard/it/tablespace-usage" },
-    { label: "Oracle Storage Monitoring", path: "/dashboard/it/disk-usage" },
     { label: "Postgre DB Browser", path: "/dashboard/it/db-browser" },
     { label: "Oracle EBS Backup Recovery", path: "/dashboard/it/ebs-backup-recovery" },
     { label: "VPN Access Monitoring", path: "/dashboard/it/vpn-monitoring" },
