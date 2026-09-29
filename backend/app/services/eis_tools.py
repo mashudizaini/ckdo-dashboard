@@ -932,6 +932,39 @@ _SUBTOTAL_ROWS = {
                               "product rows break them down. Never add both kinds of rows together."),
 }
 
+# Money columns whose unit has been checked against the table contents (see
+# SYSTEM_PROMPT in oracle_chat_service). For these the totals also carry the
+# unit and a ready-to-quote Indonesian amount, because models still slip on
+# the conversion: Sonnet 5 wrote "Rp 23,22 juta" for 23.218,55 juta
+# (= Rp 23,2 miliar). get_budget_vs_actual is deliberately absent — the
+# prompt says juta but the loaded rows look like full rupiah; unverified.
+_MONEY_UNIT = {
+    "get_purchasing_performance": ("IDR", 1, ["po_value"]),
+    "get_financial_summary": ("IDR", 1, ["net_profit_bp", "net_profit_actual", "cf_cash_in_actual",
+                                         "cf_cash_out_actual"]),
+    "get_sales_performance": ("juta IDR", 1e6, ["bp_amount", "actual_amount", "prior_year_actual",
+                                                "variance_vs_budget"]),
+    "get_cogs_performance": ("juta IDR", 1e6, ["sales_amount", "cogs_total", "ebit_amount"]),
+}
+
+
+def rupiah_text(idr: float) -> str:
+    """Rp 207,12 miliar / Rp 691,90 juta / Rp 1,20 triliun — Indonesian decimal comma."""
+    sign = "-" if idr < 0 else ""
+    a = abs(idr)
+    for div, word in ((1e12, "triliun"), (1e9, "miliar"), (1e6, "juta")):
+        if a >= div:
+            return f"{sign}Rp {a / div:,.2f} {word}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{sign}Rp {a:,.0f}".replace(",", ".")
+
+
+def _add_text(d: dict, factor: float, cols: list[str]) -> dict:
+    for c in cols:
+        if isinstance(d.get(c), (int, float)):
+            d[c + "_text"] = rupiah_text(d[c] * factor)
+    return d
+
+
 _NOT_ADDITIVE = {
     "get_ar_ap_summary": "Days and average balances per month — do not add months together; quote the "
                          "month asked for, or the latest month for a year question.",
@@ -995,4 +1028,13 @@ def summarize(tool_name: str, rows: list[dict]) -> dict | None:
             items.sort(key=lambda kv: -abs(kv[1][order_by]))
         out["by_" + group_col] = [{group_col: k, **fmt(_derive(dict(v), derived))} for k, v in items]
     out["grand_total"] = fmt(_derive(dict(grand) | {"rows": len(rows)}, derived))
+    money = _MONEY_UNIT.get(tool_name)
+    if money:
+        unit, factor, mcols = money
+        out["unit"] = unit
+        out["note"] += (f" Money columns are in {unit}; each has a *_text twin with the amount already "
+                        "converted — quote that text as-is.")
+        for g in out.get("by_" + group_col, []) if group_col else []:
+            _add_text(g, factor, mcols)
+        _add_text(out["grand_total"], factor, mcols)
     return out

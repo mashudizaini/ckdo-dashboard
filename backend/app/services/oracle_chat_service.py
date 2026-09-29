@@ -121,7 +121,9 @@ SYSTEM_PROMPT = (
     "'totals', WAJIB kutip angka dari 'totals' (by_... per kategori dan grand_total) apa adanya — JANGAN "
     "menjumlahkan baris 'data' sendiri, dan jangan menghilangkan kategori apa pun (termasuk "
     "'Unclassified'). Jika 'totals' hanya berisi 'note', ikuti catatan itu (mis. headcount/saldo tidak "
-    "boleh dijumlahkan antar bulan).\n"
+    "boleh dijumlahkan antar bulan). Jika 'totals' punya kolom berakhiran _text (mis. actual_amount_text "
+    "'Rp 23,22 miliar'), kutip teks itu APA ADANYA untuk nilai rupiahnya — satuannya sudah dikonversi, "
+    "jangan dikonversi ulang.\n"
 )
 
 
