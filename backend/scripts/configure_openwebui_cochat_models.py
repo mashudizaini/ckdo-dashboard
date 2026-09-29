@@ -185,6 +185,18 @@ def main():
         print("\nPlan only. Re-run with --apply to make these changes.")
         return
 
+    # A preset whose base model is switched off in Admin > Models answers
+    # "Model not found". Switch the bases on without widening their access
+    # grants: users reach them only through the presets above.
+    for base_id in (QWEN, SONNET, HAIKU):
+        r = c.get("/models/model", params={"id": base_id})
+        if r.status_code == 200 and not r.json().get("is_active"):
+            b = r.json()
+            call("POST", f"/models/model/update?id={base_id}",
+                 json={**{k: b.get(k) for k in ("id", "name", "base_model_id", "meta", "params", "access_grants")},
+                       "is_active": True})
+            print(f"base model {base_id}: switched on (access grants unchanged: {len(b.get('access_grants') or [])})")
+
     for action, body in writes:
         if action == "update":
             call("POST", f"/models/model/update?id={body['id']}", json=body)
