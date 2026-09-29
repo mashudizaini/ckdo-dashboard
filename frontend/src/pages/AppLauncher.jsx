@@ -9,7 +9,6 @@ import logo from "@/assets/LOGO-ONLY.png";
 const APPS = [
   // Business & Analytics
   { id: "dashboard",   category: "business", name: "CKDO Dashboard",         desc: "Monitoring & reporting",              url: "/dashboard/it",                                                    status: "sso",     emoji: "📊", role: "app:dashboard"   },
-  { id: "eis",         category: "business", name: "EIS Dashboard",           desc: "Executive information system",        url: "http://172.21.2.209:8090",                                         status: "sso",     emoji: "📈", role: "app:eis"          },
   { id: "oracle-ebs",  category: "business", name: "Oracle EBS",              desc: "Enterprise resource planning",        url: "http://ckd-app.ckd-otto.com:8000/OA_HTML/AppsLocalLogin.jsp",     status: "direct",  emoji: "🔴", role: "app:oracle-ebs"   },
 
   // Human Resources
@@ -29,6 +28,15 @@ const APPS = [
   { id: "idrac-98",    category: "infra",    name: "Dell iDRAC 98",           desc: "Server remote management (198)",      url: "https://172.21.2.198/restgui/start.html?login",                    status: "direct",  emoji: "🔧", role: "app:idrac-98"      },
   { id: "idrac-dev",   category: "infra",    name: "Dell iDRAC Dev",          desc: "Server remote management (197)",      url: "https://172.21.2.197/restgui/start.html?login",                    status: "direct",  emoji: "🔧", role: "app:idrac-dev"     },
 
+  // Network
+  //
+  // Kedua perangkat ini dijangkau lewat alamat IP, bukan nama host. FortiGate
+  // HO berada di segmen 192.168.1.0/24 (jaringan HO), bukan 172.21.2.0/24
+  // seperti perangkat lain di daftar ini, jadi hanya bisa dibuka dari jaringan
+  // yang punya rute ke sana.
+  { id: "fortigate-ho",    category: "network",  name: "FortiGate HO",            desc: "Firewall Head Office",                url: "https://192.168.1.1/ng/system/dashboard/6?releaseOverview=true",   status: "direct",  emoji: "🛡️", role: "app:fortigate-ho"    },
+  { id: "fortigate-plant", category: "network",  name: "FortiGate Plant",         desc: "Firewall Plant Cikarang",             url: "https://172.21.2.1/login?redir=%2F",                               status: "direct",  emoji: "🛡️", role: "app:fortigate-plant" },
+
   // External
   { id: "website",     category: "external", name: "Company Website",         desc: "ckd-otto.com public site",            url: "https://ckd-otto.com",                                             status: "direct",  emoji: "🌐", role: "app:website"       },
 ];
@@ -38,6 +46,7 @@ const CATEGORIES = [
   { id: "hr",       label: "Human Resources",       short: "HR",       emoji: "👥", color: "#7c3aed", light: "#ede9fe" },
   { id: "it-ops",   label: "IT Operations",         short: "IT Ops",   emoji: "🛠️", color: "#ea580c", light: "#ffedd5" },
   { id: "infra",    label: "Infrastructure",         short: "Infra",    emoji: "🏗️", color: "#0891b2", light: "#cffafe" },
+  { id: "network",  label: "Network",                short: "Network",  emoji: "🛡️", color: "#dc2626", light: "#fee2e2" },
   { id: "external", label: "External",               short: "External", emoji: "🌐", color: "#16a34a", light: "#dcfce7" },
 ];
 
@@ -58,7 +67,6 @@ function AppCard({ app, index, onNavigate, onDashboardClick }) {
 
   const handleClick = () => {
     if (app.id === "dashboard") { onDashboardClick(); onNavigate(app.url); return; }
-    if (app.id === "eis") { window.open(app.url, "_blank", "noopener,noreferrer"); return; }
     window.open(app.url, "_blank");
   };
 
