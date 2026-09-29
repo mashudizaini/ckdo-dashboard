@@ -17,8 +17,9 @@ export const itApi = {
   // Server Process / Storage Monitoring — servers + SSH logins come from Server Control
   getMonitoredServers: () => api.get("/dashboard/it/server-monitoring/servers"),
   testConnection:   (serverId) => api.get("/dashboard/it/server-monitoring/test", { params: { server_id: serverId } }),
-  getServerMetrics:  (serverId) => api.get("/dashboard/it/server-monitoring/metrics", { params: { server_id: serverId } }),
-  getTopProcesses:   (serverId) => api.get("/dashboard/it/server-monitoring/top-processes", { params: { server_id: serverId } }),
+  // auto=true marks an auto-refresh tick: the backend stores those at most once a minute per server
+  getServerMetrics:  (serverId, auto = false) => api.get("/dashboard/it/server-monitoring/metrics", { params: { server_id: serverId, auto } }),
+  getTopProcesses:   (serverId, auto = false) => api.get("/dashboard/it/server-monitoring/top-processes", { params: { server_id: serverId, auto } }),
 
   // Other sections
   getOracleSessions:       () => api.get("/dashboard/it/oracle-sessions"),
@@ -28,7 +29,7 @@ export const itApi = {
   getTablespaceDatafiles:  (ts) => api.get("/dashboard/it/tablespace-datafiles", { params: { tablespace_name: ts } }),
   addTablespaceDatafile:   (body) => api.post("/dashboard/it/tablespace-add-datafile", body),
   resizeTablespaceDatafile:(body) => api.post("/dashboard/it/tablespace-resize-datafile", body),
-  getDiskUsage:     () => api.get("/dashboard/it/disk-usage"),
+  getDiskUsage:     (serverId) => api.get("/dashboard/it/disk-usage", { params: { server_id: serverId } }),
   getPendingJobs:   () => api.get("/dashboard/it/pending-jobs"),
 
   // Database Browser (PostgreSQL — ckdo_dashboard)

@@ -327,7 +327,7 @@ function ServerRow({
           <p className="flex items-center gap-2" style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>
             {server.name}
             {server.monitor_enabled && (
-              <span title="Polled by Server Process / Storage Monitoring"
+              <span title="In the 15-minute scheduled snapshot"
                 className="inline-flex items-center gap-1"
                 style={{ fontSize: 10, fontWeight: 700, color: "#15803d", background: "rgba(34,197,94,0.12)", borderRadius: 999, padding: "1px 7px" }}>
                 <Activity size={10} /> Monitored
@@ -428,12 +428,12 @@ function ServerModal({ mode, initial, categories, saving, onSave, onClose }) {
         <label className="flex items-center gap-2" style={{ fontSize: 12.5, fontWeight: 700, color: "#334155", cursor: "pointer" }}>
           <input type="checkbox" checked={form.monitor_enabled}
             onChange={(e) => setForm((f) => ({ ...f, monitor_enabled: e.target.checked }))} />
-          Monitoring (Server Process &amp; Server Storage Monitoring)
+          Include in the 15-minute scheduled snapshot
         </label>
         <p style={{ fontSize: 11, color: "#94a3b8", margin: "4px 0 8px 22px" }}>
-          The dashboard logs in over SSH to the address above with the credential below. Readings are also saved for CoChat.
+          Every server can be opened in Server Process / Storage Monitoring and asked about in CoChat; this adds it to the automatic snapshot too. SSH uses the address above and the credential below.
         </p>
-        {form.monitor_enabled && (
+        {(
           <div className="flex gap-3" style={{ marginLeft: 22 }}>
             <div style={{ flex: 1 }}>
               <Field label="SSH credential">

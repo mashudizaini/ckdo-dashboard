@@ -6,14 +6,14 @@ Required role: it_staff OR admin
 
 Endpoints:
   GET  /summary                       — KPI cards
-  GET  /server-monitoring/servers     — servers with monitoring on (from Server Control)
+  GET  /server-monitoring/servers     — every server in Server Control
   GET  /server-monitoring/test        — Test SSH connection (?server_id=)
   GET  /server-monitoring/metrics     — CPU / Memory / Load / Uptime (?server_id=)
   GET  /server-monitoring/top-processes — top processes by CPU / memory (?server_id=)
   GET  /tablespace-usage              — Top-5 tablespace (Oracle)
   GET  /tablespace-datafiles          — Existing datafiles for a tablespace
   POST /tablespace-add-datafile       — ALTER TABLESPACE ADD DATAFILE
-  GET  /disk-usage                    — Disk usage via SSH df, every monitored server
+  GET  /disk-usage                    — Disk usage via SSH df (?server_id=)
   GET  /pending-jobs                  — Concurrent requests Oracle
 """
 
@@ -56,7 +56,7 @@ async def get_weekly_report(user: CurrentUser = Depends(require_role(Roles.IT)))
 
 @router.get("/server-monitoring/servers")
 async def get_monitored_servers(user: CurrentUser = Depends(require_role(Roles.IT))):
-    """Servers enabled for monitoring in Server Control (no secrets)."""
+    """Every server in Server Control (no secrets); `problem` says why one can't be polled."""
     servers = await run_in_threadpool(ServerMonitorService().servers_public)
     return {"success": True, "data": servers}
 
@@ -68,15 +68,18 @@ async def test_connection(server_id: Optional[int] = None, user: CurrentUser = D
 
 
 @router.get("/server-monitoring/metrics")
-async def get_metrics(server_id: Optional[int] = None, user: CurrentUser = Depends(require_role(Roles.IT))):
-    """CPU / Memory / Load / Uptime / Swap / CPU-count via SSH (default: first monitored server)."""
-    return await ServerMonitorService().get_metrics(server_id)
+async def get_metrics(server_id: Optional[int] = None, auto: bool = False,
+                      user: CurrentUser = Depends(require_role(Roles.IT))):
+    """CPU / Memory / Load / Uptime / Swap / CPU-count via SSH. auto=true marks an
+    auto-refresh tick, whose stored rows are throttled to one per minute."""
+    return await ServerMonitorService().get_metrics(server_id, auto)
 
 
 @router.get("/server-monitoring/top-processes")
-async def get_top_processes(server_id: Optional[int] = None, user: CurrentUser = Depends(require_role(Roles.IT))):
+async def get_top_processes(server_id: Optional[int] = None, auto: bool = False,
+                            user: CurrentUser = Depends(require_role(Roles.IT))):
     """Top 8 processes by CPU and by Memory via SSH ps."""
-    return await ServerMonitorService().get_top_processes(server_id)
+    return await ServerMonitorService().get_top_processes(server_id, auto)
 
 
 # ── Tablespace ───────────────────────────────────────────────────────────────
@@ -157,9 +160,9 @@ async def kill_oracle_session(
 # ── Disk Usage ───────────────────────────────────────────────────────────────
 
 @router.get("/disk-usage")
-async def get_disk_usage(user: CurrentUser = Depends(require_role(Roles.IT))):
-    """Disk usage per mount point — SSH df -P on every server with monitoring on in Server Control."""
-    return await ServerMonitorService().get_disk_usage_all()
+async def get_disk_usage(server_id: Optional[int] = None, user: CurrentUser = Depends(require_role(Roles.IT))):
+    """Disk usage per mount point — SSH df -P on one Server Control server."""
+    return await ServerMonitorService().get_disk_usage(server_id)
 
 
 # ── Pending Jobs ─────────────────────────────────────────────────────────────

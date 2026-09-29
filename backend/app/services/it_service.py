@@ -362,16 +362,18 @@ class OracleITService:
 
 class ServerMonitorService:
     """SSH-based monitoring for Server Process Monitoring and Server Storage
-    Monitoring. Hosts and logins come from Server Control (every entry with
-    monitor_enabled — see app.services.it_monitoring_store); each server uses
-    its own credential. Every reading is also appended to the eis.fact_it_*
-    tables so CoChat can answer from it."""
+    Monitoring. Hosts and logins come from Server Control (every server can be
+    polled on demand; monitor_enabled ones also by the 15-minute schedule —
+    see app.services.it_monitoring_store); each server uses its own
+    credential. Every reading is also appended to the eis.fact_it_* tables so
+    CoChat can answer from it, and a CoChat question that names a server
+    polls it first (refresh_for_chat)."""
 
     # ── Servers ─────────────────────────────────────────────────────────────
 
     def servers_public(self) -> list[dict]:
-        """Monitored servers without secrets, for the page's server picker."""
-        return store.monitored_servers(with_secret=False)
+        """Every Server Control server without secrets, for the page's server picker."""
+        return store.registry_servers(with_secret=False)
 
     @staticmethod
     def _tag(srv: dict) -> dict:
@@ -381,7 +383,7 @@ class ServerMonitorService:
     @staticmethod
     def _not_ready(srv: dict | None) -> str | None:
         if srv is None:
-            return "No server is enabled for monitoring. Turn it on in IT > Server Control."
+            return "Server not found in Server Control."
         return srv.get("problem")
 
     # ── SSH ─────────────────────────────────────────────────────────────────
@@ -390,8 +392,12 @@ class ServerMonitorService:
         import paramiko
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # No agent/key lookup: the login is exactly the Server Control
+        # credential. Short timeouts because the picker lists every server,
+        # including consoles that accept TCP/22 and then never answer.
         client.connect(srv["ip"], port=int(srv.get("port") or 22), username=srv["username"],
-                       password=srv.get("password"), timeout=8)
+                       password=srv.get("password"), timeout=8, banner_timeout=8, auth_timeout=8,
+                       look_for_keys=False, allow_agent=False)
         return client
 
     def _ssh_multi(self, srv: dict, commands: list[str]) -> list[str]:
@@ -401,7 +407,7 @@ class ServerMonitorService:
         results = []
         try:
             for cmd in commands:
-                _, stdout, _ = client.exec_command(cmd)
+                _, stdout, _ = client.exec_command(cmd, timeout=20)
                 results.append(stdout.read().decode("utf-8", "replace").strip())
         finally:
             client.close()
@@ -468,7 +474,7 @@ class ServerMonitorService:
             m = {"status": "error", "error": str(e)}
         return {**m, **self._tag(srv)}
 
-    async def get_metrics(self, server_id: int | None = None) -> dict:
+    async def get_metrics(self, server_id: int | None = None, auto: bool = False) -> dict:
         srv = await asyncio.to_thread(store.get_server, server_id, True)
         problem = self._not_ready(srv)
         if problem:
@@ -478,7 +484,7 @@ class ServerMonitorService:
                 "load": "0.0", "uptime": "-", **(self._tag(srv) if srv else {}),
             }}
         m = await asyncio.to_thread(self._metrics_row, srv)
-        await asyncio.to_thread(store.save_metrics, [m], "dashboard")
+        await asyncio.to_thread(store.save_metrics, [m], "dashboard-auto" if auto else "dashboard")
         if m["status"] == "error":
             logger.error("server_metrics_error", server=srv["name"], error=m.get("error"))
             m = {"cpu": 0, "memory_percent": 0, "memory_used": 0, "memory_total": 0,
@@ -504,7 +510,7 @@ class ServerMonitorService:
 
         return {"status": "online", "cpu": parse(cpu_raw), "mem": parse(mem_raw)}
 
-    async def get_top_processes(self, server_id: int | None = None) -> dict:
+    async def get_top_processes(self, server_id: int | None = None, auto: bool = False) -> dict:
         srv = await asyncio.to_thread(store.get_server, server_id, True)
         problem = self._not_ready(srv)
         if problem:
@@ -514,7 +520,8 @@ class ServerMonitorService:
         except Exception as e:
             logger.error("top_processes_error", server=srv["name"], error=str(e))
             return {"success": False, "error": str(e), "cpu": [], "mem": []}
-        await asyncio.to_thread(store.save_processes, self._tag(srv), data["cpu"], data["mem"], "dashboard")
+        await asyncio.to_thread(store.save_processes, self._tag(srv), data["cpu"], data["mem"],
+                                "dashboard-auto" if auto else "dashboard")
         return {"success": True, **data}
 
     # ── Disk Usage ───────────────────────────────────────────────────────────
@@ -551,17 +558,69 @@ class ServerMonitorService:
             })
         return {**head, "status": "online", "rows": rows}
 
-    async def get_disk_usage_all(self) -> dict:
-        """df -P from every monitored server, in parallel."""
-        servers = await asyncio.to_thread(store.monitored_servers, True)
-        if not servers:
-            return {"success": False, "servers": [], "data": [],
-                    "error": "No server is enabled for monitoring. Turn it on in IT > Server Control."}
-        results = list(await asyncio.gather(*[asyncio.to_thread(self._fetch_disk, s) for s in servers]))
-        for srv, res in zip(servers, results):
-            if res["rows"]:
-                await asyncio.to_thread(store.save_disks, self._tag(srv), res["rows"], "dashboard")
-        return {"success": True, "servers": results, "data": [r for s in results for r in s["rows"]]}
+    async def get_disk_usage(self, server_id: int | None = None) -> dict:
+        """df -P on one server; the rows are stored as soon as they are read."""
+        srv = await asyncio.to_thread(store.get_server, server_id, True)
+        if srv is None:
+            return {"success": False, "error": "Server not found in Server Control.", "server": None, "data": []}
+        res = await asyncio.to_thread(self._fetch_disk, srv)
+        if res["rows"]:
+            await asyncio.to_thread(store.save_disks, self._tag(srv), res["rows"], "dashboard")
+        return {"success": True, "server": res, "data": res["rows"]}
+
+    # ── On demand for CoChat ─────────────────────────────────────────────────
+
+    _CHAT_FRESH_SECS = 30
+    _chat_polled: dict[tuple[int, str], float] = {}
+
+    def refresh_for_chat(self, query: str, kind: str) -> dict:
+        """Poll the server(s) a CoChat question names, store the reading, and
+        report what happened, so the tool answers from data taken just now.
+
+        kind: 'metrics' | 'disk' | 'processes' — only what the tool needs is
+        fetched. Synchronous (eis_tools runs in a worker thread). Servers
+        polled for the same kind in the last _CHAT_FRESH_SECS are not polled
+        again: the model may call a tool twice in one answer, and the second
+        SSH round-trip would only add latency.
+
+        Returns {"keys": [server_key...], "notes": [per-server problems]}; an
+        empty "keys" with no notes means nothing in Server Control matched."""
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+
+        servers = store.resolve_servers(query, with_secret=True)
+        notes, todo = [], []
+        for srv in servers:
+            if srv.get("problem"):
+                notes.append({"server_label": srv["name"], "server_ip": srv["ip"], "note": srv["problem"]})
+            elif time.monotonic() - self._chat_polled.get((srv["id"], kind), 0) >= self._CHAT_FRESH_SECS:
+                todo.append(srv)
+
+        def poll(srv):
+            tag = self._tag(srv)
+            try:
+                if kind == "metrics":
+                    m = self._metrics_row(srv)
+                    store.save_metrics([m], "cochat")
+                    return None if m["status"] == "online" else m.get("error")
+                if kind == "disk":
+                    res = self._fetch_disk(srv)
+                    store.save_disks(tag, res["rows"], "cochat")
+                    return res.get("error")
+                data = self._fetch_top_processes(srv)
+                store.save_processes(tag, data["cpu"], data["mem"], "cochat")
+                return None
+            except Exception as e:
+                return str(e)
+
+        if todo:
+            with ThreadPoolExecutor(max_workers=len(todo)) as ex:
+                for srv, err in zip(todo, ex.map(poll, todo)):
+                    self._chat_polled[(srv["id"], kind)] = time.monotonic()
+                    if err:
+                        notes.append({"server_label": srv["name"], "server_ip": srv["ip"],
+                                      "note": f"Live SSH poll failed: {err}"})
+        return {"keys": [s["key"] for s in servers], "notes": notes}
 
     # ── Snapshot for the ETL ─────────────────────────────────────────────────
 

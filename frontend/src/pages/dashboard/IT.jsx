@@ -471,11 +471,55 @@ function KillSessionModal({ session, loading, onClose, onConfirm }) {
   );
 }
 
+
+/* ─── Server picker (every server in Server Control, grouped by category) ─── */
+
+// Default selection: the first scheduled server that can be polled, else the
+// first pollable one — the same rule the backend uses without a server_id.
+function defaultServer(list) {
+  return list.find(s => s.monitor_enabled && !s.problem) ?? list.find(s => !s.problem) ?? list[0] ?? null;
+}
+
+function ServerPicker({ servers, value, onChange }) {
+  const groups = {};
+  (servers ?? []).forEach(s => { (groups[s.category || "Other"] ||= []).push(s); });
+  const current = servers?.find(s => s.id === value);
+  return (
+    <div className="min-w-0">
+      <select value={value ?? ""} disabled={!servers?.length}
+        onChange={e => onChange(Number(e.target.value))}
+        className="rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
+        style={{ minWidth: 320, maxWidth: "100%" }}>
+        {servers === null && <option>Loading servers…</option>}
+        {servers?.length === 0 && <option>No server in Server Control</option>}
+        {Object.entries(groups).map(([cat, list]) => (
+          <optgroup key={cat} label={cat}>
+            {list.map(s => (
+              <option key={s.id} value={s.id}>
+                {s.name}{s.ip ? ` — ${s.ip}` : ""}{s.problem ? "  (not pollable)" : s.monitor_enabled ? "  ● scheduled" : ""}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+      {current && (
+        <p className="mt-1.5 text-xs text-gray-500">
+          SSH {current.ip || "—"}:{current.port}
+          {current.username && <> · login <span className="font-mono">{current.username}</span></>}
+          {current.credential_label && <> ({current.credential_label})</>}
+          {current.monitor_enabled && <> · in the 15-minute schedule</>}
+          {current.problem && <span className="text-amber-500"> · {current.problem}</span>}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Main section ─────────────────────────────────────────────────────────
 
 function ServerMonitoringSection() {
   const navigate = useNavigate();
-  const [servers,       setServers]       = useState(null); // monitored servers from Server Control
+  const [servers,       setServers]       = useState(null); // every server in Server Control
   const [serverId,      setServerId]      = useState(null);
   const [metrics,       setMetrics]       = useState(null);
   const [history,       setHistory]       = useState([]);
@@ -496,7 +540,7 @@ function ServerMonitoringSection() {
       .then(res => {
         const list = res.data ?? [];
         setServers(list);
-        setServerId(prev => prev ?? list[0]?.id ?? null);
+        setServerId(prev => prev ?? defaultServer(list)?.id ?? null);
       })
       .catch(() => setServers([]));
   }, []);
@@ -520,11 +564,11 @@ function ServerMonitoringSection() {
     finally { setTesting(false); }
   };
 
-  const fetchMetrics = useCallback(async () => {
+  const fetchMetrics = useCallback(async (auto = false) => {
     if (!serverId) return;
     setLoading(true);
     try {
-      const res = await itApi.getServerMetrics(serverId);
+      const res = await itApi.getServerMetrics(serverId, auto);
       const d = res.data;
       setMetrics(d);
       if (d.status === "online") {
@@ -540,20 +584,26 @@ function ServerMonitoringSection() {
     }
   }, [serverId]);
 
-  const fetchProcesses = useCallback(async () => {
+  const fetchProcesses = useCallback(async (auto = false) => {
     if (!serverId) return;
     setProcLoading(true);
     try {
-      const res = await itApi.getTopProcesses(serverId);
+      const res = await itApi.getTopProcesses(serverId, auto);
       if (res?.success) setProcesses({ cpu: res.cpu, mem: res.mem });
     } catch (_) {}
     finally { setProcLoading(false); }
   }, [serverId]);
 
-  // Fetch both metrics + processes in parallel on every refresh
-  const fetchAll = useCallback(async () => {
-    await Promise.all([fetchMetrics(), fetchProcesses()]);
+  // Fetch both metrics + processes in parallel on every refresh. The backend
+  // stores each reading for CoChat; auto-refresh ticks are throttled there.
+  const fetchAll = useCallback(async (auto = false) => {
+    await Promise.all([fetchMetrics(auto), fetchProcesses(auto)]);
   }, [fetchMetrics, fetchProcesses]);
+
+  // Picking a server loads it straight away (and so stores it).
+  useEffect(() => {
+    if (serverId) fetchAll(false);
+  }, [serverId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchSessions = useCallback(async () => {
     setSessLoading(true);
@@ -583,8 +633,7 @@ function ServerMonitoringSection() {
   // Auto-refresh at selected interval
   useEffect(() => {
     if (autoInterval === 0) return;
-    fetchAll();
-    const id = setInterval(fetchAll, autoInterval);
+    const id = setInterval(() => fetchAll(true), autoInterval);
     return () => clearInterval(id);
   }, [autoInterval, fetchAll]);
 
@@ -603,35 +652,18 @@ function ServerMonitoringSection() {
     <>
       <SectionCard
         title="Server Process Monitoring"
-        subtitle="Servers and SSH logins come from Server Control · every refresh is also saved for CoChat"
+        subtitle="All servers from Server Control · every load is saved to the database for CoChat"
         action={
           <div className="flex items-center gap-2">
             <AutoRefreshSelector value={autoInterval} onChange={setAutoInterval} />
-            <ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-blue-600 hover:bg-blue-700" onClick={fetchAll} />
+            <ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-blue-600 hover:bg-blue-700" onClick={() => fetchAll(false)} />
           </div>
         }
       >
-        {/* Server picker — the list is the Server Control entries with monitoring on */}
+        {/* Server picker — every server in Server Control */}
         <div className="mb-5 p-4 rounded-lg bg-gray-800/50 border border-gray-700">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2 flex-wrap">
-              {servers === null && <Loader2 size={14} className="animate-spin text-gray-500" />}
-              {servers?.length === 0 && (
-                <span className="text-sm text-amber-400">No server has monitoring turned on yet.</span>
-              )}
-              {servers?.map(s => (
-                <button key={s.id} onClick={() => selectServer(s.id)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-                    s.id === serverId
-                      ? "bg-green-500/10 border-green-500/40 text-green-400"
-                      : "bg-gray-800/60 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300"
-                  }`}>
-                  <span className="font-semibold">{s.name}</span>
-                  <span className="font-mono opacity-60">{s.ip}</span>
-                  {s.problem && <span className="text-amber-400" title={s.problem}>!</span>}
-                </button>
-              ))}
-            </div>
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <ServerPicker servers={servers} value={serverId} onChange={selectServer} />
             <div className="flex items-center gap-2">
               {server && !server.problem && (
                 <ActionBtn icon={testing ? Loader2 : Wifi} label={testing ? "Testing..." : "Test Connection"}
@@ -641,14 +673,6 @@ function ServerMonitoringSection() {
                 onClick={() => navigate("/dashboard/it/server-control")} />
             </div>
           </div>
-          {server && (
-            <p className="mt-2 text-xs text-gray-500">
-              SSH {server.ip}:{server.port}
-              {server.username && <> · login <span className="font-mono">{server.username}</span></>}
-              {server.credential_label && <> ({server.credential_label})</>}
-              {server.problem && <span className="text-amber-400"> · {server.problem}</span>}
-            </p>
-          )}
           {testResult && (
             <div className={`mt-2 flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${
               testResult.success
@@ -1559,45 +1583,41 @@ function ResizeDatafileModal({ tablespace, onClose, onSuccess }) {
 
 function DiskUsageSection() {
   const navigate = useNavigate();
-  const [servers,    setServers]    = useState(null); // monitored servers from Server Control
-  const [serverData, setServerData] = useState({});   // key -> {status, rows, error} once loaded
-  const [loading,    setLoading]    = useState(false);
-  const [globalErr,  setGlobalErr]  = useState("");
-  const [activeTab,  setActiveTab]  = useState(null);
+  const [servers,  setServers]  = useState(null); // every server in Server Control
+  const [serverId, setServerId] = useState(null);
+  const [result,   setResult]   = useState(null); // {status, rows, error, label, ip} for serverId
+  const [loading,  setLoading]  = useState(false);
+  const [globalErr, setGlobalErr] = useState("");
 
   useEffect(() => {
     itApi.getMonitoredServers()
       .then(res => {
         const list = res.data ?? [];
         setServers(list);
-        setActiveTab(prev => prev ?? list[0]?.key ?? null);
+        setServerId(prev => prev ?? defaultServer(list)?.id ?? null);
       })
       .catch(() => setServers([]));
   }, []);
 
-  const refresh = async () => {
+  // Loading a server reads df over SSH and stores the rows for CoChat.
+  const refresh = async (id = serverId) => {
+    if (!id) return;
     setLoading(true); setGlobalErr("");
     try {
-      const res = await itApi.getDiskUsage();
-      if (res?.success) {
-        const map = {};
-        (res.servers ?? []).forEach(s => { map[s.key] = s; });
-        setServerData(map);
-        // The list may have changed in Server Control since the page opened.
-        const list = (res.servers ?? []).map(s => ({ id: s.id, key: s.key, name: s.label, ip: s.ip }));
-        setServers(list);
-        setActiveTab(prev => (list.some(s => s.key === prev) ? prev : list[0]?.key ?? null));
-      } else {
-        setGlobalErr(res?.error || "Failed to fetch disk usage");
-      }
+      const res = await itApi.getDiskUsage(id);
+      if (res?.success) setResult(res.server);
+      else { setResult(null); setGlobalErr(res?.error || "Failed to fetch disk usage"); }
     } catch (e) {
+      setResult(null);
       setGlobalErr(e?.detail || e?.message || "Network error");
     } finally {
       setLoading(false);
     }
   };
 
-  const active = serverData[activeTab];
+  useEffect(() => { if (serverId) refresh(serverId); }, [serverId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const active = result && result.id === serverId ? result : null;
   const rows   = active?.rows ?? [];
 
   const chartData = [...rows]
@@ -1610,31 +1630,14 @@ function DiskUsageSection() {
   return (
     <SectionCard
       title="Server Storage Monitoring"
-      subtitle="SSH df -P on every server with monitoring on in Server Control · every refresh is also saved for CoChat"
-      action={<ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-yellow-600 hover:bg-yellow-700" onClick={refresh} />}
+      subtitle="SSH df -P on any server from Server Control · every load is saved to the database for CoChat"
+      action={<ActionBtn icon={loading ? Loader2 : RefreshCw} label="Refresh" color="bg-yellow-600 hover:bg-yellow-700" onClick={() => refresh()} />}
     >
-      {/* ── Server tabs — always visible ── */}
-      <div className="flex gap-2 mb-4">
-        {servers === null && <Loader2 size={14} className="animate-spin text-gray-500" />}
-        {servers?.length === 0 && (
-          <span className="text-xs text-amber-500 py-2">No server has monitoring turned on yet.</span>
-        )}
-        {(servers ?? []).map(s => {
-          const sd = serverData[s.key];
-          const dotColor = !sd ? "bg-gray-600" : sd.status === "online" ? "bg-green-400" : "bg-red-400";
-          return (
-            <button key={s.key} onClick={() => setActiveTab(s.key)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium border transition-all ${
-                activeTab === s.key
-                  ? "bg-yellow-500/10 border-yellow-500/40 text-yellow-400"
-                  : "bg-gray-800/60 border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300"
-              }`}>
-              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} />
-              <span className="font-semibold">{s.name}</span>
-              <span className="font-mono opacity-60">{s.ip}</span>
-            </button>
-          );
-        })}
+      {/* ── Server picker — every server in Server Control ── */}
+      <div className="mb-4 flex items-start justify-between gap-3 flex-wrap">
+        <ServerPicker servers={servers} value={serverId} onChange={setServerId} />
+        <ActionBtn icon={Settings} label="Manage in Server Control" color="bg-gray-700 hover:bg-gray-600"
+          onClick={() => navigate("/dashboard/it/server-control")} />
       </div>
 
       {/* ── Global error ── */}
@@ -1647,14 +1650,14 @@ function DiskUsageSection() {
       {/* ── Loading ── */}
       {loading && (
         <div className="flex items-center justify-center py-10 text-gray-500 text-sm gap-2">
-          <Loader2 size={16} className="animate-spin" /> Connecting to {servers?.length || ""} server(s) via SSH…
+          <Loader2 size={16} className="animate-spin" /> Connecting via SSH…
         </div>
       )}
 
       {/* ── Not yet loaded ── */}
       {!loading && !active && !globalErr && (
         <p className="text-xs text-gray-500 py-6 text-center">
-          Click <strong>Refresh</strong> to fetch disk usage via SSH.
+          Pick a server to fetch its disk usage via SSH.
           Servers and logins are managed in{" "}
           <button className="text-blue-400 hover:underline" onClick={() => navigate("/dashboard/it/server-control")}>Server Control</button>.
         </p>

@@ -311,11 +311,11 @@ EIS_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_server_resources",
-            "description": "Kondisi CPU, memori, swap, load, dan uptime terkini tiap server yang dimonitor (daftar server diatur di Server Control, mis. Oracle EBS - Database, Oracle EBS - Application). Tanpa argumen mengembalikan semua server. captured_at = waktu pengukuran.",
+            "description": "Kondisi CPU, memori, swap, load, dan uptime server yang terdaftar di Server Control (mis. Oracle EBS - Database, Oracle EBS - Application, AI Server Engine). Jika argumen server diisi (nama atau IP), data server itu diambil LANGSUNG saat ini lalu disimpan. Tanpa argumen mengembalikan snapshot terakhir tiap server terjadwal. captured_at = waktu pengukuran; baris berisi 'note' menjelaskan server yang tidak bisa diambil.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "server": {"type": "string", "description": "Saring per server: sebagian nama (mis. 'database', 'application'), server_key, atau IP."},
+                    "server": {"type": "string", "description": "Nama server di Server Control (boleh sebagian, mis. 'database', 'ai server engine') atau IP-nya, mis. '172.21.2.27'. Memicu pengambilan data langsung."},
                 },
                 "required": [],
             },
@@ -325,11 +325,11 @@ EIS_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_disk_usage",
-            "description": "Pemakaian filesystem (storage) per mount point di tiap server yang dimonitor. Gunakan min_used_pct untuk mencari partisi yang hampir penuh.",
+            "description": "Pemakaian filesystem (storage) per mount point di server yang terdaftar di Server Control. Jika argumen server diisi (nama atau IP), datanya diambil LANGSUNG saat ini lalu disimpan. Gunakan min_used_pct untuk mencari partisi yang hampir penuh.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "server": {"type": "string", "description": "Saring per server: sebagian nama (mis. 'database', 'application'), server_key, atau IP."},
+                    "server": {"type": "string", "description": "Nama server di Server Control (boleh sebagian, mis. 'database', 'ai server engine') atau IP-nya, mis. '172.21.2.27'. Memicu pengambilan data langsung."},
                     "min_used_pct": {"type": "number", "description": "Hanya tampilkan mount point dengan pemakaian >= nilai ini (persen)."},
                 },
                 "required": [],
@@ -348,11 +348,11 @@ EIS_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_server_top_processes",
-            "description": "Proses teratas (8 besar) di tiap server yang dimonitor, menurut pemakaian CPU atau memori — untuk pertanyaan 'proses apa yang bikin CPU/memori tinggi'.",
+            "description": "Proses teratas (8 besar) menurut pemakaian CPU atau memori di server yang terdaftar di Server Control — untuk pertanyaan 'proses apa yang bikin CPU/memori tinggi'. Jika argumen server diisi (nama atau IP), datanya diambil LANGSUNG saat ini lalu disimpan.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "server": {"type": "string", "description": "Saring per server: sebagian nama (mis. 'database', 'application'), server_key, atau IP."},
+                    "server": {"type": "string", "description": "Nama server di Server Control (boleh sebagian, mis. 'database', 'ai server engine') atau IP-nya, mis. '172.21.2.27'. Memicu pengambilan data langsung."},
                     "sort_by": {"type": "string", "enum": ["cpu", "mem"], "description": "Urutkan menurut CPU (default) atau memori."},
                 },
                 "required": [],
@@ -736,7 +736,34 @@ def _latest_per_server(table: str, extra_key: str = "") -> str:
     """
 
 
-def _server_filter(server: str, params: dict) -> str:
+def _live(server: str, kind: str) -> dict | None:
+    """A question that names a server triggers a fresh SSH reading of it
+    (stored with source='cochat') before the snapshot is read, so the answer
+    is about now and any Server Control server can be asked about — not only
+    the ones in the 15-minute schedule. Without a server name the tools read
+    the stored snapshots only; polling every host per question would be slow
+    and is what the schedule is for."""
+    if not server:
+        return None
+    try:
+        from app.services.it_service import ServerMonitorService
+        return ServerMonitorService().refresh_for_chat(server, kind)
+    except Exception as e:
+        return {"keys": [], "notes": [{"note": f"Live poll unavailable: {e}"}]}
+
+
+def _with_live(rows: list[dict], live: dict | None, server: str) -> list[dict]:
+    if live is None:
+        return rows
+    if not live["keys"]:
+        return [{"note": f"No server matching '{server}' in Server Control."}]
+    return rows + live["notes"]
+
+
+def _server_filter(server: str, params: dict, live: dict | None = None) -> str:
+    if live and live["keys"]:
+        params["server_keys"] = live["keys"]
+        return " AND t.server_key = ANY(%(server_keys)s)"
     if not server:
         return ""
     params["server"] = server
@@ -748,6 +775,7 @@ def _server_filter(server: str, params: dict) -> str:
 
 def get_server_resources(server: str = None) -> list[dict]:
     """Latest CPU / memory / swap / load / uptime per server."""
+    live = _live(server, "metrics")
     params = {}
     sql = f"""
         SELECT t.server_key, t.server_label, t.server_ip, t.status,
@@ -755,42 +783,44 @@ def get_server_resources(server: str = None) -> list[dict]:
                t.swap_pct, t.load_1, t.uptime, t.error_message, t.captured_at
           FROM eis.fact_it_server_metrics t
           {_latest_per_server("fact_it_server_metrics")}
-         WHERE TRUE {_server_filter(server, params)}
+         WHERE TRUE {_server_filter(server, params, live)}
          ORDER BY t.server_label
     """
-    return _query(sql, params)
+    return _with_live(_query(sql, params), live, server)
 
 
 def get_server_top_processes(server: str = None, sort_by: str = "cpu") -> list[dict]:
     """Latest top-8 processes per server, by CPU or by memory."""
     sort_by = "mem" if (sort_by or "").lower().startswith("mem") else "cpu"
+    live = _live(server, "processes")
     params = {"sort_by": sort_by}
     sql = f"""
         SELECT t.server_key, t.server_label, t.server_ip, t.sort_by, t.rank,
                t.os_user, t.pid, t.cpu_pct, t.mem_pct, t.command, t.captured_at
           FROM eis.fact_it_top_process t
           {_latest_per_server("fact_it_top_process", "sort_by, ")}
-         WHERE t.sort_by = %(sort_by)s {_server_filter(server, params)}
+         WHERE t.sort_by = %(sort_by)s {_server_filter(server, params, live)}
          ORDER BY t.server_label, t.rank
     """
-    return _query(sql, params)
+    return _with_live(_query(sql, params), live, server)
 
 
 def get_disk_usage(server: str = None, min_used_pct: float = None) -> list[dict]:
     """Latest filesystem usage per mount point, optionally filtered."""
+    live = _live(server, "disk")
     params = {}
     sql = f"""
         SELECT t.server_key, t.server_label, t.server_ip, t.mount_point, t.filesystem,
                t.size_gb, t.used_gb, t.avail_gb, t.used_pct, t.captured_at
           FROM eis.fact_it_disk_usage t
           {_latest_per_server("fact_it_disk_usage")}
-         WHERE TRUE {_server_filter(server, params)}
+         WHERE TRUE {_server_filter(server, params, live)}
     """
     if min_used_pct is not None:
         sql += " AND t.used_pct >= %(min_used_pct)s"
         params["min_used_pct"] = min_used_pct
     sql += " ORDER BY t.used_pct DESC"
-    return _query(sql, params)
+    return _with_live(_query(sql, params), live, server)
 
 
 def get_oracle_activity() -> list[dict]:
