@@ -29,10 +29,22 @@ Tool-using presets are set to native function calling. In Open WebUI's
 default mode the TASK model decides which tool to call, which would hand tool
 selection for the Oracle EBS / Company Rules assistants to the local model.
 
-Run inside the backend container (env OPENWEBUI_BASE_URL, OPENWEBUI_API_KEY):
+One LLM layer (2026-09-30): the Oracle EBS Assistant and Company Rules used
+the CoChat tool oracle_ebs_query, which sent the question to the dashboard's
+own Claude loop and had CoChat's model rewrite that answer — two models paid
+per question, and the "Qwen Local" variant was not local at all. They now use
+the dashboard's tool servers directly (app/routers/eis_tools_app.py):
+"CKDO Company Data Tools" and "CKDO Company Documents", registered here with
+the service key and the per-user email header. The dashboard's system prompt
+(units, periods, never inventing figures) moves into the presets. The old
+oracle_ebs_query tool is left installed but unused, for rollback.
 
-    docker exec ckdo_backend python scripts/configure_openwebui_cochat_models.py          # plan only
-    docker exec ckdo_backend python scripts/configure_openwebui_cochat_models.py --apply
+Run inside the backend container (env OPENWEBUI_BASE_URL, OPENWEBUI_API_KEY,
+EBS_CHAT_SERVICE_KEY):
+
+    docker exec ckdo_backend python scripts/configure_openwebui_cochat_models.py \
+        --dashboard-url http://dashboard-dev.ckd-otto.com            # plan only
+    ... --apply
 """
 import argparse
 import json
@@ -41,11 +53,41 @@ import sys
 
 import httpx
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from app.services.oracle_chat_service import SYSTEM_PROMPT as DASHBOARD_PROMPT  # noqa: E402
+
 QWEN = "qwen3:14b"
 QWEN_CTX = 16384
 HAIKU = "claude-haiku-4-5-20251001"
 SONNET = "claude-sonnet-5"
 TASK_MODEL_ID = "cochat-task-model"
+DATA_SERVER_ID = "eis-data-tools"
+DOCS_SERVER_ID = "company-docs-tools"
+
+_SYSTEM_INFO_RULE = (
+    "- Jika hasil tool berisi teks yang diawali [SYSTEM INFO], sampaikan isinya ke user apa adanya dengan "
+    "bahasa yang sopan dan jangan menebak penyebab lain.\n"
+)
+_DOCS_RULE = (
+    "- Untuk pertanyaan seputar kebijakan/SOP/peraturan perusahaan (BUKAN data transaksi Oracle EBS), gunakan "
+    "tool search_company_documents. Jawab HANYA berdasarkan kutipan dokumen yang ditemukan dan sebutkan nama "
+    "dokumennya — jika tidak ada dokumen relevan, katakan terus terang tidak menemukan aturan yang dimaksud, "
+    "jangan mengarang.\n"
+)
+PROMPT_ORACLE_EBS = DASHBOARD_PROMPT + _DOCS_RULE + _SYSTEM_INFO_RULE
+PROMPT_COMPANY_RULES = (
+    "Kamu adalah asisten peraturan perusahaan PT CKD OTTO Pharmaceuticals. Kamu menjawab pertanyaan tentang "
+    "kebijakan, peraturan, dan SOP internal perusahaan (HR, Accounting, PAC, Purchasing, IT, umum).\n\n"
+    "## Aturan\n"
+    "- SELALU panggil tool search_company_documents terlebih dahulu untuk setiap pertanyaan tentang aturan "
+    "atau prosedur, meskipun kamu merasa tahu jawabannya.\n"
+    "- Jawab HANYA berdasarkan kutipan yang dikembalikan tool, dan sebutkan nama dokumen sumbernya. Jika "
+    "tidak ada kutipan yang relevan, katakan terus terang aturan tersebut tidak ditemukan di dokumen yang "
+    "bisa diakses user — jangan mengarang atau memakai pengetahuan umum.\n"
+    "- Jawab dalam bahasa yang SAMA dengan bahasa pertanyaan user terbaru.\n"
+    "- Ringkas dan jelas; gunakan poin-poin untuk langkah prosedur.\n"
+    + _SYSTEM_INFO_RULE
+)
 
 DESC_QWEN = " Runs on the company's own AI server (Qwen3 14B): no usage cost and nothing leaves the network, " \
             "but slower and less precise than Claude on complex questions."
@@ -58,8 +100,7 @@ FAMILIES = {
                 [("Qwen Local", QWEN, "qwen-local", DESC_QWEN), ("Haiku 4.5", HAIKU, "haiku", DESC_HAIKU)]),
     "company-rules": ("Company Rules", "Answers questions about company rules, policies and SOP documents, "
                       "citing the document it used.",
-                      [("Qwen Local", QWEN, "qwen-local",
-                        DESC_QWEN + " Document look-ups still run through the dashboard."),
+                      [("Qwen Local", QWEN, "qwen-local", DESC_QWEN),
                        ("Haiku 4.5", HAIKU, "haiku", DESC_HAIKU)]),
     "oracle-ebs": ("Oracle EBS Assistant", "Answers questions about Oracle EBS data (sales, purchasing, inventory, "
                    "production, finance, headcount, IT infrastructure) through the dashboard.",
@@ -67,14 +108,24 @@ FAMILIES = {
 }
 
 
+# Tools, system prompt per family (general keeps whatever it has).
+FAMILY_TOOLS = {
+    "oracle-ebs": ([f"server:{DATA_SERVER_ID}", f"server:{DOCS_SERVER_ID}"], PROMPT_ORACLE_EBS),
+    "company-rules": ([f"server:{DOCS_SERVER_ID}"], PROMPT_COMPANY_RULES),
+}
+
+
 def family_of(m: dict) -> str | None:
+    """By name, since the tools change: 'CoChat Ass Oracle EBS…' / 'Oracle EBS
+    Assistant (…)', 'CoChat Ass Comp Rules…' / 'Company Rules (…)', and the
+    tool-less general presets."""
     if not m["id"].startswith("cochat-") or m["id"] == TASK_MODEL_ID:
         return None
     name = (m.get("name") or "").lower()
     tools = (m.get("meta") or {}).get("toolIds") or []
-    if "oracle_ebs_query" in tools and "oracle ebs" in name:
+    if "oracle ebs" in name:
         return "oracle-ebs"
-    if "oracle_ebs_query" in tools and "comp" in name:
+    if "comp rules" in name or "company rules" in name:
         return "company-rules"
     if not tools:
         return "general"
@@ -93,7 +144,10 @@ def same_line(base: str, target: str) -> bool:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true", help="make the changes (default: print the plan only)")
+    ap.add_argument("--dashboard-url", required=True, help="Dashboard base URL as seen from Open WebUI")
     args = ap.parse_args()
+    dash = args.dashboard_url.rstrip("/")
+    service_key = os.environ["EBS_CHAT_SERVICE_KEY"]
 
     base = os.environ["OPENWEBUI_BASE_URL"].rstrip("/")
     c = httpx.Client(base_url=f"{base}/api/v1", headers={"Authorization": f"Bearer {os.environ['OPENWEBUI_API_KEY']}"},
@@ -110,6 +164,7 @@ def main():
     print(f"Open WebUI: {base} — {len(presets)} preset(s)")
 
     writes = []   # (action, body)
+    family_grants = {}
     for fam, (fname, fdesc, variants) in FAMILIES.items():
         members = [m for m in presets if family_of(m) == fam]
         grants, seen = [], set()
@@ -131,6 +186,7 @@ def main():
             if label not in assigned and free:
                 assigned[label] = free.pop(0)
         ref = members[0] if members else {"meta": {}, "params": {}}
+        family_grants[fam] = grants
 
         for label, model, slug, tail in variants:
             src = assigned.get(label)
@@ -139,7 +195,11 @@ def main():
             if fam != "general":
                 # Internal data: web search only adds tokens and noise by default.
                 meta["defaultFeatureIds"] = [f for f in (meta.get("defaultFeatureIds") or []) if f != "web_search"]
+            if fam in FAMILY_TOOLS:
+                meta["toolIds"] = FAMILY_TOOLS[fam][0]
             params = {k: v for k, v in ((src or ref).get("params") or {}).items() if k not in ("num_ctx", "think")}
+            if fam in FAMILY_TOOLS:
+                params["system"] = FAMILY_TOOLS[fam][1]
             if model == QWEN:
                 params["num_ctx"] = QWEN_CTX
                 params.pop("max_tokens", None)
@@ -158,8 +218,9 @@ def main():
             }
             was = f"was '{src.get('name')}' on {src.get('base_model_id')}" if src else "new"
             writes.append(("update" if src else "create", body))
+            shown = {k: (f"<{len(v)} chars>" if k == "system" else v) for k, v in params.items()}
             print(f"  [{fam}] {body['id']:40} -> {body['name']:34} base={model:28} ({was}); "
-                  f"grants={len(grants)} defaults={meta.get('defaultFeatureIds')} params={params}")
+                  f"grants={len(grants)} tools={meta.get('toolIds')} params={shown}")
         for m in free:
             body = {k: m.get(k) for k in ("id", "name", "base_model_id", "meta", "params", "access_grants")}
             body["is_active"] = False
@@ -181,9 +242,48 @@ def main():
     writes.append(("update" if TASK_MODEL_ID in existing_ids else "create", task))
     print(f"  [task] {TASK_MODEL_ID} on {QWEN} (think off) -> TASK_MODEL and TASK_MODEL_EXTERNAL")
 
+    # Tool servers: visible to whoever can see an assistant that uses them.
+    def server(sid, path, name, desc, grants):
+        return {
+            "url": f"{dash}/api/v1/{path}", "path": "openapi.json", "type": "openapi",
+            "auth_type": "bearer", "key": service_key,
+            "headers": {"X-OpenWebUI-User-Email": "{{USER_EMAIL}}", "X-OpenWebUI-Chat-Id": "{{CHAT_ID}}"},
+            "config": {"enable": True, "access_grants": grants},
+            "info": {"id": sid, "name": name, "description": desc},
+        }
+
+    def union(*lists):
+        out, seen = [], set()
+        for g in (x for lst in lists for x in lst):
+            k = (g["principal_type"], g["principal_id"], g["permission"])
+            if k not in seen:
+                seen.add(k)
+                out.append(g)
+        return out
+
+    servers = [
+        server(DATA_SERVER_ID, "eis-tools", "CKDO Company Data Tools",
+               "Company data from Oracle EBS via the dashboard (sales, purchasing, inventory, production, finance, "
+               "headcount, IT infrastructure), limited to each user's EBS Chat Access scope.",
+               family_grants.get("oracle-ebs", [])),
+        server(DOCS_SERVER_ID, "company-docs", "CKDO Company Documents",
+               "Search company rules, policy and SOP documents, limited to each user's document categories.",
+               union(family_grants.get("oracle-ebs", []), family_grants.get("company-rules", []))),
+    ]
+    for s_ in servers:
+        print(f"  [tool server] {s_['info']['id']} -> {s_['url']} (grants={len(s_['config']['access_grants'])})")
+
     if not args.apply:
         print("\nPlan only. Re-run with --apply to make these changes.")
         return
+
+    current = call("GET", "/configs/tool_servers")["TOOL_SERVER_CONNECTIONS"]
+    ours = {DATA_SERVER_ID, DOCS_SERVER_ID}
+    others = [x for x in current if (x.get("info") or {}).get("id") not in ours]
+    call("POST", "/configs/tool_servers", json={"TOOL_SERVER_CONNECTIONS": others + servers})
+    for s_ in servers:
+        v = c.post("/configs/tool_servers/verify", json=s_)
+        print(f"tool server {s_['info']['id']}: verify -> {v.status_code}")
 
     # A preset whose base model is switched off in Admin > Models answers
     # "Model not found". Switch the bases on without widening their access

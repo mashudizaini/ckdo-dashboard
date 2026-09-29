@@ -69,6 +69,7 @@ from app.routers.coretax_router import coretax_router
 from app.routers.ai_tools import chatbot, meeting_notes, user_settings, document_converter, ebs_chat, ebs_mart_admin
 from app.routers.ebs_tools_app import app as ebs_tools_app
 from app.routers.ebs_sa_tools_app import app as ebs_sa_tools_app
+from app.routers.eis_tools_app import data_app as eis_tools_app, docs_app as company_docs_app
 
 # ── Util Routers ──
 from app.routers import health
@@ -385,6 +386,10 @@ app.mount(f"{API_PREFIX}/ebs-tools", ebs_tools_app)
 # System Administration tools: own server so Open WebUI can show them to the
 # ebs-sysadmin group only. See app/routers/ebs_sa_tools_app.py.
 app.mount(f"{API_PREFIX}/ebs-sa-tools", ebs_sa_tools_app)
+# CoChat's Oracle EBS Assistant / Company Rules call the EBS Chat tools directly
+# (one LLM layer instead of two). See app/routers/eis_tools_app.py.
+app.mount(f"{API_PREFIX}/eis-tools", eis_tools_app)
+app.mount(f"{API_PREFIX}/company-docs", company_docs_app)
 
 # Coretax Bulk Downloader (prefix already set in router: /api/coretax)
 app.include_router(coretax_router)
