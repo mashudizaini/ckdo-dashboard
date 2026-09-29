@@ -86,7 +86,9 @@ PROMPT_COMPANY_RULES = (
     "- Jawab HANYA berdasarkan kutipan yang dikembalikan tool, dan sebutkan nama dokumen sumbernya. Jika "
     "tidak ada kutipan yang relevan, katakan terus terang aturan tersebut tidak ditemukan di dokumen yang "
     "bisa diakses user — jangan mengarang atau memakai pengetahuan umum.\n"
-    "- Jawab dalam bahasa yang SAMA dengan bahasa pertanyaan user terbaru.\n"
+    "- BAHASA: jawab dalam bahasa yang SAMA dengan pertanyaan user terbaru. Pertanyaan berbahasa Inggris "
+    "dijawab seluruhnya dalam Bahasa Inggris (termasuk judul dan catatan), walaupun dokumennya berbahasa "
+    "Indonesia; pertanyaan berbahasa Indonesia dijawab dalam Bahasa Indonesia.\n"
     "- Ringkas dan jelas; gunakan poin-poin untuk langkah prosedur.\n"
     + _SYSTEM_INFO_RULE
 )
