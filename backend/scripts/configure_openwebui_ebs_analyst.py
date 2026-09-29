@@ -10,7 +10,11 @@ database directly.
 Run inside the backend container (it has httpx and the env below):
 
     docker exec ckdo_backend python scripts/configure_openwebui_ebs_analyst.py \
-        --dashboard-url http://dashboard-dev.ckd-otto.com --base-model claude-opus-5-5
+        --dashboard-url http://dashboard-dev.ckd-otto.com
+
+Every EBS model is published in two variants (see VARIANTS): the original id
+on Claude Sonnet 5 and "<id>-haiku" on Claude Haiku 4.5, so users can pick the
+cheaper one for routine questions. Names and descriptions are in English.
 
 Env: OPENWEBUI_BASE_URL, OPENWEBUI_API_KEY (an admin's key), and
 EBS_TOOLS_SERVICE_KEY or EBS_CHAT_SERVICE_KEY (sent as the bearer key).
@@ -78,11 +82,19 @@ MODEL_ID = "ebs-analyst"
 FILTER_ID = "ebs_context"
 ACTION_ID = "ebs_export_excel"
 
+# (id suffix, base model, label, description tail). The first variant keeps
+# the original model id so existing chats stay attached to it.
+VARIANTS = [
+    ("", "claude-sonnet-5", "Sonnet 5",
+     " Runs on Claude Sonnet 5: stronger reasoning for multi-step analysis."),
+    ("-haiku", "claude-haiku-4-5-20251001", "Haiku 4.5",
+     " Runs on Claude Haiku 4.5: faster and about half the cost; good for routine questions."),
+]
+
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dashboard-url", required=True, help="Base URL of the dashboard as seen from Open WebUI")
-    ap.add_argument("--base-model", default="claude-opus-5-5")
     args = ap.parse_args()
 
     base = os.environ["OPENWEBUI_BASE_URL"].rstrip("/")
@@ -213,14 +225,33 @@ def main():
             call("POST", "/prompts/create", json=body)
         print(f"prompt /{command}: ok")
 
+    def upsert_variants(spec):
+        """Create/update one model per VARIANTS entry from a base spec."""
+        for suffix, base_model, label, tail in VARIANTS:
+            m = json.loads(json.dumps(spec))
+            m["id"] = spec["id"] + suffix
+            m["base_model_id"] = base_model
+            m["name"] = f"{spec['name']} ({label})"
+            m["meta"]["description"] = spec["meta"]["description"] + tail
+            if exists(f"/models/model?id={m['id']}"):
+                call("POST", f"/models/model/update?id={m['id']}", json=m)
+            else:
+                call("POST", "/models/create", json=m)
+            got = call("GET", f"/models/model?id={m['id']}")
+            meta = got.get("meta") or {}
+            grants = [(g.get("principal_type"), g.get("permission")) for g in (got.get("access_grants") or [])]
+            print(f"model {m['id']} '{got.get('name')}': base={got.get('base_model_id')} tools={meta.get('toolIds')} "
+                  f"skills={len(meta.get('skillIds') or [])} grants={grants}")
+
     # 5. Model preset
     model = {
         "id": MODEL_ID,
-        "base_model_id": args.base_model,
         "name": "EBS Analyst",
         "meta": {
             "profile_image_url": "/static/favicon.png",
-            "description": "Analis data Oracle EBS CKDO — hutang (AP) dan stok per lot dari data mart dashboard. Setiap angka menyebut waktu data (as_of) dan SQL-nya.",
+            "description": "Oracle EBS data analyst for CKDO: payables, receivables, GL, purchasing, sales, "
+                           "inventory by lot and production, read from the dashboard's data mart. Every figure "
+                           "states its data time (as_of) and the SQL behind it.",
             "capabilities": {
                 "file_context": False, "vision": False, "file_upload": False, "web_search": False,
                 "image_generation": False, "code_interpreter": False, "terminal": False,
@@ -241,24 +272,16 @@ def main():
         },
         "params": {
             "system": (KIT / "system_prompt.md").read_text(encoding="utf-8"),
-            # No temperature: the blueprint asks for 0–0.2, but Claude Opus 5.5
-            # rejects the parameter outright ("temperature is deprecated for
-            # this model") and every chat fails with HTTP 400.
+            # No temperature: the blueprint asks for 0–0.2, but Claude Sonnet 5
+            # (like Opus 5.5) rejects the parameter outright and every chat
+            # fails with HTTP 400; one params block serves both variants.
             "function_calling": "native",
             "max_tokens": 8000,
         },
         "access_grants": [],
         "is_active": True,
     }
-    if exists(f"/models/model?id={MODEL_ID}"):
-        call("POST", f"/models/model/update?id={MODEL_ID}", json=model)
-    else:
-        call("POST", "/models/create", json=model)
-    got = call("GET", f"/models/model?id={MODEL_ID}")
-    meta = got.get("meta") or {}
-    print(f"model {MODEL_ID}: base={got.get('base_model_id')} tools={meta.get('toolIds')} "
-          f"skills={meta.get('skillIds')} filters={meta.get('filterIds')} actions={meta.get('actionIds')} "
-          f"function_calling={(got.get('params') or {}).get('function_calling')}")
+    upsert_variants(model)
 
     # 6a. Finance: skills and prompts for EBS Finance Controller (and Support)
     fin_skill_ids = []
@@ -312,13 +335,12 @@ def main():
 
     support = {
         "id": SUPPORT_MODEL_ID,
-        "base_model_id": args.base_model,
         "name": "EBS Support",
         "meta": {
             "profile_image_url": "/static/favicon.png",
-            "description": "Asisten diagnosa tim IT EBS: user, responsibility, akses fungsi, SoD, profile, login, "
-                           "concurrent request/manager, approval tertahan, patch — plus semua data mart EBS. "
-                           "Hanya untuk tim IT allowlist.",
+            "description": "EBS diagnostics for the IT team: users, responsibilities, function access, SoD, "
+                           "profiles, logins, concurrent requests and managers, stuck approvals and patches, plus "
+                           "every EBS data mart. IT allowlist only.",
             "capabilities": {**model["meta"]["capabilities"]},
             "toolIds": [f"server:{SERVER_ID}", f"server:{SA_SERVER_ID}"],
             "skillIds": skill_ids + fin_skill_ids + sa_skill_ids,
@@ -340,27 +362,19 @@ def main():
         "access_grants": sa_grants,
         "is_active": True,
     }
-    if exists(f"/models/model?id={SUPPORT_MODEL_ID}"):
-        call("POST", f"/models/model/update?id={SUPPORT_MODEL_ID}", json=support)
-    else:
-        call("POST", "/models/create", json=support)
-    got = call("GET", f"/models/model?id={SUPPORT_MODEL_ID}")
-    meta = got.get("meta") or {}
-    grants = [(g.get("principal_type"), g.get("permission")) for g in (got.get("access_grants") or [])]
-    print(f"model {SUPPORT_MODEL_ID}: base={got.get('base_model_id')} tools={meta.get('toolIds')} "
-          f"skills={meta.get('skillIds')} grants={grants}")
+    upsert_variants(support)
 
     # 7. EBS Finance Controller (library v2 2.3): Finance skills only.
     fc_skills = [s_ for s_ in ["ebs-core", "ebs-ap", "ebs-ar", "ebs-gl-reporting", "ebs-po", "ebs-om",
                                "ebs-inventory-lot", "ebs-opm"] if s_ in skill_ids] + fin_skill_ids
     fc = {
         "id": FIN_MODEL_ID,
-        "base_model_id": args.base_model,
         "name": "EBS Finance Controller",
         "meta": {
             "profile_image_url": "/static/favicon.png",
-            "description": "Asisten Finance & Accounting: closing bulanan, selisih subledger vs GL, rekonsiliasi bank, "
-                           "aset tetap, laba rugi, trial balance, AP/AR. Setiap angka menyebut waktu data dan SQL-nya.",
+            "description": "Finance & Accounting assistant: month-end close, subledger vs GL differences, bank "
+                           "reconciliation, fixed assets, P&L, trial balance, AP/AR. Every figure states its data "
+                           "time and the SQL behind it.",
             "capabilities": {**model["meta"]["capabilities"]},
             "toolIds": [f"server:{SERVER_ID}"],
             "skillIds": fc_skills,
@@ -382,15 +396,7 @@ def main():
         "access_grants": sa_grants + fin_grants,
         "is_active": True,
     }
-    if exists(f"/models/model?id={FIN_MODEL_ID}"):
-        call("POST", f"/models/model/update?id={FIN_MODEL_ID}", json=fc)
-    else:
-        call("POST", "/models/create", json=fc)
-    got = call("GET", f"/models/model?id={FIN_MODEL_ID}")
-    meta = got.get("meta") or {}
-    grants = [(g.get("principal_type"), g.get("permission")) for g in (got.get("access_grants") or [])]
-    print(f"model {FIN_MODEL_ID}: base={got.get('base_model_id')} tools={meta.get('toolIds')} "
-          f"skills={meta.get('skillIds')} grants={grants}")
+    upsert_variants(fc)
 
 
 if __name__ == "__main__":
