@@ -78,7 +78,7 @@ class AIService:
         )
         return response.content[0].text.strip()
 
-    def _anthropic_complete_with_search(self, system: str, message: str, max_tokens: int = 8192) -> str:
+    def _anthropic_complete_with_search(self, system: str, message: str, max_tokens: int = 8192, sources_out: list = None) -> str:
         """Same as _anthropic_complete but with the web_search server-side
         tool enabled, on the current flagship model — for grounding a
         response in current information instead of training-data-only
@@ -93,7 +93,12 @@ class AIService:
         trailing text blocks (empirically confirmed against the live API,
         not assumed). So: find the last non-text block and join every text
         block after it — that's the answer with the narration excluded,
-        without assuming it's a single block."""
+        without assuming it's a single block.
+
+        sources_out: if given, filled with every web page the search tool
+        returned ({"title", "url", "cited"}) — cited=True for pages the
+        answer actually quotes — so a report built on the answer can be
+        checked against its sources."""
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         messages = [{"role": "user", "content": message}]
         # Unbounded, a "ground everything" prompt drove Claude to 35 searches
@@ -110,6 +115,8 @@ class AIService:
                 messages=messages,
                 tools=tools,
             )
+            if sources_out is not None:
+                self._collect_web_sources(response.content, sources_out)
             if response.stop_reason != "pause_turn":
                 break
             messages = messages + [{"role": "assistant", "content": response.content}]
@@ -119,6 +126,31 @@ class AIService:
                 last_tool_idx = i
         answer_blocks = [b.text for b in response.content[last_tool_idx + 1:] if b.type == "text"]
         return "".join(answer_blocks).strip()
+
+    @staticmethod
+    def _collect_web_sources(content_blocks, out: list):
+        """Append search-result pages and cited pages from one response to
+        out, deduplicated by URL; a page that is cited anywhere is marked
+        cited=True."""
+        by_url = {s["url"]: s for s in out}
+
+        def add(url, title, cited):
+            if not url:
+                return
+            if url in by_url:
+                by_url[url]["cited"] = by_url[url]["cited"] or cited
+                return
+            entry = {"title": title or url, "url": url, "cited": cited}
+            by_url[url] = entry
+            out.append(entry)
+
+        for block in content_blocks:
+            if block.type == "web_search_tool_result" and isinstance(getattr(block, "content", None), list):
+                for r in block.content:
+                    add(getattr(r, "url", None), getattr(r, "title", None), False)
+            elif block.type == "text":
+                for c in (getattr(block, "citations", None) or []):
+                    add(getattr(c, "url", None), getattr(c, "title", None), True)
 
     def _anthropic_complete_with_search_history(
         self, system: str, history: list[dict], message: str, max_tokens: int = 8192,

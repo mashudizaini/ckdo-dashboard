@@ -835,68 +835,69 @@ def build_outlook_pptx(content: dict, plan_year: int) -> bytes:
 # ── AI prompt ────────────────────────────────────────────────────────────────
 
 def ai_schema_example(plan_year: int) -> str:
-    """The JSON shape the AI must return, pre-filled with this plan year's
-    column labels and illustrative (NOT real) values, so the model sees
-    the exact structure, the wording style and the density expected."""
+    """The JSON shape the AI must return, with this plan year's column
+    labels and PLACEHOLDERS only (x.x, <publisher>, ...). It deliberately
+    carries no real figures or publisher names: an earlier version showed
+    last year's deck values and "(Source : BMI ...)" as style examples, and
+    the model copied the source labels into the 2027 deck even though no
+    BMI report was among the references."""
     import json
     y = year_labels(plan_year)
     P, E = y["plan"], y["prev"]
+    src = "(Source : <publisher of the reference document> - <month year>)"
     ex = default_content(plan_year)
     ex["global"]["headline"] = [
-        f"“The GDP is projected to increase 0.1%p to 3.1% in {P}”",
-        f"Global inflation is expected to fall from 4.2% in {E} to 3.6% in {P}",
+        f"“The GDP is projected to increase x.x%p to x.x% in {P}”",
+        f"Global inflation is expected to fall from x.x% in {E} to x.x% in {P}",
     ]
     ex["global"]["blocks"] = [
-        {"title": "Global", "text": "- Uncertainty of US reciprocal tariff rates could weaken the growth\n- Geopolitical tension disrupt global supply chains :\n  - US - China strategic rivalry across trade, technology and security\n  - Middle East tension"},
-        {"title": "USA", "text": f"- The Fed rate target is projected to decrease from 4.00% in {E} to 3.75% in {P}\n- Growth is projected to slightly increase in {P} at 2.0% from 1.9% in {E}"},
-        {"title": "Eurozone", "text": f"- Growth is expected to accelerate in {P} (1.2%) driven by ..."},
-        {"title": "China", "text": "- Aging population is impacting the pension system, healthcare services and labor supply"},
+        {"title": "Global", "text": "- <key global risk or driver, with its figure>\n- <second point> :\n  - <sub point>\n  - <sub point>"},
+        {"title": "USA", "text": f"- The Fed rate target is projected to <move> from x.xx% in {E} to x.xx% in {P}\n- <growth point with figure>"},
+        {"title": "Eurozone", "text": f"- <growth / ECB point with figure for {P}>"},
+        {"title": "China", "text": "- <growth or structural point with figure>"},
     ]
-    ex["global"]["fx"]["rows"] = [["USD/IDR", "16,404", "16,500"], ["USD/EUR", "0.89", "0.86"], ["USD/KRW", "1,441", "1,330"]]
-    ex["global"]["fx"]["source"] = f"(Source : RAPBN {P}, ECB and UOB Outlook)"
-    ex["global"]["growth"]["rows"] = [["World", "3.3", "3.0", "3.1"], ["USA", "2.8", "1.9", "2.0"], ["Europe", "0.9", "1.0", "1.2"], ["China", "5.0", "4.8", "4.2"], ["Korea", "2.0", "0.8", "1.8"], ["Indonesia", "5.0", "4.8", "4.8"]]
-    ex["global"]["oil"]["rows"] = [["World (USD/barrel)", "81.26", "68.18", "64.33"]]
-    ex["global"]["source"] = f"(Source : IMF - July {E})"
+    ex["global"]["fx"]["rows"] = [["USD/IDR", "xx,xxx", "xx,xxx"], ["USD/EUR", "x.xx", "x.xx"], ["USD/KRW", "x,xxx", "x,xxx"]]
+    ex["global"]["fx"]["source"] = src
+    ex["global"]["growth"]["rows"] = [[c, "x.x", "x.x", "x.x"] for c in ("World", "USA", "Europe", "China", "Korea", "Indonesia")]
+    ex["global"]["oil"]["rows"] = [["World (USD/barrel)", "xx.xx", "xx.xx", "xx.xx"]]
+    ex["global"]["source"] = src
     ex["indonesia"]["headline"] = [
-        f"“The GDP is projected to increase 0.5%p to 5.4% in {P}”",
-        f"Inflation is expected to increase from 2.4% in {E} to 2.5% in {P}",
+        f"“The GDP is projected to increase x.x%p to x.x% in {P}”",
+        f"Inflation is expected to <move> from x.x% in {E} to x.x% in {P}",
     ]
-    ex["indonesia"]["index_table"]["rows"] = [["GDP (%)", "4.9", "5.4", "5.2"], ["Inflation (%)", "2.4", "2.5", "2.5"], ["Interest Rate Obligation 10 years (%)", "7.0", "6.9", "-"], ["Exchange Rate (USD/IDR)", "16,550", "16,500", "16,333"]]
+    ex["indonesia"]["index_table"]["rows"] = [[r[0], "x.x", "x.x", "x.x"] for r in ex["indonesia"]["index_table"]["rows"]]
     ex["indonesia"]["budget"].update({
-        "headline": f"“RAPBN {P}, Prioritize in Food Security, Energy, Education, and Health”",
-        "title": "Budget Allocation IDR 3,787 trillion",
+        "headline": f"“<APBN/RAPBN {P}>, Prioritize in <priority areas>”",
+        "title": "Budget Allocation IDR x,xxx trillion",
         "items": [
-            {"name": "Food", "prev": 155, "next": 164, "desc": "Increasing productivity, price stability and welfare of farmers"},
-            {"name": "Health", "prev": 211, "next": 244, "desc": "Improve the quality of the healthcare system"},
-            {"name": "…", "prev": 0, "next": 0, "desc": "…"},
+            {"name": "<category>", "prev": 0, "next": 0, "desc": "<one-line purpose of the allocation>"},
+            {"name": "<category>", "prev": 0, "next": 0, "desc": "<one-line purpose of the allocation>"},
         ],
-        "source": f"(Source : RAPBN {P})",
+        "source": src,
     })
     ex["indonesia"]["boxes"] = [
-        {"title": "Acceleration Investment", "text": "- **DANANTARA** : State-Owned Enterprises (SOE) super holding company\n- **Main function** :\n  - Indonesia investment acceleration\n  - Enhancing competitiveness"},
-        {"title": "Increasing Export", "text": "- Negotiation US tariff from 32% to 19%, more competitive than other ASEAN countries\n- Comprehensive Economic Partnership Agreement (CEPA) with some countries"},
+        {"title": "<topic, e.g. investment policy>", "text": "- **<label>** : <fact>\n- **<label>** :\n  - <sub point>\n  - <sub point>"},
+        {"title": "<topic, e.g. trade / export>", "text": "- <fact with figure>\n- <fact>"},
     ]
+    q = "- **<short label>** : <explanation with figure>\n- **<short label>** : <explanation>"
+    a = "- <action>\n- <action>"
     ex["swot"].update({
-        "strengths": f"- **Resilient Economic Growth** : Projected growth 5.4% in {P}, supported by public spending\n- **US Tariff** : Successfully negotiated from 32% to 19%",
-        "weaknesses": "- **Budget Deficit Concerns** : ...\n- **Inequality** : ...",
-        "opportunities": "- **Infrastructure Development** : ...\n- **Increasing Foreign Investment** : ...",
-        "threats": "- **Global Economic Slowdown** : ...\n- **Market Competition** : ...",
-        "so": "- Implement the downstream strategy to increase export and reduce import reliance\n- ...",
-        "wo": "- ...\n- ...", "st": "- ...\n- ...", "wt": "- ...\n- ...",
+        "strengths": q, "weaknesses": q, "opportunities": q, "threats": q,
+        "so": a, "wo": a, "st": a, "wt": a,
     })
     ph = ex["pharma"]
-    ph["global"] = {"headline": f"Expected increase in sales from USD 1.9 trillion in {E} to USD 2.0 trillion in {P} (▲ 5%)", "text": "- Technological integration, particularly AI in diagnostics and treatment, is accelerating growth"}
-    ph["top10"]["rows"] = [["US", "491"], ["China", "285"], ["Japan", "100"], ["Germany", "89"], ["France", "57"], ["UK", "50"], ["Italy", "41"], ["Canada", "39"], ["India", "36"], ["Spain", "35"]]
-    ph["top10"]["total"] = "Total USD 1.2 trillion (market share 64% from total sales)"
-    ph["top10"]["source"] = f"(Source : BMI Global - Q3 {E})"
-    ph["asia"] = {"headline": f"Expected to increase sales from USD 425 billion in {E} to USD 459 billion in {P} (▲ 8%)", "text": "- China's role in global clinical research will expand"}
-    ph["asia_top3"] = {"items": ["China USD 285 billion", "Japan USD 100 billion", "India USD 36 billion"], "total": "Total USD 421 billion", "note": "(market share 99% from total sales)", "source": f"(Source : BMI Global - Q3 {E})"}
-    ph["indonesia"] = {"headline": f"Expected to increase sales from IDR 122 trillion in {E} to IDR 133 trillion in {P} (▲ 9%)", "text": "- The government is increasing investment in healthcare infrastructure while implementing cost control"}
+    ph["global"] = {"headline": f"Expected increase in sales from USD x.x trillion in {E} to USD x.x trillion in {P} (▲ x%)", "text": "- <driver>"}
+    ph["top10"]["rows"] = [["<country>", "xxx"] for _ in range(10)]
+    ph["top10"]["total"] = "Total USD x.x trillion (market share xx% from total sales)"
+    ph["top10"]["source"] = src
+    ph["asia"] = {"headline": f"Expected to increase sales from USD xxx billion in {E} to USD xxx billion in {P} (▲ x%)", "text": "- <driver>"}
+    ph["asia_top3"] = {"items": ["<country> USD xxx billion"] * 3, "total": "Total USD xxx billion", "note": "(market share xx% from total sales)", "source": src}
+    ph["indonesia"] = {"headline": f"Expected to increase sales from IDR xxx trillion in {E} to IDR xxx trillion in {P} (▲ x%)", "text": "- <driver>"}
     ph["segments"] = [
-        {"title": "Prescription Drug", "value": "IDR 104 trillion", "text": "- Patented drug : IDR 13 trillion\n- Generic drug : IDR 91 trillion"},
-        {"title": "OTC Drug", "value": "IDR 29 trillion", "text": ""},
+        {"title": "Prescription Drug", "value": "IDR xxx trillion", "text": "- Patented drug : IDR xx trillion\n- Generic drug : IDR xx trillion"},
+        {"title": "OTC Drug", "value": "IDR xx trillion", "text": ""},
     ]
-    ph["opportunities"] = "- Expansion of BPJS increases medical demand, especially for generic drugs\n- ...\n- ..."
-    ph["threats"] = "- Vulnerable to global supply chain disruption as Indonesia relies on imported raw materials\n- ...\n- ..."
-    ph["source"] = f"(Source : BMI Indonesia - August {E})"
+    ph["opportunities"] = "- <opportunity>\n- <opportunity>\n- <opportunity>"
+    ph["threats"] = "- <threat>\n- <threat>\n- <threat>"
+    ph["source"] = src
     return json.dumps(ex, ensure_ascii=False, indent=1)

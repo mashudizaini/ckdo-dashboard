@@ -2542,7 +2542,45 @@ function OutlookV2Editor({ content, onChange }) {
         </div>
         <OlField label="Indonesia pharma source" value={ph.source} onChange={set(["pharma", "source"])} />
       </OlCard>
+
+      <OutlookReferences refs={c.references} />
     </div>
+  );
+}
+
+// What the last AI Generate was allowed to draw figures from — the
+// converted reference files and, with Claude, the web pages its search
+// returned (cited ones first) — so every "(Source : ...)" label on the
+// slides can be checked against something real.
+function OutlookReferences({ refs }) {
+  if (!refs) return null;
+  const files = refs.files || [];
+  const web = refs.web || [];
+  return (
+    <OlCard title="Sources to verify" subtitle="What the last AI Generate had available — check each (Source : …) label against these" defaultOpen={false}>
+      <div>
+        <label className={OL_LABEL}>Reference files ({files.length})</label>
+        {files.length === 0
+          ? <p className="text-xs text-gray-500">None — the figures came from the model's general knowledge only.</p>
+          : <ul className="text-xs text-gray-300 space-y-0.5 list-disc pl-5">{files.map((f, i) => <li key={i}>{f}</li>)}</ul>}
+      </div>
+      <div>
+        <label className={OL_LABEL}>Web pages found by Claude's search ({web.length})</label>
+        {web.length === 0
+          ? <p className="text-xs text-gray-500">{refs.provider === "anthropic" ? "Claude did not use web search in this run." : "Web search only runs with the Claude AI provider."}</p>
+          : (
+            <ul className="text-xs space-y-1">
+              {web.map((w, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className={`shrink-0 mt-0.5 px-1.5 rounded text-[9px] font-semibold ${w.cited ? "bg-green-600 text-white" : "bg-gray-700 text-gray-300"}`}>{w.cited ? "CITED" : "found"}</span>
+                  <a href={w.url} target="_blank" rel="noreferrer" className="text-sky-400 hover:underline break-all">{w.title || w.url}</a>
+                </li>
+              ))}
+            </ul>
+          )}
+      </div>
+      <p className="text-[11px] text-amber-300/80">A source label that matches none of these was not taken from a document the AI saw — treat that figure as unverified.</p>
+    </OlCard>
   );
 }
 

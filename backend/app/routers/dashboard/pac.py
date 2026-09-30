@@ -418,27 +418,43 @@ How to fill it — this is a slide, not an essay:
   USD x in {Y - 1} to USD y in {Y} (▲ n%)". Top 10 = the ten largest
   pharmaceutical markets ({Y - 1} (E), USD billion), largest first.
   Opportunities and threats: 3 bullets each, specific to Indonesia's market.
-- Every "source" field names the actual source and its date, e.g.
-  "(Source : IMF - July {Y - 1})". Never invent URLs.
-- Keep every key of the template below, in English.
+- SOURCES — management will verify every figure against its source:
+  * A "source" field may only name a document you actually used: one of
+    the reference files above (publisher + month/year as printed in that
+    document, e.g. "(Source : IMF WEO - July {Y - 1})"){", or a web page you actually opened with web search (publisher + date of that page)" if use_web_search else ""}.
+  * Never attribute a figure to a publisher or report you have not seen
+    (e.g. BMI, IQVIA, Fitch, Statista) — not even because last year's deck
+    cited it.
+  * If no reference supports a figure, write "-" in tables (or leave the
+    text out) and set that section's source to
+    "(Source : not available in references - to be completed)".
+  * Do not reuse last year's figures as this year's values.
+- Keep every key of the template below, in English. Everything in <...>
+  and every x/xx placeholder is a slot to fill, never text to copy.
 
-Return ONLY valid JSON with exactly this structure (the values shown are
-last year's style examples — replace ALL of them with {Y} figures):
+Return ONLY valid JSON with exactly this structure:
 {ai_schema_example(Y)}"""
 
+    system_msg = "You are a senior financial/economic analyst producing a management report. Return only valid JSON, no markdown code fences, no explanations."
     try:
-        response = await ai.complete(
-            "You are a senior financial/economic analyst producing a management report. Return only valid JSON, no markdown code fences, no explanations.",
-            prompt,
-            num_ctx=16384,
-            provider=body.provider,
-            gemini_api_key=gemini_key,
-            web_search=use_web_search,
-            max_tokens=16000,
-        )
+        web_sources = []
+        if use_web_search:
+            response = await asyncio.to_thread(ai._anthropic_complete_with_search, system_msg, prompt, 16000, web_sources)
+        else:
+            response = await ai.complete(
+                system_msg, prompt, num_ctx=16384, provider=body.provider, gemini_api_key=gemini_key, max_tokens=16000,
+            )
         content = _parse_json_object(response)
         content["format_version"] = FORMAT_VERSION
         content = normalize_outlook_content(content, Y)
+        # What the figures could have come from, for management to verify
+        # against: the converted reference files, plus (Claude only) every
+        # web page its search returned, cited ones first.
+        content["references"] = {
+            "files": [m["original_name"] for m in material_briefs + format_briefs],
+            "web": sorted(web_sources, key=lambda s: not s["cited"]),
+            "provider": body.provider,
+        }
         return {
             "success": True,
             "data": {"setup_module": "outlook", "plan_year": body.year, "content": content, "status": "draft"},
