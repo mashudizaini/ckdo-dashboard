@@ -1602,8 +1602,8 @@ def etl_po_lines(year: int = None, month: int = None, full_refresh: bool = False
     here — a known, deliberately accepted gap, since no observed caller
     used anything else.
 
-    Incremental by default: only PO lines created in the last 30 days
-    (covers edits/new lines; older closed lines don't change). Pass
+    Incremental by default: PO lines created or updated (header, line or
+    shipment — receiving touches the shipment) in the last 30 days. Pass
     year=<YYYY> (month optional) to instead pull everything from that
     year forward — used for the initial backfill.
 
@@ -1630,8 +1630,17 @@ def etl_po_lines(year: int = None, month: int = None, full_refresh: bool = False
             date_clause = "AND poh.creation_date >= :d_from"
             date_params = {"d_from": d_from}
         else:
+            # Created OR touched in the window — receiving updates only the
+            # shipment row (poll.last_update_date), so a creation-only window
+            # froze received_qty at 0 for any PO received >30 days after it
+            # was raised (live case: PO 26401085, raised 24 Aug, received
+            # 28 Sep). Verified live: no rcv_transactions in the window fall
+            # outside these four columns.
             d_from = _date.today() - _timedelta(days=30)
-            date_clause = "AND poh.creation_date >= :d_from"
+            date_clause = """AND (poh.creation_date     >= :d_from
+                   OR poh.last_update_date  >= :d_from
+                   OR pol.last_update_date  >= :d_from
+                   OR poll.last_update_date >= :d_from)"""
             date_params = {"d_from": d_from}
 
         cur_ora.execute(f"""
