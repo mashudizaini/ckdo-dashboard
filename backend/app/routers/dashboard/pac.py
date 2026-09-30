@@ -30,6 +30,9 @@ from app.services.pac_service import PACService
 from app.services.business_plan_service import BusinessPlanService
 from app.services.business_plan_setup_service import BusinessPlanSetupService
 from app.services.outlook_material_service import OutlookMaterialService
+from app.services.outlook_report import (
+    FORMAT_VERSION, ai_schema_example, normalize_content as normalize_outlook_content,
+)
 from app.services.sales_plan_service import SalesPlanService
 from app.services.purchase_plan_service import PurchasePlanService
 from app.services.purchase_plan_fg_service import PurchasePlanFGService
@@ -298,6 +301,17 @@ async def delete_outlook_material(
     return await OutlookMaterialService().delete_material(db, material_id)
 
 
+def _parse_json_object(text: str) -> dict:
+    """The outermost {...} of a model reply — tolerates code fences or a
+    stray sentence around the JSON, which models occasionally add despite
+    being told not to."""
+    t = (text or "").strip()
+    start, end = t.find("{"), t.rfind("}")
+    if start == -1 or end <= start:
+        raise ValueError("AI response did not contain a JSON object")
+    return json.loads(t[start:end + 1])
+
+
 class GenerateOutlookRequest(BaseModel):
     year: int
     context: Optional[str] = None
@@ -333,7 +347,7 @@ async def generate_outlook(
             f"### {m['original_name']}\n{m['brief_text']}" for m in material_briefs
         ))
     if format_briefs:
-        context_parts.append("## Ringkasan Contoh Format Laporan (acuan struktur)\n" + "\n\n".join(
+        context_parts.append("## Last year's deck / report format (wording style + prior-year baseline figures)\n" + "\n\n".join(
             f"### {m['original_name']}\n{m['brief_text']}" for m in format_briefs
         ))
     reference_context = "\n\n".join(context_parts)
@@ -344,11 +358,10 @@ async def generate_outlook(
     expert_persona = (
         "You are a senior macroeconomic and financial markets analyst — the kind "
         "of outside consultant a pharmaceutical manufacturer's board would retain "
-        "to write its annual Business Plan outlook. Write with an expert's "
-        "judgment: synthesize the data into a point of view, not just a list of "
-        "figures. Each section should read like a page from a professional "
-        "economic/industry outlook report — substantive and directly useful for "
-        "management decision-making, not a superficial summary."
+        "to prepare its annual Business Plan outlook slides. Use an expert's "
+        "judgment to pick the figures and facts that matter most for a "
+        "pharmaceutical manufacturer in Indonesia, and state them the way a "
+        "polished board deck does: precise, sourced, and concise."
     )
     search_instruction = (
         "\n\nYou have web search available (max 8 searches — budget it "
@@ -363,40 +376,55 @@ async def generate_outlook(
         if use_web_search else ""
     )
 
+    Y = body.year
     prompt = f"""{expert_persona}{search_instruction}
 
-Generate a comprehensive Business Plan Outlook for PT CKD OTTO Pharmaceuticals for year {body.year}.
+Prepare the {Y} Business Plan "Economic Outlook" slides for PT CKD OTTO
+Pharmaceuticals (Indonesian oncology/pharmaceutical manufacturer, Korean
+parent company). The output fills a FIXED four-slide layout identical to
+last year's management deck ("{Y - 1} Economic Outlook"): 1) Global,
+2) Indonesia (economic index table, state-budget chart, two topic boxes),
+3) Indonesia SWOT & implications, 4) Pharmaceutical Industry.
 {f'Additional context: {body.context}' if body.context else ''}
 
-{"Ground your answer in the reference material below — prefer these figures/trends over generic knowledge whenever they're relevant, and follow the structural cues from the format examples if given." if reference_context else "No converted reference materials are available yet for this year — generate a realistic, well-grounded outlook (upload and convert reference files first for an even more accurate result)."}
-{f"{chr(10)}{chr(10)}{reference_context}" if reference_context else ""}
+{"Ground every figure in the reference material below — it takes priority over general knowledge." if reference_context else "No converted reference materials are available yet for this year — use well-established published figures (upload and convert reference files first for an accurate result)."}
+{f"{chr(10)}{reference_context}{chr(10)}" if reference_context else ""}
+How to fill it — this is a slide, not an essay:
+- Write like the {Y - 1} deck: short, factual slide phrases. Each bullet
+  <= 110 characters, one idea, with the concrete number. No narrative
+  paragraphs, no analyst commentary, no "we advise".
+- Headlines: exactly 2 lines. Line 1 is a quoted GDP statement
+  (e.g. “The GDP is projected to increase 0.1%p to 3.1% in {Y}”), line 2
+  the inflation statement. Each <= 85 characters.
+- Year columns: {Y - 2} = actual, {Y - 1} (E) = estimate, {Y} (P) = projection.
+  Keep the column labels exactly as given in the template.
+- Tables: numbers only (e.g. "3.1", "16,500"); "-" when a source truly has
+  no value. Do not add or remove table columns.
+- Global growth table rows: World, USA, Europe, China, Korea, Indonesia.
+  Exchange rates: {Y - 1} column = average as of September {Y - 1};
+  {Y} = forecast. If the Business Plan Guideline in the references states a
+  planning exchange rate, use it for USD/IDR {Y}.
+- Indonesia index table: Ministry of Finance ({Y - 1} (E), {Y} (P) from the
+  RAPBN/APBN {Y} document) and UOB ({Y} (P)).
+- Budget: "items" = the state-budget priority categories with numeric
+  "prev" ({Y - 1}) and "next" ({Y}) allocations in IDR trillion (numbers,
+  not strings), plus a one-line "desc" each (<= 70 characters). 5-8 items.
+  "title" = "Budget Allocation IDR <total> trillion".
+- Global blocks: Global, USA, Eurozone, China — 1-4 bullets each; use
+  "  - " sub-bullets for lists (e.g. tariff rates by country).
+- SWOT: 2 items per quadrant in the form "- **Short label** : explanation";
+  implications (so/wo/st/wt): 2 bullets each, each an action.
+- Pharma: growth headlines in the form "Expected increase in sales from
+  USD x in {Y - 1} to USD y in {Y} (▲ n%)". Top 10 = the ten largest
+  pharmaceutical markets ({Y - 1} (E), USD billion), largest first.
+  Opportunities and threats: 3 bullets each, specific to Indonesia's market.
+- Every "source" field names the actual source and its date, e.g.
+  "(Source : IMF - July {Y - 1})". Never invent URLs.
+- Keep every key of the template below, in English.
 
-For each of the 3 sections below, write the content as a single Markdown
-string: 1-2 short paragraphs of analyst framing/narrative FIRST, THEN a
-"- " bullet list of the specific supporting figures and facts with key
-terms and numbers in **bold**. This should read as expert commentary, not
-a bare bullet dump — freeform text the user can edit directly, not a fixed
-list of fields. Aim for real depth: 5-8 substantive bullets per section
-minimum, each with a concrete number, trend, or specific policy/event —
-not vague statements.
-
-Return ONLY valid JSON with this exact structure:
-{{
-  "global_economic": {{
-    "title": "I. Global Economic Outlook",
-    "text": "Brief analyst framing paragraph.\\n\\n- **Global GDP Forecast**: ...\\n- **Key Factor 1**: ...\\n- **Fed Interest Rate**: ...\\n- **Global Inflation**: ..."
-  }},
-  "indonesia_economic": {{
-    "title": "II. Indonesia Economic Outlook",
-    "text": "Brief analyst framing paragraph.\\n\\n- **GDP Forecast**: ...\\n- **Inflation**: ...\\n- **Interest Rate**: ...\\n- **Exchange Rate**: ...\\n- **Government Focus**: ..."
-  }},
-  "pharmaceutical": {{
-    "title": "III. Pharmaceutical Industry",
-    "text": "Brief analyst framing paragraph.\\n\\n- **Global Market**: ...\\n- **Indonesia Market**: ...\\n- **Oncology**: ...\\n- **CKD OTTO Strategy**: ..."
-  }}
-}}
-
-Make it realistic and current for {body.year}, with specific numbers, trends, and sources where relevant."""
+Return ONLY valid JSON with exactly this structure (the values shown are
+last year's style examples — replace ALL of them with {Y} figures):
+{ai_schema_example(Y)}"""
 
     try:
         response = await ai.complete(
@@ -406,13 +434,11 @@ Make it realistic and current for {body.year}, with specific numbers, trends, an
             provider=body.provider,
             gemini_api_key=gemini_key,
             web_search=use_web_search,
+            max_tokens=16000,
         )
-        json_text = response.strip()
-        if json_text.startswith("```"):
-            json_text = json_text.strip("`")
-            if json_text.lower().startswith("json"):
-                json_text = json_text[4:]
-        content = json.loads(json_text)
+        content = _parse_json_object(response)
+        content["format_version"] = FORMAT_VERSION
+        content = normalize_outlook_content(content, Y)
         return {
             "success": True,
             "data": {"setup_module": "outlook", "plan_year": body.year, "content": content, "status": "draft"},

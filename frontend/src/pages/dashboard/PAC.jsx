@@ -1988,48 +1988,86 @@ function GuidelinePanel({ year }) {
 
 /* ══ Outlook Panel ═══════════════════════════════════════════════════════════ */
 
-const DEFAULT_OUTLOOK = {
-  global_economic: {
-    title: "I. Global Economic Outlook",
-    text: [
-      "- **Global GDP Forecast**: Decrease from 3.0% in 2023 to 2.7% in 2024",
-      "- **Key Factor 1**: Sharp slowdown in China — persistent Yuan weakness",
-      "- **Key Factor 2**: Declining inflation — reflecting drop in energy prices",
-      "- **Key Factor 3**: Russian invasion of Ukraine — ongoing recovery with OECD support",
-      "- **Fed Interest Rate**: 5.5% (Sep 2023) -> Expected 5.7% Q4 2023 -> 5.5% in 2024",
-      "- **Global Inflation**: Projected to decline from 3.8% to 2.6% in 2024",
-    ].join("\n"),
-  },
-  indonesia_economic: {
-    title: "II. Indonesia Economic Outlook",
-    text: [
-      "- **GDP Forecast**: 5.1% in 2023 -> 5.2% in 2024",
-      "- **Annual Budget**: Income Rp 2.8 T + Financing Rp 0.5 T = Expense Rp 3.3 T",
-      "- **Target**: Accelerate inclusive and sustainable economic transformation",
-      "- **Inflation**: 2.7% - 2.8%",
-      "- **Interest Rate**: 6.0% - 6.9%",
-      "- **Exchange Rate**: IDR 15,000 - 15,100 / USD",
-      "- **Geopolitics**: Presidential election Feb 2024 — potential unstable economic condition",
-      "- **IKN Capital**: Move to Kalimantan (IKN) from 2024-2045",
-    ].join("\n"),
-  },
-  pharmaceutical: {
-    title: "III. Pharmaceutical Industry",
-    text: [
-      "- **Global Market Size**: Expected $ 1.1 Trillion in 2023 to $ 1.2 Trillion in 2024",
-      "- **Indonesia Growth Rate**: Expected 12% in 2024",
-      "- **TKDN Objective**: Reduce importation of raw material by 24% in 2024",
-      "- **Oncology**: API for oncology still depend on import API",
-      "- **CKD OTTO Strategy**: Increasing TKDN score with local material purchase; Cooperate with foreign oncology medical worker",
-    ].join("\n"),
-  },
-};
+// format_version 2 = the structured four-slide layout of the Economic
+// Outlook deck (Global / Indonesia / Indonesia SWOT / Pharmaceutical
+// Industry). Mirrors default_content() in backend outlook_report.py.
+const OUTLOOK_FORMAT_VERSION = 2;
+const isOutlookV2 = (content) => content?.format_version === OUTLOOK_FORMAT_VERSION;
+
+function defaultOutlookV2(year) {
+  const E = `${year - 1} (E)`, P = `${year} (P)`, A = String(year - 2);
+  return {
+    format_version: OUTLOOK_FORMAT_VERSION,
+    global: {
+      headline: ["", ""],
+      blocks: ["Global", "USA", "Eurozone", "China"].map(title => ({ title, text: "" })),
+      fx: {
+        title: `Exchange Rate Forecast ${year}`,
+        prev_label: `${year - 1}\n(As of Sep AVG)`,
+        next_label: `${year}\n(Forecast)`,
+        rows: [["USD/IDR", "", ""], ["USD/EUR", "", ""], ["USD/KRW", "", ""]],
+        source: "",
+      },
+      growth: {
+        title: "Global Growth Rate", unit: "(in %)",
+        columns: ["Countries", A, E, P],
+        rows: ["World", "USA", "Europe", "China", "Korea", "Indonesia"].map(c => [c, "", "", ""]),
+        highlight: "Indonesia",
+      },
+      oil: { columns: ["Brent Crude Oil", A, E, P], rows: [["World (USD/barrel)", "", "", ""]] },
+      source: "",
+    },
+    indonesia: {
+      headline: ["", ""],
+      index_table: {
+        header: "Economic Index",
+        groups: [{ name: "Ministry of Finance", columns: [E, P] }, { name: "UOB", columns: [P] }],
+        rows: ["GDP (%)", "Inflation (%)", "Interest Rate Obligation 10 years (%)", "Exchange Rate (USD/IDR)"].map(r => [r, "", "", ""]),
+      },
+      budget: {
+        headline: "", title: "", unit: "In Trillion IDR",
+        series: [String(year - 1), String(year)],
+        items: ["Food", "Energy", "Health", "Social", "Education", "Security", "Others"].map(name => ({ name, prev: null, next: null, desc: "" })),
+        source: "",
+      },
+      boxes: [{ title: "Acceleration Investment", text: "" }, { title: "Increasing Export", text: "" }],
+    },
+    swot: {
+      title: "Indonesia SWOT Analysis\n&\nImplication",
+      strengths: "", weaknesses: "", opportunities: "", threats: "", so: "", wo: "", st: "", wt: "",
+    },
+    pharma: {
+      global: { headline: "", text: "" },
+      top10: { unit: "(In billion USD)", year_label: E, rows: Array.from({ length: 10 }, () => ["", ""]), total: "", source: "" },
+      asia: { headline: "", text: "" },
+      asia_top3: { items: ["", "", ""], total: "", note: "", source: "" },
+      indonesia: { headline: "", text: "" },
+      segments: [{ title: "Prescription Drug", value: "", text: "" }, { title: "OTC Drug", value: "", text: "" }],
+      opportunities: "", threats: "", source: "",
+    },
+  };
+}
+
+// Deep-merge a (possibly partial) v2 content onto the skeleton, so the
+// editor can bind to every field without null checks.
+function mergeOutlookDefaults(def, val) {
+  if (Array.isArray(def)) return Array.isArray(val) ? val : def;
+  if (def && typeof def === "object") {
+    const out = {};
+    const src = val && typeof val === "object" && !Array.isArray(val) ? val : {};
+    for (const k of Object.keys(def)) out[k] = k in src ? mergeOutlookDefaults(def[k], src[k]) : def[k];
+    for (const k of Object.keys(src)) if (!(k in out)) out[k] = src[k];
+    return out;
+  }
+  return val === undefined || val === null ? def : val;
+}
 
 // Older saved records may still use the { items: [{label,value}] } shape —
 // fold them into the same { title, text } markdown shape on read so the
-// editor never has to branch on which format it's looking at.
-function normalizeOutlookContent(content) {
+// legacy editor never has to branch on which format it's looking at.
+function normalizeOutlookContent(content, year) {
   if (!content) return content;
+  if (isOutlookV2(content)) return mergeOutlookDefaults(defaultOutlookV2(year), content);
   const out = {};
   for (const key of Object.keys(content)) {
     const sec = content[key] || {};
@@ -2223,9 +2261,14 @@ function OutlookMaterialsPanel({ year, category = "material", title, description
                     </div>
                     <OutlookBriefStatusBadge status={isConverting ? "converting" : item.brief_status} />
                     {item.brief_status === "done" ? (
-                      <button onClick={() => setExpandedId(isExpanded ? null : item.id)} className="shrink-0 p-1.5 rounded-md text-gray-400 hover:text-gray-200 hover:bg-gray-800" title="View summary">
-                        {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                      </button>
+                      <>
+                        <button onClick={() => convertOne(item.id)} disabled={isConverting} className="shrink-0 p-1.5 rounded-md text-gray-400 hover:text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-40" title="Convert again (refresh the summary)">
+                          {isConverting ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                        </button>
+                        <button onClick={() => setExpandedId(isExpanded ? null : item.id)} className="shrink-0 p-1.5 rounded-md text-gray-400 hover:text-gray-200 hover:bg-gray-800" title="View summary">
+                          {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                        </button>
+                      </>
                     ) : (
                       <button onClick={() => convertOne(item.id)} disabled={isConverting} className="shrink-0 p-1.5 rounded-md text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-40" title="Convert into a bullet-point summary">
                         {isConverting ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
@@ -2261,6 +2304,248 @@ function OutlookMaterialsPanel({ year, category = "material", title, description
   );
 }
 
+/* ── Structured Outlook editor (format_version 2) ──────────────────────────
+   One card per slide of the Economic Outlook deck; every field maps 1:1 to
+   a spot on the exported slide. Text areas use the same small Markdown
+   subset the PPT builder understands: "- " bullet, "  - " sub-bullet,
+   **bold**. */
+function setOutlookPath(obj, path, value) {
+  if (path.length === 0) return value;
+  const [k, ...rest] = path;
+  const copy = Array.isArray(obj) ? obj.slice() : Object.assign({}, obj);
+  copy[k] = setOutlookPath(obj?.[k], rest, value);
+  return copy;
+}
+
+const OL_LABEL = "block text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1";
+
+function OlField({ label, value, onChange, placeholder, className = "" }) {
+  return (
+    <div className={className}>
+      {label && <label className={OL_LABEL}>{label}</label>}
+      <input className={`${INP} w-full`} value={value ?? ""} placeholder={placeholder} onChange={e => onChange(e.target.value)} />
+    </div>
+  );
+}
+
+function OlArea({ label, value, onChange, rows = 4, placeholder = "- **Label** : text\n  - sub point", className = "" }) {
+  return (
+    <div className={className}>
+      {label && <label className={OL_LABEL}>{label}</label>}
+      <textarea rows={rows} className={`${TA} !text-xs font-mono`} value={value ?? ""} placeholder={placeholder} onChange={e => onChange(e.target.value)} />
+    </div>
+  );
+}
+
+// Editable grid over an array-of-arrays; column headers are fixed labels.
+function OlGrid({ label, columns, rows, onChange, firstColWide = true }) {
+  const setCell = (r, c, v) => onChange(rows.map((row, ri) => ri !== r ? row : columns.map((_, ci) => ci === c ? v : (row[ci] ?? ""))));
+  return (
+    <div>
+      {label && <label className={OL_LABEL}>{label}</label>}
+      <div className="overflow-x-auto rounded-md border border-gray-800">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-gray-800/60">
+              {columns.map((c, i) => <th key={i} className="px-2 py-1.5 text-left font-medium text-gray-400 whitespace-pre-line">{c}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, r) => (
+              <tr key={r} className="border-t border-gray-800">
+                {columns.map((_, c) => (
+                  <td key={c} className={`p-1 ${c === 0 && firstColWide ? "min-w-[160px]" : "min-w-[80px]"}`}>
+                    <input className="w-full bg-transparent px-1.5 py-1 text-xs text-gray-200 rounded focus:outline-none focus:bg-gray-800" value={row[c] ?? ""} onChange={e => setCell(r, c, e.target.value)} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function OlCard({ title, subtitle, children, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="rounded-xl border border-gray-800 bg-gray-900/60 overflow-hidden">
+      <button onClick={() => setOpen(v => !v)} className="w-full flex items-center justify-between px-4 py-2.5 bg-green-500/10 border-b border-gray-800 text-left">
+        <div>
+          <span className="text-xs font-bold uppercase tracking-wider text-green-400">{title}</span>
+          {subtitle && <span className="ml-2 text-[11px] text-gray-500">{subtitle}</span>}
+        </div>
+        {open ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />}
+      </button>
+      {open && <div className="p-4 space-y-4">{children}</div>}
+    </div>
+  );
+}
+
+const olNum = (v) => {
+  if (v === "" || v === null || v === undefined) return null;
+  const n = Number(String(v).replace(/,/g, ""));
+  return Number.isFinite(n) ? n : v;
+};
+
+function OutlookV2Editor({ content, onChange }) {
+  const c = content;
+  const set = (path) => (v) => onChange(path, v);
+  const g = c.global, id = c.indonesia, sw = c.swot, ph = c.pharma;
+  const idxCols = [id.index_table.header, ...id.index_table.groups.flatMap(gr => (gr.columns || []).map(col => `${gr.name}\n${col}`))];
+  const budget = id.budget;
+
+  return (
+    <div className="space-y-3">
+      {/* Slide 1 */}
+      <OlCard title="Slide 1 · Global" subtitle="Headline, regional notes, exchange rate, growth & oil tables">
+        <div className="grid md:grid-cols-2 gap-3">
+          <OlField label="Headline line 1 (GDP)" value={g.headline[0]} onChange={v => onChange(["global", "headline", 0], v)} />
+          <OlField label="Headline line 2 (inflation)" value={g.headline[1]} onChange={v => onChange(["global", "headline", 1], v)} />
+        </div>
+        <div className="grid md:grid-cols-2 gap-3">
+          {g.blocks.map((b, i) => (
+            <div key={i} className="space-y-1.5">
+              <OlField label={`Block ${i + 1} title`} value={b.title} onChange={set(["global", "blocks", i, "title"])} />
+              <OlArea value={b.text} rows={5} onChange={set(["global", "blocks", i, "text"])} placeholder={"- Point with the figure\n  - sub point"} />
+            </div>
+          ))}
+        </div>
+        <div className="grid md:grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <OlField label="Exchange rate panel title" value={g.fx.title} onChange={set(["global", "fx", "title"])} />
+            <OlGrid columns={["Pair", g.fx.prev_label, g.fx.next_label]} rows={g.fx.rows} onChange={set(["global", "fx", "rows"])} firstColWide={false} />
+            <OlField label="Exchange rate source" value={g.fx.source} onChange={set(["global", "fx", "source"])} placeholder="(Source : APBN, ECB and UOB Outlook)" />
+          </div>
+          <div className="space-y-2">
+            <OlGrid label={`${g.growth.title} ${g.growth.unit}`} columns={g.growth.columns} rows={g.growth.rows} onChange={set(["global", "growth", "rows"])} firstColWide={false} />
+            <OlGrid columns={g.oil.columns} rows={g.oil.rows} onChange={set(["global", "oil", "rows"])} firstColWide={false} />
+            <OlField label="Growth / oil source" value={g.source} onChange={set(["global", "source"])} placeholder="(Source : IMF - July)" />
+          </div>
+        </div>
+      </OlCard>
+
+      {/* Slide 2 */}
+      <OlCard title="Slide 2 · Indonesia" subtitle="Economic index, state budget chart, topic boxes" defaultOpen={false}>
+        <div className="grid md:grid-cols-2 gap-3">
+          <OlField label="Headline line 1 (GDP)" value={id.headline[0]} onChange={v => onChange(["indonesia", "headline", 0], v)} />
+          <OlField label="Headline line 2 (inflation)" value={id.headline[1]} onChange={v => onChange(["indonesia", "headline", 1], v)} />
+        </div>
+        <OlGrid label="Economic index" columns={idxCols} rows={id.index_table.rows} onChange={set(["indonesia", "index_table", "rows"])} />
+        <div className="grid md:grid-cols-2 gap-3">
+          <OlField label="Budget priorities (quote)" value={budget.headline} onChange={set(["indonesia", "budget", "headline"])} />
+          <OlField label="Chart title" value={budget.title} onChange={set(["indonesia", "budget", "title"])} placeholder="Budget Allocation IDR … trillion" />
+        </div>
+        <div>
+          <label className={OL_LABEL}>Budget allocation ({budget.unit}) — chart bars + description list</label>
+          <div className="overflow-x-auto rounded-md border border-gray-800">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-800/60 text-gray-400">
+                  <th className="px-2 py-1.5 text-left font-medium">Category</th>
+                  <th className="px-2 py-1.5 text-left font-medium">{budget.series[0]}</th>
+                  <th className="px-2 py-1.5 text-left font-medium">{budget.series[1]}</th>
+                  <th className="px-2 py-1.5 text-left font-medium">Description</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {budget.items.map((it, i) => (
+                  <tr key={i} className="border-t border-gray-800">
+                    {[["name", "min-w-[110px]"], ["prev", "w-20"], ["next", "w-20"], ["desc", "min-w-[280px]"]].map(([k, w]) => (
+                      <td key={k} className={`p-1 ${w}`}>
+                        <input className="w-full bg-transparent px-1.5 py-1 text-xs text-gray-200 rounded focus:outline-none focus:bg-gray-800"
+                          value={it[k] ?? ""}
+                          onChange={e => onChange(["indonesia", "budget", "items", i, k], k === "prev" || k === "next" ? olNum(e.target.value) : e.target.value)} />
+                      </td>
+                    ))}
+                    <td className="p-1 w-8">
+                      <button onClick={() => onChange(["indonesia", "budget", "items"], budget.items.filter((_, j) => j !== i))} className="p-1 text-gray-500 hover:text-red-400" title="Remove"><Trash2 size={12} /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center justify-between mt-1.5">
+            <button onClick={() => onChange(["indonesia", "budget", "items"], [...budget.items, { name: "", prev: null, next: null, desc: "" }])} className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1"><Plus size={11} /> Add category</button>
+            <OlField value={budget.source} onChange={set(["indonesia", "budget", "source"])} placeholder="(Source : RAPBN)" className="w-64" />
+          </div>
+        </div>
+        <div className="grid md:grid-cols-2 gap-3">
+          {id.boxes.map((b, i) => (
+            <div key={i} className="space-y-1.5">
+              <OlField label={`Box ${i + 1} title`} value={b.title} onChange={set(["indonesia", "boxes", i, "title"])} />
+              <OlArea value={b.text} rows={5} onChange={set(["indonesia", "boxes", i, "text"])} />
+            </div>
+          ))}
+        </div>
+      </OlCard>
+
+      {/* Slide 3 */}
+      <OlCard title="Slide 3 · Indonesia SWOT" subtitle="2 points per quadrant, 2 actions per implication" defaultOpen={false}>
+        <div className="grid md:grid-cols-2 gap-3">
+          {[["strengths", "Strength"], ["weaknesses", "Weaknesses"], ["opportunities", "Opportunities"], ["threats", "Threats"]].map(([k, l]) => (
+            <OlArea key={k} label={l} value={sw[k]} rows={4} onChange={set(["swot", k])} />
+          ))}
+        </div>
+        <div className="grid md:grid-cols-2 gap-3">
+          {[["so", "SO — Strength × Opportunity"], ["wo", "WO — Weakness × Opportunity"], ["st", "ST — Strength × Threat"], ["wt", "WT — Weakness × Threat"]].map(([k, l]) => (
+            <OlArea key={k} label={l} value={sw[k]} rows={3} onChange={set(["swot", k])} placeholder="- Action" />
+          ))}
+        </div>
+      </OlCard>
+
+      {/* Slide 4 */}
+      <OlCard title="Slide 4 · Pharmaceutical Industry" subtitle="Global / Asia / Indonesia market, segments, opportunities & threats" defaultOpen={false}>
+        <div className="grid md:grid-cols-3 gap-3">
+          {[["global", "Global Pharmaceuticals"], ["asia", "Asia Pharmaceuticals"], ["indonesia", "Indonesia Pharmaceuticals"]].map(([k, l]) => (
+            <div key={k} className="space-y-1.5">
+              <OlArea label={`${l} — headline`} value={ph[k].headline} rows={2} onChange={set(["pharma", k, "headline"])} placeholder="Expected increase in sales from … to … (▲ 5%)" />
+              <OlArea value={ph[k].text} rows={3} onChange={set(["pharma", k, "text"])} placeholder="- Supporting point" />
+            </div>
+          ))}
+        </div>
+        <div className="grid md:grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <OlGrid label={`Top 10 global market ${ph.top10.unit}`} columns={["Region", ph.top10.year_label]} rows={ph.top10.rows} onChange={set(["pharma", "top10", "rows"])} firstColWide={false} />
+            <OlField label="Top 10 total line" value={ph.top10.total} onChange={set(["pharma", "top10", "total"])} />
+            <OlField label="Top 10 source" value={ph.top10.source} onChange={set(["pharma", "top10", "source"])} />
+          </div>
+          <div className="space-y-2">
+            <label className={OL_LABEL}>Top 3 Asia market</label>
+            {ph.asia_top3.items.map((v, i) => (
+              <OlField key={i} value={v} onChange={set(["pharma", "asia_top3", "items", i])} placeholder="China USD … billion" />
+            ))}
+            <div className="grid grid-cols-2 gap-2">
+              <OlField label="Total" value={ph.asia_top3.total} onChange={set(["pharma", "asia_top3", "total"])} />
+              <OlField label="Note" value={ph.asia_top3.note} onChange={set(["pharma", "asia_top3", "note"])} />
+            </div>
+            <OlField label="Source" value={ph.asia_top3.source} onChange={set(["pharma", "asia_top3", "source"])} />
+          </div>
+        </div>
+        <div className="grid md:grid-cols-2 gap-3">
+          {ph.segments.map((sg, i) => (
+            <div key={i} className="space-y-1.5">
+              <div className="grid grid-cols-2 gap-2">
+                <OlField label={`Segment ${i + 1}`} value={sg.title} onChange={set(["pharma", "segments", i, "title"])} />
+                <OlField label="Value" value={sg.value} onChange={set(["pharma", "segments", i, "value"])} placeholder="IDR … trillion" />
+              </div>
+              <OlArea value={sg.text} rows={2} onChange={set(["pharma", "segments", i, "text"])} placeholder="- Breakdown : IDR … trillion" />
+            </div>
+          ))}
+        </div>
+        <div className="grid md:grid-cols-2 gap-3">
+          <OlArea label="Opportunities (▲)" value={ph.opportunities} rows={4} onChange={set(["pharma", "opportunities"])} />
+          <OlArea label="Threats (▼)" value={ph.threats} rows={4} onChange={set(["pharma", "threats"])} />
+        </div>
+        <OlField label="Indonesia pharma source" value={ph.source} onChange={set(["pharma", "source"])} />
+      </OlCard>
+    </div>
+  );
+}
+
 const PROVIDER_LABELS = { onprem: "Standard (On-Premise)", gemini: "Gemini", anthropic: "Claude AI" };
 
 function OutlookPanel({ year }) {
@@ -2280,16 +2565,20 @@ function OutlookPanel({ year }) {
     try {
       const res = await pacApi.listSetupModules({ setup_module: "outlook", plan_year: year });
       if (res.success && res.data.length > 0) {
-        setData(Object.assign({}, res.data[0], { content: normalizeOutlookContent(res.data[0].content) }));
+        setData(Object.assign({}, res.data[0], { content: normalizeOutlookContent(res.data[0].content, year) }));
       } else {
-        setData({ setup_module: "outlook", plan_year: year, content: JSON.parse(JSON.stringify(DEFAULT_OUTLOOK)), status: "draft" });
+        setData({ setup_module: "outlook", plan_year: year, content: defaultOutlookV2(year), status: "draft" });
       }
     } catch {
-      setData({ setup_module: "outlook", plan_year: year, content: JSON.parse(JSON.stringify(DEFAULT_OUTLOOK)), status: "draft" });
+      setData({ setup_module: "outlook", plan_year: year, content: defaultOutlookV2(year), status: "draft" });
     } finally { setLoading(false); }
   }, [year]);
 
   useEffect(() => { load(); }, [load]);
+
+  const updateContentPath = (path, val) => {
+    setData(prev => prev ? Object.assign({}, prev, { content: setOutlookPath(prev.content, path, val) }) : prev);
+  };
 
   const updateSectionText = (secKey, val) => {
     setData(prev => {
@@ -2324,7 +2613,7 @@ function OutlookPanel({ year }) {
     try {
       const res = await pacApi.generateOutlook({ year, provider });
       if (res.success && res.data) {
-        setData(Object.assign({}, res.data, { content: normalizeOutlookContent(res.data.content) }));
+        setData(Object.assign({}, res.data, { content: normalizeOutlookContent(res.data.content, year) }));
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);
         if (!res.materials_used && !res.format_examples_used) {
@@ -2349,7 +2638,7 @@ function OutlookPanel({ year }) {
     try {
       const payload = Object.assign({}, data, { setup_module: "outlook", plan_year: year });
       const res = await pacApi.upsertSetupModule(payload);
-      if (res.success) { setData(res.data); setSaved(true); setTimeout(() => setSaved(false), 2000); }
+      if (res.success) { setData(Object.assign({}, res.data, { content: normalizeOutlookContent(res.data.content, year) })); setSaved(true); setTimeout(() => setSaved(false), 2000); }
     } finally { setSaving(false); }
   };
 
@@ -2453,10 +2742,19 @@ function OutlookPanel({ year }) {
           )}
         </div>
       )}
-      <div className="p-5 space-y-4">
+      {isOutlookV2(data.content) ? (
+      <div className="p-5 space-y-3">
         <p className="text-[11px] text-gray-500 -mt-1">
-          Edit directly as text/Markdown (use "- " for bullets, <span className="font-mono">**bold**</span> for emphasis) — the result is used as-is when generating the PPT.
+          Each card is one slide of the Economic Outlook deck. In text boxes use "- " for bullets, "  - " for sub-bullets and <span className="font-mono">**bold**</span> for emphasis; ▲/▼ are colored automatically. Long text is shrunk to fit its box in the PPT.
         </p>
+        <OutlookV2Editor content={data.content} onChange={updateContentPath} />
+      </div>
+      ) : (
+      <div className="p-5 space-y-4">
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <span>This outlook was saved in the old free-text format, which exports as plain text slides. Run <strong>AI Generate</strong> to rebuild it in the Economic Outlook deck format (Global · Indonesia · SWOT · Pharmaceutical Industry).</span>
+        </div>
         {["global_economic", "indonesia_economic", "pharmaceutical"].map(secKey => {
           const colors = sectionColors[secKey];
           const section = data.content[secKey] || { title: "", text: "" };
@@ -2479,6 +2777,7 @@ function OutlookPanel({ year }) {
           );
         })}
       </div>
+      )}
     </div>
     </div>
   );

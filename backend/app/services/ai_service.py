@@ -68,11 +68,11 @@ class AIService:
         self.base_url = settings.ollama_api_url.rstrip("/")
         self.model = settings.ollama_chat_model
 
-    def _anthropic_complete(self, system: str, message: str) -> str:
+    def _anthropic_complete(self, system: str, message: str, max_tokens: int = 4096) -> str:
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         response = client.messages.create(
             model="claude-opus-4-8",
-            max_tokens=4096,
+            max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": message}],
         )
@@ -211,7 +211,7 @@ class AIService:
             logger.warning("followup_suggestions_failed", error=str(e))
         return []
 
-    async def complete(self, system: str, message: str, num_ctx: int = 8192, provider: str = "onprem", gemini_api_key: str = None, web_search: bool = False) -> str:
+    async def complete(self, system: str, message: str, num_ctx: int = 8192, provider: str = "onprem", gemini_api_key: str = None, web_search: bool = False, max_tokens: int = None) -> str:
         """One-shot, non-streaming completion — for batch/background tasks
         (e.g. summarizing an uploaded reference file into a structured
         brief, or generating the Outlook write-up) that just need the final
@@ -219,7 +219,9 @@ class AIService:
         default), "gemini", or "anthropic" (Claude — shared company key
         only, same as the other Claude-backed tools in this app).
         web_search: only meaningful with provider="anthropic" — grounds the
-        response in live web search results via Claude's server-side tool."""
+        response in live web search results via Claude's server-side tool.
+        max_tokens: output cap for the Claude path (its defaults are sized for
+        short answers; long structured JSON like the Outlook needs more)."""
         if provider == "gemini":
             contents = [{"role": "user", "parts": [{"text": message}]}]
             return await gemini_service.generate(system, contents, gemini_api_key)
@@ -228,8 +230,8 @@ class AIService:
             # anthropic's SDK is sync-only; run off the event loop thread
             # like meeting_notes_service's Claude path does.
             if web_search:
-                return await asyncio.to_thread(self._anthropic_complete_with_search, system, message)
-            return await asyncio.to_thread(self._anthropic_complete, system, message)
+                return await asyncio.to_thread(self._anthropic_complete_with_search, system, message, max_tokens or 8192)
+            return await asyncio.to_thread(self._anthropic_complete, system, message, max_tokens or 4096)
 
         messages = [{"role": "system", "content": system}, {"role": "user", "content": message}]
         async with httpx.AsyncClient(timeout=OLLAMA_CHAT_TIMEOUT_SECONDS) as client:

@@ -446,8 +446,10 @@ class BusinessPlanSetupService:
         )
 
     async def export_outlook_ppt(self, db: AsyncSession, plan_year: int):
-        """Build the Business Plan Outlook as a management-report-styled
-        PPTX: a navy title slide, a Contents slide, then one slide per
+        """Build the Business Plan Outlook PPTX. Structured (format_version
+        2) content is rendered by outlook_report in the 2026 deck's layout.
+        Legacy freeform content keeps the old rendering: a navy title
+        slide, a Contents slide, then one slide per
         section (Global Economic / Indonesia Economic / Pharmaceutical
         Industry) with a colored header band matching the web view's
         section colors, KPI stat cards pulled from the AI-generated
@@ -466,6 +468,19 @@ class BusinessPlanSetupService:
         result = await db.execute(q)
         row = result.scalar_one_or_none()
         content = (row.content or {}) if row else {}
+        filename = f"Business plan outlook {plan_year}.pptx"
+
+        # format_version 2 = the structured, four-slide layout of the 2026
+        # "Economic Outlook" deck; anything older falls through to the
+        # legacy one-text-slide-per-section renderer below.
+        from app.services.outlook_report import is_v2, build_outlook_pptx
+        if is_v2(content):
+            data = build_outlook_pptx(content, plan_year)
+            return StreamingResponse(
+                io.BytesIO(data),
+                media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
 
         NAVY = RGBColor(0x1F, 0x2A, 0x44)
         TEAL = RGBColor(0x0D, 0x94, 0x88)
@@ -650,7 +665,6 @@ class BusinessPlanSetupService:
         buf = io.BytesIO()
         prs.save(buf)
         buf.seek(0)
-        filename = f"Business plan outlook {plan_year}.pptx"
         return StreamingResponse(
             buf,
             media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",

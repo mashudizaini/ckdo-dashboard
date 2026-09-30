@@ -11,6 +11,7 @@ drift between runs) in favor of a compact, reusable, point-form reference.
 """
 import asyncio
 import os
+import re
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import select, delete
@@ -27,8 +28,20 @@ _UPLOAD_DIR = os.path.join(
 os.makedirs(_UPLOAD_DIR, exist_ok=True)
 
 # Conservative cap so extracted text + prompt + output stay comfortably
-# within the num_ctx window used for the summarization call.
+# within the num_ctx window used for the local summarization call. Cloud
+# models have far larger windows, so they get much more of a long report
+# (IMF/OECD PDFs run 30-200 pages; the forecast tables are rarely on the
+# first few pages, which is all 15k characters covers).
 _MAX_EXTRACT_CHARS = 15000
+_MAX_EXTRACT_CHARS_CLOUD = 60000
+
+# Words that mark the pages worth keeping when a document has to be cut.
+_KEY_TERMS = re.compile(
+    r"projection|forecast|outlook|table|gdp|growth|inflation|policy rate|interest rate|"
+    r"exchange rate|brent|oil|budget|apbn|rapbn|deficit|pharma|health|"
+    r"proyeksi|asumsi|pertumbuhan|inflasi|nilai tukar|anggaran|belanja|kesehatan",
+    re.I,
+)
 
 
 class OutlookMaterialService:
@@ -99,7 +112,7 @@ class OutlookMaterialService:
             import fitz
             doc = fitz.open(path)
             try:
-                return "\n".join(page.get_text() for page in doc)
+                return "\n".join(f"# Page {i}\n{page.get_text()}" for i, page in enumerate(doc, start=1))
             finally:
                 doc.close()
 
@@ -114,14 +127,7 @@ class OutlookMaterialService:
             lines = []
             for i, slide in enumerate(prs.slides, start=1):
                 slide_lines = []
-                for shape in slide.shapes:
-                    if shape.has_text_frame and shape.text_frame.text.strip():
-                        slide_lines.append(shape.text_frame.text)
-                    elif shape.has_table:
-                        for row in shape.table.rows:
-                            cells = [c.text for c in row.cells if c.text]
-                            if cells:
-                                slide_lines.append(" | ".join(cells))
+                self._pptx_shapes_text(slide.shapes, slide_lines)
                 if slide_lines:
                     lines.append(f"# Slide {i}")
                     lines.extend(slide_lines)
@@ -145,6 +151,60 @@ class OutlookMaterialService:
 
         raise ValueError(f"Format {ext or '(tanpa ekstensi)'} belum didukung untuk convert otomatis")
 
+    def _pptx_shapes_text(self, shapes, out: list):
+        """Text, tables and chart data of a slide, in reading order (top to
+        bottom, left to right). Recurses into grouped shapes — the 2026 deck
+        keeps a whole section (Asia Pharmaceuticals) inside a group, which a
+        flat walk silently skipped — and reads chart series, which is where
+        the state-budget allocation figures live."""
+        ordered = sorted(shapes, key=lambda sh: ((sh.top or 0) // 360000, sh.left or 0))
+        for shape in ordered:
+            if shape.shape_type == 6:  # MSO_SHAPE_TYPE.GROUP
+                self._pptx_shapes_text(shape.shapes, out)
+            elif getattr(shape, "has_chart", False) and shape.has_chart:
+                try:
+                    plot = shape.chart.plots[0]
+                    out.append("[Chart] categories: " + " | ".join(str(c) for c in plot.categories))
+                    for series in plot.series:
+                        out.append(f"[Chart] {series.name}: " + " | ".join(
+                            "" if v is None else f"{v:g}" for v in series.values))
+                except Exception:
+                    pass
+            elif shape.has_table:
+                for row in shape.table.rows:
+                    cells = [c.text.replace("\n", " ").strip() for c in row.cells]
+                    if any(cells):
+                        out.append(" | ".join(cells))
+            elif shape.has_text_frame and shape.text_frame.text.strip():
+                out.append(shape.text_frame.text.strip())
+
+    @staticmethod
+    def _select_for_budget(raw_text: str, limit: int) -> tuple:
+        """Fit a long document into limit characters by keeping whole
+        pages/slides, preferring those dense with figures and outlook terms
+        (forecast tables, budget assumptions), in their original order."""
+        if len(raw_text) <= limit:
+            return raw_text, False
+        chunks = re.split(r"(?m)^(?=# (?:Page|Slide|Sheet)\b)", raw_text)
+        if len(chunks) <= 1:
+            return raw_text[:limit], True
+        scored = []
+        for idx, ch in enumerate(chunks):
+            digits = len(re.findall(r"\d", ch))
+            terms = len(_KEY_TERMS.findall(ch))
+            scored.append(((digits + 20 * terms) / max(len(ch), 1), idx))
+        keep, used = set(), 0
+        # the opening page carries the title, date and headline summary
+        if len(chunks[0]) <= limit // 10:
+            keep.add(0)
+            used = len(chunks[0])
+        for _, idx in sorted(scored, reverse=True):
+            if idx in keep or used + len(chunks[idx]) > limit:
+                continue
+            keep.add(idx)
+            used += len(chunks[idx])
+        return "".join(chunks[i] for i in sorted(keep)), True
+
     async def convert_material(self, db: AsyncSession, material_id: int, provider: str = "onprem", gemini_api_key: str = None) -> dict:
         """Extract text from the uploaded file and summarize it into a
         structured Markdown brief via AI — run once per file, reused on
@@ -166,9 +226,21 @@ class OutlookMaterialService:
             if not raw_text:
                 raise ValueError("Tidak ada teks yang bisa diekstrak dari file ini (kemungkinan hasil scan/gambar)")
 
-            truncated = len(raw_text) > _MAX_EXTRACT_CHARS
-            text_for_ai = raw_text[:_MAX_EXTRACT_CHARS]
-            truncation_note = "\n[...dipotong, dokumen aslinya lebih panjang dari ini...]" if truncated else ""
+            # A format example (last year's deck) is used for its exact
+            # tables, labels and wording — an AI summary flattens exactly
+            # that. Short enough to pass through whole, so keep it verbatim.
+            if row.category == "format" and len(raw_text) <= _MAX_EXTRACT_CHARS:
+                row.brief_text = raw_text
+                row.brief_status = "done"
+                row.brief_error = None
+                row.converted_at = datetime.utcnow()
+                await db.flush()
+                await db.refresh(row)
+                return {"success": True, "data": self._to_dict(row)}
+
+            limit = _MAX_EXTRACT_CHARS if provider == "onprem" else _MAX_EXTRACT_CHARS_CLOUD
+            text_for_ai, truncated = self._select_for_budget(raw_text, limit)
+            truncation_note = "\n[...hanya halaman paling relevan yang disertakan, dokumen aslinya lebih panjang...]" if truncated else ""
 
             purpose = (
                 "acuan STRUKTUR/FORMAT laporan Business Plan Outlook (Global Economic Outlook, "
@@ -186,9 +258,17 @@ class OutlookMaterialService:
             )
             prompt = (
                 f'Dokumen berikut adalah {purpose}: "{row.original_name}".\n\n'
-                "Ringkas menjadi Markdown bullet list berisi poin-poin kunci saja — angka, tren, "
-                "tanggal, dan fakta penting, tanpa basa-basi pembuka/penutup. Gunakan **bold** "
-                "untuk angka/istilah kunci. Maksimal sekitar 20 bullet.\n\n"
+                "Ringkas menjadi Markdown berisi poin-poin kunci saja — angka, tren, tanggal, "
+                "dan fakta penting, tanpa basa-basi pembuka/penutup. Tulis dalam bahasa Inggris. "
+                "Gunakan **bold** untuk angka/istilah kunci. Maksimal sekitar 35 bullet.\n"
+                "Prioritaskan angka yang dipakai slide Outlook, lengkap dengan tahunnya "
+                "(aktual / estimasi / proyeksi): pertumbuhan GDP per negara/kawasan (World, US, "
+                "Euro area, China, Korea, Indonesia), inflasi, suku bunga kebijakan (Fed, ECB, BI), "
+                "kurs (USD/IDR, USD/EUR, USD/KRW), harga minyak Brent, asumsi & alokasi APBN/RAPBN "
+                "per fungsi (pangan, energi, kesehatan, pendidikan, perlindungan sosial, "
+                "pertahanan), serta ukuran/pertumbuhan pasar farmasi. Jika dokumen memuat tabel "
+                "proyeksi, salin sebagai tabel Markdown kecil apa adanya, jangan diparafrasekan.\n"
+                "Sebut di baris pertama: nama penerbit dan bulan/tahun terbit dokumen.\n\n"
                 "=== ISI DOKUMEN ===\n"
                 f"{text_for_ai}{truncation_note}\n"
                 "=== AKHIR DOKUMEN ==="
