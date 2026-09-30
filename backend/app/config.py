@@ -99,18 +99,24 @@ class Settings(BaseSettings):
     # Dedicated on-prem model for Meeting Notes' MOM generation — kept
     # separate from ollama_chat_model (shared by the AI Chatbot/CV
     # Screening/JD Generator) so tuning this one can't silently change
-    # those other features. qwen3:14b chosen over qwen2.5:14b-instruct
-    # after an empirical A/B (comparable quality/reliability once
-    # schema-constrained, newer model generation) — same ~9-10GB VRAM
-    # footprint, confirmed to fit alongside the always-resident Whisper
-    # model on the ai-engine GPU's 16GB budget.
-    ollama_mom_model: str = "qwen3:14b"
+    # those other features. qwen3.5:9b replaced qwen3:14b (2026-09-30) after
+    # an A/B on a real 87-minute weekly meeting with the app's own prompt and
+    # schema: valid JSON in ~50s, 22 topics / 58 points vs 8 / 43, ~63 vs ~35
+    # tok/s. Its hybrid attention keeps the KV cache small: 6.7GB fully on
+    # GPU at num_ctx 32768, vs 8.6GB at 16384 for qwen3:14b. Also the
+    # "Qwen Local" model in CoChat (configure_openwebui_cochat_models.py) —
+    # same model and num_ctx, so Ollama keeps a single copy loaded for both.
+    ollama_mom_model: str = "qwen3.5:9b"
 
     # Whisper transcription — GPU service on the same "ai-engine" VM
     # (172.21.2.27:9500, faster-whisper large-v3, systemd unit whisper-server.service).
     # Replaces running faster-whisper in-process on the backend's CPU for
     # Meeting Notes — ~17x realtime on this box's RTX 5060 Ti vs. potentially
     # slower-than-realtime on CPU, which matters for 1-2 hour meeting audio.
+    # Source: ai-engine-services/whisper/. It unloads the model after 10 idle
+    # minutes to free ~3.7GB of VRAM for Ollama. It stays on large-v3 rather
+    # than large-v3-turbo: turbo was 3.8x faster on an 87-minute meeting but
+    # dropped figures and names, and cannot do Korean -> English translation.
     whisper_api_url: str = "http://172.21.2.27:9500"
 
     # Speaker diarization + voice-embedding — separate pure-inference

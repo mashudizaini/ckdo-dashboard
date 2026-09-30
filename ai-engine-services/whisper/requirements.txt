@@ -1,0 +1,10 @@
+# Whisper transcription microservice — see whisper_server.py for setup notes.
+# Pinned to the versions running on ai-engine (2026-09-30).
+ctranslate2==4.8.1
+fastapi==0.140.0
+faster-whisper==1.2.1
+nvidia-cublas-cu12==12.9.2.10
+nvidia-cudnn-cu12==9.24.0.43
+python-multipart==0.0.32
+structlog==26.1.0
+uvicorn==0.51.0

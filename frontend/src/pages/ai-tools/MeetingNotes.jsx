@@ -136,9 +136,14 @@ export default function MeetingNotes() {
   const [transcribing, setTranscribing] = useState(false);
   const [transcribeError, setTranscribeError] = useState(null);
   const [transcript, setTranscript] = useState(null); // { id, text, segments, language, audio_duration_seconds, processing_time_seconds }
-  // "" = auto-detect (mixed-language meetings), "id"/"en" = pin one language,
-  // skipping Whisper's language-detection pass for a small speed gain.
-  const [transcribeLanguage, setTranscribeLanguage] = useState("");
+  // "" = auto-detect (mixed-language meetings), "en"/"id"/"ko" = pin one
+  // language, "ko-en" = Korean speech translated straight into English text
+  // by Whisper (sent as language "ko" + task "translate"). Defaults to
+  // English: weekly meetings are held in English, and auto-detect on them
+  // came back only ~53% sure (some were even detected as Korean), producing
+  // unpunctuated fragments; pinning "en" on the same recording gave full,
+  // punctuated sentences and better name accuracy.
+  const [transcribeLanguage, setTranscribeLanguage] = useState("en");
   // Estimated (not truly live — faster-whisper returns one final result with
   // no mid-transcription progress signal) percentage + ETA, derived from the
   // audio's own duration and this deployment's observed realtime-multiplier
@@ -540,6 +545,8 @@ export default function MeetingNotes() {
       }, 1000);
     }
 
+    const whisperLanguage = transcribeLanguage === "ko-en" ? "ko" : transcribeLanguage;
+    const whisperTask = transcribeLanguage === "ko-en" ? "translate" : null;
     try {
       // A live recording whose chunks already streamed to the server (see
       // handleStartRecording) is already fully stored there — transcribe it
@@ -549,7 +556,7 @@ export default function MeetingNotes() {
             method: "POST",
             headers: { ...headers, "Content-Type": "application/json" },
             body: JSON.stringify({
-              language: transcribeLanguage || null, meeting_title: title, participants,
+              language: whisperLanguage || null, task: whisperTask, meeting_title: title, participants,
             }),
           })
         : await fetch("/api/v1/ai/meeting-notes/transcribe", {
@@ -560,7 +567,8 @@ export default function MeetingNotes() {
               fd.append("source", recordedBlobInfo ? "recorded" : "uploaded");
               fd.append("meeting_title", title);
               fd.append("participants", participants);
-              if (transcribeLanguage) fd.append("language", transcribeLanguage);
+              if (whisperLanguage) fd.append("language", whisperLanguage);
+              if (whisperTask) fd.append("task", whisperTask);
               return fd;
             })(),
           });
@@ -1088,9 +1096,11 @@ export default function MeetingNotes() {
               <label className="text-xs text-gray-500 shrink-0">Meeting language</label>
               <select value={transcribeLanguage} onChange={(e) => setTranscribeLanguage(e.target.value)} disabled={transcribing}
                 className="rounded-md border border-gray-700 bg-gray-800 text-gray-200 text-xs px-2.5 py-1.5 focus:outline-none focus:border-purple-500 disabled:opacity-50">
-                <option value="">Auto-detect (mixed / both)</option>
-                <option value="id">Bahasa Indonesia</option>
                 <option value="en">English</option>
+                <option value="id">Bahasa Indonesia</option>
+                <option value="ko">Korean (한국어)</option>
+                <option value="ko-en">Korean → English (translate)</option>
+                <option value="">Auto-detect (mixed languages)</option>
               </select>
             </div>
             <button onClick={handleTranscribe} disabled={!file || transcribing}

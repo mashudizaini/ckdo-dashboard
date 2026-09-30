@@ -1,0 +1,28 @@
+[Unit]
+Description=CKDO Whisper Transcription Service (faster-whisper, GPU)
+After=network.target
+
+[Service]
+Type=simple
+User=aiuser
+Group=aiuser
+WorkingDirectory=/home/aiuser/whisper-service
+Environment=WHISPER_MODEL=large-v3
+Environment=WHISPER_DEVICE=cuda
+Environment=WHISPER_COMPUTE_TYPE=float16
+# Unload the model after 10 min without a request (frees ~3.7GB VRAM for Ollama); 0 = keep resident
+Environment=WHISPER_IDLE_UNLOAD_SECONDS=600
+# faster-whisper/CTranslate2 need libcublas/libcudnn at runtime — the NVIDIA
+# driver alone doesn't provide these, and there's no system CUDA toolkit on
+# this box, so point at the pip-installed nvidia-cublas-cu12/nvidia-cudnn-cu12
+# wheels' bundled .so files instead of requiring a system-wide CUDA install.
+Environment=LD_LIBRARY_PATH=/home/aiuser/whisper-service/venv/lib/python3.12/site-packages/nvidia/cublas/lib:/home/aiuser/whisper-service/venv/lib/python3.12/site-packages/nvidia/cudnn/lib
+ExecStart=/home/aiuser/whisper-service/venv/bin/uvicorn whisper_server:app --host 0.0.0.0 --port 9500
+Restart=always
+RestartSec=5
+# Model load + first request can take a while; give it room before
+# systemd considers the service "failed to start".
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

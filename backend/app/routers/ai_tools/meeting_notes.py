@@ -63,12 +63,17 @@ async def _get_recording_or_404(db: AsyncSession, recording_id: int) -> MeetingR
     return rec
 
 
-async def _run_transcription(db: AsyncSession, rec: MeetingRecording, content: bytes, filename: str, language: str | None) -> dict:
+def _check_task(task: str | None) -> None:
+    if task not in (None, "transcribe", "translate"):
+        raise HTTPException(400, 'Invalid task — use "transcribe" or "translate"')
+
+
+async def _run_transcription(db: AsyncSession, rec: MeetingRecording, content: bytes, filename: str, language: str | None, task: str | None = None) -> dict:
     """Shared by POST /transcribe (fresh upload) and POST /recordings/{id}/transcribe
     (audio already stored server-side) — same Whisper call, same status/error handling,
     so the two entry points behave identically once the bytes are in hand."""
     try:
-        result = await MeetingNotesService().transcribe(content, filename, language)
+        result = await MeetingNotesService().transcribe(content, filename, language, task)
     except httpx.TimeoutException:
         rec.status = "error"
         rec.error_message = "Transcription timed out — the ai-engine GPU service took too long to respond."
@@ -101,6 +106,7 @@ async def _run_transcription(db: AsyncSession, rec: MeetingRecording, content: b
 async def transcribe_audio(
     file: UploadFile = File(...),
     language: str = Form(None),
+    task: str = Form(None),  # "translate" = speech in `language` -> English text (e.g. Korean meetings)
     source: str = Form("uploaded"),  # "recorded" | "uploaded"
     meeting_title: str = Form(""),
     participants: str = Form(""),
@@ -111,6 +117,7 @@ async def transcribe_audio(
     in one unified history), then transcribe via the GPU Whisper service."""
     if source not in ("recorded", "uploaded"):
         raise HTTPException(400, 'Invalid source — use "recorded" or "uploaded"')
+    _check_task(task)
 
     content = await file.read()
     ext = os.path.splitext(file.filename or "")[1] or ".webm"
@@ -133,7 +140,7 @@ async def transcribe_audio(
     await db.commit()
     await db.refresh(rec)
 
-    result = await _run_transcription(db, rec, content, file.filename or stored_name, language)
+    result = await _run_transcription(db, rec, content, file.filename or stored_name, language, task)
     return {"success": True, "id": rec.id, **result}
 
 
@@ -234,6 +241,7 @@ async def finalize_recording(
 
 class TranscribeExistingRequest(BaseModel):
     language: str | None = None
+    task: str | None = None  # "translate" = speech in `language` -> English text
     meeting_title: str | None = None
     participants: str | None = None
 
@@ -248,6 +256,7 @@ async def transcribe_existing_recording(
     """Transcribe audio that's already sitting on the server — streamed in via
     .../chunk, or any past recording's stored file — without re-uploading it,
     unlike POST /transcribe which expects the full file in the request body."""
+    _check_task(body.task)
     rec = await _get_recording_or_404(db, recording_id)
     path = os.path.join(_UPLOAD_DIR, rec.filename) if rec.filename else None
     if not path or not os.path.exists(path) or os.path.getsize(path) == 0:
@@ -263,7 +272,7 @@ async def transcribe_existing_recording(
     with open(path, "rb") as f:
         content = f.read()
 
-    result = await _run_transcription(db, rec, content, rec.filename, body.language)
+    result = await _run_transcription(db, rec, content, rec.filename, body.language, body.task)
     return {"success": True, "id": rec.id, **result}
 
 

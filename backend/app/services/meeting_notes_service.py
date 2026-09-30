@@ -182,13 +182,18 @@ def _add_horizontal_line(paragraph):
 
 class MeetingNotesService:
 
-    async def transcribe(self, file_bytes: bytes, filename: str, language: str | None = None) -> dict:
+    async def transcribe(self, file_bytes: bytes, filename: str, language: str | None = None, task: str | None = None) -> dict:
         """Upload audio to the remote GPU Whisper service, return the
-        transcript + segments. Raises httpx.HTTPStatusError / TimeoutException
-        on failure — the router translates these into a clean error response."""
+        transcript + segments. task="translate" turns speech in `language`
+        (e.g. Korean) straight into English text; the result's "language" is
+        then "en" and "source_language" the spoken one. Raises
+        httpx.HTTPStatusError / TimeoutException on failure — the router
+        translates these into a clean error response."""
         url = f"{settings.whisper_api_url.rstrip('/')}/transcribe"
         files = {"file": (filename, file_bytes)}
         data = {"language": language} if language else {}
+        if task:
+            data["task"] = task
         async with httpx.AsyncClient(timeout=TRANSCRIBE_TIMEOUT_SECONDS) as client:
             resp = await client.post(url, files=files, data=data)
             resp.raise_for_status()
@@ -342,7 +347,12 @@ class MeetingNotesService:
                         # shows up as inconsistency/invention rather than useful
                         # variety. Low temperature + constrained top_p keep the smaller
                         # on-prem model closer to the transcript's actual content.
-                        "options": {"temperature": 0.15, "top_p": 0.9, "num_ctx": 16384},  # num_ctx: Ollama's 2048 default cut long transcripts off mid-JSON ("Unterminated string" downstream)
+                        # num_ctx: Ollama's 2048 default cut long transcripts off mid-JSON
+                        # ("Unterminated string" downstream). 16384 was still too small: an
+                        # 87-minute meeting's prompt is ~16.5k tokens, and Ollama silently
+                        # drops the start of the transcript to fit. 32768 fits ~2.5-hour
+                        # meetings plus the JSON output.
+                        "options": {"temperature": 0.15, "top_p": 0.9, "num_ctx": 32768},
                         "format": MOM_JSON_SCHEMA,
                         # Harmless no-op for non-thinking models (confirmed empirically);
                         # required for qwen3-class hybrid-thinking models so the chain-
