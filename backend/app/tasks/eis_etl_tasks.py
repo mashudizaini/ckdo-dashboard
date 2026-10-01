@@ -1060,8 +1060,12 @@ def etl_employee(year: int = None, month: int = None):
 
             dept_totals: dict = defaultdict(int)
             resigned_totals: dict = defaultdict(int)
+            # Trailing *_ rather than a fixed count: this unpacks the same
+            # emp_rows as the roster block above, and adding one field there
+            # broke only here, at runtime, in the half of the task that runs
+            # second.
             for (_uid, _name, _sex, _job, department, _div, _team,
-                 joined, resigned, _status, _reason) in emp_rows:
+                 joined, resigned, _status, *_rest) in emp_rows:
                 if not joined or joined > snap_date:
                     continue
                 if resigned and resigned <= snap_date:
