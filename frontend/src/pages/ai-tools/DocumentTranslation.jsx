@@ -30,6 +30,23 @@ const MODELS = [
 
 const LANG_LABEL = { en: "English", id: "Indonesian" };
 
+const OUTPUT_FORMATS = [
+  { value: "docx", label: "Word (.docx)" },
+  { value: "pdf",  label: "PDF" },
+];
+
+// Prefer the RFC 5987 filename* (keeps Korean names intact) over the ASCII
+// fallback filename=.
+function filenameFrom(res, fallback) {
+  const cd = res.headers.get("Content-Disposition") || "";
+  const star = cd.match(/filename\*=UTF-8''([^;]+)/i);
+  if (star) {
+    try { return decodeURIComponent(star[1].trim()); } catch (_) {}
+  }
+  const plain = cd.match(/filename="?([^";]+)"?/i);
+  return plain ? plain[1].trim() : fallback;
+}
+
 function jobState(j) {
   if (j.status === "pending" || j.status === "processing") {
     return { key: "converting", label: `Reading document… ${j.progress_percent || 0}%`, color: "text-teal-400", busy: true };
@@ -57,7 +74,9 @@ export default function DocumentTranslation() {
 
   const [jobs, setJobs] = useState([]);
   const [jobsLoading, setJobsLoading] = useState(true);
-  const [downloading, setDownloading] = useState(null); // `${jobId}-${format}-${lang}`
+  const [downloading, setDownloading] = useState(null); // `${jobId}-${lang}`
+  const [outputFormat, setOutputFormat] = useState("docx");
+  const [withOriginal, setWithOriginal] = useState(false);
 
   // Only jobs that are, or were, translation jobs — plain conversions from
   // the Document Converter would just be noise here.
@@ -103,23 +122,23 @@ export default function DocumentTranslation() {
     }
   };
 
-  const handleDownload = async (job, format, lang) => {
-    const key = `${job.id}-${format}-${lang}`;
+  // lang is the translation to download; "both" asks the server for the
+  // original followed by the translation (it picks the job's translation).
+  const handleDownload = async (job, lang) => {
     if (downloading) return;
-    setDownloading(key);
+    setDownloading(`${job.id}-${lang}`);
     try {
-      const params = new URLSearchParams({ format, lang });
+      const params = new URLSearchParams({ format: outputFormat, lang: withOriginal ? "both" : lang });
       const res = await fetch(`/api/v1/ai/document-converter/jobs/${job.id}/render?${params}`, { headers });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         throw new Error(d.detail || `Download failed (${res.status})`);
       }
       const blob = await res.blob();
-      const m = (res.headers.get("Content-Disposition") || "").match(/filename=([^;]+)/);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = m ? m[1].trim().replace(/"/g, "") : `${job.filename}.${format}`;
+      a.download = filenameFrom(res, `${job.filename}.${outputFormat}`);
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -220,9 +239,21 @@ export default function DocumentTranslation() {
       </div>
 
       <div className="rounded-xl border border-gray-800 bg-gray-900 p-5">
-        <h3 className="text-sm font-semibold text-gray-200 mb-3 flex items-center gap-2">
-          <History size={15} className="text-gray-500" /> History
-        </h3>
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <h3 className="text-sm font-semibold text-gray-200 flex items-center gap-2 mr-auto">
+            <History size={15} className="text-gray-500" /> History
+          </h3>
+          <label className="text-xs text-gray-500">Download as</label>
+          <select value={outputFormat} onChange={(e) => setOutputFormat(e.target.value)}
+            className="rounded-md border border-gray-700 bg-gray-800 text-gray-200 text-xs px-2.5 py-1.5 outline-none focus:border-blue-500">
+            {OUTPUT_FORMATS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+          </select>
+          <select value={withOriginal ? "both" : "translation"} onChange={(e) => setWithOriginal(e.target.value === "both")}
+            className="rounded-md border border-gray-700 bg-gray-800 text-gray-200 text-xs px-2.5 py-1.5 outline-none focus:border-blue-500">
+            <option value="translation">Translation only</option>
+            <option value="both">Original + translation</option>
+          </select>
+        </div>
         {jobsLoading ? (
           <div className="flex items-center gap-2 text-sm text-gray-500"><Loader2 size={14} className="animate-spin" /> Loading…</div>
         ) : translationJobs.length === 0 ? (
@@ -254,21 +285,13 @@ export default function DocumentTranslation() {
                   </div>
                   <div className="flex items-center gap-1.5">
                     {langs.map((l) => (
-                      <button key={l} onClick={() => handleDownload(j, "docx", l)} disabled={!!downloading}
+                      <button key={l} onClick={() => handleDownload(j, l)} disabled={!!downloading}
                         className="flex items-center gap-1 rounded-md border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:border-blue-500 disabled:opacity-50"
-                        title={`Word, ${LANG_LABEL[l]} only`}>
-                        {downloading === `${j.id}-docx-${l}` ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-                        Word ({l.toUpperCase()})
+                        title={`${LANG_LABEL[l]} translation as ${outputFormat === "pdf" ? "PDF" : "Word"}${withOriginal ? ", with the original first" : ""}`}>
+                        {downloading === `${j.id}-${l}` ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                        {outputFormat === "pdf" ? "PDF" : "Word"} ({l.toUpperCase()})
                       </button>
                     ))}
-                    {langs.length > 0 && (
-                      <button onClick={() => handleDownload(j, "docx", "both")} disabled={!!downloading}
-                        className="flex items-center gap-1 rounded-md border border-gray-700 px-2 py-1 text-xs text-gray-300 hover:border-blue-500 disabled:opacity-50"
-                        title="Word with the original text followed by the translation">
-                        {downloading === `${j.id}-docx-both` ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-                        Original + translation
-                      </button>
-                    )}
                     {converting ? (
                       <button onClick={() => handleStop(j)} className="p-1.5 text-gray-500 hover:text-amber-400" title="Stop">
                         <Square size={14} />

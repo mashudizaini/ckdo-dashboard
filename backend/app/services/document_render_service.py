@@ -2,8 +2,8 @@
 Document Converter — Rendering Service
 ─────────────────────────────────────────
 Renders the structured block list (document_converter_service.extract_
-blocks / document_translation_service.translate_blocks) into MD/DOCX/XLSX/
-JSONL. Every format renders from that SAME block list, not from each
+blocks / document_translation_service.translate_blocks) into MD/DOCX/PDF/
+XLSX/JSONL. Every format renders from that SAME block list, not from each
 other's output, so a table cell is never re-parsed out of another
 format's flattened text (the failure mode
 sumber/Panduan_Konversi_dan_Terjemahan_Dokumen_KO.md opens with).
@@ -14,14 +14,18 @@ cell, which would need row/column alignment guarantees this app's
 generic docling-based extraction doesn't provide (see the deferred
 Phase-2 coordinate-extraction work noted in the enhancement plan).
 """
+import html
 import io
 import json
+import re
+from urllib.parse import quote
 
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from docx import Document as DocxDocument
 from docx.enum.section import WD_ORIENT
+import fitz  # PyMuPDF — already a dependency (Document Converter's PDF splitting)
 from fastapi.responses import StreamingResponse
 
 from app.services.document_converter_service import render_markdown_from_blocks
@@ -32,9 +36,24 @@ HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
 LEFT_WRAP   = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
 
+# C0 control characters (except tab/newline/CR) that OCR sometimes emits —
+# python-docx refuses them ("All strings must be XML compatible").
+_CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _clean(s) -> str:
+    return _CTRL.sub("", str(s or ""))
+
+
 def _stream(buf: io.BytesIO, fname: str, media_type: str) -> StreamingResponse:
+    """HTTP headers are latin-1 only, so a Korean (or mis-encoded) source
+    filename in a bare filename= used to make every download a 500. Send an
+    ASCII fallback plus the real name as RFC 5987 filename*."""
     buf.seek(0)
-    return StreamingResponse(buf, media_type=media_type, headers={"Content-Disposition": f"attachment; filename={fname}"})
+    stem, dot, ext = fname.rpartition(".")
+    ascii_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("_") or "document"
+    disposition = f"attachment; filename=\"{ascii_stem}{dot}{ext}\"; filename*=UTF-8''{quote(fname)}"
+    return StreamingResponse(buf, media_type=media_type, headers={"Content-Disposition": disposition})
 
 
 def _max_table_cols(blocks: list) -> int:
@@ -61,20 +80,20 @@ def _write_docx_section(doc: DocxDocument, blocks: list, section_title: str | No
         doc.add_heading(section_title, level=1)
     for b in blocks:
         if b.get("type") == "heading":
-            doc.add_heading(b.get("text", ""), level=min(max(b.get("level", 1), 1), 4) + 1)
+            doc.add_heading(_clean(b.get("text")), level=min(max(b.get("level", 1), 1), 4) + 1)
         elif b.get("type") == "paragraph":
             if b.get("text"):
-                doc.add_paragraph(b["text"])
+                doc.add_paragraph(_clean(b["text"]))
         elif b.get("type") == "table" and b.get("rows"):
             header, *body = b["rows"]
             t = doc.add_table(rows=1, cols=len(header))
             t.style = "Table Grid"
             for cell, text in zip(t.rows[0].cells, header):
-                cell.paragraphs[0].add_run(text or "").bold = True
+                cell.paragraphs[0].add_run(_clean(text)).bold = True
             for r in body:
                 cells = t.add_row().cells
                 for i, val in enumerate(r[:len(header)]):
-                    cells[i].text = val or ""
+                    cells[i].text = _clean(val)
             doc.add_paragraph("")
 
 
@@ -84,7 +103,7 @@ def render_docx_response(blocks: list, blocks_translated: list | None, title: st
     section.orientation = WD_ORIENT.LANDSCAPE
     section.page_width, section.page_height = section.page_height, section.page_width
 
-    doc.add_heading(title or "Document", level=0)
+    doc.add_heading(_clean(title) or "Document", level=0)
     if blocks_translated:
         _write_docx_section(doc, blocks, section_title="Original")
         _write_docx_section(doc, blocks_translated, section_title="Translated")
@@ -94,6 +113,66 @@ def render_docx_response(blocks: list, blocks_translated: list | None, title: st
     buf = io.BytesIO()
     doc.save(buf)
     return _stream(buf, fname, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+
+# ── PDF — laid out from the same blocks via PyMuPDF's HTML Story; Korean
+#           text falls back to MuPDF's built-in CJK font (no extra install) ──
+
+PDF_CSS = """
+body { font-family: sans-serif; font-size: 10pt; line-height: 1.35; }
+h1 { font-size: 16pt; margin: 0 0 8pt 0; }
+h2 { font-size: 13pt; margin: 10pt 0 4pt 0; }
+h3, h4, h5 { font-size: 11pt; margin: 8pt 0 3pt 0; }
+p { margin: 0 0 5pt 0; }
+table { border-collapse: collapse; margin: 3pt 0 8pt 0; width: 100%; }
+td, th { border: 0.5pt solid #888; padding: 2pt 4pt; font-size: 9pt; vertical-align: top; }
+th { background-color: #1F4E78; color: #FFFFFF; font-weight: bold; }
+"""
+
+
+def _blocks_html(blocks: list, section_title: str | None = None) -> str:
+    out = []
+    if section_title:
+        out.append(f"<h2>{html.escape(section_title)}</h2>")
+    for b in blocks:
+        t = b.get("type")
+        if t == "heading":
+            lvl = min(max(b.get("level", 1), 1), 3) + 2
+            out.append(f"<h{lvl}>{html.escape(_clean(b.get('text')))}</h{lvl}>")
+        elif t == "paragraph" and b.get("text"):
+            out.append(f"<p>{html.escape(_clean(b['text']))}</p>")
+        elif t == "table" and b.get("rows"):
+            header, *body = b["rows"]
+            rows = ["<tr>" + "".join(f"<th>{html.escape(_clean(c))}</th>" for c in header) + "</tr>"]
+            for r in body:
+                cells = list(r[:len(header)]) + [""] * (len(header) - len(r[:len(header)]))
+                rows.append("<tr>" + "".join(f"<td>{html.escape(_clean(c))}</td>" for c in cells) + "</tr>")
+            out.append("<table>" + "".join(rows) + "</table>")
+    return "\n".join(out)
+
+
+def render_pdf_response(blocks: list, blocks_translated: list | None, title: str, fname: str) -> StreamingResponse:
+    body = f"<h1>{html.escape(_clean(title) or 'Document')}</h1>"
+    if blocks_translated:
+        body += _blocks_html(blocks, "Original") + _blocks_html(blocks_translated, "Translated")
+    else:
+        body += _blocks_html(blocks)
+    story = fitz.Story(html=body, user_css=PDF_CSS)
+    buf = io.BytesIO()
+    writer = fitz.DocumentWriter(buf)
+    mediabox = fitz.paper_rect("a4-l")
+    where = mediabox + (36, 36, -36, -36)
+    more = True
+    while more:
+        dev = writer.begin_page(mediabox)
+        more, _ = story.place(where)
+        story.draw(dev)
+        writer.end_page()
+    writer.close()
+    # The CJK fallback font is ~3.5MB; embed only the glyphs actually used.
+    doc = fitz.open("pdf", buf.getvalue())
+    doc.subset_fonts()
+    return _stream(io.BytesIO(doc.tobytes(garbage=3, deflate=True)), fname, "application/pdf")
 
 
 # ── XLSX — real cells via openpyxl, styled to match this app's other

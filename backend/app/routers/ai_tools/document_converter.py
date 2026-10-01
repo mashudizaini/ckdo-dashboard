@@ -18,7 +18,7 @@ Endpoints:
   DELETE /jobs/{id}        — remove a job from history
   POST   /jobs/{id}/translate — translate a done job's extracted content to
                              EN/ID/both, dispatches a background task
-  GET    /jobs/{id}/render — stream the job as MD/DOCX/XLSX/JSONL, original
+  GET    /jobs/{id}/render — stream the job as MD/DOCX/PDF/XLSX/JSONL, original
                              or translated — synchronous, no LLM call
   GET/POST/PUT/DELETE /glossary — term dictionary CRUD, shared across every
                              translation (see document_glossary.py)
@@ -275,7 +275,7 @@ _LANG_FIELD = {"en": "translated_en", "id": "translated_id"}
 @router.get("/jobs/{job_id}/render")
 async def render_job(
     job_id: int,
-    format: str = Query(..., pattern="^(md|docx|xlsx|jsonl)$"),
+    format: str = Query(..., pattern="^(md|docx|pdf|xlsx|jsonl)$"),
     lang: str = Query("original", pattern="^(original|en|id|both)$"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -303,6 +303,8 @@ async def render_job(
         return render_svc.render_md_response(blocks, blocks_translated, title, f"{base_fname}.md")
     if format == "docx":
         return render_svc.render_docx_response(blocks, blocks_translated, title, f"{base_fname}.docx")
+    if format == "pdf":
+        return render_svc.render_pdf_response(blocks, blocks_translated, title, f"{base_fname}.pdf")
     if format == "xlsx":
         return render_svc.render_xlsx_response(blocks, blocks_translated, title, f"{base_fname}.xlsx")
     # jsonl

@@ -24,6 +24,7 @@ const TRANSLATE_TARGETS = [
 const DOWNLOAD_FORMATS = [
   { value: "md",    label: "Markdown" },
   { value: "docx",  label: "Word (.docx)" },
+  { value: "pdf",   label: "PDF" },
   { value: "xlsx",  label: "Excel (.xlsx)" },
   { value: "jsonl", label: "JSONL" },
 ];
@@ -322,7 +323,7 @@ export default function DocumentConverter() {
       const blob = await res.blob();
       const cd = res.headers.get("Content-Disposition") || "";
       const m = cd.match(/filename=([^;]+)/);
-      const fname = m ? m[1].trim() : `${form.title || "document"}.${format}`;
+      const fname = m ? m[1].trim().replace(/"/g, "") : `${form.title || "document"}.${format}`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.download = fname; a.click();
