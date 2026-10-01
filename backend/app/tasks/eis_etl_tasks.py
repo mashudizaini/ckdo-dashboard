@@ -15,6 +15,7 @@ from app.tasks.celery_app import celery_app
 from app.config import get_settings
 from app.database import get_oracle_connection
 import psycopg2
+import psycopg2.extensions
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -36,12 +37,35 @@ def _log_start(pg, job_name, year, month):
 
 
 def _log_end(pg, job_id, status, records=0, error=None):
-    cur = pg.cursor()
-    cur.execute(
-        "UPDATE eis.etl_job_log SET status=%s, finished_at=NOW(), records_processed=%s, error_message=%s WHERE id=%s",
-        (status, records, error, job_id),
-    )
-    pg.commit()
+    """Record how a job ended — including when it ended badly.
+
+    Two ways this used to lose exactly the information it exists to capture:
+
+    1. A failed job leaves the connection in an aborted transaction, so this
+       UPDATE raised InFailedSqlTransaction and took the except-handler down
+       with it. The row kept status 'running' forever, which reads as "still
+       going", not "broken". That is how etl_employee and etl_budget failed
+       every night for eleven days without anyone seeing a failed job: the
+       real error (RLS blocking every INSERT) never reached the log.
+       Rolling back first clears the aborted state — but only when the
+       transaction is actually in error, so a successful run's pending work is
+       never silently discarded.
+
+    2. If writing the log fails anyway, raising from here replaces the caller's
+       real exception with a logging error. The original is what matters, so
+       this swallows its own failure and leaves a trace in the app log.
+    """
+    try:
+        if pg.info.transaction_status == psycopg2.extensions.TRANSACTION_STATUS_INERROR:
+            pg.rollback()
+        cur = pg.cursor()
+        cur.execute(
+            "UPDATE eis.etl_job_log SET status=%s, finished_at=NOW(), records_processed=%s, error_message=%s WHERE id=%s",
+            (status, records, error, job_id),
+        )
+        pg.commit()
+    except Exception:
+        logger.exception("[etl] tidak bisa mencatat akhir job %s (status=%s)", job_id, status)
 
 
 def _month_filter_gl(year, month):
