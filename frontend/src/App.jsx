@@ -29,6 +29,7 @@ import AiSetupPage from "@/pages/setup/ai/AiSetupPage";
 // AI Tools Pages
 import Chatbot from "@/pages/ai-tools/Chatbot";
 import MeetingNotes from "@/pages/ai-tools/MeetingNotes";
+import DocumentTranslation from "@/pages/ai-tools/DocumentTranslation";
 import MeetingTranscriptView from "@/pages/ai-tools/MeetingTranscriptView";
 
 // E-Magazine Pages
@@ -214,6 +215,7 @@ export default function App() {
         <Route path="document-converter" element={<Navigate to="/setup/ai" replace />} />
         <Route path="oracle-data" element={<Navigate to="/ai/chatbot" replace />} />
         <Route path="meeting-notes" element={<MeetingNotes />} />
+        <Route path="document-translation" element={<DocumentTranslation />} />
       </Route>
 
       {/* E-Magazine (new dynamic viewer) — deliberately NOT /e-magazine: nginx

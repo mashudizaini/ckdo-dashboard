@@ -37,7 +37,12 @@ def _update(pg, job_id: int, **fields):
 
 
 @celery_app.task(name="app.tasks.document_converter_tasks.convert_document")
-def convert_document_task(job_id: int, file_path: str, ext: str, language: str = "auto"):
+def convert_document_task(job_id: int, file_path: str, ext: str, language: str = "auto",
+                          translate_target: str = None, translate_provider: str = "onprem",
+                          translate_api_key: str = None):
+    """translate_target ("en" | "id"), when set, chains the translation task
+    once the blocks are stored — the Document Translation page uploads and
+    walks away, so this can't wait for the browser to ask for it."""
     pg = _get_pg()
     try:
         _update(pg, job_id, status="processing", status_message="Starting…")
@@ -81,9 +86,18 @@ def convert_document_task(job_id: int, file_path: str, ext: str, language: str =
         )
         logger.info(f"[document_converter] job {job_id} done ({len(markdown)} chars, {len(blocks)} blocks)")
 
+        if translate_target:
+            celery_app.send_task(
+                "app.tasks.document_translation_tasks.translate_document",
+                kwargs={"job_id": job_id, "target": translate_target, "provider": translate_provider,
+                        "api_key": translate_api_key},
+            )
+
     except Exception as e:
         logger.error(f"[document_converter] job {job_id} failed: {e}")
         _update(pg, job_id, status="error", error_message=str(e), status_message="Failed")
+        if translate_target:
+            _update(pg, job_id, translate_status="error", translate_error="Conversion failed — nothing to translate.")
         raise
     finally:
         pg.close()

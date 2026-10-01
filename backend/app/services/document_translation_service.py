@@ -41,7 +41,7 @@ BATCH_SIZE = 50
 
 TARGET_LABEL = {"en": "English", "id": "Indonesian"}
 
-SYSTEM_PROMPT_TEMPLATE = """You translate corporate/technical documents (Korean or English source) into {target_label}.
+SYSTEM_PROMPT_TEMPLATE = """You translate corporate/technical documents (Korean, English or Indonesian source) into {target_label}.
 
 Rules:
 - Translate each item as a standalone phrase/sentence, preserving its original meaning and register — don't summarize, explain, or add commentary.
@@ -127,10 +127,12 @@ async def _call_llm(provider: str, system: str, prompt: str, api_key: str | None
         resp = await client.post(
             f"{settings.ollama_api_url.rstrip('/')}/api/chat",
             json={
-                "model": settings.ollama_chat_model,
+                "model": settings.ollama_translation_model,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
                 "stream": False,
-                "options": {"temperature": 0.1, "top_p": 0.9},
+                # num_ctx matches the MOM / CoChat presets of the same model so
+                # Ollama doesn't reload it with a different context size.
+                "options": {"temperature": 0.1, "top_p": 0.9, "num_ctx": 32768},
                 "think": False,
             },
         )

@@ -6,7 +6,7 @@ import {
   Monitor, Users, Factory, Calculator,
   ShoppingCart, FileText, LogOut, LayoutGrid, TrendingUp,
   ChevronDown, ChevronRight, Settings, Clock, BarChart3, Warehouse,
-  FlaskConical, MessagesSquare, ExternalLink, Database, Loader2,
+  FlaskConical, MessagesSquare, ExternalLink, Database, Loader2, Languages,
 } from "lucide-react";
 import RobotIcon from "@/components/icons/RobotIcon";
 import logo from "@/assets/LOGO-ONLY.png";
@@ -166,6 +166,7 @@ const AI_ITEMS = [
     ? [{ label: "CoChat", path: COCHAT_URL, icon: MessagesSquare, roles: [], external: true }]
     : []),
   { label: "Meeting Notes", path: "/ai/meeting-notes",  icon: FileText,  roles: [] },
+  { label: "Document Translation", path: "/ai/document-translation", icon: Languages, roles: [] },
 ];
 
 /* ── Leaf nav card — no children (AI Tools items, or a module with none) ── */

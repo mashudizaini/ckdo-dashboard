@@ -90,6 +90,13 @@ class Settings(BaseSettings):
     # qwen2.5:14b-instruct's hallucination threshold specifically — not
     # re-validated for this model, kept as the known-safe starting point.
     ollama_chat_model: str = "qwen3:30b"
+    # Document Translation's "onprem" provider. Not ollama_chat_model: the
+    # qwen3:30b tag is now the always-thinking variant, which ignores
+    # think=false and writes its reasoning into the reply — 3 of 3 test
+    # batches came back as prose instead of JSON, taking 40-110s each
+    # (2026-09-30). qwen3.5:9b honours think=false: valid JSON in seconds.
+    # Same model and num_ctx as ollama_mom_model, so one loaded copy serves both.
+    ollama_translation_model: str = "qwen3.5:9b"
     ollama_tool_model: str = "qwen2.5:7b-instruct"  # Oracle EBS tool-calling chat — smaller/faster is fine for tool selection
     # Vision-capable model for AP Invoice OCR's default ("Standard") provider
     # — qwen2.5:14b-instruct is text-only, so document/image extraction needs

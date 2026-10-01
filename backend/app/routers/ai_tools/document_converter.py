@@ -6,7 +6,10 @@ Required role: any authenticated user
 
 Endpoints:
   POST   /convert          — upload PDF/DOCX/image, dispatches a background
-                             conversion job (Celery) and returns immediately
+                             conversion job (Celery) and returns immediately;
+                             with translate_target set, translation starts by
+                             itself once conversion is done (Document
+                             Translation page)
   GET    /jobs             — list conversion jobs (history + in-progress),
                              newest first, with status/progress per job
   GET    /jobs/{id}        — single job detail, including the full markdown
@@ -59,6 +62,7 @@ os.makedirs(_UPLOAD_DIR, exist_ok=True)
 # PROVIDERS) — same convention/exclusions as meeting_notes.py's
 # _USER_KEY_PROVIDERS (deepseek intentionally left out, shared-key only).
 _USER_KEY_PROVIDERS = {"anthropic", "gemini", "openai", "kimi"}
+_TRANSLATE_PROVIDERS = {"onprem"} | _USER_KEY_PROVIDERS
 
 
 def _job_to_dict(job: DocumentConversionJob, include_markdown: bool = False, include_blocks: bool = False) -> dict:
@@ -103,12 +107,19 @@ async def _get_job_or_404(db: AsyncSession, job_id: int) -> DocumentConversionJo
 async def convert_document(
     file: UploadFile = File(...),
     language: str = Form("auto", description='"auto" (default OCR pipeline) or one of document_converter_service.OCR_LANGUAGE_PACKS, e.g. "korean"'),
+    translate_target: Optional[str] = Form(None, description='"en" | "id" — translate automatically once conversion is done'),
+    translate_provider: str = Form("onprem"),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in svc.SUPPORTED_EXTENSIONS:
         raise HTTPException(400, f"Format tidak didukung: {ext}. Gunakan PDF, DOCX, atau gambar (PNG/JPG).")
+    if translate_target not in (None, "", "en", "id"):
+        raise HTTPException(400, 'translate_target must be "en" or "id"')
+    if translate_provider not in _TRANSLATE_PROVIDERS:
+        raise HTTPException(400, f"Unknown translate_provider: {translate_provider}")
+    translate_target = translate_target or None
 
     stored_path = os.path.join(_UPLOAD_DIR, f"{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}{ext}")
     raw = await file.read()
@@ -123,6 +134,14 @@ async def convert_document(
         status="pending",
         created_by=user.username,
     )
+    api_key = None
+    if translate_target:
+        # "pending" from the start so the job reads as a translation job in
+        # the history while it is still converting.
+        job.translate_status = "pending"
+        job.translate_provider = translate_provider
+        if translate_provider in _USER_KEY_PROVIDERS:
+            api_key = await user_api_key_service.get_user_key(db, user.username, translate_provider)
     db.add(job)
     await db.flush()
     await db.commit()
@@ -131,7 +150,9 @@ async def convert_document(
     from app.tasks.celery_app import celery_app
     result = celery_app.send_task(
         "app.tasks.document_converter_tasks.convert_document",
-        kwargs={"job_id": job.id, "file_path": stored_path, "ext": ext, "language": language},
+        kwargs={"job_id": job.id, "file_path": stored_path, "ext": ext, "language": language,
+                "translate_target": translate_target, "translate_provider": translate_provider,
+                "translate_api_key": api_key},
     )
     job.celery_task_id = result.id
     await db.commit()
