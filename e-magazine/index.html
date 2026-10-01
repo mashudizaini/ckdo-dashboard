@@ -121,8 +121,15 @@
   /* ── Content row: stage + sidebar ───────── */
   .content{flex:1;display:flex;min-height:0}
 
-  main{flex:1;position:relative;display:flex;align-items:center;justify-content:center;overflow:auto;padding:28px;min-width:0;cursor:grab}
-  main.panning{cursor:grabbing;user-select:none}
+  /* main itself no longer scrolls — it's just the positioning context for
+     the nav buttons/overlay, which must stay put on screen regardless of
+     pan/scroll. #scrollArea underneath it is the one actual scrollable
+     element (and the drag-to-pan target): an absolutely-positioned child
+     of a scrolling element scrolls right along with it, which previously
+     dragged the Prev/Next buttons off-position along with the page. */
+  main{flex:1;position:relative;display:flex;min-width:0}
+  #scrollArea{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:28px;min-width:0;cursor:grab}
+  #scrollArea.panning{cursor:grabbing;user-select:none}
   #stage{position:relative;transition:transform .25s ease;transform-origin:center}
   #stage img{-webkit-user-drag:none;user-drag:none}
 
@@ -269,7 +276,7 @@
   @media (max-width:720px){
     header{padding:10px 14px;gap:10px}
     .masthead h1{font-size:16px}
-    main{padding:16px}
+    #scrollArea{padding:16px}
     #prevBtn{left:6px} #nextBtn{right:6px}
     footer{padding:8px 12px}
   }
@@ -353,11 +360,13 @@
 <div class="content">
   <main id="viewer">
     <button class="navBtn" id="prevBtn" aria-label="Previous page">‹</button>
-    <div id="stage">
-      <div class="book" id="book">
-        <div class="half left empty" id="halfL"></div>
-        <div class="half right" id="halfR"></div>
-        <div class="ribbon"><i id="ribbonFill"></i></div>
+    <div id="scrollArea">
+      <div id="stage">
+        <div class="book" id="book">
+          <div class="half left empty" id="halfL"></div>
+          <div class="half right" id="halfR"></div>
+          <div class="ribbon"><i id="ribbonFill"></i></div>
+        </div>
       </div>
     </div>
     <button class="navBtn" id="nextBtn" aria-label="Next page">›</button>
@@ -407,7 +416,7 @@ const els = {
   halfL:$("halfL"), halfR:$("halfR"), prev:$("prevBtn"), next:$("nextBtn"),
   info:$("pageInfo"), thumbs:$("thumbs"), overlay:$("overlay"),
   overlayMsg:$("overlayMsg"), bar:$("bar"), barFill:$("barFill"), ribbon:$("ribbonFill"),
-  stage:$("stage"), viewer:$("viewer"),
+  stage:$("stage"), viewer:$("viewer"), scrollArea:$("scrollArea"),
   editionList:$("editionList"), panel:$("editionsPanel"),
   scrim:$("drawerScrim"), toggle:$("editionsToggle"),
   searchInput:$("searchInput"), searchResults:$("searchResults"),
@@ -741,8 +750,8 @@ function layout(){
   // normal two-page book layout) shrank each one hard. Always show one
   // photo at a time, full width/height, regardless of window size.
   singleMode = window.innerWidth < 720 || !!albumPhotos;
-  const availW = els.viewer.clientWidth - 140;
-  const availH = els.viewer.clientHeight - 70;
+  const availW = els.scrollArea.clientWidth - 140;
+  const availH = els.scrollArea.clientHeight - 70;
   let ph = availH;
   let pw = ph * aspect;
   const maxW = singleMode ? availW : availW/2;
@@ -903,13 +912,16 @@ $("fsBtn").onclick = ()=>{
 };
 
 /* ── Drag-to-pan ─────────────────────────── */
-/* Zooming in past 100% makes #stage bigger than #viewer, which scrolls
+/* Zooming in past 100% makes #stage bigger than #scrollArea, which scrolls
    (overflow:auto) — scrollbars exist but dragging the page directly, like
    an image viewer or a map, is the expected way to pan it. Scrolling via
    the scrollbar/wheel still works exactly as before; this just adds a
-   second way to move around that doesn't require reaching for it. */
+   second way to move around that doesn't require reaching for it.
+   #scrollArea (not #viewer) is the scroll/drag target specifically so the
+   Prev/Next buttons — positioned absolute against #viewer, which does NOT
+   scroll — stay fixed on screen instead of panning away with the page. */
 (function initDragPan(){
-  const el = els.viewer;
+  const el = els.scrollArea;
   let active = false, moved = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
 
   const isControl = (t) => !!t.closest(".navBtn, .qr-link, a, button");
