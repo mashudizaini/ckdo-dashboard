@@ -1569,13 +1569,17 @@ def lookup_master(caller: Caller, text: str, type: str | None = None) -> dict:
 
 def po_get_document(caller: Caller, po_number: str) -> dict:
     """One PO, open or closed: every shipment with ordered, received, billed
-    and cancelled quantities, and the invoices matched to it."""
+    and cancelled quantities, and the invoices matched to it — plus the
+    Purchase History report's columns (payment term, PR/requestor, latest
+    receipt, category, material type, country of origin, org)."""
     args = {"po_number": po_number}
     sql = """
         SELECT s.po_number, s.po_type, s.po_status, s.po_date, s.approved_date, s.vendor_name, s.buyer_name,
-               s.line_num, s.shipment_num, s.item_code, s.item_desc, s.uom, s.qty_ordered, s.qty_received,
-               s.qty_billed, s.qty_cancelled, s.currency_code, s.unit_price_entered, s.amount_idr,
-               s.need_by_date, s.promised_date, s.closed_code, i.invoices
+               s.payment_term, s.pr_number, s.requestor, s.organization_name,
+               s.line_num, s.shipment_num, s.item_code, s.item_desc, s.item_category, s.material_type,
+               s.country_of_origin, s.uom, s.qty_ordered, s.qty_received, s.qty_billed, s.qty_cancelled,
+               s.qty_outstanding, s.receipt_number, s.receipt_date, s.currency_code, s.unit_price_entered,
+               s.amount_entered, s.amount_idr, s.need_by_date, s.promised_date, s.closed_code, i.invoices
           FROM mart.po_shipment s
           LEFT JOIN (SELECT line_location_id, STRING_AGG(DISTINCT last_invoice_num, ', ') AS invoices
                        FROM mart.po_receipt_vs_invoice GROUP BY line_location_id) i

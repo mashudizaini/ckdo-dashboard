@@ -262,6 +262,16 @@ _CORE_DDL = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_core_po_shipment_po ON core.fact_po_shipment (po_number)",
+    # Purchase History report columns (see _PO_SHIPMENT_SQL). Rows loaded
+    # before these existed stay NULL until the next full reload.
+    "ALTER TABLE core.fact_po_shipment ADD COLUMN IF NOT EXISTS payment_term text",
+    "ALTER TABLE core.fact_po_shipment ADD COLUMN IF NOT EXISTS material_type text",
+    "ALTER TABLE core.fact_po_shipment ADD COLUMN IF NOT EXISTS country_of_origin text",
+    "ALTER TABLE core.fact_po_shipment ADD COLUMN IF NOT EXISTS organization_name text",
+    "ALTER TABLE core.fact_po_shipment ADD COLUMN IF NOT EXISTS pr_number text",
+    "ALTER TABLE core.fact_po_shipment ADD COLUMN IF NOT EXISTS requestor text",
+    "ALTER TABLE core.fact_po_shipment ADD COLUMN IF NOT EXISTS receipt_number text",
+    "ALTER TABLE core.fact_po_shipment ADD COLUMN IF NOT EXISTS receipt_date date",
     """
     CREATE TABLE IF NOT EXISTS core.fact_po_distribution (
         po_distribution_id bigint PRIMARY KEY,

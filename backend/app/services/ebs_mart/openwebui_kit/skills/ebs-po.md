@@ -20,7 +20,8 @@ permintaan pembelian, PR belum jadi PO
 - "PO X sudah ditagih belum?", uninvoiced receipts → po_get_match_status
   (po_number; status 'Diterima, belum ditagih penuh' untuk uninvoiced; group_by: none | supplier | status)
 - PR yang belum jadi PO → pr_get_pending (person, min_days_waiting, group_by: none | preparer)
-- Detail satu PO (open atau closed): semua baris, qty terima/tagih, invoice → po_get_document (po_number)
+- Detail satu PO (open atau closed): semua baris, qty terima/tagih/outstanding, payment term, PR & requestor,
+  nomor/tanggal receipt terakhir, kategori, material type, negara asal, invoice → po_get_document (po_number)
 - PO / PR yang menunggu approval, siapa approver-nya → po_get_pending_approval (min_days, doc_type, approver)
 - Receipt belum ditagih (accrual) → po_get_uninvoiced_receipts
 

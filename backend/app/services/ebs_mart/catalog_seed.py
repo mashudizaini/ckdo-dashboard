@@ -485,6 +485,23 @@ COLUMN_CATALOG.update({
     },
 })
 
+# Purchase History report columns added to po_shipment, so "payment term PO X"
+# finds the column instead of being answered as not available.
+COLUMN_CATALOG.update({
+    "po_shipment": {
+        "payment_term": ("Termin pembayaran PO (AP_TERMS), contoh 30 DAYS", ["payment term", "termin", "TOP", "term of payment", "jangka bayar"]),
+        "item_category": ("Kategori item (category set CKDO Inventory)", ["kategori"]),
+        "material_type": ("DIRECT MATERIAL / INDIRECT MATERIAL", ["tipe material", "direct", "indirect"]),
+        "country_of_origin": ("Negara asal barang (manufacturer master)", ["negara asal", "origin", "COO"]),
+        "organization_name": ("Organisasi ship-to", ["org", "plant"]),
+        "pr_number": ("Nomor PR yang mendanai shipment (PR terbaru)", ["PR", "requisition", "nomor PR"]),
+        "requestor": ("User pembuat PR (FND_USER)", ["requestor", "pemohon", "peminta"]),
+        "receipt_number": ("Nomor receipt (RECEIVE) terakhir", ["receipt", "nomor penerimaan", "GRN", "LPB"]),
+        "receipt_date": ("Tanggal transaksi receipt terakhir", ["tanggal terima", "tanggal receipt"]),
+        "qty_outstanding": ("Qty pesan - terima - batal (rumus laporan Purchase History)", ["sisa", "outstanding", "belum diterima"]),
+    },
+})
+
 # Domain + mart-level synonyms, used by find_marts in addition to the column
 # synonyms above.
 MART_SYNONYMS: dict[str, list[str]] = {

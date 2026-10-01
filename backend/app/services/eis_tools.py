@@ -198,7 +198,7 @@ EIS_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_purchase_order_detail",
-            "description": "Cari data PO (Purchase Order) individual — nomor PO, item, supplier, quantity beserta satuannya (uom), harga per unit — berdasarkan supplier, nama barang, kode item, dan/atau nomor PO. Untuk pertanyaan 'PO apa saja dari supplier X', 'PO nomor berapa untuk item Y', bukan sekadar total/trend (untuk itu pakai get_purchasing_performance).",
+            "description": "Cari data PO (Purchase Order) individual per baris — sama persis dengan Detail View laporan Purchase History di dashboard. Setiap baris berisi: nomor & tanggal PR, requestor, nomor PO, tanggal PO, status, item (kode, deskripsi, kategori, item type, material type, negara asal), supplier, organisasi, mata uang, satuan (uom), delivery date, qty, harga per unit, amount, amount IDR, qty diterima (received_qty), nomor & tanggal receipt terakhir, qty outstanding, payment term (termin pembayaran), dan buyer. Cari berdasarkan supplier, nama barang, kode item, nomor PO, periode, material type, kategori, buyer, requestor, dan/atau negara asal. Untuk pertanyaan 'PO apa saja dari supplier X', 'payment term PO Y', 'sudah diterima belum', 'siapa requestor/buyer-nya' — bukan sekadar total/trend (untuk itu pakai get_purchasing_performance). Maksimal 50 baris terbaru per panggilan; persempit filter kalau perlu lebih.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -207,6 +207,11 @@ EIS_TOOLS = [
                     "item_name": {"type": "string", "description": "Opsional. Nama atau deskripsi barang (partial match), contoh Bortezomib, Paracetamol, LABEL. Pakai ini kalau yang disebut pengguna adalah nama bahan/barang, bukan kode."},
                     "po_number": {"type": "string", "description": "Opsional. Nomor PO (partial match)"},
                     "period": {"type": "string", "description": "Opsional. Periode fiskal: YYYY-MM untuk satu bulan (contoh 2026-06), atau YYYY untuk satu tahun penuh (contoh 2025). Pakai bentuk tahun untuk pertanyaan sepanjang tahun \u2014 jangan memanggil tool ini dua belas kali."},
+                    "material_type": {"type": "string", "description": "Opsional. Tipe material, dicocokkan sebagai awalan: DIRECT MATERIAL atau INDIRECT MATERIAL."},
+                    "category": {"type": "string", "description": "Opsional. Kategori item persis, contoh API, EXCIPIENT, PRIMER, SEKUNDER, LIQUID."},
+                    "buyer_name": {"type": "string", "description": "Opsional. Nama buyer (partial match)."},
+                    "requestor": {"type": "string", "description": "Opsional. User pembuat PR / requestor (partial match), contoh MEGA."},
+                    "country_of_origin": {"type": "string", "description": "Opsional. Negara asal barang (partial match), contoh INDIA, CHINA."},
                 },
                 "required": [],
             },
@@ -561,7 +566,9 @@ def get_purchasing_performance(period: str, material_type: str = None) -> list[d
 
 def get_purchase_order_detail(
     supplier_name: str = None, item_code: str = None, item_name: str = None,
-    po_number: str = None, period: str = None,
+    po_number: str = None, period: str = None, material_type: str = None,
+    category: str = None, buyer_name: str = None, requestor: str = None,
+    country_of_origin: str = None,
 ) -> list[dict]:
     """Line-item PO search — backed by eis.fact_po_line (etl_po_lines),
     the same table Purchasing History/Price Analysis read from. Added so
@@ -574,30 +581,50 @@ def get_purchase_order_detail(
     matched nothing and was reported as no purchases at all — while
     item_description held five matching lines with supplier, quantity and
     unit price. A name is not a code, and only one of them can be matched
-    exactly."""
+    exactly.
+
+    Returns every column of the Purchase History Detail View (same order),
+    so anything visible on the dashboard can be answered here — payment
+    term, PR/requestor, receipt number/date and qty outstanding were
+    missing before and the chat reported them as unavailable."""
     fy = pnum = None
     if period:
         fy, pnum = _parse_period(period)
+
+    def _like(v):
+        return f"%{v}%" if v else None
+
     return _query(
         """
-        SELECT po_number, line_num, item_code, item_description, supplier_name,
-               material_type, currency_code, uom, quantity, unit_price, amount_orig, amount_idr,
-               creation_date, closure_status
+        SELECT pr_number, pr_date, requestor, po_number, line_num, creation_date AS po_date,
+               closure_status, item_code, item_description, category, item_type, material_type,
+               country_of_origin, supplier_name, organization_name, currency_code, uom,
+               delivery_date, quantity, unit_price, amount_orig, amount_idr, received_qty,
+               receipt_number, receipt_date, qty_outstanding, payment_term, buyer_name
         FROM eis.fact_po_line
         WHERE (%(supplier_name)s IS NULL OR supplier_name ILIKE %(supplier_like)s)
           AND (%(item_code)s    IS NULL OR UPPER(item_code) = UPPER(%(item_code)s))
           AND (%(item_name)s    IS NULL OR item_description ILIKE %(item_name_like)s)
           AND (%(po_number)s    IS NULL OR po_number ILIKE %(po_like)s)
+          AND (%(material_type)s IS NULL OR UPPER(material_type) LIKE UPPER(%(material_type)s) || '%%')
+          AND (%(category)s     IS NULL OR UPPER(category) = UPPER(%(category)s))
+          AND (%(buyer_name)s   IS NULL OR buyer_name ILIKE %(buyer_like)s)
+          AND (%(requestor)s    IS NULL OR requestor ILIKE %(requestor_like)s)
+          AND (%(country)s      IS NULL OR country_of_origin ILIKE %(country_like)s)
           AND (%(fy)s   IS NULL OR EXTRACT(YEAR FROM creation_date) = %(fy)s)
           AND (%(pnum)s IS NULL OR EXTRACT(MONTH FROM creation_date) = %(pnum)s)
-        ORDER BY creation_date DESC
+        ORDER BY creation_date DESC, po_number, line_num
         LIMIT 50
         """,
         {
-            "supplier_name": supplier_name, "supplier_like": f"%{supplier_name}%" if supplier_name else None,
+            "supplier_name": supplier_name, "supplier_like": _like(supplier_name),
             "item_code": item_code,
-            "item_name": item_name, "item_name_like": f"%{item_name}%" if item_name else None,
-            "po_number": po_number, "po_like": f"%{po_number}%" if po_number else None,
+            "item_name": item_name, "item_name_like": _like(item_name),
+            "po_number": po_number, "po_like": _like(po_number),
+            "material_type": material_type, "category": category,
+            "buyer_name": buyer_name, "buyer_like": _like(buyer_name),
+            "requestor": requestor, "requestor_like": _like(requestor),
+            "country": country_of_origin, "country_like": _like(country_of_origin),
             "fy": fy, "pnum": pnum,
         },
     )

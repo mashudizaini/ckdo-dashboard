@@ -504,6 +504,27 @@ _PO_SHIPMENT_SQL = """
            poll.quantity, poll.quantity_received, poll.quantity_accepted, poll.quantity_rejected,
            poll.quantity_billed, poll.quantity_cancelled, poll.closed_code, poll.cancel_flag, pol.cancel_flag,
            poll.match_option, poll.receipt_required_flag, poll.inspection_required_flag,
+           trm.name, lv_mt.tag, mfr.country_of_origin, hou.name,
+           (SELECT MAX(prh.segment1) KEEP (DENSE_RANK LAST ORDER BY prh.creation_date)
+              FROM po_distributions_all pd
+              JOIN po_req_distributions_all prd   ON prd.distribution_id = pd.req_distribution_id
+              JOIN po_requisition_lines_all prl   ON prl.requisition_line_id = prd.requisition_line_id
+              JOIN po_requisition_headers_all prh ON prh.requisition_header_id = prl.requisition_header_id
+             WHERE pd.line_location_id = poll.line_location_id),
+           (SELECT MAX(fu.user_name) KEEP (DENSE_RANK LAST ORDER BY prh.creation_date)
+              FROM po_distributions_all pd
+              JOIN po_req_distributions_all prd   ON prd.distribution_id = pd.req_distribution_id
+              JOIN po_requisition_lines_all prl   ON prl.requisition_line_id = prd.requisition_line_id
+              JOIN po_requisition_headers_all prh ON prh.requisition_header_id = prl.requisition_header_id
+              LEFT JOIN fnd_user fu ON fu.user_id = prh.created_by
+             WHERE pd.line_location_id = poll.line_location_id),
+           (SELECT MAX(rsh.receipt_num) KEEP (DENSE_RANK LAST ORDER BY rct.transaction_date, rct.transaction_id)
+              FROM rcv_transactions rct
+              JOIN rcv_shipment_headers rsh ON rsh.shipment_header_id = rct.shipment_header_id
+             WHERE rct.po_line_location_id = poll.line_location_id AND rct.transaction_type = 'RECEIVE'),
+           (SELECT MAX(rct.transaction_date)
+              FROM rcv_transactions rct
+             WHERE rct.po_line_location_id = poll.line_location_id AND rct.transaction_type = 'RECEIVE'),
            {wm_expr}
       FROM po_headers_all poh
       JOIN po_lines_all pol           ON pol.po_header_id = poh.po_header_id
@@ -515,6 +536,25 @@ _PO_SHIPMENT_SQL = """
                                       AND msi.organization_id = poll.ship_to_organization_id
       LEFT JOIN per_all_people_f buyer ON buyer.person_id = poh.agent_id
                                       AND SYSDATE BETWEEN buyer.effective_start_date AND buyer.effective_end_date
+      -- The Purchase History report's columns (etl_po_lines' _PO_LINE_FROM),
+      -- so the chat can answer what the dashboard shows: payment term,
+      -- material type, country of origin, ship-to org, the PR that funded
+      -- the shipment and its latest receipt. PR and receipt are correlated
+      -- per shipment (same "latest PR / latest RECEIVE" rule as there) so
+      -- the hourly incremental run stays cheap.
+      LEFT JOIN ap_terms_tl trm ON trm.term_id = poh.terms_id AND trm.language = USERENV('LANG')
+      LEFT JOIN fnd_lookup_values_vl lv_mt ON lv_mt.lookup_code = msi.item_type
+                                          AND lv_mt.view_application_id = 700
+                                          AND lv_mt.lookup_type = 'CKDO_MTRL_TYPE_DIRECT_INDIRECT'
+      LEFT JOIN (
+          SELECT item_id, country_of_origin FROM (
+              SELECT item_id, country_of_origin,
+                     ROW_NUMBER() OVER (PARTITION BY item_id
+                                        ORDER BY NVL(last_update_date, creation_date) DESC) AS rn
+                FROM xxckdo_manufacturer_master)
+           WHERE rn = 1
+      ) mfr ON mfr.item_id = pol.item_id
+      LEFT JOIN hr_all_organization_units hou ON hou.organization_id = poll.ship_to_organization_id
      WHERE poh.org_id = :org_id
        AND poll.shipment_type IN ('STANDARD', 'BLANKET', 'SCHEDULED')
        {wm}
@@ -525,7 +565,9 @@ _PO_SHIPMENT_COLS = [
     "line_num", "shipment_num", "release_num", "item_id", "item_code", "item_desc", "uom", "ship_to_org_id",
     "need_by_date", "promised_date", "unit_price", "quantity", "quantity_received", "quantity_accepted",
     "quantity_rejected", "quantity_billed", "quantity_cancelled", "closed_code", "cancel_flag",
-    "line_cancel_flag", "match_option", "receipt_required", "inspection_required", "src_last_update",
+    "line_cancel_flag", "match_option", "receipt_required", "inspection_required",
+    "payment_term", "material_type", "country_of_origin", "organization_name",
+    "pr_number", "requestor", "receipt_number", "receipt_date", "src_last_update",
 ]
 
 _PO_DIST_WM = "GREATEST(pod.last_update_date, poll.last_update_date, poh.last_update_date)"
@@ -667,7 +709,7 @@ def etl_mart_po(year: int = None, month: int = None, full_refresh: bool = False,
             (_int(r[0]), _int(r[1]), _int(r[2]), r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12],
              _num(r[13]), _int(r[14]), _int(r[15]), _int(r[16]), _int(r[17]), r[18], r[19], r[20], _int(r[21]),
              r[22], r[23], _num(r[24]), _num(r[25]), _num(r[26]), _num(r[27]), _num(r[28]), _num(r[29]),
-             _num(r[30]), r[31], r[32], r[33], r[34], r[35], r[36], r[37])
+             _num(r[30]), r[31], r[32], r[33], r[34], r[35], r[36], *r[37:45], r[45])
             for r in ships
         ]
         dist_rows = [

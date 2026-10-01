@@ -196,8 +196,13 @@ EXT_MART_SQL: dict[str, str] = {
                s.quantity_cancelled AS qty_cancelled,
                s.quantity * s.unit_price                                  AS amount_entered,
                s.quantity * s.unit_price * COALESCE(s.rate_idr, 1)        AS amount_idr,
-               s.need_by_date, s.promised_date, s.closed_code, s.cancel_flag, s.line_cancel_flag, s.match_option
+               s.need_by_date, s.promised_date, s.closed_code, s.cancel_flag, s.line_cancel_flag, s.match_option,
+               s.payment_term, c.item_category, s.material_type, s.country_of_origin, s.organization_name,
+               s.pr_number, s.requestor, s.receipt_number, s.receipt_date,
+               COALESCE(s.quantity, 0) - COALESCE(s.quantity_received, 0)
+                   - COALESCE(s.quantity_cancelled, 0)                  AS qty_outstanding
           FROM core.fact_po_shipment s
+          LEFT JOIN core.dim_item c ON c.inventory_item_id = s.item_id
     """,
 
     "po_approval_pending": f"""

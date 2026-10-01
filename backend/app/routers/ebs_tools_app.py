@@ -768,7 +768,7 @@ async def lookup_master(body: LookupIn, caller: Caller = Depends(current_caller)
 
 
 @app.post("/po_get_document", operation_id="po_get_document",
-          summary="Detail satu PO (open atau closed): semua baris/shipment, qty pesan/terima/tagih/batal, invoice terkait")
+          summary="Detail satu PO (open atau closed): semua baris/shipment, qty pesan/terima/tagih/batal/outstanding, payment term, PR & requestor, receipt terakhir, kategori/material type/negara asal, invoice terkait")
 async def po_get_document(body: PoDocIn, caller: Caller = Depends(current_caller)):
     return await _call(tools.po_get_document, caller, **body.model_dump())
 
