@@ -183,12 +183,19 @@ export const hrApi = {
   getAllCvCandidates: (p)   => api.get("/dashboard/hr/cv-screening/candidates", { params: p }),
 
   // E-Magazine
+  // Uploads (PDF/photos/music) override the client's default 30s timeout —
+  // a multi-MB file can easily take longer than that to transfer on a real
+  // office network, and axios aborts client-side right at 30s with no
+  // server-side trace at all ("client prematurely closed connection" is
+  // all nginx ever sees). Confirmed live 2026-10-01: a 60MB PDF upload
+  // failed consistently on both dev and prod for this exact reason — curl
+  // (no default timeout) never reproduced it, only a real browser did.
   eMagazineList:       ()              => api.get("/dashboard/hr/e-magazine/files"),
-  eMagazineUpload:     (form)          => api.post("/dashboard/hr/e-magazine/upload", form, { headers: { "Content-Type": "multipart/form-data" } }),
-  eMagazineUploadAlbum: (form)         => api.post("/dashboard/hr/e-magazine/upload-album", form, { headers: { "Content-Type": "multipart/form-data" } }),
-  eMagazineAddPhotos:  (filename, form) => api.post(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/add-photos`, form, { headers: { "Content-Type": "multipart/form-data" } }),
+  eMagazineUpload:     (form)          => api.post("/dashboard/hr/e-magazine/upload", form, { headers: { "Content-Type": "multipart/form-data" }, timeout: 600000 }),
+  eMagazineUploadAlbum: (form)         => api.post("/dashboard/hr/e-magazine/upload-album", form, { headers: { "Content-Type": "multipart/form-data" }, timeout: 600000 }),
+  eMagazineAddPhotos:  (filename, form) => api.post(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/add-photos`, form, { headers: { "Content-Type": "multipart/form-data" }, timeout: 600000 }),
   eMagazineReorderPhotos: (filename, photos) => api.patch(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/reorder-photos`, { photos }),
-  eMagazineUploadMusic: (filename, form) => api.post(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/music`, form, { headers: { "Content-Type": "multipart/form-data" } }),
+  eMagazineUploadMusic: (filename, form) => api.post(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/music`, form, { headers: { "Content-Type": "multipart/form-data" }, timeout: 600000 }),
   eMagazineDeleteMusic: (filename)      => api.delete(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/music`),
   eMagazineDelete:     (filename)      => api.delete(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}`),
   eMagazineUpdateQR:   (filename, qrs) => api.patch(`/dashboard/hr/e-magazine/files/${encodeURIComponent(filename)}/qr-links`, qrs),
