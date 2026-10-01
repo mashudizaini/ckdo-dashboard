@@ -974,12 +974,13 @@ def etl_employee(year: int = None, month: int = None):
                     e.user_id, e.full_name, e.sex, e.job_title,
                     e.department, e.division, e.team,
                     e.date_of_joining, e.resign_date, e.employment_status, e.resign_reason,
+                    e.date_of_birth,
                 )
                 for e in main_db.query(
                     Employee.user_id, Employee.full_name, Employee.sex, Employee.job_title,
                     Employee.department, Employee.division, Employee.team,
                     Employee.date_of_joining, Employee.resign_date, Employee.employment_status,
-                    Employee.resign_reason,
+                    Employee.resign_reason, Employee.date_of_birth,
                 )
             ]
         finally:
@@ -993,13 +994,13 @@ def etl_employee(year: int = None, month: int = None):
         # ── Complete employee roster snapshot → dim_employee ─────────
         roster_loaded = 0
         for (user_id, full_name, sex, job_title, department, division, team,
-             joined, resigned, emp_status, resign_reason) in emp_rows:
+             joined, resigned, emp_status, resign_reason, born) in emp_rows:
             cur_pg.execute(
                 """INSERT INTO eis.dim_employee
                        (employee_number, full_name, sex, position_title,
                         department, division, team, hire_date, employment_status,
-                        resign_date, resign_reason, updated_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                        resign_date, resign_reason, date_of_birth, updated_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                    ON CONFLICT (employee_number) DO UPDATE SET
                        full_name         = EXCLUDED.full_name,
                        sex               = EXCLUDED.sex,
@@ -1011,9 +1012,10 @@ def etl_employee(year: int = None, month: int = None):
                        employment_status = EXCLUDED.employment_status,
                        resign_date       = EXCLUDED.resign_date,
                        resign_reason     = EXCLUDED.resign_reason,
+                       date_of_birth     = EXCLUDED.date_of_birth,
                        updated_at        = now()""",
                 (user_id, full_name, sex, job_title, department, division, team,
-                 joined, emp_status, resigned, resign_reason),
+                 joined, emp_status, resigned, resign_reason, born),
             )
             roster_loaded += 1
         pg.commit()

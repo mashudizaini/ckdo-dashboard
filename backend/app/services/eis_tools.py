@@ -239,7 +239,7 @@ EIS_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_employee_directory",
-            "description": "Cari daftar / total karyawan (nama, posisi, department, team, tanggal masuk, status, tanggal & alasan resign) — untuk pertanyaan 'siapa saja di tim X', cari data karyawan tertentu, 'berapa total karyawan resign/aktif saat ini' (hitung dari jumlah baris hasil, employment_status='Resign' untuk yang sudah keluar, 'Active' untuk yang masih bekerja), atau 'kapan/kenapa si X resign' (pakai field resign_date dan resign_reason di hasilnya — SISTEM INI MENYIMPAN tanggal & alasan resign, jangan bilang tidak ada).",
+            "description": "Cari daftar / total karyawan (nama, posisi, department, team, tanggal masuk, status, tanggal & alasan resign, TANGGAL LAHIR) — untuk pertanyaan 'siapa saja di tim X', cari data karyawan tertentu, 'berapa total karyawan resign/aktif saat ini' (hitung dari jumlah baris hasil, employment_status='Resign' untuk yang sudah keluar, 'Active' untuk yang masih bekerja), 'kapan/kenapa si X resign' (pakai field resign_date dan resign_reason di hasilnya — SISTEM INI MENYIMPAN tanggal & alasan resign, jangan bilang tidak ada), atau pertanyaan ULANG TAHUN / TANGGAL LAHIR (pakai field date_of_birth; untuk 'siapa yang ulang tahun bulan ini/bulan Maret' pakai parameter birth_month — SISTEM INI MENYIMPAN tanggal lahir, jangan bilang tidak ada). Sebagian kecil karyawan tanggal lahirnya kosong; sebutkan itu bila relevan, jangan diartikan sebagai tidak ada data sama sekali.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -247,6 +247,7 @@ EIS_TOOLS = [
                     "team": {"type": "string", "description": "Opsional. Nama tim, contoh IT, HRGA, Purchasing, Accounting"},
                     "full_name": {"type": "string", "description": "Opsional. Cari berdasarkan nama (partial match)"},
                     "employment_status": {"type": "string", "description": "Opsional. 'Active' (masih bekerja) atau 'Resign' (sudah keluar) — pakai ini untuk pertanyaan total/daftar karyawan resign atau aktif"},
+                    "birth_month": {"type": "integer", "description": "Opsional. Bulan lahir 1-12 — untuk pertanyaan 'siapa yang ulang tahun bulan ini' atau 'ulang tahun bulan Maret'. Menyaring berdasarkan bulan saja, tahun lahir diabaikan."},
                 },
                 "required": [],
             },
@@ -664,17 +665,27 @@ def get_sales_order_detail(
     )
 
 
-def get_employee_directory(department: str = None, team: str = None, full_name: str = None, employment_status: str = None) -> list[dict]:
+def get_employee_directory(department: str = None, team: str = None, full_name: str = None,
+                           employment_status: str = None, birth_month: int = None) -> list[dict]:
+    # birth_month menyaring BULAN saja, tahun diabaikan: pertanyaan ulang tahun
+    # selalu "siapa bulan ini", tidak pernah "siapa yang lahir Maret 1990".
+    # Diurutkan per tanggal saat menyaring bulan, supaya jawabannya langsung
+    # terbaca sebagai kalender, bukan daftar per departemen.
     return _query(
         """
         SELECT employee_number, full_name, department, division, team, position_title,
-               hire_date, employment_status, resign_date, resign_reason
+               hire_date, employment_status, resign_date, resign_reason, date_of_birth
         FROM eis.dim_employee
         WHERE (%(department)s IS NULL OR UPPER(department) LIKE UPPER(%(department)s) || '%%')
           AND (%(team_like)s IS NULL OR team ILIKE %(team_like)s)
           AND (%(name_like)s IS NULL OR full_name ILIKE %(name_like)s)
           AND (%(employment_status)s IS NULL OR UPPER(employment_status) LIKE UPPER(%(employment_status)s) || '%%')
-        ORDER BY department, team, full_name
+          AND (%(birth_month)s IS NULL
+               OR EXTRACT(MONTH FROM date_of_birth) = %(birth_month)s)
+        ORDER BY
+            CASE WHEN %(birth_month)s IS NULL THEN NULL
+                 ELSE EXTRACT(DAY FROM date_of_birth) END,
+            department, team, full_name
         LIMIT 500
         """,
         {
@@ -682,6 +693,7 @@ def get_employee_directory(department: str = None, team: str = None, full_name: 
             "team_like": f"%{team}%" if team else None,
             "name_like": f"%{full_name}%" if full_name else None,
             "employment_status": employment_status,
+            "birth_month": birth_month,
         },
     )
 

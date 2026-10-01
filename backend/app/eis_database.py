@@ -141,9 +141,24 @@ async def ensure_employee_dim_table():
         await conn.execute(text(
             "ALTER TABLE eis.dim_employee ADD COLUMN IF NOT EXISTS resign_reason TEXT"
         ))
+        # date_of_birth: the same omission as resign_date above, caught the
+        # same way — a user asked CoChat about birthdays and got nothing.
+        # employees.date_of_birth holds 404 of 418 rows; dim_employee simply
+        # never mirrored it, so the tool had nothing to return and the model
+        # had no way to tell "not stored" from "not exposed".
+        await conn.execute(text(
+            "ALTER TABLE eis.dim_employee ADD COLUMN IF NOT EXISTS date_of_birth DATE"
+        ))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_dim_employee_department "
             "ON eis.dim_employee (department)"
+        ))
+        # Birthday questions are "who, this month" — a month/day index keeps
+        # that from scanning the whole roster.
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_dim_employee_birth_md "
+            "ON eis.dim_employee (EXTRACT(MONTH FROM date_of_birth), "
+            "EXTRACT(DAY FROM date_of_birth))"
         ))
 
 
