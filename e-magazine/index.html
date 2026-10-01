@@ -128,7 +128,15 @@
      of a scrolling element scrolls right along with it, which previously
      dragged the Prev/Next buttons off-position along with the page. */
   main{flex:1;position:relative;display:flex;min-width:0}
-  #scrollArea{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:28px;min-width:0;cursor:grab}
+  /* `safe center` memusatkan selama muat, lalu jatuh ke `start` begitu isinya
+     meluap. Dengan `center` biasa, isi yang lebih besar dari wadah didorong
+     ke tengah sehingga tepi atas/kirinya keluar dari jangkauan scroll —
+     tidak bisa dikembalikan dengan cara apa pun. Deklarasi `center` ditulis
+     lebih dulu sebagai cadangan untuk browser tanpa dukungan `safe`. */
+  #scrollArea{flex:1;overflow:auto;display:flex;
+    align-items:center;align-items:safe center;
+    justify-content:center;justify-content:safe center;
+    padding:28px;min-width:0;cursor:grab}
   #scrollArea.panning{cursor:grabbing;user-select:none}
   #stage{position:relative;transition:transform .25s ease;transform-origin:center}
   #stage img{-webkit-user-drag:none;user-drag:none}
@@ -903,7 +911,41 @@ async function buildThumbs(){
 }
 
 /* ── Zoom & fullscreen ──────────────────── */
-function applyZoom(){ els.stage.style.transform = `scale(${zoom})`; }
+function applyZoom(){
+  const el = els.scrollArea, st = els.stage;
+
+  /* Titik yang sekarang ada di tengah layar, disimpan sebagai rasio supaya
+     bisa dipulihkan setelah ukuran area scroll berubah — tanpa ini halaman
+     melompat setiap kali tombol zoom ditekan. */
+  const cx = (el.scrollLeft + el.clientWidth  / 2) / Math.max(1, el.scrollWidth);
+  const cy = (el.scrollTop  + el.clientHeight / 2) / Math.max(1, el.scrollHeight);
+
+  st.style.transform = `scale(${zoom})`;
+
+  /* transform-origin #stage ada di tengah, jadi halaman tumbuh ke SEGALA arah.
+     Tapi sebuah area scroll hanya pernah menampilkan luapan yang melewati tepi
+     AKHIR-nya: yang tumbuh ke belakang, melewati tepi atas/kiri, tidak bisa
+     dijangkau sama sekali karena scrollTop berhenti di 0. Itulah sebabnya
+     bagian atas halaman yang di-zoom tidak bisa dikembalikan sementara bagian
+     bawah bisa digeser dengan normal.
+
+     Separuh yang tumbuh ke belakang itu disisakan sebagai margin, sehingga
+     letaknya pindah ke DALAM kotak yang bisa di-scroll. Pada zoom <= 1 nilainya
+     nol, jadi tidak mengubah apa pun saat tidak di-zoom.
+
+     offsetWidth/offsetHeight dipakai karena keduanya ukuran tata letak sebelum
+     transform — persis angka yang perlu dikalikan, dan tidak terpengaruh margin
+     yang baru saja dipasang. */
+  const grow = Math.max(0, zoom - 1) / 2;
+  st.style.margin = `${st.offsetHeight * grow}px ${st.offsetWidth * grow}px`;
+
+  /* Setelah margin berubah, scrollWidth/Height baru tersedia pada frame
+     berikutnya. */
+  requestAnimationFrame(() => {
+    el.scrollLeft = cx * el.scrollWidth  - el.clientWidth  / 2;
+    el.scrollTop  = cy * el.scrollHeight - el.clientHeight / 2;
+  });
+}
 $("zoomIn").onclick  = ()=>{ zoom=Math.min(2.5, zoom+.2); applyZoom(); };
 $("zoomOut").onclick = ()=>{ zoom=Math.max(.6, zoom-.2); applyZoom(); };
 $("fsBtn").onclick = ()=>{
@@ -984,6 +1026,11 @@ window.addEventListener("resize", ()=>{
   if(!pdf && !albumPhotos) return;
   const wasSingle = singleMode;
   layout();
+  /* layout() menghitung ulang --pw/--ph, dan margin yang disisakan applyZoom()
+     diturunkan dari ukuran itu — tanpa dipanggil lagi, margin lama tertinggal
+     dan bagian atas kembali tidak terjangkau setelah jendela diubah ukurannya
+     sambil ter-zoom. */
+  applyZoom();
   if(wasSingle!==singleMode){
     if(singleMode){ showSingle(spreadPages(spread)[1]||spreadPages(spread)[0]||1); }
     else { showSpread(Math.floor((singlePage-1)/2)); }
