@@ -14,9 +14,10 @@
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
-  Server, Plus, Trash2, Pencil, Eye, EyeOff, Copy, Check, Search,
+  Server, Plus, Trash2, Pencil, Eye, EyeOff, Copy, Check, Search, TerminalSquare,
   Loader2, X, KeyRound, History, ExternalLink, ShieldAlert, ChevronDown, ChevronRight, Activity,
 } from "lucide-react";
+import ServerTerminal from "./ServerTerminal";
 import { serverRegistryApi } from "@/api/dashboard";
 
 /* ─── Shared UI (local copy, see file header) ──────────────────────── */
@@ -114,6 +115,9 @@ export default function ServerControl() {
 
   const [revealed, setRevealed] = useState({}); // credentialId -> {username, password}
   const [revealing, setRevealing] = useState(null);
+  // { credential, serverName } — satu sesi terminal terbuka pada satu waktu;
+  // tiap sesi menahan koneksi SSH di backend, jadi dibuka per permintaan.
+  const [terminal, setTerminal] = useState(null);
   const [copied, setCopied] = useState(null); // credentialId, briefly
   const timers = useRef({});
 
@@ -281,6 +285,7 @@ export default function ServerControl() {
                       key={s.id} server={s}
                       revealed={revealed} revealing={revealing} copied={copied}
                       onReveal={reveal} onHide={hide} onCopy={copyPassword}
+                      onTerminal={(c) => setTerminal({ credential: c, serverName: s.name })}
                       onEditServer={() => setServerModal({ mode: "edit", server: s })}
                       onDeleteServer={() => removeServer(s)}
                       onAddCredential={() => setCredModal({ mode: "add", serverId: s.id })}
@@ -305,6 +310,11 @@ export default function ServerControl() {
           saving={saving} onSave={saveCredential} onClose={() => setCredModal(null)} />
       )}
 
+      {terminal && (
+        <ServerTerminal credential={terminal.credential} serverName={terminal.serverName}
+          onClose={() => setTerminal(null)} />
+      )}
+
       {showLog && <AccessLogModal log={log} onClose={() => setShowLog(false)} />}
     </div>
   );
@@ -316,10 +326,20 @@ function looksLikeUrl(v) {
   return /^https?:\/\//i.test(v || "");
 }
 
+// A terminal only makes sense for a row whose address is a host we can SSH to.
+// Roughly half the inventory is web consoles and SaaS logins (iDRAC, OVM,
+// Synology, Talenta) stored as full URLs — those already have a clickable
+// address, and offering them a shell would just produce a connection error.
+function canSsh(address) {
+  const a = (address || "").trim();
+  return !!a && !a.includes("://") && !a.includes("/");
+}
+
 function ServerRow({
-  server, revealed, revealing, copied, onReveal, onHide, onCopy,
+  server, revealed, revealing, copied, onReveal, onHide, onCopy, onTerminal,
   onEditServer, onDeleteServer, onAddCredential, onEditCredential, onDeleteCredential,
 }) {
+  const sshable = canSsh(server.address);
   return (
     <div style={{ borderRadius: 12, border: "1px solid rgba(15,23,42,0.08)", overflow: "hidden" }}>
       <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 flex-wrap" style={{ background: "#f8fafc" }}>
@@ -379,6 +399,14 @@ function ServerRow({
                     </>
                   ) : (
                     <Btn size="sm" icon={isRevealing ? Loader2 : Eye} disabled={isRevealing} onClick={() => onReveal(c.id)} />
+                  )}
+                  {/* Opens an SSH shell in the page — the password never
+                      reaches the browser, unlike reveal-and-paste beside it.
+                      Hidden for rows whose address is a web console: a
+                      terminal there would only fail. */}
+                  {sshable && (
+                    <Btn size="sm" icon={TerminalSquare} title="Buka terminal SSH"
+                      onClick={() => onTerminal(c)} />
                   )}
                   <Btn size="sm" icon={Pencil} onClick={() => onEditCredential(c)} />
                   <Btn size="sm" icon={Trash2} variant="danger" onClick={() => onDeleteCredential(c)} />
