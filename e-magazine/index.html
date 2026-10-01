@@ -121,8 +121,10 @@
   /* ── Content row: stage + sidebar ───────── */
   .content{flex:1;display:flex;min-height:0}
 
-  main{flex:1;position:relative;display:flex;align-items:center;justify-content:center;overflow:auto;padding:28px;min-width:0}
+  main{flex:1;position:relative;display:flex;align-items:center;justify-content:center;overflow:auto;padding:28px;min-width:0;cursor:grab}
+  main.panning{cursor:grabbing;user-select:none}
   #stage{position:relative;transition:transform .25s ease;transform-origin:center}
+  #stage img{-webkit-user-drag:none;user-drag:none}
 
   .book{position:relative;display:flex;filter:drop-shadow(var(--shadow));perspective:2600px}
   /* Confirms a search-result jump landed even when the target page was
@@ -899,6 +901,65 @@ $("fsBtn").onclick = ()=>{
   if(document.fullscreenElement) document.exitFullscreen();
   else document.documentElement.requestFullscreen();
 };
+
+/* ── Drag-to-pan ─────────────────────────── */
+/* Zooming in past 100% makes #stage bigger than #viewer, which scrolls
+   (overflow:auto) — scrollbars exist but dragging the page directly, like
+   an image viewer or a map, is the expected way to pan it. Scrolling via
+   the scrollbar/wheel still works exactly as before; this just adds a
+   second way to move around that doesn't require reaching for it. */
+(function initDragPan(){
+  const el = els.viewer;
+  let active = false, moved = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+
+  const isControl = (t) => !!t.closest(".navBtn, .qr-link, a, button");
+
+  function onDown(x, y, target){
+    if(isControl(target)) return false;
+    active = true; moved = false;
+    startX = x; startY = y;
+    startLeft = el.scrollLeft; startTop = el.scrollTop;
+    return true;
+  }
+  function onMove(x, y){
+    if(!active) return;
+    const dx = x - startX, dy = y - startY;
+    if(Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+    if(moved){
+      el.scrollLeft = startLeft - dx;
+      el.scrollTop  = startTop - dy;
+      el.classList.add("panning");
+    }
+  }
+  function onUp(){
+    if(active && moved){
+      // The mouseup is immediately followed by a click on whatever's under
+      // the pointer — without this it could still land on a QR link after
+      // a real drag, firing it unintentionally.
+      const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+      window.addEventListener("click", swallow, { capture: true, once: true });
+    }
+    active = false; moved = false;
+    el.classList.remove("panning");
+  }
+
+  el.addEventListener("mousedown", (e) => {
+    if(e.button !== 0) return;
+    if(onDown(e.clientX, e.clientY, e.target)) e.preventDefault(); // stops native image drag-ghost + text selection
+  });
+  window.addEventListener("mousemove", (e) => onMove(e.clientX, e.clientY));
+  window.addEventListener("mouseup", onUp);
+
+  el.addEventListener("touchstart", (e) => {
+    if(e.touches.length !== 1) return;
+    onDown(e.touches[0].clientX, e.touches[0].clientY, e.target);
+  }, { passive: true });
+  el.addEventListener("touchmove", (e) => {
+    if(e.touches.length !== 1) return;
+    onMove(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  el.addEventListener("touchend", onUp);
+})();
 
 /* ── Interaction ────────────────────────── */
 els.prev.onclick = ()=>flip(-1);
