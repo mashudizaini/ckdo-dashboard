@@ -25,9 +25,19 @@ that Open WebUI fills per request from the logged-in user's own account
 can trust the forwarded email the same way it trusts the service key — and it
 needs no ENABLE_FORWARD_USER_INFO_HEADERS env change or container restart.
 
-The model is created without public access grants: only admins see it until
-an Open WebUI group for ebs-* users is added (blueprint: "Akses: hanya grup
-ebs-*").
+EBS Analyst, the EBS Data Tools server and the shared skills and prompts are
+granted to the Open WebUI group ebs-users, synced to everyone holding any
+ebs-* group in Setup > AI > EBS Chat Access (blueprint: "Akses: hanya grup
+ebs-*"). One shared assistant serves every domain because the fence is not
+the model: ebs_mart/access.py resolves the caller's own ebs_groups on each
+request and DOMAIN_BY_GROUP decides which marts answer. A purchasing user
+asking about AP aging is refused by the dashboard — they do not need a
+separate model, and withholding the model would only have hidden their own
+purchasing data from them too.
+
+Until 2026-10-01 these four carried no grants at all, so only administrators
+could reach them. That was invisible for months because ui.default_user_role
+held "admin" in the Open WebUI database, making every account an admin.
 
 System Administration (blueprint v2 4.7 / library v2 2.4, 3.2b, 13b) is set
 up in the same run, fenced to the Open WebUI group ebs-sysadmin whose members
@@ -64,6 +74,10 @@ SA_GROUP = "ebs-sysadmin"
 SUPPORT_MODEL_ID = "ebs-support"
 FIN_GROUP = "ebs-finance"
 FIN_MODEL_ID = "ebs-finance-controller"
+# Everyone holding ANY ebs-* group. A superset of ebs-sysadmin and
+# ebs-finance, so it is the one grant EBS Analyst and the EBS Data Tools
+# server need.
+USER_GROUP = "ebs-users"
 
 
 def finance_emails() -> set[str]:
@@ -78,6 +92,26 @@ def finance_emails() -> set[str]:
         return {r[0] for r in cur.fetchall()}
     finally:
         conn.close()
+def ebs_user_emails() -> set[str]:
+    """Emails granted any ebs-* group in Setup > AI > EBS Chat Access.
+
+    Separate from finance_emails() because the fence is not the same: which
+    marts a caller may read is decided per request from their own ebs_groups
+    (ebs_mart/access.py -> DOMAIN_BY_GROUP), so one shared assistant is safe
+    for all of them. A purchasing user asking about AP aging gets refused by
+    the dashboard, not by being unable to see the model.
+    """
+    from app.services.ebs_chat_service import _get_pg
+    conn = _get_pg()
+    try:
+        cur = conn.cursor()
+        cur.execute("""SELECT lower(email) FROM ebs_chat_scope
+                        WHERE jsonb_array_length(COALESCE(ebs_groups, '[]'::jsonb)) > 0""")
+        return {r[0] for r in cur.fetchall()}
+    finally:
+        conn.close()
+
+
 MODEL_ID = "ebs-analyst"
 FILTER_ID = "ebs_context"
 ACTION_ID = "ebs_export_excel"
@@ -138,6 +172,10 @@ def main():
     fin_grants = sync_group(FIN_GROUP, "Finance & Accounting — model EBS Finance Controller. Anggota disinkronkan "
                             "dari Setup > AI > EBS Chat Access (grup ebs-finance / ebs-management).",
                             finance_emails())
+    user_grants = sync_group(USER_GROUP, "Semua pemegang grup ebs-* — model EBS Analyst dan server EBS Data Tools. "
+                             "Anggota disinkronkan dari Setup > AI > EBS Chat Access (grup ebs-* apa pun). Mart yang "
+                             "benar-benar terbaca tetap ditentukan per pemanggil oleh DOMAIN_BY_GROUP.",
+                             ebs_user_emails())
 
     # 1. Tool server connections
     conn = {
@@ -147,10 +185,12 @@ def main():
         "auth_type": "bearer",
         "key": service_key,
         "headers": {"X-OpenWebUI-User-Email": "{{USER_EMAIL}}", "X-OpenWebUI-Chat-Id": "{{CHAT_ID}}"},
-        # ebs-sysadmin (EBS Support) and ebs-finance (Finance Controller) may
-        # use it; anyone else still needs an admin role or a grant added by
-        # hand (the dashboard checks ebs-* groups on every call regardless).
-        "config": {"enable": True, "access_grants": sa_grants + fin_grants},
+        # Granted to ebs-users, which already contains every ebs-sysadmin and
+        # ebs-finance member; the other two are listed as well so a failed
+        # ebs-users sync cannot take the server away from Support and Finance.
+        # The dashboard checks each caller's ebs-* groups on every call
+        # regardless, so this grant decides visibility, not data.
+        "config": {"enable": True, "access_grants": user_grants + sa_grants + fin_grants},
         "info": {
             "id": SERVER_ID,
             "name": "CKDO EBS Data Tools",
@@ -205,8 +245,12 @@ def main():
     for p in sorted((KIT / "skills").glob("*.md")):
         text = p.read_text(encoding="utf-8")
         title = text.splitlines()[0].lstrip("# ").strip()
+        # The shared skills belong with the shared model: without a grant the
+        # skill silently does not load for an ebs-users member, and EBS Analyst
+        # answers from the system prompt alone.
         body = {"id": p.stem, "name": p.stem, "description": title, "content": text,
-                "meta": {"tags": ["ebs"]}, "is_active": True, "access_grants": sa_grants + fin_grants}
+                "meta": {"tags": ["ebs"]}, "is_active": True,
+                "access_grants": user_grants + sa_grants + fin_grants}
         if exists(f"/skills/id/{p.stem}"):
             call("POST", f"/skills/id/{p.stem}/update", json=body)
         else:
@@ -218,7 +262,10 @@ def main():
     existing = {p["command"]: p for p in call("GET", "/prompts/")}
     for pr in json.loads((KIT / "prompts.json").read_text(encoding="utf-8")):
         command = pr["command"].lstrip("/")
-        body = {"command": command, "name": pr["title"], "content": pr["content"], "tags": ["ebs"]}
+        # access_grants was missing here, which left the shared /commands
+        # reachable by admins only — invisible while every account was admin.
+        body = {"command": command, "name": pr["title"], "content": pr["content"], "tags": ["ebs"],
+                "access_grants": user_grants + sa_grants + fin_grants}
         if command in existing:
             call("POST", f"/prompts/id/{existing[command]['id']}/update", json=body)
         else:
@@ -278,7 +325,10 @@ def main():
             "function_calling": "native",
             "max_tokens": 8000,
         },
-        "access_grants": [],
+        # Was [] — admins only, which went unnoticed while every CoChat account
+        # was an administrator. Data access is decided per caller from their own
+        # ebs_groups, so the model itself is safe to share.
+        "access_grants": user_grants,
         "is_active": True,
     }
     upsert_variants(model)

@@ -6,11 +6,12 @@ import {
   Monitor, Users, Factory, Calculator,
   ShoppingCart, FileText, LogOut, LayoutGrid, TrendingUp,
   ChevronDown, ChevronRight, Settings, Clock, BarChart3, Warehouse,
-  FlaskConical, MessagesSquare, ExternalLink, Database, Loader2, Languages,
+  FlaskConical, MessagesSquare, ExternalLink, Database, Loader2, Languages, Sparkles,
 } from "lucide-react";
 import RobotIcon from "@/components/icons/RobotIcon";
 import logo from "@/assets/LOGO-ONLY.png";
 import { oracleEnvApi } from "@/api/dashboard";
+import { openGemini } from "@/utils/sidePopup";
 
 // Each top-level module now expands into its own sections (formerly rendered
 // as an in-page tab bar) — clicking a section navigates straight to its URL.
@@ -165,12 +166,42 @@ const AI_ITEMS = [
   ...(COCHAT_URL
     ? [{ label: "CoChat", path: COCHAT_URL, icon: MessagesSquare, roles: [], external: true }]
     : []),
+  // Gemini dibuka di jendela sempit yang menempel di tepi kanan layar, bukan
+  // tab baru (lihat utils/sidePopup.js): dashboard tetap terlihat di
+  // sebelahnya, jadi tidak ada yang perlu keluar dari aplikasi untuk bertanya.
+  //
+  // Tidak ada URL per lingkungan dan tidak ada gerbang peran: langganan Google
+  // Workspace perusahaan sudah memberi setiap karyawan Gemini berbayar, dan
+  // alamatnya sama untuk semua orang. Bandingkan dengan CoChat di atas, yang
+  // justru WAJIB punya URL per lingkungan.
+  { label: "Gemini", path: "", icon: Sparkles, roles: [], popup: "gemini" },
   { label: "Meeting Notes", path: "/ai/meeting-notes",  icon: FileText,  roles: [] },
   { label: "Document Translation", path: "/ai/document-translation", icon: Languages, roles: [] },
 ];
 
 /* ── Leaf nav card — no children (AI Tools items, or a module with none) ── */
 function NavCard({ item }) {
+  const email = useAuthStore((s) => s.user?.email);
+
+  // Gemini (item.popup) tidak dinavigasi dan tidak dibuka sebagai tab: ia
+  // muncul di jendela sempit di tepi kanan layar, jadi dashboard tetap
+  // terlihat. <button>, bukan <a> — tidak ada URL yang bermakna untuk
+  // di-klik-kanan-salin, dan window.open butuh gerakan klik pengguna agar
+  // tidak diblokir.
+  if (item.popup === "gemini") {
+    return (
+      <button type="button" onClick={() => openGemini(email)} className="nav-card"
+              style={{ width: "100%", border: "none", background: "none",
+                       font: "inherit", textAlign: "left", cursor: "pointer" }}>
+        <span className="nav-card__icon">
+          <item.icon size={15} color="#2563eb" />
+        </span>
+        <span className="nav-card__label" style={{ flex: 1 }}>{item.label}</span>
+        <ExternalLink size={12} color="#64748b" />
+      </button>
+    );
+  }
+
   // External tools (e.g. CoChat) aren't app routes — NavLink's client-side
   // routing doesn't apply to a cross-origin URL, so these render a plain
   // anchor instead, opened in a new tab so the dashboard's own state isn't
@@ -445,8 +476,10 @@ export default function Sidebar() {
             AI TOOLS
           </p>
           <div className="space-y-1.5">
+            {/* Gemini tidak punya path (bukan rute, dibuka sebagai jendela),
+                jadi kuncinya diambil dari item.popup. */}
             {visibleItems(AI_ITEMS).map((item) => (
-              <NavCard key={item.path} item={item} />
+              <NavCard key={item.path || item.popup} item={item} />
             ))}
           </div>
         </div>
