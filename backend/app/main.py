@@ -298,6 +298,18 @@ app.include_router(
     tags=["Dashboard - IT - Server Control"],
     dependencies=[Depends(require_role(Roles.IT))],
 )
+# The interactive shell is a WebSocket. A browser's WebSocket API cannot set an
+# Authorization header, so Depends(require_role(...)) cannot run for it — it
+# would reject every connection. The handler therefore performs the SAME checks
+# itself, in code: it verifies the Keycloak token against JWKS via
+# dependencies.verify_token and requires Roles.IT before touching anything, then
+# additionally requires a single-use ticket minted by the IT-gated router above
+# and bound to that same user. Authorization is not skipped here, only moved
+# from the decorator into the handler, where the transport allows it.
+app.include_router(
+    it_server_registry.ws_router, prefix=f"{API_PREFIX}/dashboard/it/server-registry",
+    tags=["Dashboard - IT - Server Control"],
+)
 # These three moved from Setup > IT to Setup > General (2026-09-01) — no
 # longer blanket it_staff-gated. Access is now per-user via the new
 # menu_access_service (see Setup > General > Access Control), not tied to

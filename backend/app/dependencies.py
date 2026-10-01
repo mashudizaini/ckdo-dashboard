@@ -69,6 +69,21 @@ class CurrentUser:
 # DEPENDENCIES
 # ─────────────────────────────────────────
 
+async def verify_token(token: str) -> CurrentUser:
+    """Validate a raw Keycloak token and return its CurrentUser.
+
+    Split out of get_current_user so code that cannot use the dependency
+    chain can still authenticate properly instead of inventing its own scheme.
+    The only caller today is the Server Control terminal WebSocket: a browser's
+    WebSocket API cannot set an Authorization header, so that handler receives
+    the token in its first frame and calls this — the route still checks
+    identity and role, it just does it in code rather than via Depends.
+
+    Raises the same 401 HTTPException as the dependency on any failure.
+    """
+    return await _decode(token)
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> CurrentUser:
@@ -76,7 +91,10 @@ async def get_current_user(
     FastAPI dependency — validates Keycloak Bearer token via JWKS.
     Injects CurrentUser into route handlers.
     """
-    token = credentials.credentials
+    return await _decode(credentials.credentials)
+
+
+async def _decode(token: str) -> CurrentUser:
     try:
         jwks = await get_jwks()
         try:

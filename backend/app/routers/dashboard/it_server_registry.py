@@ -16,16 +16,34 @@ Endpoints:
   DELETE /credentials/{credential_id}   — delete a credential
   POST   /credentials/{credential_id}/reveal — decrypt + return the password, logged
   GET    /access-log                    — recent reveal history (who/what/when)
+  POST   /credentials/{credential_id}/terminal-ticket — mint a single-use ticket
+
+The interactive shell itself is a WebSocket and lives on ws_router below,
+mounted WITHOUT this router's Bearer dependency: a browser's WebSocket API
+cannot send an Authorization header, so it authenticates with the ticket
+this router issues to an already-authenticated IT user.
 """
+import asyncio
+import json
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.dependencies import CurrentUser, get_current_user
+from app.dependencies import CurrentUser, Roles, get_current_user, verify_token
+
 from app.services import server_registry_service as svc
+from app.services import server_terminal_service as term
+
+import structlog
+
+logger = structlog.get_logger(__name__)
+
+# CR+LF tanpa escape: berkas ini pernah rusak karena backslash di
+# heredoc ikut kolaps saat ditulis lewat SSH.
+_EOL = chr(13) + chr(10)
 
 router = APIRouter()
 
@@ -130,3 +148,154 @@ async def reveal_credential(credential_id: int, user: CurrentUser = Depends(get_
     if not result:
         raise HTTPException(404, "Credential not found")
     return result
+
+
+# ── Interactive shell ────────────────────────────────────────────────────
+#
+# A web page cannot launch PuTTY, cmd or PowerShell — that is a browser
+# security boundary. So the shell is brought to the page instead. See
+# services/server_terminal_service.py for why this is a better security shape
+# than reveal-and-paste, and for the three fences around it.
+
+
+@router.post("/credentials/{credential_id}/terminal-ticket")
+async def create_terminal_ticket(credential_id: int, user: CurrentUser = Depends(get_current_user)):
+    """Mint a single-use, 30-second ticket for one credential.
+
+    Issued on this router, so it inherits the IT role gate. The ticket is what
+    the WebSocket trusts; it is never put in a URL (nginx logs those).
+    """
+    ticket = await term.issue_ticket(credential_id, user.username or "unknown")
+    return {"ticket": ticket, "expires_in": term.TICKET_TTL}
+
+
+ws_router = APIRouter()
+
+
+@ws_router.websocket("/terminal")
+async def server_terminal(websocket: WebSocket):
+    """Bridge a browser terminal to an SSH shell.
+
+    Protocol, all JSON text frames:
+      client -> {"ticket": "...", "cols": 120, "rows": 30}   first frame, required
+      server -> {"type": "ready", "server": "...", "user": "..."}
+      client -> {"type": "input", "data": "ls
+"}
+      client -> {"type": "resize", "cols": .., "rows": ..}
+      server -> {"type": "output", "data": "..."}
+      server -> {"type": "error", "message": "..."} then close
+    """
+    from app.database import AsyncSessionLocal
+
+    await websocket.accept()
+    session: term.SshSession | None = None
+    pump: asyncio.Task | None = None
+    try:
+        # First frame carries the ticket. Anything else and the socket closes
+        # without having touched the database.
+        try:
+            hello = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=15))
+        except (asyncio.TimeoutError, ValueError):
+            await websocket.close(code=4401)
+            return
+
+        # Identity and role are checked HERE, in code. The WebSocket cannot
+        # carry an Authorization header, but that is no reason for the route to
+        # be unauthenticated: the same Keycloak token the page already holds is
+        # sent in this first frame and verified against JWKS, then the IT role
+        # is required exactly as require_role(Roles.IT) would.
+        #
+        # The ticket is a second, independent fence, not the only one: it binds
+        # this socket to ONE credential the user already asked for, and is
+        # single-use, so a replayed frame cannot open a second shell.
+        try:
+            caller = await verify_token(hello.get("token", ""))
+        except Exception:
+            await websocket.send_json({"type": "error", "message": "Sesi login tidak valid, muat ulang halaman."})
+            await websocket.close(code=4401)
+            return
+        if not caller.has_any_role(Roles.IT, "admin"):
+            logger.warning("server_terminal_forbidden", user=caller.username)
+            await websocket.send_json({"type": "error", "message": "Terminal server hanya untuk tim IT."})
+            await websocket.close(code=4403)
+            return
+
+        payload = await term.redeem_ticket(hello.get("ticket", ""))
+        if payload is None:
+            await websocket.send_json({"type": "error", "message": "Sesi kedaluwarsa, tutup lalu buka lagi."})
+            await websocket.close(code=4401)
+            return
+
+        # A valid ticket is not enough: it must be the ticket this user minted.
+        # Otherwise one IT user could redeem another's, and the audit row would
+        # name the wrong person.
+        if payload.get("user") != (caller.username or "unknown"):
+            logger.warning("server_terminal_ticket_mismatch",
+                           token_user=caller.username, ticket_user=payload.get("user"))
+            await websocket.send_json({"type": "error", "message": "Tiket bukan milik sesi ini."})
+            await websocket.close(code=4403)
+            return
+
+        cols = int(hello.get("cols") or 80)
+        rows = int(hello.get("rows") or 24)
+
+        async with AsyncSessionLocal() as db:
+            target = await term.resolve_target(db, payload["credential_id"], payload["user"])
+        if target is None:
+            await websocket.send_json({"type": "error", "message": "Kredensial tidak ditemukan."})
+            await websocket.close(code=4404)
+            return
+        if "error" in target:
+            await websocket.send_json({"type": "error", "message": target["error"]})
+            await websocket.close(code=4400)
+            return
+
+        session = term.SshSession(target["host"], target["port"], target["username"], target["password"])
+        try:
+            await session.connect(cols=cols, rows=rows)
+        except Exception as e:
+            # paramiko's own text is the most useful thing we can say here
+            # (auth failed vs timed out vs refused), so pass it through.
+            await websocket.send_json({"type": "error", "message": f"Gagal menyambung: {e}"})
+            await websocket.close(code=4500)
+            return
+
+        logger.info("server_terminal_opened", user=payload["user"],
+                    server=target["server_name"], host=target["host"], ssh_user=target["username"])
+        await websocket.send_json({
+            "type": "ready", "server": target["server_name"],
+            "user": target["username"], "host": target["host"], "label": target["label"],
+        })
+
+        async def shell_to_browser():
+            while True:
+                chunk = await session.read()
+                if chunk is None:
+                    break
+                await websocket.send_json({"type": "output", "data": chunk.decode("utf-8", "replace")})
+            await websocket.send_json({"type": "output", "data": _EOL + "[sesi berakhir]" + _EOL})
+
+        pump = asyncio.create_task(shell_to_browser())
+
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                msg = json.loads(raw)
+            except ValueError:
+                continue
+            if msg.get("type") == "input":
+                session.write(msg.get("data", ""))
+            elif msg.get("type") == "resize":
+                session.resize(int(msg.get("cols") or cols), int(msg.get("rows") or rows))
+            if pump.done():
+                break
+
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("server_terminal_failed")
+    finally:
+        if pump is not None:
+            pump.cancel()
+        if session is not None:
+            session.close()
