@@ -150,9 +150,22 @@ def _add_data_route(tool: dict):
     async def endpoint(body: Body, caller: Caller = Depends(current_caller)):  # type: ignore[valid-type]
         allowed = ebs_chat_service._tools_for_modules(caller.scope["allowed_modules"])
         if name not in allowed:
-            logger.warning("eis_tool_denied", tool=name, email=caller.email)
-            raise HTTPException(403, f"[SYSTEM INFO] {name} is outside this user's granted data access. "
-                                     "Tell the user they do not have access to this kind of data.")
+            logger.warning("eis_tool_denied", tool=name, email=caller.email,
+                           needs=_MODULE_OF.get(name))
+            # Name the module that would grant this. The old wording said only
+            # "they do not have access to this kind of data", so the model
+            # invented its own label for the missing thing — one user was told
+            # they had no access to "FS (GL)", which is not a module anyone can
+            # be granted. Nothing in that sentence tells the user what to ask
+            # for or tells an admin what to tick, which is the whole point of a
+            # refusal.
+            module = _MODULE_OF.get(name)
+            need = f'the "{module}" module' if module else "this data"
+            raise HTTPException(403, f"[SYSTEM INFO] {name} requires {need}, which this user does not have. "
+                                     f"Tell the user, in their own language, that their access does not include "
+                                     f"{need} and that an admin can grant it in Setup > AI > EBS Chat Access. "
+                                     f"Name the module exactly as written here; do not invent a different name "
+                                     f"for it, and do not guess at the numbers you could not read.")
         args = body.model_dump(exclude_none=True)
         try:
             rows = await run_in_threadpool(_run_scoped, caller, name, args)
@@ -168,6 +181,16 @@ def _add_data_route(tool: dict):
 
     data_app.post(f"/{name}", operation_id=name, summary=name,
                   description=tool["function"].get("description", ""))(endpoint)
+
+
+# tool -> module that grants it, derived from the same map the gate uses so the
+# two can never drift. One tool belongs to one module today; if that ever stops
+# being true this takes the first, which is still better than naming none.
+_MODULE_OF = {
+    tool: module
+    for module, tools in ebs_chat_service.MODULE_TOOL_MAP.items()
+    for tool in tools
+}
 
 
 for _t in eis_tools.EIS_TOOLS:
