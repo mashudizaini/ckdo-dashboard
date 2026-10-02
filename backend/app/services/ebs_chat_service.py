@@ -356,7 +356,10 @@ def _get_scope(email: str) -> Optional[dict]:
         )
         row = cur.fetchone()
         if not row:
-            return None
+            # First use by a known employee: grant the department/team default
+            # (see ebs_chat_defaults.py). None = not an active employee.
+            from app.services.ebs_chat_defaults import provision_default_scope
+            return provision_default_scope(conn, email)
         return {
             "full_access": row[0], "departments": row[1] or [], "allowed_modules": row[2] or [],
             "kb_departments": row[3] or [],
