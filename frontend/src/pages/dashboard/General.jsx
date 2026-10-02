@@ -12,6 +12,7 @@
  * codebase's convention for self-contained dashboard sections.
  */
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import ApInvoiceAttachments from "@/components/ApInvoiceAttachments";
 import { useNavigate, useLocation } from "react-router-dom";
 import { RefreshCw, Download, Wallet, ChevronDown, Loader2, X, Lock, AlertTriangle } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
@@ -933,6 +934,10 @@ function APOutstandingWithPaymentSection() {
                 {AP_PAYMENT_HEADERS.map(h => (
                   <SortableTH key={h.key} label={h.label} field={h.key} sortBy={sortBy} sortDir={sortDir} onSort={handleSort} align={h.num ? "right" : "left"} />
                 ))}
+                {/* Di luar AP_PAYMENT_HEADERS dengan sengaja: daftar itu juga
+                    dipakai untuk ekspor CSV, dan tombol lampiran tidak punya
+                    arti sebagai kolom di berkas CSV. */}
+                <th className="px-3 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800/60">
@@ -953,6 +958,9 @@ function APOutstandingWithPaymentSection() {
                   <td className="px-3 py-2 text-right text-green-400 tabular-nums whitespace-nowrap">{r.payment_amount != null ? fmtNum(r.payment_amount) : "—"}</td>
                   <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.payment_method || "—"}</td>
                   <td className="px-3 py-2 text-gray-500">{r.description}</td>
+                  <td className="px-3 py-2">
+                    <ApInvoiceAttachments invoiceId={r.invoice_id} invoiceNum={r.transaction_number} />
+                  </td>
                 </tr>
               ))}
             </tbody>

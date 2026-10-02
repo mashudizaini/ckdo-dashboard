@@ -432,6 +432,13 @@ export const pacApi = {
 export const accountingApi = {
   getSummary:              () => api.get("/dashboard/accounting/summary"),
   getApOutstanding:        (p) => api.get("/dashboard/accounting/ap-outstanding", { params: p }),
+  // Lampiran invoice di Oracle EBS. Disimpan sebagai BLOB di dalam database
+  // EBS (FND_LOBS), bukan berkas di server, jadi backend mengalirkannya
+  // langsung tanpa menyalin apa pun ke dashboard.
+  getApInvoiceAttachments: (invoiceId) =>
+    api.get("/dashboard/accounting/ap-invoice-attachments", { params: { invoice_id: invoiceId } }),
+  downloadApInvoiceAttachment: (id) =>
+    api.get(`/dashboard/accounting/ap-invoice-attachments/${id}/download`, { responseType: "blob" }),
   getApAging:              (p) => api.get("/dashboard/accounting/ap-aging", { params: p }),
   getArOutstanding:        (p) => api.get("/dashboard/accounting/ar-outstanding", { params: p }),
   getArAging:              (p) => api.get("/dashboard/accounting/ar-aging", { params: p }),
