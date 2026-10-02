@@ -255,8 +255,20 @@ async def server_terminal(websocket: WebSocket):
             await session.connect(cols=cols, rows=rows)
         except Exception as e:
             # paramiko's own text is the most useful thing we can say here
-            # (auth failed vs timed out vs refused), so pass it through.
-            await websocket.send_json({"type": "error", "message": f"Gagal menyambung: {e}"})
+            # (auth failed vs timed out vs refused), so pass it through — but
+            # "Authentication failed." on its own leaves the reader guessing
+            # which of the two likely causes it is, and both are fixable only
+            # outside this screen.
+            hint = ""
+            if "Authentication failed" in str(e):
+                hint = (f" Password tersimpan untuk '{target['username']}' ditolak server. "
+                        "Periksa kredensialnya di Server Control — atau, kalau ini akun root, "
+                        "host-nya mungkin memang menolak login root dengan password "
+                        "(PermitRootLogin prohibit-password, bawaan Ubuntu), sehingga kredensial "
+                        "itu tidak akan pernah bisa dipakai lewat SSH.")
+            logger.warning("server_terminal_connect_failed", user=payload["user"],
+                           host=target["host"], ssh_user=target["username"], error=str(e))
+            await websocket.send_json({"type": "error", "message": f"Gagal menyambung: {e}{hint}"})
             await websocket.close(code=4500)
             return
 
