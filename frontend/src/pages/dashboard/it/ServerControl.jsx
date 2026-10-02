@@ -136,6 +136,19 @@ export default function ServerControl() {
     setActiveSession(id);
   };
 
+  // Semua kredensial yang benar-benar bisa di-SSH, diratakan jadi satu daftar.
+  // Jendela terminal menutupi halaman, jadi pemilih "sesi baru" di dalamnya
+  // butuh daftar ini — tanpa itu satu-satunya cara mencapai server lain adalah
+  // menutup jendelanya, yang mematikan semua sesi.
+  const sshTargets = useMemo(
+    () => (servers || [])
+      .filter((s) => canSsh(s.address))
+      .flatMap((s) => (s.credentials || []).map((c) => ({
+        credential: c, serverName: s.name, address: s.address,
+      }))),
+    [servers],
+  );
+
   const closeSession = (id) => {
     setSessions((list) => {
       const rest = list.filter((s) => s.id !== id);
@@ -338,8 +351,8 @@ export default function ServerControl() {
       )}
 
       {sessions.length > 0 && (
-        <TerminalDock sessions={sessions} activeId={activeSession}
-          onActivate={setActiveSession} onCloseSession={closeSession}
+        <TerminalDock sessions={sessions} activeId={activeSession} sshTargets={sshTargets}
+          onOpen={openTerminal} onActivate={setActiveSession} onCloseSession={closeSession}
           onCloseAll={() => { setSessions([]); setActiveSession(null); }} />
       )}
 
