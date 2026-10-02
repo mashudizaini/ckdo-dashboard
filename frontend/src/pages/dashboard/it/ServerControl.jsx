@@ -17,7 +17,7 @@ import {
   Server, Plus, Trash2, Pencil, Eye, EyeOff, Copy, Check, Search, TerminalSquare,
   Loader2, X, KeyRound, History, ExternalLink, ShieldAlert, ChevronDown, ChevronRight, Activity,
 } from "lucide-react";
-import ServerTerminal from "./ServerTerminal";
+import TerminalDock from "./ServerTerminal";
 import { serverRegistryApi } from "@/api/dashboard";
 
 /* ─── Shared UI (local copy, see file header) ──────────────────────── */
@@ -37,7 +37,11 @@ function Panel({ title, subtitle, action, children }) {
   );
 }
 
-function Btn({ onClick, children, variant = "default", disabled, icon: Icon, size = "md", type = "button" }) {
+// `title` matters more than it looks: most buttons here are icon-only, and
+// without it nothing on the row says what the pencil does — which is why the
+// server name and category looked like they could not be edited at all. It was
+// also silently dropped from the terminal button added earlier.
+function Btn({ onClick, children, variant = "default", disabled, icon: Icon, size = "md", type = "button", title }) {
   const variants = {
     default: { bg: "#f1f5f9", color: "#334155" },
     primary: { bg: "#2563eb", color: "#ffffff" },
@@ -46,7 +50,7 @@ function Btn({ onClick, children, variant = "default", disabled, icon: Icon, siz
   };
   const v = variants[variant] || variants.default;
   return (
-    <button type={type} onClick={onClick} disabled={disabled}
+    <button type={type} onClick={onClick} disabled={disabled} title={title}
       className="flex items-center gap-1.5 rounded-lg transition-all"
       style={{
         background: v.bg, color: v.color, fontWeight: 700,
@@ -115,9 +119,32 @@ export default function ServerControl() {
 
   const [revealed, setRevealed] = useState({}); // credentialId -> {username, password}
   const [revealing, setRevealing] = useState(null);
-  // { credential, serverName } — satu sesi terminal terbuka pada satu waktu;
-  // tiap sesi menahan koneksi SSH di backend, jadi dibuka per permintaan.
-  const [terminal, setTerminal] = useState(null);
+  // Sesi terminal yang terbuka, satu tab masing-masing. Dulu ini satu objek,
+  // jadi membuka terminal kedua menggantikan yang pertama dan memutus shell
+  // yang sedang dipakai. Sekarang daftar: tiap sesi tetap hidup sampai tab-nya
+  // ditutup sendiri.
+  const [sessions, setSessions] = useState([]);
+  const [activeSession, setActiveSession] = useState(null);
+
+  const openTerminal = (credential, serverName) => {
+    // Satu sesi per kredensial: klik ulang pada baris yang sama memunculkan tab
+    // yang sudah ada, bukan membuka shell kedua ke server yang sama.
+    const existing = sessions.find((s) => s.credential.id === credential.id);
+    if (existing) { setActiveSession(existing.id); return; }
+    const id = `${credential.id}-${Date.now()}`;
+    setSessions((list) => [...list, { id, credential, serverName }]);
+    setActiveSession(id);
+  };
+
+  const closeSession = (id) => {
+    setSessions((list) => {
+      const rest = list.filter((s) => s.id !== id);
+      // Pindah ke tab terakhir yang tersisa supaya panel tidak jadi kosong
+      // sementara masih ada sesi berjalan.
+      setActiveSession((cur) => (cur === id ? (rest.length ? rest[rest.length - 1].id : null) : cur));
+      return rest;
+    });
+  };
   const [copied, setCopied] = useState(null); // credentialId, briefly
   const timers = useRef({});
 
@@ -285,7 +312,7 @@ export default function ServerControl() {
                       key={s.id} server={s}
                       revealed={revealed} revealing={revealing} copied={copied}
                       onReveal={reveal} onHide={hide} onCopy={copyPassword}
-                      onTerminal={(c) => setTerminal({ credential: c, serverName: s.name })}
+                      onTerminal={(c) => openTerminal(c, s.name)}
                       onEditServer={() => setServerModal({ mode: "edit", server: s })}
                       onDeleteServer={() => removeServer(s)}
                       onAddCredential={() => setCredModal({ mode: "add", serverId: s.id })}
@@ -310,9 +337,10 @@ export default function ServerControl() {
           saving={saving} onSave={saveCredential} onClose={() => setCredModal(null)} />
       )}
 
-      {terminal && (
-        <ServerTerminal credential={terminal.credential} serverName={terminal.serverName}
-          onClose={() => setTerminal(null)} />
+      {sessions.length > 0 && (
+        <TerminalDock sessions={sessions} activeId={activeSession}
+          onActivate={setActiveSession} onCloseSession={closeSession}
+          onCloseAll={() => { setSessions([]); setActiveSession(null); }} />
       )}
 
       {showLog && <AccessLogModal log={log} onClose={() => setShowLog(false)} />}
@@ -368,8 +396,8 @@ function ServerRow({
         </div>
         <div className="flex gap-1.5 shrink-0">
           <Btn size="sm" icon={KeyRound} onClick={onAddCredential}>Credential</Btn>
-          <Btn size="sm" icon={Pencil} onClick={onEditServer} />
-          <Btn size="sm" icon={Trash2} variant="danger" onClick={onDeleteServer} />
+          <Btn size="sm" icon={Pencil} title="Ubah nama, kategori, alamat" onClick={onEditServer}>Edit</Btn>
+          <Btn size="sm" icon={Trash2} variant="danger" title="Hapus server beserta kredensialnya" onClick={onDeleteServer} />
         </div>
       </div>
 
@@ -394,11 +422,11 @@ function ServerRow({
                   </span>
                   {isRevealed ? (
                     <>
-                      <Btn size="sm" icon={copied === c.id ? Check : Copy} onClick={() => onCopy(c.id, isRevealed.password)} />
-                      <Btn size="sm" icon={EyeOff} onClick={() => onHide(c.id)} />
+                      <Btn size="sm" icon={copied === c.id ? Check : Copy} title="Salin password" onClick={() => onCopy(c.id, isRevealed.password)} />
+                      <Btn size="sm" icon={EyeOff} title="Sembunyikan password" onClick={() => onHide(c.id)} />
                     </>
                   ) : (
-                    <Btn size="sm" icon={isRevealing ? Loader2 : Eye} disabled={isRevealing} onClick={() => onReveal(c.id)} />
+                    <Btn size="sm" icon={isRevealing ? Loader2 : Eye} title="Tampilkan password (tercatat di access log)" disabled={isRevealing} onClick={() => onReveal(c.id)} />
                   )}
                   {/* Opens an SSH shell in the page — the password never
                       reaches the browser, unlike reveal-and-paste beside it.
@@ -408,8 +436,8 @@ function ServerRow({
                     <Btn size="sm" icon={TerminalSquare} title="Buka terminal SSH"
                       onClick={() => onTerminal(c)} />
                   )}
-                  <Btn size="sm" icon={Pencil} onClick={() => onEditCredential(c)} />
-                  <Btn size="sm" icon={Trash2} variant="danger" onClick={() => onDeleteCredential(c)} />
+                  <Btn size="sm" icon={Pencil} title="Ubah kredensial" onClick={() => onEditCredential(c)} />
+                  <Btn size="sm" icon={Trash2} variant="danger" title="Hapus kredensial" onClick={() => onDeleteCredential(c)} />
                 </div>
               </div>
             );
@@ -428,6 +456,7 @@ function ServerModal({ mode, initial, categories, saving, onSave, onClose }) {
     notes: initial.notes || "", sequence: initial.sequence || 0,
     monitor_enabled: !!initial.monitor_enabled, monitor_credential_id: initial.monitor_credential_id ?? null,
     ssh_port: initial.ssh_port || 22,
+    newCategory: false,
   });
   const creds = initial.credentials || [];
   return (
@@ -435,15 +464,45 @@ function ServerModal({ mode, initial, categories, saving, onSave, onClose }) {
       footer={<>
         <Btn onClick={onClose}>Batal</Btn>
         <Btn variant="primary" disabled={saving || !form.name.trim()} icon={saving ? Loader2 : undefined}
-          onClick={() => onSave(form)}>Simpan</Btn>
+          onClick={() => { const { newCategory, ...body } = form; onSave(body); }}>Simpan</Btn>
       </>}>
       <Field label="Nama Server *">
         <input style={inputStyle} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} autoFocus />
       </Field>
+      {/* Memindahkan server antar kategori dilakukan di sini — pilih kategori
+          lain, simpan, dan baris itu pindah grup.
+
+          Dulu ini input teks dengan datalist, yang terlihat seperti kolom bebas:
+          satu salah ketik ("Netwrok") diam-diam membuat kategori baru berisi satu
+          server, dan tidak ada yang tampak salah. Daftar pilihan membuat
+          perpindahan jadi dua klik dan menutup celah itu; kategori betul-betul
+          baru tetap bisa dibuat, tapi harus disengaja. */}
       <Field label="Kategori">
-        <input style={inputStyle} list="server-categories" value={form.category}
-          onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} placeholder="Hypervisor, Database, Network, ..." />
-        <datalist id="server-categories">{categories.map((c) => <option key={c} value={c} />)}</datalist>
+        {form.newCategory ? (
+          <div className="flex gap-2">
+            <input style={inputStyle} autoFocus value={form.category}
+              placeholder="Nama kategori baru"
+              onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} />
+            <Btn onClick={() => setForm((f) => ({ ...f, newCategory: false, category: initial.category || "" }))}>
+              Batal
+            </Btn>
+          </div>
+        ) : (
+          <select style={inputStyle} value={form.category}
+            onChange={(e) => {
+              if (e.target.value === "__new__") setForm((f) => ({ ...f, newCategory: true, category: "" }));
+              else setForm((f) => ({ ...f, category: e.target.value }));
+            }}>
+            <option value="">— pilih kategori —</option>
+            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+            {/* Kategori yang sedang dipakai server ini tapi belum ada di daftar
+                (mis. baru dibuat di tab lain) supaya pilihannya tidak hilang. */}
+            {form.category && !categories.includes(form.category) && (
+              <option value={form.category}>{form.category}</option>
+            )}
+            <option value="__new__">+ kategori baru…</option>
+          </select>
+        )}
       </Field>
       <Field label="Address / IP / URL">
         <input style={inputStyle} value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />

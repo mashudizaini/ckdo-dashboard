@@ -50,8 +50,6 @@ _TICKET_PREFIX = "server-terminal:ticket:"
 # Bytes read from the channel per pump iteration. Terminal output arrives in
 # small bursts; a big buffer only adds latency to the common case.
 _READ_SIZE = 4096
-# Guards against a wedged or flooding session holding a worker forever.
-_IDLE_TIMEOUT = 3600
 
 
 def _redis():
