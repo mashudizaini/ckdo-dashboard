@@ -9,6 +9,7 @@ Endpoints:
 """
 import asyncio
 import io
+import urllib.parse
 from calendar import monthrange
 
 import openpyxl
@@ -19,6 +20,11 @@ from fastapi.responses import StreamingResponse
 from app.dependencies import require_role, CurrentUser, Roles
 from app.services.accounting_service import AccountingService
 from app.services import exchange_rate_service
+from app.services import ebs_attachment_service as attach
+
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
@@ -368,4 +374,58 @@ async def get_material_transactions(
     """
     return await AccountingService().get_material_transactions(
         date_from, date_to, org_code, item_number, trx_type, limit
+    )
+
+
+# ── AP invoice attachments ───────────────────────────────────────────────
+#
+# EBS keeps attached files as BLOBs inside the database (FND_LOBS), not as
+# files on the EBS server, so these read over the Oracle connection the rest of
+# this router already uses — no file share, no SSH, no path mapping. See
+# services/ebs_attachment_service.py for the join chain and why nothing is
+# mirrored into the dashboard.
+
+
+@router.get("/ap-invoice-attachments")
+async def list_ap_invoice_attachments(
+    invoice_id: int = Query(..., description="ap_invoices_all.invoice_id"),
+    user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
+):
+    """Files attached to one AP invoice. Metadata only — no bytes are read."""
+    rows = await asyncio.to_thread(attach.list_attachments, "AP_INVOICES", invoice_id)
+    return {"invoice_id": invoice_id, "attachments": rows}
+
+
+@router.get("/ap-invoice-attachments/{attached_document_id}/download")
+async def download_ap_invoice_attachment(
+    attached_document_id: int,
+    user: CurrentUser = Depends(require_role(Roles.ACCOUNTING)),
+):
+    """Stream one attachment through to the browser.
+
+    The scope argument is what keeps this endpoint to AP invoices.
+    attached_document_id is one global sequence across every attachment in EBS —
+    HR records, payment instructions, expense claims — and the ids are
+    consecutive, so without that check this would be a reader for all 208,511
+    files. An attachment outside the scope answers 404 exactly like a missing
+    one, so probing ids reveals nothing.
+    """
+    found = await asyncio.to_thread(attach.open_attachment, attached_document_id, "ap_invoice")
+    if found is None:
+        raise HTTPException(404, "Lampiran tidak ditemukan.")
+
+    logger.info("ap_invoice_attachment_download", user=user.username,
+                attached_document_id=attached_document_id,
+                file_name=found["file_name"], size=found["size"])
+
+    # filename* (RFC 5987) because EBS filenames routinely carry spaces,
+    # apostrophes and non-ASCII; the bare filename= form mangles them.
+    quoted = urllib.parse.quote(found["file_name"])
+    return StreamingResponse(
+        found["stream"](),
+        media_type=found["content_type"],
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quoted}",
+            "Content-Length": str(found["size"]),
+        },
     )
