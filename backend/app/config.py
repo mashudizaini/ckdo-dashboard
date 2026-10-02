@@ -175,6 +175,13 @@ class Settings(BaseSettings):
     # answer from these same documents. See openwebui_sync_service.py.
     # Knowledge ID belongs to a collection owned by a dedicated
     # "dashboard-integration" CoChat account, not a personal admin login.
+    # Public address of THIS dashboard, used to build download links handed to
+    # people in CoChat answers. Deliberately no fallback: a wrong value here
+    # sends someone to the other environment's documents, and a missing link is
+    # a loud, harmless failure while a link to the wrong environment is a quiet,
+    # harmful one — the same reasoning as VITE_COCHAT_URL in the sidebar.
+    # prod: https://dashboard.ckd-otto.com   dev: https://dashboard-dev.ckd-otto.com
+    dashboard_public_url: str = ""
     openwebui_base_url: str = ""
     openwebui_api_key: str = ""
     openwebui_knowledge_id: str = ""

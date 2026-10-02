@@ -429,3 +429,40 @@ async def download_ap_invoice_attachment(
             "Content-Length": str(found["size"]),
         },
     )
+
+
+# ── Ticketed download, for links handed out in CoChat ────────────────────
+#
+# Its own router, mounted WITHOUT this one's role dependency. The person
+# clicking this link is in a plain browser tab opened from a chat answer, with
+# no dashboard session and no way to send a Bearer token. Authorisation is the
+# ticket: minted by get_invoice_attachments for one attachment, for the person
+# who asked, usable once, expiring in ten minutes. The scope recorded in the
+# ticket is re-checked against the attachment's entity before any byte is read,
+# so a ticket cannot be stretched to reach a document outside AP invoices.
+ticket_router = APIRouter()
+
+
+@ticket_router.get("/{ticket}")
+async def download_by_ticket(ticket: str):
+    payload = await asyncio.to_thread(attach.redeem_download_ticket, ticket)
+    if payload is None:
+        raise HTTPException(404, "Tautan sudah dipakai atau kedaluwarsa. Minta lagi lewat CoChat.")
+
+    found = await asyncio.to_thread(attach.open_attachment, payload["aid"], payload["scope"])
+    if found is None:
+        raise HTTPException(404, "Lampiran tidak ditemukan.")
+
+    logger.info("ebs_attachment_ticket_download", email=payload.get("email"),
+                attached_document_id=payload["aid"], file_name=found["file_name"],
+                size=found["size"], scope=payload["scope"])
+
+    quoted = urllib.parse.quote(found["file_name"])
+    return StreamingResponse(
+        found["stream"](),
+        media_type=found["content_type"],
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quoted}",
+            "Content-Length": str(found["size"]),
+        },
+    )

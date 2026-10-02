@@ -98,7 +98,7 @@ _BUDGET_GROUP_MAP = {
 MODULE_TOOL_MAP: dict[str, list[str]] = {
     "Sales":         ["get_sales_performance", "get_sales_order_detail", "get_daily_sales"],
     "Production":    ["get_production_performance"],
-    "Financial":     ["get_financial_summary", "get_ar_ap_summary"],
+    "Financial":     ["get_financial_summary", "get_ar_ap_summary", "get_invoice_attachments"],
     "COGS":          ["get_cogs_performance"],
     "Inventory":     ["get_inventory_summary"],
     "Purchasing":    ["get_purchasing_performance", "get_purchase_order_detail"],

@@ -2624,6 +2624,73 @@ _MONTH_NUM = {
 }
 
 
+@celery_app.task(name="app.tasks.etl_tasks.etl_ap_attachments")
+def etl_ap_attachments():
+    """Snapshot the metadata of files attached to AP invoices in EBS.
+
+    Names, sizes and dates only — never the bytes. The files themselves are
+    BLOBs in Oracle (fnd_lobs, ~103 GB) and are streamed on demand when someone
+    actually clicks download; copying them here would double the storage bill
+    to hold what is already durable, and go stale on every new attachment.
+
+    This exists so CoChat can answer "what is attached to invoice X" with one
+    Postgres SELECT. eis_tools runs inside the chat's tool-calling loop, which a
+    model may re-enter several times per answer, so a live Oracle query there
+    would put production load behind a model's retries.
+
+    Full refresh rather than incremental: ~23k rows is small, attachments can be
+    deleted in EBS (an incremental load would keep serving rows whose file is
+    gone), and DBMS_LOB.GETLENGTH over that set is seconds, not minutes.
+    """
+    pg = _get_pg()
+    job_id = _log_start(pg, "etl_ap_attachments", None, None)
+    records = 0
+    try:
+        with get_oracle_connection() as ora:
+            cur = ora.cursor()
+            cur.execute("""
+                SELECT ad.attached_document_id, ai.invoice_id, ai.invoice_num,
+                       v.vendor_name, ai.invoice_date,
+                       dt.title, l.file_name, l.file_content_type,
+                       DBMS_LOB.GETLENGTH(l.file_data), ad.creation_date
+                FROM fnd_attached_documents ad
+                JOIN ap_invoices_all  ai ON ad.pk1_value = TO_CHAR(ai.invoice_id)
+                LEFT JOIN po_vendors  v  ON v.vendor_id = ai.vendor_id
+                JOIN fnd_documents    d  ON d.document_id = ad.document_id
+                                        AND d.datatype_id = 6
+                LEFT JOIN fnd_documents_tl dt ON dt.document_id = d.document_id
+                                             AND dt.language = USERENV('LANG')
+                JOIN fnd_lobs         l  ON l.file_id = d.media_id
+                WHERE ad.entity_name = 'AP_INVOICES'
+                  AND l.file_data IS NOT NULL
+            """)
+            rows = cur.fetchall()
+
+        cur_pg = pg.cursor()
+        cur_pg.execute("TRUNCATE eis.fact_ap_attachment")
+        for r in rows:
+            cur_pg.execute(
+                """INSERT INTO eis.fact_ap_attachment
+                       (attached_document_id, invoice_id, invoice_num, vendor_name,
+                        invoice_date, title, file_name, file_content_type,
+                        file_size, created_at, updated_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
+                   ON CONFLICT (attached_document_id) DO NOTHING""",
+                r,
+            )
+            records += 1
+        pg.commit()
+        logger.info(f"[etl_ap_attachments] {records} lampiran AP di-snapshot")
+        _log_end(pg, job_id, "success", records)
+        return {"status": "success", "records": records}
+    except Exception as e:
+        logger.error(f"[etl_ap_attachments] Failed: {e}")
+        _log_end(pg, job_id, "failed", records, str(e))
+        raise
+    finally:
+        pg.close()
+
+
 @celery_app.task(name="app.tasks.etl_tasks.etl_daily_sales")
 def etl_daily_sales(year: int = None, month: int = None):
     """Load the EIS Daily Sales grid into eis.fact_daily_sales.

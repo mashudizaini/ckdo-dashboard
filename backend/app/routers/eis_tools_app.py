@@ -110,7 +110,9 @@ def _run_scoped(caller: Caller, tool: str, arguments: dict) -> list[dict]:
     only lives for the transaction, so the tool runs inside it."""
     conn = ebs_chat_service._open_scoped_connection(caller.scope)
     try:
-        with eis_tools.use_connection(conn):
+        # use_caller: only get_invoice_attachments reads it, to bind the download
+        # ticket it mints to the person who asked.
+        with eis_tools.use_connection(conn), eis_tools.use_caller(caller.email):
             rows = eis_tools.execute_tool(tool, arguments)
         conn.commit()
         return rows

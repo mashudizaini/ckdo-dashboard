@@ -51,6 +51,9 @@ celery_app.conf.beat_schedule = {
     # eis_daily_sales.py); this is the safety net for a dispatch lost because
     # the worker or broker was down, not the primary trigger.
     "etl-daily-sales": {"task": "app.tasks.etl_tasks.etl_daily_sales", "schedule": crontab(minute=20)},
+    # Hourly: new invoice attachments should surface in CoChat the same
+    # working hour, and a full refresh of ~23k metadata rows is cheap.
+    "etl-ap-attachments": {"task": "app.tasks.etl_tasks.etl_ap_attachments", "schedule": crontab(minute=40)},
     # EBS Data Mart (CoChat "EBS Analyst" tool server, see
     # app/services/ebs_mart). AP is incremental on a composite watermark, so
     # hourly is cheap; Sunday's full reload is the delete reconciliation.

@@ -28,10 +28,14 @@ that check, an endpoint meant for invoice attachments would hand out any of the
 208,511 files to anyone who could guess an id, and they are consecutive
 integers.
 """
+import json
+import secrets
 from typing import Iterator, Optional
 
+import redis
 import structlog
 
+from app.config import get_settings
 from app.database import get_oracle_connection
 
 logger = structlog.get_logger(__name__)
@@ -145,3 +149,52 @@ def open_attachment(attached_document_id: int, scope: str) -> Optional[dict]:
         "size": size,
         "stream": stream,
     }
+
+
+# ── Download tickets, for links handed out in CoChat ─────────────────────
+#
+# A link in a chat answer cannot carry the dashboard's Bearer token: the person
+# clicks it in a plain browser tab with no SPA behind it. So the link carries a
+# ticket instead — minted for one attachment, for one person, usable once,
+# expiring in minutes.
+#
+# In Redis rather than a module dict for the same reason the terminal tickets
+# are: with more than one worker, an in-memory ticket would be redeemable once
+# per worker, and "single use" has to mean it.
+_TICKET_PREFIX = "ebs-attachment:ticket:"
+
+# Long enough for someone to read the answer, decide, and click; short enough
+# that a link pasted into a group chat is dead before anyone else gets to it.
+TICKET_TTL = 600
+
+
+def _redis():
+    return redis.from_url(get_settings().redis_url, decode_responses=True)
+
+
+def issue_download_ticket(attached_document_id: int, email: str, scope: str) -> str:
+    r = _redis()
+    try:
+        ticket = secrets.token_urlsafe(32)
+        r.set(_TICKET_PREFIX + ticket,
+              json.dumps({"aid": int(attached_document_id), "email": email, "scope": scope}),
+              ex=TICKET_TTL)
+        return ticket
+    finally:
+        r.close()
+
+
+def redeem_download_ticket(ticket: str) -> Optional[dict]:
+    """Consume a ticket, returning its payload once and only once.
+
+    GETDEL makes it atomic: two clicks racing on the same link cannot both win,
+    so a forwarded link is spent by whoever gets there first and is then useless.
+    """
+    if not ticket:
+        return None
+    r = _redis()
+    try:
+        raw = r.getdel(_TICKET_PREFIX + ticket)
+    finally:
+        r.close()
+    return json.loads(raw) if raw else None

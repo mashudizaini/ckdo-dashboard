@@ -494,6 +494,57 @@ async def ensure_daily_sales_table():
             """))
 
 
+async def ensure_ap_attachment_table():
+    """Metadata of files attached to AP invoices in EBS — names and sizes only.
+
+    The bytes stay in Oracle (fnd_lobs, ~103 GB across 208k files); this holds
+    the ~23k AP rows' names, sizes and dates so CoChat can answer "what is
+    attached to invoice X" with one Postgres SELECT. That matters because
+    eis_tools' contract is exactly that: a tool runs inside the chat's
+    tool-calling loop, which a model may re-enter several times per answer, and
+    a live Oracle query there puts production load behind a model's retries
+    (same reasoning as the IT snapshot tools above).
+
+    So this is a snapshot, refreshed by etl_ap_attachments. The cost is
+    freshness: a file attached minutes ago is not listed until the next run,
+    which is why answers carry as_of.
+    """
+    from sqlalchemy import text
+    async with eis_async_engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS eis.fact_ap_attachment (
+                attached_document_id BIGINT PRIMARY KEY,
+                invoice_id           BIGINT NOT NULL,
+                invoice_num          VARCHAR(100),
+                vendor_name          VARCHAR(300),
+                invoice_date         DATE,
+                title                VARCHAR(500),
+                file_name            VARCHAR(500),
+                file_content_type    VARCHAR(200),
+                file_size            BIGINT,
+                created_at           TIMESTAMP,
+                updated_at           TIMESTAMPTZ DEFAULT now()
+            )
+        """))
+        # Lookup is always by invoice number — that is what a person types into
+        # the chat; UPPER() because they will not match Oracle's casing.
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_fact_ap_attachment_num "
+            "ON eis.fact_ap_attachment (UPPER(invoice_num))"
+        ))
+        # Same guarded grants as the other fact tables: without these the tool
+        # picks the right query and then fails with "permission denied".
+        for role in ("chat_readonly", "ebs_chat_reader"):
+            await conn.execute(text(f"""
+                DO $$ BEGIN
+                    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') THEN
+                        GRANT USAGE ON SCHEMA eis TO {role};
+                        GRANT SELECT ON eis.fact_ap_attachment TO {role};
+                    END IF;
+                END $$;
+            """))
+
+
 async def ensure_it_monitoring_tables():
     """Create the eis.fact_it_* snapshot tables if missing.
 

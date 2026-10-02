@@ -39,6 +39,23 @@ def use_connection(conn):
     finally:
         _scoped_conn.reset(token)
 
+
+# Who is asking. Every other tool here answers the same way for everyone and
+# needs no identity — row scoping is handled by the connection above. The
+# attachment tool is the exception: it mints a download ticket, and a ticket has
+# to belong to someone, both so it cannot be handed around and so the download
+# is attributable in the audit log.
+_caller_email: contextvars.ContextVar = contextvars.ContextVar("eis_tools_caller_email", default=None)
+
+
+@contextmanager
+def use_caller(email: str):
+    token = _caller_email.set((email or "").strip().lower())
+    try:
+        yield
+    finally:
+        _caller_email.reset(token)
+
 # Setiap tool yang mengembalikan quantity WAJIB ikut mengembalikan uom.
 #
 # Bukan soal kerapian. Pada 2026-09-24 pembelian Bortezomib dilaporkan sebagai
@@ -232,6 +249,20 @@ EIS_TOOLS = [
                     "year": {"type": "integer", "description": "Opsional. Tahun fiskal 4 digit, contoh 2025 — untuk pertanyaan 'total setahun'"},
                 },
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_invoice_attachments",
+            "description": "Daftar BERKAS yang dilampirkan pada satu invoice AP di Oracle EBS (scan invoice, kuitansi, klaim transportasi, proposal), lengkap dengan TAUTAN UNDUH. Pakai ini untuk pertanyaan 'ada lampiran apa di invoice X', 'kirimkan/berikan dokumen invoice X', 'saya mau download attachment invoice X'. Sebutkan nomor invoice persis seperti di EBS. Tampilkan download_url sebagai tautan yang bisa diklik dan sampaikan bahwa tautannya berlaku 10 menit dan sekali pakai. Data lampiran disegarkan tiap jam, jadi berkas yang baru saja dilampirkan mungkin belum muncul.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "invoice_number": {"type": "string", "description": "Nomor invoice AP, contoh P22008-EXPOCT26-02"},
+                },
+                "required": ["invoice_number"],
             },
         },
     },
@@ -902,6 +933,48 @@ def get_daily_sales(year: int, month: str = None) -> list[dict]:
     return _query(sql, params)
 
 
+def get_invoice_attachments(invoice_number: str) -> list[dict]:
+    """Files attached to an AP invoice in EBS, with a one-time download link.
+
+    Reads eis.fact_ap_attachment — a snapshot refreshed hourly by
+    etl_ap_attachments — rather than Oracle, because this runs inside the chat's
+    tool-calling loop and a model may re-enter that loop several times per
+    answer. The bytes never pass through here: the link points at the dashboard,
+    which streams the file straight out of Oracle when it is clicked.
+
+    Each link is minted for the person asking and dies after one use or ten
+    minutes, so an answer pasted into a group chat does not hand the document to
+    everyone who reads it.
+    """
+    from app.services import ebs_attachment_service as attach
+
+    rows = _query(
+        """
+        SELECT attached_document_id, invoice_num, vendor_name, invoice_date,
+               title, file_name, file_content_type, file_size, created_at
+        FROM eis.fact_ap_attachment
+        WHERE UPPER(invoice_num) = UPPER(%(num)s)
+        ORDER BY created_at DESC
+        """,
+        {"num": (invoice_number or "").strip()},
+    )
+
+    email = _caller_email.get()
+    base = (settings.dashboard_public_url or "").rstrip("/")
+    for r in rows:
+        if base and email:
+            ticket = attach.issue_download_ticket(r["attached_document_id"], email, "ap_invoice")
+            r["download_url"] = f"{base}/api/v1/ebs-attachments/{ticket}"
+            r["download_note"] = "Tautan berlaku 10 menit dan hanya sekali pakai."
+        else:
+            # No guessed URL: a link to the wrong environment would quietly hand
+            # over the other instance's documents.
+            r["download_url"] = None
+            r["download_note"] = ("Tautan unduh belum tersedia di lingkungan ini "
+                                  "(DASHBOARD_PUBLIC_URL belum diisi). Buka AP Outstanding di dashboard.")
+    return rows
+
+
 _DISPATCH = {
     "get_sales_performance": get_sales_performance,
     "get_production_performance": get_production_performance,
@@ -916,6 +989,7 @@ _DISPATCH = {
     "get_sales_order_detail": get_sales_order_detail,
     "get_employee_directory": get_employee_directory,
     "get_daily_sales": get_daily_sales,
+    "get_invoice_attachments": get_invoice_attachments,
     "get_tablespace_usage": get_tablespace_usage,
     "get_tablespace_trend": get_tablespace_trend,
     "get_server_resources": get_server_resources,

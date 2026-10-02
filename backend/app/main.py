@@ -149,7 +149,7 @@ async def lifespan(app: FastAPI):
 
     # EIS tables (schema `eis` in this same ckdo_dashboard database, created
     # as eis_user through app/eis_database.py)
-    from app.eis_database import ensure_upload_log_table, ensure_purchasing_table, ensure_employee_dim_table, ensure_purchasing_migration_tables, ensure_sales_order_table, ensure_inventory_txn_table, ensure_batch_table, ensure_it_monitoring_tables, ensure_daily_sales_table
+    from app.eis_database import ensure_upload_log_table, ensure_purchasing_table, ensure_employee_dim_table, ensure_purchasing_migration_tables, ensure_sales_order_table, ensure_inventory_txn_table, ensure_batch_table, ensure_it_monitoring_tables, ensure_daily_sales_table, ensure_ap_attachment_table
     await ensure_upload_log_table()
     await ensure_purchasing_table()
     await ensure_employee_dim_table()
@@ -161,6 +161,7 @@ async def lifespan(app: FastAPI):
     # back CoChat's IT tools — see ensure_it_monitoring_tables' docstring.
     await ensure_it_monitoring_tables()
     await ensure_daily_sales_table()
+    await ensure_ap_attachment_table()
 
     # EBS Data Mart — meta/core/mart schemas, phase-1 marts, catalog and
     # golden-query seed, reader grants (app/services/ebs_mart/schema.py).
@@ -343,6 +344,12 @@ app.include_router(hr_overtime.router,       prefix=f"{API_PREFIX}/dashboard/hr/
 app.include_router(hr.router,         prefix=f"{API_PREFIX}/dashboard/hr",         tags=["Dashboard - HR"])
 app.include_router(pac.router,        prefix=f"{API_PREFIX}/dashboard/pac",        tags=["Dashboard - PAC"])
 app.include_router(accounting.router, prefix=f"{API_PREFIX}/dashboard/accounting", tags=["Dashboard - Accounting"])
+# Ticketed attachment downloads. No role dependency on purpose: the link is
+# opened from a CoChat answer in a plain browser tab that cannot send a Bearer
+# token. The single-use, ten-minute ticket IS the authorisation, and it was
+# minted only for someone the EBS Chat "Financial" module already admits.
+app.include_router(accounting.ticket_router, prefix=f"{API_PREFIX}/ebs-attachments",
+                   tags=["EBS Attachments"])
 app.include_router(ap_invoice.router,  prefix=f"{API_PREFIX}/dashboard/accounting/ap-invoice", tags=["Dashboard - AP Invoice"])
 app.include_router(supplier_wht.router, prefix=f"{API_PREFIX}/dashboard/accounting/supplier-wht", tags=["Dashboard - Supplier WHT"])
 app.include_router(financial_statement.router, prefix=f"{API_PREFIX}/dashboard/accounting/financial-statement", tags=["Dashboard - Financial Statement"])
