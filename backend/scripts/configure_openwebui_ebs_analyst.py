@@ -151,7 +151,7 @@ def main():
     users = users.get("users", users) if isinstance(users, dict) else users
     by_email = {(u.get("email") or "").lower(): u["id"] for u in users}
 
-    def sync_group(name, description, emails):
+    def sync_group(name, description, emails, remove=True):
         group = next((g for g in call("GET", "/groups/") if g["name"] == name), None)
         if not group:
             group = call("POST", "/groups/create", json={"name": name, "description": description})
@@ -160,7 +160,7 @@ def main():
         have = {u["id"] for u in call("POST", f"/groups/id/{gid}/users")}
         if want - have:
             call("POST", f"/groups/id/{gid}/users/add", json={"user_ids": sorted(want - have)})
-        if have - want:
+        if remove and have - want:
             call("POST", f"/groups/id/{gid}/users/remove", json={"user_ids": sorted(have - want)})
         missing = sorted(e for e in emails if e not in by_email)
         print(f"group {name}: {len(want)} member(s)" + (f"; belum punya akun CoChat: {missing}" if missing else ""))
@@ -172,10 +172,14 @@ def main():
     fin_grants = sync_group(FIN_GROUP, "Finance & Accounting — model EBS Finance Controller. Anggota disinkronkan "
                             "dari Setup > AI > EBS Chat Access (grup ebs-finance / ebs-management).",
                             finance_emails())
-    user_grants = sync_group(USER_GROUP, "Semua pemegang grup ebs-* — model EBS Analyst dan server EBS Data Tools. "
-                             "Anggota disinkronkan dari Setup > AI > EBS Chat Access (grup ebs-* apa pun). Mart yang "
-                             "benar-benar terbaca tetap ditentukan per pemanggil oleh DOMAIN_BY_GROUP.",
-                             ebs_user_emails())
+    # ebs-users is CoChat's default group (every new login lands in it), so EBS
+    # Analyst is reachable the same way EBS Assistant is. Never remove members
+    # here: which marts a caller reads is still decided per request from their
+    # ebs_groups, defaulted per team on first use (ebs_chat_defaults.py).
+    user_grants = sync_group(USER_GROUP, "Grup default semua user CoChat — model EBS Analyst dan server EBS Data "
+                             "Tools. Mart yang benar-benar terbaca tetap ditentukan per pemanggil dari ebs_groups "
+                             "di Setup > AI > EBS Chat Access (default per team, ebs_chat_defaults.py).",
+                             ebs_user_emails(), remove=False)
 
     # 1. Tool server connections
     conn = {

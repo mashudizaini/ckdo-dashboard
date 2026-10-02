@@ -72,17 +72,22 @@ def normalize_groups(raw) -> set[str]:
 
 
 def scope_groups(email: str) -> set[str]:
-    """ebs_chat_scope.ebs_groups for this email (empty when unregistered)."""
+    """ebs_chat_scope.ebs_groups for this email. A known employee with no row
+    yet gets the department/team default first (ebs_chat_defaults.py), same
+    as EBS Assistant; empty when the email is not an active employee."""
     from app.services.ebs_chat_service import _get_pg
+    from app.services.ebs_chat_defaults import provision_default_scope
 
+    email = (email or "").strip().lower()
     conn = _get_pg()
     try:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT ebs_groups FROM ebs_chat_scope WHERE email = %s",
-            ((email or "").strip().lower(),),
-        )
+        cur.execute("SELECT ebs_groups FROM ebs_chat_scope WHERE email = %s", (email,))
         row = cur.fetchone()
+        if not row and provision_default_scope(conn, email):
+            cur = conn.cursor()
+            cur.execute("SELECT ebs_groups FROM ebs_chat_scope WHERE email = %s", (email,))
+            row = cur.fetchone()
         return normalize_groups(row[0] if row else [])
     except Exception:
         # Column not migrated yet on this host — treat as no grant.
