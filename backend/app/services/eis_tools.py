@@ -215,7 +215,7 @@ EIS_TOOLS = [
         "type": "function",
         "function": {
             "name": "get_purchase_order_detail",
-            "description": "Cari data PO (Purchase Order) individual per baris — sama persis dengan Detail View laporan Purchase History di dashboard. Setiap baris berisi: nomor & tanggal PR, requestor, nomor PO, tanggal PO, status, item (kode, deskripsi, kategori, item type, material type, negara asal), supplier, organisasi, mata uang, satuan (uom), delivery date, qty, harga per unit, amount, amount IDR, qty diterima (received_qty), nomor & tanggal receipt terakhir, qty outstanding, payment term (termin pembayaran), dan buyer. Cari berdasarkan supplier, nama barang, kode item, nomor PO, periode, material type, kategori, buyer, requestor, dan/atau negara asal. Untuk pertanyaan 'PO apa saja dari supplier X', 'payment term PO Y', 'sudah diterima belum', 'siapa requestor/buyer-nya' — bukan sekadar total/trend (untuk itu pakai get_purchasing_performance). Maksimal 50 baris terbaru per panggilan; persempit filter kalau perlu lebih.",
+            "description": "Cari data PO (Purchase Order) individual per baris — sama persis dengan Detail View laporan Purchase History di dashboard. Setiap baris berisi: nomor & tanggal PR, requestor, nomor PO, tanggal PO, status, item (kode, deskripsi, kategori, item type, material type, negara asal), supplier, organisasi, mata uang, satuan (uom), delivery date, qty, harga per unit, amount, amount IDR, qty diterima (received_qty), nomor & tanggal receipt terakhir, qty outstanding, payment term (termin pembayaran), dan buyer. Cari berdasarkan supplier, nama barang, kode item, nomor PO, periode, material type, kategori, buyer, requestor, dan/atau negara asal. Untuk pertanyaan 'PO apa saja dari supplier X', 'payment term PO Y', 'sudah diterima belum', 'siapa requestor/buyer-nya' — bukan sekadar total/trend (untuk itu pakai get_purchasing_performance). Hasil diurutkan dari PO terbaru, maksimal 50 baris per panggilan; persempit filter kalau perlu lebih. Untuk 'pembelian/harga terakhir' pakai limit=1 per item — terutama kalau menanyakan banyak item sekaligus, supaya hasilnya tidak membengkak.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -229,6 +229,7 @@ EIS_TOOLS = [
                     "buyer_name": {"type": "string", "description": "Opsional. Nama buyer (partial match)."},
                     "requestor": {"type": "string", "description": "Opsional. User pembuat PR / requestor (partial match), contoh MEGA."},
                     "country_of_origin": {"type": "string", "description": "Opsional. Negara asal barang (partial match), contoh INDIA, CHINA."},
+                    "limit": {"type": "integer", "description": "Opsional. Jumlah baris terbaru yang dikembalikan, 1-50 (default 50). Isi 1 untuk pembelian/PO terakhir saja."},
                 },
                 "required": [],
             },
@@ -600,7 +601,7 @@ def get_purchase_order_detail(
     supplier_name: str = None, item_code: str = None, item_name: str = None,
     po_number: str = None, period: str = None, material_type: str = None,
     category: str = None, buyer_name: str = None, requestor: str = None,
-    country_of_origin: str = None,
+    country_of_origin: str = None, limit: int = None,
 ) -> list[dict]:
     """Line-item PO search — backed by eis.fact_po_line (etl_po_lines),
     the same table Purchasing History/Price Analysis read from. Added so
@@ -618,10 +619,18 @@ def get_purchase_order_detail(
     Returns every column of the Purchase History Detail View (same order),
     so anything visible on the dashboard can be answered here — payment
     term, PR/requestor, receipt number/date and qty outstanding were
-    missing before and the chat reported them as unavailable."""
+    missing before and the chat reported them as unavailable.
+
+    limit (1-50, default 50) exists because ~30 columns x 50 rows per call
+    adds up: "pembelian terakhir untuk 14 API" made 14 calls and overflowed
+    the model's 200K-token context. limit=1 returns only the latest line."""
     fy = pnum = None
     if period:
         fy, pnum = _parse_period(period)
+    try:
+        row_limit = min(max(int(limit), 1), 50) if limit else 50
+    except (TypeError, ValueError):
+        row_limit = 50
 
     def _like(v):
         return f"%{v}%" if v else None
@@ -646,9 +655,10 @@ def get_purchase_order_detail(
           AND (%(fy)s   IS NULL OR EXTRACT(YEAR FROM creation_date) = %(fy)s)
           AND (%(pnum)s IS NULL OR EXTRACT(MONTH FROM creation_date) = %(pnum)s)
         ORDER BY creation_date DESC, po_number, line_num
-        LIMIT 50
+        LIMIT %(row_limit)s
         """,
         {
+            "row_limit": row_limit,
             "supplier_name": supplier_name, "supplier_like": _like(supplier_name),
             "item_code": item_code,
             "item_name": item_name, "item_name_like": _like(item_name),
