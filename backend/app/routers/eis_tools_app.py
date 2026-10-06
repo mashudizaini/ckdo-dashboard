@@ -208,8 +208,10 @@ _DocsIn = create_model("search_company_documents_in", query=(str, Field(
 @docs_app.post(
     "/search_company_documents", operation_id="search_company_documents", summary="search_company_documents",
     description="Search the company's policy/rules/SOP documents (HR, Accounting, PAC, Purchasing, IT, General) "
-                "for passages that answer a question about internal rules or procedures — NOT for Oracle EBS "
-                "transaction data. Answer only from the returned excerpts and cite the document.",
+                "for passages that answer a question about internal rules or procedures, and PAC's yearly "
+                "Business Plan (plan/target figures: P&L, sales plan, COGS, investment, purchase, personnel, "
+                "cashflow, registration schedule, managerial objectives) — NOT for Oracle EBS transaction data. "
+                "Answer only from the returned excerpts and cite the document.",
 )
 async def search_company_documents(body: _DocsIn, caller: Caller = Depends(current_caller)):  # type: ignore[valid-type]
     if "search_company_documents" not in ebs_chat_service._tools_for_modules(caller.scope["allowed_modules"]):

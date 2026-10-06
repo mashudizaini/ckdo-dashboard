@@ -163,7 +163,9 @@ _COMPANY_RULES_TOOL = {
         "description": (
             "Cari jawaban dari dokumen kebijakan/peraturan perusahaan (SOP, company rules, "
             "kebijakan HR/Accounting/PAC/Purchasing/IT) — untuk pertanyaan seputar peraturan "
-            "atau prosedur internal perusahaan, BUKAN data transaksi Oracle EBS."
+            "atau prosedur internal perusahaan, serta Business Plan tahunan PAC (angka rencana/target: "
+            "P&L, sales plan, COGS, investasi, pembelian, personel, cashflow, jadwal registrasi, "
+            "managerial objective), BUKAN data transaksi Oracle EBS."
         ),
         "parameters": {
             "type": "object",

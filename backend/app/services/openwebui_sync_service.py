@@ -45,7 +45,7 @@ import structlog
 from psycopg2.extras import Json
 
 from app.config import get_settings
-from app.services import rag_service
+from app.services import business_plan_kb, rag_service
 
 logger = structlog.get_logger()
 settings = get_settings()
@@ -275,6 +275,12 @@ def run_full_sync(triggered_by: str = "manual") -> dict:
         by_key: dict[tuple[str, str], dict] = {}
         manifest = []
         for d in local_docs:
+            # Business Plan figures are PAC-only. CoChat's Knowledge
+            # collection has no per-user filter, so they stay reachable
+            # only through search_company_documents (kb_departments). Left
+            # out of the manifest, any copy already in CoChat is deleted.
+            if business_plan_kb.is_business_plan_source(d["source"]):
+                continue
             content = rag_service.get_document_content(d["source"], d["title"])
             if content is None:
                 continue
