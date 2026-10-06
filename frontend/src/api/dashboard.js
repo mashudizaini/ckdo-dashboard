@@ -94,6 +94,12 @@ export const ebsNetApi = {
   getSettings:      ()            => api.get("/dashboard/it/ebs-netmon/settings"),
   putSettings:      (body)        => api.put("/dashboard/it/ebs-netmon/settings", body),
   listServers:      ()            => api.get("/dashboard/it/ebs-netmon/servers"),
+  // Diagnosis reports (Laporan tab). run re-takes every measurement: allow minutes.
+  listSummaryReports: (days)      => api.get("/dashboard/it/ebs-netmon/summary-reports", { params: { days } }),
+  runSummaryReport:   ()          => api.post("/dashboard/it/ebs-netmon/summary-reports/run", null, { timeout: 300000 }),
+  getSummaryReport:   (id)        => api.get(`/dashboard/it/ebs-netmon/summary-reports/${id}`),
+  deleteSummaryReport:(id)        => api.delete(`/dashboard/it/ebs-netmon/summary-reports/${id}`),
+  downloadSummaryReport: (id, fmt) => api.get(`/dashboard/it/ebs-netmon/summary-reports/${id}/download`, { params: { fmt }, responseType: "blob" }),
 };
 
 // The HO laptop's in-browser connection test — open to every logged-in user.

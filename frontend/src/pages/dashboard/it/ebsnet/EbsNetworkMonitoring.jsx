@@ -18,9 +18,11 @@ import ClientTab from "./ClientTab";
 import IncidentTab from "./IncidentTab";
 import PlaybookTab from "./PlaybookTab";
 import SetupTab from "./SetupTab";
+import ReportTab from "./ReportTab";
 
 const TABS = [
   ["overview", "Overview"],
+  ["report", "Laporan & Kesimpulan"],
   ["path", "Jalur & Probe"],
   ["fortigate", "FortiGate / SD-WAN"],
   ["ebs", "EBS Server"],
@@ -66,6 +68,7 @@ export default function EbsNetworkMonitoring() {
       </div>
 
       {tab === "overview" && <OverviewTab goTo={goTo} />}
+      {tab === "report" && <ReportTab settings={settings} onSettingsSaved={loadSettings} />}
       {tab === "path" && <PathTab thresholds={thresholds} />}
       {tab === "fortigate" && <FortigateTab thresholds={thresholds} goTo={goTo} />}
       {tab === "ebs" && <EbsTab />}

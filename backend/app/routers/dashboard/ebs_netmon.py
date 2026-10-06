@@ -10,6 +10,8 @@ main.py with require_role(Roles.IT), same as vpn_monitor).
   Laptops      GET  /reports, GET/DELETE /reports/{id}, POST /reports/upload
   Agent        POST /agent/script
   Incidents    GET/POST /incidents, GET/PUT/DELETE /incidents/{id}
+  Diagnosis    GET /summary-reports, POST /summary-reports/run,
+               GET/DELETE /summary-reports/{id}, GET /summary-reports/{id}/download
   Setup        GET/PUT /settings, GET /servers, GET /meta
 
 The laptop-facing endpoints (browser test, agent ingest) live in
@@ -28,10 +30,10 @@ from sqlalchemy.orm import Session
 
 from app.dependencies import CurrentUser, get_current_user
 from app.models.ebs_netmon import (
-    EbsNetAgentToken, EbsNetClientReport, EbsNetIncident, EbsNetTarget, get_ebsnet_db,
+    EbsNetAgentToken, EbsNetClientReport, EbsNetIncident, EbsNetSummaryReport, EbsNetTarget, get_ebsnet_db,
 )
 from app.services import it_monitoring_store as store
-from app.services.ebs_netmon import agent_script, analysis, service
+from app.services.ebs_netmon import agent_script, analysis, report, service
 from app.services.ebs_netmon import settings as cfg
 
 router = APIRouter()
@@ -334,6 +336,64 @@ def delete_incident(incident_id: int, db: Session = Depends(get_ebsnet_db)):
     if not inc:
         raise HTTPException(404, "Insiden tidak ditemukan")
     db.delete(inc)
+    db.commit()
+    return {"deleted": True}
+
+
+# ── Diagnosis reports (Laporan tab) ────────────────────────────────────────
+
+@router.get("/summary-reports")
+def list_summary_reports(days: int = 30, db: Session = Depends(get_ebsnet_db)):
+    since = datetime.utcnow() - timedelta(days=min(max(days, 1), 180))
+    rows = (db.query(EbsNetSummaryReport).filter(EbsNetSummaryReport.created_at >= since)
+            .order_by(EbsNetSummaryReport.created_at.desc()).limit(500).all())
+    s = cfg.get_all(db)
+    last = report.last_auto(db)
+    hours = float(s.get("report_interval_hours") or 0)
+    return {
+        "reports": [report.row_dict(r) for r in rows],
+        "schedule": {
+            "interval_hours": hours,
+            "last_auto_at": last.isoformat() + "Z" if last else None,
+            "next_auto_at": ((last + timedelta(hours=hours)).isoformat() + "Z" if last else "segera")
+                            if hours > 0 else None,
+        },
+    }
+
+
+@router.post("/summary-reports/run")
+def run_summary_report(db: Session = Depends(get_ebsnet_db), user: CurrentUser = Depends(get_current_user)):
+    """Re-take every measurement now, grade it, and save the report."""
+    return report.row_dict(report.build(db, trigger="manual", user=_who(user), capture=True), full=True)
+
+
+@router.get("/summary-reports/{report_id}")
+def get_summary_report(report_id: int, db: Session = Depends(get_ebsnet_db)):
+    r = db.get(EbsNetSummaryReport, report_id)
+    if not r:
+        raise HTTPException(404, "Laporan tidak ditemukan")
+    return report.row_dict(r, full=True)
+
+
+@router.get("/summary-reports/{report_id}/download")
+def download_summary_report(report_id: int, fmt: str = "html", db: Session = Depends(get_ebsnet_db)):
+    r = db.get(EbsNetSummaryReport, report_id)
+    if not r:
+        raise HTTPException(404, "Laporan tidak ditemukan")
+    stamp = (r.created_at + timedelta(hours=7)).strftime("%Y%m%d_%H%M")
+    if fmt == "json":
+        return Response(content=r.content or "{}", media_type="application/json",
+                        headers={"Content-Disposition": f'attachment; filename="EBS_Diagnosis_{stamp}.json"'})
+    return Response(content=r.html or "", media_type="text/html; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="EBS_Diagnosis_{stamp}.html"'})
+
+
+@router.delete("/summary-reports/{report_id}")
+def delete_summary_report(report_id: int, db: Session = Depends(get_ebsnet_db)):
+    r = db.get(EbsNetSummaryReport, report_id)
+    if not r:
+        raise HTTPException(404, "Laporan tidak ditemukan")
+    db.delete(r)
     db.commit()
     return {"deleted": True}
 

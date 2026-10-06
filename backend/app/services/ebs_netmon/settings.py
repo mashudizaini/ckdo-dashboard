@@ -42,6 +42,10 @@ DEFAULT_SETTINGS = {
     "poll_ebs": True,
     "probe_samples": 5,
     "thresholds": DEFAULT_THRESHOLDS,
+    # Automatic diagnosis report (Laporan tab): every N hours, 0 = off.
+    "report_interval_hours": 3,
+    # Laptop reports older than this are not used in a diagnosis report.
+    "report_client_window_hours": 24,
     "playbook_checklist": {},
 }
 

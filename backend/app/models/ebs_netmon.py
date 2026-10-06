@@ -165,6 +165,26 @@ class EbsNetAgentToken(EbsNetBase):
     uses       = Column(Integer, nullable=False, default=0)
 
 
+class EbsNetSummaryReport(EbsNetBase):
+    """A saved diagnosis report: every measurement re-taken at `created_at`,
+    graded, with the bottleneck, conclusion and actions. `content` is the
+    full JSON the Laporan tab renders; `html` is the same report as a
+    self-contained file for download / email / print, frozen at creation so
+    an old report never changes when thresholds or code change later."""
+    __tablename__ = "ebsnet_summary_reports"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    trigger    = Column(String(10), nullable=False, default="manual")   # manual / auto
+    created_by = Column(String(150))
+    overall    = Column(String(10))                                     # good / warn / bad / unknown
+    bottleneck = Column(String(30))                                     # section key or NULL
+    headline   = Column(Text)
+    content    = Column(Text)
+    html       = Column(Text)
+    duration_s = Column(Float)
+
+
 class EbsNetSetting(EbsNetBase):
     """Key/value JSON settings — see DEFAULT_SETTINGS in services/ebs_netmon/settings.py."""
     __tablename__ = "ebsnet_settings"

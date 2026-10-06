@@ -5,6 +5,10 @@ snapshot the FortiGates and EBS health when enabled in Setup. That steady
 series is what makes "EBS was slow at 14:32" answerable after the fact —
 the script's test matrix (08:00 / 11:00 / 14:00 / 15:00-16:00) is covered
 automatically on the server side; only the laptop side needs a person.
+
+The diagnosis report (Laporan tab) rides the same tick: when the interval
+set in Setup (report_interval_hours, default 3) has passed since the last
+automatic report, that tick builds one instead of the plain poll.
 """
 import logging
 from datetime import datetime
@@ -12,7 +16,7 @@ from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.models.ebs_netmon import EbsNetSessionLocal
-from app.services.ebs_netmon import service
+from app.services.ebs_netmon import report, service
 from app.services.ebs_netmon import settings as cfg
 
 logger = logging.getLogger("ebs_netmon.scheduler")
@@ -27,6 +31,11 @@ def _tick():
     db = EbsNetSessionLocal()
     try:
         s = cfg.get_all(db)
+        if report.due(db):
+            # The report re-takes every measurement itself (probes, both
+            # FortiGates, EBS incl. app tier), so this tick is the report.
+            report.build(db, trigger="auto", user="scheduler", capture=True)
+            return
         service.run_probes(db)
         if s.get("poll_fortigate") and service.fortigate_ids(s):
             service.capture_fortigates(db)
