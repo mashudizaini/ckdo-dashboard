@@ -6,6 +6,7 @@ main.py with require_role(Roles.IT), same as vpn_monitor).
   Targets      GET/POST /targets, DELETE /targets/{id}, GET /targets/{id}/history
   Probes       POST /probes/run
   FortiGate    GET  /fortigate, POST /fortigate/capture, GET /fortigate/history
+  SD-WAN cfg   GET  /sdwan-config, POST /sdwan-config/capture
   EBS health   GET  /ebs, POST /ebs/capture, GET /ebs/history
   Laptops      GET  /reports, GET/DELETE /reports/{id}, POST /reports/upload
   Agent        POST /agent/script
@@ -148,6 +149,18 @@ def fortigate_history(hours: int = 24, db: Session = Depends(get_ebsnet_db)):
                     "sdwan": [{k: m.get(k) for k in ("check", "member", "state", "latency_ms", "jitter_ms", "loss_pct")}
                               for m in sm.get("sdwan", [])]})
     return out
+
+
+@router.get("/sdwan-config")
+def get_sdwan_config(db: Session = Depends(get_ebsnet_db)):
+    return service.sdwan_config_view(db)
+
+
+@router.post("/sdwan-config/capture")
+def capture_sdwan_config(db: Session = Depends(get_ebsnet_db)):
+    if not service.fortigate_ids(cfg.get_all(db)):
+        raise HTTPException(400, "Belum ada FortiGate dipilih di Setup")
+    return service.capture_sdwan_config(db)
 
 
 # ── EBS health ────────────────────────────────────────────────────────────

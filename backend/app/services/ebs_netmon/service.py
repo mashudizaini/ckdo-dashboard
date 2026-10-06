@@ -4,6 +4,7 @@ probes, take FortiGate / EBS snapshots, ingest laptop reports, build the
 overview. Sync (Session from get_ebsnet_db / EbsNetSessionLocal).
 """
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
@@ -12,7 +13,7 @@ from sqlalchemy import func
 from app.models.ebs_netmon import (
     EbsNetClientReport, EbsNetProbeLog, EbsNetSnapshot, EbsNetTarget,
 )
-from app.services.ebs_netmon import analysis, ebs_health, fortigate, probes
+from app.services.ebs_netmon import analysis, ebs_health, fortigate, probes, sdwan_config
 from app.services.ebs_netmon import settings as cfg
 
 RAW_KEEP_DAYS = 2
@@ -146,6 +147,36 @@ def capture_fortigates(db) -> list[dict]:
     return out
 
 
+def ebs_ips(db) -> list[str]:
+    """EBS addresses the SD-WAN checks look for — web/app tier first (users
+    open :8000 there), then the DB host from Setup."""
+    out = []
+    web = (db.query(EbsNetTarget.host).filter(EbsNetTarget.segment.in_(("ebs_web", "ebs_db")))
+           .order_by(EbsNetTarget.segment.desc(), EbsNetTarget.sequence).all())
+    for (h,) in web + [(cfg.get_all(db).get("ebs_host"),)]:
+        if h and re.fullmatch(r"\d+\.\d+\.\d+\.\d+", h) and h not in out:
+            out.append(h)
+    return out
+
+
+def capture_sdwan_config(db) -> dict:
+    ids = fortigate_ids(cfg.get_all(db))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda x: sdwan_config.capture(x[1]), ids))
+    for (role, _), res in zip(ids, results):
+        _save_snapshot(db, "sdwan_cfg", f"{role}: {res['name']}", res)
+    return sdwan_config_view(db)
+
+
+def sdwan_config_view(db) -> dict:
+    """Newest config read per side, plus the HO↔Plant analysis over them."""
+    snaps = sorted(latest_snapshots(db, "sdwan_cfg", with_raw=True), key=lambda s: s["checked_at"], reverse=True)
+    side = {role: next((s for s in snaps if s["name"].startswith(f"{role}:")), None) for role in ("HO", "Plant")}
+    ok = {role: (s["summary"] if s and s["ok"] else None) for role, s in side.items()}
+    return {"devices": side, "analysis": sdwan_config.analyze(ok["HO"], ok["Plant"], ebs_ips(db)),
+            "configured": len(fortigate_ids(cfg.get_all(db)))}
+
+
 def capture_ebs(db, include_app_tier: bool = True) -> dict:
     res = ebs_health.snapshot(include_app_tier=include_app_tier)
     return snapshot_dict(_save_snapshot(db, "ebs", "EBS", res))
@@ -169,7 +200,9 @@ def snapshot_series(db, kind: str, hours: int = 24) -> list[dict]:
 def nearest_snapshots(db, at: datetime, minutes: int = 15) -> dict:
     """Snapshots/probes closest to an incident time — the correlation step."""
     lo, hi = at - timedelta(minutes=minutes), at + timedelta(minutes=minutes)
-    snaps = (db.query(EbsNetSnapshot).filter(EbsNetSnapshot.checked_at.between(lo, hi))
+    # Config reads (sdwan_cfg) are not measurements — leave them out.
+    snaps = (db.query(EbsNetSnapshot).filter(EbsNetSnapshot.checked_at.between(lo, hi),
+                                             EbsNetSnapshot.kind != "sdwan_cfg")
              .order_by(EbsNetSnapshot.checked_at).all())
     logs = (db.query(EbsNetProbeLog, EbsNetTarget.name, EbsNetTarget.segment)
             .join(EbsNetTarget, EbsNetTarget.id == EbsNetProbeLog.target_id)

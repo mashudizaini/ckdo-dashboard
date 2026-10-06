@@ -13,6 +13,7 @@ import { useAuthStore } from "@/store/authStore";
 import OverviewTab from "./OverviewTab";
 import PathTab from "./PathTab";
 import FortigateTab from "./FortigateTab";
+import SdwanConfigTab from "./SdwanConfigTab";
 import EbsTab from "./EbsTab";
 import ClientTab from "./ClientTab";
 import IncidentTab from "./IncidentTab";
@@ -25,6 +26,7 @@ const TABS = [
   ["report", "Laporan & Kesimpulan"],
   ["path", "Jalur & Probe"],
   ["fortigate", "FortiGate / SD-WAN"],
+  ["sdwancfg", "Konfigurasi SD-WAN"],
   ["ebs", "EBS Server"],
   ["client", "Client Test (Laptop)"],
   ["incidents", "Incident Log"],
@@ -71,6 +73,7 @@ export default function EbsNetworkMonitoring() {
       {tab === "report" && <ReportTab settings={settings} onSettingsSaved={loadSettings} />}
       {tab === "path" && <PathTab thresholds={thresholds} />}
       {tab === "fortigate" && <FortigateTab thresholds={thresholds} goTo={goTo} />}
+      {tab === "sdwancfg" && <SdwanConfigTab goTo={goTo} />}
       {tab === "ebs" && <EbsTab />}
       {tab === "client" && <ClientTab />}
       {tab === "incidents" && <IncidentTab meta={meta} thresholds={thresholds} />}
