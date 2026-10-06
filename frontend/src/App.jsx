@@ -18,6 +18,7 @@ import ProductionDashboard from "@/pages/dashboard/Production";
 import GeneralDashboard from "@/pages/dashboard/General";
 import EISDashboard from "@/pages/dashboard/EIS";
 import OvertimeSystem from "@/pages/dashboard/overtime/OvertimeSystem";
+import EbsConnectionCheck from "@/pages/EbsConnectionCheck";
 
 // Setup Pages — one per team, same names as the DASHBOARD section
 import SetupPage from "@/pages/setup/SetupPage";
@@ -93,6 +94,17 @@ export default function App() {
           element={
             <ProtectedRoute roles={["it_staff", "admin"]}>
               <ITDashboard />
+            </ProtectedRoute>
+          }
+        />
+        {/* Cek Koneksi Oracle EBS — any logged-in employee (the HO user who
+            reports EBS as slow runs it); results go to IT > Oracle EBS
+            Network Monitoring. Server-side the endpoints only need a login. */}
+        <Route
+          path="ebs-check"
+          element={
+            <ProtectedRoute>
+              <EbsConnectionCheck />
             </ProtectedRoute>
           }
         />

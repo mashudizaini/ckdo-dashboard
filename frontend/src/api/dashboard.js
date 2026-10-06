@@ -64,6 +64,47 @@ export const vpnApi = {
   getSessions:     (id)        => api.get(`/dashboard/it/vpn-monitor/gateways/${id}/sessions`),
 };
 
+// Oracle EBS Network Monitoring. Capture/probe calls SSH into FortiGates and
+// EBS hosts, which can outlast the client's 30s default.
+const LONG = { timeout: 180000 };
+export const ebsNetApi = {
+  getOverview:      ()            => api.get("/dashboard/it/ebs-netmon/overview"),
+  getMeta:          ()            => api.get("/dashboard/it/ebs-netmon/meta"),
+  listTargets:      ()            => api.get("/dashboard/it/ebs-netmon/targets"),
+  upsertTarget:     (body)        => api.post("/dashboard/it/ebs-netmon/targets", body),
+  deleteTarget:     (id)          => api.delete(`/dashboard/it/ebs-netmon/targets/${id}`),
+  targetHistory:    (id, hours)   => api.get(`/dashboard/it/ebs-netmon/targets/${id}/history`, { params: { hours } }),
+  runProbes:        (targetId)    => api.post("/dashboard/it/ebs-netmon/probes/run", null, { params: targetId ? { target_id: targetId } : {}, ...LONG }),
+  getFortigate:     ()            => api.get("/dashboard/it/ebs-netmon/fortigate"),
+  captureFortigate: ()            => api.post("/dashboard/it/ebs-netmon/fortigate/capture", null, LONG),
+  fortigateHistory: (hours)       => api.get("/dashboard/it/ebs-netmon/fortigate/history", { params: { hours } }),
+  getEbs:           ()            => api.get("/dashboard/it/ebs-netmon/ebs"),
+  captureEbs:       ()            => api.post("/dashboard/it/ebs-netmon/ebs/capture", null, LONG),
+  ebsHistory:       (hours)       => api.get("/dashboard/it/ebs-netmon/ebs/history", { params: { hours } }),
+  listReports:      (hours)       => api.get("/dashboard/it/ebs-netmon/reports", { params: { hours } }),
+  getReport:        (id)          => api.get(`/dashboard/it/ebs-netmon/reports/${id}`),
+  deleteReport:     (id)          => api.delete(`/dashboard/it/ebs-netmon/reports/${id}`),
+  uploadReport:     (json)        => api.post("/dashboard/it/ebs-netmon/reports/upload", json),
+  agentScript:      (body)        => api.post("/dashboard/it/ebs-netmon/agent/script", body, { responseType: "text" }),
+  listIncidents:    (days)        => api.get("/dashboard/it/ebs-netmon/incidents", { params: { days } }),
+  getIncident:      (id)          => api.get(`/dashboard/it/ebs-netmon/incidents/${id}`),
+  createIncident:   (body)        => api.post("/dashboard/it/ebs-netmon/incidents", body, LONG),
+  updateIncident:   (id, body)    => api.put(`/dashboard/it/ebs-netmon/incidents/${id}`, body, LONG),
+  deleteIncident:   (id)          => api.delete(`/dashboard/it/ebs-netmon/incidents/${id}`),
+  getSettings:      ()            => api.get("/dashboard/it/ebs-netmon/settings"),
+  putSettings:      (body)        => api.put("/dashboard/it/ebs-netmon/settings", body),
+  listServers:      ()            => api.get("/dashboard/it/ebs-netmon/servers"),
+};
+
+// The HO laptop's in-browser connection test — open to every logged-in user.
+export const ebsNetClientApi = {
+  config:   ()            => api.get("/ebs-netmon-client/config"),
+  ping:     ()            => api.get("/ebs-netmon-client/ping", { params: { _: Date.now() } }),
+  download: (size)        => api.get("/ebs-netmon-client/download", { params: { size, _: Date.now() }, responseType: "arraybuffer", timeout: 120000 }),
+  upload:   (blob)        => api.post("/ebs-netmon-client/upload", blob, { headers: { "Content-Type": "application/octet-stream" }, timeout: 120000 }),
+  report:   (body)        => api.post("/ebs-netmon-client/report", body),
+};
+
 export const etlAdminApi = {
   getStatus:   ()               => api.get("/dashboard/it/etl-admin/status"),
   trigger:     (jobName, params) => api.post(`/dashboard/it/etl-admin/trigger/${jobName}`, params),

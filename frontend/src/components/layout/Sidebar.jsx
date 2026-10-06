@@ -24,6 +24,7 @@ const NAV_ITEMS = [
     { label: "Postgre DB Browser", path: "/dashboard/it/db-browser" },
     { label: "Oracle EBS Backup Recovery", path: "/dashboard/it/ebs-backup-recovery" },
     { label: "VPN Access Monitoring", path: "/dashboard/it/vpn-monitoring" },
+    { label: "Oracle EBS Network Monitoring", path: "/dashboard/it/ebs-network-monitoring" },
   ] },
   // No roles on the parent — the Overtime System child is open to every
   // employee (they file their own overtime there), so HRGA has to appear in

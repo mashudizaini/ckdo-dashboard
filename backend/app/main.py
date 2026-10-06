@@ -42,6 +42,7 @@ import app.models.overtime  # noqa: F401
 import app.models.emagazine  # noqa: F401 — register emagazine models
 from app.models.ebs_backup import init_ebs_db
 from app.models.vpn_monitor import init_vpn_db
+from app.models.ebs_netmon import init_ebsnet_db
 from app.models.hikcentral import init_hikcentral_db
 from app.models.zkteco import init_zkteco_db
 
@@ -52,6 +53,7 @@ from app.routers import emagazine, emagazine_hotspots
 from app.routers.dashboard import it, it_db_browser, it_server_registry, hr, pac, accounting, purchasing, ap_invoice, financial_statement, general, sales_marketing, ppwh, production, supplier_wht, ap_vat_in, ap_wht_listing
 from app.routers.dashboard import ebs_backup
 from app.routers.dashboard import vpn_monitor
+from app.routers.dashboard import ebs_netmon, ebs_netmon_client
 from app.routers.dashboard import it_hikcentral
 from app.routers.dashboard import it_zkteco
 from app.routers.dashboard import it_etl_admin
@@ -187,6 +189,12 @@ async def lifespan(app: FastAPI):
     from app.services import vpn_monitor_scheduler
     vpn_monitor_scheduler.start()
 
+    # Oracle EBS Network Monitoring — dedicated sync tables (ebsnet_*) + a
+    # 5-minute poller (probes, FortiGate SD-WAN/tunnel, EBS health).
+    init_ebsnet_db()
+    from app.services.ebs_netmon import scheduler as ebsnet_scheduler
+    ebsnet_scheduler.start()
+
     # HikCentral Integration — dedicated sync table (hikcentral_config,
     # editable from the IT dashboard tab) + 15-minute pull of today's door
     # events into AttendanceRecord (source="hikcentral"). No-ops until
@@ -208,6 +216,7 @@ async def lifespan(app: FastAPI):
 
     zkteco_scheduler.stop()
     hikcentral_scheduler.stop()
+    ebsnet_scheduler.stop()
     vpn_monitor_scheduler.stop()
     ebs_backup_scheduler.stop()
     logger.info("Shutting down CKDO Dashboard API")
@@ -291,6 +300,18 @@ app.include_router(
     tags=["Dashboard - IT - VPN Monitoring"],
     dependencies=[Depends(require_role(Roles.IT))],
 )
+app.include_router(
+    ebs_netmon.router, prefix=f"{API_PREFIX}/dashboard/it/ebs-netmon",
+    tags=["Dashboard - IT - EBS Network Monitoring"],
+    dependencies=[Depends(require_role(Roles.IT))],
+)
+# The HO laptop side of EBS Network Monitoring: the browser connection test
+# is open to any logged-in employee (each route requires get_current_user),
+# and the PowerShell agent posts with a one-time token instead of a login.
+app.include_router(ebs_netmon_client.client_router, prefix=f"{API_PREFIX}/ebs-netmon-client",
+                   tags=["EBS Network Monitoring - Client Test"])
+app.include_router(ebs_netmon_client.agent_router, prefix=f"{API_PREFIX}/ebs-netmon-agent",
+                   tags=["EBS Network Monitoring - Agent Ingest"])
 # Server Control — centralized server inventory + encrypted credentials
 # (see server_registry_service.py / crypto.py). IT-only, no exceptions —
 # this is the single highest-value target in the whole app if it leaked.

@@ -7,7 +7,7 @@ import {
   Cpu, TrendingUp, List, Lightbulb, Terminal,
   Table2, Layers, Hash, Code2, Key, Link2, Trash2, Search,
   ChevronLeft, ChevronRight, Play, History,
-  ShieldCheck, KeyRound,
+  ShieldCheck, KeyRound, Waypoints,
 } from "lucide-react";
 import {
   AreaChart, Area,
@@ -17,6 +17,7 @@ import {
 import { itApi } from "@/api/dashboard";
 import EbsBackupRecovery from "@/pages/dashboard/it/EbsBackupRecovery";
 import VpnAccessMonitoring from "@/pages/dashboard/it/VpnAccessMonitoring";
+import EbsNetworkMonitoring from "@/pages/dashboard/it/ebsnet/EbsNetworkMonitoring";
 import ServerControl from "@/pages/dashboard/it/ServerControl";
 // HikCentral Integration, ZKTeco Integration and ETL Admin moved to
 // Setup > General (2026-09-01, previously Setup > IT as of 2026-08-19) —
@@ -32,6 +33,7 @@ const TABS = [
   { id: "db-browser",        icon: Database,      color: "text-purple-400", bg: "bg-purple-500/10", activeBorder: "border-purple-500/40", label: "Postgre DB Browser"  },
   { id: "ebs-backup-recovery", icon: RefreshCw,   color: "text-red-400",    bg: "bg-red-500/10",    activeBorder: "border-red-500/40",    label: "Oracle EBS Backup Recovery" },
   { id: "vpn-monitoring",    icon: ShieldCheck,   color: "text-teal-400",  bg: "bg-teal-500/10",   activeBorder: "border-teal-500/40",   label: "VPN Access Monitoring" },
+  { id: "ebs-network-monitoring", icon: Waypoints, color: "text-orange-400", bg: "bg-orange-500/10", activeBorder: "border-orange-500/40", label: "Oracle EBS Network Monitoring" },
 ];
 
 /* ─── Main Page ───────────────────────────────────── */
@@ -60,6 +62,7 @@ export default function ITDashboard() {
       {activeId === "db-browser"        && <DatabaseBrowserSection />}
       {activeId === "ebs-backup-recovery" && <EbsBackupRecovery />}
       {activeId === "vpn-monitoring"      && <VpnAccessMonitoring />}
+      {activeId === "ebs-network-monitoring" && <EbsNetworkMonitoring />}
     </div>
   );
 }
