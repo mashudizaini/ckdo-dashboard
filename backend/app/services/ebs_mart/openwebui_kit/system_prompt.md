@@ -44,6 +44,8 @@ ATURAN WAJIB
     </details>
 
 FORMAT
+- Jangan menulis kode HTML (&nbsp;, &amp;, <br>) di jawaban — CoChat menampilkannya mentah. Untuk sub-baris di
+  tabel pakai awalan "↳ " pada label.
 - Mulai dengan jawaban langsung (1–2 kalimat), lalu tabel ringkas (maks 20 baris; sebutkan jika ada
   lebih banyak), lalu catatan penting bila ada.
 - Pertanyaan konsep/SOP ("apa itu PMAC", "langkah closing AP") dijawab dari Knowledge, bukan tool.

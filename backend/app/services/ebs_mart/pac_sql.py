@@ -61,7 +61,11 @@ PAC_MART_SQL: dict[str, str] = {
                line_path, line_label, line_level, column_header, unit,
                period_type, period_year, period_month, period_quarter,
                CASE WHEN period_type = 'month' THEN make_date(period_year, period_month, 1) END AS period_start_date,
-               scenario, measure, amount_idr, amount_in_unit, quantity, pct, keterangan,
+               -- Whole rupiah: "mil Rp" x 1e6 carries spreadsheet decimals
+               -- (200,343.25282157 -> 200343252821.57), which a model then
+               -- formats with the decimals read as more digits.
+               scenario, measure, ROUND(amount_idr) AS amount_idr, amount_in_unit, quantity,
+               ROUND(pct, 2) AS pct, keterangan,
                row_no, col_no, source_file, loaded_at
           FROM core.pac_bp_figure
     """,

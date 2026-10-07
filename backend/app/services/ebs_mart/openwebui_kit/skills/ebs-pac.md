@@ -18,6 +18,10 @@ plan vs actual, realisasi vs target, pencapaian target, achievement
 ## Intent tool (utamakan)
 - Target penjualan vs realisasi EBS (per bisnis / per bulan, sebulan, YTD, setahun) →
   pac_get_sales_plan_vs_actual (year, month, ytd, basis gross|net|customer, group_by business|month|business_month)
+- "Target penjualan / sales tahun X" → pac_get_business_plan(year=X, section='1-1', line='Sales', period='X'):
+  P&L tahunan memuat Customer Sales, CKD OTTO Gross Sales dan Net Sales per bisnis (Local / CMO & Others / Export).
+  Jika user tidak menyebut basis, tampilkan ketiganya dan jelaskan bedanya singkat. Per bulan → section '1-2'
+  dengan period='X-MM'; per produk → section '2-1' (nilai) / '2-2' (qty) DENGAN period agar tidak terpotong.
 - Angka plan lainnya → pac_get_business_plan (year, section, line, period, scenario, measure).
   period: tahunan (total plan + tahun pembanding) | YYYY | YYYY-MM | YYYY-Qn. section '1-2' = sheet ringkasan saja;
   '1' = 1-1, 1-2, 1-2.a/b/c sekaligus (nama baris berulang antar sheet — bedakan dengan sheet_title).
@@ -27,8 +31,10 @@ plan vs actual, realisasi vs target, pencapaian target, achievement
   tampilkan berdampingan. Sebutkan bahwa definisi bisa berbeda (plan disusun per bisnis/produk PAC, aktual dari EBS).
 
 ## Aturan bisnis
-- amount_idr sudah dalam Rupiah penuh (sheet ditulis "mil Rp" = juta Rupiah, sudah dikali 1.000.000).
-  amount_in_unit = angka seperti tertulis di sheet.
+- amount_idr sudah dalam Rupiah penuh tanpa desimal (sheet ditulis "mil Rp" = juta Rupiah, sudah dikali
+  1.000.000). Tulis Rp 200.343.252.822 atau ringkas "Rp 200,3 miliar" — jangan menambah digit.
+  amount_in_unit = angka seperti tertulis di sheet (juta Rupiah).
+- Jika hasil truncated, JANGAN menjumlah atau menyimpulkan total — panggil ulang dengan filter yang disarankan note.
 - Kolom "2026(P)" = total rencana tahun plan; kolom tahun sebelumnya (scenario pembanding) adalah angka pembanding
   yang dicantumkan dokumen (estimasi/aktual saat plan disusun) — BUKAN data EBS. Untuk aktual pakai tool EBS.
 - Baris P&L: Customer Sales (penjualan distributor ke pasar) → CKD OTTO Gross Sales → dikurangi distribution fee,

@@ -1997,7 +1997,11 @@ def pac_get_business_plan(caller: Caller, year: int | None = None, section: str 
                 OR (period_type = 'year' AND (%(py)s::int = 0 OR period_year = %(py)s::int)))
          ORDER BY section, row_no, col_no
     """
-    return _run(caller, "pac_business_plan", sql, params, "pac_get_business_plan", args)
+    res = _run(caller, "pac_business_plan", sql, params, "pac_get_business_plan", args)
+    if res.get("truncated"):
+        res["note"] = ("Hasil terpotong 500 baris — jangan menyimpulkan total dari hasil ini. Persempit: period='YYYY' "
+                       "(kolom tahunan saja), period='YYYY-MM', section sheet tertentu (mis. '1-1'), atau line.")
+    return res
 
 
 # Business Plan P&L line each basis reads. EBS invoices (RA, net of credit
