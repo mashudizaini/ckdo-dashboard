@@ -15,7 +15,7 @@ import {
   HardDrive, Database, RotateCcw, HeartPulse, CalendarClock,
   GitBranch, History as HistoryIcon, FileBarChart, Settings2, RefreshCw,
   Loader2, CheckCircle2, XCircle, AlertTriangle, Play, Pause, Square,
-  Trash2, Plus, Key, ShieldCheck, ChevronDown, ChevronUp, Server as ServerIcon,
+  Trash2, Pencil, Plus, Key, ShieldCheck, ChevronDown, ChevronUp, Server as ServerIcon,
   Folder, File as FileIcon, ChevronRight, Home, Cloud, FolderSync,
 } from "lucide-react";
 import { ebsBackupApi } from "@/api/ebsBackup";
