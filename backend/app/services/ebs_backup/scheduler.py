@@ -122,13 +122,47 @@ def _reap_dead_jobs(db):
                 if ssh.is_pid_alive(job.pid):
                     continue
 
+                # The manifest lives where the ARCHIVE landed, which is not
+                # always the server that ran the job. An application backup
+                # streamed to the DB server runs on the App server and writes
+                # to the DB server — and the App server has no /backup at all,
+                # so reading the manifest there returns nothing and a finished,
+                # successful backup gets recorded as failed. That is exactly
+                # what happened to job #4 on 2026-10-07: 13 GB transferred, the
+                # manifest said success, and the dashboard said failed — which
+                # also meant the Synology copy never chained.
                 data = {}
                 if job.output_path:
-                    r = ssh.run(f"cat {job.output_path}/manifest.json 2>/dev/null || echo '{{}}'")
+                    holder_ssh, holder_cm = ssh, None
                     try:
-                        data = json.loads((r.stdout or "").strip())
+                        from app.routers.dashboard.ebs_backup import _archive_holder
+                        from app.database import SessionLocal as _AppSession
+                        app_db = _AppSession()
+                        try:
+                            holder = _archive_holder(app_db, job)
+                        finally:
+                            app_db.close()
+                        if holder and holder.id != job.target_server_id:
+                            h_cred = db.query(EbsCredential).filter(
+                                EbsCredential.server_id == holder.id,
+                                EbsCredential.cred_type.in_(["ssh_password", "ssh_key"]),
+                            ).first()
+                            h_srv = db.query(EbsServer).get(holder.id)
+                            if h_cred and h_srv:
+                                holder_cm = ssh_from_server(h_srv, h_cred)
+                                holder_ssh = holder_cm.__enter__()
                     except Exception:
-                        data = {}
+                        holder_ssh, holder_cm = ssh, None
+
+                    try:
+                        r = holder_ssh.run(f"cat {job.output_path}/manifest.json 2>/dev/null || echo '{{}}'")
+                        try:
+                            data = json.loads((r.stdout or "").strip())
+                        except Exception:
+                            data = {}
+                    finally:
+                        if holder_cm is not None:
+                            holder_cm.__exit__(None, None, None)
 
                 job.status = data.get("status") or "failed"
                 if data.get("total_size_bytes"):
