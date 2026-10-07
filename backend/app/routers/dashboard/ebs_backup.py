@@ -573,13 +573,23 @@ def _has_spfile(server: Server, cred: Credential) -> bool:
 # Jam server database relatif terhadap UTC. Dibaca sekali saat dipakai, bukan
 # dikeraskan, supaya perubahan zona waktu server tidak diam-diam menggeser
 # jadwal tujuh jam.
+_OFFSET_CACHE: dict = {}
+
+
 def _db_utc_offset_hours(default: int = 7) -> int:
+    # Cached for an hour: the jobs list renders this for every scheduled row,
+    # and a server's timezone does not move between page refreshes.
+    hit = _OFFSET_CACHE.get("v")
+    if hit and (datetime.utcnow() - hit[1]).total_seconds() < 3600:
+        return hit[0]
     try:
         from app.database import get_oracle_connection
         with get_oracle_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT TO_CHAR(SYSTIMESTAMP,'TZH') FROM dual")
-            return int(cur.fetchone()[0])
+            val = int(cur.fetchone()[0])
+        _OFFSET_CACHE["v"] = (val, datetime.utcnow())
+        return val
     except Exception:
         return default
 
@@ -649,6 +659,7 @@ def trigger_online(payload: BackupOnlineIn, bg: BackgroundTasks, db: Session = D
             raise HTTPException(400, "Waktu yang dipilih sudah lewat.")
         params = payload.model_dump()
         params["run_at_utc"] = run_at_utc.strftime("%Y-%m-%d %H:%M:%S")
+        params["run_at_local"] = local.strftime("%Y-%m-%d %H:%M")
         job = BackupJob(
             job_type=payload.job_type, target_server_id=server.id, status="scheduled",
             parameters=json.dumps(params), started_at=None,
@@ -726,6 +737,37 @@ def backup_readiness():
         return readiness.collect()
     except Exception as e:
         raise HTTPException(503, f"Tidak bisa membaca kondisi database: {e}")
+
+
+class RescheduleIn(BaseModel):
+    run_at_local: str   # "YYYY-MM-DD HH:MM" dalam waktu server database
+
+
+@router.post("/jobs/{job_id}/reschedule")
+def reschedule_job(job_id: int, body: RescheduleIn, db: Session = Depends(get_db)):
+    """Move a scheduled job to a different time.
+
+    Only a job that has not started can move: once it is running there is a
+    process on a server that this would not touch, and pretending otherwise
+    would be worse than refusing.
+    """
+    job = db.query(BackupJob).filter(BackupJob.id == job_id).first()
+    if not job or job.status != "scheduled":
+        raise HTTPException(400, "Hanya job berstatus terjadwal yang bisa diubah waktunya.")
+    try:
+        local = datetime.strptime(body.run_at_local.strip()[:16], "%Y-%m-%d %H:%M")
+    except ValueError:
+        raise HTTPException(400, "Format waktu harus 'YYYY-MM-DD HH:MM' (waktu server database)")
+    run_at_utc = local - timedelta(hours=_db_utc_offset_hours())
+    if run_at_utc <= datetime.utcnow():
+        raise HTTPException(400, "Waktu yang dipilih sudah lewat.")
+
+    params = json.loads(job.parameters or "{}")
+    params["run_at_utc"] = run_at_utc.strftime("%Y-%m-%d %H:%M:%S")
+    params["run_at_local"] = local.strftime("%Y-%m-%d %H:%M")
+    job.parameters = json.dumps(params)
+    db.commit()
+    return {"job_id": job.id, "status": "scheduled", "run_at_local": params["run_at_local"]}
 
 
 @router.get("/jobs/{job_id}/scheduled/cancel")
@@ -1210,6 +1252,7 @@ def trigger_app(payload: BackupAppIn, bg: BackgroundTasks, db: Session = Depends
             raise HTTPException(400, "Waktu yang dipilih sudah lewat.")
         params = payload.model_dump()
         params["run_at_utc"] = run_at_utc.strftime("%Y-%m-%d %H:%M:%S")
+        params["run_at_local"] = local.strftime("%Y-%m-%d %H:%M")
         job = BackupJob(job_type="app_fs", target_server_id=server.id, status="scheduled",
                         parameters=json.dumps(params), started_at=None)
         db.add(job)
@@ -1544,8 +1587,69 @@ def delete_job_output(job_id: int, db: Session = Depends(get_db)):
     return {"job_id": job_id, "deleted_path": job.output_path}
 
 
+_JOB_LABEL = {
+    "online_full": "Database full (RMAN)",
+    "online_incremental": "Database incremental",
+    "archivelog": "Archivelog",
+    "offline_cold": "Database offline (cold)",
+    "app_fs": "Application tier",
+    "db_sync_synology": "Salin ke Synology",
+    "db_sync_minio": "Salin ke MinIO",
+}
+
+
+def _job_description(j: BackupJob) -> str:
+    """One line saying what this job actually backs up.
+
+    The list used to show only the job_type slug, so two app backups of
+    different filesystems to different destinations were indistinguishable —
+    and a scheduled row said nothing about what it would do when it fired.
+    """
+    try:
+        p = json.loads(j.parameters or "{}")
+    except Exception:
+        p = {}
+    label = _JOB_LABEL.get(j.job_type, j.job_type)
+    bits = []
+    if j.job_type == "app_fs":
+        bits.append((p.get("fs_target") or "?").upper())
+        if p.get("include_inst_top"):
+            bits.append("+ fs_ne")
+        if p.get("remote_target_server_id"):
+            bits.append("stream ke server DB")
+        if p.get("sync_synology_server_id"):
+            bits.append("+ Synology")
+    elif j.job_type == "online_incremental":
+        bits.append(f"level {p.get('incremental_level', '?')}")
+    elif j.job_type == "online_full":
+        dest = p.get("destination")
+        if dest and dest != "staging":
+            bits.append(dest)
+        if p.get("parallelism"):
+            bits.append(f"{p['parallelism']} channel")
+    elif j.job_type.startswith("db_sync_"):
+        if p.get("source_job_id"):
+            bits.append(f"dari job #{p['source_job_id']}")
+    return f"{label} — {', '.join(bits)}" if bits else label
+
+
 def _serialize_job(j: BackupJob) -> dict:
+    try:
+        p = json.loads(j.parameters or "{}")
+    except Exception:
+        p = {}
+    run_at_local = p.get("run_at_local")
+    if not run_at_local and p.get("run_at_utc"):
+        # Jobs scheduled before run_at_local was stored: derive it so the list
+        # never shows a UTC time where the user entered a local one.
+        try:
+            run_at_local = (datetime.strptime(p["run_at_utc"], "%Y-%m-%d %H:%M:%S")
+                            + timedelta(hours=_db_utc_offset_hours())).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            run_at_local = None
     return {
+        "description": _job_description(j),
+        "run_at_local": run_at_local,
         "id": j.id, "job_type": j.job_type, "status": j.status,
         "target_server_id": j.target_server_id, "triggered_by": j.triggered_by,
         "started_at": j.started_at.isoformat() if j.started_at else None,

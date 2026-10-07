@@ -35,6 +35,8 @@ export const ebsBackupApi = {
       remote_target_server_id: remoteTargetId || undefined,
     } }),
   cancelScheduled:     (jobId) => api.get(`${BASE}/jobs/${jobId}/scheduled/cancel`),
+  rescheduleJob:       (jobId, runAtLocal) =>
+    api.post(`${BASE}/jobs/${jobId}/reschedule`, { run_at_local: runAtLocal }),
   syncOnlineToMinio:    (body) => api.post(`${BASE}/backup/online/sync-minio`, body),
   syncOnlineToSynology: (body) => api.post(`${BASE}/backup/online/sync-synology`, body),
   triggerArchivelog:    (body) => api.post(`${BASE}/backup/archivelog`, body),

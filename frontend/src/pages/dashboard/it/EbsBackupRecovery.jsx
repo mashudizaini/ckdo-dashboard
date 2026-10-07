@@ -499,6 +499,38 @@ function JobsList({ jobTypes, refreshSignal }) {
   }, [jobTypes]);
 
   useEffect(() => { refresh(); }, [refresh, refreshSignal]);
+
+  const cancelJob = async (j) => {
+    if (!confirm(`Batalkan jadwal job #${j.id}?
+${j.description || j.job_type} — ${j.run_at_local || "?"}`)) return;
+    try {
+      await ebsBackupApi.cancelScheduled(j.id);
+      refresh();
+    } catch (e) {
+      alert(e?.detail || "Gagal membatalkan");
+    }
+  };
+
+  const rescheduleJob = async (j) => {
+    // Diisi dalam waktu server database, sama seperti saat menjadwalkan. Nilai
+    // lama dijadikan default supaya mengoreksi jam tidak berarti mengetik ulang
+    // seluruh tanggal.
+    const next = prompt(
+      `Jadwal baru untuk job #${j.id} (${j.description || j.job_type})
+`
+      + "Format: YYYY-MM-DD HH:MM — waktu server database (WIB)",
+      j.run_at_local || "",
+    );
+    if (!next) return;
+    try {
+      const r = await ebsBackupApi.rescheduleJob(j.id, next.trim());
+      alert(`Dipindah ke ${r.run_at_local} WIB.`);
+      refresh();
+    } catch (e) {
+      alert(e?.detail || "Gagal mengubah jadwal");
+    }
+  };
+
   useEffect(() => {
     const hasActive = jobs.some((j) => j.status === "running" || j.status === "paused" || j.status === "pending");
     if (!hasActive) return;
@@ -516,8 +548,12 @@ function JobsList({ jobTypes, refreshSignal }) {
           <table className="w-full text-xs">
             <thead>
               <tr style={{ background: "#f8fafc", color: "#64748b", fontWeight: 700 }}>
-                <td className="px-3 py-2">ID</td><td className="px-3 py-2">Type</td><td className="px-3 py-2">Status</td>
-                <td className="px-3 py-2">Started</td><td className="px-3 py-2">Duration</td><td className="px-3 py-2">Size</td><td className="px-3 py-2"></td>
+                <td className="px-3 py-2">ID</td>
+                {/* "Type" dulu hanya menampilkan slug job_type, jadi dua app backup
+                    dengan filesystem dan tujuan berbeda terlihat sama persis, dan
+                    baris terjadwal tidak memberi tahu apa yang akan dikerjakannya. */}
+                <td className="px-3 py-2">Yang di-backup</td><td className="px-3 py-2">Status</td>
+                <td className="px-3 py-2">Mulai / terjadwal</td><td className="px-3 py-2">Duration</td><td className="px-3 py-2">Size</td><td className="px-3 py-2"></td>
               </tr>
             </thead>
             <tbody>
@@ -525,15 +561,35 @@ function JobsList({ jobTypes, refreshSignal }) {
                 <>
                   <tr key={j.id} style={{ borderTop: "1px solid rgba(0,0,0,0.05)" }}>
                     <td className="px-3 py-2">#{j.id}</td>
-                    <td className="px-3 py-2">{j.job_type}</td>
+                    <td className="px-3 py-2">{j.description || j.job_type}</td>
                     <td className="px-3 py-2"><StatusBadge status={j.status} /></td>
-                    <td className="px-3 py-2" style={{ color: "#64748b" }}>{fmtDate(j.started_at)}</td>
+                    <td className="px-3 py-2" style={{ color: "#64748b" }}>
+                      {j.status === "scheduled"
+                        ? (j.run_at_local
+                            ? <span title="Waktu server database">{j.run_at_local} <span style={{ fontSize: 10 }}>WIB</span></span>
+                            : "—")
+                        : fmtDate(j.started_at)}
+                    </td>
                     <td className="px-3 py-2" style={{ color: "#64748b" }}>{fmtDuration(j.duration_sec)}</td>
                     <td className="px-3 py-2" style={{ color: "#64748b" }}>{fmtBytes(j.total_size_bytes)}</td>
                     <td className="px-3 py-2">
-                      <button onClick={() => setExpanded(expanded === j.id ? null : j.id)} style={{ color: "#2563eb" }}>
-                        {expanded === j.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                      </button>
+                      <div className="flex items-center gap-1">
+                        {j.status === "scheduled" && (
+                          <>
+                            <button title="Ubah jadwal" style={{ color: "#2563eb" }}
+                              onClick={() => rescheduleJob(j)}>
+                              <Pencil size={13} />
+                            </button>
+                            <button title="Batalkan jadwal" style={{ color: "#dc2626" }}
+                              onClick={() => cancelJob(j)}>
+                              <Trash2 size={13} />
+                            </button>
+                          </>
+                        )}
+                        <button onClick={() => setExpanded(expanded === j.id ? null : j.id)} style={{ color: "#2563eb" }}>
+                          {expanded === j.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                   {expanded === j.id && (
