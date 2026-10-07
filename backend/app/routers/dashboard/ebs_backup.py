@@ -926,6 +926,25 @@ def trigger_offline(payload: BackupOfflineIn, bg: BackgroundTasks, db: Session =
     return {"job_id": job.id, "status": "submitted", "target": target}
 
 
+def _df_bytes(ssh, path: str) -> dict:
+    """Free space at a path, or a reason it could not be read.
+
+    df on a path that does not exist prints an error and no table, so the old
+    `parts[1]` raised "list index out of range" — an exception that says nothing
+    about the actual situation. On the App server /backup simply is not there,
+    which is the whole reason the stream-to-DB mode exists; that deserves to be
+    said rather than crashed on.
+    """
+    r = ssh.run(f"df -B1 {path} 2>&1 | tail -1", timeout=15)
+    parts = (r.stdout or "").split()
+    if len(parts) < 4 or not parts[1].isdigit():
+        if "No such file" in (r.stdout or "") or "tidak" in (r.stdout or ""):
+            return {"connected": False, "error": f"{path} tidak ada di server ini"}
+        return {"connected": False, "error": (r.stdout or "df gagal").strip()[:120]}
+    return {"connected": True, "total_bytes": int(parts[1]),
+            "used_bytes": int(parts[2]), "available_bytes": int(parts[3])}
+
+
 @router.get("/backup/app/preflight/{server_id}")
 def app_preflight(server_id: int, fs_target: str = "fs2",
                   remote_target_server_id: Optional[int] = None,
@@ -992,29 +1011,40 @@ def app_preflight(server_id: int, fs_target: str = "fs2",
                     path = f"{settings.BACKUP_STAGING}/application/{fs_target}"
                     try:
                         with ssh_from_server(remote, rcred) as rssh:
-                            r = rssh.run(f"df -B1 {settings.BACKUP_STAGING} | tail -1", timeout=15)
-                        parts = r.stdout.split()
-                        out["target"] = {
-                            "connected": True, "server": remote.name, "host": remote.host,
-                            "path": path, "total_bytes": int(parts[1]),
-                            "used_bytes": int(parts[2]), "available_bytes": int(parts[3]),
-                        }
+                            info = _df_bytes(rssh, settings.BACKUP_STAGING)
                     except Exception as e:
-                        out["target"] = {"connected": False, "server": remote.name,
-                                         "path": path, "error": str(e)}
+                        info = {"connected": False, "error": str(e)}
+                    out["target"] = {**info, "server": remote.name, "host": remote.host, "path": path}
             else:
                 path = f"{settings.BACKUP_STAGING}/application/{fs_target}"
-                try:
-                    r = ssh.run(f"df -B1 {settings.BACKUP_STAGING} | tail -1", timeout=15)
-                    parts = r.stdout.split()
-                    out["target"] = {
-                        "connected": True, "server": server.name, "host": server.host,
-                        "path": path, "total_bytes": int(parts[1]),
-                        "used_bytes": int(parts[2]), "available_bytes": int(parts[3]),
-                    }
-                except Exception as e:
-                    out["target"] = {"connected": False, "server": server.name,
-                                     "path": path, "error": str(e)}
+                info = _df_bytes(ssh, settings.BACKUP_STAGING)
+                if not info.get("connected"):
+                    info["error"] = (info.get("error", "") +
+                                     " — App server ini tidak punya partisi backup, "
+                                     "jadi pilih 'Stream to <DB server>' sebagai tujuan.")
+                out["target"] = {**info, "server": server.name, "host": server.host, "path": path}
+            # apps_base yang salah adalah kegagalan senyap: tar tidak menemukan
+            # apa pun dan backup "berhasil" tanpa isi. Kalau direktori yang
+            # diharapkan tidak ada, cari di mana ia sebenarnya dan katakan.
+            if not any(src["exists"] for src in out["sources"]):
+                r = ssh.run(
+                    f"find {apps_base} -maxdepth 3 -type d -name fs2 2>/dev/null | head -3",
+                    timeout=60,
+                )
+                found = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+                if found:
+                    detected = found[0].rsplit("/", 1)[0]
+                    out["apps_base_hint"] = detected
+                    out["warning"] = (
+                        f"Tidak ada fs1/fs2 di '{apps_base}', tapi ketemu di '{detected}'. "
+                        f"Ubah apps_base server ini jadi '{detected}' di tab Setup — "
+                        f"kalau tidak, backup akan berjalan tanpa menyalin apa pun."
+                    )
+                else:
+                    out["warning"] = (
+                        f"Tidak ada fs1/fs2/fs_ne di bawah '{apps_base}', dan tidak ketemu "
+                        f"di mana pun di bawahnya. Periksa apps_base di tab Setup."
+                    )
     except Exception as e:
         raise HTTPException(500, f"Preflight app backup gagal: {e}")
 

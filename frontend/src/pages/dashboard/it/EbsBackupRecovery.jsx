@@ -926,6 +926,14 @@ function AppPreflight({ pre }) {
       border: "1px solid rgba(15,23,42,0.1)", borderRadius: 10, padding: 12, marginBottom: 14,
       background: "#f8fafc",
     }}>
+      {pre.warning && (
+        <p style={{
+          fontSize: 11.5, color: "#92400e", background: "rgba(217,119,6,0.12)",
+          border: "1px solid rgba(217,119,6,0.35)", borderRadius: 8, padding: "7px 10px", marginBottom: 10,
+        }}>
+          <b>Perhatian:</b> {pre.warning}
+        </p>
+      )}
       <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginBottom: 8 }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>
           Sumber — {pre.apps_base}
