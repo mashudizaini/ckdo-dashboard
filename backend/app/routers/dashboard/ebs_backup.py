@@ -123,6 +123,11 @@ class BackupOnlineIn(BaseModel):
     destination: str = "staging"
     minio_server_id: Optional[int] = None
     synology_server_id: Optional[int] = None
+    # Jalankan nanti, bukan sekarang. Diisi dalam WAKTU SERVER DATABASE (WIB),
+    # format "YYYY-MM-DD HH:MM" — bukan UTC, karena itulah jam yang dilihat
+    # operator di layar dan di nama direktori staging. Dikonversi ke UTC di
+    # sini, satu kali, supaya tidak ada lagi dua jam yang berbeda tujuh jam.
+    run_at_local: Optional[str] = None
 
 
 class SyncBackupIn(BaseModel):
@@ -557,6 +562,66 @@ def _has_spfile(server: Server, cred: Credential) -> bool:
         return True
 
 
+# Jam server database relatif terhadap UTC. Dibaca sekali saat dipakai, bukan
+# dikeraskan, supaya perubahan zona waktu server tidak diam-diam menggeser
+# jadwal tujuh jam.
+def _db_utc_offset_hours(default: int = 7) -> int:
+    try:
+        from app.database import get_oracle_connection
+        with get_oracle_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT TO_CHAR(SYSTIMESTAMP,'TZH') FROM dual")
+            return int(cur.fetchone()[0])
+    except Exception:
+        return default
+
+
+def build_online_script(db: Session, server: Server, payload: BackupOnlineIn, job_id: int):
+    """Build the bash script for an online backup.
+
+    Split out of the trigger so a scheduled run can produce exactly the same
+    script at fire time — rebuilt then, not at scheduling time, so the staging
+    directory is stamped with the moment it actually runs.
+    """
+    if payload.job_type == "online_full":
+        sync_kwargs = {}
+        if payload.destination == "minio_direct":
+            if not payload.minio_server_id:
+                raise HTTPException(400, "minio_server_id required for destination=minio_direct")
+            sync_kwargs = {"sync_target": "minio", **_minio_sync_params(db, payload.minio_server_id)}
+        elif payload.destination == "synology_direct":
+            if not payload.synology_server_id:
+                raise HTTPException(400, "synology_server_id required for destination=synology_direct")
+            sync_kwargs = {"sync_target": "synology", **_synology_sync_params(db, payload.synology_server_id)}
+
+        db_cred = db.query(Credential).filter(
+            Credential.server_id == server.id,
+            Credential.cred_type.in_(["ssh_password", "ssh_key"]),
+        ).first()
+        include_spfile = _has_spfile(server, db_cred) if db_cred else True
+
+        return rman_templates.rman_online_full(
+            oracle_home=server.oracle_home or settings.ORACLE_HOME,
+            oracle_sid=server.oracle_sid or settings.ORACLE_SID,
+            staging_path=settings.BACKUP_STAGING,
+            parallelism=payload.parallelism,
+            compression=payload.compression,
+            include_archivelog=payload.include_archivelog,
+            archivelog_delete_input=payload.archivelog_delete_input,
+            include_spfile=include_spfile,
+            job_id=job_id,
+            **sync_kwargs,
+        )
+    return rman_templates.rman_incremental(
+        oracle_home=server.oracle_home or settings.ORACLE_HOME,
+        oracle_sid=server.oracle_sid or settings.ORACLE_SID,
+        staging_path=settings.BACKUP_STAGING,
+        level=payload.incremental_level,
+        parallelism=payload.parallelism,
+        job_id=job_id,
+    )
+
+
 @router.post("/backup/online")
 def trigger_online(payload: BackupOnlineIn, bg: BackgroundTasks, db: Session = Depends(get_db)):
     server = db.query(Server).filter(Server.id == payload.server_id).first()
@@ -564,6 +629,28 @@ def trigger_online(payload: BackupOnlineIn, bg: BackgroundTasks, db: Session = D
         raise HTTPException(400, "Server is not DB")
     if payload.destination not in ("staging", "minio_direct", "synology_direct"):
         raise HTTPException(400, "Invalid destination")
+
+    # ── Dijadwalkan: simpan niatnya, jangan jalankan sekarang ────────────
+    if payload.run_at_local:
+        try:
+            local = datetime.strptime(payload.run_at_local.strip()[:16], "%Y-%m-%d %H:%M")
+        except ValueError:
+            raise HTTPException(400, "run_at_local harus berformat 'YYYY-MM-DD HH:MM' (waktu server database)")
+        run_at_utc = local - timedelta(hours=_db_utc_offset_hours())
+        if run_at_utc <= datetime.utcnow():
+            raise HTTPException(400, "Waktu yang dipilih sudah lewat.")
+        params = payload.model_dump()
+        params["run_at_utc"] = run_at_utc.strftime("%Y-%m-%d %H:%M:%S")
+        job = BackupJob(
+            job_type=payload.job_type, target_server_id=server.id, status="scheduled",
+            parameters=json.dumps(params), started_at=None,
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        return {"job_id": job.id, "status": "scheduled",
+                "run_at_local": local.strftime("%Y-%m-%d %H:%M"),
+                "run_at_utc": params["run_at_utc"]}
 
     job = _create_job(db, payload.job_type, server.id, payload.model_dump())
 
@@ -610,6 +697,38 @@ def trigger_online(payload: BackupOnlineIn, bg: BackgroundTasks, db: Session = D
     db.commit()
     bg.add_task(_deploy_and_run, job.id, bash, target)
     return {"job_id": job.id, "status": "submitted", "target": target, "destination": payload.destination}
+
+
+@router.get("/backup/readiness")
+def backup_readiness():
+    """Is now a good time to back up, and what is the database doing?
+
+    Preflight answers "is there room and can we reach the targets". This answers
+    the question an operator actually asks at 22:00 — is anyone still working,
+    is anything mid-flight, will this hurt. Read-only throughout.
+
+    Both clocks are returned deliberately. The dashboard stores naive UTC, the
+    database server runs WIB: the failed run of 2026-10-06 is recorded as 12:55
+    and its files are stamped 19:55, the same moment written two ways. A
+    schedule entered without being shown which clock it means is seven hours
+    wrong.
+    """
+    from app.services.ebs_backup import readiness
+    try:
+        return readiness.collect()
+    except Exception as e:
+        raise HTTPException(503, f"Tidak bisa membaca kondisi database: {e}")
+
+
+@router.get("/jobs/{job_id}/scheduled/cancel")
+def cancel_scheduled(job_id: int, db: Session = Depends(get_db)):
+    """Drop a job that has not started yet."""
+    job = db.query(BackupJob).filter(BackupJob.id == job_id).first()
+    if not job or job.status != "scheduled":
+        raise HTTPException(400, "Job ini tidak berstatus terjadwal.")
+    db.delete(job)
+    db.commit()
+    return {"status": "cancelled"}
 
 
 @router.get("/backup/online/preflight/{server_id}")
@@ -1019,9 +1138,32 @@ def get_job(job_id: int, tail_lines: int = 200, list_files: bool = False, db: Se
         except Exception:
             output_files = None
 
+    # Angka yang dipercaya, berurutan: RMAN sendiri dulu.
+    #
+    # Bar berbasis byte itu menyesatkan secara struktural — ia membandingkan
+    # keluaran TERKOMPRESI di staging dengan total datafile TIDAK terkompresi,
+    # jadi backup yang sudah selesai terbaca sekitar 25%, dan kodenya menutup di
+    # 99% sehingga tidak pernah terlihat selesai juga. v$session_longops memakai
+    # satuan yang sama di kedua sisi dan benar-benar mencapai 100.
     progress_percent = None
-    if progress_total_bytes and progress_current_bytes is not None:
+    progress_source = None
+    progress_eta_minutes = None
+    progress_elapsed_minutes = None
+    if job.status == "running":
+        try:
+            from app.services.ebs_backup import readiness
+            live = readiness.rman_progress()
+        except Exception:
+            live = None
+        if live:
+            progress_percent = live["percent"]
+            progress_source = live["source"]
+            progress_eta_minutes = live.get("eta_minutes")
+            progress_elapsed_minutes = live.get("elapsed_minutes")
+
+    if progress_percent is None and progress_total_bytes and progress_current_bytes is not None:
         progress_percent = min(99.0, round(progress_current_bytes / progress_total_bytes * 100, 1))
+        progress_source = "ukuran berkas (perkiraan kasar, keluarannya terkompresi)"
 
     return {
         **_serialize_job(job),
@@ -1030,6 +1172,9 @@ def get_job(job_id: int, tail_lines: int = 200, list_files: bool = False, db: Se
         "parameters_parsed": json.loads(job.parameters) if job.parameters else {},
         "progress_total_bytes": progress_total_bytes,
         "progress_current_bytes": progress_current_bytes,
+        "progress_source": progress_source,
+        "progress_eta_minutes": progress_eta_minutes,
+        "progress_elapsed_minutes": progress_elapsed_minutes,
         "progress_percent": progress_percent,
         "output_files": output_files,
     }

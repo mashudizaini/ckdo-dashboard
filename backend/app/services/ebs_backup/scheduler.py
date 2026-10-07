@@ -164,12 +164,68 @@ def _reap_dead_jobs(db):
             logger.exception("Could not reap job #%s", job.id)
 
 
+
+def _fire_scheduled_jobs(db):
+    """Launch jobs whose chosen time has arrived.
+
+    A one-off "run at 22:00" is stored as a job row with status 'scheduled' and
+    run_at_utc inside parameters — no new table, and no cron expression pretending
+    to mean "once". The script is built HERE rather than when the user picked the
+    time, so the staging directory is stamped with the moment it actually runs.
+
+    Wrapped per job: a server that cannot be reached must not stop the other
+    schedules sharing this tick, and must not leave the row claiming to be
+    running when nothing was launched.
+    """
+    from app.routers.dashboard.ebs_backup import (
+        BackupOnlineIn, build_online_script, _deploy_and_run,
+    )
+    from app.database import SessionLocal
+    from app.models.ebs_backup import EbsServer as _Srv
+
+    now = datetime.utcnow()
+    due = db.query(EbsBackupJob).filter(EbsBackupJob.status == "scheduled").all()
+    for job in due:
+        try:
+            params = json.loads(job.parameters or "{}")
+            run_at = params.get("run_at_utc")
+            if not run_at or datetime.strptime(run_at, "%Y-%m-%d %H:%M:%S") > now:
+                continue
+
+            # Build with the router's own session: build_online_script reads
+            # servers and credentials through the main app's models.
+            app_db = SessionLocal()
+            try:
+                srv = app_db.query(_Srv).get(job.target_server_id)
+                payload = BackupOnlineIn(**{k: v for k, v in params.items()
+                                            if k in BackupOnlineIn.model_fields and k != "run_at_local"})
+                bash, target = build_online_script(app_db, srv, payload, job.id)
+            finally:
+                app_db.close()
+
+            job.status = "pending"
+            job.started_at = now
+            job.output_path = target
+            db.commit()
+
+            _deploy_and_run(job.id, bash, target)
+            logger.info("Scheduled job #%s fired (was due %s UTC)", job.id, run_at)
+        except Exception:
+            db.rollback()
+            job.status = "failed"
+            job.error_message = "Gagal meluncurkan job terjadwal — lihat log backend."
+            job.finished_at = datetime.utcnow()
+            db.commit()
+            logger.exception("Could not fire scheduled job #%s", job.id)
+
+
 def _tick():
     db = EbsSessionLocal()
     try:
         # Before dispatching anything new, close out what has already died —
         # otherwise a dead job stays "running" until someone opens its page.
         _reap_dead_jobs(db)
+        _fire_scheduled_jobs(db)
 
         now = datetime.utcnow()
         due = db.query(EbsSchedule).filter(

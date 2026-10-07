@@ -28,7 +28,13 @@ logger = structlog.get_logger(__name__)
 # make worse".
 _SESSIONS_GOOD = 10        # active user sessions at or below this: quiet
 _SESSIONS_BUSY = 30        # above this: genuinely busy
-_LONG_TXN_MINUTES = 30     # an open transaction older than this holds undo
+_LONG_TXN_MINUTES = 30     # an open transaction older than this is worth listing
+# ...but age alone is not a problem, and treating it as one trains the operator
+# to ignore the verdict. EBS leaves transactions open for months that hold two
+# undo blocks — on 2026-10-07 the oldest was 114 days with 16 KB. What actually
+# costs a backup is undo VOLUME, so only transactions above this raise the
+# level; the rest are reported as information.
+_LONG_TXN_UNDO_MB = 50
 _CONC_REQ_GOOD = 2         # EBS concurrent requests still running
 
 
@@ -92,12 +98,13 @@ def collect(now_utc: Optional[datetime] = None) -> dict:
 
         # ── Open transactions: these pin undo and make a backup window worse
         out["long_transactions"] = _rows(cur, f"""
-            SELECT s.sid, s.username, NVL(s.module,'-') AS module,
+            SELECT s.sid, NVL(s.username,'(background)') AS username,
+                   NVL(s.module,'-') AS module, s.status,
                    ROUND((SYSDATE - t.start_date)*24*60, 1) AS open_minutes,
-                   t.used_ublk AS undo_blocks
+                   ROUND(t.used_ublk * 8192 / 1024 / 1024, 1) AS undo_mb
             FROM v$transaction t JOIN v$session s ON s.saddr = t.ses_addr
             WHERE (SYSDATE - t.start_date)*24*60 >= {_LONG_TXN_MINUTES}
-            ORDER BY t.start_date FETCH FIRST 5 ROWS ONLY""")
+            ORDER BY t.used_ublk DESC FETCH FIRST 5 ROWS ONLY""")
 
         # ── EBS concurrent requests still running ─────────────────────────
         # The signal that matters most in an EBS shop: a backup during a long
@@ -165,12 +172,21 @@ def _verdict(d: dict) -> dict:
         reasons.append(f"{active} sesi user aktif — tenang.")
 
     txns = d.get("long_transactions") or []
-    if txns:
+    heavy = [t for t in txns if (t.get("undo_mb") or 0) >= _LONG_TXN_UNDO_MB]
+    if heavy:
         worse("caution")
-        longest = max(t.get("open_minutes") or 0 for t in txns)
+        biggest = max(t["undo_mb"] for t in heavy)
         reasons.append(
-            f"{len(txns)} transaksi terbuka lebih dari {_LONG_TXN_MINUTES} menit "
-            f"(terlama {longest:.0f} menit) — undo tertahan selama backup."
+            f"{len(heavy)} transaksi terbuka menahan undo besar (terbesar {biggest} MB) — "
+            "backup akan berjalan sementara undo itu tidak bisa didaur ulang."
+        )
+    elif txns:
+        # Listed, not counted against the verdict: EBS always has a few of
+        # these and they hold kilobytes.
+        oldest = max(t.get("open_minutes") or 0 for t in txns)
+        reasons.append(
+            f"{len(txns)} transaksi terbuka lama (terlama {oldest/1440:.0f} hari) tapi "
+            "undo-nya kecil — sesi EBS yang menganggur, bukan penghalang backup."
         )
 
     cr = (d.get("concurrent_requests") or {}).get("running")
