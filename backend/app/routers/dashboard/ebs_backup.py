@@ -849,6 +849,32 @@ def _archive_holder(db: Session, job: BackupJob) -> Server:
     return db.query(Server).filter(Server.id == job.target_server_id).first()
 
 
+def _synology_mountpoint(ssh, syn_srv: Server) -> Optional[str]:
+    """Local path where this server already has the Synology share mounted.
+
+    Found at runtime from the mount table rather than stored as config: the
+    mount point is a property of the server as it is right now, and a recorded
+    value goes stale the first time someone remounts it elsewhere.
+
+    Mounted is not the same as usable. The export can squash this server's uid
+    to something the NAS ACL refuses — exactly what blocked it here until the
+    share's squash setting was changed — so writability is probed before the
+    path is used.
+    """
+    spec = f"{syn_srv.host}:{syn_srv.share_path}"
+    r = ssh.run(
+        f"findmnt -n -o TARGET --source '{spec}' 2>/dev/null || "
+        f"mount | grep -F '{spec} on ' | awk '{{print $3}}'",
+        timeout=20,
+    )
+    mp = (r.stdout or "").strip().splitlines()
+    mp = mp[0].strip() if mp else ""
+    if not mp:
+        return None
+    probe = ssh.run(f"test -w '{mp}' && echo WRITABLE", timeout=20)
+    return mp if "WRITABLE" in (probe.stdout or "") else None
+
+
 def _sync_existing_backup(db: Session, bg: BackgroundTasks, payload: SyncBackupIn, target: str):
     src_job = db.query(BackupJob).filter(BackupJob.id == payload.job_id).first()
     if not src_job or not src_job.output_path:
@@ -875,6 +901,7 @@ def _sync_existing_backup(db: Session, bg: BackgroundTasks, payload: SyncBackupI
         dest_desc = dest
     else:
         p = _synology_sync_params(db, payload.target_server_id)
+        syn_srv = db.query(Server).filter(Server.id == payload.target_server_id).first()
         ssh_opts = f"-p {p['synology_port']} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes"
         # Keep the tiers apart on the NAS: an application tar landing under
         # database/full would be indistinguishable from a datafile backupset
