@@ -57,7 +57,8 @@ def scan_folder(root: str) -> tuple[list[dict], list[str]]:
     Returns ([{rel, path, sha256, copies: [rel, …]}], [skipped rel])."""
     by_hash: dict[str, dict] = {}
     skipped = []
-    for dirpath, _dirs, files in os.walk(root):
+    for dirpath, dirs, files in os.walk(root):
+        dirs.sort()  # walk order picks which copy of a duplicate is kept — keep it the same on every OS
         for f in sorted(files):
             path = os.path.join(dirpath, f)
             rel = os.path.relpath(path, root).replace(os.sep, "/")
