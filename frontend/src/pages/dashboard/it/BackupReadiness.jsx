@@ -10,7 +10,7 @@
  */
 import { useEffect, useState } from "react";
 import { Loader2, RefreshCw, CheckCircle2, AlertTriangle, XCircle, Clock } from "lucide-react";
-import { ebsBackupApi } from "@/api/dashboard";
+import { ebsBackupApi } from "@/api/ebsBackup";
 
 const LEVEL = {
   good:    { color: "#16a34a", bg: "rgba(22,163,74,0.12)",  Icon: CheckCircle2 },
