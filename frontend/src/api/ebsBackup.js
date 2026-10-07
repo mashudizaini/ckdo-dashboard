@@ -28,6 +28,12 @@ export const ebsBackupApi = {
   // Terpisah dari preflight: preflight menjawab kapasitas & konektivitas,
   // ini menjawab beban dan waktu.
   readiness:           () => api.get(`${BASE}/backup/readiness`),
+  // Apa yang disalin, ke folder mana, dan apakah muat.
+  appPreflight:        (serverId, fsTarget, remoteTargetId) =>
+    api.get(`${BASE}/backup/app/preflight/${serverId}`, { params: {
+      fs_target: fsTarget,
+      remote_target_server_id: remoteTargetId || undefined,
+    } }),
   cancelScheduled:     (jobId) => api.get(`${BASE}/jobs/${jobId}/scheduled/cancel`),
   syncOnlineToMinio:    (body) => api.post(`${BASE}/backup/online/sync-minio`, body),
   syncOnlineToSynology: (body) => api.post(`${BASE}/backup/online/sync-synology`, body),

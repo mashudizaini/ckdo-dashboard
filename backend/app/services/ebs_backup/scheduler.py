@@ -178,8 +178,16 @@ def _fire_scheduled_jobs(db):
     running when nothing was launched.
     """
     from app.routers.dashboard.ebs_backup import (
-        BackupOnlineIn, build_online_script, _deploy_and_run,
+        BackupOnlineIn, BackupAppIn, build_online_script, build_app_script, _deploy_and_run,
     )
+
+    # Which payload and which builder, per job type. Adding a type here is the
+    # whole change needed to make it schedulable.
+    BUILDERS = {
+        "online_full": (BackupOnlineIn, build_online_script),
+        "online_incremental": (BackupOnlineIn, build_online_script),
+        "app_fs": (BackupAppIn, build_app_script),
+    }
     from app.database import SessionLocal
     from app.models.ebs_backup import EbsServer as _Srv
 
@@ -194,12 +202,16 @@ def _fire_scheduled_jobs(db):
 
             # Build with the router's own session: build_online_script reads
             # servers and credentials through the main app's models.
+            model, builder = BUILDERS.get(job.job_type, (None, None))
+            if builder is None:
+                raise RuntimeError(f"Jenis job '{job.job_type}' belum bisa dijadwalkan")
+
             app_db = SessionLocal()
             try:
                 srv = app_db.query(_Srv).get(job.target_server_id)
-                payload = BackupOnlineIn(**{k: v for k, v in params.items()
-                                            if k in BackupOnlineIn.model_fields and k != "run_at_local"})
-                bash, target = build_online_script(app_db, srv, payload, job.id)
+                payload = model(**{k: v for k, v in params.items()
+                                   if k in model.model_fields and k != "run_at_local"})
+                bash, target = builder(app_db, srv, payload, job.id)
             finally:
                 app_db.close()
 

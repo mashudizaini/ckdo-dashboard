@@ -914,6 +914,77 @@ function DbBackupTab({ servers }) {
 
 /* ─── App Backup ──────────────────────────────────── */
 
+/* Apa yang disalin, ke folder mana, dan apakah muat.
+   Tab ini dulu tidak menampilkan satu pun dari ketiganya: Anda memilih
+   filesystem lalu menekan Run tanpa diberi tahu direktori mana yang dibaca,
+   direktori mana yang ditulis, dan berapa sisa ruang di sana. */
+function AppPreflight({ pre }) {
+  const t = pre.target || {};
+  const fits = pre.fits;
+  return (
+    <div style={{
+      border: "1px solid rgba(15,23,42,0.1)", borderRadius: 10, padding: 12, marginBottom: 14,
+      background: "#f8fafc",
+    }}>
+      <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginBottom: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>
+          Sumber — {pre.apps_base}
+        </span>
+        <span style={{ fontSize: 11, color: "#64748b" }}>
+          mode: {pre.mode === "remote_stream" ? "dialirkan lewat SSH ke server lain" : "disk lokal App server"}
+        </span>
+      </div>
+
+      <table className="w-full" style={{ fontSize: 11.5, marginBottom: 10 }}>
+        <tbody>
+          {(pre.sources || []).map((src) => (
+            <tr key={src.name}>
+              <td style={{ padding: "2px 0", color: "#475569", width: 70 }}>{src.name}</td>
+              <td style={{ padding: "2px 8px", color: "#64748b", fontFamily: "monospace" }}>{src.path}</td>
+              <td style={{ padding: "2px 0", textAlign: "right", color: src.exists ? "#0f172a" : "#dc2626" }}>
+                {src.exists ? fmtBytes(src.bytes) : "tidak ada"}
+              </td>
+            </tr>
+          ))}
+          <tr style={{ borderTop: "1px solid rgba(15,23,42,0.1)" }}>
+            <td colSpan={2} style={{ padding: "4px 0", fontWeight: 700, color: "#0f172a" }}>Total sumber</td>
+            <td style={{ padding: "4px 0", textAlign: "right", fontWeight: 700 }}>{fmtBytes(pre.source_total_bytes)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Tujuan</div>
+      {t.connected === false ? (
+        <p style={{ fontSize: 11.5, color: "#dc2626" }}>
+          Tidak bisa dibaca{t.server ? ` (${t.server})` : ""}: {t.error}
+        </p>
+      ) : (
+        <>
+          <p style={{ fontSize: 11.5, color: "#64748b", fontFamily: "monospace", marginBottom: 4 }}>
+            {t.host ? `${t.host}:` : ""}{t.path}
+          </p>
+          <div className="flex gap-4 flex-wrap" style={{ fontSize: 11.5, color: "#475569" }}>
+            <span>Total {fmtBytes(t.total_bytes)}</span>
+            <span>Terpakai {fmtBytes(t.used_bytes)}</span>
+            <span>Sisa <b style={{ color: "#0f172a" }}>{fmtBytes(t.available_bytes)}</b></span>
+          </div>
+          {fits != null && (
+            <p style={{
+              fontSize: 11.5, marginTop: 6, fontWeight: 700,
+              color: fits ? "#16a34a" : "#dc2626",
+            }}>
+              {fits
+                ? `Muat — sisa ${fmtBytes(pre.headroom_bytes)} setelah disalin, dan arsipnya dikompresi jadi biasanya jauh lebih kecil dari angka sumber.`
+                : `TIDAK MUAT — kurang ${fmtBytes(Math.abs(pre.headroom_bytes))} dibanding ukuran sumber mentah. Kompresi mungkin menyelamatkan, tapi jangan diandalkan.`}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+
 function AppBackupTab({ servers }) {
   const appServers = servers.filter((s) => s.role === "app");
   const dbServers = servers.filter((s) => s.role === "db");
@@ -924,15 +995,40 @@ function AppBackupTab({ servers }) {
   const [remoteTargetId, setRemoteTargetId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [refreshSignal, setRefreshSignal] = useState(0);
+  const [pre, setPre] = useState(null);
+  const [preBusy, setPreBusy] = useState(false);
+  const [runAtLocal, setRunAtLocal] = useState("");
+
+  // Ukuran sumber diukur dengan du pada direktori sebenarnya, bukan ditaksir —
+  // fs1 dan fs2 sangat berbeda antar instalasi, jadi tebakan tidak berguna.
+  // Karena itu bisa memakan waktu, hanya dijalankan saat diminta.
+  const runPre = async () => {
+    if (!serverId) return alert("Pilih App server dulu");
+    setPreBusy(true);
+    try {
+      setPre(await ebsBackupApi.appPreflight(serverId, fsTarget, remoteTargetId || null));
+    } catch (e) {
+      alert(e?.detail || "Preflight gagal");
+    } finally {
+      setPreBusy(false);
+    }
+  };
 
   const submit = async () => {
     if (!serverId) return alert("Select an App server first");
     setSubmitting(true);
     try {
-      await ebsBackupApi.triggerApp({
+      const res = await ebsBackupApi.triggerApp({
         server_id: Number(serverId), fs_target: fsTarget, include_inst_top: includeInstTop,
         remote_target_server_id: remoteTargetId ? Number(remoteTargetId) : null,
+        run_at_local: runAtLocal || null,
       });
+      if (res?.status === "scheduled") {
+        alert(`Dijadwalkan jalan ${res.run_at_local} waktu server database.
+`
+            + `Job #${res.job_id} diluncurkan otomatis — halaman tidak perlu dibuka.`);
+        setRunAtLocal("");
+      }
       setRefreshSignal((n) => n + 1);
     } catch (e) {
       alert(e?.detail || "Failed to submit app backup job");
@@ -965,11 +1061,27 @@ function AppBackupTab({ servers }) {
             </select>
           </Field>
         </div>
+        <div className="grid grid-cols-3 gap-4 mb-4">
+          <Field label="Jalankan nanti (kosongkan = sekarang)">
+            {/* Waktu server database, sama seperti tab DB Backup — bukan waktu
+                browser dan bukan UTC. */}
+            <input type="datetime-local" style={inputStyle} value={runAtLocal}
+              onChange={(e) => setRunAtLocal(e.target.value.replace("T", " "))} />
+          </Field>
+        </div>
         <label className="flex items-center gap-2 mb-4" style={{ fontSize: 12 }}>
           <input type="checkbox" checked={includeInstTop} onChange={(e) => setIncludeInstTop(e.target.checked)} /> Include inst_top / fs_ne
         </label>
+
+        <div className="flex gap-2 mb-4">
+          <Btn size="sm" icon={preBusy ? Loader2 : RefreshCw} disabled={preBusy || !serverId} onClick={runPre}>
+            {preBusy ? "Mengukur…" : "Cek ukuran & tujuan"}
+          </Btn>
+        </div>
+        {pre && <AppPreflight pre={pre} />}
+
         <Btn variant="primary" icon={Play} disabled={submitting} onClick={submit}>
-          {submitting ? "Submitting…" : "Trigger App Backup"}
+          {submitting ? "Submitting…" : runAtLocal ? "Jadwalkan App Backup" : "Trigger App Backup"}
         </Btn>
       </Panel>
 

@@ -152,6 +152,9 @@ class BackupAppIn(BaseModel):
     fs_target: str = "fs2"
     include_inst_top: bool = True
     remote_target_server_id: Optional[int] = None
+    # Sama seperti backup database: diisi dalam WAKTU SERVER DATABASE (WIB),
+    # "YYYY-MM-DD HH:MM". Lihat catatan di BackupOnlineIn.
+    run_at_local: Optional[str] = None
 
 
 class RestoreDevIn(BaseModel):
@@ -923,12 +926,111 @@ def trigger_offline(payload: BackupOfflineIn, bg: BackgroundTasks, db: Session =
     return {"job_id": job.id, "status": "submitted", "target": target}
 
 
-@router.post("/backup/app")
-def trigger_app(payload: BackupAppIn, bg: BackgroundTasks, db: Session = Depends(get_db)):
-    server = db.query(Server).filter(Server.id == payload.server_id).first()
+@router.get("/backup/app/preflight/{server_id}")
+def app_preflight(server_id: int, fs_target: str = "fs2",
+                  remote_target_server_id: Optional[int] = None,
+                  db: Session = Depends(get_db)):
+    """What is being copied, where it lands, and whether it fits.
+
+    The App Backup tab used to show none of this: you picked a filesystem and
+    pressed Run without being told which directory would be read, which
+    directory it would be written to, or how much room was left there. The tar
+    either worked or filled a disk.
+
+    Sizes are measured with du on the real directories rather than estimated,
+    because fs1 and fs2 differ a lot between installs and a guess here is worth
+    nothing. Compression typically lands the archive well under the figure
+    shown, so "fits" based on the raw size is a deliberately pessimistic test.
+    """
+    server = db.query(Server).filter(Server.id == server_id).first()
     if not server or server.role != "app":
         raise HTTPException(400, "Server is not App")
+    cred = db.query(Credential).filter(
+        Credential.server_id == server.id,
+        Credential.cred_type.in_(["ssh_password", "ssh_key"]),
+    ).first()
+    if not cred:
+        raise HTTPException(400, "No SSH credential for App server")
 
+    apps_base = server.apps_base or settings.APPS_BASE
+    out = {
+        "apps_base": apps_base,
+        "fs_target": fs_target,
+        "sources": [],
+        "source_total_bytes": 0,
+        "target": None,
+        "mode": "local",
+    }
+
+    wanted = ["fs1", "fs2"] if fs_target == "both" else [fs_target]
+
+    try:
+        with ssh_from_server(server, cred) as ssh:
+            for fs in wanted + ["fs_ne"]:
+                path = f"{apps_base}/{fs}"
+                r = ssh.run(f"du -sb {path} 2>/dev/null | cut -f1", timeout=120)
+                try:
+                    size = int((r.stdout or "").strip())
+                except ValueError:
+                    size = None
+                out["sources"].append({"name": fs, "path": path, "bytes": size,
+                                       "exists": size is not None})
+                if size:
+                    out["source_total_bytes"] += size
+
+            # Where it lands.
+            if remote_target_server_id:
+                remote = db.query(Server).filter(Server.id == remote_target_server_id).first()
+                rcred = db.query(Credential).filter(
+                    Credential.server_id == remote_target_server_id,
+                    Credential.cred_type.in_(["ssh_password", "ssh_key"]),
+                ).first() if remote else None
+                if not remote or not rcred:
+                    out["target"] = {"connected": False, "error": "Server tujuan atau kredensialnya belum ada"}
+                else:
+                    out["mode"] = "remote_stream"
+                    path = f"{settings.BACKUP_STAGING}/application/{fs_target}"
+                    try:
+                        with ssh_from_server(remote, rcred) as rssh:
+                            r = rssh.run(f"df -B1 {settings.BACKUP_STAGING} | tail -1", timeout=15)
+                        parts = r.stdout.split()
+                        out["target"] = {
+                            "connected": True, "server": remote.name, "host": remote.host,
+                            "path": path, "total_bytes": int(parts[1]),
+                            "used_bytes": int(parts[2]), "available_bytes": int(parts[3]),
+                        }
+                    except Exception as e:
+                        out["target"] = {"connected": False, "server": remote.name,
+                                         "path": path, "error": str(e)}
+            else:
+                path = f"{settings.BACKUP_STAGING}/application/{fs_target}"
+                try:
+                    r = ssh.run(f"df -B1 {settings.BACKUP_STAGING} | tail -1", timeout=15)
+                    parts = r.stdout.split()
+                    out["target"] = {
+                        "connected": True, "server": server.name, "host": server.host,
+                        "path": path, "total_bytes": int(parts[1]),
+                        "used_bytes": int(parts[2]), "available_bytes": int(parts[3]),
+                    }
+                except Exception as e:
+                    out["target"] = {"connected": False, "server": server.name,
+                                     "path": path, "error": str(e)}
+    except Exception as e:
+        raise HTTPException(500, f"Preflight app backup gagal: {e}")
+
+    t = out["target"] or {}
+    if t.get("available_bytes") is not None and out["source_total_bytes"]:
+        out["fits"] = t["available_bytes"] > out["source_total_bytes"]
+        out["headroom_bytes"] = t["available_bytes"] - out["source_total_bytes"]
+    return out
+
+
+def build_app_script(db: Session, server: Server, payload: BackupAppIn, job_id: int):
+    """Build the bash script for an application-tier backup.
+
+    Split out for the same reason as build_online_script: a scheduled run has to
+    produce exactly the same script at fire time, not at scheduling time.
+    """
     remote_host = None
     remote_user = None
     remote_port = 22
@@ -948,24 +1050,52 @@ def trigger_app(payload: BackupAppIn, bg: BackgroundTasks, db: Session = Depends
         remote_user = rcred.username
         remote_port = remote_srv.port or 22
 
-    job = _create_job(db, "app_fs", server.id, payload.model_dump())
-    bash, target = rman_templates.app_backup(
+    return rman_templates.app_backup(
         apps_base=server.apps_base or settings.APPS_BASE,
         fs_to_backup=payload.fs_target,
         fs_ne_path=f"{server.apps_base or settings.APPS_BASE}/fs_ne",
         staging_path=settings.BACKUP_STAGING,
         include_inst_top=payload.include_inst_top,
-        job_id=job.id,
+        job_id=job_id,
         remote_host=remote_host,
         remote_user=remote_user,
         remote_port=remote_port,
     )
+
+
+@router.post("/backup/app")
+def trigger_app(payload: BackupAppIn, bg: BackgroundTasks, db: Session = Depends(get_db)):
+    server = db.query(Server).filter(Server.id == payload.server_id).first()
+    if not server or server.role != "app":
+        raise HTTPException(400, "Server is not App")
+
+    if payload.run_at_local:
+        try:
+            local = datetime.strptime(payload.run_at_local.strip()[:16], "%Y-%m-%d %H:%M")
+        except ValueError:
+            raise HTTPException(400, "run_at_local harus berformat 'YYYY-MM-DD HH:MM' (waktu server database)")
+        run_at_utc = local - timedelta(hours=_db_utc_offset_hours())
+        if run_at_utc <= datetime.utcnow():
+            raise HTTPException(400, "Waktu yang dipilih sudah lewat.")
+        params = payload.model_dump()
+        params["run_at_utc"] = run_at_utc.strftime("%Y-%m-%d %H:%M:%S")
+        job = BackupJob(job_type="app_fs", target_server_id=server.id, status="scheduled",
+                        parameters=json.dumps(params), started_at=None)
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        return {"job_id": job.id, "status": "scheduled",
+                "run_at_local": local.strftime("%Y-%m-%d %H:%M"),
+                "run_at_utc": params["run_at_utc"]}
+
+    job = _create_job(db, "app_fs", server.id, payload.model_dump())
+    bash, target = build_app_script(db, server, payload, job.id)
     job.output_path = target
     db.commit()
     bg.add_task(_deploy_and_run, job.id, bash, target)
     return {
         "job_id": job.id, "status": "submitted", "target": target,
-        "mode": "remote_stream" if remote_host else "local", "remote_host": remote_host,
+        "mode": "remote_stream" if payload.remote_target_server_id else "local",
     }
 
 
