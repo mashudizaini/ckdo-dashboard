@@ -924,10 +924,14 @@ def _sync_existing_backup(db: Session, bg: BackgroundTasks, payload: SyncBackupI
             dest_dir = f"{mountpoint}/{subdir}/{backup_name}"
             # rsync when available for a resumable copy of something this
             # size; cp -a otherwise, which every host has.
+            #
+            # --stats, not --info=progress2: the DB server has rsync 3.0.9 and
+            # --info arrived in 3.1, so the fancier flag would have failed the
+            # transfer outright. --stats prints a summary every version has.
             transfer_cmd = (
                 f'mkdir -p "{dest_dir}"\n'
                 f'if command -v rsync >/dev/null 2>&1; then\n'
-                f'  rsync -a --info=progress2 "{src_job.output_path}/" "{dest_dir}/"\n'
+                f'  rsync -a --stats "{src_job.output_path}/" "{dest_dir}/"\n'
                 f'else\n'
                 f'  cp -a "{src_job.output_path}/." "{dest_dir}/"\n'
                 f'fi'
