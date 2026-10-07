@@ -880,12 +880,39 @@ def _sync_existing_backup(db: Session, bg: BackgroundTasks, payload: SyncBackupI
         # database/full would be indistinguishable from a datafile backupset
         # when someone goes looking during a restore.
         subdir = "application" if src_job.job_type == "app_fs" else "database/full"
-        dest_dir = f"{p['synology_share_path']}/{subdir}/{backup_name}"
-        transfer_cmd = (
-            f'ssh {ssh_opts} {p["synology_user"]}@{p["synology_host"]} "mkdir -p {dest_dir}"\n'
-            f'tar cf - -C "{src_job.output_path}" . | ssh {ssh_opts} {p["synology_user"]}@{p["synology_host"]} "cd {dest_dir} && tar xf -"'
-        )
-        dest_desc = dest_dir
+
+        # Prefer the NFS mount when the share is already mounted and writable.
+        mountpoint = None
+        try:
+            syn_cred = db.query(Credential).filter(
+                Credential.server_id == server.id,
+                Credential.cred_type.in_(["ssh_password", "ssh_key"]),
+            ).first()
+            with ssh_from_server(server, syn_cred) as probe_ssh:
+                mountpoint = _synology_mountpoint(probe_ssh, syn_srv)
+        except Exception:
+            mountpoint = None
+
+        if mountpoint:
+            dest_dir = f"{mountpoint}/{subdir}/{backup_name}"
+            # rsync when available for a resumable copy of something this
+            # size; cp -a otherwise, which every host has.
+            transfer_cmd = (
+                f'mkdir -p "{dest_dir}"\n'
+                f'if command -v rsync >/dev/null 2>&1; then\n'
+                f'  rsync -a --info=progress2 "{src_job.output_path}/" "{dest_dir}/"\n'
+                f'else\n'
+                f'  cp -a "{src_job.output_path}/." "{dest_dir}/"\n'
+                f'fi'
+            )
+            dest_desc = f"{dest_dir} (NFS mount)"
+        else:
+            dest_dir = f"{p['synology_share_path']}/{subdir}/{backup_name}"
+            transfer_cmd = (
+                f'ssh {ssh_opts} {p["synology_user"]}@{p["synology_host"]} "mkdir -p {dest_dir}"\n'
+                f'tar cf - -C "{src_job.output_path}" . | ssh {ssh_opts} {p["synology_user"]}@{p["synology_host"]} "cd {dest_dir} && tar xf -"'
+            )
+            dest_desc = f"{p['synology_host']}:{dest_dir} (SSH)"
 
     script = f"""#!/bin/bash
 set -e
