@@ -611,6 +611,22 @@ def build_online_script(db: Session, server: Server, payload: BackupOnlineIn, jo
             if not payload.synology_server_id:
                 raise HTTPException(400, "synology_server_id required for destination=synology_direct")
             sync_kwargs = {"sync_target": "synology", **_synology_sync_params(db, payload.synology_server_id)}
+            # Prefer the NFS mount this server already has over tar-over-SSH.
+            # The SSH route needs a passwordless key on the NAS, which is a
+            # chain of things to keep working; the mount is a filesystem write.
+            try:
+                syn_srv = db.query(Server).filter(Server.id == payload.synology_server_id).first()
+                db_cred = db.query(Credential).filter(
+                    Credential.server_id == server.id,
+                    Credential.cred_type.in_(["ssh_password", "ssh_key"]),
+                ).first()
+                if syn_srv and db_cred:
+                    with ssh_from_server(server, db_cred) as probe:
+                        mp = _synology_mountpoint(probe, syn_srv)
+                    if mp:
+                        sync_kwargs["synology_mountpoint"] = mp
+            except Exception:
+                pass   # tidak ketemu mount -> jatuh ke jalur SSH di template
 
         db_cred = db.query(Credential).filter(
             Credential.server_id == server.id,

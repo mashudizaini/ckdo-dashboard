@@ -49,6 +49,7 @@ def rman_online_full(
     synology_user: str | None = None,
     synology_port: int = 22,
     synology_share_path: str | None = None,
+    synology_mountpoint: str | None = None,   # lihat sync_block Synology di bawah
 ) -> tuple[str, str]:
     """Return (bash_script, target_dir)."""
     ts = _timestamp()
@@ -66,15 +67,36 @@ def rman_online_full(
     mc mirror "$TARGET_DIR" {minio_dest} 2>&1 | tail -30
     echo "[$(date)] Sync to MinIO complete: {minio_dest}"
 """
+    elif sync_target == "synology" and synology_mountpoint:
+        # The share is NFS-mounted on this server, so the copy is an ordinary
+        # filesystem write — no SSH key to install and nothing for StrictModes
+        # to reject, which is what the tar-over-SSH route below needs.
+        #
+        # -rlptD with owner and group dropped, not -a: the export maps every
+        # client uid to the NAS admin account, so rsync cannot chown to the
+        # source owner and exits 23 while every byte arrives intact. Under
+        # `set -e` that would fail a backup that is actually complete.
+        syn_dest_dir = f"{synology_mountpoint}/database/full/{oracle_sid}_{ts}"
+        sync_block = f"""
+    echo "[$(date)] === SYNC TO SYNOLOGY (NFS mount) ==="
+    mkdir -p "{syn_dest_dir}"
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -rlptD --no-owner --no-group --stats "$TARGET_DIR/" "{syn_dest_dir}/"
+    else
+        cp -a "$TARGET_DIR/." "{syn_dest_dir}/"
+    fi
+    echo "[$(date)] Sync to Synology complete: {syn_dest_dir}"
+"""
     elif sync_target == "synology":
-        # tar-over-SSH, not rsync: this Synology's DSM rejects `rsync --server`
-        # for this account (some rsync-specific ACL) even though the account
-        # has full shell + filesystem access over SSH otherwise — confirmed
-        # by testing directly. tar avoids that restriction entirely.
+        # Fallback when the share is not mounted here. tar-over-SSH, not rsync:
+        # this Synology's DSM rejects `rsync --server` for this account (some
+        # rsync-specific ACL) even though the account has full shell access
+        # otherwise. Needs a working passwordless key, which the NFS path does
+        # not.
         syn_ssh_opts = f"-p {synology_port} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes"
         syn_dest_dir = f"{synology_share_path}/database/full/{oracle_sid}_{ts}"
         sync_block = f"""
-    echo "[$(date)] === SYNC TO SYNOLOGY ==="
+    echo "[$(date)] === SYNC TO SYNOLOGY (SSH) ==="
     ssh {syn_ssh_opts} {synology_user}@{synology_host} "mkdir -p {syn_dest_dir}"
     tar cf - -C "$TARGET_DIR" . | ssh {syn_ssh_opts} {synology_user}@{synology_host} "cd {syn_dest_dir} && tar xf -"
     echo "[$(date)] Sync to Synology complete: {syn_dest_dir}"
@@ -162,6 +184,22 @@ set -e
 echo "[$(date)] RMAN exit code: $RC"
 
 if [ $RC -eq 0 ]; then
+    # Sync dijalankan SEBELUM manifest sukses ditulis. Sebelumnya manifest
+    # sudah menyatakan "success" lalu sync berjalan sesudahnya — kalau sync
+    # gagal, pemulung job membaca manifest itu dan mencatat backup sebagai
+    # sukses penuh padahal salinan keduanya tidak pernah mendarat.
+    set +e
+{sync_block}
+    SYNC_RC=$?
+    set -e
+    if [ $SYNC_RC -ne 0 ]; then
+        cat > "$TARGET_DIR/manifest.json" << MANIFEST
+{{"job_id": {job_id}, "status": "failed", "exit_code": $SYNC_RC,
+  "note": "RMAN backup ke staging BERHASIL, tapi sync ke {sync_target} GAGAL"}}
+MANIFEST
+        echo "[$(date)] === SYNC FAILED (backup staging tetap utuh) ==="
+        exit $SYNC_RC
+    fi
     cat > "$TARGET_DIR/manifest.json" << MANIFEST
 {{
   "job_id": {job_id},
@@ -175,7 +213,6 @@ if [ $RC -eq 0 ]; then
   "status": "success"
 }}
 MANIFEST
-{sync_block}
     echo "[$(date)] === SUCCESS ==="
     exit 0
 else
