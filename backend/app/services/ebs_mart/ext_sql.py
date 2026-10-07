@@ -181,10 +181,26 @@ EXT_MART_SQL: dict[str, str] = {
                     ELSE 'Belum dibayar' END                        AS payment_status,
                CASE WHEN i.amount_remaining_entered <> 0 THEN {TODAY} - i.next_due_date END AS days_overdue,
                COALESCE(p.payment_count, 0) AS payment_count, p.paid_amount_idr, p.last_payment_date, p.payment_numbers,
-               COALESCE(h.active_holds, 0) AS active_holds, h.hold_codes
+               COALESCE(h.active_holds, 0) AS active_holds, h.hold_codes,
+               -- Invoice Workbench "Validation" field. Prepayment codes
+               -- (AVAILABLE/FULL/UNPAID/PERMANENT) are only returned once the
+               -- prepayment is validated, so they read as Validated here.
+               CASE v.status_code
+                    WHEN 'APPROVED'         THEN 'Validated'
+                    WHEN 'NEVER APPROVED'   THEN 'Never Validated'
+                    WHEN 'NEEDS REAPPROVAL' THEN 'Needs Revalidation'
+                    WHEN 'UNAPPROVED'       THEN 'Not Validated'
+                    WHEN 'CANCELLED'        THEN 'Cancelled'
+                    WHEN 'AVAILABLE'        THEN 'Validated'
+                    WHEN 'FULL'             THEN 'Validated'
+                    WHEN 'UNPAID'           THEN 'Validated'
+                    WHEN 'PERMANENT'        THEN 'Validated'
+                    ELSE v.status_code END                           AS validation_status,
+               v.status_code                                        AS validation_status_code
           FROM inv i
           LEFT JOIN pay p ON p.invoice_id = i.invoice_id
           LEFT JOIN hld h ON h.invoice_id = i.invoice_id
+          LEFT JOIN core.fact_ap_invoice_status v ON v.invoice_id = i.invoice_id
     """,
 
     # Every PO shipment, open or closed, for "tampilkan PO X".
@@ -317,7 +333,7 @@ EXT_UNIQUE_INDEX: dict[str, list[str]] = {
 
 EXT_EXTRA_INDEXES: dict[str, list[str]] = {
     "master_lookup": ["type", "code"],
-    "ap_invoice": ["invoice_num", "vendor_name", "next_due_date"],
+    "ap_invoice": ["invoice_num", "vendor_name", "next_due_date", "validation_status"],
     "po_shipment": ["po_number", "vendor_name"],
     "ap_withholding": ["period_name", "tax_name"],
     "so_order_line": ["order_number", "customer_name"],

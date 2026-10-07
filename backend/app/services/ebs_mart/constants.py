@@ -301,8 +301,10 @@ MARTS: dict[str, dict] = {
     "ap_invoice": {
         "domain": "AP", "phase": 8, "built": True,
         "grain": "Satu invoice AP (lunas, terbuka, cancelled)",
-        "description": "Semua invoice supplier dengan status bayar, sisa, jatuh tempo berikutnya, pembayaran dan hold aktif.",
-        "sources": "AP_INVOICES_ALL, AP_PAYMENT_SCHEDULES_ALL, AP_INVOICE_PAYMENTS_ALL, AP_HOLDS_ALL",
+        "description": "Semua invoice supplier dengan status validasi (Validated / Never Validated / Needs Revalidation), "
+                       "status bayar, sisa, jatuh tempo berikutnya, pembayaran dan hold aktif.",
+        "sources": "AP_INVOICES_ALL, AP_PAYMENT_SCHEDULES_ALL, AP_INVOICE_PAYMENTS_ALL, AP_HOLDS_ALL, "
+                   "AP_INVOICES_PKG.GET_APPROVAL_STATUS",
         "source_jobs": ["etl_mart_ap"],
         "unique_key": ["invoice_id"],
     },

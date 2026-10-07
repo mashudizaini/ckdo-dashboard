@@ -502,6 +502,24 @@ COLUMN_CATALOG.update({
     },
 })
 
+# Invoice Workbench "Validation" field on ap_invoice — users ask for Never
+# Validated / Needs Revalidation invoices and were told the field did not exist.
+COLUMN_CATALOG.update({
+    "ap_invoice": {
+        "validation_status": (
+            "Status validasi invoice di Oracle (field Validation di Invoice Workbench): Validated, Never Validated, "
+            "Needs Revalidation, Not Validated, Cancelled",
+            ["validasi", "validation", "never validated", "needs revalidation", "belum divalidasi",
+             "perlu validasi ulang", "status validasi", "unvalidated"],
+        ),
+        "validation_status_code": (
+            "Kode mentah AP_INVOICES_PKG.GET_APPROVAL_STATUS: APPROVED, NEVER APPROVED, NEEDS REAPPROVAL, UNAPPROVED, "
+            "CANCELLED; prepayment tervalidasi: AVAILABLE, FULL, UNPAID, PERMANENT",
+            ["approval status", "kode validasi"],
+        ),
+    },
+})
+
 # Domain + mart-level synonyms, used by find_marts in addition to the column
 # synonyms above.
 MART_SYNONYMS: dict[str, list[str]] = {

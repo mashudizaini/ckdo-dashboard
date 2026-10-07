@@ -1613,14 +1613,14 @@ def po_get_pending_approval(caller: Caller, min_days: int | None = None, doc_typ
 
 
 def ap_get_invoice(caller: Caller, invoice_num: str, supplier: str | None = None) -> dict:
-    """One supplier invoice, paid or not: amounts, payment status, next due
-    date, payments made and holds still active."""
+    """One supplier invoice, paid or not: amounts, validation and payment
+    status, next due date, payments made and holds still active."""
     args = {"invoice_num": invoice_num, "supplier": supplier}
     sql = """
         SELECT invoice_num, vendor_name, invoice_type, invoice_date, gl_date, currency_code, invoice_amount_entered,
-               invoice_amount_idr, payment_status, amount_remaining_entered, amount_remaining_idr, next_due_date,
-               days_overdue, payment_count, paid_amount_idr, last_payment_date, payment_numbers, active_holds,
-               hold_codes, cancelled_date, description
+               invoice_amount_idr, validation_status, payment_status, amount_remaining_entered, amount_remaining_idr,
+               next_due_date, days_overdue, payment_count, paid_amount_idr, last_payment_date, payment_numbers,
+               active_holds, hold_codes, cancelled_date, description
           FROM mart.ap_invoice
          WHERE UPPER(invoice_num) = UPPER(%(i)s::text)
            AND (%(s)s::text IS NULL OR vendor_name ILIKE %(s)s::text)

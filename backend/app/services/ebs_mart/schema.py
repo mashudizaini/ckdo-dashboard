@@ -213,6 +213,18 @@ _CORE_DDL = [
     "ALTER TABLE core.fact_ap_hold ADD COLUMN IF NOT EXISTS invoice_amount numeric",
     "ALTER TABLE core.fact_ap_hold ADD COLUMN IF NOT EXISTS invoice_amount_idr numeric",
     "ALTER TABLE core.fact_ap_hold ADD COLUMN IF NOT EXISTS cancelled_date date",
+    # Validation status per invoice (AP_INVOICES_PKG.GET_APPROVAL_STATUS), the
+    # "Validation" field of the Invoice Workbench. Reloaded whole each run like
+    # core.fact_ap_hold: validating, re-matching or releasing a hold changes it
+    # without touching AP_INVOICES_ALL.last_update_date, so the incremental
+    # schedule watermark would leave it stale.
+    """
+    CREATE TABLE IF NOT EXISTS core.fact_ap_invoice_status (
+        invoice_id  bigint PRIMARY KEY,
+        status_code text,
+        loaded_at   timestamptz DEFAULT now()
+    )
+    """,
     # ── Phase 2: PO / PR / OPM cost ──────────────────────────────────────
     # One row per PO shipment (PO_LINE_LOCATIONS_ALL). Not eis.fact_po_line:
     # that table is keyed (po_number, line_num) although it is extracted per

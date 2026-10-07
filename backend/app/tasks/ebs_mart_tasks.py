@@ -232,6 +232,20 @@ _AP_HOLD_SQL = """
        AND ah.release_lookup_code IS NULL
 """
 
+# Validation status of every invoice, the same call the Invoice Workbench
+# makes for its "Validation" field: NEVER APPROVED (Never Validated), NEEDS
+# REAPPROVAL (Needs Revalidation), APPROVED (Validated), UNAPPROVED, CANCELLED,
+# and for prepayments AVAILABLE / FULL / UNPAID / PERMANENT once validated.
+# Reloaded whole each run (~35K invoices, ~16s on prod 2026-10-07) — see
+# core.fact_ap_invoice_status in schema.py for why not incremental.
+_AP_STATUS_SQL = """
+    SELECT ai.invoice_id,
+           ap_invoices_pkg.get_approval_status(ai.invoice_id, ai.invoice_amount,
+                                               ai.payment_status_flag, ai.invoice_type_lookup_code)
+      FROM ap_invoices_all ai
+     WHERE ai.org_id = :org_id
+"""
+
 
 def _extract_incremental(cur_ora, sql: str, wm_col: str, watermark, full: bool):
     """Run an extract with the composite-watermark clause. Oracle date
@@ -274,9 +288,11 @@ def etl_mart_ap(year: int = None, month: int = None, full_refresh: bool = False,
                 cur_ora, _AP_PAYMENT_SQL, "GREATEST(aip.last_update_date, ac.last_update_date)", wm_pay, full_refresh)
             cur_ora.execute(_AP_HOLD_SQL, {"org_id": EBS_OPERATING_UNIT_ID})
             holds = cur_ora.fetchall()
+            cur_ora.execute(_AP_STATUS_SQL, {"org_id": EBS_OPERATING_UNIT_ID})
+            statuses = cur_ora.fetchall()
         finally:
             ora.close()
-        rows_read = len(sched) + len(pays) + len(holds)
+        rows_read = len(sched) + len(pays) + len(holds) + len(statuses)
 
         # Weekly reconciliation: a full load replaces core wholesale, which
         # is what removes rows deleted in Oracle (interface cleanups, purged
@@ -310,6 +326,15 @@ def etl_mart_ap(year: int = None, month: int = None, full_refresh: bool = False,
                   _num(h[12]), _num(h[13]), h[14]) for h in holds],
             )
             rows_upserted += len(holds)
+
+        cur.execute("TRUNCATE core.fact_ap_invoice_status")
+        if statuses:
+            execute_values(
+                cur,
+                "INSERT INTO core.fact_ap_invoice_status (invoice_id, status_code) VALUES %s",
+                [(int(s[0]), s[1]) for s in statuses],
+            )
+            rows_upserted += len(statuses)
 
         new_sched = max((r[-1] for r in sched_rows if r[-1]), default=None)
         new_pay = max((r[-1] for r in pay_rows if r[-1]), default=None)
