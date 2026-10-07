@@ -10,6 +10,7 @@
  * the standalone was dark-themed (slate/amber).
  */
 import { useState, useEffect, useCallback, useRef } from "react";
+import BackupReadiness from "./BackupReadiness";
 import {
   HardDrive, Database, RotateCcw, HeartPulse, CalendarClock,
   GitBranch, History as HistoryIcon, FileBarChart, Settings2, RefreshCw,
@@ -589,9 +590,26 @@ function JobDetail({ jobId, onChanged }) {
 
       {detail.progress_percent != null && (
         <div>
-          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 3 }}>Progress: {detail.progress_percent}%</div>
+          {/* Sumber angkanya ikut ditulis. Dua sumber ini tidak setara: RMAN
+              melaporkan kemajuannya sendiri dalam satuan yang sama di kedua
+              sisi dan benar-benar mencapai 100%, sedangkan hitungan berbasis
+              ukuran berkas membandingkan keluaran TERKOMPRESI dengan total
+              datafile TIDAK terkompresi — backup yang sudah selesai terbaca
+              sekitar 25%. Persentase tanpa keterangan sumber membuat keduanya
+              terlihat sama meyakinkan. */}
+          <div className="flex items-center justify-between" style={{ fontSize: 11, color: "#64748b", marginBottom: 3 }}>
+            <span>
+              Progress: <b style={{ color: "#0f172a" }}>{detail.progress_percent}%</b>
+              {detail.progress_elapsed_minutes != null && ` · berjalan ${detail.progress_elapsed_minutes} menit`}
+              {detail.progress_eta_minutes != null && ` · perkiraan sisa ${detail.progress_eta_minutes} menit`}
+            </span>
+            {detail.progress_source && <span style={{ fontSize: 10 }}>sumber: {detail.progress_source}</span>}
+          </div>
           <div style={{ height: 6, borderRadius: 4, background: "#e2e8f0", overflow: "hidden" }}>
-            <div style={{ height: "100%", width: `${detail.progress_percent}%`, background: "#2563eb" }} />
+            <div style={{
+              height: "100%", width: `${detail.progress_percent}%`,
+              background: detail.progress_source === "v$session_longops" ? "#2563eb" : "#94a3b8",
+            }} />
           </div>
         </div>
       )}
@@ -679,6 +697,11 @@ function DbBackupTab({ servers }) {
   const [refreshSignal, setRefreshSignal] = useState(0);
   const [preflight, setPreflight] = useState(null);
   const [preflightBusy, setPreflightBusy] = useState(false);
+  // Jam yang dipakai adalah jam SERVER DATABASE, bukan jam browser — operator
+  // bisa saja di zona lain, dan jam server itulah yang muncul di nama direktori
+  // staging dan di stempel berkas.
+  const [runAtLocal, setRunAtLocal] = useState("");
+  const [serverClock, setServerClock] = useState(null);
 
   const runPreflight = async () => {
     if (!serverId) return alert("Select a DB server first");
@@ -705,11 +728,18 @@ function DbBackupTab({ servers }) {
       } else if (jobType === "archivelog") {
         await ebsBackupApi.triggerArchivelog({ server_id: Number(serverId), delete_input: archDeleteInput });
       } else {
-        await ebsBackupApi.triggerOnlineBackup({
+        const res = await ebsBackupApi.triggerOnlineBackup({
           server_id: Number(serverId), job_type: jobType, incremental_level: incLevel, parallelism,
           compression, include_archivelog: includeArchivelog, archivelog_delete_input: archDeleteInput,
           destination, minio_server_id: minioId ? Number(minioId) : null, synology_server_id: synologyId ? Number(synologyId) : null,
+          run_at_local: runAtLocal || null,
         });
+        if (res?.status === "scheduled") {
+          alert(`Dijadwalkan jalan ${res.run_at_local} waktu server database.
+`
+              + `Job #${res.job_id} akan diluncurkan otomatis — halaman tidak perlu dibuka.`);
+          setRunAtLocal("");
+        }
       }
       setConfirmText("");
       setRefreshSignal((n) => n + 1);
@@ -722,6 +752,11 @@ function DbBackupTab({ servers }) {
 
   return (
     <>
+      <Panel title="Kondisi Database Sekarang"
+        subtitle="Apakah ini saat yang tepat untuk backup — beban, sesi berjalan, dan jam server. Diperbarui tiap 30 detik.">
+        <BackupReadiness onServerClock={setServerClock} />
+      </Panel>
+
       <Panel title="Trigger Database Backup" subtitle="RMAN online full / incremental / archivelog, or a maintenance-window offline cold backup.">
         <div className="grid grid-cols-3 gap-4 mb-4">
           <Field label="DB Server">
@@ -741,6 +776,20 @@ function DbBackupTab({ servers }) {
           {["online_full", "online_incremental"].includes(jobType) && (
             <Field label="Parallelism (channels)">
               <input type="number" min={1} max={8} style={inputStyle} value={parallelism} onChange={(e) => setParallelism(Number(e.target.value))} />
+            </Field>
+          )}
+          {["online_full", "online_incremental"].includes(jobType) && (
+            <Field label="Jalankan nanti (kosongkan = sekarang)">
+              {/* Diisi dalam waktu SERVER DATABASE, yang ditampilkan di panel
+                  atas — bukan waktu browser dan bukan UTC. Dashboard menyimpan
+                  UTC, dan tanpa label ini "22:00" bisa berarti dua jam yang
+                  berbeda tujuh jam. */}
+              <input type="datetime-local" style={inputStyle} value={runAtLocal}
+                onChange={(e) => setRunAtLocal(e.target.value.replace("T", " "))} />
+              <p style={{ fontSize: 10.5, color: "#64748b", marginTop: 3 }}>
+                Waktu server database{serverClock ? ` — sekarang ${serverClock}` : ""}.
+                Job diluncurkan otomatis; halaman tidak perlu dibuka.
+              </p>
             </Field>
           )}
         </div>

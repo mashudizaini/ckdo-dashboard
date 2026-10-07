@@ -24,6 +24,11 @@ export const ebsBackupApi = {
   // Backup operations
   triggerOnlineBackup: (body) => api.post(`${BASE}/backup/online`, body),
   onlinePreflight:     (serverId) => api.get(`${BASE}/backup/online/preflight/${serverId}`),
+  // Kondisi database saat ini + kesimpulan apakah ini saat yang tepat.
+  // Terpisah dari preflight: preflight menjawab kapasitas & konektivitas,
+  // ini menjawab beban dan waktu.
+  readiness:           () => api.get(`${BASE}/backup/readiness`),
+  cancelScheduled:     (jobId) => api.get(`${BASE}/jobs/${jobId}/scheduled/cancel`),
   syncOnlineToMinio:    (body) => api.post(`${BASE}/backup/online/sync-minio`, body),
   syncOnlineToSynology: (body) => api.post(`${BASE}/backup/online/sync-synology`, body),
   triggerArchivelog:    (body) => api.post(`${BASE}/backup/archivelog`, body),
