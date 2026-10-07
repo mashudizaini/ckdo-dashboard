@@ -1682,10 +1682,24 @@ function SshSetupWizard({ servers }) {
         </Field>
         <Field label="Target Username"><input style={inputStyle} value={targetUsername} onChange={(e) => setTargetUsername(e.target.value)} /></Field>
       </div>
+      {/* Password ini dulu berupa kotak tanpa label yang terselip di antara dua
+          tombol, hanya bermodal placeholder — dan praktis tidak terlihat, jadi
+          langkah 2 tampak mustahil dilakukan. Sekarang jadi kolom berlabel
+          seperti kolom lain di halaman ini. */}
+      <div className="grid grid-cols-3 gap-4 mb-4">
+        <Field label="Password target (hanya untuk langkah 2)">
+          <input type="password" style={inputStyle} autoComplete="new-password"
+            placeholder="password akun di server target"
+            value={targetPassword} onChange={(e) => setTargetPassword(e.target.value)} />
+          <p style={{ fontSize: 10.5, color: "#64748b", marginTop: 3 }}>
+            Dipakai sekali untuk menitipkan kunci, lalu dibuang — tidak disimpan di mana pun.
+          </p>
+        </Field>
+      </div>
       <div className="flex gap-2 flex-wrap mb-3">
         <Btn disabled={busy} onClick={genKey}>1. Generate Key on Source</Btn>
-        <input type="password" style={{ ...inputStyle, width: 220 }} placeholder="Target's temporary password" value={targetPassword} onChange={(e) => setTargetPassword(e.target.value)} />
-        <Btn disabled={busy} onClick={copyId}>2. Copy Key to Target</Btn>
+        <Btn disabled={busy || !targetPassword} onClick={copyId}
+          title={targetPassword ? "" : "Isi password target dulu"}>2. Copy Key to Target</Btn>
         <Btn disabled={busy} onClick={test}>3. Test Passwordless</Btn>
       </div>
       {pubKey && <pre style={{ background: "#f8fafc", fontSize: 10.5, padding: 8, borderRadius: 8, overflow: "auto", marginBottom: 8 }}>{pubKey}</pre>}
