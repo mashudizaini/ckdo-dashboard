@@ -928,10 +928,18 @@ def _sync_existing_backup(db: Session, bg: BackgroundTasks, payload: SyncBackupI
             # --stats, not --info=progress2: the DB server has rsync 3.0.9 and
             # --info arrived in 3.1, so the fancier flag would have failed the
             # transfer outright. --stats prints a summary every version has.
+            #
+            # -rlptD rather than -a, and ownership explicitly dropped. The NFS
+            # export maps every client uid to the NAS admin account, so rsync
+            # cannot chown to the source owner and exits 23 — "some files/attrs
+            # were not transferred" — even though every byte arrived and the
+            # checksums match. Under `set -e` that exit code fails the job on a
+            # backup that is actually complete. Ownership on the NAS copy is
+            # meaningless anyway: everything there belongs to admin by design.
             transfer_cmd = (
                 f'mkdir -p "{dest_dir}"\n'
                 f'if command -v rsync >/dev/null 2>&1; then\n'
-                f'  rsync -a --stats "{src_job.output_path}/" "{dest_dir}/"\n'
+                f'  rsync -rlptD --no-owner --no-group --stats "{src_job.output_path}/" "{dest_dir}/"\n'
                 f'else\n'
                 f'  cp -a "{src_job.output_path}/." "{dest_dir}/"\n'
                 f'fi'
