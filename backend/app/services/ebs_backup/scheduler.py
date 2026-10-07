@@ -159,10 +159,56 @@ def _reap_dead_jobs(db):
             db.commit()
             logger.warning("Reaped job #%s: process %s gone, marked %s",
                            job.id, job.pid, job.status)
+
+            if job.status == "success":
+                _chain_synology_sync(db, job)
         except Exception:
             db.rollback()
             logger.exception("Could not reap job #%s", job.id)
 
+
+
+
+def _chain_synology_sync(db, job):
+    """Copy a finished archive to Synology when the job asked for it.
+
+    Two stages rather than two simultaneous destinations: the archive lands on
+    the DB server, which has the room, and is copied from there. Streaming to
+    both at once would mean reading the application tier twice over the network.
+
+    Chained here, off the same heartbeat that noticed the job finished, so the
+    copy starts on its own — nobody has to be watching the page at 22:30 to
+    press a second button.
+    """
+    try:
+        params = json.loads(job.parameters or "{}")
+    except Exception:
+        return
+    target_id = params.get("sync_synology_server_id")
+    if not target_id:
+        return
+
+    try:
+        from fastapi import BackgroundTasks
+        from app.database import SessionLocal
+        from app.routers.dashboard.ebs_backup import SyncBackupIn, _sync_existing_backup
+
+        # BackgroundTasks outside a request never runs itself, so the tasks it
+        # collects are executed here explicitly.
+        bg = BackgroundTasks()
+        app_db = SessionLocal()
+        try:
+            res = _sync_existing_backup(
+                app_db, bg, SyncBackupIn(job_id=job.id, target_server_id=int(target_id)), "synology",
+            )
+        finally:
+            app_db.close()
+        for task in bg.tasks:
+            task.func(*task.args, **task.kwargs)
+        logger.info("Job #%s finished; Synology sync submitted as job #%s -> %s",
+                    job.id, res.get("job_id"), res.get("destination"))
+    except Exception:
+        logger.exception("Could not chain Synology sync for job #%s", job.id)
 
 
 def _fire_scheduled_jobs(db):

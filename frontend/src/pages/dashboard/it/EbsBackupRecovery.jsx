@@ -1006,6 +1006,8 @@ function AppBackupTab({ servers }) {
   const [pre, setPre] = useState(null);
   const [preBusy, setPreBusy] = useState(false);
   const [runAtLocal, setRunAtLocal] = useState("");
+  const [syncSynologyId, setSyncSynologyId] = useState("");
+  const synologyServers = servers.filter((s) => s.role === "synology");
 
   // Ukuran sumber diukur dengan du pada direktori sebenarnya, bukan ditaksir —
   // fs1 dan fs2 sangat berbeda antar instalasi, jadi tebakan tidak berguna.
@@ -1030,6 +1032,7 @@ function AppBackupTab({ servers }) {
         server_id: Number(serverId), fs_target: fsTarget, include_inst_top: includeInstTop,
         remote_target_server_id: remoteTargetId ? Number(remoteTargetId) : null,
         run_at_local: runAtLocal || null,
+        sync_synology_server_id: syncSynologyId ? Number(syncSynologyId) : null,
       });
       if (res?.status === "scheduled") {
         alert(`Dijadwalkan jalan ${res.run_at_local} waktu server database.
@@ -1070,6 +1073,17 @@ function AppBackupTab({ servers }) {
           </Field>
         </div>
         <div className="grid grid-cols-3 gap-4 mb-4">
+          <Field label="Salin juga ke Synology (setelah selesai)">
+            {/* Dua tahap, bukan dua tujuan sekaligus: arsipnya mendarat di
+                server DB yang punya ruang, lalu disalin dari sana. Menyalurkan
+                ke dua tempat bersamaan berarti membaca application tier dua
+                kali lewat jaringan. Salinannya dimulai sendiri begitu backup
+                selesai — tidak perlu ada yang menunggui halaman. */}
+            <select style={inputStyle} value={syncSynologyId} onChange={(e) => setSyncSynologyId(e.target.value)}>
+              <option value="">Tidak</option>
+              {synologyServers.map((s) => <option key={s.id} value={s.id}>Ya — {s.name}</option>)}
+            </select>
+          </Field>
           <Field label="Jalankan nanti (kosongkan = sekarang)">
             {/* Waktu server database, sama seperti tab DB Backup — bukan waktu
                 browser dan bukan UTC. */}

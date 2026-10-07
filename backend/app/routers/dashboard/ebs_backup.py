@@ -155,6 +155,11 @@ class BackupAppIn(BaseModel):
     # Sama seperti backup database: diisi dalam WAKTU SERVER DATABASE (WIB),
     # "YYYY-MM-DD HH:MM". Lihat catatan di BackupOnlineIn.
     run_at_local: Optional[str] = None
+    # Salin arsipnya ke Synology setelah backup selesai. Dua tahap, bukan dua
+    # tujuan sekaligus: arsipnya mendarat di server DB dulu (yang punya ruang),
+    # lalu disalin dari sana. Menyalurkannya ke dua tempat sekaligus berarti
+    # membaca application tier dua kali.
+    sync_synology_server_id: Optional[int] = None
 
 
 class RestoreDevIn(BaseModel):
@@ -823,13 +828,34 @@ def online_preflight(server_id: int, db: Session = Depends(get_db)):
     return result
 
 
+def _archive_holder(db: Session, job: BackupJob) -> Server:
+    """The server the archive actually sits on, which is not always the server
+    the job ran against.
+
+    An application backup streamed with remote_target_server_id runs ON the App
+    server but writes TO the DB server. Syncing from job.target_server_id would
+    tar a path that does not exist there and fail with something unhelpful.
+    """
+    if job.job_type == "app_fs":
+        try:
+            params = json.loads(job.parameters or "{}")
+        except Exception:
+            params = {}
+        remote_id = params.get("remote_target_server_id")
+        if remote_id:
+            remote = db.query(Server).filter(Server.id == remote_id).first()
+            if remote:
+                return remote
+    return db.query(Server).filter(Server.id == job.target_server_id).first()
+
+
 def _sync_existing_backup(db: Session, bg: BackgroundTasks, payload: SyncBackupIn, target: str):
     src_job = db.query(BackupJob).filter(BackupJob.id == payload.job_id).first()
     if not src_job or not src_job.output_path:
         raise HTTPException(404, "Source job not found or has no output")
     if src_job.status != "success":
         raise HTTPException(400, "Source job did not finish successfully")
-    server = db.query(Server).filter(Server.id == src_job.target_server_id).first()
+    server = _archive_holder(db, src_job)
 
     sync_job = _create_job(db, f"db_sync_{target}", server.id,
                             {"source_job_id": src_job.id, "target_server_id": payload.target_server_id})
@@ -840,7 +866,8 @@ def _sync_existing_backup(db: Session, bg: BackgroundTasks, payload: SyncBackupI
         p = _minio_sync_params(db, payload.target_server_id)
         alias = f"syncnow{sync_job.id}"
         url = p["minio_endpoint"] if p["minio_endpoint"].startswith("http") else f"http://{p['minio_endpoint']}"
-        dest = f"{alias}/{p['minio_bucket']}/db-tier/{backup_name}"
+        tier = "app-tier" if src_job.job_type == "app_fs" else "db-tier"
+        dest = f"{alias}/{p['minio_bucket']}/{tier}/{backup_name}"
         transfer_cmd = (
             f'mc alias set {alias} "{url}" "{p["minio_access_key"]}" "{p["minio_secret_key"]}" --api s3v4 >/dev/null\n'
             f'mc mirror "{src_job.output_path}" {dest} 2>&1 | tail -30'
@@ -849,7 +876,11 @@ def _sync_existing_backup(db: Session, bg: BackgroundTasks, payload: SyncBackupI
     else:
         p = _synology_sync_params(db, payload.target_server_id)
         ssh_opts = f"-p {p['synology_port']} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes"
-        dest_dir = f"{p['synology_share_path']}/database/full/{backup_name}"
+        # Keep the tiers apart on the NAS: an application tar landing under
+        # database/full would be indistinguishable from a datafile backupset
+        # when someone goes looking during a restore.
+        subdir = "application" if src_job.job_type == "app_fs" else "database/full"
+        dest_dir = f"{p['synology_share_path']}/{subdir}/{backup_name}"
         transfer_cmd = (
             f'ssh {ssh_opts} {p["synology_user"]}@{p["synology_host"]} "mkdir -p {dest_dir}"\n'
             f'tar cf - -C "{src_job.output_path}" . | ssh {ssh_opts} {p["synology_user"]}@{p["synology_host"]} "cd {dest_dir} && tar xf -"'
