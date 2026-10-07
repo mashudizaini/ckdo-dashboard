@@ -17,7 +17,11 @@ from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from app.models.ebs_backup import EbsSessionLocal, EbsSchedule
+from datetime import timedelta
+
+from app.models.ebs_backup import (
+    EbsSessionLocal, EbsSchedule, EbsBackupJob, EbsServer, EbsCredential,
+)
 
 try:
     from croniter import croniter
@@ -71,9 +75,102 @@ _RUNNERS = {
 }
 
 
+
+# A job is only considered dead after this long, so a just-submitted one whose
+# PID is not yet visible over SSH is never reaped out from under itself.
+_REAP_GRACE = timedelta(minutes=3)
+
+
+def _reap_dead_jobs(db):
+    """Close out jobs whose process is gone but whose row still says running.
+
+    Until now this reconciliation lived ONLY in the job-detail endpoint, so a
+    backup that died was recorded as finished exactly when a human happened to
+    open that job's page — and not before. On 2026-10-06 an RMAN script aborted
+    at parse time within seconds, and the dashboard still showed "running"
+    twelve hours later: the operator believed a backup was in progress when
+    nothing had been written at all. A backup system that reports a dead job as
+    running is worse than one that reports nothing, because it answers the
+    question "are we backed up?" with a confident yes.
+
+    Runs on the same 60s heartbeat. Normally there are zero or one running
+    jobs, so this is one SSH round trip a minute at most, and each job is
+    isolated so an unreachable server cannot stall the schedule dispatch that
+    shares this tick.
+    """
+    from app.services.ebs_backup.ssh_executor import ssh_from_server
+
+    cutoff = datetime.utcnow() - _REAP_GRACE
+    stale = db.query(EbsBackupJob).filter(
+        EbsBackupJob.status.in_(("running", "paused")),
+        EbsBackupJob.pid.isnot(None),
+        EbsBackupJob.started_at.isnot(None),
+        EbsBackupJob.started_at < cutoff,
+    ).all()
+
+    for job in stale:
+        try:
+            server = db.query(EbsServer).get(job.target_server_id)
+            cred = db.query(EbsCredential).filter(
+                EbsCredential.server_id == server.id,
+                EbsCredential.cred_type.in_(["ssh_password", "ssh_key"]),
+            ).first()
+            if not server or not cred:
+                continue
+
+            with ssh_from_server(server, cred) as ssh:
+                if ssh.is_pid_alive(job.pid):
+                    continue
+
+                data = {}
+                if job.output_path:
+                    r = ssh.run(f"cat {job.output_path}/manifest.json 2>/dev/null || echo '{{}}'")
+                    try:
+                        data = json.loads((r.stdout or "").strip())
+                    except Exception:
+                        data = {}
+
+                job.status = data.get("status") or "failed"
+                if data.get("total_size_bytes"):
+                    job.total_size_bytes = data["total_size_bytes"]
+                if data.get("file_count"):
+                    job.file_count = data["file_count"]
+
+                # "failed" with no reason sends the operator hunting through
+                # logs on the DB server. The tail almost always holds the real
+                # error — for the RMAN parse abort it was the RMAN-02001 stack.
+                if job.status != "success" and not job.error_message:
+                    tail = ""
+                    for path in (f"{job.output_path}/rman_session.log" if job.output_path else None,
+                                 job.log_path):
+                        if not path:
+                            continue
+                        got = ssh.run(f"tail -n 25 {path} 2>/dev/null")
+                        if (got.stdout or "").strip():
+                            tail = got.stdout.strip()
+                            break
+                    job.error_message = tail or (
+                        "Process ended without writing manifest.json — check the log on the server."
+                    )
+
+            job.finished_at = datetime.utcnow()
+            if job.started_at:
+                job.duration_sec = int((job.finished_at - job.started_at).total_seconds())
+            db.commit()
+            logger.warning("Reaped job #%s: process %s gone, marked %s",
+                           job.id, job.pid, job.status)
+        except Exception:
+            db.rollback()
+            logger.exception("Could not reap job #%s", job.id)
+
+
 def _tick():
     db = EbsSessionLocal()
     try:
+        # Before dispatching anything new, close out what has already died —
+        # otherwise a dead job stays "running" until someone opens its page.
+        _reap_dead_jobs(db)
+
         now = datetime.utcnow()
         due = db.query(EbsSchedule).filter(
             EbsSchedule.enabled.is_(True),

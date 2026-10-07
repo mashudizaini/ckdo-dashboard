@@ -18,6 +18,14 @@ def _timestamp() -> str:
 # ============================================================
 # 1. RMAN ONLINE FULL BACKUP (Hot Backup)
 # ============================================================
+# RMAN comments are '#', NOT '--'. A bare '-' is RMAN's line-continuation
+# character, so '--' parses as punctuation and the whole script dies with
+# RMAN-02001 before a single file is backed up.
+#
+# That happened on 2026-10-06: the SPFILE-skipped note below was written as a
+# '--' comment, RMAN aborted at parse time within seconds, and the dashboard
+# still showed the job "running" twelve hours later. Any comment added to these
+# templates must use '#'.
 def rman_online_full(
     oracle_home: str,
     oracle_sid: str,
@@ -102,7 +110,7 @@ def rman_online_full(
     PLUS ARCHIVELOG;
 {archlog_block}
   BACKUP CURRENT CONTROLFILE FORMAT '{target_dir}/CTL_{oracle_sid}_{ts}_%U.bkp';
-{"  BACKUP SPFILE FORMAT '" + target_dir + "/SPFILE_" + oracle_sid + "_" + ts + "_%U.bkp';" if include_spfile else "  -- BACKUP SPFILE skipped: instance is started with a PFILE, not an SPFILE"}
+{"  BACKUP SPFILE FORMAT '" + target_dir + "/SPFILE_" + oracle_sid + "_" + ts + "_%U.bkp';" if include_spfile else "  # BACKUP SPFILE skipped: instance is started with a PFILE, not an SPFILE"}
 
 {release}
 
