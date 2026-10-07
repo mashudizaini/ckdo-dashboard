@@ -68,6 +68,9 @@ STATEMENT_TIMEOUT = "15s"
 #
 #   source_jobs: eis.etl_job_log job names whose last successful run is the
 #                mart's as_of. A mart is only as fresh as its oldest input.
+#   explicit_grant: an all_access role (management) does not get this mart
+#                by default — it must be granted in the access matrix like
+#                any other role (policy.levels_for).
 MARTS: dict[str, dict] = {
     "ap_open_invoice": {
         "domain": "AP", "phase": 1, "built": True,
@@ -467,6 +470,17 @@ MARTS: dict[str, dict] = {
         "source_jobs": ["etl_mart_sa"],
         "unique_key": ["rule_id"],
     },
+    # ── PAC Business Plan: loaded from PAC's workbook, not Oracle (pac_sql.py) ──
+    "pac_business_plan": {
+        "domain": "PAC", "phase": 9, "built": True, "explicit_grant": True,
+        "grain": "Business Plan tahun × sheet × baris × kolom (satu angka per sel)",
+        "description": "Angka Business Plan PAC (rencana): P&L tahunan & bulanan per bisnis (Local/CMO/Export), "
+                       "sales plan per produk (nilai & qty), COGS, manufacture plan, investasi, purchase plan, "
+                       "personel, cashflow — plus angka tahun pembanding di dokumen yang sama.",
+        "sources": "<tahun> Business plan.xlsx (PAC), diimpor scripts/ingest_business_plan.py",
+        "source_jobs": ["import_business_plan"],
+        "unique_key": ["row_key"],
+    },
 }
 
 BUILT_MARTS = [name for name, m in MARTS.items() if m.get("built")]
@@ -514,5 +528,6 @@ GROUP_LABELS = {
     "ebs-warehouse": "Gudang — stok per lot & mutasi (tanpa valuasi)",
     "ebs-production": "Produksi — batch & stok per lot",
     "ebs-sales": "Sales — SO, penjualan, aging piutang",
-    "ebs-management": "Manajemen — semua mart",
+    "ebs-management": "Manajemen — semua mart (kecuali Business Plan PAC, yang perlu grant sendiri)",
+    "ebs-pac": "PAC — Business Plan",
 }

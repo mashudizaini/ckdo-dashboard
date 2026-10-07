@@ -845,6 +845,52 @@ async def gl_get_budget_vs_actual(body: BudgetIn, caller: Caller = Depends(curre
     return await _call(tools.gl_get_budget_vs_actual, caller, **body.model_dump())
 
 
+# ── PAC Business Plan ────────────────────────────────────────────────────────
+
+class BusinessPlanIn(BaseModel):
+    year: Optional[int] = Field(None, description="Tahun Business Plan, mis. 2026. Kosong = tahun plan terbaru.")
+    section: Optional[str] = Field(None, description=(
+        "Bagian dokumen: nomor (1-1 P&L tahunan, 1-2 P&L bulanan, 1-2.a Local, 1-2.b CMO, 1-2.c Export, "
+        "2-1 sales plan nilai, 2-2 sales plan qty, 3-1 COGS per bisnis, 3-2 COGS per produk, 4 manufacture, "
+        "5 investasi, 6-1 purchase nilai, 6-2 purchase qty, 7 registrasi, 8 marketing, 9 personel, 10 cashflow) "
+        "atau nama (P&L, sales, COGS, manufacture, investment, purchase, personnel, cashflow). Kode bertanda "
+        "-/. (1-2) = sheet itu saja; angka saja (1) = semua sub-bagiannya. "
+        "Kosong bersama line = daftar bagian saja."))
+    line: Optional[str] = Field(None, description="Label baris (cocok sebagian pada jalur induk > anak), mis. 'Net Sales', "
+                                                  "'Gross Profit', 'Export', nama produk, nama departemen")
+    period: Optional[str] = Field(None, description="tahunan = semua kolom tahunan (total plan + angka tahun pembanding), "
+                                                    "YYYY = kolom tahunan tahun itu saja, YYYY-MM = satu bulan, "
+                                                    "YYYY-Qn = satu kuartal. Kosong = semua kolom (termasuk bulanan).")
+    scenario: Optional[Literal["plan", "pembanding"]] = Field(None, description="plan = rencana; pembanding = angka "
+                                                                               "tahun sebelumnya di dokumen")
+    measure: Optional[Literal["value", "ratio", "growth"]] = Field(None, description="value = angka; ratio/growth = persen")
+
+
+class PlanVsActualIn(BaseModel):
+    year: int = Field(..., description="Tahun, mis. 2026")
+    month: Optional[int] = Field(None, description="Bulan 1–12; kosong = setahun penuh (Jan–Des)")
+    ytd: bool = Field(False, description="true = Januari s.d. month")
+    basis: Literal["gross", "net", "customer"] = Field("gross", description=(
+        "Baris plan yang dibandingkan: gross = CKD OTTO Gross Sales (paling sebanding dengan invoice EBS, default); "
+        "net = Net Sales (setelah distribution fee, diskon, retur, freight); customer = Customer Sales "
+        "(penjualan distributor ke pasar)"))
+    group_by: Literal["business", "month", "business_month"] = Field("business", description="Dimensi ringkasan")
+
+
+@app.post("/pac_get_business_plan", operation_id="pac_get_business_plan",
+          summary="Angka Business Plan PAC (rencana/target): P&L, sales plan per produk, COGS, manufacture, "
+                  "investasi, purchase, personel, cashflow — per tahun, bulan, kuartal")
+async def pac_get_business_plan(body: BusinessPlanIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.pac_get_business_plan, caller, **body.model_dump())
+
+
+@app.post("/pac_get_sales_plan_vs_actual", operation_id="pac_get_sales_plan_vs_actual",
+          summary="Target penjualan Business Plan vs realisasi invoice EBS per bisnis (Local/CMO/Export): "
+                  "sebulan, YTD atau setahun, selisih dan % pencapaian")
+async def pac_get_sales_plan_vs_actual(body: PlanVsActualIn, caller: Caller = Depends(current_caller)):
+    return await _call(tools.pac_get_sales_plan_vs_actual, caller, **body.model_dump())
+
+
 @app.get("/health", include_in_schema=False)
 async def health():
     return {"status": "ok"}

@@ -153,5 +153,10 @@
     "command": "/proyeksi-bayar",
     "title": "Proyeksi pembayaran supplier",
     "content": "Proyeksi pembayaran supplier {{minggu | 8}} minggu ke depan per minggu, termasuk yang sudah lewat jatuh tempo."
+  },
+  {
+    "command": "/target-penjualan",
+    "title": "Target penjualan Business Plan vs realisasi EBS",
+    "content": "Bandingkan target penjualan Business Plan {{tahun | tahun ini}} dengan realisasi invoice EBS per bisnis (Local, CMO, Export) {{periode | YTD sampai bulan lalu}}. Tampilkan plan, aktual, selisih dan % pencapaian, sebutkan basis yang dipakai (gross sales) dan tandai bulan yang belum lengkap."
   }
 ]

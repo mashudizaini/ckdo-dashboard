@@ -125,7 +125,9 @@ export default function DataAccessMatrix({ onRolesChange }) {
 
   // What a role has in one domain, shown on the group row: "All", "—", or "2 Full · 1 Qty".
   const summary = (role, marts) => {
-    if (role.all_access) return <span className={`rounded border px-1.5 py-0.5 ${LEVEL_STYLE.full}`}>All</span>;
+    if (role.all_access && !marts.some((m) => m.explicit_grant)) {
+      return <span className={`rounded border px-1.5 py-0.5 ${LEVEL_STYLE.full}`}>All</span>;
+    }
     let full = 0, qty = 0;
     marts.forEach((m) => {
       const lv = grantOf[`${role.role_code}|${m.mart}`];
@@ -222,7 +224,9 @@ export default function DataAccessMatrix({ onRolesChange }) {
                     </td>
                     {roles.map((r) => {
                       const key = `${r.role_code}|${m.mart}`;
-                      if (r.all_access) {
+                      // all_access covers every data set except explicit_grant ones
+                      // (PAC Business Plan), which are granted per role like any other.
+                      if (r.all_access && !m.explicit_grant) {
                         return (
                           <td key={key} className="border-b border-gray-800/60 group-hover:bg-gray-800/40 px-2 py-1.5 text-center">
                             <span className={`rounded border px-2 py-0.5 ${LEVEL_STYLE.full}`}>All</span>

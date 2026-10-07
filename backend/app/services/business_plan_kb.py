@@ -158,10 +158,18 @@ def _build_headers(header_rows: list[list[tuple[int, object]]]) -> dict[int, str
     return headers
 
 
-# ── Sheet -> paragraphs ──────────────────────────────────────────────
+# ── Sheet -> rows ────────────────────────────────────────────────────
 
-def _sheet_lines(rows: list[list], year: int, sheet: str) -> tuple[str, list[str]]:
-    """Returns (sheet title, row paragraphs)."""
+def _parse_sheet(rows: list[list]) -> tuple[str | None, list[dict]]:
+    """One pass over a body sheet. Returns (sheet title, events), where an
+    event is either a header row —
+        {"kind": "columns", "texts": [header cell text, …]}
+    — or a data row —
+        {"kind": "row", "row_no", "unit", "path": [label, …],
+         "cells": [(header or None, value, is_percent), …]}
+    Both the Knowledge Base text (_sheet_lines) and the structured figures
+    (sheet_figures) are built from these, so the two can never disagree on
+    which number sits under which header."""
     grid = []
     for r in rows:
         cells = [(c, cv) for c, cv in ((c, _clean(v)) for c, v in enumerate(r)) if cv is not None]
@@ -171,7 +179,7 @@ def _sheet_lines(rows: list[list], year: int, sheet: str) -> tuple[str, list[str
     unit = ""
     headers: dict[int, str] = {}
     stack: list[tuple[int, str]] = []  # (column, label) — row label hierarchy by indent column
-    lines: list[str] = []
+    events: list[dict] = []
     started = False  # past the banner/title/unit preamble
 
     def next_nonempty(i):
@@ -219,7 +227,7 @@ def _sheet_lines(rows: list[list], year: int, sheet: str) -> tuple[str, list[str
                 headers = _build_headers(header_rows)
                 stack = []
                 started = True
-                lines.append("Kolom: " + " | ".join(_fmt(v) for _, v in cells))
+                events.append({"kind": "columns", "texts": [_fmt(v) for _, v in cells]})
                 i += 2 if two_row else 1
                 continue
         started = True
@@ -248,7 +256,7 @@ def _sheet_lines(rows: list[list], year: int, sheet: str) -> tuple[str, list[str
             path = path + ["%"]
 
         occupied = {c for c, _ in cells}
-        parts = []
+        out_cells = []
         for c, v in value_cells:
             hdr = headers.get(c)
             if hdr is None:
@@ -262,17 +270,28 @@ def _sheet_lines(rows: list[list], year: int, sheet: str) -> tuple[str, list[str
             if hdr is None and _is_num(v) and headers:
                 continue  # helper column outside the table's header span
             pct = percent_row or bool(hdr and any(h in hdr.lower() for h in _PERCENT_HINTS))
-            parts.append(f"{hdr}: {_fmt(v, pct)}" if hdr else _fmt(v, pct))
+            out_cells.append((hdr, v, pct))
 
-        label = " > ".join(path) if path else ""
-        if not label and not parts:
-            i += 1
-            continue
-        body = f"{label} — {' · '.join(parts)}" if parts and label else (label or " · ".join(parts))
-        tag = f"[{source_for_year(year)} · {sheet}" + (f" · {unit}" if unit else "") + "]"
-        lines.append(f"{tag} {body}")
+        if path or out_cells:
+            events.append({"kind": "row", "row_no": i, "unit": unit, "path": path, "cells": out_cells})
         i += 1
 
+    return title, events
+
+
+def _sheet_lines(rows: list[list], year: int, sheet: str) -> tuple[str, list[str]]:
+    """Returns (sheet title, row paragraphs)."""
+    title, events = _parse_sheet(rows)
+    lines = []
+    for ev in events:
+        if ev["kind"] == "columns":
+            lines.append("Kolom: " + " | ".join(ev["texts"]))
+            continue
+        parts = [f"{hdr}: {_fmt(v, pct)}" if hdr else _fmt(v, pct) for hdr, v, pct in ev["cells"]]
+        label = " > ".join(ev["path"])
+        body = f"{label} — {' · '.join(parts)}" if parts and label else (label or " · ".join(parts))
+        tag = f"[{source_for_year(year)} · {sheet}" + (f" · {ev['unit']}" if ev["unit"] else "") + "]"
+        lines.append(f"{tag} {body}")
     return title or sheet, lines
 
 
@@ -288,13 +307,19 @@ def body_sheets(wb) -> list[str]:
     return out
 
 
-def workbook_documents(path: str, year: int) -> list[dict]:
-    """One {sheet, title, text} per body sheet, ready for rag_service.ingest_text."""
+def read_body_sheets(path: str) -> list[tuple[str, list[list]]]:
+    """(sheet name, raw rows) for each body sheet — read once, then handed to
+    both workbook_documents and workbook_figures."""
     from python_calamine import CalamineWorkbook  # only the import script needs it
     wb = CalamineWorkbook.from_path(path)
+    return [(s, wb.get_sheet_by_name(s).to_python(skip_empty_area=False)) for s in body_sheets(wb)]
+
+
+def workbook_documents(path_or_sheets, year: int) -> list[dict]:
+    """One {sheet, title, text} per body sheet, ready for rag_service.ingest_text."""
+    sheets = read_body_sheets(path_or_sheets) if isinstance(path_or_sheets, str) else path_or_sheets
     docs, seen = [], set()
-    for sheet in body_sheets(wb):
-        rows = wb.get_sheet_by_name(sheet).to_python(skip_empty_area=False)
+    for sheet, rows in sheets:
         sheet_title, lines = _sheet_lines(rows, year, sheet)
         if not lines:
             continue
@@ -309,3 +334,122 @@ def workbook_documents(path: str, year: int) -> list[dict]:
         )
         docs.append({"sheet": sheet, "title": title, "text": "\n\n".join([intro] + lines)})
     return docs
+
+
+# ── Sheet -> figures (mart.pac_business_plan) ────────────────────────
+#
+# The same rows as numbers, one record per value cell, for the EBS Data
+# Mart (core.pac_bp_figure -> mart.pac_business_plan). Text answers "what is
+# the 2026 objective"; only numbers can be summed, filtered by month and set
+# against the invoiced sales in mart.sales_by_customer_item_month.
+#
+# Each column header is read into a period: "2026(P)" is the plan year,
+# "Monthly Mar" / "Manufacture Plan Mar" / "2026, 1st Half Mar" a month of
+# the plan year, "2026(P) Q1" a quarter, a bare "2025" the prior-year
+# comparison figure the document carries. "ratio"/"growth"/"%" headers and
+# "%" rows are percentages. Headers that are none of these (Price/unit,
+# QTY, Notes) keep period_type 'other' — the header text itself is always
+# stored, so nothing is lost by not recognising it.
+
+_MONTHS = {m: i for i, m in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), start=1)}
+_MONTH_TOKEN_RE = re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?$", re.I)
+_QUARTER_RE = re.compile(r"\bQ([1-4])\b", re.I)
+_HALF_RE = re.compile(r"\b(1st|2nd)\s+half\b", re.I)
+_SECTION_CODE_RE = re.compile(r"^(\d+(?:-\d+)?(?:\.[a-z])?)")
+# Units are written "mil Rp" (millions of rupiah) on the money sheets.
+_MONEY_UNIT_RE = re.compile(r"\b(rp|idr)\b", re.I)
+_SCALE = (("bil", 1_000_000_000), ("mil", 1_000_000), ("thousand", 1_000), ("000", 1_000))
+# Columns that hold a count even on a "mil Rp" sheet (Purchase Plan QTY,
+# COGS-by-product Qty).
+_QTY_HEADER_RE = re.compile(r"\b(qty|quantity|unit|vial|pcs)\b", re.I)
+
+
+def period_of(header: str | None, plan_year: int) -> dict:
+    """Column header -> period_type / period_year / period_month /
+    period_quarter / scenario / measure."""
+    h = (header or "").strip()
+    low = h.lower()
+    measure = "growth" if "growth" in low else "ratio" if ("ratio" in low or "portion" in low or low == "%") else "value"
+    years = [int(y) for y in _YEAR_RE.findall(h)]
+    year = years[0] if years else None
+    plan = "(p)" in low or "plan" in low
+    out = {"period_type": "other", "period_year": year, "period_month": None, "period_quarter": None,
+           "scenario": None, "measure": measure}
+    m = _MONTH_TOKEN_RE.search(h)
+    q = _QUARTER_RE.search(h)
+    if m and len(h) <= 40:
+        out.update(period_type="month", period_month=_MONTHS[m.group(1).lower()], period_year=year or plan_year)
+    elif q:
+        out.update(period_type="quarter", period_quarter=int(q.group(1)), period_year=year or plan_year)
+    elif _HALF_RE.search(h):
+        out.update(period_type="half", period_year=year or plan_year)
+    elif year and ("total" in low or len(h) <= 30):
+        out["period_type"] = "year"
+    if out["period_type"] != "other":
+        y = out["period_year"]
+        out["scenario"] = "plan" if (plan or y == plan_year or y is None) else (
+            "pembanding" if y < plan_year else "plan")
+    return out
+
+
+def _unit_scale(unit: str) -> tuple[str, bool, float]:
+    """'unit: mil Rp' -> ('mil Rp', True, 1e6)."""
+    u = re.sub(r"^unit\s*:\s*", "", unit or "", flags=re.I).strip()
+    money = bool(_MONEY_UNIT_RE.search(u))
+    scale = 1.0
+    if money:
+        for word, s in _SCALE:
+            if word in u.lower():
+                scale = float(s)
+                break
+    return u, money, scale
+
+
+def sheet_figures(rows: list[list], year: int, sheet: str) -> list[dict]:
+    title, events = _parse_sheet(rows)
+    title = title or sheet
+    sec = _SECTION_CODE_RE.match(title)
+    out = []
+    for ev in events:
+        if ev["kind"] != "row":
+            continue
+        unit, money_unit, scale = _unit_scale(ev["unit"])
+        path = [p for p in ev["path"] if p != "%"]
+        is_pct_row = bool(ev["path"]) and ev["path"][-1] == "%"
+        for col_no, (hdr, v, pct) in enumerate(ev["cells"]):
+            per = period_of(hdr, year)
+            rec = {
+                "plan_year": year, "sheet_name": sheet, "sheet_title": title,
+                "section": sec.group(1) if sec else None,
+                "row_no": ev["row_no"], "col_no": col_no,
+                "line_path": " > ".join(path) or None,
+                "line_label": path[-1] if path else None,
+                "line_level": len(path),
+                "column_header": hdr, "unit": unit or None,
+                **per,
+                "amount_in_unit": None, "amount_idr": None, "quantity": None, "pct": None, "keterangan": None,
+            }
+            if isinstance(v, str):
+                rec["keterangan"] = v
+            elif _is_num(v):
+                if pct or is_pct_row:
+                    rec["pct"] = round(v * 100, 4) if abs(v) <= 10 else v
+                    rec["measure"] = rec["measure"] if rec["measure"] != "value" else "ratio"
+                elif money_unit and not (hdr and _QTY_HEADER_RE.search(hdr)):
+                    rec["amount_in_unit"] = v
+                    rec["amount_idr"] = round(v * scale, 2)
+                else:
+                    rec["quantity"] = v
+            else:
+                continue
+            out.append(rec)
+    return out
+
+
+def workbook_figures(path_or_sheets, year: int) -> list[dict]:
+    sheets = read_body_sheets(path_or_sheets) if isinstance(path_or_sheets, str) else path_or_sheets
+    out = []
+    for sheet, rows in sheets:
+        out.extend(sheet_figures(rows, year, sheet))
+    return out

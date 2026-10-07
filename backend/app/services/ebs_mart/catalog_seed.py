@@ -636,3 +636,42 @@ GOLDEN_QUERIES: list[tuple[str, str, str]] = [
     ("INV", "Nilai persediaan per kategori",
      "SELECT item_category, SUM(value_idr) AS nilai_idr FROM mart.inv_valuation GROUP BY item_category ORDER BY 2 DESC"),
 ]
+
+# PAC Business Plan (pac_sql.py) — loaded from PAC's workbook.
+COLUMN_CATALOG.update({
+    "pac_business_plan": {
+        "plan_year": ("Tahun Business Plan (dokumen), mis. 2026", ["tahun plan", "business plan", "BP"]),
+        "section": ("Nomor bagian dokumen: 1-1 P&L tahunan, 1-2 P&L bulanan (1-2.a Local, 1-2.b CMO, 1-2.c Export), "
+                    "2-1 sales plan nilai, 2-2 sales plan qty, 3-1/3-2 COGS, 4 manufacture, 5 investasi, "
+                    "6-1/6-2 purchase, 7 registrasi, 8 marketing, 9 personel, 10 cashflow",
+                    ["bagian", "sheet", "section"]),
+        "sheet_title": ("Judul bagian, mis. '1-2. Summary - Profit or Loss, Monthly'", ["judul"]),
+        "line_path": ("Jalur label baris, induk > anak, mis. 'CKD OTTO, Net Sales > Export'", ["baris", "pos", "line", "produk"]),
+        "line_label": ("Label baris terdalam (pos P&L, produk, negara, material, departemen)", ["pos", "produk", "item"]),
+        "column_header": ("Header kolom asli di workbook, mis. '2026(P)', 'Monthly Mar', '2026(P) Q1'", ["kolom", "header"]),
+        "unit": ("Satuan sheet: 'mil Rp' = juta Rupiah, 'vial', 'uom'", ["satuan", "unit"]),
+        "period_type": ("year / month / quarter / half / other (kolom bukan periode: harga, qty, catatan)", ["periode"]),
+        "period_year": ("Tahun periode kolom", ["tahun"]),
+        "period_month": ("Bulan 1–12 untuk kolom bulanan", ["bulan"]),
+        "period_start_date": ("Tanggal awal bulan untuk kolom bulanan (join ke data aktual EBS)", ["bulan", "periode"]),
+        "scenario": ("plan = angka rencana tahun plan; pembanding = angka tahun sebelumnya yang dicantumkan dokumen",
+                     ["rencana", "target", "budget", "pembanding", "estimasi"]),
+        "measure": ("value = angka; ratio = porsi/rasio %; growth = pertumbuhan %", ["rasio", "growth", "porsi"]),
+        "amount_idr": ("Nilai dalam Rupiah penuh (angka sheet × skala satuan, mil Rp × 1.000.000)", ["nilai", "rupiah", "target penjualan"]),
+        "amount_in_unit": ("Nilai seperti tertulis di sheet (mis. juta Rupiah)", ["nilai sheet"]),
+        "quantity": ("Angka non-uang: qty vial/uom, jumlah karyawan, umur ekonomis", ["qty", "jumlah", "unit", "vial"]),
+        "pct": ("Persentase (sudah × 100): rasio, porsi, growth, margin", ["persen", "%", "margin"]),
+        "keterangan": ("Isi teks sel (catatan, status registrasi, bulan akuisisi)", ["catatan", "notes", "status"]),
+    },
+})
+MART_SYNONYMS["pac_business_plan"] = [
+    "business plan", "BP", "rencana", "target", "plan", "budget tahunan", "PAC", "proyeksi", "sales plan",
+    "rencana penjualan", "target penjualan", "manufacture plan", "purchase plan", "investment plan",
+    "personnel plan", "cashflow plan", "plan vs actual", "realisasi vs target",
+]
+GOLDEN_QUERIES.append(
+    ("PAC", "Target net sales per bulan per bisnis (business plan)",
+     "SELECT period_start_date, line_label AS bisnis, amount_idr FROM mart.pac_business_plan "
+     "WHERE plan_year = 2026 AND section = '1-2' AND line_path LIKE 'CKD OTTO, Net Sales >%' "
+     "AND period_type = 'month' AND measure = 'value' ORDER BY 1, 2"),
+)

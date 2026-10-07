@@ -1,12 +1,20 @@
 """
-Import PAC's "<year> Business plan.xlsx" into the Knowledge Base, so CoChat's
-Company Rules assistant (search_company_documents) can answer from it.
+Import PAC's "<year> Business plan.xlsx" into two places:
 
-Each body sheet (before "Appendix→") becomes one document under source
-"Business Plan <year>", tagged PAC — see app/services/business_plan_kb.py for
-the conversion and why. Re-running for a year replaces that year's documents
-(all existing "Business Plan <year>" entries are deleted first), so a revised
-workbook can simply be imported again.
+  kb    the Knowledge Base, so CoChat's Company Rules assistant
+        (search_company_documents) can answer from the text. Each body sheet
+        (before "Appendix→") becomes one document under source
+        "Business Plan <year>", tagged PAC.
+  mart  core.pac_bp_figure -> mart.pac_business_plan, one row per value
+        cell, so EBS Analyst (pac_get_business_plan,
+        pac_get_sales_plan_vs_actual) can sum plan figures and set them
+        against invoiced sales in EBS. Access follows the data access matrix
+        (role ebs-pac); see app/services/ebs_mart/pac_sql.py.
+
+See app/services/business_plan_kb.py for the conversion — both come from the
+same parse. Re-running for a year replaces that year in each target, so a
+revised workbook can simply be imported again. --only kb|mart limits the run
+to one target (both by default).
 
 Copy the workbook into the backend container, then run:
 
@@ -16,7 +24,8 @@ Copy the workbook into the backend container, then run:
 
 The year comes from the file name; pass --year when it doesn't contain one.
 Only callers whose EBS Chat Access row includes the PAC knowledge tag can
-retrieve these documents.
+retrieve the documents, and only roles granted pac_business_plan in the data
+access matrix can read the figures.
 """
 import argparse
 import os
@@ -35,6 +44,7 @@ def main() -> int:
     ap.add_argument("--created-by", default="business-plan-import")
     ap.add_argument("--dry-run", action="store_true", help="Convert and report only; write nothing")
     ap.add_argument("--out", help="With --dry-run: write each year's converted text to this folder for review")
+    ap.add_argument("--only", choices=("kb", "mart"), help="Import into one target only (default: both)")
     args = ap.parse_args()
 
     if args.year and len(args.files) > 1:
@@ -47,10 +57,14 @@ def main() -> int:
             print(f"!! {name}: no year in the file name — pass --year")
             return 2
         source = business_plan_kb.source_for_year(year)
-        docs = business_plan_kb.workbook_documents(path, year)
-        print(f"== {name} -> source '{source}', {len(docs)} sheet(s), tag {args.department}")
+        sheets = business_plan_kb.read_body_sheets(path)
+        docs = business_plan_kb.workbook_documents(sheets, year)
+        figures = business_plan_kb.workbook_figures(sheets, year)
+        print(f"== {name} -> source '{source}', {len(docs)} sheet(s), tag {args.department}; "
+              f"{len(figures):,} figures for mart.pac_business_plan")
         for d in docs:
-            print(f"   {d['sheet']:<34} {len(d['text']):>7,} chars  {d['title']}")
+            n = sum(1 for f in figures if f["sheet_name"] == d["sheet"])
+            print(f"   {d['sheet']:<34} {len(d['text']):>7,} chars {n:>6,} figures  {d['title']}")
 
         if args.dry_run:
             if args.out:
@@ -60,6 +74,13 @@ def main() -> int:
                     for d in docs:
                         f.write(f"\n\n######## {d['title']}  [{d['sheet']}]\n\n{d['text']}")
                 print(f"   written {out}")
+            continue
+
+        if args.only != "kb":
+            from app.services.ebs_mart import pac_sql
+            r = pac_sql.load_year(year, figures, name, args.created_by)
+            print(f"   mart: {r['deleted']:,} old rows replaced by {r['inserted']:,}; refresh {r['refresh']}")
+        if args.only == "mart":
             continue
 
         existing = [d for d in rag_service.list_documents() if d["source"] == source]

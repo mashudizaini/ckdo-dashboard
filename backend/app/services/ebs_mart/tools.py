@@ -1904,3 +1904,168 @@ def gl_get_budget_vs_actual(caller: Caller, period: str, ytd: bool = False, depa
          ORDER BY COALESCE(budget_idr, 0) + COALESCE(actual_idr, 0) DESC
     """
     return _run(caller, "gl_budget_vs_actual", sql, params, "gl_get_budget_vs_actual", args)
+
+
+# ── PAC Business Plan (pac_sql.py) ───────────────────────────────────────────
+
+_BP_SECTIONS = {
+    "p&l": "1", "pl": "1", "profit": "1", "laba rugi": "1", "sales": "2", "penjualan": "2",
+    "cogs": "3", "hpp": "3", "manufactur": "4", "produksi": "4", "invest": "5", "capex": "5",
+    "purchas": "6", "pembelian": "6", "registra": "7", "marketing": "8", "personnel": "9", "personel": "9",
+    "karyawan": "9", "headcount": "9", "cashflow": "10", "cash flow": "10", "arus kas": "10",
+}
+
+
+def _bp_section(v: str | None) -> str | None:
+    """'1-2', '2', 'cogs', 'Sales Plan' -> a section code. A bare number
+    takes the whole family ('1' -> 1-1, 1-2, 1-2.a…, never 10); a code with
+    a dash or dot is that sheet only ('1-2' is the summary, not 1-2.a), since
+    the per-business sheets repeat the summary's line names."""
+    import re as _re
+    v = _val(v)
+    if not v:
+        return None
+    m = _re.match(r"^\s*(\d+(?:-\d+)?(?:\.[a-z])?)\s*$", v)
+    if m:
+        return m.group(1)
+    low = v.lower()
+    for word, pattern in _BP_SECTIONS.items():
+        # Word start always; short keys (pl, hpp, ...) must be whole words, so
+        # "Sales Plan" is not read as "pl".
+        end = r"(?![a-z])" if len(word) <= 4 else ""
+        if _re.search(rf"(?<![a-z]){_re.escape(word)}{end}", low):
+            return pattern
+    raise sql_guard.SqlRejected(f"Bagian '{v}' tidak dikenal — pakai nomor (1-1, 1-2, 2-1, 3-1, 4, 5, 6-1, 9, 10) "
+                                "atau nama (P&L, sales, COGS, manufacture, investment, purchase, personnel, cashflow).")
+
+
+def _bp_period(period: str | None) -> tuple:
+    """'2026' -> year columns of 2026; '2026-03' -> March 2026; '2026-Q1' -> Q1;
+    'tahunan' -> every year column (plan total and prior-year comparison)."""
+    import re as _re
+    if not period:
+        return None, None, None
+    if str(period).strip().lower() in ("tahunan", "year", "yearly", "annual"):
+        return 0, None, None
+    m = _re.match(r"^\s*(\d{4})(?:-(?:(\d{1,2})|[Qq]([1-4])))?\s*$", str(period))
+    if not m:
+        raise sql_guard.SqlRejected(f"Format periode '{period}' tidak dikenal — pakai YYYY, YYYY-MM atau YYYY-Qn.")
+    return int(m.group(1)), (int(m.group(2)) if m.group(2) else None), (int(m.group(3)) if m.group(3) else None)
+
+
+def pac_get_business_plan(caller: Caller, year: int | None = None, section: str | None = None,
+                          line: str | None = None, period: str | None = None, scenario: str | None = None,
+                          measure: str | None = None) -> dict:
+    """Business Plan figures. Without section/line it lists the sections of
+    that year's plan instead of 16k cells, so the model can pick one."""
+    args = {"year": year, "section": section, "line": line, "period": period, "scenario": scenario,
+            "measure": measure}
+    py, pm, pq = _bp_period(period)
+    params = {"year": year, "sec": _bp_section(section), "line": _like(line), "py": py, "pm": pm, "pq": pq,
+              "sc": _val(scenario), "ms": _val(measure)}
+    year_cond = "plan_year = COALESCE(%(year)s::int, (SELECT MAX(plan_year) FROM mart.pac_business_plan))"
+    if not params["sec"] and not params["line"]:
+        sql = f"""
+            SELECT plan_year, section, sheet_title, MAX(unit) AS unit, COUNT(DISTINCT line_path) AS jml_baris,
+                   COUNT(*) FILTER (WHERE period_type = 'month') AS sel_bulanan
+              FROM mart.pac_business_plan WHERE {year_cond}
+             GROUP BY plan_year, section, sheet_title
+             ORDER BY SUBSTRING(section FROM '^[0-9]+')::int NULLS FIRST, section
+        """
+        res = _run(caller, "pac_business_plan", sql, params, "pac_get_business_plan", args)
+        res["note"] = ("Daftar bagian Business Plan. Panggil lagi dengan section (mis. '1-2') dan/atau line "
+                       "(mis. 'Net Sales') untuk angkanya.")
+        return res
+    # A month or quarter asks for that column; a bare year asks for the year
+    # columns (plan total and the prior-year comparison the document carries).
+    sql = f"""
+        SELECT plan_year, section, sheet_title, line_path, column_header, period_type, period_year,
+               period_month, period_quarter, scenario, measure, unit,
+               amount_idr, amount_in_unit, quantity, pct, keterangan
+          FROM mart.pac_business_plan
+         WHERE {year_cond}
+           AND (%(sec)s::text  IS NULL OR section = %(sec)s::text
+                OR (%(sec)s::text !~ '[-.]' AND (section LIKE %(sec)s::text || '-%%'
+                                                 OR section LIKE %(sec)s::text || '.%%')))
+           AND (%(line)s::text IS NULL OR line_path ILIKE %(line)s::text)
+           AND (%(sc)s::text   IS NULL OR scenario = LOWER(%(sc)s::text))
+           AND (%(ms)s::text   IS NULL OR measure = LOWER(%(ms)s::text))
+           AND (%(pm)s::int IS NULL OR (period_type = 'month' AND period_month = %(pm)s::int
+                                        AND period_year = %(py)s::int))
+           AND (%(pq)s::int IS NULL OR (period_type = 'quarter' AND period_quarter = %(pq)s::int))
+           AND (%(py)s::int IS NULL OR %(pm)s::int IS NOT NULL OR %(pq)s::int IS NOT NULL
+                OR (period_type = 'year' AND (%(py)s::int = 0 OR period_year = %(py)s::int)))
+         ORDER BY section, row_no, col_no
+    """
+    return _run(caller, "pac_business_plan", sql, params, "pac_get_business_plan", args)
+
+
+# Business Plan P&L line each basis reads. EBS invoices (RA, net of credit
+# memos) are CKD OTTO's own sales to its customers — closest to the plan's
+# "CKD OTTO, Gross Sales". Net Sales is after distribution fee, discount,
+# return and freight, which are not on the invoice; "Customer Sales" is the
+# distributors' sales to the market.
+_BP_BASIS = {"gross": "CKD OTTO, Gross Sales", "net": "CKD OTTO, Net Sales", "customer": "Customer Sales"}
+
+
+def pac_get_sales_plan_vs_actual(caller: Caller, year: int, month: int | None = None, ytd: bool = False,
+                                 basis: str = "gross", group_by: str = "business") -> dict:
+    """Business Plan sales (P&L monthly, section 1-2) vs sales invoiced in
+    EBS, per business (Local / CMO / Export), for one month, year to date
+    up to a month, or the whole year."""
+    args = {"year": year, "month": month, "ytd": ytd, "basis": basis, "group_by": group_by}
+    line = _BP_BASIS.get((basis or "gross").strip().lower())
+    if not line:
+        raise sql_guard.SqlRejected("basis harus gross, net atau customer.")
+    if month is not None and not 1 <= int(month) <= 12:
+        raise sql_guard.SqlRejected("month harus 1–12.")
+    if month:
+        m0, m1 = (1, int(month)) if ytd else (int(month), int(month))
+    else:
+        m0, m1 = 1, 12
+    dims = {"month": ["period_start_date"], "business_month": ["period_start_date", "bisnis"]}.get(group_by, ["bisnis"])
+    dim = ", ".join(dims)
+    nulls = ", ".join("NULL" for _ in dims)
+    shown = ", ".join("COALESCE(bisnis, 'TOTAL') AS bisnis" if d == "bisnis" else d for d in dims)
+    params = {"year": int(year), "line": line, "m0": m0, "m1": m1}
+    sql = f"""
+        WITH plan AS (
+            SELECT period_start_date,
+                   CASE WHEN line_label ILIKE 'Local%%'  THEN 'Local'
+                        WHEN line_label ILIKE 'CMO%%'    THEN 'CMO'
+                        WHEN line_label ILIKE 'Export%%' THEN 'Export' ELSE line_label END AS bisnis,
+                   amount_idr
+              FROM mart.pac_business_plan
+             WHERE plan_year = %(year)s AND section = '1-2' AND period_type = 'month' AND measure = 'value'
+               AND line_path LIKE %(line)s || ' > %%' AND line_level = 2
+               AND period_month BETWEEN %(m0)s AND %(m1)s
+        ), actual AS (
+            SELECT period_start_date, business_type AS bisnis, amount_idr
+              FROM mart.sales_by_customer_item_month
+             WHERE period_start_date >= make_date(%(year)s, %(m0)s, 1)
+               AND period_start_date <  make_date(%(year)s, %(m1)s, 1) + INTERVAL '1 month'
+        ), agg AS (
+            SELECT {dim}, SUM(plan_idr) AS plan_idr, SUM(actual_idr) AS actual_idr
+              FROM (SELECT {dim}, amount_idr AS plan_idr, NULL::numeric AS actual_idr FROM plan
+                    UNION ALL
+                    SELECT {dim}, NULL, amount_idr FROM actual) u
+             GROUP BY {dim}
+        ), tot AS (
+            SELECT {dim}, plan_idr, actual_idr, 0 AS ord FROM agg
+            UNION ALL
+            SELECT {nulls}, SUM(plan_idr), SUM(actual_idr), 1 FROM agg
+        )
+        SELECT {shown},
+               ROUND(COALESCE(plan_idr, 0)) AS plan_idr, ROUND(COALESCE(actual_idr, 0)) AS actual_idr,
+               ROUND(COALESCE(actual_idr, 0) - COALESCE(plan_idr, 0)) AS selisih_idr,
+               ROUND(100.0 * actual_idr / NULLIF(plan_idr, 0), 1) AS pencapaian_pct
+          FROM tot ORDER BY ord, {dim}
+    """
+    res = _run(caller, ["pac_business_plan", "sales_by_customer_item_month"], sql, params,
+               "pac_get_sales_plan_vs_actual", args)
+    res["note"] = (f"Plan = Business Plan {year}, baris '{line}' (P&L bulanan, bagian 1-2), bulan {m0}–{m1}. "
+                   "Actual = penjualan terinvoice di Oracle EBS (RA, dikurangi credit memo) per tipe bisnis; "
+                   "'Non-SO' = invoice tanpa sales order, tidak punya padanan di plan. Bulan berjalan belum lengkap. "
+                   "Basis gross paling sebanding dengan invoice EBS; net sudah dikurangi distribution fee, diskon, "
+                   "retur dan freight yang tidak tercatat di invoice.")
+    return res

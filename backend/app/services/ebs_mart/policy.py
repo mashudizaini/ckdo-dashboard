@@ -3,8 +3,9 @@ Data access policy for EBS chat: which access role may read which mart, and
 how much of it — edited in Setup > AI > EBS Chat Access, stored in meta.
 
   meta.access_role   a role (ebs-finance, ebs-purchasing, ... or any role an
-                     admin adds). all_access = every mart except sa_* (the
-                     management role), so new marts need no new grant.
+                     admin adds). all_access = every mart except sa_* and
+                     explicit_grant marts (the management role), so new
+                     marts need no new grant.
   meta.access_grant  role × mart × level:
                        full — every column
                        qty  — quantities, dates and names only: columns that
@@ -152,8 +153,16 @@ def load() -> dict:
     return policy
 
 
+def is_explicit(mart: str) -> bool:
+    """Marts all_access does not cover (constants.MARTS explicit_grant) —
+    today the PAC Business Plan, confidential to PAC."""
+    return bool(MARTS.get(mart, {}).get("explicit_grant"))
+
+
 def levels_for(roles: set[str]) -> dict[str, str]:
-    """mart -> level for a set of roles; full beats qty. sa_* never appears."""
+    """mart -> level for a set of roles; full beats qty. sa_* never appears.
+    all_access covers every mart except explicit_grant ones, which an
+    all_access role still reads when it is granted them like any role."""
     p = load()
     out: dict[str, str] = {}
     for r in roles:
@@ -161,8 +170,8 @@ def levels_for(roles: set[str]) -> dict[str, str]:
             continue
         if p["roles"][r]["all_access"]:
             for m in _mart_names():
-                out[m] = "full"
-            continue
+                if not is_explicit(m):
+                    out[m] = "full"
         for m, level in p["grants"].get(r, {}).items():
             if m.startswith(SA_PREFIX) or m not in MARTS:
                 continue

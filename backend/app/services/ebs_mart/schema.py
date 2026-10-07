@@ -20,6 +20,7 @@ from app.services.ebs_mart.mart_sql import MART_EXTRA_INDEXES, MART_SQL, MART_UN
 from app.services.ebs_mart.sa_sql import SA_CORE_DDL, SA_META_DDL, SOD_SEED
 from app.services.ebs_mart.fin_sql import FIN_CORE_DDL
 from app.services.ebs_mart.ext_sql import EXT_CORE_DDL
+from app.services.ebs_mart.pac_sql import PAC_CORE_DDL, seed_pac_role
 from app.services.ebs_mart.policy import POLICY_DDL, seed_policy
 
 logger = logging.getLogger(__name__)
@@ -956,8 +957,10 @@ def ensure_mart_schema():
         ("system administration ddl", lambda cur: _exec_each(cur, SA_META_DDL + SA_CORE_DDL, "sa ddl")),
         ("finance close ddl", lambda cur: _exec_each(cur, FIN_CORE_DDL, "finance close ddl")),
         ("catalog extension ddl", lambda cur: _exec_each(cur, EXT_CORE_DDL, "catalog extension ddl")),
+        ("pac business plan ddl", lambda cur: _exec_each(cur, PAC_CORE_DDL, "pac business plan ddl")),
         ("sod rules", seed_sod_rules),
         ("access policy", lambda cur: (_exec_each(cur, POLICY_DDL, "access policy ddl"), seed_policy(cur))),
+        ("pac role", seed_pac_role),
         ("etl_job_log columns", lambda cur: _exec_each(cur, _ETL_LOG_COLUMNS, "etl_job_log columns")),
         ("etl_run_log view", create_etl_run_log_view),
         ("marts", ensure_marts),

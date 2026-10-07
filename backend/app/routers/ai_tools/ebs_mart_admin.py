@@ -306,7 +306,8 @@ _INTENT_TOOLS = {
         "sa_get_resp_programs", "sa_get_dormant_users", "sa_get_terminated_active_users", "sa_get_sod_violations",
         "sa_get_profile_value", "sa_get_login_history", "sa_get_manager_status", "sa_get_pending_approvals",
         "sa_check_patch", "sa_get_form_personalizations", "it_get_concurrent_requests", "it_get_interface_errors")},
-    **{name: getattr(tools, name) for name in ("lookup_master", "po_get_document", "po_get_pending_approval", "ap_get_invoice", "ap_get_due_forecast", "ap_get_withholding", "so_get_order", "so_get_holds", "ar_get_customer_balance", "inv_get_stock_card", "inv_get_slow_moving", "opm_get_item_cost", "gl_get_account_movement", "gl_get_budget_vs_actual")},
+    **{name: getattr(tools, name) for name in ("lookup_master", "po_get_document", "po_get_pending_approval", "ap_get_invoice", "ap_get_due_forecast", "ap_get_withholding", "so_get_order", "so_get_holds", "ar_get_customer_balance", "inv_get_stock_card", "inv_get_slow_moving", "opm_get_item_cost", "gl_get_account_movement", "gl_get_budget_vs_actual",
+                                               "pac_get_business_plan", "pac_get_sales_plan_vs_actual")},
 }
 
 
@@ -686,7 +687,8 @@ async def access_policy(user: CurrentUser = Depends(_admin)):
     p = await run_in_threadpool(policy.load)
     money = await run_in_threadpool(_money_columns)
     marts = [{"mart": m, "domain": MARTS[m]["domain"], "phase": MARTS[m]["phase"],
-              "description": MARTS[m]["description"], "money_columns": money.get(m, [])}
+              "description": MARTS[m]["description"], "money_columns": money.get(m, []),
+              "explicit_grant": policy.is_explicit(m)}
              for m in policy._mart_names()]
     users = await run_in_threadpool(_scope_rows, """
         SELECT g AS role_code, COUNT(*) AS users FROM ebs_chat_scope, jsonb_array_elements_text(ebs_groups) g

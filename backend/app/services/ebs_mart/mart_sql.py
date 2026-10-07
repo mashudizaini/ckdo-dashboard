@@ -957,3 +957,14 @@ MART_EXTRA_INDEXES.update(EXT_EXTRA_INDEXES)
 MARTS_BY_JOB.update(EXT_MARTS_BY_JOB)
 for _job, _marts in EXT_EXTRA_REFRESH.items():
     MARTS_BY_JOB[_job] = MARTS_BY_JOB.get(_job, []) + [m for m in _marts if m not in MARTS_BY_JOB.get(_job, [])]
+
+# PAC Business Plan (pac_sql.py): loaded from PAC's workbook by
+# scripts/ingest_business_plan.py, not by an Oracle ETL job.
+from app.services.ebs_mart.pac_sql import (  # noqa: E402
+    PAC_EXTRA_INDEXES, PAC_MART_SQL, PAC_MARTS_BY_JOB, PAC_UNIQUE_INDEX,
+)
+
+MART_SQL.update(PAC_MART_SQL)
+MART_UNIQUE_INDEX.update(PAC_UNIQUE_INDEX)
+MART_EXTRA_INDEXES.update(PAC_EXTRA_INDEXES)
+MARTS_BY_JOB.update(PAC_MARTS_BY_JOB)
