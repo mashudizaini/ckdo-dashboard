@@ -1074,6 +1074,18 @@ def etl_employee(year: int = None, month: int = None):
                 dept_totals[department or "Unclassified"] += 1
 
             all_departments = set(dept_totals) | set(resigned_totals)
+            # The upsert below only touches departments that exist today, so a
+            # department that disappeared kept its old row forever and was
+            # summed into every total: the Oracle-era "Admin" rows (~270, in
+            # all of 2025 and 2026) turned a June 2026 headcount of ~134 into
+            # 405. Each recomputed month is the whole truth for that month —
+            # unless the employees read came back empty, which is a failed
+            # source, not a month with nobody in it.
+            if emp_rows:
+                cur_pg.execute(
+                    "DELETE FROM eis.fact_employee WHERE period_id = %s AND NOT (dept_group = ANY(%s))",
+                    (period_id, list(all_departments)),
+                )
             for department in all_departments:
                 cur_pg.execute(
                     """INSERT INTO eis.fact_employee
