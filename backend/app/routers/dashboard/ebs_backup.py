@@ -1753,6 +1753,48 @@ def copy_id(payload: CopyIdIn, db: Session = Depends(get_db)):
         raise HTTPException(500, f"Login to target failed (wrong password?): {e}")
 
 
+def _diagnose_pubkey_failure(db: Session, tgt: Server, username: str) -> str:
+    """Ask the target why the key was refused, instead of listing suspects."""
+    cred = db.query(Credential).filter(
+        Credential.server_id == tgt.id,
+        Credential.cred_type.in_(["ssh_password", "ssh_key"]),
+    ).first()
+    if not cred:
+        return ("Tidak ada kredensial tersimpan untuk server target, jadi penyebabnya "
+                "tidak bisa diperiksa dari sini.")
+    try:
+        with ssh_from_server(tgt, cred) as t:
+            home = (t.run("readlink -f $HOME", timeout=15).stdout or "").strip()
+            mode = (t.run("stat -c %a $(readlink -f $HOME)", timeout=15).stdout or "").strip()
+            akeys = (t.run("wc -l < ~/.ssh/authorized_keys 2>/dev/null || echo 0", timeout=15).stdout or "0").strip()
+            ssh_mode = (t.run("stat -c %a ~/.ssh 2>/dev/null", timeout=15).stdout or "").strip()
+    except Exception as e:
+        return f"Gagal memeriksa server target: {e}"
+
+    problems = []
+    if akeys in ("", "0"):
+        problems.append("authorized_keys kosong atau tidak ada — kunci belum sampai; ulangi langkah 2.")
+    # Group-write (0o020) or other-write (0o002) on the home directory is what
+    # StrictModes rejects; the owner bits are irrelevant to it.
+    try:
+        group_or_other_writable = bool(int(mode, 8) & 0o022) if mode else False
+    except ValueError:
+        group_or_other_writable = False
+    if group_or_other_writable:
+        problems.append(
+            f"Home '{home}' izinnya {mode} — bisa ditulis group/other. OpenSSH StrictModes "
+            f"(bawaan) menolak authorized_keys dalam kondisi ini: kunci ditawarkan, diabaikan "
+            f"diam-diam, lalu jatuh ke password. Perbaiki: chmod 755 {home}"
+        )
+    if ssh_mode and ssh_mode != "700":
+        problems.append(f"~/.ssh izinnya {ssh_mode}, seharusnya 700.")
+
+    if problems:
+        return " | ".join(problems)
+    return (f"authorized_keys berisi {akeys} baris, home {home} ({mode}) dan ~/.ssh ({ssh_mode}) "
+            f"terlihat benar — periksa PubkeyAuthentication di sshd server target.")
+
+
 @router.post("/ssh-setup/test")
 def test_setup(payload: TestSetupIn, db: Session = Depends(get_db)):
     """Verify: from source server, can SSH to target user@host without password."""
@@ -1772,15 +1814,16 @@ def test_setup(payload: TestSetupIn, db: Session = Depends(get_db)):
             r = ssh.run(test_cmd, timeout=20)
             if r.ok and "SSH_OK_" in r.stdout:
                 return {"ok": True, "message": "SSH passwordless works", "output": r.stdout.strip()}
-            else:
-                return {
-                    "ok": False, "message": "SSH passwordless FAILED", "stdout": r.stdout, "stderr": r.stderr,
-                    "hint": (
-                        "Check: (1) key already in target authorized_keys? "
-                        "(2) permissions on ~/.ssh and ~/.ssh/authorized_keys on target correct? "
-                        "(3) sshd on target allows PubkeyAuthentication?"
-                    ),
-                }
+            # A failure used to answer with three things to go and check. Each
+            # of them is answerable from here in a second, so it does the
+            # checking instead of handing the list back. On 2026-10-07 the real
+            # cause was the fourth one nobody lists: the target's HOME was 777,
+            # and OpenSSH with StrictModes (the default) refuses authorized_keys
+            # when the home directory is writable by anyone else — the key is
+            # offered, silently ignored, and it falls back to a password.
+            return {"ok": False, "message": "SSH passwordless FAILED",
+                    "stdout": r.stdout, "stderr": r.stderr,
+                    "hint": _diagnose_pubkey_failure(db, tgt, payload.target_username)}
     except Exception as e:
         raise HTTPException(500, f"Error testing: {e}")
 
