@@ -1018,7 +1018,11 @@ def app_preflight(server_id: int, fs_target: str = "fs2",
         with ssh_from_server(server, cred) as ssh:
             for fs in wanted + ["fs_ne"]:
                 path = f"{apps_base}/{fs}"
-                r = ssh.run(f"du -sb {path} 2>/dev/null | cut -f1", timeout=120)
+                # du over a real EBS application tier walks hundreds of
+                # thousands of files; measured on 172.21.2.202 it runs past two
+                # minutes. The first version timed out at 120s and reported the
+                # directories as missing, which is a far worse answer than slow.
+                r = ssh.run(f"du -sb {path} 2>/dev/null | cut -f1", timeout=900)
                 try:
                     size = int((r.stdout or "").strip())
                 except ValueError:

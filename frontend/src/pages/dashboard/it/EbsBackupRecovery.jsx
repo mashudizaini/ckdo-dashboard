@@ -1097,8 +1097,13 @@ function AppBackupTab({ servers }) {
 
         <div className="flex gap-2 mb-4">
           <Btn size="sm" icon={preBusy ? Loader2 : RefreshCw} disabled={preBusy || !serverId} onClick={runPre}>
-            {preBusy ? "Mengukur…" : "Cek ukuran & tujuan"}
+            {preBusy ? "Mengukur… (bisa beberapa menit)" : "Cek ukuran & tujuan"}
           </Btn>
+          {preBusy && (
+            <span style={{ fontSize: 11, color: "#64748b", alignSelf: "center" }}>
+              du menelusuri ratusan ribu berkas di application tier — biarkan berjalan.
+            </span>
+          )}
         </div>
         {pre && <AppPreflight pre={pre} />}
 
