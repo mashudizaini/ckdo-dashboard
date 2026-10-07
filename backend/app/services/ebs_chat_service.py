@@ -165,7 +165,9 @@ _COMPANY_RULES_TOOL = {
             "kebijakan HR/Accounting/PAC/Purchasing/IT) — untuk pertanyaan seputar peraturan "
             "atau prosedur internal perusahaan, serta Business Plan tahunan PAC (angka rencana/target: "
             "P&L, sales plan, COGS, investasi, pembelian, personel, cashflow, jadwal registrasi, "
-            "managerial objective), BUKAN data transaksi Oracle EBS."
+            "managerial objective) dan dokumen pinjaman PAC (pinjaman bank & pemegang saham: perjanjian "
+            "kredit, LOI, jaminan, promissory note, drawdown, jadwal pembayaran, bunga pinjaman pemegang "
+            "saham), BUKAN data transaksi Oracle EBS."
         ),
         "parameters": {
             "type": "object",

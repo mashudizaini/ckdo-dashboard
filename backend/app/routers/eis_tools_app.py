@@ -210,7 +210,9 @@ _DocsIn = create_model("search_company_documents_in", query=(str, Field(
     description="Search the company's policy/rules/SOP documents (HR, Accounting, PAC, Purchasing, IT, General) "
                 "for passages that answer a question about internal rules or procedures, and PAC's yearly "
                 "Business Plan (plan/target figures: P&L, sales plan, COGS, investment, purchase, personnel, "
-                "cashflow, registration schedule, managerial objectives) — NOT for Oracle EBS transaction data. "
+                "cashflow, registration schedule, managerial objectives) and PAC's loan documents (bank and "
+                "shareholder loans: credit agreements, LOI, guarantees, promissory notes, drawdowns, payment "
+                "schedules, shareholder-loan interest) — NOT for Oracle EBS transaction data. "
                 "Answer only from the returned excerpts and cite the document.",
 )
 async def search_company_documents(body: _DocsIn, caller: Caller = Depends(current_caller)):  # type: ignore[valid-type]
