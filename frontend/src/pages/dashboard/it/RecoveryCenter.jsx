@@ -79,7 +79,16 @@ const CATEGORY = {
   required: { label: "Wajib disimpan", short: "Wajib", color: C.red, bg: "rgba(220,38,38,0.08)" },
   optional: { label: "Opsional (PITR lama)", short: "Opsional", color: C.amber, bg: "rgba(217,119,6,0.1)" },
   obsolete: { label: "Aman dihapus", short: "Aman dihapus", color: C.green, bg: "rgba(22,163,74,0.1)" },
+  unknown: { label: "Bukan milik PROD", short: "Bukan PROD", color: C.sub, bg: "rgba(100,116,139,0.1)" },
 };
+
+// Where archive log copies live. archive_dest (the database's own folder) is
+// shown but never deletable from here — RMAN manages it.
+const LOCS = [
+  { id: "staging", label: "Staging", long: "Staging (server DB)" },
+  { id: "minio", label: "MinIO", long: "MinIO (archive-logs/)" },
+  { id: "synology", label: "Synology", long: "Synology (NFS)" },
+];
 
 function Card({ children, style, className = "" }) {
   return (
@@ -278,7 +287,8 @@ function SummaryView({ catalog, err, goTo }) {
           sub={latest ? `terbaru ${daysAgo(latest.start_time)} hari lalu` : "—"} color={s.restorable_count ? C.ink : C.red} />
         <Stat icon={AlertTriangle} label="Potensi data hilang (RPO)" value={fmtMinutes(s.rpo_minutes)}
           sub="jika server hilang total saat ini" color={s.rpo_minutes > 1440 ? C.red : s.rpo_minutes > 360 ? C.amber : C.ink} />
-        <Stat icon={HardDrive} label="Archive log aman dihapus" value={fmtBytes(obs.bytes)} sub={`${obs.count} file di staging`} color={C.green} />
+        <Stat icon={HardDrive} label="Archive log aman dihapus" value={fmtBytes(obs.bytes)}
+          sub={`${obs.count} sequence · ${LOCS.map((l) => `${l.label} ${fmtBytes(obs.by_location?.[l.id]?.bytes || 0)}`).join(" · ")}`} color={C.green} />
       </div>
 
       <RecoveryTimeline catalog={catalog} />
@@ -388,6 +398,8 @@ function FullBackupsView({ catalog, err, inventory }) {
                     <Pill color={C.sub}>{f.datafiles}/{f.datafiles_total} datafile</Pill>
                     <Pill color={C.sub}>{fmtBytes(f.size_bytes)}</Pill>
                     {f.controlfile_ok && <Pill color={C.sub}>+ controlfile</Pill>}
+                    {(f.copies || []).map((loc) => <Pill key={loc} color={C.blue}>{loc === "synology" ? "Salinan Synology" : "Di staging"}</Pill>)}
+                    {f.restorable && !(f.copies || []).includes("synology") && <Pill color={C.amber} title="Bila server DB rusak, backup ini ikut hilang">Belum ada di Synology</Pill>}
                   </div>
                   {f.restorable ? (
                     <div style={{ fontSize: 12, color: C.ink }}>
@@ -397,8 +409,10 @@ function FullBackupsView({ catalog, err, inventory }) {
                   ) : (
                     f.problems.map((p, i) => <div key={i} style={{ fontSize: 12, color: C.red }}>• {p}</div>)
                   )}
+                  {(f.notes || []).map((n, i) => <div key={i} style={{ fontSize: 11.5, color: C.amber, marginTop: 2 }}>• {n}</div>)}
                   <div style={{ fontSize: 11, color: C.faint, marginTop: 4 }}>
                     Tag {f.tag} · {f.dirs.join(", ") || "lokasi tidak diketahui"}
+                    {f.synology_paths?.length > 0 && <> · Synology: {f.synology_paths.join(", ")}</>}
                     {copies.length > 0 && <> · Salinan: {copies.join(", ")}</>}
                   </div>
                 </div>
@@ -418,15 +432,18 @@ function FullBackupsView({ catalog, err, inventory }) {
 function RestoreScript({ f, stagingPath }) {
   const [copied, setCopied] = useState(false);
   const until = f.recoverable_until || f.end_time;
+  const dir = f.restore_dir || f.dirs[0];
   const script = [
     "# REFERENSI — jalankan di server target (Dev / server pengganti), JANGAN di PROD yang sedang berjalan.",
     "# 1. Startup nomount dengan pfile/spfile PROD, lalu:",
     "rman target /",
     "",
-    `RESTORE CONTROLFILE FROM '<${f.dirs[0] || "folder_backup"}/CTL_...bkp>';`,
+    ...(f.restore_source === "synology" ? ["# Folder staging sudah tidak ada — memakai salinan di Synology (mount NFS)."] : []),
+    `RESTORE CONTROLFILE FROM '<${dir || "folder_backup"}/CTL_...bkp>';`,
     "ALTER DATABASE MOUNT;",
-    `CATALOG START WITH '${f.dirs[0] || "<folder_backup>"}/' NOPROMPT;`,
+    `CATALOG START WITH '${dir || "<folder_backup>"}/' NOPROMPT;`,
     `CATALOG START WITH '${stagingPath}/' NOPROMPT;`,
+    "# Bila archive log yang dibutuhkan sudah tidak ada di staging, CATALOG juga folder archive log di Synology.",
     "",
     "RUN {",
     `  SET UNTIL TIME "TO_DATE('${until}','YYYY-MM-DD HH24:MI:SS')";`,
@@ -460,8 +477,33 @@ function RestoreScript({ f, stagingPath }) {
 
 const PAGE = 100;
 
+function LocationStatus({ locations }) {
+  if (!locations) return null;
+  return (
+    <div className="flex gap-2 flex-wrap mb-3">
+      {LOCS.map((l) => {
+        const s = locations[l.id];
+        const ok = s?.ok;
+        return (
+          <span key={l.id} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1"
+            title={ok ? s.path : s?.error || "Tidak dipindai"}
+            style={{ fontSize: 11, background: ok ? "rgba(22,163,74,0.07)" : "rgba(217,119,6,0.08)", color: ok ? C.green : C.amber, fontWeight: 700 }}>
+            {ok ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
+            {l.long}
+            <span style={{ color: C.faint, fontWeight: 500 }}>
+              {ok ? (s.path || "") : (s?.error || "tidak dipindai")}
+              {ok && l.id === "synology" && s.writable === false ? " · read-only" : ""}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function ArchivelogView({ catalog, err, onChanged }) {
   const [filter, setFilter] = useState("all");
+  const [locFilter, setLocFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState({});
   const [limit, setLimit] = useState(PAGE);
@@ -478,15 +520,16 @@ function ArchivelogView({ catalog, err, onChanged }) {
 
   const rows = useMemo(() => logs.filter((a) =>
     (filter === "all" || a.category === filter)
+    && (locFilter === "all" || (locFilter === "archive_dest" ? a.on_disk : a.copies?.[locFilter]))
     && (!query || a.name.includes(query.trim()) || String(a.sequence).includes(query.trim()))
-  ), [logs, filter, query]);
+  ), [logs, filter, locFilter, query]);
 
   if (err) return <ErrorBox>{err}</ErrorBox>;
   if (!catalog) return <Empty>Membaca katalog RMAN…</Empty>;
 
   const sum = catalog.archivelog_summary;
   const chosen = Object.keys(selected).filter((n) => selected[n]).map((n) => byName[n]).filter(Boolean);
-  const chosenBytes = chosen.reduce((t, a) => t + a.size_bytes, 0);
+  const chosenBytes = chosen.reduce((t, a) => t + Object.values(a.copies || {}).reduce((x, c) => x + c.size_bytes, 0), 0);
   const visibleDeletable = rows.filter((a) => a.deletable);
   const allVisibleChecked = visibleDeletable.length > 0 && visibleDeletable.every((a) => selected[a.name]);
 
@@ -503,6 +546,8 @@ function ArchivelogView({ catalog, err, onChanged }) {
 
   return (
     <>
+      <LocationStatus locations={catalog.locations} />
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
         {["required", "optional", "obsolete"].map((k) => {
           const c = CATEGORY[k];
@@ -514,16 +559,28 @@ function ArchivelogView({ catalog, err, onChanged }) {
                 <span style={{ fontSize: 11, fontWeight: 800, color: c.color }}>{c.label.toUpperCase()}</span>
                 <span style={{ fontSize: 11, color: C.faint }}>{active ? "filter aktif" : "klik untuk filter"}</span>
               </div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: C.ink, marginTop: 4 }}>{sum[k].count} file · {fmtBytes(sum[k].bytes)}</div>
-              <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>
-                {k === "required" && "Dibutuhkan full backup terbaru untuk recovery sampai sekarang. Tidak bisa dihapus."}
+              <div style={{ fontSize: 18, fontWeight: 800, color: C.ink, marginTop: 4 }}>{sum[k].count} sequence · {fmtBytes(sum[k].bytes)}</div>
+              <div className="flex gap-3 flex-wrap" style={{ fontSize: 10.5, color: C.sub, marginTop: 3 }}>
+                {LOCS.map((l) => (
+                  <span key={l.id}>{l.label}: <b>{sum[k].by_location?.[l.id]?.count || 0}</b> ({fmtBytes(sum[k].by_location?.[l.id]?.bytes || 0)})</span>
+                ))}
+              </div>
+              <div style={{ fontSize: 11, color: C.sub, marginTop: 4 }}>
+                {k === "required" && "Dibutuhkan full backup terbaru untuk recovery sampai sekarang. Tidak bisa dihapus di lokasi mana pun."}
                 {k === "optional" && "Hanya untuk recovery ke masa lalu memakai full backup lama. Boleh dihapus dengan konfirmasi."}
-                {k === "obsolete" && "Lebih tua dari semua full backup yang ada — tidak dibutuhkan lagi."}
+                {k === "obsolete" && "Lebih tua dari semua full backup yang bisa di-restore — tidak dibutuhkan lagi."}
               </div>
             </button>
           );
         })}
       </div>
+      {sum.unknown?.count > 0 && (
+        <p className="flex items-start gap-1.5 mb-3" style={{ fontSize: 11.5, color: C.sub }}>
+          <Info size={13} style={{ marginTop: 1, flexShrink: 0 }} />
+          {sum.unknown.count} archive log ({fmtBytes(sum.unknown.bytes)}) punya resetlogs id yang tidak dikenal database PROD —
+          kemungkinan milik database lain (DEV/TEST) di share/bucket yang sama. Tidak bisa dihapus dari halaman ini.
+        </p>
+      )}
 
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <div className="flex items-center gap-1.5 rounded-lg px-2.5" style={{ border: `1px solid ${C.line}`, height: 32 }}>
@@ -536,6 +593,12 @@ function ArchivelogView({ catalog, err, onChanged }) {
           <option value="required">Wajib disimpan</option>
           <option value="optional">Opsional</option>
           <option value="obsolete">Aman dihapus</option>
+          <option value="unknown">Bukan milik PROD</option>
+        </select>
+        <select value={locFilter} onChange={(e) => setLocFilter(e.target.value)} style={{ border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 12, height: 32, padding: "0 8px" }}>
+          <option value="all">Semua lokasi</option>
+          {LOCS.map((l) => <option key={l.id} value={l.id}>Ada di {l.label}</option>)}
+          <option value="archive_dest">Ada di /archive DB</option>
         </select>
         <Button size="sm" icon={CheckCircle2} onClick={() => selectCategory("obsolete")} disabled={!sum.obsolete.count}>Pilih semua yang aman dihapus</Button>
         {chosen.length > 0 && <Button size="sm" onClick={() => setSelected({})}>Batal pilih</Button>}
@@ -547,11 +610,11 @@ function ArchivelogView({ catalog, err, onChanged }) {
 
       {result && (
         <div className="rounded-lg px-3 py-2 mb-3" style={{ background: "rgba(22,163,74,0.08)", fontSize: 12, color: C.ink }}>
-          <b style={{ color: C.green }}>{result.deleted.length} file dihapus</b> ({fmtBytes(result.freed_bytes)} dibebaskan
-          {result.minio_removed ? `, ${result.minio_removed} salinan MinIO ikut dihapus` : ""}).
+          <b style={{ color: C.green }}>{result.deleted.length} salinan dihapus</b> ({fmtBytes(result.freed_bytes)} dibebaskan
+          {result.by_location ? ` — ${LOCS.filter((l) => result.by_location[l.id]?.count).map((l) => `${l.label} ${result.by_location[l.id].count} file / ${fmtBytes(result.by_location[l.id].bytes)}`).join(", ")}` : ""}).
           {result.refused.length > 0 && (
             <div style={{ color: C.amber, marginTop: 4 }}>
-              {result.refused.length} file ditolak: {result.refused.slice(0, 5).map((r) => `${r.name} (${r.reason})`).join("; ")}
+              {result.refused.length} ditolak: {result.refused.slice(0, 5).map((r) => `${r.name}${r.location ? ` @${r.location}` : ""} (${r.reason})`).join("; ")}
               {result.refused.length > 5 ? "…" : ""}
             </div>
           )}
@@ -576,12 +639,12 @@ function ArchivelogView({ catalog, err, onChanged }) {
           </thead>
           <tbody>
             {rows.slice(0, limit).map((a) => {
-              const c = CATEGORY[a.category];
+              const c = CATEGORY[a.category] || CATEGORY.unknown;
               return (
-                <tr key={`${a.location}:${a.name}`} style={{ borderTop: `1px solid ${C.line}`, background: selected[a.name] ? "rgba(220,38,38,0.03)" : undefined }}>
+                <tr key={`${a.resetlogs_id}:${a.name}`} style={{ borderTop: `1px solid ${C.line}`, background: selected[a.name] ? "rgba(220,38,38,0.03)" : undefined }}>
                   <td className="px-3 py-2">
                     <input type="checkbox" disabled={!a.deletable} checked={!!selected[a.name]}
-                      title={a.deletable ? "" : a.location === "archive_dest" ? "Di archive destination — dikelola RMAN" : "Wajib disimpan"}
+                      title={a.deletable ? "" : a.location === "archive_dest" ? "Hanya di archive destination — dikelola RMAN" : c.label}
                       onChange={(e) => setSelected((s) => ({ ...s, [a.name]: e.target.checked }))} />
                   </td>
                   <td className="px-3 py-2">
@@ -595,10 +658,14 @@ function ArchivelogView({ catalog, err, onChanged }) {
                   <td className="px-3 py-2" style={{ whiteSpace: "nowrap" }}>{fmtBytes(a.size_bytes)}</td>
                   <td className="px-3 py-2">
                     <div className="flex gap-1 flex-wrap">
-                      {a.in_staging && <Pill color={C.sub}>Staging</Pill>}
+                      {LOCS.map((l) => a.copies?.[l.id] && (
+                        <Pill key={l.id} color={l.id === "staging" ? C.sub : C.blue}
+                          title={a.copies[l.id].refs?.join("\n")}>
+                          {l.label}{a.copies[l.id].count > 1 ? ` ×${a.copies[l.id].count}` : ""}
+                        </Pill>
+                      ))}
                       {a.on_disk && <Pill color={C.sub}>/archive DB</Pill>}
                       {a.in_backupset && <Pill color={C.blue} title={a.backupset_tags.join(", ")}>RMAN backup</Pill>}
-                      {a.in_minio && <Pill color={C.blue}>MinIO</Pill>}
                     </div>
                   </td>
                   <td className="px-3 py-2"><Pill color={c.color} bg={c.bg}>{c.short}</Pill></td>
@@ -617,7 +684,7 @@ function ArchivelogView({ catalog, err, onChanged }) {
       )}
 
       {confirming && (
-        <DeleteArchivelogModal chosen={chosen} chosenBytes={chosenBytes}
+        <DeleteArchivelogModal chosen={chosen} locations={catalog.locations}
           onClose={() => setConfirming(false)}
           onDone={(res) => { setConfirming(false); setSelected({}); setResult(res); onChanged(); }} />
       )}
@@ -625,20 +692,29 @@ function ArchivelogView({ catalog, err, onChanged }) {
   );
 }
 
-function DeleteArchivelogModal({ chosen, chosenBytes, onClose, onDone }) {
+function DeleteArchivelogModal({ chosen, locations, onClose, onDone }) {
+  // Per location: how many of the chosen logs have a copy there, and its size.
+  const perLoc = useMemo(() => Object.fromEntries(LOCS.map((l) => {
+    const copies = chosen.map((a) => a.copies?.[l.id]).filter(Boolean);
+    return [l.id, { files: copies.reduce((t, c) => t + c.count, 0), bytes: copies.reduce((t, c) => t + c.size_bytes, 0) }];
+  })), [chosen]);
+  const usable = (id) => perLoc[id].files > 0 && locations?.[id]?.ok && !(id === "synology" && locations.synology.writable === false);
+
+  const [locs, setLocs] = useState(() => Object.fromEntries(LOCS.map((l) => [l.id, usable(l.id)])));
   const [ack, setAck] = useState(false);
-  const [minio, setMinio] = useState(false);
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const optional = chosen.filter((a) => a.category === "optional");
   const seqs = chosen.map((a) => a.sequence).sort((x, y) => x - y);
-  const ok = typed === "HAPUS" && (!optional.length || ack);
+  const picked = LOCS.filter((l) => locs[l.id] && usable(l.id)).map((l) => l.id);
+  const pickedBytes = picked.reduce((t, id) => t + perLoc[id].bytes, 0);
+  const ok = typed === "HAPUS" && picked.length > 0 && (!optional.length || ack);
 
   const submit = async () => {
     setBusy(true); setError(null);
     try {
-      const res = await ebsBackupApi.deleteArchivelogs({ names: chosen.map((a) => a.name), allow_optional: optional.length > 0, include_minio: minio });
+      const res = await ebsBackupApi.deleteArchivelogs({ names: chosen.map((a) => a.name), locations: picked, allow_optional: optional.length > 0 });
       onDone(res);
     } catch (e) {
       setError(errMsg(e, "Gagal menghapus"));
@@ -648,27 +724,44 @@ function DeleteArchivelogModal({ chosen, chosenBytes, onClose, onDone }) {
   };
 
   return (
-    <Modal title="Hapus archive log dari staging" onClose={busy ? undefined : onClose}
+    <Modal title="Hapus archive log" onClose={busy ? undefined : onClose}
       footer={<>
         <Button onClick={onClose} disabled={busy}>Batal</Button>
-        <Button variant="danger" icon={busy ? Loader2 : Trash2} disabled={!ok || busy} onClick={submit}>{busy ? "Menghapus…" : `Hapus ${chosen.length} file`}</Button>
+        <Button variant="danger" icon={busy ? Loader2 : Trash2} disabled={!ok || busy} onClick={submit}>{busy ? "Menghapus…" : `Hapus (${fmtBytes(pickedBytes)})`}</Button>
       </>}>
       <p>
-        Anda akan menghapus <b>{chosen.length} file</b> ({fmtBytes(chosenBytes)}), sequence <b>{seqs[0]}</b>
-        {seqs.length > 1 && <> s/d <b>{seqs[seqs.length - 1]}</b></>}, dari folder staging di server DB.
+        <b>{chosen.length} archive log</b> terpilih, sequence <b>{seqs[0]}</b>
+        {seqs.length > 1 && <> s/d <b>{seqs[seqs.length - 1]}</b></>}. Pilih dari lokasi mana salinannya dihapus:
       </p>
-      <p style={{ color: C.sub, marginTop: 6 }}>
-        Server akan memeriksa ulang setiap file sebelum menghapus — file yang ternyata masih wajib disimpan akan ditolak otomatis.
+
+      <div className="rounded-lg mt-3" style={{ border: `1px solid ${C.line}` }}>
+        {LOCS.map((l) => {
+          const can = usable(l.id);
+          const why = !perLoc[l.id].files ? "tidak ada salinan" : !locations?.[l.id]?.ok ? "lokasi tidak terjangkau"
+            : l.id === "synology" && locations.synology.writable === false ? "share read-only dari server DB" : "";
+          return (
+            <label key={l.id} className="flex items-center gap-2 px-3 py-2" style={{ fontSize: 12, borderTop: l.id === "staging" ? "none" : `1px solid ${C.line}`, opacity: can ? 1 : 0.5 }}>
+              <input type="checkbox" disabled={!can || busy} checked={can && !!locs[l.id]} onChange={(e) => setLocs((s) => ({ ...s, [l.id]: e.target.checked }))} />
+              <span style={{ fontWeight: 700, width: 150 }}>{l.long}</span>
+              <span style={{ color: C.sub }}>{perLoc[l.id].files} file · {fmtBytes(perLoc[l.id].bytes)}</span>
+              {why && <span style={{ color: C.faint, marginLeft: "auto" }}>{why}</span>}
+            </label>
+          );
+        })}
+      </div>
+      <p style={{ color: C.sub, marginTop: 8 }}>
+        Server memeriksa ulang setiap file sebelum menghapus — yang ternyata masih wajib disimpan ditolak otomatis.
+        File di archive destination database (/archive DB) tidak disentuh; itu dikelola RMAN.
       </p>
 
       {optional.length > 0 && (
         <div className="rounded-lg p-3 mt-3" style={{ background: "rgba(217,119,6,0.08)", border: "1px solid rgba(217,119,6,0.3)" }}>
           <p style={{ fontWeight: 700, color: C.amber }}>
             <AlertTriangle size={13} style={{ display: "inline", marginRight: 4, verticalAlign: -2 }} />
-            {optional.length} file berstatus Opsional
+            {optional.length} archive log berstatus Opsional
           </p>
           <p style={{ fontSize: 12, marginTop: 4 }}>
-            Setelah dihapus, full backup yang lebih lama hanya bisa dipulihkan sampai sequence sebelum file yang dihapus.
+            Bila dihapus dari semua lokasi, full backup yang lebih lama hanya bisa dipulihkan sampai sequence sebelum file yang dihapus.
             Recovery dari full backup terbaru tidak terpengaruh.
           </p>
           <label className="flex items-center gap-2 mt-2" style={{ fontSize: 12 }}>
@@ -676,11 +769,6 @@ function DeleteArchivelogModal({ chosen, chosenBytes, onClose, onDone }) {
           </label>
         </div>
       )}
-
-      <label className="flex items-center gap-2 mt-3" style={{ fontSize: 12 }}>
-        <input type="checkbox" checked={minio} onChange={(e) => setMinio(e.target.checked)} />
-        Hapus juga salinannya di MinIO (archive-logs/)
-      </label>
 
       <div className="mt-3">
         <label style={{ fontSize: 11, fontWeight: 700, color: C.sub, display: "block", marginBottom: 4 }}>Ketik <b>HAPUS</b> untuk konfirmasi</label>
@@ -901,10 +989,9 @@ function GuideView({ catalog }) {
       </Section>
       <Section title="Kebijakan retensi yang disarankan">
         <ul style={{ listStyle: "disc", paddingLeft: 18 }}>
-          <li>Full backup online <b>mingguan</b>; simpan minimal <b>2</b> full backup terakhir (lokal + MinIO/Synology).</li>
-          <li>Archive log disalin ke staging & MinIO <b>setiap hari</b> (sudah berjalan via cron 01:00).</li>
-          <li>Hapus archive log yang berstatus <b>Aman dihapus</b> setelah full backup baru berhasil.</li>
-          <li>Uji restore ke Dev minimal <b>sebulan sekali</b> (tab Restore) — backup yang belum pernah diuji belum terbukti.</li>
+          <li>Full backup online <b>mingguan</b> ke staging + salinan Synology; simpan minimal <b>2</b> full backup terakhir.</li>
+          <li>Archive log disalin ke staging, MinIO, dan Synology <b>setiap hari</b>. Ketiganya salinan yang setara — cukup satu yang utuh untuk recovery.</li>
+          <li>Hapus archive log berstatus <b>Aman dihapus</b> dari ketiga lokasi setelah full backup baru berhasil dan tersalin ke Synology.</li>          <li>Uji restore ke Dev minimal <b>sebulan sekali</b> (tab Restore) — backup yang belum pernah diuji belum terbukti.</li>
         </ul>
       </Section>
       <Section title="Kondisi saat ini">

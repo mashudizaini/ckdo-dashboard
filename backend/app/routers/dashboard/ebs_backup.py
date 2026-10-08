@@ -2785,14 +2785,21 @@ def delete_inventory_item(payload: dict, db: Session = Depends(get_db)):
 # See app/services/ebs_backup/recovery_catalog.py for the rules.
 
 ARCHIVELOG_MINIO_PREFIX = "archive-logs/"
+# The share as the DB server mounts it (NFS, all-squash to admin). Used when the
+# Synology server row is missing or its host:share does not match the mount
+# table — the catalog reads the NAS through this path, never over SSH.
+SYNOLOGY_MOUNT_DEFAULT = "/mnt/synology_backup"
+ARCHIVELOG_DELETE_LOCATIONS = ("staging", "minio", "synology")
 
 
 class ArchivelogDeleteIn(BaseModel):
     names: List[str]
+    # Which copies to remove: any of staging / minio / synology.
+    locations: List[str] = ["staging"]
     # "optional" logs only serve point-in-time recovery with an OLDER full
     # backup; deleting them is legitimate but must be asked for explicitly.
     allow_optional: bool = False
-    # Also remove the MinIO copy (archive-logs/<name>) of each deleted file.
+    # Legacy flag from the first version of the page — same as adding "minio".
     include_minio: bool = False
 
 
@@ -2808,25 +2815,66 @@ def _db_server_and_cred(db: Session) -> tuple[Server, Credential]:
     return server, cred
 
 
-def _minio_archivelog_names(db: Session) -> set:
+def _minio_archivelog_client(db: Session):
     minio_srv = db.query(Server).filter(Server.role == "minio", Server.enabled == True).first()  # noqa: E712
     if not minio_srv or not minio_srv.bucket:
-        return set()
+        return None, None
     cred = db.query(Credential).filter(Credential.server_id == minio_srv.id, Credential.cred_type == "minio").first()
     if not cred:
-        return set()
+        return minio_srv, None
+    return minio_srv, _minio_client(minio_srv, cred)
+
+
+def _minio_archivelog_files(db: Session) -> tuple[list[dict], dict]:
+    """Every object under archive-logs/ as {name, ref=object key, size, mtime}."""
+    minio_srv, client = _minio_archivelog_client(db)
+    if not minio_srv:
+        return [], {"ok": False, "error": "Tidak ada server MinIO aktif"}
+    info = {"ok": False, "name": minio_srv.name, "path": f"{minio_srv.bucket}/{ARCHIVELOG_MINIO_PREFIX}"}
+    if not client:
+        return [], {**info, "error": "Kredensial MinIO belum diisi"}
     try:
-        client = _minio_client(minio_srv, cred)
-        return {o.object_name.split("/")[-1]
-                for o in client.list_objects(minio_srv.bucket, prefix=ARCHIVELOG_MINIO_PREFIX, recursive=True)}
-    except Exception:
-        return set()
+        files = [{"name": o.object_name.rsplit("/", 1)[-1], "ref": o.object_name, "size_bytes": o.size or 0,
+                  "mtime_epoch": o.last_modified.timestamp() if o.last_modified else None}
+                 for o in client.list_objects(minio_srv.bucket, prefix=ARCHIVELOG_MINIO_PREFIX, recursive=True)
+                 if not o.is_dir]
+        return files, {**info, "ok": True}
+    except Exception as e:
+        return [], {**info, "error": str(e)[:300]}
+
+
+def _minio_archivelog_names(db: Session) -> set:
+    return {f["name"] for f in _minio_archivelog_files(db)[0]}
+
+
+def _db_side_synology_mount(ssh, db: Session) -> tuple[Optional[str], bool]:
+    """(mount point on the DB server, writable). Looked up from the mount
+    table first, then the known default path."""
+    syn_srv = db.query(Server).filter(Server.role == "synology", Server.enabled == True).first()  # noqa: E712
+    mp = None
+    if syn_srv and syn_srv.host and syn_srv.share_path:
+        spec = f"{syn_srv.host}:{syn_srv.share_path}"
+        r = ssh.run(f"findmnt -n -o TARGET --source {shlex.quote(spec)} 2>/dev/null | head -1", timeout=20)
+        mp = (r.stdout or "").strip() or None
+    if not mp:
+        r = ssh.run(f"mountpoint -q {SYNOLOGY_MOUNT_DEFAULT} && echo MOUNTED", timeout=20)
+        if "MOUNTED" in (r.stdout or ""):
+            mp = SYNOLOGY_MOUNT_DEFAULT
+    if not mp:
+        return None, False
+    w = ssh.run(f"test -w {shlex.quote(mp)} && echo WRITABLE", timeout=20)
+    return mp, "WRITABLE" in (w.stdout or "")
+
+
+_NAS_PRUNE = r"\( -name '@eaDir' -o -name '#recycle' -o -name '@Recycle' \) -prune -o"
 
 
 def _build_recovery_catalog(db: Session) -> dict:
     server, cred = _db_server_and_cred(db)
     oracle_home = server.oracle_home or settings.ORACLE_HOME
     oracle_sid = server.oracle_sid or settings.ORACLE_SID
+    locations = {"staging": {"ok": True, "name": server.name, "path": ARCHIVELOG_STAGING_PATH}}
+    syn_files, syn_dirs = [], {}
     with ssh_from_server(server, cred) as ssh:
         r = ssh.run(
             f"export ORACLE_HOME={oracle_home}; export ORACLE_SID={oracle_sid}; "
@@ -2835,7 +2883,7 @@ def _build_recovery_catalog(db: Session) -> dict:
             timeout=60,
         )
         ls = ssh.run(
-            f"find {ARCHIVELOG_STAGING_PATH} -maxdepth 1 -type f -printf '%f|%s|%T@\\n' 2>/dev/null",
+            f"find {ARCHIVELOG_STAGING_PATH} -maxdepth 1 -type f -printf '%p|%s|%T@\\n' 2>/dev/null",
             timeout=30,
         )
         raw = recovery_catalog.parse_catalog(r.stdout)
@@ -2861,12 +2909,39 @@ def _build_recovery_catalog(db: Session) -> dict:
             )
             existing = set(found.stdout.splitlines())
             raw["on_disk"] = {k: v for k, v in raw["on_disk"].items() if v["path"] in existing}
+
+        # Synology, through the NFS mount this server already has: archive log
+        # copies anywhere on the share, plus every folder name so a full backup
+        # whose staging folder is gone can still be found there.
+        try:
+            mp, writable = _db_side_synology_mount(ssh, db)
+            if mp:
+                q = shlex.quote(mp)
+                fr = ssh.run(
+                    f"find {q} -maxdepth 6 {_NAS_PRUNE} -type f \\( -name '*.arc' -o -name '*.ARC' \\) "
+                    f"-printf '%p|%s|%T@\\n' 2>/dev/null", timeout=180,
+                )
+                syn_files = [f for f in recovery_catalog.parse_file_listing(fr.stdout)
+                             if recovery_catalog.ARC_NAME_RE.match(f["name"])]
+                dr = ssh.run(f"find {q} -mindepth 1 -maxdepth 4 {_NAS_PRUNE} -type d -printf '%p\\n' 2>/dev/null",
+                             timeout=120)
+                for p in dr.stdout.splitlines():
+                    syn_dirs.setdefault(p.rstrip("/").rsplit("/", 1)[-1], p)
+                locations["synology"] = {"ok": True, "path": mp, "writable": writable}
+            else:
+                locations["synology"] = {"ok": False, "error": f"Share Synology tidak ter-mount di {server.name}"}
+        except Exception as e:
+            locations["synology"] = {"ok": False, "error": str(e)[:300]}
+
+    minio_files, locations["minio"] = _minio_archivelog_files(db)
     catalog = recovery_catalog.build_catalog(
-        raw, recovery_catalog.parse_staging_listing(ls.stdout), _minio_archivelog_names(db),
+        raw, recovery_catalog.parse_file_listing(ls.stdout),
         staging_path=ARCHIVELOG_STAGING_PATH, missing_dirs=missing_dirs,
+        remote_files={"minio": minio_files, "synology": syn_files}, synology_dirs=syn_dirs,
     )
     catalog["generated_at"] = datetime.utcnow().isoformat()
     catalog["staging_path"] = ARCHIVELOG_STAGING_PATH
+    catalog["locations"] = locations
     return catalog
 
 
@@ -2877,56 +2952,95 @@ def recovery_catalog_view(db: Session = Depends(get_db)):
 
 @router.post("/recovery/archivelog/delete")
 def delete_archivelogs(payload: ArchivelogDeleteIn, db: Session = Depends(get_db)):
-    """Delete archive log copies from the staging folder. The classification is
-    recomputed here, at delete time, so a stale page can never remove a log
-    that has since become required (e.g. an old full backup was deleted)."""
+    """Delete archive log copies from staging, MinIO and/or Synology. The
+    classification is recomputed here, at delete time, so a stale page can
+    never remove a log that has since become required (e.g. an old full backup
+    was deleted). Only paths the scan itself found are ever removed."""
     if not payload.names:
         raise HTTPException(400, "No archive logs selected")
-    catalog = _build_recovery_catalog(db)
-    by_name = {a["name"]: a for a in catalog["archivelogs"] if a["location"] == "staging"}
+    locs = set(payload.locations or []) | ({"minio"} if payload.include_minio else set())
+    bad = locs - set(ARCHIVELOG_DELETE_LOCATIONS)
+    if bad or not locs:
+        raise HTTPException(400, f"Lokasi tidak valid: {', '.join(sorted(bad)) or '(kosong)'}")
 
-    allowed, refused = [], []
+    catalog = _build_recovery_catalog(db)
+    by_name = {a["name"]: a for a in catalog["archivelogs"] if a["copies"]}
+    syn_root = (catalog["locations"].get("synology") or {}).get("path")
+
+    # plan[loc] = [(name, ref, bytes_per_copy)]
+    plan = {loc: [] for loc in ARCHIVELOG_DELETE_LOCATIONS}
+    refused = []
     for name in dict.fromkeys(payload.names):
         a = by_name.get(name)
         if not recovery_catalog.ARC_NAME_RE.match(name) or not a:
-            refused.append({"name": name, "reason": "Tidak ditemukan di folder staging"})
-        elif a["category"] == "required":
-            refused.append({"name": name, "reason": "Masih wajib disimpan untuk recovery"})
-        elif a["category"] == "optional" and not payload.allow_optional:
+            refused.append({"name": name, "reason": "Tidak ditemukan di staging / MinIO / Synology"})
+            continue
+        if a["category"] in ("required", "unknown"):
+            refused.append({"name": name, "reason": "Masih wajib disimpan untuk recovery" if a["category"] == "required"
+                            else "Bukan archive log database PROD"})
+            continue
+        if a["category"] == "optional" and not payload.allow_optional:
             refused.append({"name": name, "reason": "Kategori opsional — konfirmasi khusus diperlukan"})
-        else:
-            allowed.append(a)
+            continue
+        for loc in locs:
+            c = a["copies"].get(loc)
+            if not c:
+                continue
+            each = c["size_bytes"] // max(c["count"], 1)
+            for ref in c["refs"]:
+                # Belt and braces: every path must sit where its location says.
+                ok = (ref.startswith(ARCHIVELOG_STAGING_PATH.rstrip("/") + "/") if loc == "staging"
+                      else ref.startswith(ARCHIVELOG_MINIO_PREFIX) if loc == "minio"
+                      else bool(syn_root) and ref.startswith(syn_root.rstrip("/") + "/"))
+                if ok and ref.rsplit("/", 1)[-1] == name:
+                    plan[loc].append((name, ref, each))
 
-    deleted, freed = [], 0
-    if allowed:
+    if plan["synology"] and not (catalog["locations"].get("synology") or {}).get("writable"):
+        refused += [{"name": n, "location": "synology", "reason": "Share Synology read-only dari server DB"}
+                    for n, _, _ in plan["synology"]]
+        plan["synology"] = []
+
+    deleted, by_location = [], {loc: {"count": 0, "bytes": 0} for loc in ARCHIVELOG_DELETE_LOCATIONS}
+
+    def _record(loc, name, size):
+        deleted.append({"name": name, "location": loc})
+        by_location[loc]["count"] += 1
+        by_location[loc]["bytes"] += size
+
+    fs_items = [(loc, *it) for loc in ("staging", "synology") for it in plan[loc]]
+    if fs_items:
         server, cred = _db_server_and_cred(db)
         with ssh_from_server(server, cred) as ssh:
-            # Names are validated against ARC_NAME_RE (digits/underscore only),
-            # so they are safe to place in the command line.
-            for i in range(0, len(allowed), 100):
-                chunk = allowed[i:i + 100]
-                files = " ".join(f'"{ARCHIVELOG_STAGING_PATH}/{a["name"]}"' for a in chunk)
-                ssh.run(f"rm -f -- {files}", timeout=60)
-            remaining = ssh.run(
-                f"find {ARCHIVELOG_STAGING_PATH} -maxdepth 1 -type f -printf '%f\\n' 2>/dev/null", timeout=30,
-            ).stdout.split()
-        remaining = set(remaining)
-        for a in allowed:
-            if a["name"] in remaining:
-                refused.append({"name": a["name"], "reason": "rm gagal (cek permission)"})
+            for i in range(0, len(fs_items), 100):
+                chunk = fs_items[i:i + 100]
+                ssh.run("rm -f -- " + " ".join(shlex.quote(ref) for _, _, ref, _ in chunk), timeout=120)
+            left = set()
+            for i in range(0, len(fs_items), 200):
+                chunk = fs_items[i:i + 200]
+                r = ssh.run("for f in " + " ".join(shlex.quote(ref) for _, _, ref, _ in chunk)
+                            + '; do [ -e "$f" ] && echo "$f"; done; true', timeout=60)
+                left |= set(r.stdout.splitlines())
+        for loc, name, ref, size in fs_items:
+            if ref in left:
+                refused.append({"name": name, "location": loc, "reason": "rm gagal (cek permission)"})
             else:
-                deleted.append(a["name"])
-                freed += a["size_bytes"]
+                _record(loc, name, size)
 
-    minio_removed = 0
-    if payload.include_minio and deleted:
-        minio_srv = db.query(Server).filter(Server.role == "minio", Server.enabled == True).first()  # noqa: E712
-        cred = minio_srv and db.query(Credential).filter(
-            Credential.server_id == minio_srv.id, Credential.cred_type == "minio").first()
-        if minio_srv and cred:
-            client = _minio_client(minio_srv, cred)
-            objs = [DeleteObject(f"{ARCHIVELOG_MINIO_PREFIX}{n}") for n in deleted]
-            errors = list(client.remove_objects(minio_srv.bucket, objs))
-            minio_removed = len(objs) - len(errors)
+    if plan["minio"]:
+        minio_srv, client = _minio_archivelog_client(db)
+        if not client:
+            refused += [{"name": n, "location": "minio", "reason": "MinIO tidak bisa diakses"} for n, _, _ in plan["minio"]]
+        else:
+            failed = {e.name for e in client.remove_objects(minio_srv.bucket, [DeleteObject(ref) for _, ref, _ in plan["minio"]])}
+            for name, ref, size in plan["minio"]:
+                if ref in failed:
+                    refused.append({"name": name, "location": "minio", "reason": "Gagal dihapus di MinIO"})
+                else:
+                    _record("minio", name, size)
 
-    return {"deleted": deleted, "refused": refused, "freed_bytes": freed, "minio_removed": minio_removed}
+    return {
+        "deleted": deleted, "refused": refused, "by_location": by_location,
+        "freed_bytes": sum(v["bytes"] for v in by_location.values()),
+        "deleted_names": sorted({d["name"] for d in deleted}),
+        "minio_removed": by_location["minio"]["count"],
+    }
