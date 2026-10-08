@@ -11,6 +11,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from "react";
 import BackupReadiness from "./BackupReadiness";
+import RecoveryCenter from "./RecoveryCenter";
 import {
   HardDrive, Database, RotateCcw, HeartPulse, CalendarClock,
   GitBranch, History as HistoryIcon, FileBarChart, Settings2, RefreshCw,
@@ -28,7 +29,7 @@ const SUB_TABS = [
   { id: "db-backup", label: "DB Backup", icon: Database },
   { id: "app-backup", label: "App Backup", icon: ServerIcon },
   { id: "restore", label: "Restore", icon: RotateCcw },
-  { id: "recovery-health", label: "Recovery Health", icon: ShieldCheck },
+  { id: "recovery-health", label: "Recovery Center", icon: ShieldCheck },
   { id: "schedule", label: "Schedule", icon: CalendarClock },
   { id: "replication", label: "Replication", icon: GitBranch },
   { id: "history", label: "History", icon: HistoryIcon },
@@ -70,7 +71,7 @@ export default function EbsBackupRecovery() {
       {tab === "db-backup" && <DbBackupTab servers={servers} />}
       {tab === "app-backup" && <AppBackupTab servers={servers} />}
       {tab === "restore" && <RestoreTab servers={servers} />}
-      {tab === "recovery-health" && <RecoveryHealthTab />}
+      {tab === "recovery-health" && <RecoveryCenter />}
       {tab === "schedule" && <ScheduleTab servers={servers} />}
       {tab === "replication" && <ReplicationTab />}
       {tab === "history" && <HistoryTab />}
@@ -1248,98 +1249,6 @@ function RestoreTab() {
               </div>
             </div>
           )}
-        </>
-      )}
-    </Panel>
-  );
-}
-
-/* ─── Recovery Health ─────────────────────────────── */
-
-function RecoveryHealthTab() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState({});
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try { setData(await ebsBackupApi.scanInventory()); } finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { refresh(); }, [refresh]);
-
-  const readinessColor = { green: "#16a34a", amber: "#d97706", red: "#dc2626" }[data?.readiness?.status] || "#94a3b8";
-
-  const deleteSelected = async () => {
-    const targets = Object.entries(selected).filter(([, v]) => v).map(([k]) => k);
-    if (!targets.length) return;
-    if (!confirm(`Delete ${targets.length} selected backup copies? This cannot be undone.`)) return;
-    for (const key of targets) {
-      const [location, server_id, ...pathParts] = key.split("::");
-      try { await ebsBackupApi.deleteInventoryItem({ location, server_id: Number(server_id), path: pathParts.join("::") }); } catch (_) {}
-    }
-    setSelected({});
-    refresh();
-  };
-
-  return (
-    <Panel title="Recovery Readiness" subtitle="Heuristic scan across the DB server's /backup tree, MinIO, and Synology — every recommendation carries its reasoning; nothing is deleted automatically." action={<Btn icon={loading ? Loader2 : RefreshCw} onClick={refresh}>{loading ? "Scanning…" : "Rescan"}</Btn>}>
-      {!data ? <Empty>Loading…</Empty> : (
-        <>
-          <div className="rounded-xl p-5 mb-5 text-center" style={{ background: `${readinessColor}12`, border: `1px solid ${readinessColor}40` }}>
-            <p style={{ fontSize: 26, fontWeight: 800, color: readinessColor, textTransform: "uppercase" }}>{data.readiness.status}</p>
-            <p style={{ fontSize: 13, color: "#0f172a", marginTop: 4 }}>{data.readiness.message}</p>
-            {data.readiness.warnings?.map((w, i) => <p key={i} style={{ fontSize: 11.5, color: "#d97706", marginTop: 4 }}>{w}</p>)}
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 mb-5">
-            <div className="rounded-xl p-4 text-center" style={{ border: "1px solid rgba(0,0,0,0.06)" }}>
-              <p style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>Total Backup Footprint</p>
-              <p style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>{fmtBytes(data.total_bytes)}</p>
-            </div>
-            <div className="rounded-xl p-4 text-center" style={{ border: "1px solid rgba(0,0,0,0.06)" }}>
-              <p style={{ fontSize: 11, color: "#64748b", fontWeight: 700 }}>Reclaimable (safe to delete)</p>
-              <p style={{ fontSize: 18, fontWeight: 800, color: "#16a34a" }}>{fmtBytes(data.reclaimable_bytes)}</p>
-            </div>
-          </div>
-
-          {Object.values(selected).some(Boolean) && (
-            <div className="mb-3"><Btn variant="danger" icon={Trash2} onClick={deleteSelected}>Delete Selected</Btn></div>
-          )}
-
-          <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(0,0,0,0.06)" }}>
-            <table className="w-full text-xs">
-              <thead>
-                <tr style={{ background: "#f8fafc", color: "#64748b", fontWeight: 700 }}>
-                  <td className="px-3 py-2"></td><td className="px-3 py-2">Name</td><td className="px-3 py-2">Type</td>
-                  <td className="px-3 py-2">Age</td><td className="px-3 py-2">Size</td><td className="px-3 py-2">Locations</td><td className="px-3 py-2">Recommendation</td>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((it, i) => {
-                  const primaryLoc = it.locations[0];
-                  const key = `${primaryLoc.location}::${primaryLoc.server_id}::${primaryLoc.path}`;
-                  const recColor = { delete: "#dc2626", move_offsite: "#d97706", review: "#64748b", keep: "#16a34a" }[it.recommendation];
-                  return (
-                    <tr key={i} style={{ borderTop: "1px solid rgba(0,0,0,0.05)" }}>
-                      <td className="px-3 py-2">
-                        {it.recommendation === "delete" && <input type="checkbox" checked={!!selected[key]} onChange={(e) => setSelected((s) => ({ ...s, [key]: e.target.checked }))} />}
-                      </td>
-                      <td className="px-3 py-2" style={{ color: "#0f172a", fontWeight: 600 }}>{it.name}</td>
-                      <td className="px-3 py-2">{it.type_label}</td>
-                      <td className="px-3 py-2">{it.age_days != null ? `${it.age_days}d` : "—"}</td>
-                      <td className="px-3 py-2">{fmtBytes(it.size_bytes)}</td>
-                      <td className="px-3 py-2">{it.locations.map((l) => l.location_label).join(", ")}</td>
-                      <td className="px-3 py-2">
-                        <span style={{ color: recColor, fontWeight: 700 }}>{it.recommendation}</span>
-                        <div style={{ color: "#94a3b8", fontSize: 10 }}>{it.reason}</div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
         </>
       )}
     </Panel>

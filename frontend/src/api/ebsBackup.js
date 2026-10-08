@@ -81,4 +81,9 @@ export const ebsBackupApi = {
   // Inventory / recovery readiness
   scanInventory: () => api.get(`${BASE}/inventory/scan`),
   deleteInventoryItem: (body) => api.post(`${BASE}/inventory/delete`, body),
+
+  // Recovery catalog (RMAN control file): restorable full backups and
+  // required / optional / obsolete archive logs.
+  recoveryCatalog:   () => api.get(`${BASE}/recovery/catalog`),
+  deleteArchivelogs: (body) => api.post(`${BASE}/recovery/archivelog/delete`, body),
 };

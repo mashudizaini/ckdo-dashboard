@@ -36,6 +36,7 @@ _minio_client was reused by inventory.py):
 """
 import json
 import re
+import shlex
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
@@ -51,7 +52,7 @@ from app.models.ebs_backup import (
 )
 from app.services.ebs_backup.ssh_executor import ssh_from_server, SSHExecutor
 from app.services.ebs_backup.vault_shim import vault
-from app.services.ebs_backup import rman_templates
+from app.services.ebs_backup import rman_templates, recovery_catalog
 
 try:
     from croniter import croniter
@@ -2447,6 +2448,18 @@ def _age_days(date_str: str | None, fallback_epoch: float | None) -> int | None:
         return None
 
 
+def _backup_at(date_str: str | None, newest_epoch: float | None) -> str | None:
+    """When the backup was taken, for display and sorting: the newest file's
+    timestamp (UTC, ISO) — i.e. when the run finished — falling back to the
+    date in the folder/file name."""
+    if newest_epoch:
+        try:
+            return datetime.utcfromtimestamp(newest_epoch).isoformat() + "Z"
+        except Exception:
+            pass
+    return f"{date_str}T00:00:00" if date_str else None
+
+
 def _scan_db_server(db: Session) -> tuple[list[dict], Server | None]:
     server = db.query(Server).filter(Server.role == "db", Server.enabled == True).first()  # noqa: E712
     if not server:
@@ -2490,6 +2503,7 @@ def _scan_db_server(db: Session) -> tuple[list[dict], Server | None]:
                     "location": "db_server", "location_label": f"{server.name} (local disk)", "server_id": server.id,
                     "size_bytes": size_bytes, "type": type_key, "type_label": type_label, "date": date_str,
                     "age_days": _age_days(date_str, newest_epoch), "sample_files": sample_files[:5],
+                    "backup_at": _backup_at(date_str, newest_epoch),
                 })
     except Exception:
         pass
@@ -2522,6 +2536,7 @@ def _scan_minio(db: Session) -> list[dict]:
                 "location": "minio", "location_label": f"{minio_srv.name} ({minio_srv.bucket})", "server_id": minio_srv.id,
                 "size_bytes": size_bytes, "type": type_key, "type_label": type_label, "date": date_str,
                 "age_days": _age_days(date_str, newest.timestamp() if newest else None), "sample_files": sample_files[:5],
+                "backup_at": _backup_at(date_str, newest.timestamp() if newest else None),
             })
     except Exception:
         pass
@@ -2576,6 +2591,7 @@ def _scan_synology(db: Session) -> list[dict]:
                     "location": "synology", "location_label": f"{syn_srv.name} ({syn_srv.share_path})", "server_id": syn_srv.id,
                     "size_bytes": size_bytes, "type": type_key, "type_label": type_label, "date": date_str,
                     "age_days": _age_days(date_str, newest_epoch), "sample_files": sample_files[:5],
+                    "backup_at": _backup_at(date_str, newest_epoch),
                 })
     except Exception:
         pass
@@ -2660,7 +2676,8 @@ def scan_inventory(db: Session = Depends(get_db)):
 
     merged = _merge_redundant(all_items)
     merged = _recommend(merged)
-    merged.sort(key=lambda it: (it["age_days"] if it["age_days"] is not None else 999999))
+    # Newest first. Items with no known date sink to the bottom.
+    merged.sort(key=lambda it: (it.get("backup_at") is not None, it.get("backup_at") or ""), reverse=True)
 
     full_backups = [it for it in merged if it["type"] in ("rman_full", "cold_tar")]
     full_backups.sort(key=lambda it: (it["age_days"] if it["age_days"] is not None else 999999))
@@ -2756,3 +2773,160 @@ def delete_inventory_item(payload: dict, db: Session = Depends(get_db)):
         return {"deleted": True}
 
     raise HTTPException(400, "Unknown location")
+
+
+# ============================================================
+# Recovery catalog — what can actually be restored, from RMAN's own records
+# ============================================================
+# The inventory scan above judges folders by name and age. This one asks the
+# control file (read-only V$ queries over SSH, same as _has_spfile) which full
+# backups are complete, how far forward each can be rolled with the archive
+# logs that exist, and therefore which archive log copies are still needed.
+# See app/services/ebs_backup/recovery_catalog.py for the rules.
+
+ARCHIVELOG_MINIO_PREFIX = "archive-logs/"
+
+
+class ArchivelogDeleteIn(BaseModel):
+    names: List[str]
+    # "optional" logs only serve point-in-time recovery with an OLDER full
+    # backup; deleting them is legitimate but must be asked for explicitly.
+    allow_optional: bool = False
+    # Also remove the MinIO copy (archive-logs/<name>) of each deleted file.
+    include_minio: bool = False
+
+
+def _db_server_and_cred(db: Session) -> tuple[Server, Credential]:
+    server = db.query(Server).filter(Server.role == "db", Server.enabled == True).first()  # noqa: E712
+    if not server:
+        raise HTTPException(404, "No enabled server with role = db")
+    cred = db.query(Credential).filter(
+        Credential.server_id == server.id, Credential.cred_type.in_(["ssh_password", "ssh_key"]),
+    ).first()
+    if not cred:
+        raise HTTPException(404, "DB server has no SSH credential")
+    return server, cred
+
+
+def _minio_archivelog_names(db: Session) -> set:
+    minio_srv = db.query(Server).filter(Server.role == "minio", Server.enabled == True).first()  # noqa: E712
+    if not minio_srv or not minio_srv.bucket:
+        return set()
+    cred = db.query(Credential).filter(Credential.server_id == minio_srv.id, Credential.cred_type == "minio").first()
+    if not cred:
+        return set()
+    try:
+        client = _minio_client(minio_srv, cred)
+        return {o.object_name.split("/")[-1]
+                for o in client.list_objects(minio_srv.bucket, prefix=ARCHIVELOG_MINIO_PREFIX, recursive=True)}
+    except Exception:
+        return set()
+
+
+def _build_recovery_catalog(db: Session) -> dict:
+    server, cred = _db_server_and_cred(db)
+    oracle_home = server.oracle_home or settings.ORACLE_HOME
+    oracle_sid = server.oracle_sid or settings.ORACLE_SID
+    with ssh_from_server(server, cred) as ssh:
+        r = ssh.run(
+            f"export ORACLE_HOME={oracle_home}; export ORACLE_SID={oracle_sid}; "
+            f"export PATH=$ORACLE_HOME/bin:$PATH; sqlplus -s / as sysdba <<'SQLEOF'\n"
+            f"{recovery_catalog.CATALOG_SQL}SQLEOF",
+            timeout=60,
+        )
+        ls = ssh.run(
+            f"find {ARCHIVELOG_STAGING_PATH} -maxdepth 1 -type f -printf '%f|%s|%T@\\n' 2>/dev/null",
+            timeout=30,
+        )
+        raw = recovery_catalog.parse_catalog(r.stdout)
+        if not raw["db"]:
+            raise HTTPException(502, f"Could not read the control file: {(r.stdout + r.stderr).strip()[:500]}")
+        # The control file only knows what RMAN last saw. Check the folders and
+        # files it names are really on disk; anything we cannot confirm counts
+        # as missing, which can only make more archive logs "required".
+        dirs = sorted(recovery_catalog.piece_dirs(raw))
+        present = set()
+        if dirs:
+            chk = ssh.run(
+                "for d in " + " ".join(shlex.quote(d) for d in dirs)
+                + '; do [ -d "$d" ] && echo "$d"; done; true', timeout=30,
+            )
+            present = set(chk.stdout.splitlines())
+        missing_dirs = set(dirs) - present
+        arch_dirs = sorted({d["path"].rsplit("/", 1)[0] for d in raw["on_disk"].values() if "/" in d["path"]})
+        if arch_dirs:
+            found = ssh.run(
+                "find " + " ".join(shlex.quote(d) for d in arch_dirs)
+                + " -maxdepth 1 -type f -printf '%p\\n' 2>/dev/null", timeout=60,
+            )
+            existing = set(found.stdout.splitlines())
+            raw["on_disk"] = {k: v for k, v in raw["on_disk"].items() if v["path"] in existing}
+    catalog = recovery_catalog.build_catalog(
+        raw, recovery_catalog.parse_staging_listing(ls.stdout), _minio_archivelog_names(db),
+        staging_path=ARCHIVELOG_STAGING_PATH, missing_dirs=missing_dirs,
+    )
+    catalog["generated_at"] = datetime.utcnow().isoformat()
+    catalog["staging_path"] = ARCHIVELOG_STAGING_PATH
+    return catalog
+
+
+@router.get("/recovery/catalog")
+def recovery_catalog_view(db: Session = Depends(get_db)):
+    return _build_recovery_catalog(db)
+
+
+@router.post("/recovery/archivelog/delete")
+def delete_archivelogs(payload: ArchivelogDeleteIn, db: Session = Depends(get_db)):
+    """Delete archive log copies from the staging folder. The classification is
+    recomputed here, at delete time, so a stale page can never remove a log
+    that has since become required (e.g. an old full backup was deleted)."""
+    if not payload.names:
+        raise HTTPException(400, "No archive logs selected")
+    catalog = _build_recovery_catalog(db)
+    by_name = {a["name"]: a for a in catalog["archivelogs"] if a["location"] == "staging"}
+
+    allowed, refused = [], []
+    for name in dict.fromkeys(payload.names):
+        a = by_name.get(name)
+        if not recovery_catalog.ARC_NAME_RE.match(name) or not a:
+            refused.append({"name": name, "reason": "Tidak ditemukan di folder staging"})
+        elif a["category"] == "required":
+            refused.append({"name": name, "reason": "Masih wajib disimpan untuk recovery"})
+        elif a["category"] == "optional" and not payload.allow_optional:
+            refused.append({"name": name, "reason": "Kategori opsional — konfirmasi khusus diperlukan"})
+        else:
+            allowed.append(a)
+
+    deleted, freed = [], 0
+    if allowed:
+        server, cred = _db_server_and_cred(db)
+        with ssh_from_server(server, cred) as ssh:
+            # Names are validated against ARC_NAME_RE (digits/underscore only),
+            # so they are safe to place in the command line.
+            for i in range(0, len(allowed), 100):
+                chunk = allowed[i:i + 100]
+                files = " ".join(f'"{ARCHIVELOG_STAGING_PATH}/{a["name"]}"' for a in chunk)
+                ssh.run(f"rm -f -- {files}", timeout=60)
+            remaining = ssh.run(
+                f"find {ARCHIVELOG_STAGING_PATH} -maxdepth 1 -type f -printf '%f\\n' 2>/dev/null", timeout=30,
+            ).stdout.split()
+        remaining = set(remaining)
+        for a in allowed:
+            if a["name"] in remaining:
+                refused.append({"name": a["name"], "reason": "rm gagal (cek permission)"})
+            else:
+                deleted.append(a["name"])
+                freed += a["size_bytes"]
+
+    minio_removed = 0
+    if payload.include_minio and deleted:
+        minio_srv = db.query(Server).filter(Server.role == "minio", Server.enabled == True).first()  # noqa: E712
+        cred = minio_srv and db.query(Credential).filter(
+            Credential.server_id == minio_srv.id, Credential.cred_type == "minio").first()
+        if minio_srv and cred:
+            client = _minio_client(minio_srv, cred)
+            objs = [DeleteObject(f"{ARCHIVELOG_MINIO_PREFIX}{n}") for n in deleted]
+            errors = list(client.remove_objects(minio_srv.bucket, objs))
+            minio_removed = len(objs) - len(errors)
+
+    return {"deleted": deleted, "refused": refused, "freed_bytes": freed, "minio_removed": minio_removed}
