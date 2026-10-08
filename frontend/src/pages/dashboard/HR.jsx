@@ -316,16 +316,13 @@ function EmployeeTable() {
   // "Employment State" as chosen in Filters until the user picks a
   // different value there.
   const [summaryEmploymentStatus, setSummaryEmploymentStatus] = useState("Active");
-  // Blank ("All") by default — reverted 2026-09-17 after confirming live
-  // that defaulting to the current month/year (as briefly tried) made the
-  // list load empty: Joined Month/Year is an exact match (only employees
-  // who joined in that exact period, see _apply_employee_filters), and 0
-  // of the 127 active employees joined in the current month, so that
-  // default filtered out virtually everyone on every page load. The
-  // dropdowns themselves are unaffected — picking a specific month/year
-  // still works exactly as designed, this only changes what's pre-selected.
-  const [joinMonthFilter, setJoinMonthFilter] = useState("");
-  const [joinYearFilter, setJoinYearFilter] = useState("");
+  // As Of Month/Year — the roster as of the end of that month: everyone
+  // who had joined by then (Employment State filters active/inactive).
+  // Defaults to the running month/year so the first load is the whole
+  // roster. Restored 2026-10-08 from the exact "Joined Month/Year" match
+  // (2026-09-17), which loaded almost nobody.
+  const [joinMonthFilter, setJoinMonthFilter] = useState(() => String(new Date().getMonth() + 1));
+  const [joinYearFilter, setJoinYearFilter] = useState(() => String(new Date().getFullYear()));
   const [teamFilter, setTeamFilter] = useState("");
   const [departments, setDepartments]   = useState([]);
   const [teams,       setTeams]         = useState([]);
@@ -683,8 +680,8 @@ function EmployeeTable() {
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide" title="Shows only employees who joined in this exact month/year">
-                      Joined Month
+                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide" title="Employees who had joined by the end of the selected Month/Year">
+                      As Of Month
                     </label>
                     <select
                       value={joinMonthFilter}
@@ -697,8 +694,8 @@ function EmployeeTable() {
                   </div>
 
                   <div>
-                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide" title="Shows only employees who joined in this exact month/year">
-                      Joined Year
+                    <label className="mb-1 block text-[11px] font-semibold text-gray-400 uppercase tracking-wide" title="Employees who had joined by the end of the selected Month/Year">
+                      As Of Year
                     </label>
                     <select
                       value={joinYearFilter}
@@ -716,7 +713,9 @@ function EmployeeTable() {
                       className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-1.5 text-xs text-gray-300 outline-none focus:border-indigo-500 cursor-pointer"
                     >
                       <option value="">All</option>
-                      {joinYears.map((y) => <option key={y} value={y}>{y}</option>)}
+                      {/* The running year may have no joiners yet, but it is the default As Of year. */}
+                      {[...new Set([String(new Date().getFullYear()), ...joinYears.map(String)])]
+                        .sort((a, b) => b - a).map((y) => <option key={y} value={y}>{y}</option>)}
                     </select>
                   </div>
                 </div>

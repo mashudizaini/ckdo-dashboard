@@ -838,7 +838,13 @@ _DEPT_FILTER_ALIASES = {
 
 
 def _resolve_department_alias(department: Optional[str]) -> Optional[str]:
-    return _DEPT_FILTER_ALIASES.get(department, department) if department else department
+    """Filter value -> the Summary group it means. Accepts department_master
+    names too ("Strategy Development"), since the Summary rows and LOVs now
+    carry those — see department_master_service.names_match."""
+    if not department:
+        return department
+    department = _DEPT_FILTER_ALIASES.get(department, department)
+    return next((g for g in DEPT_GROUPS if department_master_service.names_match(g, department)), department)
 
 
 def _apply_employee_filters(
@@ -890,7 +896,9 @@ def _apply_employee_filters(
             # silently miss half of them.
             q = q.where(func.upper(Employee.department) == department.upper())
     if division:
-        q = q.where(Employee.division == division)
+        # Lenient like the Summary: department_master names ("Quality
+        # Management") match the raw values they stand for.
+        q = q.where(department_master_service.sql_name_match(Employee.division, division))
     if sex:
         q = q.where(Employee.sex == sex)
     if status:
@@ -900,7 +908,7 @@ def _apply_employee_filters(
     if level:
         q = q.where(Employee.level == level)
     if team:
-        q = q.where(Employee.team == team)
+        q = q.where(department_master_service.sql_name_match(Employee.team, team))
     if education:
         q = q.where(Employee.education_degree == education)
     if position:
@@ -908,16 +916,15 @@ def _apply_employee_filters(
     if marital_status:
         q = q.where(Employee.marital_status == marital_status)
     if join_year:
-        # Exact match — only employees who joined in this specific month/
-        # year, not a cumulative "up to" cutoff (changed 2026-09-17 from
-        # the previous <= cutoff-date behavior, per explicit request: the
-        # Joined Month/Year filter should only pull the exact period
-        # picked). Year alone (no month) still means "anywhere in that
-        # year" — the "All" option for Month stays meaningful.
-        conditions = [Employee.date_of_joining.isnot(None), extract("year", Employee.date_of_joining) == join_year]
-        if join_month:
-            conditions.append(extract("month", Employee.date_of_joining) == join_month)
-        q = q.where(*conditions)
+        # "As of" cutoff — everyone who had joined by the end of this
+        # month/year (month blank = end of the year), regardless of whether
+        # they have since resigned; Employment State filters that part.
+        # Restored 2026-10-08: the exact-month match tried on 2026-09-17
+        # loaded almost nobody, while HR reads this list as the roster as of
+        # a date.
+        cutoff_month = join_month or 12
+        cutoff_date = date(join_year, cutoff_month, monthrange(join_year, cutoff_month)[1])
+        q = q.where(Employee.date_of_joining.isnot(None), Employee.date_of_joining <= cutoff_date)
     if snapshot_year:
         # "Active as of" a specific month-end — same windowing as
         # /summary/by-month, so drilling down from that report into this
@@ -1797,50 +1804,129 @@ def _lead_row_role(division_filter) -> str:
     return "Division Head" if division_filter else "Department Head"
 
 
-@router.get("/summary/by-year")
-async def get_summary_by_year(
-    year_from: Optional[int] = Query(None, description="First year of the window — defaults to the earliest date_of_joining on file"),
-    year_to:   Optional[int] = Query(None, description="Last year of the window — defaults to the current year"),
-    db:   AsyncSession = Depends(get_db),
-    user: CurrentUser  = Depends(require_role(Roles.HR)),
-):
-    """Headcount by department (grouped into the canonical DEPT_GROUPS) >
-    division > team, Beginning/Ending per year — same "active as of a date"
-    windowing used by /turnover-summary and /monthly-summary. Division/team
-    rows mirror /summary/by-month's tree (only some departments have them).
+def _summary_layout(raw_emps, tree):
+    """Map employees onto department_master and lay out the Summary rows.
 
-    `year_from`/`year_to` let the HR page offer an explicit period filter;
-    left blank, the window defaults to the full history (earliest
-    date_of_joining on file through the current year) — same as before any
-    period filter existed. year_to is capped at the current year: a future
-    year_to would make by_year_for's `min(date(y, 12, 31), today)` clamp to
-    `today` for every such year, silently repeating the current year's
-    count instead of showing that year hasn't happened yet."""
-    today = date.today()
+    raw_emps: [(group, division, team, join, resign, employment_status)] —
+              group from _group_department, division/team stripped raw.
+    tree:     department_master_service.get_tree().
 
+    Returns (emps, specs):
+      emps  — same tuples with department/division/team replaced by the
+              department_master names they match (names_match), so counting
+              by equality on these labels counts exactly the people a
+              drill-down on the same labels finds (sql_name_match).
+      specs — ordered row dicts {department, division, team[, lead_title]
+              [, parent_team]}, following department_master's structure and
+              sequence. A master node with nobody in it still gets its row.
+              Values that match nothing in the master are kept, after the
+              master's own rows, so nobody disappears from the totals.
+    """
+    match = department_master_service.names_match
+
+    def find(nodes, name, types):
+        return next((n for n in nodes if n["type"] in types and match(n["name"], name)), None)
+
+    roots = [n for n in tree if n["type"] in ("director", "department")]
+
+    emps = []
+    for g, v, t, j, r, es in raw_emps:
+        dept = find(roots, g, ("director", "department"))
+        d_label = dept["name"] if dept else g
+        if g == "President Director":
+            emps.append((d_label, None, None, j, r, es))
+            continue
+        if not dept:
+            emps.append((d_label, v, t, j, r, es))
+            continue
+        divisions = [n for n in dept["children"] if n["type"] == "division"]
+        div = find(divisions, v, ("division",)) if v else None
+        v_label = div["name"] if div else v
+        t_label = t
+        if t and t not in LEAD_TEAM_NAMES and (div or not v):
+            # Only where the employee's own division says — never moved to
+            # another division, or the drill-down (which filters on the
+            # employee's own division) would stop matching this count. A
+            # team the master places elsewhere shows as an extra row.
+            hit = find((div or dept)["children"], t, ("team",))
+            if hit:
+                t_label = hit["name"]
+        emps.append((d_label, v_label, t_label, j, r, es))
+
+    def present(pred):
+        return {key for key in ((d, v, t) for d, v, t, *_ in emps) if pred(*key)}
+
+    def lead_rows(dept_label, division):
+        rows, first = [], None
+        for lead in LEAD_TEAM_NAMES:
+            if present(lambda d, v, t: d == dept_label and v == division and t == lead):
+                rows.append({"department": dept_label, "division": division, "team": lead,
+                             "lead_title": _lead_row_role(division)})
+                first = first or lead
+        return rows, first
+
+    specs = []
+    master_depts = [n["name"] for n in roots]
+    extra_depts = sorted({d for d, *_ in emps if d not in master_depts})
+    for dept_label in master_depts + extra_depts:
+        specs.append({"department": dept_label, "division": None, "team": None})
+        if dept_label == "President Director":
+            # A singleton role, not a department with real substructure —
+            # any team value on that person's record is a legacy artifact.
+            continue
+        node = next((n for n in roots if n["name"] == dept_label), None)
+        children = node["children"] if node else []
+
+        # Department-scoped Director / General Manager lead the department;
+        # its ordinary direct teams report to them (parent_team).
+        leads, dept_lead = lead_rows(dept_label, None)
+        specs += leads
+
+        master_divs = [c["name"] for c in children if c["type"] == "division"]
+        master_teams = [c["name"] for c in children if c["type"] == "team"]
+        extra_divs = sorted({v for d, v, _t in present(lambda d, v, t: d == dept_label and v) if v not in master_divs})
+        extra_teams = sorted({t for d, v, t in present(lambda d, v, t: d == dept_label and not v and t)
+                              if t not in master_teams and t not in LEAD_TEAM_NAMES})
+
+        def division_block(division, div_node):
+            specs.append({"department": dept_label, "division": division, "team": None})
+            d_leads, div_lead = lead_rows(dept_label, division)
+            specs.extend(d_leads)
+            m_teams = [c["name"] for c in (div_node or {}).get("children", []) if c["type"] == "team"]
+            x_teams = sorted({t for d, v, t in present(lambda d, v, t: d == dept_label and v == division and t)
+                              if t not in m_teams and t not in LEAD_TEAM_NAMES})
+            for team in m_teams + x_teams:
+                specs.append({"department": dept_label, "division": division, "team": team, "parent_team": div_lead})
+
+        for c in children:
+            if c["type"] == "division":
+                division_block(c["name"], c)
+            elif c["type"] == "team":
+                specs.append({"department": dept_label, "division": None, "team": c["name"], "parent_team": dept_lead})
+        for division in extra_divs:
+            division_block(division, None)
+        for team in extra_teams:
+            specs.append({"department": dept_label, "division": None, "team": team, "parent_team": dept_lead})
+
+    return emps, specs
+
+
+async def _summary_inputs(db: AsyncSession):
     rows_q = await db.execute(
         select(Employee.department, Employee.division, Employee.team, Employee.job_title,
                Employee.date_of_joining, Employee.resign_date, Employee.employment_status)
         .where(Employee.date_of_joining.isnot(None))
     )
-    emps_with_title = [
-        (_group_department(d, t, jt), (v or "").strip() or None, (t or "").strip() or None, jt, j, r, es)
-        for d, v, t, jt, j, r, es in rows_q.fetchall()
-    ]
-    emps_with_title = [row for row in emps_with_title if row[0] is not None]
-    emps = [(d, v, t, j, r, es) for d, v, t, _jt, j, r, es in emps_with_title]
+    raw = []
+    for d, v, t, jt, j, r, es in rows_q.fetchall():
+        g = _group_department(d, t, jt)
+        if g is not None:
+            raw.append((g, (v or "").strip() or None, (t or "").strip() or None, j, r, es))
+    tree = await department_master_service.get_tree(db)
+    return _summary_layout(raw, tree)
 
-    order_maps = await department_master_service.get_order_maps(db)
-    dept_seq, division_seq, team_seq = order_maps["dept_seq"], order_maps["division_seq"], order_maps["team_seq"]
 
-    default_year_from = min((j.year for _d, _v, _t, j, _r, _es in emps), default=today.year)
-    target_from = year_from or default_year_from
-    target_to = min(year_to, today.year) if year_to else today.year
-    year_list = list(range(target_from, target_to + 1)) if target_from <= target_to else [target_to]
-
-    ordered_dept_groups = sorted(DEPT_GROUPS, key=lambda d: dept_seq.get(d, 99))
-    departments = ordered_dept_groups
-
+def _active_counter(emps):
     def active_count(snapshot, dept_filter=None, division_filter=None, team_filter=None):
         return sum(
             1 for d, v, t, j, r, es in emps
@@ -1849,109 +1935,48 @@ async def get_summary_by_year(
             and (division_filter is None or v == division_filter)
             and (team_filter is None or t == team_filter)
         )
+    return active_count
+
+
+@router.get("/summary/by-year")
+async def get_summary_by_year(
+    year_from: Optional[int] = Query(None, description="First year of the window — defaults to the earliest date_of_joining on file"),
+    year_to:   Optional[int] = Query(None, description="Last year of the window — defaults to the current year"),
+    db:   AsyncSession = Depends(get_db),
+    user: CurrentUser  = Depends(require_role(Roles.HR)),
+):
+    """Headcount by department > division > team, Beginning/Ending per year —
+    same "active as of a date" windowing used by /turnover-summary and
+    /monthly-summary. Rows, their names and their order come from
+    department_master (see _summary_layout).
+
+    `year_from`/`year_to` default to the full history (earliest
+    date_of_joining on file through the current year). year_to is capped at
+    the current year: a future year would clamp to `today` and silently
+    repeat the current year's count."""
+    today = date.today()
+    emps, specs = await _summary_inputs(db)
+    active_count = _active_counter(emps)
+
+    default_year_from = min((j.year for _d, _v, _t, j, _r, _es in emps), default=today.year)
+    target_from = year_from or default_year_from
+    target_to = min(year_to, today.year) if year_to else today.year
+    year_list = list(range(target_from, target_to + 1)) if target_from <= target_to else [target_to]
 
     def by_year_for(dept_filter=None, division_filter=None, team_filter=None):
-        result = {}
-        for y in year_list:
-            beg_snapshot = date(y, 1, 1)
-            end_snapshot = min(date(y, 12, 31), today)
-            result[y] = {
-                "beginning": active_count(beg_snapshot, dept_filter, division_filter, team_filter),
-                "ending":    active_count(end_snapshot, dept_filter, division_filter, team_filter),
+        return {
+            y: {
+                "beginning": active_count(date(y, 1, 1), dept_filter, division_filter, team_filter),
+                "ending":    active_count(min(date(y, 12, 31), today), dept_filter, division_filter, team_filter),
             }
-        return result
+            for y in year_list
+        }
 
-    rows = []
-    for label in ordered_dept_groups:
-        rows.append({"department": label, "division": None, "team": None, "by_year": by_year_for(label)})
-
-        # "President Director" is a singleton role, not a department with
-        # real division/team substructure — any team value on a row routed
-        # here (e.g. a predecessor's raw Employee.team happening to be
-        # "Director") is a legacy artifact of that person's own record, not
-        # meaningful org structure, and would otherwise render as a
-        # confusing "President Director - Director" child row the image
-        # doesn't show. Keep this group as a single flat row.
-        if label == "President Director":
-            continue
-
-        divisions_in_dept = sorted(
-            {v for d, v, _t, _j, _r, _es in emps if d == label and v},
-            key=lambda v: (division_seq.get((label, v), 99), v),
-        )
-        teams_direct = sorted(
-            {t for d, v, t, _j, _r, _es in emps if d == label and not v and t},
-            key=lambda t: _team_sort_key(t, label, None, team_seq),
-        )
-
-        # A department-scoped Director, then General Manager, lead the whole
-        # department (rows #1/#2 after the department total) even when the
-        # department also has divisions (e.g. Plant) — without this, they'd
-        # otherwise land at the very bottom since teams_direct is normally
-        # rendered after every division block. `lead_team_label` tracks
-        # whichever one was found (Director takes precedence when both
-        # exist) — this department's OTHER direct teams (below) report to
-        # that person in the real org chart (e.g. Planning & Coordination
-        # reports to Administration's GM, not straight to "Administration"),
-        # so they're tagged `parent_team` to nest one level under the lead
-        # row instead of sitting as its siblings.
-        lead_team_label = None
-        for lead_team in LEAD_TEAM_NAMES:
-            if teams_direct and teams_direct[0] == lead_team:
-                rows.append({
-                    "department": label, "division": None, "team": lead_team,
-                    "lead_title": _lead_row_role(None),
-                    "by_year": by_year_for(label, None, lead_team),
-                })
-                lead_team_label = lead_team_label or lead_team
-                teams_direct = teams_direct[1:]
-
-        for division in divisions_in_dept:
-            rows.append({
-                "department": label, "division": division, "team": None,
-                "by_year": by_year_for(label, division),
-            })
-            teams_in_division = sorted(
-                {t for d, v, t, _j, _r, _es in emps if d == label and v == division and t},
-                key=lambda t: _team_sort_key(t, label, division, team_seq),
-            )
-
-            # A division head (e.g. Production Management's "Senior
-            # Manager", Quality Management's "General Manager") gets the
-            # exact same treatment as a department's own Director/General
-            # Manager above — popped out first, the division's other teams
-            # report to them (parent_team), not straight to the division.
-            division_lead_label = None
-            for lead_team in LEAD_TEAM_NAMES:
-                if teams_in_division and teams_in_division[0] == lead_team:
-                    rows.append({
-                        "department": label, "division": division, "team": lead_team,
-                        "lead_title": _lead_row_role(division),
-                        "by_year": by_year_for(label, division, lead_team),
-                    })
-                    division_lead_label = division_lead_label or lead_team
-                    teams_in_division = teams_in_division[1:]
-
-            for team in teams_in_division:
-                rows.append({
-                    "department": label, "division": division, "team": team,
-                    "parent_team": division_lead_label,
-                    "by_year": by_year_for(label, division, team),
-                })
-
-        for team in teams_direct:
-            rows.append({
-                "department": label, "division": None, "team": team,
-                "parent_team": lead_team_label,
-                "by_year": by_year_for(label, None, team),
-            })
-
+    rows = [{**s, "by_year": by_year_for(s["department"], s["division"], s["team"])} for s in specs]
+    departments = [s["department"] for s in specs if s["division"] is None and s["team"] is None]
     total = by_year_for()
-
-    growth = {}
-    for i, y in enumerate(year_list):
-        growth[y] = None if i == 0 else total[y]["ending"] - total[year_list[i - 1]]["ending"]
-
+    growth = {y: None if i == 0 else total[y]["ending"] - total[year_list[i - 1]]["ending"]
+              for i, y in enumerate(year_list)}
     return {"years": year_list, "departments": departments, "rows": rows, "total": total, "growth": growth}
 
 
@@ -1961,134 +1986,30 @@ async def get_summary_by_month(
     db:   AsyncSession = Depends(get_db),
     user: CurrentUser  = Depends(require_role(Roles.HR)),
 ):
-    """Headcount by department (grouped into the canonical DEPT_GROUPS) >
-    division > team, end-of-month snapshot for each month of the given year
-    (default: current year). Division is only populated for some departments
-    (currently just Plant) — departments without it go straight from
-    department to team rows. Department/division/team are each employee's
-    *current* value — the Employee table isn't historized — same caveat as
-    /monthly-summary."""
+    """Headcount by department > division > team, end-of-month snapshot for
+    each month of the given year (default: current year). Rows, names and
+    order come from department_master (see _summary_layout).
+    Department/division/team are each employee's *current* value — the
+    Employee table isn't historized — same caveat as /monthly-summary."""
     target_year = year or date.today().year
-    rows_q = await db.execute(
-        select(Employee.department, Employee.division, Employee.team, Employee.job_title,
-               Employee.date_of_joining, Employee.resign_date, Employee.employment_status)
-        .where(Employee.date_of_joining.isnot(None))
-    )
-    emps_with_title = [
-        (_group_department(d, t, jt), (v or "").strip() or None, (t or "").strip() or None, jt, j, r, es)
-        for d, v, t, jt, j, r, es in rows_q.fetchall()
-    ]
-    emps_with_title = [row for row in emps_with_title if row[0] is not None]
-    emps = [(d, v, t, j, r, es) for d, v, t, _jt, j, r, es in emps_with_title]
-
-    order_maps = await department_master_service.get_order_maps(db)
-    dept_seq, division_seq, team_seq = order_maps["dept_seq"], order_maps["division_seq"], order_maps["team_seq"]
-    ordered_dept_groups = sorted(DEPT_GROUPS, key=lambda d: dept_seq.get(d, 99))
-
     today = date.today()
+    emps, specs = await _summary_inputs(db)
+    active_count = _active_counter(emps)
     months = list(range(1, 13))
-
-    def active_count(snapshot, dept_filter=None, division_filter=None, team_filter=None):
-        return sum(
-            1 for d, v, t, j, r, es in emps
-            if _is_active(j, r, es, snapshot)
-            and (dept_filter is None or d == dept_filter)
-            and (division_filter is None or v == division_filter)
-            and (team_filter is None or t == team_filter)
-        )
-
-    def snapshot_for(m):
-        return min(date(target_year, m, monthrange(target_year, m)[1]), today)
 
     def by_month_for(dept_filter=None, division_filter=None, team_filter=None):
         result = {}
         for m in months:
-            # A month that hasn't started yet has no headcount to report —
-            # without this check, snapshot_for(m) silently clamped to
-            # `today`, so every future month repeated the current month's
-            # headcount instead of showing "not reached yet".
+            # A month that hasn't started yet has no headcount to report.
             if (target_year, m) > (today.year, today.month):
                 result[m] = None
             else:
-                result[m] = active_count(snapshot_for(m), dept_filter, division_filter, team_filter)
+                snap = min(date(target_year, m, monthrange(target_year, m)[1]), today)
+                result[m] = active_count(snap, dept_filter, division_filter, team_filter)
         return result
 
-    rows = []
-    for label in ordered_dept_groups:
-        rows.append({"department": label, "division": None, "team": None, "by_month": by_month_for(label)})
-
-        # See the matching comment in /summary/by-year — "President Director"
-        # is a singleton role, not a department with real division/team
-        # substructure.
-        if label == "President Director":
-            continue
-
-        divisions_in_dept = sorted(
-            {v for d, v, _t, _j, _r, _es in emps if d == label and v},
-            key=lambda v: (division_seq.get((label, v), 99), v),
-        )
-        teams_direct = sorted(
-            {t for d, v, t, _j, _r, _es in emps if d == label and not v and t},
-            key=lambda t: _team_sort_key(t, label, None, team_seq),
-        )
-
-        # A department-scoped Director, then General Manager, lead the whole
-        # department (rows #1/#2 after the department total) even when the
-        # department also has divisions (e.g. Plant) — without this, they'd
-        # otherwise land at the very bottom since teams_direct is normally
-        # rendered after every division block. See the matching comment in
-        # /summary/by-year for `lead_team_label`/`parent_team`.
-        lead_team_label = None
-        for lead_team in LEAD_TEAM_NAMES:
-            if teams_direct and teams_direct[0] == lead_team:
-                rows.append({
-                    "department": label, "division": None, "team": lead_team,
-                    "lead_title": _lead_row_role(None),
-                    "by_month": by_month_for(label, None, lead_team),
-                })
-                lead_team_label = lead_team_label or lead_team
-                teams_direct = teams_direct[1:]
-
-        for division in divisions_in_dept:
-            rows.append({
-                "department": label, "division": division, "team": None,
-                "by_month": by_month_for(label, division),
-            })
-            teams_in_division = sorted(
-                {t for d, v, t, _j, _r, _es in emps if d == label and v == division and t},
-                key=lambda t: _team_sort_key(t, label, division, team_seq),
-            )
-
-            # See the matching comment in /summary/by-year for
-            # `division_lead_label`.
-            division_lead_label = None
-            for lead_team in LEAD_TEAM_NAMES:
-                if teams_in_division and teams_in_division[0] == lead_team:
-                    rows.append({
-                        "department": label, "division": division, "team": lead_team,
-                        "lead_title": _lead_row_role(division),
-                        "by_month": by_month_for(label, division, lead_team),
-                    })
-                    division_lead_label = division_lead_label or lead_team
-                    teams_in_division = teams_in_division[1:]
-
-            for team in teams_in_division:
-                rows.append({
-                    "department": label, "division": division, "team": team,
-                    "parent_team": division_lead_label,
-                    "by_month": by_month_for(label, division, team),
-                })
-
-        for team in teams_direct:
-            rows.append({
-                "department": label, "division": None, "team": team,
-                "parent_team": lead_team_label,
-                "by_month": by_month_for(label, None, team),
-            })
-
-    total = by_month_for()
-
-    return {"year": target_year, "months": months, "rows": rows, "total": total}
+    rows = [{**s, "by_month": by_month_for(s["department"], s["division"], s["team"])} for s in specs]
+    return {"year": target_year, "months": months, "rows": rows, "total": by_month_for()}
 
 
 @router.get("/upload-logs")

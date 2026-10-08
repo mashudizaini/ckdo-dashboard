@@ -11,6 +11,7 @@ functions) — later edits to sequence/name/parent belong to whoever manages
 this table (SQL for now; a CRUD UI is a natural follow-up, not built here),
 not to a re-run of the seed.
 """
+import re
 from typing import Optional
 
 import structlog
@@ -133,3 +134,79 @@ async def get_order_maps(db: AsyncSession) -> dict:
                 team_seq[(parent.name, None, r.name)] = r.sequence
 
     return {"dept_seq": dept_seq, "division_seq": division_seq, "team_seq": team_seq}
+
+
+# ── Name matching ──────────────────────────────────────────────────────────
+# department_master is edited by hand (Setup > HRGA > Department Master), and
+# its names drift from the raw Employee values: "Strategy Development" vs
+# "Strategy & Development", "Quality Assurance" vs "QA", "General Affair" vs
+# "GA". An exact lookup then misses, and the row silently falls back to
+# alphabetical at the bottom. One rule, with a Python and a SQL twin so the
+# Summary count and its drill-down list can never disagree:
+#   same letters/digits ignoring case, spaces and punctuation, OR
+#   one side is the other's initials ("QA" = "Quality Assurance").
+
+_NON_ALNUM = re.compile(r"[^A-Za-z0-9]+")
+_ACRONYM_MAX = 5
+
+
+def name_key(s: Optional[str]) -> str:
+    return _NON_ALNUM.sub("", s or "").upper()
+
+
+def name_acronym(s: Optional[str]) -> str:
+    """Initials of a multi-word name ("Planning & Coordination" -> "PC");
+    empty for a single word, which has no meaningful initials."""
+    words = [w for w in _NON_ALNUM.split(s or "") if w]
+    return "".join(w[0] for w in words).upper() if len(words) > 1 else ""
+
+
+def names_match(a: Optional[str], b: Optional[str]) -> bool:
+    ka, kb = name_key(a), name_key(b)
+    if not ka or not kb:
+        return False
+    if ka == kb:
+        return True
+    if len(ka) <= _ACRONYM_MAX and name_acronym(b) == ka:
+        return True
+    return len(kb) <= _ACRONYM_MAX and name_acronym(a) == kb
+
+
+def sql_name_match(col, value: str):
+    """SQL twin of names_match(col, value) for PostgreSQL."""
+    from sqlalchemy import and_, func, or_
+
+    key = name_key(value)
+    col_key = func.upper(func.regexp_replace(col, "[^A-Za-z0-9]+", "", "g"))
+    # Initials: first character of each alphanumeric run.
+    col_acr = func.upper(func.regexp_replace(col, "[^A-Za-z0-9]*([A-Za-z0-9])[A-Za-z0-9]*", "\1", "g"))
+    multi_word = col.op("~")("[A-Za-z0-9][^A-Za-z0-9]+[A-Za-z0-9]")
+    conds = [col_key == key]
+    if key and len(key) <= _ACRONYM_MAX:
+        conds.append(and_(multi_word, col_acr == key))
+    acr = name_acronym(value)
+    if acr:
+        conds.append(and_(func.length(col_key) <= _ACRONYM_MAX, col_key == acr))
+    return or_(*conds)
+
+
+async def get_tree(db: AsyncSession) -> list[dict]:
+    """department_master as nested dicts, every level sorted by sequence
+    (a division before a team on equal sequence, then name):
+    [{id, name, type, sequence, children: [...]}, ...] — top level is the
+    director/department rows."""
+    rows = (await db.execute(select(DepartmentMaster))).scalars().all()
+    nodes = {r.id: {"id": r.id, "name": r.name, "type": r.type, "sequence": r.sequence or 0,
+                    "parent_id": r.parent_id, "children": []} for r in rows}
+    roots = []
+    for n in nodes.values():
+        parent = nodes.get(n["parent_id"]) if n["parent_id"] else None
+        (parent["children"] if parent else roots).append(n)
+
+    def _sort(lst):
+        lst.sort(key=lambda n: (n["sequence"], 0 if n["type"] == "division" else 1, n["name"]))
+        for n in lst:
+            _sort(n["children"])
+
+    _sort(roots)
+    return roots
