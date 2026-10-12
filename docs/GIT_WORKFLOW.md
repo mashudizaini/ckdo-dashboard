@@ -1,5 +1,7 @@
 # Panduan Git — Kerja dari VS Code + Claude Desktop
 
+> **Acuan utama sekarang: [SOP_SINKRONISASI.md](SOP_SINKRONISASI.md)** (ringkas, termasuk Claude Desktop akun lain dan deploy DEV/PROD). Dokumen ini tetap berlaku untuk detail merge branch/worktree.
+
 Dokumen ini untuk satu masalah spesifik: dashboard ini dikerjakan dari **dua sisi**
 — VS Code di laptop, dan Claude Desktop — dan keduanya harus tetap sinkron.
 
