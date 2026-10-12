@@ -91,7 +91,17 @@ export const useAuthStore = create((set, get) => ({
     if (kcInitialized) return;
     kcInitialized = true;
     try {
+      // check-sso: on every page load, ask Keycloak silently (hidden iframe
+      // to silent-check-sso.html) whether the SSO session is still alive and
+      // pick it up. Without it the token lived only in memory, so any reload
+      // — F5, a new tab, or Vite's dev server pushing a full reload to every
+      // open tab after a deploy (prod runs the dev server) — looked like
+      // being signed out although the 100-minute session was still valid.
+      // A real logout (idle timer, manual) ends the Keycloak session too, so
+      // this never logs anyone back in after that.
       const authenticated = await kc.init({
+        onLoad: "check-sso",
+        silentCheckSsoRedirectUri: `${window.location.origin}/silent-check-sso.html`,
         checkLoginIframe: false,
         pkceMethod: "S256",
       });
