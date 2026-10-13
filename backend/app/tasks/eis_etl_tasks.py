@@ -1305,7 +1305,19 @@ def etl_financial(year: int = None, month: int = None):
 
 @celery_app.task(name="app.tasks.etl_tasks.etl_budget")
 def etl_budget(year: int = None, month: int = None):
-    """Extract departmental OPEX budget vs actual from Oracle GL into fact_budget."""
+    """Extract departmental OPEX budget vs actual from Oracle GL into fact_budget.
+
+    The department is GL segment3 (CKDO_GL_COA_DEPARTMENT — the same
+    segment Budget Monitoring / budget_service.py reads), mapped to the
+    fact_budget.dept_group labels CoChat's department scoping relies on
+    (ebs_chat_service._BUDGET_GROUP_MAP): 1x Administration and 4x Director
+    -> Admin, 2x -> SM, 6x -> SD, 3x -> Plant, split Direct = 34 Warehouse /
+    35 Production Planning / 38 Production (HRGA's Production + PPWH teams,
+    as on the EIS Administration page) and Indirect = the other 3x codes.
+    Codes outside those ranges (0xx/9xx: non-departmental postings and
+    eliminations) belong to no department and are not loaded. This used to
+    group by segment2 with a placeholder range map, which put nearly all
+    spend under Admin."""
     year = year or datetime.now().year
     pg = _get_pg()
     job_id = _log_start(pg, "etl_budget", year, month)
@@ -1316,25 +1328,27 @@ def etl_budget(year: int = None, month: int = None):
 
         period_clause, period_params = _month_filter_gl(year, month)
 
-        # Extract expense accounts (account_type='E') grouped by period + cost center (segment2)
-        # actual_flag: 'A' = actual spending, 'B' = budget (business plan)
+        # Expense accounts (account_type='E') per period + department (segment3).
+        # actual_flag: 'A' = actual spending, 'B' = budget (business plan).
+        # summary_flag='N' keeps summary-template balances from double counting.
         cur_ora.execute(f"""
             SELECT
                 gb.period_name,
                 gb.period_year,
                 gb.period_num,
-                gcc.segment2 as cost_center,
+                gcc.segment3 as dept_code,
                 gb.actual_flag,
                 SUM(NVL(gb.period_net_dr, 0) - NVL(gb.period_net_cr, 0)) as amount
             FROM gl_balances gb
             JOIN gl_code_combinations gcc ON gb.code_combination_id = gcc.code_combination_id
             WHERE gb.actual_flag IN ('A', 'B')
               AND gcc.account_type = 'E'
+              AND gcc.summary_flag = 'N'
               AND gb.currency_code = 'IDR'
               {period_clause}
             GROUP BY gb.period_name, gb.period_year, gb.period_num,
-                     gcc.segment2, gb.actual_flag
-            ORDER BY gb.period_year, gb.period_num, gcc.segment2
+                     gcc.segment3, gb.actual_flag
+            ORDER BY gb.period_year, gb.period_num, gcc.segment3
         """, period_params)
 
         rows = cur_ora.fetchall()
@@ -1343,30 +1357,47 @@ def etl_budget(year: int = None, month: int = None):
         ora.close()
 
         # ── LOAD ──────────────────────────────────────────────────
-        # Map Oracle cost center segment → dept_group
-        def _map_cost_center(segment):
-            """Map GL segment2 (cost center code) to dept_group."""
-            s = str(segment or '').strip().upper()
-            # Adjust these ranges to match your actual Oracle COA cost center codes
-            if s.startswith('1'):      # e.g. 1xxx = Sales & Marketing
+        plant_direct_codes = {"34", "35", "38"}
+
+        def _map_department(code):
+            """GL segment3 department code -> fact_budget.dept_group (None = not a department)."""
+            c = str(code or '').strip()
+            if c[:1] in ('1', '4'):
+                return 'Admin'
+            if c[:1] == '2':
                 return 'SM'
-            if s.startswith('2'):      # e.g. 2xxx = Supply & Distribution
+            if c[:1] == '6':
                 return 'SD'
-            if s.startswith('3'):      # e.g. 3xxx = Plant Direct
-                return 'Plant Direct'
-            if s.startswith('4'):      # e.g. 4xxx = Plant Indirect
-                return 'Plant Indirect'
-            return 'Admin'
+            if c[:1] == '3':
+                return 'Plant Direct' if c[:2] in plant_direct_codes else 'Plant Indirect'
+            return None
 
         # Aggregate per (period, dept_group, actual_flag)
         agg = defaultdict(lambda: {'A': 0.0, 'B': 0.0})
-        for period_name_ora, period_year, period_num, cost_center, actual_flag, amount in rows:
-            dept_group = _map_cost_center(cost_center)
+        skipped = defaultdict(float)
+        for period_name_ora, period_year, period_num, dept_code, actual_flag, amount in rows:
+            dept_group = _map_department(dept_code)
+            if dept_group is None:
+                skipped[str(dept_code)] += float(amount or 0)
+                continue
             key = (int(period_year), int(period_num), dept_group)
             if actual_flag in ('A', 'B'):
                 agg[key][actual_flag] += float(amount or 0)
+        if skipped:
+            logger.info(f"[etl_budget] Non-department codes not loaded: "
+                        f"{ {k: round(v) for k, v in sorted(skipped.items())} }")
 
+        # Replace the reloaded periods wholesale, so a group that no longer
+        # receives postings (e.g. rows written under the old segment2 map)
+        # doesn't keep a stale value next to the new ones.
         cur_pg = pg.cursor()
+        cur_pg.execute(
+            """DELETE FROM eis.fact_budget
+               WHERE period_id IN (SELECT id FROM eis.dim_period
+                                   WHERE fiscal_year = %s AND (%s IS NULL OR period_num = %s))""",
+            (year, month, month),
+        )
+
         loaded = 0
         for (ora_year, ora_month, dept_group), amounts in agg.items():
             period_id = _get_period_id(cur_pg, ora_year, ora_month)

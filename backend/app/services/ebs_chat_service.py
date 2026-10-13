@@ -37,15 +37,12 @@ aggregate or transactional table with no department-ownership column at
 all — RLS can't filter a dimension the data doesn't carry. Only
 dim_employee.department, fact_employee.dept_group (HR canonical taxonomy —
 Administration / Sales & Marketing / Strategy & Development / Plant) and
-fact_budget.dept_group (a DIFFERENT taxonomy, derived from GL cost-center
-codes — SM / SD / Plant Direct / Plant Indirect / Admin, see
-eis_etl_tasks.etl_budget._map_cost_center) have one. _BUDGET_GROUP_MAP below
-is a best-effort translation between the two so an admin only ever has to
-pick departments from the one taxonomy they already know from HR/Attendance
-— note etl_budget's own cost-center-range mapping is flagged there as a
-placeholder pending calibration against the real Oracle COA, so this
-translation inherits that same uncertainty for the "SD" bucket in
-particular.
+fact_budget.dept_group (a DIFFERENT taxonomy, derived from the GL
+department segment3 — SM / SD / Plant Direct / Plant Indirect / Admin, see
+eis_etl_tasks.etl_budget's docstring for the code ranges) have one.
+_BUDGET_GROUP_MAP below translates between the two so an admin only ever has
+to pick departments from the one taxonomy they already know from
+HR/Attendance.
 
 Callers with departments=[] and full_access=false can still ask about
 sales/production/COGS/etc. — those 9 tables are unaffected by RLS regardless
@@ -81,7 +78,7 @@ logger = structlog.get_logger()
 settings = get_settings()
 
 # fact_budget.dept_group taxonomy <- HR canonical department taxonomy.
-# See module docstring — best-effort, "SD" in particular is unconfirmed.
+# Both sides follow the same department ranges (see etl_budget).
 _BUDGET_GROUP_MAP = {
     "Administration": ["Admin"],
     "Sales & Marketing": ["SM"],
