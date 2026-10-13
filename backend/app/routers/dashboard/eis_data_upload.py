@@ -995,6 +995,10 @@ async def upload_expansion(
 #                                sales_amount
 #   Marketing_Activities         event_name, region, year, month,
 #                                plan_event_count, actual_event_count
+#   Administration_Headcount     department, year, month, plan_count,
+#                                actual_count
+#   Administration_Financial     metric, department, year, month,
+#                                plan_amount, actual_amount
 #
 # `month` is an English month name or 1–12. Every year present in a sheet
 # is replaced wholesale for that sheet's table, so re-uploading a corrected
@@ -1087,6 +1091,18 @@ _TEMPLATE_SHEETS = {
                    "plan_event_count": _num(r["plan_event_count"]),
                    "actual_event_count": _num(r["actual_event_count"])},
     ),
+    "administration_headcount": (
+        "adm_headcount",
+        ["department", "year", "month", "plan_count", "actual_count"],
+        lambda r: {"department": _txt(r["department"], 80), "plan_count": _num(r["plan_count"]),
+                   "actual_count": _num(r["actual_count"])},
+    ),
+    "administration_financial": (
+        "adm_financial",
+        ["metric", "department", "year", "month", "plan_amount", "actual_amount"],
+        lambda r: {"metric": _txt(r["metric"], 80), "department": _txt(r["department"], 80),
+                   "plan_amount": _num(r["plan_amount"]), "actual_amount": _num(r["actual_amount"])},
+    ),
 }
 
 # Columns that must be non-empty for a row to mean anything.
@@ -1098,6 +1114,7 @@ _TEMPLATE_KEY_COLS = {
     "perf_sales_ledger": ("product_name", "market", "scenario"),
     "perf_area_sales": ("region",),
     "perf_marketing": ("event_name",),
+    "adm_financial": ("metric",),
 }
 
 
@@ -1153,7 +1170,8 @@ def _parse_eis_template(content: bytes) -> dict[str, list[dict]]:
             detail="Tidak ada sheet EIS Template di file ini. Sheet yang dibaca: Production_BatchYield, "
                    "Production_Ratios, Production_Release, Production_COGSRatio, "
                    "Production_MachineUtilization, SalesSummary_Monthly, Sales_Ledger, "
-                   "AreaSales_Ledger, Marketing_Activities.",
+                   "AreaSales_Ledger, Marketing_Activities, Administration_Headcount, "
+                   "Administration_Financial.",
         )
     return out
 

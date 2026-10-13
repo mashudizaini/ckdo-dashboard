@@ -320,6 +320,7 @@ export const eisApi = {
   getCashflow:  (year) => api.get(`${EIS}/admin/cashflow`, { params: { year } }),
   getRatios:    (year) => api.get(`${EIS}/admin/ratios`, { params: { year } }),
   getBudget:    (year) => api.get(`${EIS}/admin/budget`, { params: { year } }),
+  getAdministrationDashboard: (year, period) => api.get(`${EIS}/admin/dashboard`, { params: { year, period } }),
 
   // Business Plan
   getBpList: (year, planType) => api.get(`${EIS}/bp/list`, { params: { year, plan_type: planType } }),

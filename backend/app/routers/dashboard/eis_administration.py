@@ -196,3 +196,254 @@ async def budget_utilization(
     """)
     result = await db.execute(q, {"year": year})
     return {"data": [dict(r) for r in result.mappings().all()]}
+
+
+# ══════════════════════════════════════════════════════════════
+# Administration dashboard — laid out after the EIS template's
+# Administration sheet. One call returns every block; actuals are live,
+# only the plans come from the EIS template upload (eis.adm_*), because
+# neither HRGA nor Accounting carries a plan figure:
+#   Personnel   HRGA employees, active as of the selected month's end (same
+#               _is_active rule as HRGA Employee Data). Groups = the 4
+#               canonical departments; Plant split Direct (team Production
+#               or PPWH) / Indirect. Turnover = HRGA's YTD formula (resigns
+#               Jan..month ÷ mean of each month's avg headcount). Plan =
+#               Administration_Headcount (company row).
+#   Financial   Oracle GL through Accounting's FinancialStatementService
+#               (same numbers as Financial Statement): net profit per month
+#               vs Administration_Financial "Net Profit" plan (progress =
+#               YTD actual ÷ YTD plan); cash & cash equivalents at month end
+#               vs "Cashflow Ending Balance" plan.
+#   Ratios      DSO = avg AR ÷ net sales of the last 12 months × 365,
+#               DPO = avg AP ÷ COGS of the last 12 months × 365, the average
+#               being (this month + same month last year) ÷ 2 — the
+#               template's own formula (reproduces its Oct 2025 84.79 days).
+#   Budget      actual = Oracle GL expense postings (actual_flag 'A') per
+#               department via segment3 (CKDO_GL_COA_DEPARTMENT, as Budget
+#               Monitoring); codes outside the department ranges (0xx/9xx:
+#               non-departmental, eliminations) are left out. Plan =
+#               Administration_Financial "Budget Usage" (monthly) and
+#               "Budget Allocation" (YTD per department).
+# Amounts are returned in IDR million, as the template shows them.
+# ══════════════════════════════════════════════════════════════
+
+ADM_GROUPS = ["Sales & Marketing", "Strategy & Development", "Plant", "Administration"]
+PLANT_DIRECT_TEAMS = {"PRODUCTION", "PPWH"}
+# segment3 first digit -> department group (codes per budget_access_service)
+BUDGET_DEPT_GROUP = {"1": "Administration", "4": "Administration", "2": "Sales & Marketing",
+                     "3": "Plant", "6": "Strategy & Development"}
+# Administration_Financial "Budget Allocation" department labels -> groups
+_TPL_DEPT = {"Sales & Marketing": "Sales & Marketing", "Strategy & Development": "Strategy & Development",
+             "Plant": "Plant", "Admin": "Administration", "Administration": "Administration"}
+
+
+def _mio(v):
+    return round(float(v) / 1e6, 1) if v is not None else None
+
+
+def _ratio_pct(num, den):
+    return round(num / den * 100, 1) if num is not None and den else None
+
+
+def _personnel(rows, year: int, period: int):
+    from app.routers.dashboard.hr_employees import _is_active
+
+    def snapshot(d):
+        return [r for r in rows if _is_active(r.date_of_joining, r.resign_date, r.employment_status, d)]
+
+    month_end = date(year, period, monthrange(year, period)[1])
+    active = snapshot(month_end)
+    groups = {g: 0 for g in ADM_GROUPS}
+    unassigned = plant_direct = 0
+    for r in active:
+        g = normalize_department(r.department)
+        if g is None:
+            unassigned += 1
+            continue
+        groups[g] += 1
+        if g == "Plant" and (r.team or "").strip().upper() in PLANT_DIRECT_TEAMS:
+            plant_direct += 1
+
+    monthly, resigns, avg_hcs = [], 0, []
+    for m in range(1, period + 1):
+        first = date(year, m, 1)
+        last = date(year, m, monthrange(year, m)[1])
+        monthly.append({"month": m, "headcount": len(snapshot(last))})
+        # HRGA /turnover-summary's month window, kept identical on purpose
+        start = sum(1 for r in rows if r.date_of_joining < first and
+                    (r.resign_date >= first if r.resign_date else r.employment_status != "Resign"))
+        end = sum(1 for r in rows if r.date_of_joining <= last and
+                  (r.resign_date >= first if r.resign_date else r.employment_status != "Resign"))
+        avg_hcs.append((start + end) / 2)
+        resigns += sum(1 for r in rows if r.resign_date and first <= r.resign_date <= last)
+    avg_hc = sum(avg_hcs) / len(avg_hcs) if avg_hcs else 0
+
+    return {
+        "total": len(active),
+        "groups": groups,
+        "plant_direct": plant_direct,
+        "plant_indirect": groups["Plant"] - plant_direct,
+        "unassigned": unassigned,
+        "monthly": monthly,
+        "resigns_ytd": resigns,
+        "turnover_pct": round(resigns / avg_hc * 100, 1) if avg_hc else None,
+    }
+
+
+def _budget_actuals(year: int, period: int) -> dict:
+    """(month, group) -> Oracle expense actual in rupiah."""
+    from app.database import get_oracle_connection
+    sql = """
+        SELECT gb.period_num, SUBSTR(gcc.segment3, 1, 1) AS dept_digit,
+               SUM(NVL(gb.period_net_dr, 0) - NVL(gb.period_net_cr, 0)) AS amount
+        FROM gl_balances gb
+        JOIN gl_code_combinations gcc ON gcc.code_combination_id = gb.code_combination_id
+        WHERE gb.actual_flag = 'A' AND gcc.account_type = 'E' AND gb.currency_code = 'IDR'
+          AND gcc.summary_flag = 'N' AND gb.period_year = :y AND gb.period_num <= :p
+        GROUP BY gb.period_num, SUBSTR(gcc.segment3, 1, 1)
+    """
+    out = {}
+    with get_oracle_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, {"y": year, "p": period})
+        for m, digit, amount in cur.fetchall():
+            g = BUDGET_DEPT_GROUP.get(str(digit))
+            if g:
+                out[(int(m), g)] = out.get((int(m), g), 0.0) + float(amount or 0)
+    return out
+
+
+@router.get("/dashboard")
+async def administration_dashboard(
+    year: int = Query(...), period: int = Query(..., ge=1, le=12),
+    main_db: AsyncSession = Depends(get_main_db), eis_db: AsyncSession = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    import asyncio
+    import logging
+    log = logging.getLogger(__name__)
+
+    # ── Plans (EIS template) ─────────────────────────────────────
+    hc_plan_row = (await eis_db.execute(text("""
+        SELECT month_num, plan_count FROM eis.adm_headcount
+        WHERE department = '' AND fiscal_year = :y AND month_num <= :p AND plan_count IS NOT NULL
+        ORDER BY month_num DESC LIMIT 1
+    """), {"y": year, "p": period})).first()
+    fin_rows = (await eis_db.execute(text("""
+        SELECT metric, department, month_num, plan_amount
+        FROM eis.adm_financial
+        WHERE fiscal_year = :y AND month_num <= :p
+    """), {"y": year, "p": period})).mappings().all()
+    plan = {}
+    for r in fin_rows:
+        plan[(r["metric"], r["department"], r["month_num"])] = float(r["plan_amount"]) if r["plan_amount"] is not None else None
+
+    def plan_series(metric):
+        return [plan.get((metric, "", m)) for m in range(1, period + 1)]
+
+    # ── Personnel (HRGA) ─────────────────────────────────────────
+    emp_rows = (await main_db.execute(
+        select(Employee.department, Employee.team, Employee.date_of_joining,
+               Employee.resign_date, Employee.employment_status)
+        .where(Employee.date_of_joining.isnot(None))
+    )).all()
+    personnel = _personnel(emp_rows, year, period)
+    personnel["plan"] = float(hc_plan_row[1]) if hc_plan_row else None
+    personnel["plan_month"] = hc_plan_row[0] if hc_plan_row else None
+    personnel["achievement_pct"] = _ratio_pct(personnel["total"], personnel["plan"])
+
+    # ── Financial + ratios (Oracle via Accounting) ───────────────
+    yy = lambda y: str(y)[2:].zfill(2)
+    pname = lambda y, m: f"{_MONTH_ABBR[m - 1]}-{yy(y)}"
+    # 24 months: Jan of last year .. selected month (12-month windows + YTD)
+    months = [(year - 1, m) for m in range(1, 13)] + [(year, m) for m in range(1, period + 1)]
+    financial = ratios = None
+    try:
+        fs = FinancialStatementService()
+        pl = await fs.get_profit_and_loss([{"label": pname(*k), "periods": [pname(*k)]} for k in months])
+        bs_periods = [pname(year, m) for m in range(1, period + 1)] + [pname(year - 1, period)]
+        bs = await fs.get_balance_sheet(bs_periods)
+
+        def bs_row(section, label):
+            r = next((x for x in bs.get(section, []) if x["label"] == label), None)
+            return r["values"] if r else [None] * len(bs_periods)
+
+        cash = bs_row("current_assets", "CASH & CASH EQUIVALENTS")
+        ar = bs_row("current_assets", "ACCOUNT RECEIVABLES")
+        ap = bs_row("current_liabilities", "ACCOUNT PAYABLES")
+        this_year = slice(12, 12 + period)
+        pat = pl["profit_after_tax"][this_year]
+
+        np_plan = plan_series("Net Profit")
+        ytd_np = sum(v for v in pat if v is not None) / 1e6
+        ytd_np_plan = sum(v for v in np_plan if v is not None) if any(v is not None for v in np_plan) else None
+        cf_plan = plan.get(("Cashflow Ending Balance", "", period))
+        financial = {
+            "net_profit": [{"month": m, "actual": _mio(pat[m - 1]), "plan": np_plan[m - 1]} for m in range(1, period + 1)],
+            "net_profit_ytd": round(ytd_np, 1),
+            "net_profit_ytd_plan": ytd_np_plan,
+            # A progress ratio only means something against a positive plan.
+            "net_profit_progress_pct": _ratio_pct(ytd_np, ytd_np_plan) if ytd_np_plan and ytd_np_plan > 0 else None,
+            "cash": [{"month": m, "actual": _mio(cash[m - 1]), "plan": plan.get(("Cashflow Ending Balance", "", m))}
+                     for m in range(1, period + 1)],
+            "cash_plan": cf_plan,
+            "cash_achievement_pct": _ratio_pct(_mio(cash[period - 1]), cf_plan),
+        }
+
+        window = slice(period, 12 + period)   # the 12 months ending at the selected one
+        sales12 = sum(v or 0 for v in pl["total_net_sales"][window])
+        cogs12 = sum(v or 0 for v in pl["total_cogs"][window])
+        avg = lambda a: (a[period - 1] + a[-1]) / 2 if a[period - 1] is not None and a[-1] is not None else None
+        avg_ar, avg_ap = avg(ar), avg(ap)
+        ratios = {
+            "dso_days": round(avg_ar / sales12 * 365, 1) if avg_ar is not None and sales12 else None,
+            "dpo_days": round(avg_ap / cogs12 * 365, 1) if avg_ap is not None and cogs12 else None,
+            "sales_12m": _mio(sales12), "cogs_12m": _mio(cogs12),
+            "avg_ar": _mio(avg_ar), "avg_ap": _mio(avg_ap),
+        }
+    except Exception as e:  # Oracle down must not blank the HR half of the page
+        log.exception("[eis admin] Oracle financial figures failed")
+        financial = {"error": str(e)}
+        ratios = {"error": str(e)}
+
+    # ── Budget (Oracle actual, template plan) ─────────────────────
+    budget = None
+    try:
+        actuals = await asyncio.to_thread(_budget_actuals, year, period)
+        bu_plan = plan_series("Budget Usage")
+        monthly = []
+        for m in range(1, period + 1):
+            vals = [actuals.get((m, g)) for g in ADM_GROUPS]
+            act = sum(v for v in vals if v is not None) / 1e6 if any(v is not None for v in vals) else None
+            monthly.append({"month": m, "actual": round(act, 1) if act is not None else None, "plan": bu_plan[m - 1]})
+        ytd_actual = sum(r["actual"] for r in monthly if r["actual"] is not None)
+        ytd_plan = sum(v for v in bu_plan if v is not None) if any(v is not None for v in bu_plan) else None
+        # Budget Allocation plan is YTD-cumulative in the template: latest month <= period
+        alloc_plan = {}
+        for (metric, dept, m), v in plan.items():
+            g = _TPL_DEPT.get(dept)
+            if metric == "Budget Allocation" and g and v is not None and m >= alloc_plan.get(g, (0, None))[0]:
+                alloc_plan[g] = (m, v)
+        dept_ytd = {g: sum(actuals.get((m, g), 0.0) for m in range(1, period + 1)) / 1e6 for g in ADM_GROUPS}
+        dept_total = sum(v for v in dept_ytd.values() if v > 0)
+        budget = {
+            "monthly": monthly,
+            "ytd_actual": round(ytd_actual, 1),
+            "ytd_plan": ytd_plan,
+            "achievement_pct": _ratio_pct(ytd_actual, ytd_plan),
+            "departments": [
+                {"group": g, "actual": round(dept_ytd[g], 1),
+                 "share_pct": _ratio_pct(dept_ytd[g], dept_total) if dept_ytd[g] > 0 else 0,
+                 "plan": alloc_plan[g][1] if g in alloc_plan else None}
+                for g in ADM_GROUPS
+            ],
+        }
+    except Exception as e:
+        log.exception("[eis admin] Oracle budget actuals failed")
+        budget = {"error": str(e)}
+
+    return {
+        "year": year, "period": period,
+        "personnel": personnel, "financial": financial, "ratios": ratios, "budget": budget,
+        "has_plan": bool(hc_plan_row or fin_rows),
+    }

@@ -642,6 +642,36 @@ async def ensure_eis_template_tables():
             UNIQUE (event_name, region, fiscal_year, month_num)
         )
         """,
+        # Administration: only the plan columns are read (Administration
+        # page) — actuals come live from HRGA employees and Oracle GL;
+        # the sheets' own actual columns are stored as delivered.
+        """
+        CREATE TABLE IF NOT EXISTS eis.adm_headcount (
+            id              SERIAL PRIMARY KEY,
+            department      VARCHAR(80) NOT NULL DEFAULT '',
+            fiscal_year     INTEGER NOT NULL,
+            month_num       INTEGER NOT NULL CHECK (month_num BETWEEN 1 AND 12),
+            plan_count      NUMERIC(10,2),
+            actual_count    NUMERIC(10,2),
+            uploaded_by     VARCHAR(150),
+            uploaded_at     TIMESTAMPTZ DEFAULT now(),
+            UNIQUE (department, fiscal_year, month_num)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS eis.adm_financial (
+            id              SERIAL PRIMARY KEY,
+            metric          VARCHAR(80) NOT NULL,
+            department      VARCHAR(80) NOT NULL DEFAULT '',
+            fiscal_year     INTEGER NOT NULL,
+            month_num       INTEGER NOT NULL CHECK (month_num BETWEEN 1 AND 12),
+            plan_amount     NUMERIC(20,6),
+            actual_amount   NUMERIC(20,6),
+            uploaded_by     VARCHAR(150),
+            uploaded_at     TIMESTAMPTZ DEFAULT now(),
+            UNIQUE (metric, department, fiscal_year, month_num)
+        )
+        """,
     ]
     async with eis_async_engine.begin() as conn:
         for stmt in ddl:

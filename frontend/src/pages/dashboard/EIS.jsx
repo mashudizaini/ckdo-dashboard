@@ -4,7 +4,7 @@ import {
   BarChart2, TrendingUp, TrendingDown, Landmark, Wallet, Users, PieChart as PieIcon,
   Loader2, RefreshCw, Upload, FileSpreadsheet, Save, Plus, Trash2, Play, Square,
   ChevronDown, ChevronUp, Database, CheckCircle2, XCircle, Clock, X, Target, Package,
-  DollarSign, Activity,
+  DollarSign, Activity, PersonStanding,
 } from "lucide-react";
 import {
   BarChart, Bar, LineChart, Line, ComposedChart, PieChart, Pie, XAxis, YAxis, CartesianGrid,
@@ -1049,185 +1049,234 @@ function SourceTag({ children }) {
   );
 }
 
-const ADMIN_TABS = [
-  { key: "personnel", label: "Personnel", icon: Users },
-  { key: "financial", label: "Financial", icon: Landmark },
-  { key: "ratios", label: "Ratios", icon: PieIcon },
-  { key: "budget", label: "Budget", icon: Wallet },
-];
+/* Laid out after the template's Administration sheet: Personel Plan,
+   Financial Updates, Financial Ratio, Budget Utilization. Actuals are live
+   (HRGA employees, Oracle GL via Accounting); plans come from the EIS
+   Template upload — see eis_administration.py /dashboard. Uses the shared
+   EIS template pieces defined above the Performance tab. */
+const ADM_GROUP_LABEL = {
+  "Sales & Marketing": "S&M", "Strategy & Development": "SD", Plant: "Plant", Administration: "Admin",
+};
+const ADM_PIE_COLORS = [XL_BLUE, XL_ORANGE, XL_GRAY, "#FFC000"];
 
-function EisAdministrationTab({ year }) {
-  const [tab, setTab] = useState("personnel");
-  const [data, setData] = useState({});
+/** Full ring: blue = achieved, pale = remainder (capped at 100% visually). */
+function FullDonut({ pct, height = 150 }) {
+  const v = Math.max(0, Math.min(100, Number(pct) || 0));
+  return (
+    <div className="relative" style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Pie data={[{ v }, { v: 100 - v }]} dataKey="v" startAngle={90} endAngle={-270}
+            innerRadius="58%" outerRadius="90%" stroke="none" isAnimationActive={false}>
+            <Cell fill={XL_BLUE} /><Cell fill="#dbe4f3" />
+          </Pie>
+        </PieChart>
+      </ResponsiveContainer>
+      <div className="absolute inset-0 flex items-center justify-center text-lg font-extrabold text-gray-100">
+        {pct == null ? "—" : `${fmtN(pct, 0)}%`}
+      </div>
+    </div>
+  );
+}
+
+function PersonRow({ label, count, indent = false }) {
+  return (
+    <div className="grid grid-cols-[110px_36px_1fr] items-center gap-2 py-0.5">
+      <span className={`text-xs font-bold text-gray-200 ${indent ? "pl-5" : ""}`}>{label}</span>
+      <span className="text-xs font-semibold text-gray-300 text-right">{count}</span>
+      <div className="flex flex-wrap gap-px">
+        {Array.from({ length: count }, (_, i) => <PersonStanding key={i} size={11} strokeWidth={2.5} style={{ color: XL_ORANGE }} />)}
+      </div>
+    </div>
+  );
+}
+
+function KpiBox({ title, value }) {
+  return (
+    <div className="border border-gray-800 rounded-lg overflow-hidden flex flex-col">
+      <div className="text-center text-xs font-bold text-gray-200 py-1 border-b border-gray-800">{title}</div>
+      <div className="flex-1 flex items-center justify-center py-2 text-4xl font-extrabold text-gray-100">{value}</div>
+    </div>
+  );
+}
+
+function OracleError({ block }) {
+  return <div className="py-8 text-center text-xs text-red-600">Data Oracle tidak bisa dibaca: {block.error}</div>;
+}
+
+/** Monthly bars with value labels (negative bars allowed). */
+function MonthlyBars({ rows, height = 210 }) {
+  const data = rows.map((r) => ({ ...r, name: MONTHS_SHORT[r.month - 1] }));
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data} margin={{ top: 18, right: 8, left: 4, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={TPL_GRID} vertical={false} />
+        <XAxis dataKey="name" tick={TPL_TICK} />
+        <YAxis tick={TPL_TICK} tickFormatter={fmtInt} width={62} />
+        <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => [fmtInt(v), "Actual"]} />
+        <ReferenceLine y={0} stroke="#94a3b8" />
+        <Bar dataKey="actual" name="Actual" fill={XL_BLUE} barSize={18}>
+          <LabelList dataKey="actual" position="top" formatter={(v) => v == null ? "" : fmtInt(v)} style={TPL_LABEL} />
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function EisAdministrationTab({ year, period }) {
+  const [d, setD] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    try {
-      const [hRes, tRes, pRes, cRes, rRes, bRes] = await Promise.all([
-        eisApi.getHeadcount(year), eisApi.getTurnover(year), eisApi.getProfit(year),
-        eisApi.getCashflow(year), eisApi.getRatios(year), eisApi.getBudget(year),
-      ]);
-      setData({
-        headcount: hRes.data || [], turnover: tRes.data || [], profit: pRes.data || [],
-        cashflow: cRes.data || [], ratios: rRes.data || [], budget: bRes.data || [],
-      });
-    } catch (e) { console.error("Failed to load EIS administration:", e); }
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, [year]); // eslint-disable-line
+    eisApi.getAdministrationDashboard(year, period)
+      .then((r) => { if (!cancelled) setD(r); })
+      .catch((e) => { console.error("Failed to load EIS administration:", e); if (!cancelled) setD(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [year, period]);
 
   if (loading) return <Loading />;
+  if (!d) return <ChartCard title=""><div className="py-12 text-center text-sm text-gray-500">Gagal memuat data Administration.</div></ChartCard>;
 
-  const headcountByMonth = {};
-  (data.headcount || []).forEach((r) => {
-    if (!headcountByMonth[r.period_num]) headcountByMonth[r.period_num] = { period_name: r.period_name, period_num: r.period_num, total: 0 };
-    headcountByMonth[r.period_num][r.dept_group] = r.headcount;
-    headcountByMonth[r.period_num].total += r.headcount;
-  });
-  const headcountChart = Object.values(headcountByMonth).sort((a, b) => a.period_num - b.period_num);
-
-  const budgetByMonth = {};
-  (data.budget || []).forEach((r) => {
-    if (!budgetByMonth[r.period_num]) budgetByMonth[r.period_num] = { period_name: r.period_name, bp: 0, actual: 0 };
-    budgetByMonth[r.period_num].bp += Number(r.bp_amount || 0);
-    budgetByMonth[r.period_num].actual += Number(r.actual_amount || 0);
-  });
-  const budgetChart = Object.values(budgetByMonth);
+  const p = d.personnel, f = d.financial, r = d.ratios, b = d.budget;
+  const g = p.groups;
+  const budgetRows = (b?.monthly || []).map((x) => ({ ...x, name: MONTHS_SHORT[x.month - 1] }));
+  const pie = (b?.departments || []).map((x) => ({ ...x, name: ADM_GROUP_LABEL[x.group] }));
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-xl p-1 w-fit">
-        {ADMIN_TABS.map(({ key, label, icon: Icon }) => (
-          <button key={key} onClick={() => setTab(key)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-colors ${tab === key ? "bg-cyan-600 text-white" : "text-gray-400 hover:bg-gray-800"}`}>
-            <Icon size={14} />{label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "personnel" && (
-        <div className="space-y-2">
-        <SourceTag>Dashboard HRGA &ndash; Employee Data</SourceTag>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ChartCard title="Employee headcount">
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={headcountChart}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
-                <XAxis dataKey="period_name" tick={AXIS_TICK} tickFormatter={(v) => v?.slice(0, 3)} />
-                <YAxis tick={AXIS_TICK} />
-                <Tooltip contentStyle={TOOLTIP_STYLE} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                <Bar dataKey="Sales & Marketing" stackId="a" fill={COLOR_PRIMARY} name="Sales & Marketing" />
-                <Bar dataKey="Strategy & Development" stackId="a" fill="#47a7c7" name="Strategy & Development" />
-                <Bar dataKey="Plant" stackId="a" fill={COLOR_GREEN} name="Plant" />
-                <Bar dataKey="Administration" stackId="a" fill={COLOR_GOLD} name="Administration" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-          <ChartCard title="Turnover rate">
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={data.turnover}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
-                <XAxis dataKey="period_name" tick={AXIS_TICK} tickFormatter={(v) => v?.slice(0, 3)} />
-                <YAxis tick={AXIS_TICK} unit="%" />
-                <Tooltip contentStyle={TOOLTIP_STYLE} />
-                <ReferenceLine y={15} stroke={COLOR_AMBER} strokeDasharray="5 5" />
-                <ReferenceLine y={20} stroke={COLOR_RED} strokeDasharray="5 5" />
-                <Line type="monotone" dataKey="turnover_pct" stroke="#ef6c4a" strokeWidth={2.5} dot={{ r: 4 }} name="Turnover %" />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartCard>
-        </div>
+      <SourceTag>HRGA Employee · Oracle GL (Accounting) · plan: EIS Template</SourceTag>
+      <EisHeaderBand title="ADMINISTRATION" year={year} period={period} />
+      {!d.has_plan && (
+        <div className="text-xs text-amber-700 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+          Plan (Business Plan headcount, Net Profit, Cashflow, Budget) belum ada untuk {year}. Upload workbook EIS Template (sheet Administration_Headcount &amp; Administration_Financial) di EIS → Data Upload.
         </div>
       )}
 
-      {tab === "financial" && (
-        <div className="space-y-2">
-        <SourceTag>Dashboard Accounting &amp; Tax (Actual) &middot; ETL Financial (Plan)</SourceTag>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ChartCard title="Monthly net profit">
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={data.profit}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
-                <XAxis dataKey="period_name" tick={AXIS_TICK} tickFormatter={(v) => v?.slice(0, 3)} />
-                <YAxis tick={AXIS_TICK} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
-                <Tooltip contentStyle={TOOLTIP_STYLE} />
-                <ReferenceLine y={0} stroke="#4b5563" />
-                <Bar dataKey="net_profit_actual" name="Net Profit" radius={[4, 4, 0, 0]}>
-                  {(data.profit || []).map((entry, i) => <Cell key={i} fill={Number(entry.net_profit_actual) >= 0 ? COLOR_GREEN : COLOR_RED} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-          <ChartCard title="Cashflow: plan vs actual">
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={data.cashflow}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
-                <XAxis dataKey="period_name" tick={AXIS_TICK} tickFormatter={(v) => v?.slice(0, 3)} />
-                <YAxis tick={AXIS_TICK} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
-                <Tooltip contentStyle={TOOLTIP_STYLE} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line type="monotone" dataKey="cf_ending_balance_bp" stroke="#6b7280" strokeWidth={1.5} strokeDasharray="5 5" name="Plan" dot={false} />
-                <Line type="monotone" dataKey="cf_ending_balance_actual" stroke={COLOR_PRIMARY} strokeWidth={2.5} dot={{ r: 3 }} name="Actual" />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartCard>
+      <EisSection title="Personel Plan" subtitle="Total Employee">
+        <div className="grid grid-cols-1 lg:grid-cols-[150px_1fr_170px] gap-3">
+          <div className="grid grid-rows-2 gap-3">
+            <KpiBox title="Total" value={fmtInt(p.total)} />
+            <KpiBox title="Turnover Rate" value={p.turnover_pct == null ? "—" : `${fmtN(p.turnover_pct, 0)}%`} />
+          </div>
+          <div className="border border-gray-800 rounded-lg px-3 py-2 flex flex-col justify-center">
+            <PersonRow label="S&M" count={g["Sales & Marketing"]} />
+            <PersonRow label="SD" count={g["Strategy & Development"]} />
+            <PersonRow label="Plant" count={g.Plant} />
+            <PersonRow label="Plant Direct" count={p.plant_direct} indent />
+            <PersonRow label="Plant Indirect" count={p.plant_indirect} indent />
+            <PersonRow label="Admin" count={g.Administration} />
+            {p.unassigned > 0 && <PersonRow label="Tanpa department" count={p.unassigned} />}
+            <div className="text-[10px] text-gray-600 mt-1">Plant Direct = team Production &amp; PPWH · turnover = resign Jan–{MONTHS_SHORT[period - 1]} ÷ rata-rata headcount</div>
+          </div>
+          <div className="grid grid-rows-2 gap-3">
+            <KpiBox title="Business Plan" value={p.plan == null ? "—" : fmtInt(p.plan)} />
+            <KpiBox title="Achievement" value={p.achievement_pct == null ? "—" : `${fmtN(p.achievement_pct, 0)}%`} />
+          </div>
         </div>
-        </div>
-      )}
-
-      {tab === "ratios" && (
-        <div className="space-y-2">
-        <SourceTag>ETL Financial</SourceTag>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <ChartCard title="DSO & DPO trend">
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={data.ratios}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
-                <XAxis dataKey="period_name" tick={AXIS_TICK} tickFormatter={(v) => v?.slice(0, 3)} />
-                <YAxis tick={AXIS_TICK} unit=" d" />
-                <Tooltip contentStyle={TOOLTIP_STYLE} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line type="monotone" dataKey="dso_days" stroke={COLOR_PRIMARY} strokeWidth={2} dot={{ r: 3 }} name="DSO" />
-                <Line type="monotone" dataKey="dpo_days" stroke={COLOR_GOLD} strokeWidth={2} dot={{ r: 3 }} name="DPO" />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartCard>
-          <ChartCard title="Net working capital trend">
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={data.ratios}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
-                <XAxis dataKey="period_name" tick={AXIS_TICK} tickFormatter={(v) => v?.slice(0, 3)} />
-                <YAxis tick={AXIS_TICK} unit=" d" />
-                <Tooltip contentStyle={TOOLTIP_STYLE} />
-                <Line type="monotone" dataKey="nwc_days" stroke="#ef6c4a" strokeWidth={2.5} dot={{ r: 4 }} name="NWC (days)" />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartCard>
-        </div>
-        </div>
-      )}
-
-      {tab === "budget" && (
-        <div className="space-y-2">
-        <SourceTag>ETL Financial</SourceTag>
-        <ChartCard title="Monthly budget: plan vs actual">
-          <ResponsiveContainer width="100%" height={340}>
-            <BarChart data={budgetChart} barCategoryGap="25%">
-              <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
-              <XAxis dataKey="period_name" tick={AXIS_TICK} tickFormatter={(v) => v?.slice(0, 3)} />
-              <YAxis tick={AXIS_TICK} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="bp" name="Business Plan" fill={COLOR_PRIMARY} radius={[4, 4, 0, 0]} />
-              <Bar dataKey="actual" name="Actual" fill={COLOR_GOLD} radius={[4, 4, 0, 0]} />
+        <div className="mt-3">
+          <BlockTitle>Monthly Headcount</BlockTitle>
+          <ResponsiveContainer width="100%" height={210}>
+            <BarChart data={p.monthly.map((x) => ({ ...x, name: MONTH_NAMES[x.month - 1] }))} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={TPL_GRID} vertical={false} />
+              <XAxis dataKey="name" tick={TPL_TICK} />
+              <YAxis tick={TPL_TICK} domain={[(min) => Math.max(0, Math.floor((min - 5) / 2) * 2), (max) => Math.ceil((max + 1) / 2) * 2]} width={40} allowDecimals={false} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => [v, "Headcount"]} />
+              <Bar dataKey="headcount" name="Headcount" fill={XL_BLUE} barSize={26}>
+                <LabelList dataKey="headcount" position="top" style={TPL_LABEL} />
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
-        </ChartCard>
         </div>
-      )}
+      </EisSection>
+
+      <EisSection title="Financial Updates">
+        {f?.error ? <OracleError block={f} /> : (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div>
+              <div className="text-center text-sm font-bold text-gray-200 border-b border-gray-800 pb-1 mb-2">Profit or Loss</div>
+              <div className="grid grid-cols-1 sm:grid-cols-[150px_1fr] gap-2 items-center">
+                <div>
+                  <BlockTitle>Net Profit Progress</BlockTitle>
+                  <FullDonut pct={f.net_profit_progress_pct} />
+                  <div className="text-[10px] text-gray-600 text-center">YTD {fmtInt(f.net_profit_ytd)} ÷ plan {f.net_profit_ytd_plan == null ? "—" : fmtInt(f.net_profit_ytd_plan)}</div>
+                </div>
+                <div>
+                  <BlockTitle>Monthly Net Profit - IDR Million</BlockTitle>
+                  <MonthlyBars rows={f.net_profit} />
+                </div>
+              </div>
+            </div>
+            <div>
+              <div className="text-center text-sm font-bold text-gray-200 border-b border-gray-800 pb-1 mb-2">Cashflow</div>
+              <div className="grid grid-cols-1 sm:grid-cols-[150px_1fr] gap-2 items-center">
+                <div>
+                  <BlockTitle>Achievement</BlockTitle>
+                  <FullDonut pct={f.cash_achievement_pct} />
+                  <div className="text-[10px] text-gray-600 text-center">Saldo kas {MONTHS_SHORT[period - 1]} ÷ plan {f.cash_plan == null ? "—" : fmtInt(f.cash_plan)}</div>
+                </div>
+                <div>
+                  <BlockTitle>Monthly - IDR Million</BlockTitle>
+                  <MonthlyBars rows={f.cash} />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </EisSection>
+
+      <EisSection title="Financial Ratio (days)">
+        {r?.error ? <OracleError block={r} /> : (
+          <div className="grid grid-cols-2 divide-x divide-gray-800 border border-gray-800 rounded-lg">
+            {[["DSO", r.dso_days, `avg AR ${fmtInt(r.avg_ar)} ÷ sales 12 bln ${fmtInt(r.sales_12m)} × 365`],
+              ["DPO", r.dpo_days, `avg AP ${fmtInt(r.avg_ap)} ÷ COGS 12 bln ${fmtInt(r.cogs_12m)} × 365`]].map(([k, v, note]) => (
+              <div key={k} className="text-center py-2">
+                <div className="text-sm font-bold text-gray-200 border-b border-gray-800 pb-1 mb-2">{k}</div>
+                <div className="text-3xl font-extrabold text-gray-100">{v == null ? "—" : fmtN(v, 0)}</div>
+                <div className="text-[10px] text-gray-600 mt-1">{note}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </EisSection>
+
+      <EisSection title="Budget Utilization">
+        {b?.error ? <OracleError block={b} /> : (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div>
+              <BlockTitle>Monthly - IDR Million</BlockTitle>
+              <MonthlyPlanActual seg={{ monthly: b.monthly }} />
+            </div>
+            <div>
+              <div className="grid grid-cols-2 gap-3 mb-1">
+                <div>
+                  <div className="text-xs font-bold text-gray-200">Budget Usage :</div>
+                  <div className="text-xl font-extrabold text-gray-100">{fmtInt(b.ytd_actual)} <span className="text-xs font-semibold text-gray-500">IDR Million</span></div>
+                  <div className="text-[10px] text-gray-600">Jan–{MONTHS_SHORT[period - 1]} · plan {b.ytd_plan == null ? "—" : fmtInt(b.ytd_plan)}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs font-bold text-gray-200">Budget Achievement :</div>
+                  <div className="text-xl font-extrabold text-gray-100">{b.achievement_pct == null ? "—" : `${fmtN(b.achievement_pct, 0)}%`}</div>
+                </div>
+              </div>
+              <BlockTitle>Department Allocation</BlockTitle>
+              <ResponsiveContainer width="100%" height={230}>
+                <PieChart>
+                  <Pie data={pie} dataKey="actual" nameKey="name" outerRadius="75%" isAnimationActive={false}
+                    label={({ share_pct }) => `${fmtN(share_pct, 0)}%`} labelLine={false}>
+                    {pie.map((_, i) => <Cell key={i} fill={ADM_PIE_COLORS[i % ADM_PIE_COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, n, item) => [`${fmtInt(v)} (plan ${item.payload.plan == null ? "—" : fmtInt(item.payload.plan)})`, n]} />
+                  <Legend layout="vertical" align="right" verticalAlign="middle" wrapperStyle={{ fontSize: 11 }} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="text-[10px] text-gray-600 text-center">Actual Oracle GL (beban per department, segment3) · plan dari EIS Template</div>
+            </div>
+          </div>
+        )}
+      </EisSection>
     </div>
   );
 }
@@ -1675,7 +1724,7 @@ function EisDataUploadTab({ year: sharedYear }) {
 
   return (
     <div className="space-y-4">
-      <ChartCard title="EIS Template — Production & Performance" subtitle="Workbook EIS Template (mis. EIS_Template_2026_V2_Filled_v4-PRODUCTION.xlsx). Hanya sheet yang ada di file yang diperbarui; sheet lain diabaikan. Tahun diambil dari isi file."
+      <ChartCard title="EIS Template — Production, Performance & Administration" subtitle="Workbook EIS Template (mis. EIS_Template_2026_V2_Filled_v4-PRODUCTION.xlsx). Hanya sheet yang ada di file yang diperbarui; sheet lain diabaikan. Tahun diambil dari isi file."
         right={
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={() => ptFileRef.current?.click()} disabled={ptUploading} className={`${uploadBtnCls} bg-indigo-600 hover:bg-indigo-700`}>
@@ -1697,6 +1746,8 @@ function EisDataUploadTab({ year: sharedYear }) {
             <li><strong className="text-gray-300">Sales_Ledger</strong>: product_name, market, year, month, scenario (Actual / Business Plan), sales_amount, cogs_amount, opex_amount, ebit_amount — dipakai untuk EBIT - Product</li>
             <li><strong className="text-gray-300">AreaSales_Ledger</strong>: region, city, year, month, segment, sales_amount — bulanan per area</li>
             <li><strong className="text-gray-300">Marketing_Activities</strong>: event_name, region, year, Month, plan_event_count (target tahunan), actual_event_count (kumulatif YTD)</li>
+            <li><strong className="text-gray-300">Administration_Headcount</strong>: department, year, month, plan_count, actual_count — yang dipakai hanya plan baris company (department kosong); actual headcount live dari HRGA</li>
+            <li><strong className="text-gray-300">Administration_Financial</strong>: metric (Net Profit / Cashflow Ending Balance / Budget Usage / Budget Allocation), department, year, month, plan_amount, actual_amount — yang dipakai hanya plan; actual live dari Oracle GL</li>
           </ul>
           <p><strong className="text-gray-300">month</strong> = nama bulan Inggris (January…) atau 1–12. Upload ulang mengganti seluruh data tahun yang ada di file; sel kosong disimpan kosong (bukan nol).</p>
         </RequiredFormatNote>
@@ -1988,7 +2039,7 @@ export default function EISDashboard() {
       {tab === "performance" && <EisPerformanceTab year={year} period={period} />}
       {tab === "production" && <EisProductionTab year={year} period={period} />}
       {tab === "expansion" && <EisExpansionTab year={year} period={period} />}
-      {tab === "administration" && <EisAdministrationTab year={year} />}
+      {tab === "administration" && <EisAdministrationTab year={year} period={period} />}
       {tab === "business-plan" && <EisBusinessPlanTab year={year} />}
       {tab === "daily-sales" && <EisDailySalesTab year={year} />}
       {tab === "data-upload" && <EisDataUploadTab year={year} />}
