@@ -494,6 +494,95 @@ async def ensure_daily_sales_table():
             """))
 
 
+async def ensure_production_template_tables():
+    """Tables behind the EIS Production page, filled by uploading the EIS
+    template workbook (sheets Production_BatchYield / _Ratios / _Release /
+    _COGSRatio / _MachineUtilization — see eis_data_upload's
+    production-template upload). Deliberately separate from fact_production,
+    fact_financial_ratio and fact_cogs: those are rewritten from Oracle by
+    the nightly ETL, which would silently overwrite uploaded figures.
+
+    Keyed by (fiscal_year, month_num) directly rather than dim_period — the
+    workbook carries its own years, and a snapshot sheet (GPM, machine
+    utilization) can land in a month dim_period has not been seeded for.
+    Text key columns default to '' instead of NULL so the UNIQUE constraints
+    hold (NULL never equals NULL). NULL values mean "empty in the source",
+    not zero — the template says so for every month it has not filled."""
+    from sqlalchemy import text
+    ddl = [
+        """
+        CREATE TABLE IF NOT EXISTS eis.prod_batch_yield (
+            id              SERIAL PRIMARY KEY,
+            segment         VARCHAR(50) NOT NULL,
+            fiscal_year     INTEGER NOT NULL,
+            month_num       INTEGER NOT NULL CHECK (month_num BETWEEN 1 AND 12),
+            plan_qty        NUMERIC(18,4),
+            batch_size_qty  NUMERIC(18,4),
+            actual_qty      NUMERIC(18,4),
+            uploaded_by     VARCHAR(150),
+            uploaded_at     TIMESTAMPTZ DEFAULT now(),
+            UNIQUE (segment, fiscal_year, month_num)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS eis.prod_ratio (
+            id              SERIAL PRIMARY KEY,
+            metric          VARCHAR(50) NOT NULL,
+            segment         VARCHAR(50) NOT NULL DEFAULT '',
+            fiscal_year     INTEGER NOT NULL,
+            month_num       INTEGER NOT NULL CHECK (month_num BETWEEN 1 AND 12),
+            value_type      VARCHAR(50) NOT NULL,
+            value           NUMERIC(18,6),
+            uploaded_by     VARCHAR(150),
+            uploaded_at     TIMESTAMPTZ DEFAULT now(),
+            UNIQUE (metric, segment, fiscal_year, month_num, value_type)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS eis.prod_release (
+            id              SERIAL PRIMARY KEY,
+            product_code    VARCHAR(50) NOT NULL DEFAULT '',
+            fiscal_year     INTEGER NOT NULL,
+            month_num       INTEGER NOT NULL CHECK (month_num BETWEEN 1 AND 12),
+            plan_days       NUMERIC(10,2),
+            actual_days     NUMERIC(10,2),
+            uploaded_by     VARCHAR(150),
+            uploaded_at     TIMESTAMPTZ DEFAULT now(),
+            UNIQUE (product_code, fiscal_year, month_num)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS eis.prod_gpm (
+            id              SERIAL PRIMARY KEY,
+            product_name    VARCHAR(150) NOT NULL,
+            fiscal_year     INTEGER NOT NULL,
+            month_num       INTEGER NOT NULL CHECK (month_num BETWEEN 1 AND 12),
+            gpm_ratio       NUMERIC(12,6),
+            uploaded_by     VARCHAR(150),
+            uploaded_at     TIMESTAMPTZ DEFAULT now(),
+            UNIQUE (product_name, fiscal_year, month_num)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS eis.prod_machine_utilization (
+            id               SERIAL PRIMARY KEY,
+            plant            VARCHAR(50) NOT NULL DEFAULT '',
+            fiscal_year      INTEGER NOT NULL,
+            month_num        INTEGER NOT NULL CHECK (month_num BETWEEN 1 AND 12),
+            availability_pct NUMERIC(8,6),
+            performance_pct  NUMERIC(8,6),
+            quality_pct      NUMERIC(8,6),
+            uploaded_by      VARCHAR(150),
+            uploaded_at      TIMESTAMPTZ DEFAULT now(),
+            UNIQUE (plant, fiscal_year, month_num)
+        )
+        """,
+    ]
+    async with eis_async_engine.begin() as conn:
+        for stmt in ddl:
+            await conn.execute(text(stmt))
+
+
 async def ensure_ap_attachment_table():
     """Metadata of files attached to AP invoices in EBS — names and sizes only.
 

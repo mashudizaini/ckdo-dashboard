@@ -7,7 +7,7 @@ import {
   DollarSign, Activity,
 } from "lucide-react";
 import {
-  BarChart, Bar, LineChart, Line, ComposedChart, XAxis, YAxis, CartesianGrid,
+  BarChart, Bar, LineChart, Line, ComposedChart, PieChart, Pie, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer, Cell, ReferenceLine, LabelList,
 } from "recharts";
 import { eisApi } from "@/api/dashboard";
@@ -549,116 +549,245 @@ function EisPerformanceTab({ year, period, segment }) {
   );
 }
 
-/* ─── Tab: Production ───────────────────────────────────────────── */
+/* ─── Tab: Production ─────────────────────────────────────────────
+   Laid out after the template's Production_Dashboard sheet (Executive
+   Information Summary): Batch & Yield, DIO, Quality Release, COGS
+   Performance (GPM), Machine Utilization (OEE), Overtime Ratio. Data comes
+   from the EIS template upload (eis.prod_*), one call for the whole page;
+   every formula lives in the backend (eis_production.py /dashboard).
+   Series colors follow the sheet: blue = plan / main series, orange =
+   actual / second series. */
+const XL_BLUE = "#4472C4";
+const XL_ORANGE = "#ED7D31";
+const XL_GRAY = "#A5A5A5";
+const MONTH_NAMES = MONTHS_FULL_ID.map((m) => m.label);
+
+function ProdSection({ title, className = "", children }) {
+  return (
+    <div className={`bg-gray-900 border border-gray-800 rounded-xl overflow-hidden flex flex-col ${className}`}>
+      <div className="bg-blue-950 border-b border-blue-900 px-3 py-1.5 text-center text-sm font-bold text-blue-100">{title}</div>
+      <div className="p-3 flex-1">{children}</div>
+    </div>
+  );
+}
+
+/** "as of Jul 2026" when a block shows a different month than the one selected. */
+function AsOf({ year, month, selYear, selMonth }) {
+  if (!month || (year === selYear && month === selMonth)) return null;
+  return <div className="text-[10px] text-amber-400/80 text-center mt-1">as of {MONTHS_SHORT[month - 1]} {year}</div>;
+}
+
+function BigNumber({ value, unit }) {
+  return (
+    <div className="text-center">
+      <div className="text-4xl font-extrabold text-gray-100 leading-tight">{value}</div>
+      {unit && <div className="text-[11px] text-gray-500">{unit}</div>}
+    </div>
+  );
+}
+
+function YieldGauge({ pct }) {
+  const v = Math.max(0, Math.min(100, Number(pct) || 0));
+  return (
+    <div className="relative h-[130px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Pie data={[{ v }, { v: 100 - v }]} dataKey="v" startAngle={180} endAngle={0}
+            cx="50%" cy="85%" innerRadius="60%" outerRadius="100%" stroke="none" isAnimationActive={false}>
+            <Cell fill={XL_BLUE} /><Cell fill={XL_ORANGE} />
+          </Pie>
+        </PieChart>
+      </ResponsiveContainer>
+      <div className="absolute inset-x-0 bottom-2 text-center text-sm font-semibold text-gray-200">
+        {pct == null ? "—" : `${fmtN(pct, 1)}%`}
+      </div>
+    </div>
+  );
+}
+
 function EisProductionTab({ year, period }) {
-  const [yieldData, setYieldData] = useState([]);
-  const [overtime, setOvertime] = useState([]);
-  const [cogs, setCogs] = useState([]);
-  const [release, setRelease] = useState([]);
-  const [dio, setDio] = useState([]);
+  const [d, setD] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    try {
-      const [yRes, oRes, cRes, rRes, dRes] = await Promise.all([
-        eisApi.getYieldProduction(year), eisApi.getOvertime(year),
-        eisApi.getCogsRatio(year, period), eisApi.getReleaseTime(year), eisApi.getDio(year),
-      ]);
-      setYieldData(yRes.data || []);
-      setOvertime(oRes.data || []);
-      setCogs((cRes.data || []).slice(0, 14));
-      setRelease(rRes.data || []);
-      setDio(dRes.data || []);
-    } catch (e) { console.error("Failed to load EIS production:", e); }
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, [year, period]); // eslint-disable-line
+    eisApi.getProductionDashboard(year, period)
+      .then((r) => { if (!cancelled) setD(r); })
+      .catch((e) => { console.error("Failed to load EIS production:", e); if (!cancelled) setD(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [year, period]);
 
   if (loading) return <Loading />;
-  const latestYield = yieldData.length > 0 ? yieldData[yieldData.length - 1] : null;
+  if (!d?.has_data) {
+    return (
+      <ChartCard title="">
+        <div className="text-center py-12 text-gray-500">
+          <BarChart2 size={32} className="mx-auto mb-3 opacity-30" />
+          <p className="text-sm">Belum ada data Production untuk {MONTH_NAMES[period - 1]} {year}.</p>
+          <p className="text-xs text-gray-600 mt-1">Upload workbook EIS Template di menu EIS → Data Upload → "EIS Template — Production".</p>
+        </div>
+      </ChartCard>
+    );
+  }
+
+  const label = (m) => MONTHS_SHORT[m - 1];
+  const batch = d.batch.map((r) => ({ ...r, name: label(r.month) }));
+  const yieldRows = d.yield.monthly.map((r) => ({ ...r, name: label(r.month) }));
+  const overtime = d.overtime.map((r) => ({ ...r, name: label(r.month) }));
+  const yieldVals = yieldRows.map((r) => r.yield_pct).filter((v) => v != null);
+  const yieldDomain = yieldVals.length
+    ? [Math.floor(Math.min(...yieldVals) - 3), Math.min(100, Math.ceil(Math.max(...yieldVals) + 2))]
+    : [80, 100];
+  const sel = { selYear: year, selMonth: period };
+  const gpm = d.gpm?.items || [];
+  const m = d.machine;
 
   return (
     <div className="space-y-4">
-      <SourceTag>ETL Financial</SourceTag>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: "Current yield", value: `${fmtN(latestYield?.yield_pct || 0, 1)}%`, sub: "Target: 95%", good: Number(latestYield?.yield_pct || 0) >= 95 },
-          { label: "Days inventory (DIO)", value: dio.length ? fmtN(dio[dio.length - 1].dio_days, 0) : "—", sub: "days", good: null },
-          { label: "FG release time", value: release.length ? release[release.length - 1].actual_days : "—", sub: "days (target: 16)", good: release.length && Number(release[release.length - 1]?.actual_days) <= 16 },
-          { label: "Overtime ratio", value: overtime.length ? `${fmtN(overtime[overtime.length - 1]?.ratio_pct, 1)}%` : "—", sub: "Target: <15%", good: overtime.length && Number(overtime[overtime.length - 1]?.ratio_pct) <= 15 },
-        ].map((k) => (
-          <div key={k.label} className="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center">
-            <div className="text-xs text-gray-500 font-medium mb-2">{k.label}</div>
-            <div className={`text-3xl font-bold ${k.good === null ? "text-cyan-400" : k.good ? "text-emerald-400" : "text-amber-400"}`}>{k.value}</div>
-            <div className="text-[10px] text-gray-600 mt-1">{k.sub}</div>
+      <SourceTag>EIS Template (upload Excel)</SourceTag>
+
+      {/* Header band — mirrors the sheet's title block */}
+      <div className="grid grid-cols-[2fr_1.4fr_1fr] rounded-xl overflow-hidden border border-blue-900 bg-blue-950 text-white">
+        <div className="px-4 py-2 text-xs sm:text-sm font-bold leading-snug flex items-center justify-center text-center">
+          PT CKD OTTO PHARMACEUTICALS<br />EXECUTIVE INFORMATION SUMMARY
+        </div>
+        <div className="border-x border-blue-900 flex items-center justify-center text-sm sm:text-base font-bold tracking-wide">PRODUCTION</div>
+        <div className="grid grid-rows-2 text-center text-sm font-bold">
+          <div className="flex items-center justify-center border-b border-blue-900">{year}</div>
+          <div className="flex items-center justify-center">{MONTH_NAMES[period - 1]}</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <ProdSection title="Batch & Yield Production">
+          <div className="text-center text-xs font-semibold text-gray-300 mb-1">Batch Production - Vials : Accumulated</div>
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={batch} margin={{ top: 18, right: 8, left: 8, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
+              <XAxis dataKey="name" tick={AXIS_TICK} />
+              <YAxis tick={AXIS_TICK} tickFormatter={fmtInt} width={64} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => fmtInt(v)} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Bar dataKey="plan_cum" name="Business Plan" fill={XL_BLUE}>
+                <LabelList dataKey="plan_cum" position="top" formatter={fmtInt} style={{ fontSize: 9, fill: "#d1d5db" }} />
+              </Bar>
+              <Bar dataKey="actual_cum" name="Actual" fill={XL_ORANGE}>
+                <LabelList dataKey="actual_cum" position="top" formatter={fmtInt} style={{ fontSize: 9, fill: "#d1d5db" }} />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_2fr] gap-3 mt-3">
+            <div className="rounded-lg border border-gray-800 flex flex-col">
+              <div className="text-center text-xs font-semibold text-gray-300 pt-2">Yield</div>
+              <YieldGauge pct={d.yield.current?.yield_pct} />
+              <AsOf year={year} month={d.yield.current?.month} {...sel} />
+              <div className="border-t border-gray-800 mt-2 py-2 text-center">
+                <div className="text-sm font-bold text-gray-200">Target Yield</div>
+                <div className="text-xl font-extrabold text-gray-100">{fmtN(d.yield.target_pct, 1)}%</div>
+              </div>
+            </div>
+            <div className="rounded-lg border border-gray-800 p-2">
+              <div className="text-center text-xs font-semibold text-gray-300 mb-1">Monthly Yield</div>
+              <ResponsiveContainer width="100%" height={210}>
+                <LineChart data={yieldRows} margin={{ top: 16, right: 12, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
+                  <XAxis dataKey="name" tick={AXIS_TICK} />
+                  <YAxis tick={AXIS_TICK} domain={yieldDomain} tickFormatter={(v) => `${v}%`} width={44} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => [`${fmtN(v, 1)}%`, "Yield"]} />
+                  <ReferenceLine y={d.yield.target_pct} stroke={COLOR_RED} strokeDasharray="5 5" />
+                  <Line type="linear" dataKey="yield_pct" name="Yield" stroke={XL_GRAY} strokeWidth={2} dot={{ r: 3, fill: XL_GRAY }} connectNulls={false}>
+                    <LabelList dataKey="yield_pct" position="top" formatter={(v) => v == null ? "" : `${fmtN(v, 1)}%`} style={{ fontSize: 9, fill: "#d1d5db" }} />
+                  </Line>
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           </div>
-        ))}
+        </ProdSection>
+
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <ProdSection title="DIO">
+              <div className="text-center text-[11px] text-gray-500 mb-1">Days</div>
+              <BigNumber value={d.dio?.days == null ? "—" : fmtN(d.dio.days, 0)} />
+              <AsOf year={year} month={d.dio?.month} {...sel} />
+            </ProdSection>
+            <ProdSection title="Quality Release">
+              <div className="text-center text-[11px] text-gray-500 mb-1">Days</div>
+              <div className="grid grid-cols-2 divide-x divide-gray-800">
+                <div><div className="text-center text-xs font-semibold text-gray-400">Plan</div><BigNumber value={d.release?.plan_days == null ? "—" : fmtN(d.release.plan_days, 0)} /></div>
+                <div><div className="text-center text-xs font-semibold text-gray-400">Actual</div><BigNumber value={d.release?.actual_days == null ? "—" : fmtN(d.release.actual_days, 0)} /></div>
+              </div>
+              <AsOf year={year} month={d.release?.month} {...sel} />
+            </ProdSection>
+          </div>
+
+          <ProdSection title="COGS Performance">
+            <div className="text-center text-xs font-semibold text-gray-300 mb-1">GPM</div>
+            {gpm.length === 0 ? <div className="py-8 text-center text-xs text-gray-600">Belum ada data GPM.</div> : (
+              <ResponsiveContainer width="100%" height={Math.max(180, gpm.length * 22 + 30)}>
+                <BarChart data={gpm} layout="vertical" margin={{ left: 8, right: 44, top: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
+                  <XAxis type="number" tick={AXIS_TICK} tickFormatter={(v) => `${v}%`} />
+                  <YAxis type="category" dataKey="product" tick={{ fontSize: 10, fill: "#d1d5db" }} width={110} interval={0} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => [`${fmtN(v, 1)}%`, "GPM"]} />
+                  <Bar dataKey="gpm_pct" name="GPM" fill={XL_BLUE} barSize={12}>
+                    <LabelList dataKey="gpm_pct" position="right" formatter={(v) => `${fmtN(v, 0)}%`} style={{ fontSize: 10, fill: "#d1d5db" }} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+            {d.gpm && <AsOf year={d.gpm.year} month={d.gpm.month} {...sel} />}
+          </ProdSection>
+
+          <ProdSection title="Machine Utilization">
+            {!m ? <div className="py-8 text-center text-xs text-gray-600">Belum ada data machine utilization.</div> : (
+              <>
+                <div className="grid grid-cols-[1.4fr_auto_1.6fr] gap-3 items-center">
+                  <div className="rounded-lg border border-gray-800 overflow-hidden text-xs">
+                    <div className="bg-gray-800/60 text-center font-semibold text-gray-300 py-1">Indicator</div>
+                    {[["Availability", m.availability_pct], ["Performance", m.performance_pct], ["Quality", m.quality_pct]].map(([k, v]) => (
+                      <div key={k} className="grid grid-cols-2 border-t border-gray-800">
+                        <div className="px-2 py-1.5 font-bold text-gray-200">{k}</div>
+                        <div className="px-2 py-1.5 text-center text-gray-300 border-l border-gray-800">{v == null ? "—" : `${fmtN(v, 0)}%`}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <ChevronDown size={34} className="-rotate-90 text-blue-500" strokeWidth={3} />
+                  <div className="rounded-lg border border-gray-800 h-full flex flex-col">
+                    <div className="bg-gray-800/60 text-center text-xs font-semibold text-gray-300 py-1">Overall Equipment Effectiveness</div>
+                    <div className="flex-1 flex items-center justify-center py-3">
+                      <BigNumber value={m.oee_pct == null ? "—" : `${fmtN(m.oee_pct, 0)}%`} />
+                    </div>
+                  </div>
+                </div>
+                <AsOf year={m.year} month={m.month} {...sel} />
+              </>
+            )}
+          </ProdSection>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ChartCard title="Yield production trend">
-          <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={yieldData}>
-              <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
-              <XAxis dataKey="period_name" tick={AXIS_TICK} tickFormatter={(v) => v?.slice(0, 3)} />
-              <YAxis tick={AXIS_TICK} unit="%" domain={[80, 100]} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <ReferenceLine y={95} stroke={COLOR_RED} strokeDasharray="5 5" label={{ value: "Target 95%", position: "right", fontSize: 10, fill: COLOR_RED }} />
-              <Line type="monotone" dataKey="yield_pct" stroke={COLOR_GREEN} strokeWidth={2.5} dot={{ r: 4, fill: COLOR_GREEN }} name="Yield %" />
-            </LineChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        <ChartCard title="Plant overtime ratio">
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={overtime}>
-              <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
-              <XAxis dataKey="period_name" tick={AXIS_TICK} tickFormatter={(v) => v?.slice(0, 3)} />
-              <YAxis tick={AXIS_TICK} unit="%" />
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <ReferenceLine y={15} stroke={COLOR_RED} strokeDasharray="5 5" label={{ value: "15%", position: "right", fontSize: 10, fill: COLOR_RED }} />
-              <Bar dataKey="ratio_pct" name="Overtime %" radius={[4, 4, 0, 0]}>
-                {overtime.map((entry, i) => (
-                  <Cell key={i} fill={Number(entry.ratio_pct) <= 15 ? COLOR_GREEN : Number(entry.ratio_pct) <= 20 ? COLOR_AMBER : COLOR_RED} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ChartCard title="COGS ratio by product">
-          <ResponsiveContainer width="100%" height={340}>
-            <BarChart data={cogs} layout="vertical" margin={{ left: 130 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
-              <XAxis type="number" tick={AXIS_TICK} />
-              <YAxis type="category" dataKey="product_name" tick={{ fontSize: 10, fill: "#d1d5db" }} width={125} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <Bar dataKey="cogs_rate" name="COGS Ratio" radius={[0, 4, 4, 0]}>
-                {cogs.map((entry, i) => (
-                  <Cell key={i} fill={Number(entry.cogs_rate) > 1 ? COLOR_RED : Number(entry.cogs_rate) > 0.7 ? COLOR_AMBER : COLOR_PRIMARY} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        <ChartCard title="Days inventory outstanding (DIO)">
-          <ResponsiveContainer width="100%" height={340}>
-            <LineChart data={dio}>
-              <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
-              <XAxis dataKey="period_name" tick={AXIS_TICK} tickFormatter={(v) => v?.slice(0, 3)} />
-              <YAxis tick={AXIS_TICK} unit=" d" />
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <ReferenceLine y={150} stroke={COLOR_AMBER} strokeDasharray="5 5" />
-              <Line type="monotone" dataKey="dio_days" stroke={COLOR_GOLD} strokeWidth={2.5} dot={{ r: 4 }} name="DIO (days)" />
-            </LineChart>
-          </ResponsiveContainer>
-        </ChartCard>
-      </div>
+      <ProdSection title="Overtime Ratio">
+        <div className="text-center text-xs font-semibold text-gray-300 mb-1">Overtime Ratio - Plant</div>
+        <ResponsiveContainer width="100%" height={260}>
+          <ComposedChart data={overtime} margin={{ top: 16, right: 8, left: 8, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
+            <XAxis dataKey="name" tick={AXIS_TICK} />
+            <YAxis yAxisId="h" tick={AXIS_TICK} tickFormatter={fmtInt} width={56} />
+            <YAxis yAxisId="r" orientation="right" tick={AXIS_TICK} tickFormatter={(v) => `${v}%`} width={40} domain={[0, (max) => Math.max(25, Math.ceil(max / 5) * 5)]} />
+            <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, n) => n === "Overtime Ratio" ? [`${fmtN(v, 1)}%`, n] : [fmtN(v, 1), n]} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Bar yAxisId="h" dataKey="overtime_hours" name="Overtime Hour" fill={XL_BLUE} />
+            <Bar yAxisId="h" dataKey="working_hours" name="Working Hour" fill={XL_ORANGE} />
+            <Line yAxisId="r" type="linear" dataKey="ratio_pct" name="Overtime Ratio" stroke={XL_GRAY} strokeWidth={2} dot={{ r: 3, fill: XL_GRAY }}>
+              <LabelList dataKey="ratio_pct" position="top" formatter={(v) => v == null ? "" : `${fmtN(v, 0)}%`} style={{ fontSize: 9, fill: "#d1d5db" }} />
+            </Line>
+          </ComposedChart>
+        </ResponsiveContainer>
+      </ProdSection>
     </div>
   );
 }
@@ -1302,6 +1431,11 @@ function EisDataUploadTab({ year: sharedYear }) {
   const [expLogsKey, setExpLogsKey] = useState(0);
   const expFileRef = useRef(null);
 
+  const [ptUploading, setPtUploading] = useState(false);
+  const [ptMsg, setPtMsg] = useState(null);
+  const [ptLogsKey, setPtLogsKey] = useState(0);
+  const ptFileRef = useRef(null);
+
   const loadOvertime = async () => { setOtLoading(true); try { setOvertime((await eisApi.getOvertimeData(selectedYear)).data || []); } catch (e) { console.error(e); } setOtLoading(false); };
   const loadCogs = async () => { setCogsLoading(true); try { setCogs((await eisApi.getCogsUploadData(selectedYear, selectedPeriod)).data || []); } catch (e) { console.error(e); } setCogsLoading(false); };
   const loadSalesBP = async () => { setBpLoading(true); try { setSalesBP((await eisApi.getSalesBP(selectedYear)).data || []); } catch (e) { console.error(e); } setBpLoading(false); };
@@ -1364,6 +1498,18 @@ function EisDataUploadTab({ year: sharedYear }) {
     setExpUploading(false); e.target.value = "";
   };
 
+  const handlePtUpload = async (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    setPtUploading(true); setPtMsg(null);
+    try {
+      const fd = new FormData(); fd.append("file", file);
+      const res = await eisApi.uploadProductionTemplate(fd);
+      setPtMsg({ type: "ok", text: res.message });
+    } catch (err) { setPtMsg({ type: "err", text: "Gagal: " + (err?.response?.data?.detail || err?.detail || err.message) }); }
+    setPtLogsKey((k) => k + 1);
+    setPtUploading(false); e.target.value = "";
+  };
+
   const YearSelector = () => (
     <div className="flex items-center gap-2">
       <label className="text-xs text-gray-500 font-medium">Tahun:</label>
@@ -1375,6 +1521,30 @@ function EisDataUploadTab({ year: sharedYear }) {
 
   return (
     <div className="space-y-4">
+      <ChartCard title="EIS Template — Production" subtitle="Workbook EIS Template (mis. EIS_Template_2026_V2_Filled_v4-PRODUCTION.xlsx): sheet Production_* dibaca, sheet lain diabaikan. Tahun diambil dari isi file."
+        right={
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => ptFileRef.current?.click()} disabled={ptUploading} className={`${uploadBtnCls} bg-indigo-600 hover:bg-indigo-700`}>
+              {ptUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {ptUploading ? "Mengupload..." : "Pilih File"}
+            </button>
+            <input ref={ptFileRef} type="file" accept=".xlsx" className="hidden" onChange={handlePtUpload} />
+          </div>
+        }>
+        <MsgBanner msg={ptMsg} onClose={() => setPtMsg(null)} />
+        <RequiredFormatNote>
+          <p>Setiap sheet berupa tabel dengan <strong className="text-gray-300">header di baris 1</strong> (nama kolom, urutan bebas). Kolom <strong className="text-gray-300">notes</strong> hanya panduan pengisian dan tidak disimpan.</p>
+          <ul className="list-disc pl-4 space-y-0.5">
+            <li><strong className="text-gray-300">Production_BatchYield</strong>: segment, year, month, plan_qty, batch_size_qty, actual_qty — segmen "(Total Company)" berisi batch size &amp; actual untuk yield</li>
+            <li><strong className="text-gray-300">Production_Ratios</strong>: metric (DIO / Overtime Ratio), segment, year, month, value_1, Type (COGS, Average Inventory / Overtime Hour, Working Hour)</li>
+            <li><strong className="text-gray-300">Production_Release</strong>: product_code, year, month, plan_days, actual_days</li>
+            <li><strong className="text-gray-300">Production_COGSRatio</strong>: product_code (nama molekul), year, month, gpm_ratio (1.87 = 187%)</li>
+            <li><strong className="text-gray-300">Production_MachineUtilization</strong>: plant, year, month, availability_pct, performance_pct, quality_pct (0.8 = 80%)</li>
+          </ul>
+          <p><strong className="text-gray-300">month</strong> = nama bulan Inggris (January…) atau 1–12. Upload ulang mengganti seluruh data tahun yang ada di file; sel kosong disimpan kosong (bukan nol).</p>
+        </RequiredFormatNote>
+        <UploadHistoryTable uploadType="production-template" refreshKey={ptLogsKey} />
+      </ChartCard>
+
       <ChartCard title="Upload Data Overtime" subtitle="Format kolom B: label (Overtime Hour / Working Hour) · Kolom C–N: Jan–Dec · Referensi: overtime_data.xlsx"
         right={
           <div className="flex items-center gap-2 shrink-0">

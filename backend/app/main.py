@@ -151,7 +151,7 @@ async def lifespan(app: FastAPI):
 
     # EIS tables (schema `eis` in this same ckdo_dashboard database, created
     # as eis_user through app/eis_database.py)
-    from app.eis_database import ensure_upload_log_table, ensure_purchasing_table, ensure_employee_dim_table, ensure_purchasing_migration_tables, ensure_sales_order_table, ensure_inventory_txn_table, ensure_batch_table, ensure_it_monitoring_tables, ensure_daily_sales_table, ensure_ap_attachment_table
+    from app.eis_database import ensure_upload_log_table, ensure_purchasing_table, ensure_employee_dim_table, ensure_purchasing_migration_tables, ensure_sales_order_table, ensure_inventory_txn_table, ensure_batch_table, ensure_it_monitoring_tables, ensure_daily_sales_table, ensure_ap_attachment_table, ensure_production_template_tables
     await ensure_upload_log_table()
     await ensure_purchasing_table()
     await ensure_employee_dim_table()
@@ -164,6 +164,7 @@ async def lifespan(app: FastAPI):
     await ensure_it_monitoring_tables()
     await ensure_daily_sales_table()
     await ensure_ap_attachment_table()
+    await ensure_production_template_tables()
 
     # EBS Data Mart — meta/core/mart schemas, phase-1 marts, catalog and
     # golden-query seed, reader grants (app/services/ebs_mart/schema.py).

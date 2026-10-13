@@ -968,12 +968,212 @@ async def upload_expansion(
 
 
 # ══════════════════════════════════════════════════════════════
+# EIS Template — Production (EIS_Template_2026_V2_*.xlsx)
+#
+# One workbook, five sheets, each a flat table with a header in row 1
+# (columns matched by name, case-insensitive; order does not matter).
+# The `notes` column is guidance for whoever fills the template and is
+# never stored. Other sheets in the workbook (Sales_*, Administration_*,
+# ...) are ignored here.
+#
+#   Production_BatchYield        segment, year, month, plan_qty,
+#                                batch_size_qty, actual_qty
+#   Production_Ratios            metric, segment, year, month, value_1, type
+#   Production_Release           product_code, year, month, plan_days,
+#                                actual_days
+#   Production_COGSRatio         product_code, year, month, gpm_ratio
+#   Production_MachineUtilization plant, year, month, availability_pct,
+#                                performance_pct, quality_pct
+#
+# `month` is an English month name or 1–12. Every year present in a sheet
+# is replaced wholesale for that sheet's table, so re-uploading a corrected
+# workbook never leaves stale months behind; years not in the file are
+# left untouched.
+# ══════════════════════════════════════════════════════════════
+
+def _month_num(v) -> Optional[int]:
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        n = int(v)
+        return n if 1 <= n <= 12 else None
+    s = str(v).strip().lower()
+    for i, (sh, lo) in enumerate(zip(_BP_MONTH_SHORT, _BP_MONTH_LONG)):
+        if s in (sh, lo):
+            return i + 1
+    return None
+
+
+def _num(v) -> Optional[float]:
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _txt(v, limit: int) -> str:
+    return str(v).strip()[:limit] if v is not None else ""
+
+
+# sheet -> (table, required columns, row builder)
+_PROD_SHEETS = {
+    "production_batchyield": (
+        "prod_batch_yield",
+        ["segment", "year", "month", "plan_qty", "batch_size_qty", "actual_qty"],
+        lambda r: {"segment": _txt(r["segment"], 50), "plan_qty": _num(r["plan_qty"]),
+                   "batch_size_qty": _num(r["batch_size_qty"]), "actual_qty": _num(r["actual_qty"])},
+    ),
+    "production_ratios": (
+        "prod_ratio",
+        ["metric", "segment", "year", "month", "value_1", "type"],
+        lambda r: {"metric": _txt(r["metric"], 50), "segment": _txt(r["segment"], 50),
+                   "value_type": _txt(r["type"], 50), "value": _num(r["value_1"])},
+    ),
+    "production_release": (
+        "prod_release",
+        ["product_code", "year", "month", "plan_days", "actual_days"],
+        lambda r: {"product_code": _txt(r["product_code"], 50), "plan_days": _num(r["plan_days"]),
+                   "actual_days": _num(r["actual_days"])},
+    ),
+    "production_cogsratio": (
+        "prod_gpm",
+        ["product_code", "year", "month", "gpm_ratio"],
+        lambda r: {"product_name": _txt(r["product_code"], 150), "gpm_ratio": _num(r["gpm_ratio"])},
+    ),
+    "production_machineutilization": (
+        "prod_machine_utilization",
+        ["plant", "year", "month", "availability_pct", "performance_pct", "quality_pct"],
+        lambda r: {"plant": _txt(r["plant"], 50), "availability_pct": _num(r["availability_pct"]),
+                   "performance_pct": _num(r["performance_pct"]), "quality_pct": _num(r["quality_pct"])},
+    ),
+}
+
+# Columns that must be non-empty for a row to mean anything.
+_PROD_KEY_COLS = {
+    "prod_batch_yield": ("segment",),
+    "prod_ratio": ("metric", "value_type"),
+    "prod_gpm": ("product_name",),
+}
+
+
+def _parse_production_template(content: bytes) -> dict[str, list[dict]]:
+    try:
+        import openpyxl
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl not installed")
+
+    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+    sheets = {ws.title.strip().lower(): ws for ws in wb.worksheets}
+
+    out: dict[str, list[dict]] = {}
+    for sheet_key, (table, cols, build) in _PROD_SHEETS.items():
+        ws = sheets.get(sheet_key)
+        if ws is None:
+            continue
+        rows = ws.iter_rows(values_only=True)
+        header = next(rows, None) or ()
+        idx = {str(h).strip().lower(): i for i, h in enumerate(header) if h is not None}
+        missing = [c for c in cols if c not in idx]
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Sheet '{ws.title}': kolom {', '.join(missing)} tidak ditemukan di baris 1.",
+            )
+
+        parsed = []
+        for n, raw in enumerate(rows, start=2):
+            if raw is None or all(v is None for v in raw):
+                continue
+            r = {c: (raw[idx[c]] if idx[c] < len(raw) else None) for c in cols}
+            year = _num(r["year"])
+            month = _month_num(r["month"])
+            if year is None and month is None:
+                continue  # blank template row
+            if year is None or month is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Sheet '{ws.title}' baris {n}: year/month tidak valid ({r['year']!r}, {r['month']!r}).",
+                )
+            rec = build(r)
+            if any(not rec[k] for k in _PROD_KEY_COLS.get(table, ())):
+                continue
+            rec["fiscal_year"] = int(year)
+            rec["month_num"] = month
+            parsed.append(rec)
+        out[table] = parsed
+
+    if not out:
+        raise HTTPException(
+            status_code=422,
+            detail="Tidak ada sheet Production_* di file ini. Pastikan memakai workbook EIS Template "
+                   "(sheet Production_BatchYield, Production_Ratios, Production_Release, "
+                   "Production_COGSRatio, Production_MachineUtilization).",
+        )
+    return out
+
+
+@router.post("/production-template/upload")
+async def upload_production_template(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    """Load the Production_* sheets of the EIS template workbook into the
+    eis.prod_* tables. Years come from the file itself (no year parameter)."""
+    if not file.filename.endswith(".xlsx"):
+        raise HTTPException(status_code=422, detail="File harus .xlsx (EIS Template)")
+
+    uploaded_by = user.full_name or user.username or "upload"
+    content = await file.read()
+
+    try:
+        parsed = _parse_production_template(content)
+        summary = {}
+        for table, rows in parsed.items():
+            years = sorted({r["fiscal_year"] for r in rows})
+            if years:
+                await db.execute(
+                    text(f"DELETE FROM eis.{table} WHERE fiscal_year = ANY(:ys)"), {"ys": years},
+                )
+            if rows:
+                cols = list(rows[0].keys()) + ["uploaded_by"]
+                await db.execute(
+                    text(f"INSERT INTO eis.{table} ({', '.join(cols)}) "
+                         f"VALUES ({', '.join(':' + c for c in cols)})"),
+                    [{**r, "uploaded_by": uploaded_by} for r in rows],
+                )
+            summary[table] = {"rows": len(rows), "years": years}
+        await db.commit()
+    except HTTPException as e:
+        await _log_upload("production-template", file.filename, None, 0, "failed", str(e.detail), uploaded_by)
+        raise
+    except Exception as e:
+        logger.exception("[upload_production_template] failed")
+        await _log_upload("production-template", file.filename, None, 0, "failed", str(e), uploaded_by)
+        raise HTTPException(status_code=500, detail=f"Upload gagal: {e}")
+
+    total = sum(s["rows"] for s in summary.values())
+    all_years = sorted({y for s in summary.values() for y in s["years"]})
+    await _log_upload(
+        "production-template", file.filename, all_years[-1] if all_years else None,
+        total, "success", None, uploaded_by,
+    )
+    return {
+        "message": f"Berhasil upload {total} baris Production ({len(summary)} sheet, tahun "
+                   f"{', '.join(map(str, all_years)) or '—'})",
+        "tables": summary,
+    }
+
+
+# ══════════════════════════════════════════════════════════════
 # Upload history — shared by all upload types above
 # ══════════════════════════════════════════════════════════════
 
 @router.get("/upload-logs")
 async def get_upload_logs(
-    upload_type: Optional[str] = Query(None, description="overtime | cogs | sales-bp | expansion"),
+    upload_type: Optional[str] = Query(None, description="overtime | cogs | sales-bp | expansion | production-template"),
     limit: int = Query(20, le=100),
     db: AsyncSession = Depends(get_db),
     user = Depends(get_current_user),
