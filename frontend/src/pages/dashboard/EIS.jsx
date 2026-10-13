@@ -298,29 +298,30 @@ const COGS_COLUMNS = [
   { idx: "W–AH", name: "COGS Amount Jan–Dec", required: true, note: "12 kolom nilai COGS bulanan, dalam JUTA IDR" },
 ];
 
-/* ─── Tab: Summary ──────────────────────────────────────────────── */
+/* ─── Tab: Summary ────────────────────────────────────────────────
+   After the template's Summary sheet. Same numbers as the Performance /
+   Production / Administration pages (the backend's /summary/dashboard
+   calls their own functions), plus Product Portfolio (Sales_Ledger +
+   Oracle OPM cost split) and Sales Closing Estimation for the month being
+   closed (the one after the selected month). */
+const fmtOrDash = (v) => (v == null ? "—" : fmtInt(v));
+const pctOrDash = (v) => (v == null ? "—" : `${fmtN(v, 0)}%`);
+const BUSINESS_LINES = ["Local", "CMO & Others", "Export"];
+
 function ClosingEstBox({ title, seg, planLabel, estLabel }) {
-  const s = seg || { plan: 0, est: 0, pct: 0 };
-  const pctCls = s.pct >= 80 ? "text-emerald-400" : s.pct >= 60 ? "text-amber-400" : "text-red-400";
+  const s = seg || {};
+  const pctCls = s.pct == null ? "text-gray-500" : s.pct >= 80 ? "text-emerald-600" : s.pct >= 60 ? "text-amber-600" : "text-red-600";
   return (
-    <div className="shrink-0 border border-gray-700 rounded-lg overflow-hidden">
-      <table className="text-xs border-collapse">
-        <thead>
-          <tr><th colSpan={3} className="bg-gray-800 text-gray-200 font-semibold px-3 py-1.5 text-center border-b border-gray-700 whitespace-nowrap">{title}</th></tr>
-          <tr className="bg-gray-800/60 text-gray-500">
-            <th className="px-3 py-1.5 border-r border-gray-700 font-medium whitespace-nowrap">{planLabel}</th>
-            <th className="px-3 py-1.5 border-r border-gray-700 font-medium whitespace-nowrap">{estLabel}</th>
-            <th className="px-3 py-1.5 font-medium">%</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr className="text-gray-100 font-mono">
-            <td className="px-3 py-2 border-r border-t border-gray-700 text-right">{fmtInt(s.plan)}</td>
-            <td className="px-3 py-2 border-r border-t border-gray-700 text-right">{fmtInt(s.est)}</td>
-            <td className={`px-3 py-2 border-t border-gray-700 text-right font-semibold ${pctCls}`}>{fmtN(s.pct, 0)}%</td>
-          </tr>
-        </tbody>
-      </table>
+    <div className="shrink-0 border border-gray-800 rounded-lg overflow-hidden text-xs min-w-[190px]">
+      <div className="text-center font-bold text-gray-200 py-1.5 border-b border-gray-800">{title}</div>
+      <div className="grid grid-cols-3 text-center text-gray-500 font-semibold border-b border-gray-800">
+        <span className="py-1">{planLabel}</span><span className="py-1 border-x border-gray-800">{estLabel}</span><span className="py-1">%</span>
+      </div>
+      <div className="grid grid-cols-3 text-right font-mono text-gray-100">
+        <span className="px-2 py-2">{fmtOrDash(s.plan)}</span>
+        <span className="px-2 py-2 border-x border-gray-800">{fmtOrDash(s.est)}</span>
+        <span className={`px-2 py-2 font-semibold ${pctCls}`}>{pctOrDash(s.pct)}</span>
+      </div>
     </div>
   );
 }
@@ -328,95 +329,160 @@ function ClosingEstBox({ title, seg, planLabel, estLabel }) {
 function ClosingEstArrow() {
   return (
     <div className="shrink-0 w-9 flex items-center justify-center self-center">
-      <div className="w-7 h-7 bg-sky-500" style={{ clipPath: "polygon(0% 20%, 50% 20%, 50% 0%, 100% 50%, 50% 100%, 50% 80%, 0% 80%)" }} />
+      <div className="w-7 h-7" style={{ background: XL_BLUE, clipPath: "polygon(0% 0%, 55% 0%, 100% 50%, 55% 100%, 0% 100%, 45% 50%)" }} />
+    </div>
+  );
+}
+
+/** One header+values strip of the portfolio table (div grid — the app's
+ * global table CSS would restyle a real <table>). */
+function PortfolioStrip({ cols }) {
+  return (
+    <div className="overflow-x-auto">
+      <div className="grid min-w-[880px] text-xs border border-gray-800 rounded-lg overflow-hidden"
+        style={{ gridTemplateColumns: cols.map((c) => c.w || "1fr").join(" ") }}>
+        {cols.map((c, i) => <div key={`h${i}`} className="bg-amber-100 text-gray-200 font-bold text-center px-1 py-1 border-b border-gray-800">{c.h}</div>)}
+        {cols.map((c, i) => <div key={`v${i}`} className={`px-2 py-1.5 text-gray-300 ${c.num ? "text-right font-mono" : "text-center"}`}>{c.v}</div>)}
+      </div>
+    </div>
+  );
+}
+
+function ProductPortfolio({ year, period, initial }) {
+  const [p, setP] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setP(initial); }, [initial]);
+
+  if (!p) return <div className="py-8 text-center text-xs text-gray-600">Belum ada data Sales_Ledger. Upload workbook EIS Template di EIS → Data Upload.</div>;
+  const sel = p.selected;
+  const markets = p.markets.filter((m) => m.business === sel.business);
+  const products = (p.markets.find((m) => m.market === sel.market) || { products: [] }).products;
+
+  const choose = async (market, product) => {
+    setBusy(true);
+    try { setP(await eisApi.getSummaryPortfolio(year, period, market, product)); } catch (e) { console.error(e); }
+    setBusy(false);
+  };
+  const onBusiness = (b) => { const m = p.markets.find((x) => x.business === b); if (m) choose(m.market, null); };
+
+  const c = p.cost;
+  const costCell = (k) => (c && !c.error ? c[k] : null);
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={sel.business} onChange={(e) => onBusiness(e.target.value)} className={selCls}>
+          {BUSINESS_LINES.filter((b) => p.markets.some((m) => m.business === b)).map((b) => <option key={b} value={b}>{b}</option>)}
+        </select>
+        <select value={sel.market} onChange={(e) => choose(e.target.value, null)} className={selCls}>
+          {markets.map((m) => <option key={m.market} value={m.market}>{m.market}</option>)}
+        </select>
+        <select value={sel.product} onChange={(e) => choose(sel.market, e.target.value)} className={selCls}>
+          {products.map((x) => <option key={x} value={x}>{x}</option>)}
+        </select>
+        {busy && <Loader2 size={13} className="animate-spin text-gray-500" />}
+        <span className="ml-auto text-[10px] text-amber-600">Sales_Ledger as of {MONTHS_SHORT[p.as_of.month - 1]} {p.as_of.year}</span>
+      </div>
+      <PortfolioStrip cols={[
+        { h: "Business", v: sel.business }, { h: "Market", v: sel.market }, { h: "Product", v: sel.product, w: "1.6fr" },
+        { h: "Sales", v: fmtOrDash(sel.sales), num: true }, { h: "COGS", v: fmtOrDash(sel.cogs), num: true }, { h: "%", v: pctOrDash(sel.cogs_pct), num: true, w: ".6fr" },
+        { h: "Gross Profit", v: fmtOrDash(sel.gross_profit), num: true }, { h: "%", v: pctOrDash(sel.gp_pct), num: true, w: ".6fr" },
+        { h: "OPEX", v: fmtOrDash(sel.opex), num: true }, { h: "%", v: pctOrDash(sel.opex_pct), num: true, w: ".6fr" },
+        { h: "EBIT", v: fmtOrDash(sel.ebit), num: true }, { h: "%", v: pctOrDash(sel.ebit_pct), num: true, w: ".6fr" },
+      ]} />
+      <PortfolioStrip cols={[
+        { h: "COGS", v: `${sel.business} · ${sel.market} · ${sel.product}`, w: "3.6fr" },
+        { h: "Price", v: fmtOrDash(sel.cogs), num: true },
+        { h: "Material", v: fmtOrDash(costCell("material")?.amount), num: true }, { h: "%", v: pctOrDash(costCell("material")?.pct), num: true, w: ".6fr" },
+        { h: "Labour", v: fmtOrDash(costCell("labour")?.amount), num: true }, { h: "%", v: pctOrDash(costCell("labour")?.pct), num: true, w: ".6fr" },
+        { h: "Depreciation", v: fmtOrDash(costCell("depreciation")?.amount), num: true }, { h: "%", v: pctOrDash(costCell("depreciation")?.pct), num: true, w: ".6fr" },
+        { h: "FOH", v: fmtOrDash(costCell("foh")?.amount), num: true }, { h: "%", v: pctOrDash(costCell("foh")?.pct), num: true, w: ".6fr" },
+      ]} />
+      <div className="text-[10px] text-gray-600">
+        Nilai mengikuti skala Sales_Ledger. Pecahan COGS = rasio cost component Oracle OPM
+        {c && !c.error ? ` (${c.item_code} ${c.item_desc}, ${c.period})` : ""}
+        {c && !c.error && !c.detailed ? " — costing periode ini belum memecah Labour/Depreciation; keduanya masih di dalam FOH (GL Allocation)." : "."}
+        {!c && " — item tidak ditemukan di costing Oracle untuk periode ini."}
+        {c?.error && ` — Oracle tidak bisa dibaca: ${c.error}`}
+      </div>
     </div>
   );
 }
 
 function EisSummaryTab({ year, period }) {
-  const [kpi, setKpi] = useState(null);
-  const [closing, setClosing] = useState(null);
-  const [closingUnmatched, setClosingUnmatched] = useState([]);
-  const [nwc, setNwc] = useState(null);
+  const [d, setD] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    try {
-      const [kpiRes, closingRes, nwcRes] = await Promise.all([
-        eisApi.getKpiCards(year, period),
-        eisApi.getClosingEstimation(year, period),
-        eisApi.getNwc(year, period),
-      ]);
-      setKpi(kpiRes.data);
-      setClosing(closingRes.data || null);
-      setClosingUnmatched(closingRes.unmatched_sheets || []);
-      setNwc(nwcRes.data);
-    } catch (e) { console.error("Failed to load EIS summary:", e); }
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, [year, period]); // eslint-disable-line
+    eisApi.getSummaryDashboard(year, period)
+      .then((r) => { if (!cancelled) setD(r); })
+      .catch((e) => { console.error("Failed to load EIS summary:", e); if (!cancelled) setD(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [year, period]);
 
   if (loading) return <Loading />;
+  if (!d) return <ChartCard title=""><div className="py-12 text-center text-sm text-gray-500">Gagal memuat Summary.</div></ChartCard>;
+
+  const k = d.kpi, cl = d.closing, n = d.nwc;
+  const closeLabel = `${MONTH_NAMES[cl.month - 1]} ${cl.year}`;
+  const estNote = cl.daily_sales
+    ? `Local = proyeksi Daily Sales (${cl.daily_sales.wd_actual}/${cl.daily_sales.wd_total} WD)`
+    : "Local = belum ada Daily Sales bulan ini";
 
   return (
     <div className="space-y-4">
-      <SourceTag>ETL Financial (Plan) &middot; Dashboard PAC (Sales BP) &middot; Dashboard Accounting &amp; Tax (Net Profit/Cashflow Actual)</SourceTag>
+      <SourceTag>Performance · Production · Administration · Daily Sales · Oracle OPM</SourceTag>
+      <EisHeaderBand title="Summary" year={year} period={period} />
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <EisKpiCard title="Sales Achievement" value={kpi?.sales_achievement || 0} unit="%" icon={DollarSign} color="cyan" />
-        <EisKpiCard title="Production Yield" value={kpi?.yield_pct || 0} unit="%" target={95} icon={Activity} color="emerald" />
-        <EisKpiCard title="Net Profit Achievement" value={kpi?.net_profit_achievement || 0} unit="%" icon={Landmark} color="amber" />
-        <EisKpiCard title="Cashflow Achievement" value={kpi?.cashflow_achievement || 0} unit="%" icon={Wallet} color="orange" />
+        <EisKpiCard title="Sales Achievement (YTD)" value={k.sales_achievement_pct ?? "—"} unit={k.sales_achievement_pct == null ? "" : "%"} icon={DollarSign} color="cyan" />
+        <EisKpiCard title="Production Yield" value={k.yield_pct ?? "—"} unit={k.yield_pct == null ? "" : "%"} target={k.yield_pct == null ? undefined : k.yield_target_pct} icon={Activity} color="emerald" />
+        <EisKpiCard title="Net Profit Achievement (YTD)" value={k.net_profit_progress_pct ?? "—"} unit={k.net_profit_progress_pct == null ? "" : "%"} icon={Landmark} color="amber" />
+        <EisKpiCard title="Cashflow Achievement" value={k.cash_achievement_pct ?? "—"} unit={k.cash_achievement_pct == null ? "" : "%"} icon={Wallet} color="orange" />
       </div>
+      {k.financial_error && <div className="text-[11px] text-red-600">Net profit / cashflow: data Oracle tidak bisa dibaca ({k.financial_error}).</div>}
 
-      <ChartCard title="Sales Closing Estimation" subtitle={`Business Plan: PAC Sales Plan, Jan–${MONTHS_SHORT[period - 1]} ${year} (all products) · Estimation: no data source yet`}>
-        {closing ? (
-          <>
-            <div className="flex items-stretch gap-3 overflow-x-auto py-1">
-              <ClosingEstBox title="Sales" seg={closing.sales} planLabel="Business Plan" estLabel="Estimation" />
-              <ClosingEstArrow />
-              <ClosingEstBox title="Local" seg={closing.local} planLabel="Plan" estLabel="Est." />
-              <ClosingEstBox title="CMO & Other" seg={closing.cmo_other} planLabel="Plan" estLabel="Est." />
-              <ClosingEstBox title="Export" seg={closing.export} planLabel="Plan" estLabel="Est." />
-            </div>
-            {closingUnmatched.length > 0 && (
-              <div className="mt-3 text-[11px] text-amber-400/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
-                {closing.sales.plan === 0 && "Business Plan is 0 — likely cause: "}
-                {closingUnmatched.length} Sales Plan sheet(s) for {year} didn't match Local/Export/CMO &amp; Other and were skipped: {closingUnmatched.join(", ")}.
-                {" "}If a sheet shows "(no sheet_name — uploaded before this feature)", re-upload that Sales Plan Excel file in PAC &rarr; Simulation Data &rarr; Sales Plan so it gets tagged correctly.
-              </div>
-            )}
-          </>
-        ) : <div className="text-center text-gray-600 py-10 text-sm">No data available</div>}
-      </ChartCard>
+      <EisSection title="Product Portfolio">
+        <ProductPortfolio year={year} period={period} initial={d.portfolio} />
+      </EisSection>
 
-      <div className="max-w-md">
-        <ChartCard title="Net working capital">
-          {nwc ? (
-            <div className="space-y-4">
-              <div className="text-center">
-                <div className="text-4xl font-bold text-cyan-400">{fmtN(nwc.nwc_days, 1)}</div>
-                <div className="text-sm text-gray-500 mt-1">days ({fmtN(nwc.nwc_months, 1)} months)</div>
-              </div>
-              <div className="grid grid-cols-3 gap-3 mt-4">
-                {[
-                  { label: "DSO", value: nwc.dso_days, cls: "bg-cyan-500/10 text-cyan-400" },
-                  { label: "DIO", value: nwc.dio_days, cls: "bg-amber-500/10 text-amber-400" },
-                  { label: "DPO", value: nwc.dpo_days, cls: "bg-emerald-500/10 text-emerald-400" },
-                ].map((item) => (
-                  <div key={item.label} className={`rounded-lg p-3 text-center ${item.cls}`}>
-                    <div className="text-[10px] font-medium opacity-80">{item.label}</div>
-                    <div className="text-xl font-bold mt-1">{fmtN(item.value, 1)}</div>
-                    <div className="text-[9px] opacity-60">days</div>
-                  </div>
-                ))}
-              </div>
-              <div className="text-center text-[10px] text-gray-600 mt-2">NWC = DSO + DIO − DPO</div>
+      <EisSection title="Sales Closing Estimation" subtitle={`Closing ${closeLabel}`}>
+        <div className="flex items-stretch gap-3 overflow-x-auto py-1">
+          <ClosingEstBox title="Sales" seg={cl.sales} planLabel="Business Plan" estLabel="Estimation" />
+          <ClosingEstArrow />
+          <ClosingEstBox title="Local" seg={cl.local} planLabel="Plan" estLabel="Est." />
+          <ClosingEstBox title="CMO & Other" seg={cl.cmo_other} planLabel="Plan" estLabel="Est." />
+          <ClosingEstBox title="Export" seg={cl.export} planLabel="Plan" estLabel="Est." />
+        </div>
+        <div className="text-[10px] text-gray-600 mt-1">
+          Plan: SalesSummary_Monthly{["local", "cmo_other", "export"].some((s) => cl[s].plan_source === "pac") ? " (bulan yang belum ada di template: PAC Sales Plan)" : ""} · {estNote} · CMO &amp; Export = actual bulan itu bila sudah ada · juta IDR
+        </div>
+      </EisSection>
+
+      <EisSection title="Net Working Capital">
+        {n.error ? <div className="py-6 text-center text-xs text-red-600">Data Oracle tidak bisa dibaca: {n.error}</div> : (
+          <div className="flex items-stretch gap-3 overflow-x-auto">
+            <div className="shrink-0 min-w-[180px] border border-gray-800 rounded-lg text-center">
+              <div className="text-xs font-bold text-gray-200 py-1 border-b border-gray-800">NWC (Days)</div>
+              <div className="text-3xl font-extrabold text-gray-100 py-3">{n.nwc_days == null ? "—" : fmtN(n.nwc_days, 0)}</div>
+              <div className="text-[11px] italic text-blue-700 pb-1">Month {n.nwc_months == null ? "—" : fmtN(n.nwc_months, 0)}</div>
             </div>
-          ) : <div className="text-center text-gray-600 py-10 text-sm">No data available</div>}
-        </ChartCard>
-      </div>
+            <ClosingEstArrow />
+            <div className="flex-1 grid grid-cols-3 border border-gray-800 rounded-lg divide-x divide-gray-800 min-w-[420px]">
+              {[["DSO", n.dso_days, n.dso_months], ["DIO", n.dio_days, n.dio_months], ["DPO", n.dpo_days, n.dpo_months]].map(([lbl, v, mo]) => (
+                <div key={lbl} className="text-center">
+                  <div className="text-xs font-bold text-gray-200 py-1 border-b border-gray-800">{lbl}</div>
+                  <div className="text-3xl font-extrabold text-gray-100 py-3">{v == null ? "—" : fmtN(v, 0)}</div>
+                  <div className="text-[11px] italic text-blue-700 pb-1">Month {mo == null ? "—" : fmtN(mo, 0)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="text-[10px] text-gray-600 mt-1">NWC = DSO + DIO − DPO · DSO/DPO dari Administration (Oracle), DIO dari Production{n.dio_month && n.dio_month !== period ? ` (as of ${MONTHS_SHORT[n.dio_month - 1]})` : ""}</div>
+      </EisSection>
     </div>
   );
 }

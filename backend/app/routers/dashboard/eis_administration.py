@@ -313,17 +313,9 @@ def _budget_actuals(year: int, period: int) -> dict:
     return out
 
 
-@router.get("/dashboard")
-async def administration_dashboard(
-    year: int = Query(...), period: int = Query(..., ge=1, le=12),
-    main_db: AsyncSession = Depends(get_main_db), eis_db: AsyncSession = Depends(get_db),
-    user = Depends(get_current_user),
-):
-    import asyncio
-    import logging
-    log = logging.getLogger(__name__)
-
-    # ── Plans (EIS template) ─────────────────────────────────────
+async def load_admin_plans(eis_db: AsyncSession, year: int, period: int):
+    """Plans from the EIS template (eis.adm_*): the company headcount plan
+    row (latest month <= period) and {(metric, department, month): plan}."""
     hc_plan_row = (await eis_db.execute(text("""
         SELECT month_num, plan_count FROM eis.adm_headcount
         WHERE department = '' AND fiscal_year = :y AND month_num <= :p AND plan_count IS NOT NULL
@@ -338,25 +330,19 @@ async def administration_dashboard(
     for r in fin_rows:
         plan[(r["metric"], r["department"], r["month_num"])] = float(r["plan_amount"]) if r["plan_amount"] is not None else None
 
-    def plan_series(metric):
-        return [plan.get((metric, "", m)) for m in range(1, period + 1)]
+    return hc_plan_row, plan, bool(hc_plan_row or fin_rows)
 
-    # ── Personnel (HRGA) ─────────────────────────────────────────
-    emp_rows = (await main_db.execute(
-        select(Employee.department, Employee.team, Employee.date_of_joining,
-               Employee.resign_date, Employee.employment_status)
-        .where(Employee.date_of_joining.isnot(None))
-    )).all()
-    personnel = _personnel(emp_rows, year, period)
-    personnel["plan"] = float(hc_plan_row[1]) if hc_plan_row else None
-    personnel["plan_month"] = hc_plan_row[0] if hc_plan_row else None
-    personnel["achievement_pct"] = _ratio_pct(personnel["total"], personnel["plan"])
 
-    # ── Financial + ratios (Oracle via Accounting) ───────────────
+async def financial_and_ratios(year: int, period: int, plan: dict):
+    """(financial, ratios) blocks from Oracle GL via Accounting's
+    FinancialStatementService — shared by this page and the EIS Summary
+    (net profit / cashflow achievement, DSO / DPO for NWC). Each comes
+    back as {"error": ...} instead of raising when Oracle can't be read."""
     yy = lambda y: str(y)[2:].zfill(2)
     pname = lambda y, m: f"{_MONTH_ABBR[m - 1]}-{yy(y)}"
     # 24 months: Jan of last year .. selected month (12-month windows + YTD)
     months = [(year - 1, m) for m in range(1, 13)] + [(year, m) for m in range(1, period + 1)]
+    import logging
     financial = ratios = None
     try:
         fs = FinancialStatementService()
@@ -374,7 +360,7 @@ async def administration_dashboard(
         this_year = slice(12, 12 + period)
         pat = pl["profit_after_tax"][this_year]
 
-        np_plan = plan_series("Net Profit")
+        np_plan = [plan.get(("Net Profit", "", m)) for m in range(1, period + 1)]
         ytd_np = sum(v for v in pat if v is not None) / 1e6
         ytd_np_plan = sum(v for v in np_plan if v is not None) if any(v is not None for v in np_plan) else None
         cf_plan = plan.get(("Cashflow Ending Balance", "", period))
@@ -402,9 +388,40 @@ async def administration_dashboard(
             "avg_ar": _mio(avg_ar), "avg_ap": _mio(avg_ap),
         }
     except Exception as e:  # Oracle down must not blank the HR half of the page
-        log.exception("[eis admin] Oracle financial figures failed")
+        logging.getLogger(__name__).exception("[eis admin] Oracle financial figures failed")
         financial = {"error": str(e)}
         ratios = {"error": str(e)}
+
+    return financial, ratios
+
+
+@router.get("/dashboard")
+async def administration_dashboard(
+    year: int = Query(...), period: int = Query(..., ge=1, le=12),
+    main_db: AsyncSession = Depends(get_main_db), eis_db: AsyncSession = Depends(get_db),
+    user = Depends(get_current_user),
+):
+    import asyncio
+    import logging
+    log = logging.getLogger(__name__)
+
+    hc_plan_row, plan, has_plan = await load_admin_plans(eis_db, year, period)
+
+    def plan_series(metric):
+        return [plan.get((metric, "", m)) for m in range(1, period + 1)]
+
+    # ── Personnel (HRGA) ─────────────────────────────────────────
+    emp_rows = (await main_db.execute(
+        select(Employee.department, Employee.team, Employee.date_of_joining,
+               Employee.resign_date, Employee.employment_status)
+        .where(Employee.date_of_joining.isnot(None))
+    )).all()
+    personnel = _personnel(emp_rows, year, period)
+    personnel["plan"] = float(hc_plan_row[1]) if hc_plan_row else None
+    personnel["plan_month"] = hc_plan_row[0] if hc_plan_row else None
+    personnel["achievement_pct"] = _ratio_pct(personnel["total"], personnel["plan"])
+
+    financial, ratios = await financial_and_ratios(year, period, plan)
 
     # ── Budget (Oracle actual, template plan) ─────────────────────
     budget = None
@@ -445,5 +462,5 @@ async def administration_dashboard(
     return {
         "year": year, "period": period,
         "personnel": personnel, "financial": financial, "ratios": ratios, "budget": budget,
-        "has_plan": bool(hc_plan_row or fin_rows),
+        "has_plan": has_plan,
     }
