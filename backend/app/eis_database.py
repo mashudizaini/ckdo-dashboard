@@ -494,13 +494,15 @@ async def ensure_daily_sales_table():
             """))
 
 
-async def ensure_production_template_tables():
-    """Tables behind the EIS Production page, filled by uploading the EIS
-    template workbook (sheets Production_BatchYield / _Ratios / _Release /
-    _COGSRatio / _MachineUtilization — see eis_data_upload's
-    production-template upload). Deliberately separate from fact_production,
-    fact_financial_ratio and fact_cogs: those are rewritten from Oracle by
-    the nightly ETL, which would silently overwrite uploaded figures.
+async def ensure_eis_template_tables():
+    """Tables behind the EIS Production and Performance pages, filled by
+    uploading the EIS template workbook (see eis_data_upload's eis-template
+    upload): eis.prod_* from the Production_* sheets, eis.perf_* from
+    SalesSummary_Monthly / Sales_Ledger / AreaSales_Ledger /
+    Marketing_Activities. Deliberately separate from fact_production,
+    fact_financial_ratio, fact_cogs and fact_sales: those are rewritten from
+    Oracle by the nightly ETL, which would silently overwrite uploaded
+    figures.
 
     Keyed by (fiscal_year, month_num) directly rather than dim_period — the
     workbook carries its own years, and a snapshot sheet (GPM, machine
@@ -575,6 +577,69 @@ async def ensure_production_template_tables():
             uploaded_by      VARCHAR(150),
             uploaded_at      TIMESTAMPTZ DEFAULT now(),
             UNIQUE (plant, fiscal_year, month_num)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS eis.perf_sales_summary (
+            id              SERIAL PRIMARY KEY,
+            business_type   VARCHAR(50) NOT NULL,
+            fiscal_year     INTEGER NOT NULL,
+            month_num       INTEGER NOT NULL CHECK (month_num BETWEEN 1 AND 12),
+            plan_amount     NUMERIC(20,6),
+            actual_amount   NUMERIC(20,6),
+            uploaded_by     VARCHAR(150),
+            uploaded_at     TIMESTAMPTZ DEFAULT now(),
+            UNIQUE (business_type, fiscal_year, month_num)
+        )
+        """,
+        # No UNIQUE key: the source ledger legitimately repeats a
+        # (product, market, month, scenario) key — its notes flag these as
+        # "kunci ganda" (two Rawdata rows for one key) — so rows are kept
+        # as delivered and aggregated at read time.
+        """
+        CREATE TABLE IF NOT EXISTS eis.perf_sales_ledger (
+            id              SERIAL PRIMARY KEY,
+            product_name    VARCHAR(150) NOT NULL,
+            market          VARCHAR(50) NOT NULL,
+            fiscal_year     INTEGER NOT NULL,
+            month_num       INTEGER NOT NULL CHECK (month_num BETWEEN 1 AND 12),
+            scenario        VARCHAR(30) NOT NULL,
+            sales_amount    NUMERIC(20,6),
+            cogs_amount     NUMERIC(20,6),
+            opex_amount     NUMERIC(20,6),
+            ebit_amount     NUMERIC(20,6),
+            uploaded_by     VARCHAR(150),
+            uploaded_at     TIMESTAMPTZ DEFAULT now()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS ix_perf_sales_ledger_period "
+        "ON eis.perf_sales_ledger (fiscal_year, month_num, scenario)",
+        """
+        CREATE TABLE IF NOT EXISTS eis.perf_area_sales (
+            id              SERIAL PRIMARY KEY,
+            region          VARCHAR(50) NOT NULL,
+            city            VARCHAR(80) NOT NULL DEFAULT '',
+            segment         VARCHAR(50) NOT NULL DEFAULT '',
+            fiscal_year     INTEGER NOT NULL,
+            month_num       INTEGER NOT NULL CHECK (month_num BETWEEN 1 AND 12),
+            sales_amount    NUMERIC(20,6),
+            uploaded_by     VARCHAR(150),
+            uploaded_at     TIMESTAMPTZ DEFAULT now(),
+            UNIQUE (region, city, segment, fiscal_year, month_num)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS eis.perf_marketing (
+            id                  SERIAL PRIMARY KEY,
+            event_name          VARCHAR(100) NOT NULL,
+            region              VARCHAR(50) NOT NULL DEFAULT '',
+            fiscal_year         INTEGER NOT NULL,
+            month_num           INTEGER NOT NULL CHECK (month_num BETWEEN 1 AND 12),
+            plan_event_count    NUMERIC(10,2),
+            actual_event_count  NUMERIC(10,2),
+            uploaded_by         VARCHAR(150),
+            uploaded_at         TIMESTAMPTZ DEFAULT now(),
+            UNIQUE (event_name, region, fiscal_year, month_num)
         )
         """,
     ]

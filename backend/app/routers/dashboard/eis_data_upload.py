@@ -967,14 +967,16 @@ async def upload_expansion(
     }
 
 
+
 # ══════════════════════════════════════════════════════════════
-# EIS Template — Production (EIS_Template_2026_V2_*.xlsx)
+# EIS Template (EIS_Template_2026_V2_*.xlsx) — Production & Performance
 #
-# One workbook, five sheets, each a flat table with a header in row 1
-# (columns matched by name, case-insensitive; order does not matter).
-# The `notes` column is guidance for whoever fills the template and is
-# never stored. Other sheets in the workbook (Sales_*, Administration_*,
-# ...) are ignored here.
+# One workbook, each sheet a flat table with a header in row 1 (columns
+# matched by name, case-insensitive; order does not matter). The `notes`
+# column is guidance for whoever fills the template and is never stored.
+# Sheets not listed here (Administration_*, BusinessExpansion_*, ...) are
+# ignored, and a workbook holding only some of these sheets updates only
+# those — so the full template and a Performance-only extract both work.
 #
 #   Production_BatchYield        segment, year, month, plan_qty,
 #                                batch_size_qty, actual_qty
@@ -984,6 +986,15 @@ async def upload_expansion(
 #   Production_COGSRatio         product_code, year, month, gpm_ratio
 #   Production_MachineUtilization plant, year, month, availability_pct,
 #                                performance_pct, quality_pct
+#   SalesSummary_Monthly         business_type, year, month, plan_amount,
+#                                actual_amount
+#   Sales_Ledger                 product_name, market, year, month, scenario,
+#                                sales_amount, cogs_amount, opex_amount,
+#                                ebit_amount
+#   AreaSales_Ledger             region, city, year, month, segment,
+#                                sales_amount
+#   Marketing_Activities         event_name, region, year, month,
+#                                plan_event_count, actual_event_count
 #
 # `month` is an English month name or 1–12. Every year present in a sheet
 # is replaced wholesale for that sheet's table, so re-uploading a corrected
@@ -1018,7 +1029,7 @@ def _txt(v, limit: int) -> str:
 
 
 # sheet -> (table, required columns, row builder)
-_PROD_SHEETS = {
+_TEMPLATE_SHEETS = {
     "production_batchyield": (
         "prod_batch_yield",
         ["segment", "year", "month", "plan_qty", "batch_size_qty", "actual_qty"],
@@ -1048,17 +1059,49 @@ _PROD_SHEETS = {
         lambda r: {"plant": _txt(r["plant"], 50), "availability_pct": _num(r["availability_pct"]),
                    "performance_pct": _num(r["performance_pct"]), "quality_pct": _num(r["quality_pct"])},
     ),
+    "salessummary_monthly": (
+        "perf_sales_summary",
+        ["business_type", "year", "month", "plan_amount", "actual_amount"],
+        lambda r: {"business_type": _txt(r["business_type"], 50), "plan_amount": _num(r["plan_amount"]),
+                   "actual_amount": _num(r["actual_amount"])},
+    ),
+    "sales_ledger": (
+        "perf_sales_ledger",
+        ["product_name", "market", "year", "month", "scenario",
+         "sales_amount", "cogs_amount", "opex_amount", "ebit_amount"],
+        lambda r: {"product_name": _txt(r["product_name"], 150), "market": _txt(r["market"], 50),
+                   "scenario": _txt(r["scenario"], 30), "sales_amount": _num(r["sales_amount"]),
+                   "cogs_amount": _num(r["cogs_amount"]), "opex_amount": _num(r["opex_amount"]),
+                   "ebit_amount": _num(r["ebit_amount"])},
+    ),
+    "areasales_ledger": (
+        "perf_area_sales",
+        ["region", "city", "year", "month", "segment", "sales_amount"],
+        lambda r: {"region": _txt(r["region"], 50), "city": _txt(r["city"], 80),
+                   "segment": _txt(r["segment"], 50), "sales_amount": _num(r["sales_amount"])},
+    ),
+    "marketing_activities": (
+        "perf_marketing",
+        ["event_name", "region", "year", "month", "plan_event_count", "actual_event_count"],
+        lambda r: {"event_name": _txt(r["event_name"], 100), "region": _txt(r["region"], 50),
+                   "plan_event_count": _num(r["plan_event_count"]),
+                   "actual_event_count": _num(r["actual_event_count"])},
+    ),
 }
 
 # Columns that must be non-empty for a row to mean anything.
-_PROD_KEY_COLS = {
+_TEMPLATE_KEY_COLS = {
     "prod_batch_yield": ("segment",),
     "prod_ratio": ("metric", "value_type"),
     "prod_gpm": ("product_name",),
+    "perf_sales_summary": ("business_type",),
+    "perf_sales_ledger": ("product_name", "market", "scenario"),
+    "perf_area_sales": ("region",),
+    "perf_marketing": ("event_name",),
 }
 
 
-def _parse_production_template(content: bytes) -> dict[str, list[dict]]:
+def _parse_eis_template(content: bytes) -> dict[str, list[dict]]:
     try:
         import openpyxl
     except ImportError:
@@ -1068,7 +1111,7 @@ def _parse_production_template(content: bytes) -> dict[str, list[dict]]:
     sheets = {ws.title.strip().lower(): ws for ws in wb.worksheets}
 
     out: dict[str, list[dict]] = {}
-    for sheet_key, (table, cols, build) in _PROD_SHEETS.items():
+    for sheet_key, (table, cols, build) in _TEMPLATE_SHEETS.items():
         ws = sheets.get(sheet_key)
         if ws is None:
             continue
@@ -1097,7 +1140,7 @@ def _parse_production_template(content: bytes) -> dict[str, list[dict]]:
                     detail=f"Sheet '{ws.title}' baris {n}: year/month tidak valid ({r['year']!r}, {r['month']!r}).",
                 )
             rec = build(r)
-            if any(not rec[k] for k in _PROD_KEY_COLS.get(table, ())):
+            if any(not rec[k] for k in _TEMPLATE_KEY_COLS.get(table, ())):
                 continue
             rec["fiscal_year"] = int(year)
             rec["month_num"] = month
@@ -1107,21 +1150,23 @@ def _parse_production_template(content: bytes) -> dict[str, list[dict]]:
     if not out:
         raise HTTPException(
             status_code=422,
-            detail="Tidak ada sheet Production_* di file ini. Pastikan memakai workbook EIS Template "
-                   "(sheet Production_BatchYield, Production_Ratios, Production_Release, "
-                   "Production_COGSRatio, Production_MachineUtilization).",
+            detail="Tidak ada sheet EIS Template di file ini. Sheet yang dibaca: Production_BatchYield, "
+                   "Production_Ratios, Production_Release, Production_COGSRatio, "
+                   "Production_MachineUtilization, SalesSummary_Monthly, Sales_Ledger, "
+                   "AreaSales_Ledger, Marketing_Activities.",
         )
     return out
 
 
-@router.post("/production-template/upload")
-async def upload_production_template(
+@router.post("/eis-template/upload")
+async def upload_eis_template(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     user = Depends(get_current_user),
 ):
-    """Load the Production_* sheets of the EIS template workbook into the
-    eis.prod_* tables. Years come from the file itself (no year parameter)."""
+    """Load the Production / Performance sheets of the EIS template workbook
+    into the eis.prod_* / eis.perf_* tables. Years come from the file itself
+    (no year parameter)."""
     if not file.filename.endswith(".xlsx"):
         raise HTTPException(status_code=422, detail="File harus .xlsx (EIS Template)")
 
@@ -1129,7 +1174,7 @@ async def upload_production_template(
     content = await file.read()
 
     try:
-        parsed = _parse_production_template(content)
+        parsed = _parse_eis_template(content)
         summary = {}
         for table, rows in parsed.items():
             years = sorted({r["fiscal_year"] for r in rows})
@@ -1147,25 +1192,24 @@ async def upload_production_template(
             summary[table] = {"rows": len(rows), "years": years}
         await db.commit()
     except HTTPException as e:
-        await _log_upload("production-template", file.filename, None, 0, "failed", str(e.detail), uploaded_by)
+        await _log_upload("eis-template", file.filename, None, 0, "failed", str(e.detail), uploaded_by)
         raise
     except Exception as e:
-        logger.exception("[upload_production_template] failed")
-        await _log_upload("production-template", file.filename, None, 0, "failed", str(e), uploaded_by)
+        logger.exception("[upload_eis_template] failed")
+        await _log_upload("eis-template", file.filename, None, 0, "failed", str(e), uploaded_by)
         raise HTTPException(status_code=500, detail=f"Upload gagal: {e}")
 
     total = sum(s["rows"] for s in summary.values())
     all_years = sorted({y for s in summary.values() for y in s["years"]})
     await _log_upload(
-        "production-template", file.filename, all_years[-1] if all_years else None,
+        "eis-template", file.filename, all_years[-1] if all_years else None,
         total, "success", None, uploaded_by,
     )
     return {
-        "message": f"Berhasil upload {total} baris Production ({len(summary)} sheet, tahun "
+        "message": f"Berhasil upload {total} baris dari {len(summary)} sheet (tahun "
                    f"{', '.join(map(str, all_years)) or '—'})",
         "tables": summary,
     }
-
 
 # ══════════════════════════════════════════════════════════════
 # Upload history — shared by all upload types above
@@ -1173,7 +1217,7 @@ async def upload_production_template(
 
 @router.get("/upload-logs")
 async def get_upload_logs(
-    upload_type: Optional[str] = Query(None, description="overtime | cogs | sales-bp | expansion | production-template"),
+    upload_type: Optional[str] = Query(None, description="overtime | cogs | sales-bp | expansion | eis-template"),
     limit: int = Query(20, le=100),
     db: AsyncSession = Depends(get_db),
     user = Depends(get_current_user),

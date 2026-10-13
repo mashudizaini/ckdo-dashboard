@@ -298,6 +298,7 @@ export const eisApi = {
   getAreaSales:        (year, period)       => api.get(`${EIS}/performance/area-sales`, { params: { year, period } }),
   getMarketing:        (year)               => api.get(`${EIS}/performance/marketing`, { params: { year } }),
   getForecast:         (year, period, segment) => api.get(`${EIS}/performance/forecast`, { params: { year, period, segment } }),
+  getPerformanceDashboard: (year, period, ebitMarket) => api.get(`${EIS}/performance/dashboard`, { params: { year, period, ebit_market: ebitMarket } }),
 
   // Production
   getProductionDashboard: (year, period) => api.get(`${EIS}/production/dashboard`, { params: { year, period } }),
@@ -341,7 +342,7 @@ export const eisApi = {
   getSalesBP:        (year)         => api.get(`${EIS}/data-upload/sales-bp`, { params: { year } }),
   uploadSalesBP:     (year, formData) => api.post(`${EIS}/data-upload/sales-bp/upload`, formData, { params: { year }, headers: { "Content-Type": "multipart/form-data" } }),
   uploadExpansionData:(year, formData) => api.post(`${EIS}/data-upload/expansion/upload`, formData, { params: { year }, headers: { "Content-Type": "multipart/form-data" } }),
-  uploadProductionTemplate: (formData) => api.post(`${EIS}/data-upload/production-template/upload`, formData, { headers: { "Content-Type": "multipart/form-data" } }),
+  uploadEisTemplate: (formData) => api.post(`${EIS}/data-upload/eis-template/upload`, formData, { headers: { "Content-Type": "multipart/form-data" } }),
   getUploadLogs:     (uploadType, limit) => api.get(`${EIS}/data-upload/upload-logs`, { params: { upload_type: uploadType, limit } }),
 };
 

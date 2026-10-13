@@ -421,151 +421,46 @@ function EisSummaryTab({ year, period }) {
   );
 }
 
-/* ─── Tab: Performance ──────────────────────────────────────────── */
-function EisPerformanceTab({ year, period, segment }) {
-  const [monthly, setMonthly] = useState([]);
-  const [achievement, setAchievement] = useState([]);
-  const [ebit, setEbit] = useState([]);
-  const [area, setArea] = useState([]);
-  const [loading, setLoading] = useState(true);
+/* ─── EIS template pages (Performance, Production) — shared ───────
+   Both pages are laid out after the EIS template's own dashboard sheets
+   and read the tables filled by the EIS Template upload (eis.perf_*,
+   eis.prod_*), one call per page; every formula lives in the backend
+   (eis_performance.py / eis_production.py /dashboard). Series colors
+   follow the sheets: blue = business plan / main series, orange = actual.
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const [mRes, aRes, eRes, arRes] = await Promise.all([
-        eisApi.getMonthlySales(year, segment),
-        eisApi.getSalesAchievement(year, segment),
-        eisApi.getEbitProduct(year, period),
-        eisApi.getAreaSales(year, period),
-      ]);
-      setMonthly(mRes.data || []);
-      setAchievement(aRes.data || []);
-      setEbit((eRes.data || []).slice(0, 5));
-      setArea(arRes.data || []);
-    } catch (e) { console.error("Failed to load EIS performance:", e); }
-    setLoading(false);
-  };
+   The app's theme is light (index.css "FLAT WHITE") and forces
+   .text-white to near-black, so the navy bands use text-blue-50 to stay
+   light, and chart labels/grid use explicit dark-on-white colors rather
+   than GRID_STROKE / AXIS_TICK, which were tuned for the old dark theme. */
+const XL_BLUE = "#4472C4";
+const XL_ORANGE = "#ED7D31";
+const XL_GRAY = "#A5A5A5";
+const TPL_GRID = "#e5e7eb";
+const TPL_TICK = { fontSize: 11, fill: "#64748b" };
+const TPL_LABEL = { fontSize: 9, fill: "#334155", fontWeight: 600 };
+const MONTH_NAMES = MONTHS_FULL_ID.map((m) => m.label);
 
-  useEffect(() => { load(); }, [year, period, segment]); // eslint-disable-line
-
-  if (loading) return <Loading />;
-  const latestAch = achievement.length > 0 ? achievement[achievement.length - 1] : null;
-
+/** Title block of the sheet: company · page name · year / month. */
+function EisHeaderBand({ title, year, period }) {
   return (
-    <div className="space-y-4">
-      <SourceTag>ETL Financial</SourceTag>
-      {latestAch && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-6">
-          <div className="relative w-24 h-24 shrink-0">
-            <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
-              <circle cx="50" cy="50" r="42" fill="none" stroke="#1f2937" strokeWidth="8" />
-              <circle cx="50" cy="50" r="42" fill="none"
-                stroke={Number(latestAch.achievement_pct) >= 80 ? COLOR_GREEN : Number(latestAch.achievement_pct) >= 60 ? COLOR_AMBER : COLOR_RED}
-                strokeWidth="8" strokeLinecap="round" strokeDasharray={`${Number(latestAch.achievement_pct) * 2.64} 264`} />
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-lg font-bold text-gray-100">{fmtN(latestAch.achievement_pct, 1)}%</span>
-              <span className="text-[9px] text-gray-500">YTD</span>
-            </div>
-          </div>
-          <div>
-            <div className="text-base font-semibold text-gray-200">{segment === "all" ? "Company" : segment} sales achievement</div>
-            <div className="text-xs text-gray-500 mt-1">
-              Actual: {fmtInt(latestAch.actual_cumulative)} M IDR / BP: {fmtInt(latestAch.bp_cumulative)} M IDR
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ChartCard title="Monthly sales: BP vs actual">
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={monthly} barCategoryGap="20%">
-              <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
-              <XAxis dataKey="period_name" tick={AXIS_TICK} tickFormatter={(v) => v?.slice(0, 3)} />
-              <YAxis tick={AXIS_TICK} tickFormatter={(v) => `${(v / 1000).toFixed(0)}K`} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="bp_amount" name="Business Plan" fill={COLOR_PRIMARY} radius={[3, 3, 0, 0]} />
-              <Bar dataKey="actual_amount" name="Actual" fill={COLOR_GOLD} radius={[3, 3, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        <ChartCard title="Cumulative achievement trend">
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={achievement} barCategoryGap="25%">
-              <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
-              <XAxis dataKey="period_name" tick={AXIS_TICK} tickFormatter={(v) => v?.slice(0, 3)} />
-              <YAxis tick={AXIS_TICK} unit="%" domain={[0, 130]} />
-              <Tooltip formatter={(v) => [`${fmtN(v, 1)}%`, "Achievement"]} contentStyle={TOOLTIP_STYLE} />
-              <ReferenceLine y={100} stroke={COLOR_RED} strokeDasharray="6 3" label={{ value: "Target 100%", fill: COLOR_RED, fontSize: 10, position: "insideTopRight" }} />
-              <Bar dataKey="achievement_pct" name="Achievement %" radius={[4, 4, 0, 0]} maxBarSize={40}>
-                {achievement.map((entry, i) => (
-                  <Cell key={i} fill={Number(entry.achievement_pct) >= 100 ? COLOR_GREEN : Number(entry.achievement_pct) >= 80 ? COLOR_GOLD : COLOR_RED} />
-                ))}
-                <LabelList dataKey="achievement_pct" position="top" formatter={(v) => `${Number(v).toFixed(0)}%`} style={{ fontSize: 10, fontWeight: 600, fill: "#9ca3af" }} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
+    <div className="grid grid-cols-[2fr_1.4fr_1fr] rounded-xl overflow-hidden border border-blue-900 bg-blue-950 text-blue-50">
+      <div className="px-4 py-2 text-xs sm:text-sm font-bold leading-snug flex items-center justify-center text-center">
+        PT CKD OTTO PHARMACEUTICALS<br />EXECUTIVE INFORMATION SUMMARY
       </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ChartCard title="EBIT — Product" subtitle="Top 5 produk berdasarkan nilai penjualan tertinggi">
-          {ebit.length === 0 ? <div className="text-center text-gray-600 py-10 text-sm">No data available</div> : (
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={ebit} layout="vertical" margin={{ left: 130, right: 60, top: 4, bottom: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-                <XAxis type="number" tick={AXIS_TICK} tickFormatter={(v) => `${v}%`} domain={[0, "dataMax + 5"]} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="product_name" tick={{ fontSize: 11, fill: "#d1d5db" }} width={125} axisLine={false} tickLine={false} />
-                <Tooltip formatter={(v) => [`${fmtN(v, 1)}%`, "EBIT %"]} contentStyle={TOOLTIP_STYLE} />
-                <Bar dataKey="ebit_pct" name="EBIT %" radius={[0, 4, 4, 0]} barSize={28} fill={COLOR_PRIMARY}>
-                  <LabelList dataKey="ebit_pct" position="right" formatter={(v) => `${Number(v).toFixed(0)}%`} style={{ fontSize: 11, fontWeight: 600, fill: "#9ca3af" }} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
-
-        <ChartCard title="Area sales performance">
-          {area.length > 0 ? (
-            <div className="space-y-3">
-              {area.map((a) => (
-                <div key={a.area_name} className="flex items-center gap-3">
-                  <div className="w-24 text-xs font-medium text-gray-300 truncate">{a.area_name}</div>
-                  <div className="flex-1 h-6 bg-gray-800 rounded-full overflow-hidden relative">
-                    <div className="h-full bg-cyan-500 rounded-full transition-all duration-700" style={{ width: `${Number(a.portion_pct)}%` }} />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-medium text-gray-300">{fmtInt(a.cumulative_amount)} M</span>
-                  </div>
-                  <div className="w-12 text-right text-xs font-mono font-medium text-cyan-400">{fmtN(a.portion_pct, 1)}%</div>
-                </div>
-              ))}
-            </div>
-          ) : <div className="text-center text-gray-600 py-10 text-sm">No data available</div>}
-        </ChartCard>
+      <div className="border-x border-blue-900 flex items-center justify-center text-sm sm:text-base font-bold tracking-wide">{title}</div>
+      <div className="grid grid-rows-2 text-center text-sm font-bold">
+        <div className="flex items-center justify-center border-b border-blue-900">{year}</div>
+        <div className="flex items-center justify-center">{MONTH_NAMES[period - 1]}</div>
       </div>
     </div>
   );
 }
 
-/* ─── Tab: Production ─────────────────────────────────────────────
-   Laid out after the template's Production_Dashboard sheet (Executive
-   Information Summary): Batch & Yield, DIO, Quality Release, COGS
-   Performance (GPM), Machine Utilization (OEE), Overtime Ratio. Data comes
-   from the EIS template upload (eis.prod_*), one call for the whole page;
-   every formula lives in the backend (eis_production.py /dashboard).
-   Series colors follow the sheet: blue = plan / main series, orange =
-   actual / second series. */
-const XL_BLUE = "#4472C4";
-const XL_ORANGE = "#ED7D31";
-const XL_GRAY = "#A5A5A5";
-const MONTH_NAMES = MONTHS_FULL_ID.map((m) => m.label);
-
-function ProdSection({ title, className = "", children }) {
+function EisSection({ title, subtitle, className = "", children }) {
   return (
     <div className={`bg-gray-900 border border-gray-800 rounded-xl overflow-hidden flex flex-col ${className}`}>
-      <div className="bg-blue-950 border-b border-blue-900 px-3 py-1.5 text-center text-sm font-bold text-blue-100">{title}</div>
+      <div className="bg-blue-950 border-b border-blue-900 px-3 py-1.5 text-center text-sm font-bold text-blue-50">{title}</div>
+      {subtitle && <div className="border-b border-gray-800 px-3 py-1 text-center text-xs font-bold text-gray-200">{subtitle}</div>}
       <div className="p-3 flex-1">{children}</div>
     </div>
   );
@@ -574,7 +469,7 @@ function ProdSection({ title, className = "", children }) {
 /** "as of Jul 2026" when a block shows a different month than the one selected. */
 function AsOf({ year, month, selYear, selMonth }) {
   if (!month || (year === selYear && month === selMonth)) return null;
-  return <div className="text-[10px] text-amber-400/80 text-center mt-1">as of {MONTHS_SHORT[month - 1]} {year}</div>;
+  return <div className="text-[10px] text-amber-600 text-center mt-1">as of {MONTHS_SHORT[month - 1]} {year}</div>;
 }
 
 function BigNumber({ value, unit }) {
@@ -586,10 +481,12 @@ function BigNumber({ value, unit }) {
   );
 }
 
-function YieldGauge({ pct }) {
+/** Half-donut like the sheet's gauges: blue = achieved, orange = remainder
+ * (capped at 100% visually; the label shows the real value). */
+function HalfGauge({ pct, height = 130, digits = 0 }) {
   const v = Math.max(0, Math.min(100, Number(pct) || 0));
   return (
-    <div className="relative h-[130px]">
+    <div className="relative" style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie data={[{ v }, { v: 100 - v }]} dataKey="v" startAngle={180} endAngle={0}
@@ -598,13 +495,280 @@ function YieldGauge({ pct }) {
           </Pie>
         </PieChart>
       </ResponsiveContainer>
-      <div className="absolute inset-x-0 bottom-2 text-center text-sm font-semibold text-gray-200">
-        {pct == null ? "—" : `${fmtN(pct, 1)}%`}
+      <div className="absolute inset-x-0 bottom-2 text-center text-lg font-extrabold text-gray-100">
+        {pct == null ? "—" : `${fmtN(pct, digits)}%`}
       </div>
     </div>
   );
 }
 
+function BlockTitle({ children, right }) {
+  return (
+    <div className="flex items-center justify-center gap-3 text-sm font-bold text-gray-200 mb-1">
+      <span>{children}</span>{right}
+    </div>
+  );
+}
+
+function PctTag({ pct }) {
+  if (pct == null) return null;
+  return <span className={pct < 0 ? "text-red-600" : "text-emerald-600"}>{pct > 0 ? "+" : ""}{fmtN(pct, 0)}%</span>;
+}
+
+/* ─── Tab: Performance ──────────────────────────────────────────── */
+const EBIT_MARKETS = [
+  ["Public", "Local Public"], ["Private", "Local Private"], ["CMO", "CMO"],
+  ["Export", "Export"], ["Service Agreement", "Service Agreement"],
+];
+
+/** Business plan (bars) vs actual (line, labeled) per month. */
+function MonthlyPlanActual({ seg, height = 230 }) {
+  const data = seg.monthly.map((r) => ({ ...r, name: MONTHS_SHORT[r.month - 1] }));
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={data} margin={{ top: 18, right: 16, left: 4, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={TPL_GRID} vertical={false} />
+        <XAxis dataKey="name" tick={TPL_TICK} />
+        <YAxis tick={TPL_TICK} tickFormatter={fmtInt} width={56} />
+        <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => fmtInt(v)} />
+        <Legend wrapperStyle={{ fontSize: 11 }} />
+        <Bar dataKey="plan" name="Business Plan" fill={XL_BLUE} />
+        <Line type="linear" dataKey="actual" name="Actual" stroke={XL_ORANGE} strokeWidth={2} dot={false}>
+          <LabelList dataKey="actual" position="top" formatter={(v) => v == null ? "" : fmtInt(v)} style={TPL_LABEL} />
+        </Line>
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Previous-year vs this-year YTD actual, same months. */
+function GrowthBars({ seg, year, period, height = 180 }) {
+  const data = [
+    { name: String(year - 1), value: seg.prev_ytd_actual },
+    { name: String(year), value: seg.ytd_actual },
+  ];
+  return (
+    <>
+      <ResponsiveContainer width="100%" height={height}>
+        <ComposedChart data={data} margin={{ top: 18, right: 16, left: 4, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={TPL_GRID} vertical={false} />
+          <XAxis dataKey="name" tick={TPL_TICK} />
+          <YAxis tick={TPL_TICK} tickFormatter={fmtInt} width={56} />
+          <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => [fmtInt(v), "Actual"]} />
+          <Bar dataKey="value" name="Actual" fill={XL_ORANGE} barSize={36}>
+            <LabelList dataKey="value" position="top" formatter={(v) => v == null ? "" : fmtInt(v)} style={TPL_LABEL} />
+          </Bar>
+          <Line type="linear" dataKey="value" stroke={XL_ORANGE} strokeDasharray="3 3" dot={false} legendType="none" tooltipType="none" />
+        </ComposedChart>
+      </ResponsiveContainer>
+      {seg.prev_ytd_actual == null && (
+        <div className="text-[10px] text-amber-600 text-center">Belum ada data {year - 1} (Jan–{MONTHS_SHORT[period - 1]}) di SalesSummary_Monthly</div>
+      )}
+    </>
+  );
+}
+
+function YearlyGrowthColumn({ seg, year, period }) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <BlockTitle>Yearly</BlockTitle>
+        <HalfGauge pct={seg.achievement_pct} height={180} />
+      </div>
+      <div>
+        <BlockTitle right={<PctTag pct={seg.growth_pct} />}>Growth</BlockTitle>
+        <GrowthBars seg={seg} year={year} period={period} />
+      </div>
+    </div>
+  );
+}
+
+function AreaSalesBlock({ area }) {
+  if (!area) return <div className="py-8 text-center text-xs text-gray-600">Belum ada data area sales.</div>;
+  return (
+    <div className="text-xs">
+      <div className="grid grid-cols-2 border border-gray-800 rounded-lg overflow-hidden mb-2">
+        {area.groups.map((g, i) => (
+          <div key={g.name} className={i ? "border-l border-gray-800" : ""}>
+            <div className="text-center font-bold text-gray-200 py-1 border-b border-gray-800">{g.name}</div>
+            <div className="grid grid-cols-2 text-center py-1.5">
+              <span className="font-semibold text-gray-200">{fmtInt(g.amount)}</span>
+              <span className="text-gray-400">{g.portion_pct == null ? "—" : `${fmtN(g.portion_pct, 0)}%`}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="border border-gray-800 rounded-lg overflow-hidden">
+        <div className="grid grid-cols-3 font-bold text-gray-300 border-b border-gray-800 px-2 py-1">
+          <span>Area</span><span className="text-right">Amount</span><span className="text-right">Portion</span>
+        </div>
+        {area.regions.map((r) => (
+          <div key={r.region} className="grid grid-cols-3 px-2 py-0.5 text-gray-300">
+            <span>{r.region}</span><span className="text-right font-mono">{fmtInt(r.amount)}</span>
+            <span className="text-right font-mono">{r.portion_pct == null ? "—" : `${fmtN(r.portion_pct, 0)}%`}</span>
+          </div>
+        ))}
+        <div className="grid grid-cols-3 px-2 py-1 border-t border-gray-800 font-bold text-gray-200">
+          <span>Total</span><span className="text-right font-mono">{fmtInt(area.total)}</span><span className="text-right font-mono">100%</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MarketingBlock({ marketing, year, period }) {
+  if (!marketing.length) return <div className="py-8 text-center text-xs text-gray-600">Belum ada data marketing activity.</div>;
+  return (
+    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${marketing.length}, minmax(0, 1fr))` }}>
+      {marketing.map((e) => (
+        <div key={e.event} className="border border-gray-800 rounded-lg overflow-hidden">
+          <div className="text-center text-xs font-bold text-gray-200 py-1 border-b border-gray-800">{e.event}</div>
+          <div className="grid grid-cols-2 divide-x divide-gray-800 text-center">
+            <div className="py-2">
+              <div className="text-[11px] font-semibold text-gray-400">Business Plan</div>
+              <div className="text-3xl font-extrabold text-gray-100">{e.plan == null ? "—" : fmtInt(e.plan)}</div>
+            </div>
+            <div className="py-2">
+              <div className="text-[11px] font-semibold text-gray-400">Actual</div>
+              <div className="text-3xl font-extrabold text-gray-100">{e.actual == null ? "—" : fmtInt(e.actual)}</div>
+              <div className="text-sm font-bold text-gray-300">{e.achievement_pct == null ? "" : `${fmtN(e.achievement_pct, 0)}%`}</div>
+            </div>
+          </div>
+          <AsOf year={year} month={e.month} selYear={year} selMonth={period} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EisPerformanceTab({ year, period }) {
+  const [d, setD] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [ebitMarket, setEbitMarket] = useState("Public");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    eisApi.getPerformanceDashboard(year, period, ebitMarket)
+      .then((r) => { if (!cancelled) setD(r); })
+      .catch((e) => { console.error("Failed to load EIS performance:", e); if (!cancelled) setD(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [year, period, ebitMarket]);
+
+  // Only the first load blanks the page; switching the EBIT market keeps
+  // the rest on screen while it refetches.
+  if (loading && !d) return <Loading />;
+  if (!d?.has_data) {
+    return (
+      <ChartCard title="">
+        <div className="text-center py-12 text-gray-500">
+          <BarChart2 size={32} className="mx-auto mb-3 opacity-30" />
+          <p className="text-sm">Belum ada data Performance untuk {MONTH_NAMES[period - 1]} {year}.</p>
+          <p className="text-xs text-gray-600 mt-1">Upload workbook EIS Template di menu EIS → Data Upload → "EIS Template".</p>
+        </div>
+      </ChartCard>
+    );
+  }
+
+  const s = d.segments;
+  const ebitItems = d.ebit?.items || [];
+
+  return (
+    <div className="space-y-4">
+      <SourceTag>EIS Template (upload Excel)</SourceTag>
+      <EisHeaderBand title="PERFORMANCE" year={year} period={period} />
+
+      <EisSection title="Company Sales Performance" subtitle="Achievement">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-4">
+          <YearlyGrowthColumn seg={s.Company} year={year} period={period} />
+          <div className="space-y-3">
+            <div>
+              <BlockTitle>Monthly</BlockTitle>
+              <MonthlyPlanActual seg={s.Company} />
+            </div>
+            <div className="border-t border-gray-800 pt-2">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <select value={ebitMarket} onChange={(e) => setEbitMarket(e.target.value)} className={selCls}>
+                  {EBIT_MARKETS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+                </select>
+                {loading && <Loader2 size={13} className="animate-spin text-gray-500" />}
+              </div>
+              <BlockTitle>EBIT - Product</BlockTitle>
+              {ebitItems.length === 0 ? <div className="py-8 text-center text-xs text-gray-600">Tidak ada produk dengan EBIT positif untuk market ini.</div> : (
+                <ResponsiveContainer width="100%" height={ebitItems.length * 30 + 40}>
+                  <BarChart data={ebitItems} layout="vertical" margin={{ left: 8, right: 44, top: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={TPL_GRID} horizontal={false} />
+                    <XAxis type="number" tick={TPL_TICK} tickFormatter={(v) => `${v}%`} />
+                    <YAxis type="category" dataKey="product" tick={{ fontSize: 10, fill: "#334155" }} width={130} interval={0} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => [`${fmtN(v, 1)}%`, "EBIT"]} />
+                    <Bar dataKey="ebit_pct" name="EBIT" fill={XL_BLUE} barSize={12}>
+                      <LabelList dataKey="ebit_pct" position="right" formatter={(v) => `${fmtN(v, 0)}%`} style={{ ...TPL_LABEL, fontSize: 10 }} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+              {d.ebit && <AsOf year={d.ebit.year} month={d.ebit.month} selYear={year} selMonth={period} />}
+              <div className="text-[10px] text-gray-600 text-center mt-0.5">5 produk penjualan terbesar dengan EBIT positif · EBIT ÷ sales</div>
+            </div>
+          </div>
+        </div>
+      </EisSection>
+
+      <EisSection title="Local Performance" subtitle="Achievement">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-4">
+          <YearlyGrowthColumn seg={s.Local} year={year} period={period} />
+          <div className="space-y-3">
+            <div>
+              <BlockTitle>Monthly</BlockTitle>
+              <MonthlyPlanActual seg={s.Local} />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border-t border-gray-800 pt-2">
+              <div>
+                <BlockTitle>Area Sales Force Performance</BlockTitle>
+                <AreaSalesBlock area={d.area} />
+              </div>
+              <div>
+                <BlockTitle>Marketing Activity</BlockTitle>
+                <MarketingBlock marketing={d.marketing} year={year} period={period} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </EisSection>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        {[["CMO & Others Performance", s["CMO & Others"]], ["Export Performance", s.Export]].map(([title, seg]) => (
+          <EisSection key={title} title={title}>
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_1.4fr] gap-3">
+              <div>
+                <BlockTitle>Yearly</BlockTitle>
+                <HalfGauge pct={seg.achievement_pct} />
+              </div>
+              <div>
+                <BlockTitle right={<PctTag pct={seg.growth_pct} />}>GROWTH</BlockTitle>
+                <GrowthBars seg={seg} year={year} period={period} height={150} />
+              </div>
+            </div>
+            <div className="mt-3">
+              <BlockTitle>Monthly</BlockTitle>
+              <MonthlyPlanActual seg={seg} />
+            </div>
+          </EisSection>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Tab: Production ─────────────────────────────────────────────
+   Laid out after the template's Production_Dashboard sheet (Executive
+   Information Summary): Batch & Yield, DIO, Quality Release, COGS
+   Performance (GPM), Machine Utilization (OEE), Overtime Ratio. Data comes
+   from the EIS template upload (eis.prod_*), one call for the whole page;
+   every formula lives in the backend (eis_production.py /dashboard).
+   Shared pieces (header band, sections, gauge) are defined above the
+   Performance tab. */
 function EisProductionTab({ year, period }) {
   const [d, setD] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -648,33 +812,23 @@ function EisProductionTab({ year, period }) {
     <div className="space-y-4">
       <SourceTag>EIS Template (upload Excel)</SourceTag>
 
-      {/* Header band — mirrors the sheet's title block */}
-      <div className="grid grid-cols-[2fr_1.4fr_1fr] rounded-xl overflow-hidden border border-blue-900 bg-blue-950 text-white">
-        <div className="px-4 py-2 text-xs sm:text-sm font-bold leading-snug flex items-center justify-center text-center">
-          PT CKD OTTO PHARMACEUTICALS<br />EXECUTIVE INFORMATION SUMMARY
-        </div>
-        <div className="border-x border-blue-900 flex items-center justify-center text-sm sm:text-base font-bold tracking-wide">PRODUCTION</div>
-        <div className="grid grid-rows-2 text-center text-sm font-bold">
-          <div className="flex items-center justify-center border-b border-blue-900">{year}</div>
-          <div className="flex items-center justify-center">{MONTH_NAMES[period - 1]}</div>
-        </div>
-      </div>
+      <EisHeaderBand title="PRODUCTION" year={year} period={period} />
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <ProdSection title="Batch & Yield Production">
+        <EisSection title="Batch & Yield Production">
           <div className="text-center text-xs font-semibold text-gray-300 mb-1">Batch Production - Vials : Accumulated</div>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={batch} margin={{ top: 18, right: 8, left: 8, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
-              <XAxis dataKey="name" tick={AXIS_TICK} />
-              <YAxis tick={AXIS_TICK} tickFormatter={fmtInt} width={64} />
+              <CartesianGrid strokeDasharray="3 3" stroke={TPL_GRID} vertical={false} />
+              <XAxis dataKey="name" tick={TPL_TICK} />
+              <YAxis tick={TPL_TICK} tickFormatter={fmtInt} width={64} />
               <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => fmtInt(v)} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               <Bar dataKey="plan_cum" name="Business Plan" fill={XL_BLUE}>
-                <LabelList dataKey="plan_cum" position="top" formatter={fmtInt} style={{ fontSize: 9, fill: "#d1d5db" }} />
+                <LabelList dataKey="plan_cum" position="top" formatter={fmtInt} style={TPL_LABEL} />
               </Bar>
               <Bar dataKey="actual_cum" name="Actual" fill={XL_ORANGE}>
-                <LabelList dataKey="actual_cum" position="top" formatter={fmtInt} style={{ fontSize: 9, fill: "#d1d5db" }} />
+                <LabelList dataKey="actual_cum" position="top" formatter={fmtInt} style={TPL_LABEL} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -682,7 +836,7 @@ function EisProductionTab({ year, period }) {
           <div className="grid grid-cols-1 md:grid-cols-[1fr_2fr] gap-3 mt-3">
             <div className="rounded-lg border border-gray-800 flex flex-col">
               <div className="text-center text-xs font-semibold text-gray-300 pt-2">Yield</div>
-              <YieldGauge pct={d.yield.current?.yield_pct} />
+              <HalfGauge pct={d.yield.current?.yield_pct} digits={1} />
               <AsOf year={year} month={d.yield.current?.month} {...sel} />
               <div className="border-t border-gray-800 mt-2 py-2 text-center">
                 <div className="text-sm font-bold text-gray-200">Target Yield</div>
@@ -693,56 +847,56 @@ function EisProductionTab({ year, period }) {
               <div className="text-center text-xs font-semibold text-gray-300 mb-1">Monthly Yield</div>
               <ResponsiveContainer width="100%" height={210}>
                 <LineChart data={yieldRows} margin={{ top: 16, right: 12, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
-                  <XAxis dataKey="name" tick={AXIS_TICK} />
-                  <YAxis tick={AXIS_TICK} domain={yieldDomain} tickFormatter={(v) => `${v}%`} width={44} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={TPL_GRID} vertical={false} />
+                  <XAxis dataKey="name" tick={TPL_TICK} />
+                  <YAxis tick={TPL_TICK} domain={yieldDomain} tickFormatter={(v) => `${v}%`} width={44} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => [`${fmtN(v, 1)}%`, "Yield"]} />
                   <ReferenceLine y={d.yield.target_pct} stroke={COLOR_RED} strokeDasharray="5 5" />
                   <Line type="linear" dataKey="yield_pct" name="Yield" stroke={XL_GRAY} strokeWidth={2} dot={{ r: 3, fill: XL_GRAY }} connectNulls={false}>
-                    <LabelList dataKey="yield_pct" position="top" formatter={(v) => v == null ? "" : `${fmtN(v, 1)}%`} style={{ fontSize: 9, fill: "#d1d5db" }} />
+                    <LabelList dataKey="yield_pct" position="top" formatter={(v) => v == null ? "" : `${fmtN(v, 1)}%`} style={TPL_LABEL} />
                   </Line>
                 </LineChart>
               </ResponsiveContainer>
             </div>
           </div>
-        </ProdSection>
+        </EisSection>
 
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <ProdSection title="DIO">
+            <EisSection title="DIO">
               <div className="text-center text-[11px] text-gray-500 mb-1">Days</div>
               <BigNumber value={d.dio?.days == null ? "—" : fmtN(d.dio.days, 0)} />
               <AsOf year={year} month={d.dio?.month} {...sel} />
-            </ProdSection>
-            <ProdSection title="Quality Release">
+            </EisSection>
+            <EisSection title="Quality Release">
               <div className="text-center text-[11px] text-gray-500 mb-1">Days</div>
               <div className="grid grid-cols-2 divide-x divide-gray-800">
                 <div><div className="text-center text-xs font-semibold text-gray-400">Plan</div><BigNumber value={d.release?.plan_days == null ? "—" : fmtN(d.release.plan_days, 0)} /></div>
                 <div><div className="text-center text-xs font-semibold text-gray-400">Actual</div><BigNumber value={d.release?.actual_days == null ? "—" : fmtN(d.release.actual_days, 0)} /></div>
               </div>
               <AsOf year={year} month={d.release?.month} {...sel} />
-            </ProdSection>
+            </EisSection>
           </div>
 
-          <ProdSection title="COGS Performance">
+          <EisSection title="COGS Performance">
             <div className="text-center text-xs font-semibold text-gray-300 mb-1">GPM</div>
             {gpm.length === 0 ? <div className="py-8 text-center text-xs text-gray-600">Belum ada data GPM.</div> : (
               <ResponsiveContainer width="100%" height={Math.max(180, gpm.length * 22 + 30)}>
                 <BarChart data={gpm} layout="vertical" margin={{ left: 8, right: 44, top: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} horizontal={false} />
-                  <XAxis type="number" tick={AXIS_TICK} tickFormatter={(v) => `${v}%`} />
-                  <YAxis type="category" dataKey="product" tick={{ fontSize: 10, fill: "#d1d5db" }} width={110} interval={0} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={TPL_GRID} horizontal={false} />
+                  <XAxis type="number" tick={TPL_TICK} tickFormatter={(v) => `${v}%`} />
+                  <YAxis type="category" dataKey="product" tick={{ fontSize: 10, fill: "#334155" }} width={110} interval={0} />
                   <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => [`${fmtN(v, 1)}%`, "GPM"]} />
                   <Bar dataKey="gpm_pct" name="GPM" fill={XL_BLUE} barSize={12}>
-                    <LabelList dataKey="gpm_pct" position="right" formatter={(v) => `${fmtN(v, 0)}%`} style={{ fontSize: 10, fill: "#d1d5db" }} />
+                    <LabelList dataKey="gpm_pct" position="right" formatter={(v) => `${fmtN(v, 0)}%`} style={{ ...TPL_LABEL, fontSize: 10 }} />
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}
             {d.gpm && <AsOf year={d.gpm.year} month={d.gpm.month} {...sel} />}
-          </ProdSection>
+          </EisSection>
 
-          <ProdSection title="Machine Utilization">
+          <EisSection title="Machine Utilization">
             {!m ? <div className="py-8 text-center text-xs text-gray-600">Belum ada data machine utilization.</div> : (
               <>
                 <div className="grid grid-cols-[1.4fr_auto_1.6fr] gap-3 items-center">
@@ -766,28 +920,28 @@ function EisProductionTab({ year, period }) {
                 <AsOf year={m.year} month={m.month} {...sel} />
               </>
             )}
-          </ProdSection>
+          </EisSection>
         </div>
       </div>
 
-      <ProdSection title="Overtime Ratio">
+      <EisSection title="Overtime Ratio">
         <div className="text-center text-xs font-semibold text-gray-300 mb-1">Overtime Ratio - Plant</div>
         <ResponsiveContainer width="100%" height={260}>
           <ComposedChart data={overtime} margin={{ top: 16, right: 8, left: 8, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} vertical={false} />
-            <XAxis dataKey="name" tick={AXIS_TICK} />
-            <YAxis yAxisId="h" tick={AXIS_TICK} tickFormatter={fmtInt} width={56} />
-            <YAxis yAxisId="r" orientation="right" tick={AXIS_TICK} tickFormatter={(v) => `${v}%`} width={40} domain={[0, (max) => Math.max(25, Math.ceil(max / 5) * 5)]} />
+            <CartesianGrid strokeDasharray="3 3" stroke={TPL_GRID} vertical={false} />
+            <XAxis dataKey="name" tick={TPL_TICK} />
+            <YAxis yAxisId="h" tick={TPL_TICK} tickFormatter={fmtInt} width={56} />
+            <YAxis yAxisId="r" orientation="right" tick={TPL_TICK} tickFormatter={(v) => `${v}%`} width={40} domain={[0, (max) => Math.max(25, Math.ceil(max / 5) * 5)]} />
             <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, n) => n === "Overtime Ratio" ? [`${fmtN(v, 1)}%`, n] : [fmtN(v, 1), n]} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
             <Bar yAxisId="h" dataKey="overtime_hours" name="Overtime Hour" fill={XL_BLUE} />
             <Bar yAxisId="h" dataKey="working_hours" name="Working Hour" fill={XL_ORANGE} />
             <Line yAxisId="r" type="linear" dataKey="ratio_pct" name="Overtime Ratio" stroke={XL_GRAY} strokeWidth={2} dot={{ r: 3, fill: XL_GRAY }}>
-              <LabelList dataKey="ratio_pct" position="top" formatter={(v) => v == null ? "" : `${fmtN(v, 0)}%`} style={{ fontSize: 9, fill: "#d1d5db" }} />
+              <LabelList dataKey="ratio_pct" position="top" formatter={(v) => v == null ? "" : `${fmtN(v, 0)}%`} style={TPL_LABEL} />
             </Line>
           </ComposedChart>
         </ResponsiveContainer>
-      </ProdSection>
+      </EisSection>
     </div>
   );
 }
@@ -1503,7 +1657,7 @@ function EisDataUploadTab({ year: sharedYear }) {
     setPtUploading(true); setPtMsg(null);
     try {
       const fd = new FormData(); fd.append("file", file);
-      const res = await eisApi.uploadProductionTemplate(fd);
+      const res = await eisApi.uploadEisTemplate(fd);
       setPtMsg({ type: "ok", text: res.message });
     } catch (err) { setPtMsg({ type: "err", text: "Gagal: " + (err?.response?.data?.detail || err?.detail || err.message) }); }
     setPtLogsKey((k) => k + 1);
@@ -1521,7 +1675,7 @@ function EisDataUploadTab({ year: sharedYear }) {
 
   return (
     <div className="space-y-4">
-      <ChartCard title="EIS Template — Production" subtitle="Workbook EIS Template (mis. EIS_Template_2026_V2_Filled_v4-PRODUCTION.xlsx): sheet Production_* dibaca, sheet lain diabaikan. Tahun diambil dari isi file."
+      <ChartCard title="EIS Template — Production & Performance" subtitle="Workbook EIS Template (mis. EIS_Template_2026_V2_Filled_v4-PRODUCTION.xlsx). Hanya sheet yang ada di file yang diperbarui; sheet lain diabaikan. Tahun diambil dari isi file."
         right={
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={() => ptFileRef.current?.click()} disabled={ptUploading} className={`${uploadBtnCls} bg-indigo-600 hover:bg-indigo-700`}>
@@ -1539,10 +1693,14 @@ function EisDataUploadTab({ year: sharedYear }) {
             <li><strong className="text-gray-300">Production_Release</strong>: product_code, year, month, plan_days, actual_days</li>
             <li><strong className="text-gray-300">Production_COGSRatio</strong>: product_code (nama molekul), year, month, gpm_ratio (1.87 = 187%)</li>
             <li><strong className="text-gray-300">Production_MachineUtilization</strong>: plant, year, month, availability_pct, performance_pct, quality_pct (0.8 = 80%)</li>
+            <li><strong className="text-gray-300">SalesSummary_Monthly</strong>: business_type (Local / CMO &amp; Others / Export), year, month, plan_amount, actual_amount — bulanan, juta IDR. Isi juga tahun sebelumnya agar Growth tampil</li>
+            <li><strong className="text-gray-300">Sales_Ledger</strong>: product_name, market, year, month, scenario (Actual / Business Plan), sales_amount, cogs_amount, opex_amount, ebit_amount — dipakai untuk EBIT - Product</li>
+            <li><strong className="text-gray-300">AreaSales_Ledger</strong>: region, city, year, month, segment, sales_amount — bulanan per area</li>
+            <li><strong className="text-gray-300">Marketing_Activities</strong>: event_name, region, year, Month, plan_event_count (target tahunan), actual_event_count (kumulatif YTD)</li>
           </ul>
           <p><strong className="text-gray-300">month</strong> = nama bulan Inggris (January…) atau 1–12. Upload ulang mengganti seluruh data tahun yang ada di file; sel kosong disimpan kosong (bukan nol).</p>
         </RequiredFormatNote>
-        <UploadHistoryTable uploadType="production-template" refreshKey={ptLogsKey} />
+        <UploadHistoryTable uploadType="eis-template" refreshKey={ptLogsKey} />
       </ChartCard>
 
       <ChartCard title="Upload Data Overtime" subtitle="Format kolom B: label (Overtime Hour / Working Hour) · Kolom C–N: Jan–Dec · Referensi: overtime_data.xlsx"
@@ -1779,7 +1937,6 @@ export default function EISDashboard() {
   const location = useLocation();
   const [year, setYear] = useState(CY);
   const [period, setPeriod] = useState(new Date().getMonth() || 12);
-  const [segment, setSegment] = useState("all");
   const YEARS = Array.from({ length: 5 }, (_, i) => CY - i);
 
   // Derive active tab from URL — navigation now lives in the sidebar tree menu.
@@ -1824,19 +1981,11 @@ export default function EISDashboard() {
           <select value={period} onChange={(e) => setPeriod(Number(e.target.value))} className={selCls}>
             {MONTHS_SHORT.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
           </select>
-          {tab === "performance" && (
-            <select value={segment} onChange={(e) => setSegment(e.target.value)} className={selCls}>
-              <option value="all">All Segments</option>
-              <option value="Local">Local</option>
-              <option value="Export">Export</option>
-              <option value="CMO">CMO</option>
-            </select>
-          )}
         </div>
       </div>
 
       {tab === "summary" && <EisSummaryTab year={year} period={period} />}
-      {tab === "performance" && <EisPerformanceTab year={year} period={period} segment={segment} />}
+      {tab === "performance" && <EisPerformanceTab year={year} period={period} />}
       {tab === "production" && <EisProductionTab year={year} period={period} />}
       {tab === "expansion" && <EisExpansionTab year={year} period={period} />}
       {tab === "administration" && <EisAdministrationTab year={year} />}

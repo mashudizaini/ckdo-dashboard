@@ -125,7 +125,7 @@ async def product_release_time(
 
 # ══════════════════════════════════════════════════════════════
 # Production dashboard — reads the eis.prod_* tables filled by the EIS
-# template upload (eis_data_upload: /production-template/upload), not the
+# template upload (eis_data_upload: /eis-template/upload), not the
 # ETL fact_* tables above. One call returns every block of the page, with
 # the formulas of the template's own Production_Dashboard sheet:
 #   Batch production  cumulative Σ plan / Σ actual of Local+CMO+Export
