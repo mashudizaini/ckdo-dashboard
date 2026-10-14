@@ -39,8 +39,8 @@ export default function SpeakersModal({ onClose }) {
   useEffect(() => { fetchSpeakers(); }, []); // eslint-disable-line
 
   const handleEnroll = async () => {
-    if (!file) { setMsg({ type: "error", text: "Pilih file audio dulu" }); return; }
-    if (!name.trim()) { setMsg({ type: "error", text: "Nama tidak boleh kosong" }); return; }
+    if (!file) { setMsg({ type: "error", text: "Choose an audio file first" }); return; }
+    if (!name.trim()) { setMsg({ type: "error", text: "Name cannot be empty" }); return; }
     setEnrolling(true);
     setMsg(null);
     try {
@@ -52,8 +52,8 @@ export default function SpeakersModal({ onClose }) {
       fd.append("team", team);
       const res = await fetch(url, { method: "POST", headers, body: fd });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.detail || "Gagal mendaftarkan suara");
-      setMsg({ type: "success", text: `Suara "${data.name}" berhasil didaftarkan` });
+      if (!res.ok) throw new Error(data?.detail || "Failed to enroll the voice");
+      setMsg({ type: "success", text: `Voice "${data.name}" enrolled` });
       setFile(null);
       if (fileRef.current) fileRef.current.value = "";
       setName(""); setGender(""); setPosition(""); setTeam("");
@@ -66,7 +66,7 @@ export default function SpeakersModal({ onClose }) {
   };
 
   const handleDelete = async (id, spName) => {
-    if (!confirm(`Hapus suara terdaftar "${spName}"?`)) return;
+    if (!confirm(`Delete the enrolled voice "${spName}"?`)) return;
     setDeletingId(id);
     try {
       await fetch(`${url}/${id}`, { method: "DELETE", headers });
@@ -88,25 +88,25 @@ export default function SpeakersModal({ onClose }) {
 
         <div className="p-5 space-y-5">
           <p className="text-xs text-gray-400 leading-relaxed">
-            Daftarkan suara seseorang sekali (klip solo, idealnya 20 detik atau lebih, tanpa suara orang lain) —
-            selanjutnya "Identify Speakers" pada rekaman rapat akan otomatis mengenali suara ini. Mendaftar ulang
-            nama yang sama akan menimpa sample sebelumnya.
+            Enroll a person's voice once (a solo clip, ideally 20 seconds or more, with no other voices) —
+            from then on "Identify Speakers" on meeting recordings recognises this voice automatically. Enrolling
+            the same name again replaces the previous sample.
           </p>
 
           <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-4 space-y-3">
-            <p className="text-xs font-semibold text-gray-300">Daftarkan suara baru</p>
+            <p className="text-xs font-semibold text-gray-300">Enroll a new voice</p>
             <div className="grid grid-cols-2 gap-2">
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama *"
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name *"
                 className="rounded-md border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500" />
               <select value={gender} onChange={(e) => setGender(e.target.value)}
                 className="rounded-md border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500 cursor-pointer">
-                <option value="">Gender (opsional)</option>
-                <option value="man">Pria</option>
-                <option value="women">Wanita</option>
+                <option value="">Gender (optional)</option>
+                <option value="man">Male</option>
+                <option value="women">Female</option>
               </select>
-              <input value={position} onChange={(e) => setPosition(e.target.value)} placeholder="Jabatan (opsional)"
+              <input value={position} onChange={(e) => setPosition(e.target.value)} placeholder="Position (optional)"
                 className="rounded-md border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500" />
-              <input value={team} onChange={(e) => setTeam(e.target.value)} placeholder="Team (opsional)"
+              <input value={team} onChange={(e) => setTeam(e.target.value)} placeholder="Team (optional)"
                 className="rounded-md border border-gray-700 bg-gray-900 px-2.5 py-1.5 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500" />
             </div>
             <input ref={fileRef} type="file" accept="audio/*" onChange={(e) => setFile(e.target.files?.[0] || null)}
@@ -114,7 +114,7 @@ export default function SpeakersModal({ onClose }) {
             <button onClick={handleEnroll} disabled={enrolling}
               className="w-full flex items-center justify-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2 transition-colors">
               {enrolling ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
-              {enrolling ? "Memproses suara…" : "Enroll"}
+              {enrolling ? "Processing voice…" : "Enroll"}
             </button>
             {msg && (
               <div className={`flex items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium ${msg.type === "error" ? "bg-red-500/10 border border-red-500/30 text-red-400" : "bg-green-500/10 border border-green-500/30 text-green-400"}`}>
@@ -124,11 +124,11 @@ export default function SpeakersModal({ onClose }) {
           </div>
 
           <div>
-            <p className="text-xs font-semibold text-gray-300 mb-2">Terdaftar ({speakers.length})</p>
+            <p className="text-xs font-semibold text-gray-300 mb-2">Enrolled ({speakers.length})</p>
             {loading ? (
               <div className="flex justify-center py-6"><Loader2 size={16} className="animate-spin text-gray-600" /></div>
             ) : speakers.length === 0 ? (
-              <div className="text-xs text-gray-600 text-center py-6 border border-dashed border-gray-800 rounded-lg">Belum ada suara terdaftar.</div>
+              <div className="text-xs text-gray-600 text-center py-6 border border-dashed border-gray-800 rounded-lg">No voices enrolled yet.</div>
             ) : (
               <div className="divide-y divide-gray-800 border border-gray-800 rounded-lg overflow-hidden">
                 {speakers.map((s) => (

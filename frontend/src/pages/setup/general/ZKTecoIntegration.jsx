@@ -234,7 +234,7 @@ export default function ZKTecoIntegration() {
     <>
       <Panel
         title="Devices"
-        subtitle="Plant attendance terminals (ZKTeco protocol, port 4370 by default) — Lobby, Loker Male/Female, Server IT, Female/Male Lab, Mall, Office, ..."
+        subtitle="Plant attendance terminals (ZKTeco protocol, port 4370 by default) — Lobby, Locker Male/Female, Server IT, Female/Male Lab, Mall, Office, ..."
         action={<Btn icon={Plus} variant="primary" onClick={() => setEditing({})}>Add Device</Btn>}
       >
         {loadingDevices ? (
@@ -466,7 +466,7 @@ function SetupGuide() {
           </div>
           <div>
             <p style={{ fontWeight: 700, marginBottom: 4 }}>2. Comm Key / Password</p>
-            <p>This is the device's numeric ZKTeco "comm key", not a login password — set via the terminal's own menu or the "Solution" desktop software. <code>0</code> means no key is set (confirmed for the Office terminal: "admin, tanpa password").</p>
+            <p>This is the device's numeric ZKTeco "comm key", not a login password — set via the terminal's own menu or the "Solution" desktop software. <code>0</code> means no key is set (confirmed for the Office terminal: "admin, no password").</p>
           </div>
           <div>
             <p style={{ fontWeight: 700, marginBottom: 4 }}>3. Employee ID matching</p>

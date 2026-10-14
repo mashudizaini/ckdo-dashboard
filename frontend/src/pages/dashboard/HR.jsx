@@ -931,7 +931,7 @@ const EMPLOYEE_DETAIL_FIELDS = [
     ["personal_email", "Personal Email"], ["address", "Address"],
   ] },
   { section: "Administrative", fields: [
-    ["no_bpjs_health", "BPJS Kesehatan"], ["no_bpjs_employee", "BPJS Ketenagakerjaan"], ["npwp_number", "NPWP"],
+    ["no_bpjs_health", "BPJS Health"], ["no_bpjs_employee", "BPJS Employment"], ["npwp_number", "NPWP"],
     ["bank_account_bca", "Bank Account (BCA)"], ["bank_account_name", "Bank Account Name"],
   ] },
 ];

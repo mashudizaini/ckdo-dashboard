@@ -35,7 +35,7 @@ export default function OverviewTab() {
     setNotice(null);
     try {
       const r = await ebsMartApi.trigger(job, { full_refresh: fullRefresh });
-      setNotice(r.message + " — status muncul di riwayat di bawah.");
+      setNotice(r.message + " — the status appears in the history below.");
       setTimeout(load, 1500);
     } catch (e) {
       setError(errMsg(e));
@@ -54,16 +54,16 @@ export default function OverviewTab() {
 
       {data && (
         <>
-          <Card title="Katalog mart" icon={Database}
-            subtitle="Satu sumber kebenaran untuk chat dan dashboard. LLM hanya melihat mart.* — tidak pernah Oracle, core.*, atau eis.*.">
+          <Card title="Mart catalog" icon={Database}
+            subtitle="One source of truth for chat and the dashboard. The LLM only sees mart.* — never Oracle, core.* or eis.*.">
             <div className="p-4 space-y-4">
               {phases.map((ph) => {
                 const marts = data.marts.filter((m) => m.phase === ph);
                 return (
                   <div key={ph}>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-gray-600 mb-2">
-                      Fase {ph} {marts.every((m) => m.built) ? "· aktif" : "· direncanakan"}
-                      {ph === 6 && " · System Administration — hanya tim IT allowlist (llm_sa_ro)"}
+                      Phase {ph} {marts.every((m) => m.built) ? "· live" : "· planned"}
+                      {ph === 6 && " · System Administration — IT allowlist only (llm_sa_ro)"}
                     </p>
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                       {marts.map((m) => (
@@ -76,11 +76,11 @@ export default function OverviewTab() {
                           <p className="text-[11px] text-gray-500 mt-0.5 line-clamp-2">{m.grain}</p>
                           {m.built ? (
                             <div className="flex items-center justify-between mt-2 text-[11px]">
-                              <span className="text-gray-300 tabular-nums">{fmtNum(m.row_count)} baris</span>
-                              <span className={m.as_of ? "text-gray-400" : "text-amber-400"}>{m.as_of || "belum di-load"}</span>
+                              <span className="text-gray-300 tabular-nums">{fmtNum(m.row_count)} rows</span>
+                              <span className={m.as_of ? "text-gray-400" : "text-amber-400"}>{m.as_of || "not loaded yet"}</span>
                             </div>
                           ) : (
-                            <p className="text-[11px] text-gray-600 mt-2">Sumber: {m.sources}</p>
+                            <p className="text-[11px] text-gray-600 mt-2">Source: {m.sources}</p>
                           )}
                         </div>
                       ))}
@@ -92,15 +92,15 @@ export default function OverviewTab() {
           </Card>
 
           <Card title="ETL & refresh" icon={Workflow}
-            subtitle="Tombol manual memakai advisory lock — kalau job yang sama sedang jalan (jadwal), tarikan manual tercatat 'skipped', bukan dobel."
-            actions={<Button variant="ghost" icon={RefreshCw} onClick={load}>Muat ulang</Button>}>
+            subtitle="Manual buttons use an advisory lock — if the same job is already running (scheduled), the manual pull is recorded as 'skipped', not doubled."
+            actions={<Button variant="ghost" icon={RefreshCw} onClick={load}>Reload</Button>}>
             <div className="p-4 flex flex-wrap gap-2 border-b border-gray-800">
-              <Button icon={Play} loading={busy === "etl_mart_ap"} onClick={() => trigger("etl_mart_ap")}>Tarik AP (incremental)</Button>
+              <Button icon={Play} loading={busy === "etl_mart_ap"} onClick={() => trigger("etl_mart_ap")}>Pull AP (incremental)</Button>
               <Button variant="ghost" icon={Play} loading={busy === "etl_mart_ap-full"} onClick={() => trigger("etl_mart_ap", true)}
-                title="Reload penuh + rekonsiliasi delete (otomatis tiap Minggu 01:00)">AP full reload</Button>
-              <Button icon={Play} loading={busy === "etl_mart_inventory"} onClick={() => trigger("etl_mart_inventory")}>Tarik stok per lot</Button>
-              <Button variant="ghost" icon={Play} loading={busy === "etl_inventory_txn"} onClick={() => trigger("etl_inventory_txn")}>Tarik mutasi inventory</Button>
-              <Button variant="ghost" icon={RefreshCw} loading={busy === "refresh_ebs_marts"} onClick={() => trigger("refresh_ebs_marts")}>Refresh semua mart</Button>
+                title="Full reload + delete reconciliation (automatic every Sunday 01:00)">AP full reload</Button>
+              <Button icon={Play} loading={busy === "etl_mart_inventory"} onClick={() => trigger("etl_mart_inventory")}>Pull stock by lot</Button>
+              <Button variant="ghost" icon={Play} loading={busy === "etl_inventory_txn"} onClick={() => trigger("etl_inventory_txn")}>Pull inventory movements</Button>
+              <Button variant="ghost" icon={RefreshCw} loading={busy === "refresh_ebs_marts"} onClick={() => trigger("refresh_ebs_marts")}>Refresh all marts</Button>
             </div>
             {data.watermarks.length > 0 && (
               <div className="px-4 py-2 border-b border-gray-800 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-gray-500">
@@ -115,7 +115,7 @@ export default function OverviewTab() {
               <table className="w-full text-[11px]">
                 <thead className="sticky top-0 bg-gray-800 text-gray-400">
                   <tr>
-                    {["Job", "Pemicu", "Status", "Dibaca", "Upsert", "Watermark", "Mulai", "Durasi", "Catatan"].map((h) => (
+                    {["Job", "Trigger", "Status", "Read", "Upsert", "Watermark", "Started", "Duration", "Notes"].map((h) => (
                       <th key={h} className="px-3 py-1.5 text-left font-semibold whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -130,36 +130,36 @@ export default function OverviewTab() {
                       <td className="px-3 py-1.5 text-right tabular-nums text-gray-300">{fmtNum(r.rows_upserted)}</td>
                       <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">{r.watermark_from ? `${fmtDate(r.watermark_from)} →` : "full"} {r.watermark_to ? fmtDate(r.watermark_to) : ""}</td>
                       <td className="px-3 py-1.5 text-gray-400 whitespace-nowrap">{fmtDate(r.started_at)}</td>
-                      <td className="px-3 py-1.5 text-gray-400 tabular-nums">{r.duration_secs != null ? `${r.duration_secs} dtk` : "—"}</td>
+                      <td className="px-3 py-1.5 text-gray-400 tabular-nums">{r.duration_secs != null ? `${r.duration_secs} s` : "—"}</td>
                       <td className="px-3 py-1.5 text-red-300 max-w-xs truncate" title={r.error_msg || ""}>{r.error_msg || ""}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {data.runs.length === 0 && <p className="px-3 py-6 text-center text-xs text-gray-500">Belum ada run.</p>}
+              {data.runs.length === 0 && <p className="px-3 py-6 text-center text-xs text-gray-500">No runs yet.</p>}
             </div>
           </Card>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Card title="Peran akses data" icon={Users}
-              subtitle="Isi aksesnya diatur di matriks EBS Chat Access; peran diberikan per email di sana atau lewat claim groups token Keycloak.">
+            <Card title="Data access roles" icon={Users}
+              subtitle="What each role can read is set in the EBS Chat Access matrix; roles are given per email there or through the Keycloak token's groups claim.">
               <div className="divide-y divide-gray-800">
                 {data.groups.map((g) => (
                   <div key={g.group} className="px-4 py-2 text-xs">
                     <p className="font-mono text-gray-200">{g.group}</p>
-                    <p className="text-gray-500">{g.label} · {g.all_access ? "semua data" : `${g.marts.length} data`}</p>
+                    <p className="text-gray-500">{g.label} · {g.all_access ? "all data" : `${g.marts.length} data sets`}</p>
                   </div>
                 ))}
               </div>
             </Card>
-            <Card title="Guardrail aktif" icon={ShieldCheck}>
+            <Card title="Active guardrails" icon={ShieldCheck}>
               <ul className="p-4 space-y-1.5 text-xs text-gray-400 list-disc list-inside">
-                <li>run_sql: satu SELECT, semua tabel harus mart.* (diperiksa dengan sqlglot; SQL hasil parse yang dieksekusi)</li>
-                <li>Koneksi read-only, statement_timeout <b className="text-gray-200">{data.guardrails.statement_timeout}</b>, maksimal <b className="text-gray-200">{data.guardrails.max_rows}</b> baris (flag truncated)</li>
-                <li>Akses per peran dicek sebelum query (matriks EBS Chat Access) — 403 tidak bergantung pada kepatuhan model</li>
-                <li>Akses "Qty": kolom nilai/harga dibuang dari hasil, dan run_sql yang menyentuhnya ditolak</li>
-                <li>Setiap panggilan (termasuk yang ditolak) dicatat di meta.chat_query_log</li>
-                <li>Setiap hasil membawa as_of, sql_used, row_count</li>
+                <li>run_sql: one SELECT, every table must be mart.* (checked with sqlglot; the parsed SQL is what runs)</li>
+                <li>Read-only connection, statement_timeout <b className="text-gray-200">{data.guardrails.statement_timeout}</b>, at most <b className="text-gray-200">{data.guardrails.max_rows}</b> rows (truncated flag)</li>
+                <li>Role access is checked before the query (EBS Chat Access matrix) — a 403 does not depend on the model complying</li>
+                <li>"Qty" access: value/price columns are dropped from results, and run_sql touching them is refused</li>
+                <li>Every call (including refused ones) is logged in meta.chat_query_log</li>
+                <li>Every result carries as_of, sql_used, row_count</li>
               </ul>
             </Card>
           </div>

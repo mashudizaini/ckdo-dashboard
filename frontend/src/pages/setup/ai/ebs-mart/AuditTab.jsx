@@ -36,14 +36,14 @@ export default function AuditTab() {
     <div className="space-y-4">
       <ErrorBox>{error}</ErrorBox>
       {stats && (
-        <Card title="Pemakaian 30 hari" icon={Activity}
-          subtitle="Siklus perbaikan mingguan (blueprint §11): tinjau query gagal dan DENIED di sini → tambah sinonim → golden query → perjelas skill → jadikan intent tool.">
+        <Card title="Usage, 30 days" icon={Activity}
+          subtitle="Weekly improvement cycle (blueprint §11): review failed and DENIED queries here → add synonyms → golden query → sharpen the skill → turn it into an intent tool.">
           <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
-              ["Panggilan tool", totals.calls],
-              ["Berhasil", totals.calls ? `${Math.round((totals.ok / totals.calls) * 100)}%` : "—"],
+              ["Tool calls", totals.calls],
+              ["Succeeded", totals.calls ? `${Math.round((totals.ok / totals.calls) * 100)}%` : "—"],
               ["Error / timeout", totals.errors],
-              ["Ditolak akses", totals.denied],
+              ["Access denied", totals.denied],
             ].map(([label, v]) => (
               <div key={label} className="rounded-lg border border-gray-800 bg-gray-800/40 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-wider text-gray-500">{label}</p>
@@ -59,8 +59,8 @@ export default function AuditTab() {
                   <XAxis dataKey="day" tick={{ fill: "#6b7280", fontSize: 10 }} tickFormatter={(d) => String(d).slice(5)} />
                   <YAxis tick={{ fill: "#6b7280", fontSize: 10 }} allowDecimals={false} />
                   <Tooltip contentStyle={{ background: "#111827", border: "1px solid #374151", fontSize: 11 }} />
-                  <Bar dataKey="calls" name="Panggilan" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="not_ok" name="Tidak OK" fill="#f59e0b" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="calls" name="Calls" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="not_ok" name="Not OK" fill="#f59e0b" radius={[3, 3, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -68,7 +68,7 @@ export default function AuditTab() {
           <div className="overflow-auto">
             <table className="w-full text-[11px]">
               <thead className="bg-gray-800 text-gray-400">
-                <tr>{["Tool", "Panggilan", "OK", "Error", "Ditolak guardrail", "Ditolak akses", "Median (ms)", "User"].map((h) => (
+                <tr>{["Tool", "Calls", "OK", "Error", "Guardrail denied", "Access denied", "Median (ms)", "User"].map((h) => (
                   <th key={h} className="px-3 py-1.5 text-left font-semibold">{h}</th>))}</tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
@@ -87,18 +87,18 @@ export default function AuditTab() {
       )}
 
       <Card title="Audit log (meta.chat_query_log)" icon={ScrollText}
-        subtitle="Setiap panggilan tool — siapa, pertanyaan, SQL, jumlah baris, durasi, status."
-        actions={<Button variant="ghost" icon={RefreshCw} onClick={load}>Muat ulang</Button>}>
+        subtitle="Every tool call — who, question, SQL, rows, duration, status."
+        actions={<Button variant="ghost" icon={RefreshCw} onClick={load}>Reload</Button>}>
         <div className="p-4 space-y-3">
           <div className="flex flex-wrap gap-2">
             <input placeholder="Email user" value={filters.user_email} className={inputCls}
               onChange={(e) => setFilters({ ...filters, user_email: e.target.value })} />
-            <input placeholder="Nama tool" value={filters.tool} className={inputCls}
+            <input placeholder="Tool name" value={filters.tool} className={inputCls}
               onChange={(e) => setFilters({ ...filters, tool: e.target.value })} />
             <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })} className={inputCls}>
-              {STATUSES.map((s) => <option key={s} value={s}>{s || "Semua status"}</option>)}
+              {STATUSES.map((s) => <option key={s} value={s}>{s || "All statuses"}</option>)}
             </select>
-            <Button onClick={load}>Terapkan</Button>
+            <Button onClick={load}>Apply</Button>
           </div>
           <div className="rounded-lg border border-gray-800 divide-y divide-gray-800 max-h-[560px] overflow-auto">
             {(rows || []).map((r) => (
@@ -109,13 +109,13 @@ export default function AuditTab() {
                   <span className="font-mono text-gray-200">{r.tool_name}</span>
                   <span className="text-gray-400">{r.user_email || "—"}</span>
                   <span className="text-gray-600">{r.source}</span>
-                  <span className="text-gray-500 tabular-nums">{r.row_count ?? "—"} baris · {r.duration_ms ?? "—"} ms{r.truncated ? " · dipotong" : ""}</span>
+                  <span className="text-gray-500 tabular-nums">{r.row_count ?? "—"} rows · {r.duration_ms ?? "—"} ms{r.truncated ? " · truncated" : ""}</span>
                   {r.question && <span className="text-gray-400 truncate max-w-md">“{r.question}”</span>}
                 </button>
                 {open === r.id && (
                   <div className="mt-2 space-y-1.5">
                     {r.error_msg && <p className="text-red-300">{r.error_msg}</p>}
-                    <p className="text-gray-500">Grup: {(r.groups || []).join(", ") || "—"} · Mart: {(r.marts || []).join(", ") || "—"} · chat_id: {r.chat_id || "—"}</p>
+                    <p className="text-gray-500">Groups: {(r.groups || []).join(", ") || "—"} · Mart: {(r.marts || []).join(", ") || "—"} · chat_id: {r.chat_id || "—"}</p>
                     {r.tool_args && Object.keys(r.tool_args).length > 0 && (
                       <pre className="bg-gray-950 rounded p-2 text-gray-400 whitespace-pre-wrap">{JSON.stringify(r.tool_args, null, 2)}</pre>
                     )}
@@ -124,7 +124,7 @@ export default function AuditTab() {
                 )}
               </div>
             ))}
-            {rows?.length === 0 && <p className="px-3 py-6 text-center text-xs text-gray-500">Belum ada panggilan.</p>}
+            {rows?.length === 0 && <p className="px-3 py-6 text-center text-xs text-gray-500">No calls yet.</p>}
           </div>
         </div>
       </Card>

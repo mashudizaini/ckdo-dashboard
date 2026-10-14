@@ -33,7 +33,7 @@ export default function GeminiApiKeyModal({ onClose }) {
 
   const handleSave = async () => {
     const key = input.trim();
-    if (!key) { setMsg({ type: "error", text: "Paste API key dulu" }); return; }
+    if (!key) { setMsg({ type: "error", text: "Paste an API key first" }); return; }
     setSaving(true);
     setMsg(null);
     try {
@@ -41,7 +41,7 @@ export default function GeminiApiKeyModal({ onClose }) {
         method: "PUT", headers, body: JSON.stringify({ api_key: key }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Gagal menyimpan API key");
+      if (!res.ok) throw new Error(data.detail || "Failed to save the API key");
       setMsg({ type: "success", text: data.message });
       setInput("");
       setHasKey(true);
@@ -54,13 +54,13 @@ export default function GeminiApiKeyModal({ onClose }) {
   };
 
   const handleRemove = async () => {
-    if (!confirm("Hapus API key pribadi Anda? Chatbot akan kembali memakai key perusahaan (shared).")) return;
+    if (!confirm("Delete your personal API key? The chatbot will go back to the company (shared) key.")) return;
     setRemoving(true);
     setMsg(null);
     try {
       const res = await fetch("/api/v1/ai/settings/api-key/gemini", { method: "DELETE", headers });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Gagal menghapus API key");
+      if (!res.ok) throw new Error(data.detail || "Failed to delete the API key");
       setMsg({ type: "success", text: data.message });
       setHasKey(false);
       setKeyHint(null);
@@ -76,34 +76,34 @@ export default function GeminiApiKeyModal({ onClose }) {
       <div className="rounded-xl border border-gray-800 bg-gray-900 w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800 sticky top-0 bg-gray-900 z-10">
           <h3 className="text-sm font-semibold text-gray-200 flex items-center gap-2">
-            <KeyRound size={16} className="text-violet-400" /> API Key Gemini Saya
+            <KeyRound size={16} className="text-violet-400" /> My Gemini API Key
           </h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300"><X size={16} /></button>
         </div>
 
         <div className="p-5 space-y-4">
           <p className="text-xs text-gray-400 leading-relaxed">
-            Secara default, AI Chatbot memakai API key Gemini bersama milik perusahaan. Kalau Anda ingin
-            memakai akun Gemini pribadi (kuota &amp; billing sendiri), paste API key Anda di bawah ini.
-            Kosongkan / hapus kapan saja untuk kembali memakai key perusahaan.
+            By default, the AI Chatbot uses the company's shared Gemini API key. If you want to use
+            your own Gemini account (your own quota &amp; billing), paste your API key below.
+            Clear / delete it at any time to go back to the company key.
           </p>
 
           {/* Guide */}
           <div className="rounded-lg border border-gray-700 bg-gray-800/40 p-4 space-y-2">
-            <p className="text-xs font-semibold text-gray-300">Cara mendapatkan API key Gemini:</p>
+            <p className="text-xs font-semibold text-gray-300">How to get a Gemini API key:</p>
             <ol className="text-xs text-gray-400 space-y-1.5 list-decimal list-inside">
               <li>
-                Buka{" "}
+                Open{" "}
                 <a href={AI_STUDIO_URL} target="_blank" rel="noopener noreferrer"
                   className="text-violet-400 hover:text-violet-300 underline inline-flex items-center gap-1">
                   Google AI Studio <ExternalLink size={10} />
                 </a>
               </li>
-              <li>Login dengan akun Google/Gmail Anda (yang sudah punya akses Gemini)</li>
-              <li>Klik <span className="text-gray-300 font-medium">"Create API key"</span></li>
-              <li>Pilih project Google Cloud perusahaan bila diminta</li>
-              <li>Copy key yang muncul (diawali <code className="text-gray-300">AIza...</code>)</li>
-              <li>Paste di kolom bawah ini, lalu klik <span className="text-gray-300 font-medium">Simpan</span></li>
+              <li>Log in with your Google/Gmail account (one that already has Gemini access)</li>
+              <li>Click <span className="text-gray-300 font-medium">"Create API key"</span></li>
+              <li>Choose the company Google Cloud project if asked</li>
+              <li>Copy the key shown (it starts with <code className="text-gray-300">AIza...</code>)</li>
+              <li>Paste it in the field below, then click <span className="text-gray-300 font-medium">Save</span></li>
             </ol>
           </div>
 
@@ -113,22 +113,22 @@ export default function GeminiApiKeyModal({ onClose }) {
           ) : hasKey ? (
             <div className="flex items-center justify-between rounded-lg border border-green-700/40 bg-green-500/10 px-3 py-2.5">
               <span className="flex items-center gap-2 text-xs text-green-400">
-                <CheckCircle2 size={14} /> API key pribadi aktif: <code>{keyHint}</code>
+                <CheckCircle2 size={14} /> Personal API key active: <code>{keyHint}</code>
               </span>
               <button onClick={handleRemove} disabled={removing}
                 className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300 border border-red-500/30 rounded px-2 py-1 hover:bg-red-500/10 transition-colors disabled:opacity-50">
-                {removing ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />} Hapus
+                {removing ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />} Delete
               </button>
             </div>
           ) : (
             <div className="rounded-lg border border-gray-700 bg-gray-800/30 px-3 py-2.5 text-xs text-gray-500">
-              Belum ada API key pribadi — saat ini memakai key perusahaan (shared).
+              No personal API key yet — currently using the company (shared) key.
             </div>
           )}
 
           {/* Input field */}
           <div>
-            <label className="text-xs text-gray-500 mb-1 block">Paste API key Gemini Anda</label>
+            <label className="text-xs text-gray-500 mb-1 block">Paste your Gemini API key</label>
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <input
@@ -146,7 +146,7 @@ export default function GeminiApiKeyModal({ onClose }) {
               <button onClick={handleSave} disabled={saving || !input.trim()}
                 className="flex items-center gap-1.5 rounded-md bg-violet-600 hover:bg-violet-700 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white shrink-0">
                 {saving ? <Loader2 size={13} className="animate-spin" /> : null}
-                {saving ? "Memvalidasi..." : "Simpan"}
+                {saving ? "Validating..." : "Save"}
               </button>
             </div>
           </div>

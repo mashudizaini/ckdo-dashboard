@@ -14,10 +14,10 @@ import KitTab from "./KitTab";
 // configuration to paste in. Backend: app/services/ebs_mart,
 // app/routers/ai_tools/ebs_mart_admin.py, app/routers/ebs_tools_app.py.
 const TABS = [
-  { id: "overview",   icon: LayoutDashboard, label: "Ringkasan",     Comp: OverviewTab },
-  { id: "catalog",    icon: BookText,        label: "Katalog kolom", Comp: CatalogTab },
+  { id: "overview",   icon: LayoutDashboard, label: "Overview",      Comp: OverviewTab },
+  { id: "catalog",    icon: BookText,        label: "Column catalog", Comp: CatalogTab },
   { id: "golden",     icon: Sparkles,        label: "Golden query",  Comp: GoldenQueryTab },
-  { id: "playground", icon: FlaskConical,    label: "Uji & keamanan", Comp: PlaygroundTab },
+  { id: "playground", icon: FlaskConical,    label: "Test & security", Comp: PlaygroundTab },
   { id: "audit",      icon: ScrollText,      label: "Audit log",     Comp: AuditTab },
   { id: "subinv",     icon: Warehouse,       label: "Subinventory",  Comp: SubinventoryTab },
   { id: "kit",        icon: Bot,             label: "Open WebUI kit", Comp: KitTab },

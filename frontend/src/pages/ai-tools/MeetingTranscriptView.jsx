@@ -17,7 +17,7 @@ export default function MeetingTranscriptView() {
           headers: { Authorization: `Bearer ${token}` },
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data?.detail || "Gagal memuat transcript");
+        if (!res.ok) throw new Error(data?.detail || "Failed to load the transcript");
         setRec(data);
       } catch (e) {
         setError(e.message);
@@ -45,7 +45,7 @@ export default function MeetingTranscriptView() {
               {rec.audio_duration_seconds && (
                 <span className="flex items-center gap-1"><Clock size={11} />{Math.round(rec.audio_duration_seconds)}s audio</span>
               )}
-              {rec.participants && <span>Peserta: {rec.participants}</span>}
+              {rec.participants && <span>Participants: {rec.participants}</span>}
             </div>
           )}
         </div>
@@ -71,7 +71,7 @@ export default function MeetingTranscriptView() {
               </button>
             </div>
             <div className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">
-              {rec.transcript || "(transcript kosong)"}
+              {rec.transcript || "(empty transcript)"}
             </div>
           </div>
         )}

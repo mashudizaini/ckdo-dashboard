@@ -101,7 +101,7 @@ export default function NotificationSettingsPanel() {
   };
 
   const remove = async (id) => {
-    if (!confirm("Hapus pengumuman ini?")) return;
+    if (!confirm("Delete this announcement?")) return;
     setDeletingId(id);
     try {
       const res = await fetch(`${API}/announcements/${id}`, { method: "DELETE", headers: hdrs });
@@ -141,9 +141,9 @@ export default function NotificationSettingsPanel() {
 
       {/* ── Section 1: system-derived notification types ── */}
       <div>
-        <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wider mb-1.5">Jenis Notifikasi Otomatis</p>
+        <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wider mb-1.5">Automatic Notification Types</p>
         <p className="text-xs text-gray-500 mb-3 leading-relaxed">
-          Aktif/nonaktifkan jenis notifikasi yang tampil di panel Announcement & Notification (Application Center).
+          Turn on/off the notification types shown in the Announcement & Notification panel (Application Center).
         </p>
         {types === null ? (
           <div className="flex justify-center py-6"><Loader2 size={18} className="animate-spin text-gray-600" /></div>
@@ -169,7 +169,7 @@ export default function NotificationSettingsPanel() {
                     }`}
                   >
                     {isSaving ? <Loader2 size={12} className="animate-spin" /> : isOn ? <CheckCircle2 size={12} /> : null}
-                    {isOn ? "Tampil" : "Disembunyikan"}
+                    {isOn ? "Shown" : "Hidden"}
                   </button>
                 </label>
               );
@@ -181,43 +181,43 @@ export default function NotificationSettingsPanel() {
       {/* ── Section 2: custom Announcements ── */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wider">Pengumuman (Announcement)</p>
+          <p className="text-[10px] font-bold text-gray-600 uppercase tracking-wider">Announcements</p>
           {!form && (
             <button onClick={openCreate}
               className="flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 transition-colors">
-              <Plus size={13} /> Tambah Pengumuman
+              <Plus size={13} /> Add Announcement
             </button>
           )}
         </div>
         <p className="text-xs text-gray-500 mb-3 leading-relaxed">
-          Pesan bebas yang ikut tampil di panel Announcement & Notification — dengan jendela tanggal opsional (kosong = tampil terus).
+          Free-text messages shown in the Announcement & Notification panel — with an optional date window (empty = always shown).
         </p>
 
         {form && (
           <form onSubmit={submitForm} className="rounded-xl border border-gray-800 bg-gray-900 p-4 space-y-3 mb-3">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-gray-200">{editingId ? "Edit Pengumuman" : "Pengumuman Baru"}</p>
+              <p className="text-sm font-semibold text-gray-200">{editingId ? "Edit Announcement" : "New Announcement"}</p>
               <button type="button" onClick={closeForm} className="text-gray-500 hover:text-gray-300"><X size={16} /></button>
             </div>
             <input
-              required placeholder="Judul" value={form.title}
+              required placeholder="Title" value={form.title}
               onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
               className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500"
             />
             <textarea
-              required placeholder="Pesan" rows={3} value={form.message}
+              required placeholder="Message" rows={3} value={form.message}
               onChange={e => setForm(f => ({ ...f, message: e.target.value }))}
               className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500 resize-none"
             />
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <p className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">Mulai (opsional)</p>
+                <p className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">Start (optional)</p>
                 <input type="date" value={form.start_date}
                   onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))}
                   className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 outline-none focus:border-blue-500" />
               </div>
               <div>
-                <p className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">Sampai (opsional)</p>
+                <p className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">End (optional)</p>
                 <input type="date" value={form.end_date}
                   onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))}
                   className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 outline-none focus:border-blue-500" />
@@ -227,12 +227,12 @@ export default function NotificationSettingsPanel() {
               <input type="checkbox" checked={form.is_enabled}
                 onChange={e => setForm(f => ({ ...f, is_enabled: e.target.checked }))}
                 className="w-4 h-4 accent-blue-600 cursor-pointer" />
-              Tampilkan sekarang
+              Show now
             </label>
             <button type="submit" disabled={saving}
               className="flex items-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 transition-colors">
               {saving ? <Loader2 size={14} className="animate-spin" /> : null}
-              {editingId ? "Simpan Perubahan" : "Tambah"}
+              {editingId ? "Save Changes" : "Add"}
             </button>
           </form>
         )}
@@ -242,7 +242,7 @@ export default function NotificationSettingsPanel() {
         ) : announcements.length === 0 ? (
           <div className="rounded-xl border border-dashed border-gray-800 bg-gray-900 px-6 py-10 text-center">
             <Megaphone size={22} className="text-gray-700 mx-auto mb-2" />
-            <p className="text-xs text-gray-600">Belum ada pengumuman.</p>
+            <p className="text-xs text-gray-600">No announcements yet.</p>
           </div>
         ) : (
           <div className="rounded-xl border border-gray-800 bg-gray-900 divide-y divide-gray-800">
@@ -264,7 +264,7 @@ export default function NotificationSettingsPanel() {
                     className={`rounded-full px-2.5 py-1 text-[11px] font-semibold border transition-colors ${
                       a.is_enabled ? "bg-green-500/15 text-green-400 border-green-500/30" : "bg-gray-800 text-gray-500 border-gray-700"
                     }`}>
-                    {a.is_enabled ? "Tampil" : "Disembunyikan"}
+                    {a.is_enabled ? "Shown" : "Hidden"}
                   </button>
                   <button onClick={() => openEdit(a)} className="p-1.5 rounded-lg text-gray-500 hover:text-blue-400 hover:bg-gray-800 transition-colors">
                     <Pencil size={13} />

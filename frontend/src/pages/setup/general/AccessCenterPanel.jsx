@@ -42,7 +42,7 @@ export default function AccessCenterPanel() {
     try {
       const res = await fetch(`${API}/user/${encodeURIComponent(clean)}`, { headers });
       const body = await res.json();
-      if (!res.ok) throw new Error(body?.detail || "Gagal memuat data akses");
+      if (!res.ok) throw new Error(body?.detail || "Failed to load the access data");
       setData(body);
     } catch (e) {
       setError(e.message || String(e));
@@ -61,7 +61,7 @@ export default function AccessCenterPanel() {
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        throw new Error(d.detail || "Gagal menyimpan");
+        throw new Error(d.detail || "Save failed");
       }
       setData((prev) => ({
         ...prev,
@@ -80,8 +80,8 @@ export default function AccessCenterPanel() {
   return (
     <div className="space-y-4 max-w-3xl">
       <p className="text-xs text-gray-500 leading-relaxed">
-        Satu layar untuk melihat/mengatur akses seseorang di 3 sistem: role Dashboard (Keycloak), scope EBS Chat/
-        CoChat, dan referensi responsibility Oracle EBS (lihat saja — pengaturan aslinya tetap di Oracle EBS).
+        One screen to view/manage a person's access across 3 systems: Dashboard roles (Keycloak), EBS Chat/
+        CoChat scope, and their Oracle EBS responsibilities for reference (view only — the actual setting stays in Oracle EBS).
       </p>
 
       <div className="flex gap-2">
@@ -97,7 +97,7 @@ export default function AccessCenterPanel() {
         </div>
         <button onClick={() => openEmail(emailInput)} disabled={!emailInput.trim()}
           className="rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium px-4 py-2 transition-colors">
-          Cari
+          Search
         </button>
       </div>
 
@@ -121,10 +121,10 @@ export default function AccessCenterPanel() {
             </div>
             {!data.keycloak.configured ? (
               <p className="px-4 py-4 text-xs text-gray-500">
-                Keycloak Admin API belum dikonfigurasi — kelola role lewat Keycloak Admin Console.
+                The Keycloak Admin API is not configured — manage roles in the Keycloak Admin Console.
               </p>
             ) : !data.keycloak.found ? (
-              <p className="px-4 py-4 text-xs text-gray-500">Tidak ada akun Keycloak untuk email ini.</p>
+              <p className="px-4 py-4 text-xs text-gray-500">No Keycloak account for this email.</p>
             ) : (
               <div className="p-4 flex flex-wrap gap-2">
                 {keycloakRoles.map((r) => {
@@ -154,8 +154,8 @@ export default function AccessCenterPanel() {
             <div className="px-4 py-3 flex items-start gap-2">
               <Info size={13} className="text-gray-600 shrink-0 mt-0.5" />
               <p className="text-xs text-gray-500">
-                Diatur di <b>Setup &gt; AI Tools &gt; EBS Chat Access</b> (departemen data, modul yang boleh
-                diakses, dan dokumen perusahaan yang boleh dibaca) — tidak diduplikasi di sini.
+                Managed in <b>Setup &gt; AI Tools &gt; EBS Chat Access</b> (data departments, the modules they may
+                use, and the company documents they may read) — not duplicated here.
               </p>
             </div>
           </div>
@@ -168,9 +168,9 @@ export default function AccessCenterPanel() {
               <span className="ml-auto text-[10px] uppercase tracking-wider text-gray-600 font-bold">Read-only</span>
             </div>
             {data.oracle?.error ? (
-              <p className="px-4 py-4 text-xs text-red-400">Gagal mengambil data Oracle: {data.oracle.error}</p>
+              <p className="px-4 py-4 text-xs text-red-400">Failed to fetch Oracle data: {data.oracle.error}</p>
             ) : !data.oracle?.found ? (
-              <p className="px-4 py-4 text-xs text-gray-500">Tidak ada akun Oracle EBS terdaftar untuk email ini.</p>
+              <p className="px-4 py-4 text-xs text-gray-500">No Oracle EBS account is registered for this email.</p>
             ) : (
               <div className="p-4 space-y-2">
                 <p className="text-xs text-gray-400">
@@ -179,13 +179,13 @@ export default function AccessCenterPanel() {
                 {data.oracle.is_shared_account && (
                   <div className="rounded-md px-3 py-2 text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-start gap-2">
                     <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                    Ini akun bersama/admin (bukan akun pribadi) — daftar responsibility di bawah bukan cerminan
-                    akses pribadi orang ini, melainkan akun bersama yang emailnya kebetulan terdaftar sama.
+                    This is a shared/admin account (not a personal one) — the responsibilities below do not reflect
+                    this person's own access, but a shared account that happens to be registered with the same email.
                   </div>
                 )}
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   {data.oracle.responsibilities.length === 0 ? (
-                    <p className="text-xs text-gray-600">Tidak ada responsibility aktif.</p>
+                    <p className="text-xs text-gray-600">No active responsibilities.</p>
                   ) : (
                     data.oracle.responsibilities.map((r) => (
                       <span key={r.name} className="rounded-full border border-gray-700 bg-gray-800 px-2.5 py-1 text-[11px] text-gray-300">
@@ -199,7 +199,7 @@ export default function AccessCenterPanel() {
           </div>
         </div>
       ) : (
-        <div className="py-10 text-center text-xs text-gray-600">Cari email di atas untuk melihat aksesnya.</div>
+        <div className="py-10 text-center text-xs text-gray-600">Search for an email above to see its access.</div>
       )}
     </div>
   );

@@ -29,7 +29,7 @@ export default function SupplierWhtMaster() {
       const res = await supplierWhtApi.list(q);
       setRows(res.items || []);
     } catch (e) {
-      setError(e?.detail || e?.message || "Gagal memuat data");
+      setError(e?.detail || e?.message || "Failed to load data");
     } finally {
       setLoading(false);
     }
@@ -52,7 +52,7 @@ export default function SupplierWhtMaster() {
       setSyncResult(res);
       await load(search || undefined);
     } catch (e) {
-      setError(e?.detail || e?.message || "Sync gagal");
+      setError(e?.detail || e?.message || "Sync failed");
     } finally {
       setSyncing(false);
     }
@@ -84,7 +84,7 @@ export default function SupplierWhtMaster() {
       setModalOpen(false);
       await load(search || undefined);
     } catch (e) {
-      setError(e?.detail || e?.message || "Simpan gagal");
+      setError(e?.detail || e?.message || "Save failed");
     } finally {
       setSaving(false);
     }
@@ -96,20 +96,20 @@ export default function SupplierWhtMaster() {
       await supplierWhtApi.setActive(r.id, !r.is_active);
       setRows(prev => prev.map(row => row.id === r.id ? { ...row, is_active: !r.is_active } : row));
     } catch (e) {
-      setError(e?.detail || e?.message || "Gagal update status aktif");
+      setError(e?.detail || e?.message || "Failed to update the active flag");
     } finally {
       setActiveBusyId(null);
     }
   };
 
   const remove = async (id) => {
-    if (!window.confirm("Hapus data WHT supplier ini?")) return;
+    if (!window.confirm("Delete this supplier's WHT data?")) return;
     setDeletingId(id);
     try {
       await supplierWhtApi.remove(id);
       setRows(prev => prev.filter(r => r.id !== id));
     } catch (e) {
-      setError(e?.detail || e?.message || "Hapus gagal");
+      setError(e?.detail || e?.message || "Delete failed");
     } finally {
       setDeletingId(null);
     }
@@ -124,13 +124,13 @@ export default function SupplierWhtMaster() {
   return (
     <div className="space-y-4">
       <p className="text-xs text-gray-500 leading-relaxed max-w-3xl">
-        Master rate PPh (withholding tax) per supplier. "Sync from Oracle" membaca histori transaksi
-        AP nyata di EBS — baris invoice bertipe AWT (Automatic Withholding Tax) — dan mengambil grup/rate
-        PPh yang PALING TERAKHIR dipakai untuk tiap supplier. Baris hasil edit manual (source: manual)
-        tidak akan ditimpa oleh sync berikutnya. Jika satu supplier punya lebih dari satu vendor ID di
-        Oracle dengan grup/rate yang sama, hanya disimpan satu baris; jika grup/rate-nya beda, semua baris
-        tetap disimpan tapi hanya satu yang ditandai <strong className="text-gray-300">Aktif</strong> (default: yang paling
-        terakhir dipakai) — centang kolom Aktif bisa diubah manual kapan saja.
+        PPh (withholding tax) rate master per supplier. "Sync from Oracle" reads the real AP transaction
+        history in EBS — invoice lines of type AWT (Automatic Withholding Tax) — and takes the PPh group/rate
+        MOST RECENTLY used for each supplier. Manually edited rows (source: manual) are not overwritten by
+        later syncs. If a supplier has more than one vendor ID in Oracle with the same group/rate, only one
+        row is kept; if the group/rate differs, every row is kept but only one is marked
+        <strong className="text-gray-300"> Active</strong> (default: the most recently used) — the Active
+        tick can be changed manually at any time.
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -139,7 +139,7 @@ export default function SupplierWhtMaster() {
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Cari nama supplier atau grup PPh..."
+            placeholder="Search supplier name or PPh group..."
             className="w-full rounded-lg border border-gray-700 bg-gray-900 pl-9 pr-3 py-2 text-sm text-gray-200 placeholder-gray-600 outline-none focus:border-blue-500"
           />
         </div>
@@ -150,18 +150,18 @@ export default function SupplierWhtMaster() {
         </button>
         <button onClick={openAdd}
           className="flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 transition-colors">
-          <Plus size={13} /> Tambah Manual
+          <Plus size={13} /> Add Manually
         </button>
       </div>
 
       {syncResult && (
         <div className="rounded-lg px-4 py-2.5 text-xs bg-green-500/10 text-green-400 border border-green-500/20">
-          Sync selesai — {syncResult.suppliers_found_in_oracle} supplier ditemukan di Oracle,
-          {" "}{syncResult.upserted} baris diperbarui.
+          Sync done — {syncResult.suppliers_found_in_oracle} suppliers found in Oracle,
+          {" "}{syncResult.upserted} rows updated.
           {syncResult.internal_employee_suppliers_excluded > 0 &&
-            ` ${syncResult.internal_employee_suppliers_excluded} supplier internal (karyawan) dikeluarkan.`}
+            ` ${syncResult.internal_employee_suppliers_excluded} internal (employee) suppliers excluded.`}
           {syncResult.duplicate_entries_collapsed > 0 &&
-            ` ${syncResult.duplicate_entries_collapsed} baris duplikat (grup/rate sama) digabung.`}
+            ` ${syncResult.duplicate_entries_collapsed} duplicate rows (same group/rate) merged.`}
         </div>
       )}
 
@@ -174,7 +174,7 @@ export default function SupplierWhtMaster() {
       <div className="flex gap-3 text-[11px] text-gray-500">
         <span>{stats.total} supplier</span>
         <span className="text-gray-700">·</span>
-        <span>{stats.oracle} dari Oracle</span>
+        <span>{stats.oracle} from Oracle</span>
         <span className="text-gray-700">·</span>
         <span>{stats.manual} manual</span>
       </div>
@@ -184,7 +184,7 @@ export default function SupplierWhtMaster() {
           <div className="flex justify-center py-10"><Loader2 size={18} className="animate-spin text-gray-600" /></div>
         ) : rows.length === 0 ? (
           <div className="py-10 text-center text-xs text-gray-600">
-            Belum ada data. Klik "Sync from Oracle" untuk mengambil histori PPh dari transaksi AP.
+            No data yet. Click "Sync from Oracle" to pull the PPh history from AP transactions.
           </div>
         ) : (
           <table className="w-full text-xs">
@@ -192,12 +192,12 @@ export default function SupplierWhtMaster() {
               <tr className="border-b border-gray-800 text-gray-500 uppercase tracking-wider text-[10px]">
                 <th className="text-left px-4 py-2.5 font-semibold">Vendor ID</th>
                 <th className="text-left px-4 py-2.5 font-semibold">Supplier</th>
-                <th className="text-left px-4 py-2.5 font-semibold">Grup PPh</th>
+                <th className="text-left px-4 py-2.5 font-semibold">PPh Group</th>
                 <th className="text-right px-4 py-2.5 font-semibold">Rate</th>
-                <th className="text-left px-4 py-2.5 font-semibold">Terakhir Dipakai</th>
-                <th className="text-left px-4 py-2.5 font-semibold">Sumber</th>
-                <th className="text-center px-4 py-2.5 font-semibold">Aktif</th>
-                <th className="text-right px-4 py-2.5 font-semibold">Aksi</th>
+                <th className="text-left px-4 py-2.5 font-semibold">Last Used</th>
+                <th className="text-left px-4 py-2.5 font-semibold">Source</th>
+                <th className="text-center px-4 py-2.5 font-semibold">Active</th>
+                <th className="text-right px-4 py-2.5 font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
@@ -224,7 +224,7 @@ export default function SupplierWhtMaster() {
                       <Loader2 size={13} className="animate-spin text-gray-500 mx-auto" />
                     ) : (
                       <input type="checkbox" checked={!!r.is_active} onChange={() => toggleActive(r)}
-                        title="Baris ini yang dipakai kalau ada beberapa Vendor ID untuk supplier yang sama"
+                        title="This row is used when the same supplier has several Vendor IDs"
                         className="w-3.5 h-3.5 cursor-pointer" />
                     )}
                   </td>
@@ -262,12 +262,12 @@ export default function SupplierWhtMaster() {
                   onChange={e => setForm(f => ({ ...f, vendor_id: e.target.value }))}
                   className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 outline-none focus:border-blue-500" />
               </Field>
-              <Field label="Nama Supplier">
+              <Field label="Supplier Name">
                 <input value={form.vendor_name}
                   onChange={e => setForm(f => ({ ...f, vendor_name: e.target.value }))}
                   className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 outline-none focus:border-blue-500" />
               </Field>
-              <Field label="Grup PPh (mis. PPh23-2%-104)">
+              <Field label="PPh Group (e.g. PPh23-2%-104)">
                 <input value={form.awt_group_name}
                   onChange={e => setForm(f => ({ ...f, awt_group_name: e.target.value }))}
                   className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-200 outline-none focus:border-blue-500" />
@@ -282,12 +282,12 @@ export default function SupplierWhtMaster() {
             <div className="flex justify-end gap-2 pt-1">
               <button onClick={() => setModalOpen(false)}
                 className="rounded-lg border border-gray-700 px-3 py-2 text-xs font-semibold text-gray-400 hover:bg-gray-800">
-                Batal
+                Cancel
               </button>
               <button onClick={save} disabled={saving || !form.vendor_id || !form.vendor_name || !form.tax_rate}
                 className="flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-xs font-semibold px-4 py-2">
                 {saving ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} className="hidden" />}
-                Simpan
+                Save
               </button>
             </div>
           </div>

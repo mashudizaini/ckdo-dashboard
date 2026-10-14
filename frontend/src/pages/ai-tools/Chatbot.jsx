@@ -130,14 +130,14 @@ export default function Chatbot() {
             </option>
           </select>
           {provider !== "onprem" && (
-            <button onClick={() => setShowApiKey(true)} title={`Pakai API key ${provider === "anthropic" ? "Claude" : "Gemini"} pribadi Anda sendiri`}
+            <button onClick={() => setShowApiKey(true)} title={`Use your own personal ${provider === "anthropic" ? "Claude" : "Gemini"} API key`}
               className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs font-medium text-gray-300 hover:border-violet-500 hover:text-violet-400 transition-colors">
               <KeyRound size={14} /> My API Key
             </button>
           )}
           <button
             onClick={() => { if (confirm("Clear this conversation's history? This cannot be undone.")) chat.clearHistory(); }}
-            title="Riwayat percakapan tersimpan di browser ini dan ikut dikirim sebagai konteks di setiap pertanyaan baru — kosongkan kalau jawaban lama masih 'nyangkut' meski Knowledge Base sudah diubah."
+            title="The conversation history is kept in this browser and sent as context with every new question — clear it if old answers keep coming back after the Knowledge Base has changed."
             className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-xs font-medium text-gray-300 hover:border-amber-500 hover:text-amber-400 transition-colors">
             <RotateCcw size={14} /> Clear Conversation
           </button>

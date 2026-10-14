@@ -123,11 +123,11 @@ function AttendanceCoverageSection() {
 
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-green-500/30 border border-green-500/40 inline-block" /> Ada data</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-500/30 border border-red-500/40 inline-block" /> Belum diupload (gap)</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-gray-800/40 border border-gray-800 inline-block" /> Di luar rentang data</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-green-500/30 border border-green-500/40 inline-block" /> Has data</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-500/30 border border-red-500/40 inline-block" /> Not uploaded (gap)</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-gray-800/40 border border-gray-800 inline-block" /> Outside the data range</span>
         {data.observed_range.from && (
-          <span className="text-gray-600">Data tersedia: {data.observed_range.from} s/d {data.observed_range.to}</span>
+          <span className="text-gray-600">Data available: {data.observed_range.from} to {data.observed_range.to}</span>
         )}
       </div>
     </div>

@@ -113,7 +113,7 @@ export function useChatStream(initialGreeting, storageKey = null, endpoint = "/a
             } else if (evt.type === "error") {
               setMessages((prev) => {
                 const next = [...prev];
-                next[next.length - 1] = { role: "assistant", text: `Maaf, terjadi kesalahan: ${evt.message || "AI service error"}`, error: true };
+                next[next.length - 1] = { role: "assistant", text: `Sorry, something went wrong: ${evt.message || "AI service error"}`, error: true };
                 return next;
               });
             }
@@ -124,7 +124,7 @@ export function useChatStream(initialGreeting, storageKey = null, endpoint = "/a
       if (e.name === "AbortError") return;
       setMessages((prev) => {
         const next = [...prev];
-        next[next.length - 1] = { role: "assistant", text: `Maaf, terjadi kesalahan: ${e.message}`, error: true };
+        next[next.length - 1] = { role: "assistant", text: `Sorry, something went wrong: ${e.message}`, error: true };
         return next;
       });
     } finally {

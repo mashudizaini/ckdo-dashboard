@@ -333,7 +333,7 @@ export default function MeetingNotes() {
     try {
       const res = await fetch("/api/v1/ai/meeting-notes/recordings", { headers });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.detail || "Gagal memuat riwayat");
+      if (!res.ok) throw new Error(data?.detail || "Failed to load the history");
       setHistory(data);
     } catch (e) {
       setHistoryError(e.message);
@@ -679,8 +679,8 @@ export default function MeetingNotes() {
         body: JSON.stringify({ mom_json: mom, mom_meta: { date, time, venue, agenda }, meeting_title: title, participants }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.detail || "Gagal menyimpan perubahan");
-      setSaveMomMsg({ type: "success", text: "Perubahan disimpan" });
+      if (!res.ok) throw new Error(data?.detail || "Failed to save the changes");
+      setSaveMomMsg({ type: "success", text: "Changes saved" });
     } catch (e) {
       setSaveMomMsg({ type: "error", text: e.message });
     } finally {
@@ -694,7 +694,7 @@ export default function MeetingNotes() {
       const res = await fetch(`/api/v1/ai/meeting-notes/recordings/${recordingId}/mom/docx`, { headers });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.detail || "Gagal mengunduh MOM");
+        throw new Error(data.detail || "Failed to download the MOM");
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -713,7 +713,7 @@ export default function MeetingNotes() {
   };
 
   const handleDeleteRecording = async (recordingId) => {
-    if (!confirm("Hapus recording ini beserta transcript & MOM-nya?")) return;
+    if (!confirm("Delete this recording and its transcript & MOM?")) return;
     try {
       await fetch(`/api/v1/ai/meeting-notes/recordings/${recordingId}`, { method: "DELETE", headers });
       fetchHistory();
@@ -728,7 +728,7 @@ export default function MeetingNotes() {
     try {
       const res = await fetch(`/api/v1/ai/meeting-notes/recordings/${recordingId}`, { headers });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.detail || "Gagal memuat recording");
+      if (!res.ok) throw new Error(data?.detail || "Failed to load the recording");
       setTranscript({
         id: data.id,
         text: data.transcript,
@@ -798,12 +798,12 @@ export default function MeetingNotes() {
 
   const updateDeptName = (di, value) => updateMom((m) => { m.departments[di].name = value; return m; });
   const removeDept = (di) => updateMom((m) => { m.departments.splice(di, 1); return m; });
-  const addDept = () => updateMom((m) => { m.departments.push({ name: "Departemen Baru", topics: [] }); return m; });
+  const addDept = () => updateMom((m) => { m.departments.push({ name: "New Department", topics: [] }); return m; });
 
   const updateTopicTitle = (di, ti, value) => updateMom((m) => { m.departments[di].topics[ti].title = value; return m; });
   const removeTopic = (di, ti) => updateMom((m) => { m.departments[di].topics.splice(ti, 1); return m; });
   const addTopic = (di) => updateMom((m) => {
-    m.departments[di].topics.push({ title: "Topik Baru", discussion_points: [], action_plans: [] });
+    m.departments[di].topics.push({ title: "New Topic", discussion_points: [], action_plans: [] });
     return m;
   });
 
@@ -1151,7 +1151,7 @@ export default function MeetingNotes() {
             {historyLoading ? (
               <div className="flex justify-center py-6"><Loader2 size={16} className="animate-spin text-gray-600" /></div>
             ) : history.length === 0 ? (
-              <div className="px-4 py-6 text-center text-xs text-gray-600">Belum ada recording.</div>
+              <div className="px-4 py-6 text-center text-xs text-gray-600">No recordings yet.</div>
             ) : (
               <div className="divide-y divide-gray-800 overflow-y-auto" style={{ maxHeight: 5 * 52 }}>
                 {history.map((item) => {
@@ -1160,7 +1160,7 @@ export default function MeetingNotes() {
                   return (
                   <div key={item.id} className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-gray-800/40 transition-colors">
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs font-medium text-gray-200 truncate">{item.meeting_title || "(Tanpa judul)"}</p>
+                      <p className="text-xs font-medium text-gray-200 truncate">{item.meeting_title || "(Untitled)"}</p>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-[10px] text-gray-500">{fmtDate(item.created_at)}</span>
                         <span className={`text-[9px] font-semibold rounded-full px-1.5 py-0.5 ${
@@ -1483,7 +1483,7 @@ export default function MeetingNotes() {
                             ))}
                             <button onClick={() => addPoint(di, ti, field)}
                               className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-blue-400">
-                              <Plus size={11} /> Tambah {field === "discussion_points" ? "poin" : "action"}
+                              <Plus size={11} /> Add {field === "discussion_points" ? "point" : "action"}
                             </button>
                           </div>
                         </div>
@@ -1492,14 +1492,14 @@ export default function MeetingNotes() {
                   ))}
                   <button onClick={() => addTopic(di)}
                     className="flex items-center gap-1 text-xs text-gray-400 hover:text-blue-400 ml-2">
-                    <Plus size={12} /> Tambah topik
+                    <Plus size={12} /> Add topic
                   </button>
                 </div>
               ))}
 
               <button onClick={addDept}
                 className="flex items-center gap-1.5 rounded-md border border-dashed border-gray-700 hover:border-blue-500 text-gray-400 hover:text-blue-400 text-xs font-medium px-3 py-2 w-full justify-center transition-colors">
-                <Plus size={13} /> Tambah Departemen / Topik
+                <Plus size={13} /> Add Department / Topic
               </button>
             </div>
           )}
@@ -1517,7 +1517,7 @@ export default function MeetingNotes() {
           ) : historyError ? (
             <div className="px-5 py-4 text-sm text-red-400 flex items-center gap-2"><AlertTriangle size={13} />{historyError}</div>
           ) : history.length === 0 ? (
-            <div className="px-5 py-10 text-center text-sm text-gray-600">Belum ada recording.</div>
+            <div className="px-5 py-10 text-center text-sm text-gray-600">No recordings yet.</div>
           ) : (
             <div className="divide-y divide-gray-800">
               {history.map((item) => {
@@ -1535,7 +1535,7 @@ export default function MeetingNotes() {
                       <FileText size={16} className="text-purple-400" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-200 truncate">{item.meeting_title || "(Tanpa judul)"}</p>
+                      <p className="text-sm font-medium text-gray-200 truncate">{item.meeting_title || "(Untitled)"}</p>
                       <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                         <span className="flex items-center gap-1 text-xs text-gray-500">
                           <Clock size={11} />{fmtDate(item.created_at)}

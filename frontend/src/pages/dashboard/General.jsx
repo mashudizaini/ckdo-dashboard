@@ -315,7 +315,7 @@ function GLBudgetSection({ dept }) {
           title="Year-To-Date up to this month (e.g. March = Jan-Mar summed)"
           className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
         >
-          <option value={0}>All Months (Jan-Des)</option>
+          <option value={0}>All Months (Jan-Dec)</option>
           {MONTHS_ID.map((m, i) => <option key={i + 1} value={i + 1}>to {m}</option>)}
         </select>
 
@@ -569,7 +569,7 @@ function BudgetGraphSection({ dept }) {
           title="Year-To-Date up to this month (e.g. March = Jan-Mar summed)"
           className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
         >
-          <option value={0}>All Months (Jan-Des)</option>
+          <option value={0}>All Months (Jan-Dec)</option>
           {MONTHS_ID.map((m, i) => <option key={i + 1} value={i + 1}>to {m}</option>)}
         </select>
 

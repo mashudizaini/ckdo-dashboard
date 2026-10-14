@@ -36,17 +36,17 @@ export default function SubinventoryTab() {
   const official = (rows || []).filter((r) => r.official_type).length;
 
   return (
-    <Card title="Klasifikasi subinventory (org 121)" icon={Warehouse}
-      subtitle={`Menentukan stok mana yang dihitung "bisa dipakai" (GOOD) versus karantina/reject di mart.inv_onhand_lot. Tebakan otomatis dari nama dan availability_type Oracle berlaku sampai Gudang/QA menetapkan daftar resmi di sini. ${official}/${rows?.length || 0} sudah resmi. Perubahan langsung me-refresh mart.`}>
+    <Card title="Subinventory classification (org 121)" icon={Warehouse}
+      subtitle={`Decides which stock counts as "usable" (GOOD) versus quarantine/reject in mart.inv_onhand_lot. An automatic guess from the name and Oracle's availability_type applies until the Warehouse/QA sets the official list here. ${official}/${rows?.length || 0} are official. Changes refresh the mart immediately.`}>
       <div className="p-4 space-y-3">
         <ErrorBox>{error}</ErrorBox>
         {rows?.length === 0 && (
-          <p className="text-xs text-gray-500">Belum ada data — jalankan "Tarik stok per lot" di tab Ringkasan.</p>
+          <p className="text-xs text-gray-500">No data yet — run "Pull stock by lot" in the Overview tab.</p>
         )}
         <div className="overflow-auto rounded-lg border border-gray-800">
           <table className="w-full text-[11px]">
             <thead className="bg-gray-800 text-gray-400">
-              <tr>{["Subinventory", "Deskripsi", "Nettable", "Tebakan", "Resmi", "Berlaku", "Diubah"].map((h) => (
+              <tr>{["Subinventory", "Description", "Nettable", "Guess", "Official", "Effective", "Changed"].map((h) => (
                 <th key={h} className="px-3 py-1.5 text-left font-semibold">{h}</th>))}</tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
@@ -54,12 +54,12 @@ export default function SubinventoryTab() {
                 <tr key={r.subinventory_code}>
                   <td className="px-3 py-1.5 font-mono text-gray-200">{r.subinventory_code}</td>
                   <td className="px-3 py-1.5 text-gray-400">{r.description}</td>
-                  <td className="px-3 py-1.5 text-gray-500">{r.availability_type === 1 ? "Ya" : r.availability_type === 2 ? "Tidak" : "—"}</td>
+                  <td className="px-3 py-1.5 text-gray-500">{r.availability_type === 1 ? "Yes" : r.availability_type === 2 ? "No" : "—"}</td>
                   <td className="px-3 py-1.5 text-gray-500">{r.guessed_type}</td>
                   <td className="px-3 py-1.5">
                     <select value={r.official_type || ""} disabled={saving === r.subinventory_code}
                       onChange={(e) => set(r.subinventory_code, e.target.value)} className={inputCls}>
-                      <option value="">(pakai tebakan)</option>
+                      <option value="">(use the guess)</option>
                       <option>GOOD</option>
                       <option>QUARANTINE</option>
                       <option>REJECT</option>

@@ -46,22 +46,22 @@ export default function CatalogTab() {
   if (!rows && !error) return <Spinner />;
 
   return (
-    <Card title="Katalog kolom (meta.column_catalog)" icon={BookText}
-      subtitle={`Deskripsi Bahasa Indonesia dan sinonim dibaca find_marts untuk memetakan bahasa user ke kolom. ${missingSyn} kolom belum punya sinonim — kriteria selesai blueprint: setiap kolom punya deskripsi dan minimal 1 sinonim.`}>
+    <Card title="Column catalog (meta.column_catalog)" icon={BookText}
+      subtitle={`find_marts reads the (Indonesian) descriptions and synonyms to map the user's words to columns. ${missingSyn} columns have no synonym yet — blueprint done criterion: every column has a description and at least 1 synonym.`}>
       <div className="p-4 space-y-3">
         <ErrorBox>{error}</ErrorBox>
         <div className="flex flex-wrap gap-2">
           <select value={mart} onChange={(e) => setMart(e.target.value)} className={inputCls}>
-            <option value="">Semua mart</option>
+            <option value="">All marts</option>
             {marts.map((m) => <option key={m} value={m}>mart.{m}</option>)}
           </select>
-          <input placeholder="Cari kolom / deskripsi / sinonim" value={q} onChange={(e) => setQ(e.target.value)} className={`${inputCls} w-72`} />
+          <input placeholder="Search column / description / synonym" value={q} onChange={(e) => setQ(e.target.value)} className={`${inputCls} w-72`} />
         </div>
         <div className="overflow-auto max-h-[560px] rounded-lg border border-gray-800">
           <table className="w-full text-[11px]">
             <thead className="sticky top-0 bg-gray-800 text-gray-400">
               <tr>
-                {["Mart", "Kolom", "Tipe", "Deskripsi", "Sinonim", "Nilai contoh", ""].map((h) => (
+                {["Mart", "Column", "Type", "Description", "Synonyms", "Sample values", ""].map((h) => (
                   <th key={h} className="px-3 py-1.5 text-left font-semibold">{h}</th>
                 ))}
               </tr>
@@ -78,11 +78,11 @@ export default function CatalogTab() {
                       {isEdit ? (
                         <textarea rows={2} value={editing.description_id || ""} className={`${inputCls} w-full`}
                           onChange={(e) => setEditing({ ...editing, description_id: e.target.value })} />
-                      ) : r.description_id || <span className="text-amber-400">— belum ada —</span>}
+                      ) : r.description_id || <span className="text-amber-400">— none yet —</span>}
                     </td>
                     <td className="px-3 py-1.5 min-w-[200px]">
                       {isEdit ? (
-                        <input value={editing.synonyms} className={`${inputCls} w-full`} placeholder="pisahkan dengan koma"
+                        <input value={editing.synonyms} className={`${inputCls} w-full`} placeholder="comma-separated"
                           onChange={(e) => setEditing({ ...editing, synonyms: e.target.value })} />
                       ) : (
                         <div className="flex flex-wrap gap-1">
@@ -96,7 +96,7 @@ export default function CatalogTab() {
                     <td className="px-3 py-1.5 whitespace-nowrap">
                       {isEdit ? (
                         <div className="flex gap-1">
-                          <Button icon={Save} loading={saving} onClick={save}>Simpan</Button>
+                          <Button icon={Save} loading={saving} onClick={save}>Save</Button>
                           <Button variant="ghost" icon={X} onClick={() => setEditing(null)} />
                         </div>
                       ) : (

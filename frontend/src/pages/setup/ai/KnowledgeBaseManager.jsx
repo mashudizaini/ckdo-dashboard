@@ -93,7 +93,7 @@ export default function KnowledgeBaseManager() {
     try {
       const res = await fetch("/api/v1/ai/chatbot/openwebui-sync", { method: "POST", headers });
       const d = await res.json();
-      if (!res.ok) throw new Error(d.detail || "Sync gagal dimulai");
+      if (!res.ok) throw new Error(d.detail || "Sync failed to start");
       setOwMsg({ type: "success", text: d.message });
       fetchOwStatus();
     } catch (e) {
@@ -165,21 +165,21 @@ export default function KnowledgeBaseManager() {
               <div className="flex items-center justify-between">
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Sync to CoChat</p>
                 {owStatus && !owStatus.configured && (
-                  <span className="text-[11px] text-amber-400">Belum dikonfigurasi</span>
+                  <span className="text-[11px] text-amber-400">Not configured</span>
                 )}
               </div>
               <p className="text-xs text-gray-500">
-                Mendorong seluruh dokumen di atas ke Knowledge Base "Company Rules" milik CoChat, supaya chat CoChat juga bisa menjawab dari dokumen yang sama.
+                Pushes every document above to CoChat's "Company Rules" Knowledge Base, so CoChat can answer from the same documents.
               </p>
               <div className="flex items-center gap-3 flex-wrap">
                 <button onClick={handleOwSync} disabled={owTriggering || !owStatus?.configured || owStatus?.last_run?.status === "running"}
                   className="flex items-center gap-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white shrink-0">
                   {owTriggering || owStatus?.last_run?.status === "running" ? <Loader2 size={13} className="animate-spin" /> : <UploadCloud size={13} />}
-                  {owStatus?.last_run?.status === "running" ? "Sedang sync..." : "Sync ke CoChat"}
+                  {owStatus?.last_run?.status === "running" ? "Syncing..." : "Sync to CoChat"}
                 </button>
                 {owStatus?.last_run && (
                   <span className="text-xs text-gray-500">
-                    Terakhir: <span className={
+                    Last run: <span className={
                       owStatus.last_run.status === "success" ? "text-green-400" :
                       owStatus.last_run.status === "running" ? "text-amber-400" : "text-red-400"
                     }>{owStatus.last_run.status}</span>
@@ -233,7 +233,7 @@ export default function KnowledgeBaseManager() {
                 <button onClick={handleSubmit} disabled={saving}
                   className="flex items-center gap-1.5 rounded-md bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-white shrink-0">
                   {saving ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-                  {saving ? "Processing... (bisa beberapa menit untuk PDF hasil scan)" : "Upload & Save"}
+                  {saving ? "Processing... (may take a few minutes for scanned PDFs)" : "Upload & Save"}
                 </button>
               </div>
               {msg && (

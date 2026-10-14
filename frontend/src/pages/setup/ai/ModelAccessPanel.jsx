@@ -6,9 +6,9 @@ import { useAuthStore } from "@/store/authStore";
 // provider string the backend/frontend already use everywhere else
 // ("onprem"/"anthropic"/"gemini"), not a display-only slug.
 const MODELS = [
-  { id: "onprem",    label: "On-Premise",  icon: Cpu,      desc: "Model lokal di server ai-engine — gratis, tanpa biaya per token." },
-  { id: "anthropic", label: "Claude",      icon: Sparkles, desc: "Anthropic Claude — berbayar per token." },
-  { id: "gemini",    label: "Gemini",      icon: Gem,      desc: "Google Gemini — berbayar per token (jauh lebih murah dari Claude), pencarian web punya kuota gratis bulanan." },
+  { id: "onprem",    label: "On-Premise",  icon: Cpu,      desc: "Local model on the ai-engine server — free, no per-token cost." },
+  { id: "anthropic", label: "Claude",      icon: Sparkles, desc: "Anthropic Claude — paid per token." },
+  { id: "gemini",    label: "Gemini",      icon: Gem,      desc: "Google Gemini — paid per token (much cheaper than Claude); web search has a free monthly quota." },
 ];
 
 // Matches ai_chat_provider_service.MODES exactly.
@@ -50,7 +50,7 @@ export default function ModelAccessPanel() {
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        throw new Error(d.detail || `Gagal menyimpan (${res.status})`);
+        throw new Error(d.detail || `Save failed (${res.status})`);
       }
       setStatus(await res.json());
     } catch (e) {
@@ -72,7 +72,7 @@ export default function ModelAccessPanel() {
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        throw new Error(d.detail || `Gagal menyimpan (${res.status})`);
+        throw new Error(d.detail || `Save failed (${res.status})`);
       }
       setDefaults(await res.json());
     } catch (e) {
@@ -92,7 +92,7 @@ export default function ModelAccessPanel() {
         <div className="px-5 py-4 border-b border-gray-800">
           <h3 className="text-sm font-semibold text-gray-200">Model Access</h3>
           <p className="text-xs text-gray-500 mt-1">
-            Kontrol model AI mana yang boleh dipilih user di AI Chatbot (Company Policy dan Oracle ERP Data). Tidak mempengaruhi fitur AI lain (CV Screening, Meeting Notes, dll).
+            Controls which AI models users may choose in the AI Chatbot (Company Policy and Oracle ERP Data). Does not affect other AI features (CV Screening, Meeting Notes, etc.).
           </p>
         </div>
 
@@ -132,7 +132,7 @@ export default function ModelAccessPanel() {
         <div className="px-5 py-4 border-b border-gray-800">
           <h3 className="text-sm font-semibold text-gray-200">Default Model per Mode</h3>
           <p className="text-xs text-gray-500 mt-1">
-            Model yang otomatis terpilih saat user pertama kali membuka tiap mode chat (di halaman AI Chatbot maupun widget chat). User tetap bisa mengganti sendiri di dropdown provider — ini cuma titik awalnya.
+            The model selected automatically when a user first opens each chat mode (on the AI Chatbot page and in the chat widget). Users can still change it in the provider dropdown — this is only the starting point.
           </p>
         </div>
 

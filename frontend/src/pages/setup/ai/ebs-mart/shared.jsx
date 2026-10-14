@@ -7,7 +7,7 @@ import { Check, Copy, Loader2 } from "lucide-react";
 export const errMsg = (e) => {
   const d = e?.detail ?? e?.response?.data?.detail;
   if (d) return typeof d === "string" ? d : JSON.stringify(d);
-  return e?.message || "Terjadi kesalahan";
+  return e?.message || "Something went wrong";
 };
 
 export const fmtNum = (v) =>
@@ -16,7 +16,7 @@ export const fmtNum = (v) =>
 export const fmtDate = (v) => {
   if (!v) return "—";
   const d = new Date(String(v).replace(" ", "T"));
-  return isNaN(d) ? v : d.toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+  return isNaN(d) ? v : d.toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
 };
 
 export function Card({ title, subtitle, icon: Icon, actions, children, className = "" }) {
@@ -75,7 +75,7 @@ export function Button({ children, onClick, loading, disabled, variant = "primar
   );
 }
 
-export function CopyButton({ text, label = "Salin" }) {
+export function CopyButton({ text, label = "Copy" }) {
   const [done, setDone] = useState(false);
   const copy = async () => {
     try {
@@ -128,9 +128,9 @@ export function ResultTable({ result }) {
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-400">
-        <Badge tone="OK">{result.row_count} baris</Badge>
-        {result.truncated && <Badge tone="TIMEOUT">dipotong di 500 baris</Badge>}
-        <span>Data per <b className="text-gray-300">{result.as_of || "belum pernah di-load"}</b></span>
+        <Badge tone="OK">{result.row_count} rows</Badge>
+        {result.truncated && <Badge tone="TIMEOUT">truncated at 500 rows</Badge>}
+        <span>Data as of <b className="text-gray-300">{result.as_of || "never loaded"}</b></span>
         {result.marts?.length > 0 && <span className="text-gray-600">· {result.marts.map((m) => `mart.${m}`).join(", ")}</span>}
       </div>
       <div className="overflow-auto max-h-[420px] rounded-lg border border-gray-800">
@@ -150,11 +150,11 @@ export function ResultTable({ result }) {
             ))}
           </tbody>
         </table>
-        {result.rows.length === 0 && <p className="px-3 py-6 text-center text-xs text-gray-500">Tidak ada baris.</p>}
+        {result.rows.length === 0 && <p className="px-3 py-6 text-center text-xs text-gray-500">No rows.</p>}
       </div>
       {result.sql_used && (
         <details className="text-[11px]">
-          <summary className="cursor-pointer text-gray-500 hover:text-gray-300">SQL yang dipakai</summary>
+          <summary className="cursor-pointer text-gray-500 hover:text-gray-300">SQL used</summary>
           <pre className="mt-1 bg-gray-950 rounded-lg p-3 text-gray-300 whitespace-pre-wrap">{result.sql_used}</pre>
         </details>
       )}

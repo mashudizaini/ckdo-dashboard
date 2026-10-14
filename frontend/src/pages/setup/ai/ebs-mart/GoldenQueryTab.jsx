@@ -59,7 +59,7 @@ export default function GoldenQueryTab() {
   };
 
   const remove = async (g) => {
-    if (!window.confirm(`Hapus golden query "${g.question_id}"?`)) return;
+    if (!window.confirm(`Delete golden query "${g.question_id}"?`)) return;
     await ebsMartApi.goldenDelete(g.id);
     load();
   };
@@ -70,8 +70,8 @@ export default function GoldenQueryTab() {
   return (
     <div className="space-y-4">
       <Card title="Golden queries (meta.golden_query)" icon={Sparkles}
-        subtitle={`Pasangan pertanyaan–SQL yang sudah diuji; dikembalikan find_marts sebagai contoh untuk model. ${verified}/${rows?.length || 0} terverifikasi. Target fase 1: 20–30 query, dicocokkan dengan laporan standar EBS.`}
-        actions={<Button icon={Plus} onClick={() => setForm(EMPTY)}>Tambah</Button>}>
+        subtitle={`Tested question–SQL pairs; find_marts returns them to the model as examples. ${verified}/${rows?.length || 0} verified. Phase 1 target: 20–30 queries, matched against standard EBS reports.`}
+        actions={<Button icon={Plus} onClick={() => setForm(EMPTY)}>Add</Button>}>
         <div className="p-4 space-y-3">
           <ErrorBox>{error}</ErrorBox>
           {form && (
@@ -80,15 +80,15 @@ export default function GoldenQueryTab() {
                 <select value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} className={inputCls}>
                   {["AP", "AR", "INV", "PO", "OM", "OPM", "GL"].map((d) => <option key={d}>{d}</option>)}
                 </select>
-                <input placeholder="Pertanyaan contoh (Bahasa Indonesia)" value={form.question_id}
+                <input placeholder="Example question (in Indonesian, as users ask)" value={form.question_id}
                   onChange={(e) => setForm({ ...form, question_id: e.target.value })} className={`${inputCls} flex-1`} />
               </div>
               <textarea rows={5} placeholder="SELECT ... FROM mart...." value={form.sql_text}
                 onChange={(e) => setForm({ ...form, sql_text: e.target.value })} className={`${inputCls} w-full font-mono`} />
-              <p className="text-[11px] text-gray-500">SQL diperiksa guardrail yang sama dengan run_sql sebelum disimpan. Mengubah SQL menghapus status verifikasi.</p>
+              <p className="text-[11px] text-gray-500">The SQL is checked by the same guardrail as run_sql before saving. Changing the SQL clears the verified status.</p>
               <div className="flex gap-2">
-                <Button icon={Save} loading={busy} onClick={save} disabled={!form.question_id || !form.sql_text}>Simpan</Button>
-                <Button variant="ghost" icon={X} onClick={() => setForm(null)}>Batal</Button>
+                <Button icon={Save} loading={busy} onClick={save} disabled={!form.question_id || !form.sql_text}>Save</Button>
+                <Button variant="ghost" icon={X} onClick={() => setForm(null)}>Cancel</Button>
               </div>
             </div>
           )}
@@ -102,14 +102,14 @@ export default function GoldenQueryTab() {
                       <p className="text-xs text-gray-200">{g.question_id}</p>
                     </div>
                     <p className="text-[11px] text-gray-500 mt-1">
-                      {g.verified_at ? <span className="text-emerald-400">Terverifikasi {g.verified_by} · {g.verified_at}</span> : "Belum diverifikasi"}
-                      {" · "}dibuat {g.created_by} {fmtDate(g.created_at)}
+                      {g.verified_at ? <span className="text-emerald-400">Verified {g.verified_by} · {g.verified_at}</span> : "Not verified"}
+                      {" · "}created by {g.created_by} {fmtDate(g.created_at)}
                     </p>
                   </div>
                   <div className="flex gap-1 shrink-0">
-                    <Button variant="ghost" icon={Play} loading={runningId === g.id} onClick={() => run(g)}>Jalankan</Button>
+                    <Button variant="ghost" icon={Play} loading={runningId === g.id} onClick={() => run(g)}>Run</Button>
                     <Button variant="ghost" icon={BadgeCheck} onClick={() => verify(g)}
-                      title="Tandai sudah dicocokkan dengan laporan standar EBS">Verifikasi</Button>
+                      title="Mark as matched against the standard EBS report">Verify</Button>
                     <Button variant="ghost" onClick={() => setForm({ ...g })}>Edit</Button>
                     <Button variant="danger" icon={Trash2} onClick={() => remove(g)} />
                   </div>

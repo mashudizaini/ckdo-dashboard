@@ -39,7 +39,7 @@ export default function ApInvoiceAttachments({ invoiceId, invoiceNum }) {
       const res = await accountingApi.getApInvoiceAttachments(invoiceId);
       setRows(res.attachments || []);
     } catch (e) {
-      setError(e?.detail || e?.message || "Gagal memuat lampiran");
+      setError(e?.detail || e?.message || "Failed to load attachments");
     } finally {
       setBusy(false);
     }
@@ -54,11 +54,11 @@ export default function ApInvoiceAttachments({ invoiceId, invoiceNum }) {
       const url = URL.createObjectURL(new Blob([blob], { type: a.file_content_type }));
       const el = document.createElement("a");
       el.href = url;
-      el.download = a.file_name || `lampiran-${a.attached_document_id}`;
+      el.download = a.file_name || `attachment-${a.attached_document_id}`;
       el.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      setError(e?.detail || e?.message || "Gagal mengunduh");
+      setError(e?.detail || e?.message || "Download failed");
     } finally {
       setDownloading(null);
     }
@@ -66,7 +66,7 @@ export default function ApInvoiceAttachments({ invoiceId, invoiceNum }) {
 
   return (
     <div className="relative">
-      <button onClick={toggle} title={`Lampiran invoice ${invoiceNum || ""}`.trim()}
+      <button onClick={toggle} title={`Invoice attachments ${invoiceNum || ""}`.trim()}
         className="p-1 rounded hover:bg-gray-700/50"
         style={{ background: "none", border: "none", cursor: "pointer", color: open ? "#60a5fa" : "#94a3b8" }}>
         <Paperclip size={13} />
@@ -80,12 +80,12 @@ export default function ApInvoiceAttachments({ invoiceId, invoiceNum }) {
           }}>
           {busy && (
             <p className="flex items-center gap-2" style={{ fontSize: 11.5, color: "#94a3b8", padding: 4 }}>
-              <Loader2 size={12} className="animate-spin" /> memuat…
+              <Loader2 size={12} className="animate-spin" /> loading…
             </p>
           )}
           {error && <p style={{ fontSize: 11.5, color: "#f87171", padding: 4 }}>{error}</p>}
           {!busy && rows !== null && rows.length === 0 && (
-            <p style={{ fontSize: 11.5, color: "#64748b", padding: 4 }}>Invoice ini tidak punya lampiran berkas.</p>
+            <p style={{ fontSize: 11.5, color: "#64748b", padding: 4 }}>This invoice has no file attachments.</p>
           )}
           {(rows || []).map((a) => (
             <div key={a.attached_document_id} className="flex items-center justify-between gap-3"
@@ -99,7 +99,7 @@ export default function ApInvoiceAttachments({ invoiceId, invoiceNum }) {
                 </span>
               </span>
               <button onClick={() => download(a)} disabled={downloading === a.attached_document_id}
-                title="Unduh"
+                title="Download"
                 className="shrink-0 p-1 rounded hover:bg-gray-700/50"
                 style={{ background: "none", border: "none", cursor: "pointer", color: "#60a5fa" }}>
                 {downloading === a.attached_document_id

@@ -77,11 +77,11 @@ function EtlDataPreview({ jobName, runParams }) {
     <tr>
       <td colSpan={8} className="p-0">
         <div className="bg-gray-950 border-t border-gray-800 px-4 py-3">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-cyan-400 mb-3"><Database size={13} /> Data hasil import — <span className="font-mono">{jobName}</span></div>
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-cyan-400 mb-3"><Database size={13} /> Imported data — <span className="font-mono">{jobName}</span></div>
           {rows === null ? (
-            <div className="flex items-center gap-2 text-xs text-gray-500 py-2"><Loader2 size={13} className="animate-spin" /> Memuat data...</div>
+            <div className="flex items-center gap-2 text-xs text-gray-500 py-2"><Loader2 size={13} className="animate-spin" /> Loading data...</div>
           ) : err ? <div className="text-xs text-red-400 py-2">{err}</div>
-          : rows.length === 0 ? <div className="text-xs text-gray-600 py-2">Belum ada data untuk parameter ini.</div>
+          : rows.length === 0 ? <div className="text-xs text-gray-600 py-2">No data for these parameters yet.</div>
           : (
             <div className="overflow-x-auto rounded border border-gray-800 max-h-64">
               <table className="w-full text-[11px] border-collapse min-w-max">
@@ -130,7 +130,7 @@ function SourceModal({ jobName, onClose }) {
           {err ? (
             <p className="text-sm text-red-400">{err}</p>
           ) : source === null ? (
-            <div className="flex items-center gap-2 text-xs text-gray-500"><Loader2 size={13} className="animate-spin" /> Memuat kode...</div>
+            <div className="flex items-center gap-2 text-xs text-gray-500"><Loader2 size={13} className="animate-spin" /> Loading code...</div>
           ) : (
             <pre className="text-[11px] text-gray-300 font-mono whitespace-pre-wrap leading-relaxed bg-gray-950 rounded-lg p-4 border border-gray-800">{source}</pre>
           )}
@@ -172,16 +172,16 @@ export default function EtlAdmin() {
     const { job, year, month } = modal;
     setModal(null); setTriggering(job);
     try { await etlAdminApi.trigger(job, { year, month: month || null }); setTimeout(loadData, 2000); }
-    catch (err) { alert("Gagal: " + (err?.response?.data?.detail || err?.detail || err.message)); }
+    catch (err) { alert("Failed: " + (err?.response?.data?.detail || err?.detail || err.message)); }
     setTriggering("");
   };
 
   const handleStop = async (jobName, e) => {
     e.stopPropagation();
-    if (!confirm(`Hentikan job "${jobName}" yang sedang berjalan?`)) return;
+    if (!confirm(`Stop the running job "${jobName}"?`)) return;
     setStopping(jobName);
     try { await etlAdminApi.stop(jobName); await loadData(); }
-    catch (err) { alert("Gagal stop: " + (err?.response?.data?.detail || err?.detail || err.message)); }
+    catch (err) { alert("Stop failed: " + (err?.response?.data?.detail || err?.detail || err.message)); }
     setStopping("");
   };
 
@@ -204,22 +204,22 @@ export default function EtlAdmin() {
             </div>
             <div className="space-y-3">
               <div>
-                <label className="block text-xs font-medium text-gray-400 mb-1">Tahun</label>
+                <label className="block text-xs font-medium text-gray-400 mb-1">Year</label>
                 <select value={modal.year} onChange={(e) => setModal({ ...modal, year: Number(e.target.value) })} className={`${selCls} w-full`}>
                   {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-400 mb-1">Bulan <span className="text-gray-600 font-normal">(kosong = semua bulan)</span></label>
+                <label className="block text-xs font-medium text-gray-400 mb-1">Month <span className="text-gray-600 font-normal">(empty = all months)</span></label>
                 <select value={modal.month} onChange={(e) => setModal({ ...modal, month: e.target.value ? Number(e.target.value) : "" })} className={`${selCls} w-full`}>
-                  <option value="">Semua bulan</option>
+                  <option value="">All months</option>
                   {MONTHS_SHORT.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
                 </select>
               </div>
             </div>
             <div className="flex gap-2 mt-5">
-              <button onClick={() => setModal(null)} className="flex-1 border border-gray-700 text-gray-400 px-4 py-2 rounded-lg text-sm hover:bg-gray-800">Batal</button>
-              <button onClick={handleTrigger} className="flex-1 flex items-center justify-center gap-1.5 bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded-lg text-sm font-medium"><Play size={13} /> Jalankan</button>
+              <button onClick={() => setModal(null)} className="flex-1 border border-gray-700 text-gray-400 px-4 py-2 rounded-lg text-sm hover:bg-gray-800">Cancel</button>
+              <button onClick={handleTrigger} className="flex-1 flex items-center justify-center gap-1.5 bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 rounded-lg text-sm font-medium"><Play size={13} /> Run</button>
             </div>
           </div>
         </div>
@@ -264,7 +264,7 @@ export default function EtlAdmin() {
         </div>
       </ChartCard>
 
-      <ChartCard title="Recent Job History" subtitle="10 terakhir · klik baris untuk lihat data yang sudah masuk" className="overflow-x-auto">
+      <ChartCard title="Recent Job History" subtitle="Last 10 · click a row to see the data that came in" className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="bg-gray-950 border-b border-gray-800">
@@ -275,7 +275,7 @@ export default function EtlAdmin() {
           </thead>
           <tbody>
             {jobs.length === 0 ? (
-              <tr><td colSpan={8} className="py-10 text-center text-gray-600 text-sm">Belum ada job yang dijalankan</td></tr>
+              <tr><td colSpan={8} className="py-10 text-center text-gray-600 text-sm">No jobs have run yet</td></tr>
             ) : jobs.map((j) => (
               <Fragment key={j.id}>
                 <tr onClick={() => setExpandedId((p) => (p === j.id ? null : j.id))} className={`border-b border-gray-800/60 cursor-pointer transition-colors ${expandedId === j.id ? "bg-cyan-500/5" : "hover:bg-gray-800/40"}`}>
@@ -290,7 +290,7 @@ export default function EtlAdmin() {
                   <td className="py-2 px-3 text-xs text-red-400 max-w-[160px] truncate" title={j.error_message}>{j.error_message || "—"}</td>
                   <td className="py-2 px-3">
                     {j.status === "running" && (
-                      <button onClick={(e) => handleStop(j.job_name, e)} disabled={stopping === j.job_name} title="Hentikan job"
+                      <button onClick={(e) => handleStop(j.job_name, e)} disabled={stopping === j.job_name} title="Stop job"
                         className="flex items-center gap-1 text-xs bg-red-500/10 text-red-400 border border-red-500/30 px-2 py-1 rounded-lg hover:bg-red-500/20 disabled:opacity-50">
                         {stopping === j.job_name ? <Loader2 size={11} className="animate-spin" /> : <Square size={11} />} Stop
                       </button>

@@ -313,7 +313,7 @@ export default function ChatWidget() {
             {provider !== "onprem" && (
               <button
                 onClick={() => setShowApiKey(true)}
-                title={`API Key ${provider === "anthropic" ? "Claude" : "Gemini"} pribadi`}
+                title={`Personal ${provider === "anthropic" ? "Claude" : "Gemini"} API key`}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
                   width: 22, height: 22, borderRadius: 6, border: "1px solid #e2e8f0",
@@ -453,7 +453,7 @@ export default function ChatWidget() {
         {open ? (
           <>
             <X size={17} color="#6d28d9" />
-            <span style={{ fontSize: 12, fontWeight: 700, color: "#6d28d9", letterSpacing: 0.2 }}>Tutup</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#6d28d9", letterSpacing: 0.2 }}>Close</span>
           </>
         ) : (
           <>

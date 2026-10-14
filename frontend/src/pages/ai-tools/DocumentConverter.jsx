@@ -250,7 +250,7 @@ export default function DocumentConverter() {
       const params = new URLSearchParams({ source, title });
       const res = await fetch(`/api/v1/ai/chatbot/documents/content?${params}`, { headers });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Gagal memuat dokumen");
+      if (!res.ok) throw new Error(data.detail || "Failed to load the document");
       const doc = existingDocs.find((d) => d.source === source && d.title === title);
       setMarkdown(data.content);
       setMarkdownDirty(false);
@@ -387,7 +387,7 @@ export default function DocumentConverter() {
 
   const handleSendToKB = async () => {
     if (!form.source.trim() || !form.title.trim() || !markdown.trim()) {
-      setSendMsg({ type: "error", text: "Isi Source, Title, dan pastikan hasil konversi tidak kosong" });
+      setSendMsg({ type: "error", text: "Fill in Source and Title, and make sure the conversion result is not empty" });
       return;
     }
     setSending(true);
@@ -398,7 +398,7 @@ export default function DocumentConverter() {
         const delRes = await fetch(`/api/v1/ai/chatbot/documents?${params}`, { method: "DELETE", headers });
         if (!delRes.ok) {
           const d = await delRes.json().catch(() => ({}));
-          throw new Error(d.detail || "Gagal menghapus versi lama sebelum menyimpan perubahan");
+          throw new Error(d.detail || "Failed to delete the old version before saving the changes");
         }
       }
 
@@ -409,8 +409,8 @@ export default function DocumentConverter() {
       fd.append("department", form.department);
       const res = await fetch("/api/v1/ai/chatbot/documents", { method: "POST", headers, body: fd });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Gagal mengirim ke Knowledge Base");
-      setSendMsg({ type: "success", text: `✓ ${editingExisting ? "Perubahan disimpan — " : ""}${data.message}` });
+      if (!res.ok) throw new Error(data.detail || "Failed to send to the Knowledge Base");
+      setSendMsg({ type: "success", text: `✓ ${editingExisting ? "Changes saved — " : ""}${data.message}` });
       setEditingExisting(editingExisting ? { source: form.source.trim(), title: form.title.trim() } : null);
       try {
         const listRes = await fetch("/api/v1/ai/chatbot/documents", { headers });
@@ -438,8 +438,8 @@ export default function DocumentConverter() {
             Document Converter
           </h1>
           <p className="text-gray-500 text-sm mt-1">
-            Konversi PDF, DOCX, atau gambar (termasuk hasil scan) ke Markdown/DOCX/XLSX/JSONL terstruktur, dengan opsi terjemahan Korea/Inggris ke Inggris/Indonesia — cocok untuk Knowledge Base AI Chatbot maupun dokumen siap pakai.
-            Konversi berjalan di background — aman ditinggal atau tutup tab, progress tersimpan.
+            Convert PDF, DOCX or images (including scans) to structured Markdown/DOCX/XLSX/JSONL, with optional Korean/English to English/Indonesian translation — suitable for the AI Chatbot Knowledge Base or ready-to-use documents.
+            Conversion runs in the background — you can leave or close the tab; progress is kept.
           </p>
         </div>
         <button onClick={() => setShowGlossary(true)}
@@ -460,7 +460,7 @@ export default function DocumentConverter() {
               <input ref={fileRef} type="file" accept={ACCEPTED} className="hidden"
                 onChange={(e) => handleFileChange(e.target.files?.[0] || null)} />
               <Upload size={20} className="mx-auto text-gray-600 mb-2" />
-              <p className="text-sm text-gray-300">{file ? file.name : "Klik untuk pilih file"}</p>
+              <p className="text-sm text-gray-300">{file ? file.name : "Click to choose a file"}</p>
               {file && <p className="text-xs text-gray-600 mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</p>}
             </div>
           </div>
@@ -479,7 +479,7 @@ export default function DocumentConverter() {
             className="flex items-center justify-center gap-2 rounded-lg bg-teal-600 hover:bg-teal-700 disabled:opacity-50 px-4 py-2.5 text-sm font-semibold text-white transition-colors"
           >
             {uploading ? <Loader2 size={15} className="animate-spin" /> : <FileText size={15} />}
-            {uploading ? "Mengirim..." : "Konversi ke Markdown"}
+            {uploading ? "Sending..." : "Convert to Markdown"}
           </button>
 
           {uploadError && (
@@ -600,9 +600,9 @@ export default function DocumentConverter() {
             {editingExisting ? (
               <div className="rounded-lg border border-amber-700/40 bg-amber-500/10 px-3 py-2.5 flex items-center justify-between gap-2 mb-3">
                 <p className="text-xs text-amber-400 flex items-center gap-1.5">
-                  <FolderOpen size={13} /> Mengedit: <span className="font-semibold">{editingExisting.title}</span>
+                  <FolderOpen size={13} /> Editing: <span className="font-semibold">{editingExisting.title}</span>
                 </p>
-                <button onClick={handleCancelEdit} title="Batal edit"
+                <button onClick={handleCancelEdit} title="Cancel editing"
                   className="text-amber-400 hover:text-amber-300 shrink-0">
                   <X size={14} />
                 </button>
@@ -613,7 +613,7 @@ export default function DocumentConverter() {
                 <div className="flex gap-2">
                   <select value={selectedDocKey} onChange={(e) => setSelectedDocKey(e.target.value)}
                     className="flex-1 rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-200 outline-none focus:border-teal-500 cursor-pointer">
-                    <option value="">Pilih dokumen...</option>
+                    <option value="">Choose a document...</option>
                     {existingDocs.map((d) => (
                       <option key={`${d.source}::${d.title}`} value={JSON.stringify([d.source, d.title])}>
                         {d.title} ({d.chunks} chunk)
@@ -622,14 +622,14 @@ export default function DocumentConverter() {
                   </select>
                   <button onClick={handleLoadExisting} disabled={!selectedDocKey || loadingDoc}
                     className="flex items-center gap-1.5 rounded-md border border-gray-700 bg-gray-800 hover:border-teal-500 disabled:opacity-40 px-3 py-2 text-xs font-medium text-gray-300 transition-colors shrink-0">
-                    {loadingDoc ? <Loader2 size={13} className="animate-spin" /> : <FolderOpen size={13} />} Buka
+                    {loadingDoc ? <Loader2 size={13} className="animate-spin" /> : <FolderOpen size={13} />} Open
                   </button>
                 </div>
               </div>
             )}
 
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-              {editingExisting ? "Edit Dokumen KB" : "Transfer to Knowledge Base"}
+              {editingExisting ? "Edit KB Document" : "Transfer to Knowledge Base"}
             </p>
             <div className="space-y-3">
               <div>
@@ -658,7 +658,7 @@ export default function DocumentConverter() {
                 <button onClick={handleSendToKB} disabled={!markdown || sending}
                   className="flex-1 flex items-center justify-center gap-1.5 rounded-md bg-teal-600 hover:bg-teal-700 disabled:opacity-40 px-3 py-2 text-xs font-semibold text-white transition-colors">
                   {sending ? <Loader2 size={13} className="animate-spin" /> : editingExisting ? <Save size={13} /> : <Send size={13} />}
-                  {editingExisting ? "Simpan Perubahan" : "Kirim ke KB Chatbot"}
+                  {editingExisting ? "Save Changes" : "Send to Chatbot KB"}
                 </button>
               </div>
 
@@ -706,7 +706,7 @@ export default function DocumentConverter() {
                   ))}
               </div>
             )}
-            {markdown && <p className="text-xs text-gray-600">{markdown.length.toLocaleString()} karakter — bisa diedit sebelum dikirim</p>}
+            {markdown && <p className="text-xs text-gray-600">{markdown.length.toLocaleString()} characters — can be edited before sending</p>}
           </div>
           {selectedJob && selectedJob.status !== "done" ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
@@ -724,7 +724,7 @@ export default function DocumentConverter() {
                   {selectedJob.total_pages > 1 && (
                     <p className="text-xs text-gray-600">Page {selectedJob.current_page || 0} of {selectedJob.total_pages} — {selectedJob.progress_percent || 0}%</p>
                   )}
-                  <p className="text-xs text-gray-700 max-w-xs">Bisa beberapa menit untuk dokumen hasil scan — aman ditinggal, tab ini boleh ditutup.</p>
+                  <p className="text-xs text-gray-700 max-w-xs">Scanned documents can take a few minutes — you can leave; this tab may be closed.</p>
                 </>
               )}
             </div>
@@ -734,7 +734,7 @@ export default function DocumentConverter() {
             <textarea
               value={markdown}
               onChange={(e) => { setMarkdown(e.target.value); setMarkdownDirty(true); }}
-              placeholder="Konversi sebuah file, atau pilih job/dokumen yang sudah ada — hasilnya akan muncul di sini..."
+              placeholder="Convert a file, or choose an existing job/document — the result appears here..."
               className="flex-1 w-full resize-none bg-gray-950 text-gray-200 text-xs font-mono p-4 outline-none placeholder-gray-700"
             />
           )}

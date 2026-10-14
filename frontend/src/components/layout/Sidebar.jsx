@@ -85,7 +85,7 @@ const NAV_ITEMS = [
   { label: "PPWH", path: "/dashboard/ppwh", icon: Warehouse, roles: ["ppwh_staff"], children: [
     { label: "Inventory In", path: "/dashboard/ppwh/inbound" },
     { label: "Inventory Out", path: "/dashboard/ppwh/outbound" },
-    { label: "Kartu Stok", path: "/dashboard/ppwh/stock-card" },
+    { label: "Stock Card", path: "/dashboard/ppwh/stock-card" },
   ] },
   // Gated to "production_staff" (2026-09-18) — same fix as PPWH/Sales &
   // Marketing above. OPM batch production tracking from gme_batch_header

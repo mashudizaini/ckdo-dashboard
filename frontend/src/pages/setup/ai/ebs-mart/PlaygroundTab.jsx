@@ -164,8 +164,8 @@ function GroupSelect({ value, onChange }) {
     }).catch(() => {});
   }, []);
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className={inputCls} title="Jalankan sebagai grup ini">
-      {groups.map((g) => <option key={g} value={g}>sebagai {g}</option>)}
+    <select value={value} onChange={(e) => onChange(e.target.value)} className={inputCls} title="Run as this group">
+      {groups.map((g) => <option key={g} value={g}>as {g}</option>)}
     </select>
   );
 }
@@ -229,15 +229,15 @@ export default function PlaygroundTab() {
 
   return (
     <div className="space-y-4">
-      <Card title="Uji intent tool" icon={FlaskConical}
-        subtitle="Panggil tool persis seperti Open WebUI memanggilnya, sebagai grup tertentu — untuk memastikan jawaban dan penolakan akses sebelum dipakai user.">
+      <Card title="Intent tool test" icon={FlaskConical}
+        subtitle="Call a tool exactly as Open WebUI does, as a given group — to check answers and access refusals before users rely on them.">
         <div className="p-4 space-y-3">
           <div className="flex flex-wrap gap-2">
             <select value={tool} onChange={(e) => { setTool(e.target.value); setArgs({}); setToolResult(null); }} className={inputCls}>
               {Object.keys(TOOLS).map((t) => <option key={t}>{t}</option>)}
             </select>
             <GroupSelect value={toolGroup} onChange={setToolGroup} />
-            <Button icon={Play} loading={toolBusy} onClick={runTool}>Jalankan</Button>
+            <Button icon={Play} loading={toolBusy} onClick={runTool}>Run</Button>
           </div>
           {TOOLS[tool].length > 0 && (
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
@@ -246,7 +246,7 @@ export default function PlaygroundTab() {
                   <span className="font-mono">{name}</span>
                   {Array.isArray(type) ? (
                     <select value={args[name] ?? type[0]} onChange={(e) => setArgs({ ...args, [name]: e.target.value })} className={`${inputCls} w-full`}>
-                      {type.map((o) => <option key={o} value={o}>{o || "(semua)"}</option>)}
+                      {type.map((o) => <option key={o} value={o}>{o || "(all)"}</option>)}
                     </select>
                   ) : (
                     <input type={type} placeholder={def != null ? String(def) : ""} value={args[name] ?? ""}
@@ -262,35 +262,35 @@ export default function PlaygroundTab() {
       </Card>
 
       <Card title="SQL playground (run_sql)" icon={TerminalSquare}
-        subtitle="Guardrail yang sama dengan yang dipakai model: satu SELECT, hanya mart.*, read-only, timeout 15 detik, maksimal 500 baris. Tercatat di audit log.">
+        subtitle="The same guardrail the model uses: one SELECT, mart.* only, read-only, 15-second timeout, at most 500 rows. Logged in the audit log.">
         <div className="p-4 space-y-3">
           <textarea rows={6} value={sql} onChange={(e) => setSql(e.target.value)} className={`${inputCls} w-full font-mono`} spellCheck={false} />
           <div className="flex gap-2">
             <GroupSelect value={sqlGroup} onChange={setSqlGroup} />
-            <Button icon={Play} loading={sqlBusy} onClick={runSql}>Jalankan</Button>
+            <Button icon={Play} loading={sqlBusy} onClick={runSql}>Run</Button>
           </div>
           <ErrorBox>{sqlErr}</ErrorBox>
           <ResultTable result={sqlResult} />
         </div>
       </Card>
 
-      <Card title="Uji keamanan tool server" icon={ShieldCheck}
-        subtitle="Checklist blueprint bagian 11: DML/DDL, multi-statement, tabel di luar mart, fungsi berbahaya, 403 lintas domain, timeout, audit. Target: 100% lulus."
-        actions={<Button icon={Play} loading={secBusy} onClick={runSec}>Jalankan uji</Button>}>
+      <Card title="Tool server security test" icon={ShieldCheck}
+        subtitle="Blueprint section 11 checklist: DML/DDL, multi-statement, tables outside mart, dangerous functions, cross-domain 403, timeout, audit. Target: 100% pass."
+        actions={<Button icon={Play} loading={secBusy} onClick={runSec}>Run tests</Button>}>
         <div className="p-4 space-y-2">
           <ErrorBox>{secErr}</ErrorBox>
           {sec && (
             <>
               <p className="text-xs text-gray-300">
                 <b className={sec.results.some((r) => r.passed === false) ? "text-red-400" : "text-emerald-400"}>
-                  {sec.passed}/{sec.total} lulus
+                  {sec.passed}/{sec.total} passed
                 </b>
               </p>
               <div className="divide-y divide-gray-800 rounded-lg border border-gray-800">
                 {sec.results.map((r) => (
                   <div key={r.test} className="px-3 py-1.5 flex items-start gap-3 text-[11px]">
                     <Badge tone={r.passed === true ? "OK" : r.passed === false ? "FAILED" : "SKIPPED"}>
-                      {r.passed === true ? "LULUS" : r.passed === false ? "GAGAL" : "N/A"}
+                      {r.passed === true ? "PASS" : r.passed === false ? "FAIL" : "N/A"}
                     </Badge>
                     <span className="text-gray-200 w-64 shrink-0">{r.test}</span>
                     <span className="text-gray-500">{String(r.detail)}</span>
