@@ -314,19 +314,19 @@ def build_catalog(raw: dict, staging_files: list[dict], minio_names: Optional[se
 
         problems, notes = [], []
         if total_df and fb["datafiles"] < total_df:
-            problems.append(f"Hanya {fb['datafiles']} dari {total_df} datafile yang ter-backup.")
+            problems.append(f"Only {fb['datafiles']} of {total_df} datafiles are backed up.")
         if bad:
-            problems.append(f"{bad} backup piece berstatus EXPIRED/UNAVAILABLE (file hilang dari disk).")
+            problems.append(f"{bad} backup pieces are EXPIRED/UNAVAILABLE (file missing from disk).")
         if gone:
-            problems.append("Folder backup tidak ada lagi di disk maupun Synology: " + ", ".join(gone)
-                            + " — control file belum di-CROSSCHECK.")
+            problems.append("The backup folder no longer exists on disk or Synology: " + ", ".join(gone)
+                            + " — the control file has not been CROSSCHECKed.")
         if from_syn:
-            notes.append("Folder di staging sudah tidak ada — restore dari salinan Synology "
-                         "(jalankan CATALOG START WITH ke folder Synology lebih dulu).")
+            notes.append("The staging folder is gone — restore from the Synology copy "
+                         "(run CATALOG START WITH on the Synology folder first).")
         if not ctl_ok:
-            problems.append("Tidak ada backup controlfile setelah backup ini dimulai.")
+            problems.append("No controlfile backup after this backup started.")
         if start_seq is None:
-            problems.append("Sequence archive log awal tidak ditemukan di control file.")
+            problems.append("The starting archive log sequence is not found in the control file.")
 
         last_seq = None
         recoverable_until = None
@@ -335,7 +335,7 @@ def build_catalog(raw: dict, staging_files: list[dict], minio_names: Optional[se
             if end_seq is not None and last_seq < end_seq:
                 miss = [s for s in range(start_seq, end_seq + 1) if (thread, s) not in available]
                 problems.append(
-                    "Archive log yang dibutuhkan agar backup ini konsisten hilang: seq "
+                    "Archive logs needed to make this backup consistent are missing: seq "
                     + ", ".join(str(s) for s in miss[:10]) + ("…" if len(miss) > 10 else "")
                 )
             elif last_seq >= start_seq:
@@ -378,23 +378,23 @@ def build_catalog(raw: dict, staging_files: list[dict], minio_names: Optional[se
     def classify(t: int, seq: int, file_rid: str) -> tuple[str, str]:
         if file_rid != rid:
             if file_rid in incarnations:
-                return "obsolete", "Dari incarnation database lama (sebelum RESETLOGS) — tidak bisa dipakai lagi."
+                return "obsolete", "From an old database incarnation (before RESETLOGS) — can no longer be used."
             # MinIO / Synology may also hold logs of another database (DEV,
             # TEST) with the same naming. Not ours to judge — never deletable.
-            return "unknown", ("Resetlogs id tidak dikenal oleh database PROD — kemungkinan milik database lain. "
-                               "Tidak bisa dihapus dari sini.")
+            return "unknown", ("The resetlogs id is not known to the PROD database — probably from another database. "
+                               "It cannot be deleted from here.")
         if not newest:
-            return "required", "Belum ada full backup yang terbukti bisa di-restore — simpan semua archive log."
+            return "required", "No full backup has been proven restorable yet — keep every archive log."
         if seq >= newest["start_seq"]:
-            return "required", (f"Dibutuhkan untuk recovery dari full backup terbaru ({newest['start_time']}) "
-                                f"sampai kondisi terkini.")
+            return "required", (f"Needed to recover from the latest full backup ({newest['start_time']}) "
+                                f"up to the present.")
         if seq >= oldest["start_seq"]:
             older = [f for f in restorable_fulls if f["start_seq"] <= seq]
             ref = older[0] if older else oldest
-            return "optional", (f"Hanya untuk point-in-time recovery ke waktu antara {ref['start_time'][:10]} "
-                                f"dan {newest['start_time'][:10]} memakai full backup lama ({ref['tag']}).")
-        return "obsolete", (f"Lebih tua dari full backup tertua yang masih bisa di-restore "
-                            f"({oldest['start_time'][:10]}, mulai seq {oldest['start_seq']}) — tidak ada backup yang membutuhkannya.")
+            return "optional", (f"Only for point-in-time recovery to a time between {ref['start_time'][:10]} "
+                                f"and {newest['start_time'][:10]} using an older full backup ({ref['tag']}).")
+        return "obsolete", (f"Older than the oldest full backup that can still be restored "
+                            f"({oldest['start_time'][:10]}, from seq {oldest['start_seq']}) — no backup needs it.")
 
     # Logs only in the database's own archive destination still get a row.
     for (t, seq), d in raw["on_disk"].items():
@@ -416,7 +416,7 @@ def build_catalog(raw: dict, staging_files: list[dict], minio_names: Optional[se
         mtimes = [c["mtime_epoch"] for c in g["copies"].values() if c["mtime_epoch"]]
         sizes = [c["size_bytes"] // max(len(c["refs"]), 1) for c in g["copies"].values() if c["size_bytes"]]
         if not copies:
-            reason += " (Belum tersalin ke staging/MinIO/Synology — dikelola oleh RMAN di archive destination.)"
+            reason += " (Not yet copied to staging/MinIO/Synology — managed by RMAN in the archive destination.)"
         staging_ref = copies["staging"]["refs"][0] if "staging" in copies else None
         archivelogs.append({
             "name": g["name"], "thread": t, "sequence": seq, "resetlogs_id": file_rid,
@@ -455,31 +455,31 @@ def build_catalog(raw: dict, staging_files: list[dict], minio_names: Optional[se
     rpo_minutes = int((server_now - until).total_seconds() // 60) if (server_now and until) else None
     warnings = []
     if not newest:
-        status, message = "red", "Tidak ada full backup RMAN yang terbukti bisa di-restore."
+        status, message = "red", "No RMAN full backup has been proven restorable."
     else:
         age_days = (server_now - _ts(newest["start_time"])).days if server_now else None
-        message = (f"Database bisa dipulihkan ke titik waktu mana pun antara {newest['recoverable_from']} "
-                   f"dan {newest['recoverable_until'] or 'sequence ' + str(newest['last_seq'])} WIB "
-                   f"memakai full backup {newest['tag']}.")
+        message = (f"The database can be recovered to any point in time between {newest['recoverable_from']} "
+                   f"and {newest['recoverable_until'] or 'sequence ' + str(newest['last_seq'])} WIB "
+                   f"using full backup {newest['tag']}.")
         status = "green"
         if age_days is not None and age_days > 7:
             status = "amber"
-            warnings.append(f"Full backup terbaru sudah {age_days} hari — recovery akan butuh banyak archive log "
-                            f"(lebih lama). Jadwalkan full backup mingguan.")
+            warnings.append(f"The latest full backup is {age_days} days old — recovery will need many archive logs "
+                            f"(slower). Schedule a weekly full backup.")
         if rpo_minutes is not None and rpo_minutes > 24 * 60:
             status = "amber"
-            warnings.append(f"Archive log terakhir yang tersedia {rpo_minutes // 60} jam lalu — "
-                            f"cek apakah log switch / sinkronisasi archive berjalan.")
+            warnings.append(f"The latest available archive log is {rpo_minutes // 60} hours old — "
+                            f"check that log switches / archive sync are running.")
         if len(restorable_fulls) < 2:
-            warnings.append("Hanya ada 1 full backup yang bisa di-restore. Idealnya simpan minimal 2.")
+            warnings.append("Only 1 full backup can be restored. Ideally keep at least 2.")
         if synology_dirs and "synology" not in newest["copies"]:
-            warnings.append("Full backup terbaru belum punya salinan di Synology — bila server DB rusak, "
-                            "backup ini ikut hilang.")
+            warnings.append("The latest full backup has no Synology copy yet — if the DB server fails, "
+                            "this backup is lost with it.")
     if gaps:
         if status == "green":
             status = "amber"
-        warnings.append("Ada sequence archive log yang hilang: " + ", ".join(str(g) for g in gaps[:15])
-                        + ("…" if len(gaps) > 15 else "") + " — recovery berhenti di sequence sebelum celah.")
+        warnings.append("Some archive log sequences are missing: " + ", ".join(str(g) for g in gaps[:15])
+                        + ("…" if len(gaps) > 15 else "") + " — recovery stops at the sequence before the gap.")
 
     return {
         "db": {**db, "current_sequence": current_seq, "latest_archived_sequence": latest_archived},

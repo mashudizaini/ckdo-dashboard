@@ -89,19 +89,19 @@ def seed_defaults():
         starters = [
             dict(name="EBS Database Listener (PROD)", segment="ebs_db", check_type="tcp",
                  host=_cfg.oracle_prod_host, port=_cfg.oracle_prod_port, enabled=True, sequence=10,
-                 notes="Diambil dari konfigurasi koneksi Oracle dashboard."),
+                 notes="Taken from the dashboard's Oracle connection settings."),
             dict(name="EBS Web / Application Tier", segment="ebs_web", check_type="tcp",
                  host="172.21.2.202", port=8000, enabled=False, sequence=20,
-                 notes="Verifikasi host & port web EBS (R12.2 umumnya 8000 / 4443), lalu aktifkan."),
+                 notes="Verify the EBS web host & port (R12.2 is usually 8000 / 4443), then enable it."),
             dict(name="EBS Login Page (TTFB)", segment="ebs_web", check_type="http",
                  url="", enabled=False, sequence=21,
-                 notes="Isi URL AppsLocalLogin.jsp — mengukur waktu respons web tier, bukan sekadar port terbuka."),
+                 notes="Enter the AppsLocalLogin.jsp URL — measures web tier response time, not just an open port."),
             dict(name="FortiGate HO (LAN interface)", segment="wan", check_type="tcp",
                  host="", port=443, enabled=False, sequence=30,
-                 notes="Isi IP LAN FortiGate HO. Dari server Plant, probe ini melewati tunnel HO-Plant."),
+                 notes="Enter the HO FortiGate LAN IP. From the Plant server this probe goes through the HO-Plant tunnel."),
             dict(name="Internet (Cloudflare 1.1.1.1)", segment="internet", check_type="tcp",
                  host="1.1.1.1", port=443, enabled=True, sequence=90,
-                 notes="Pembanding: kalau internet ikut buruk, masalahnya di ISP Plant, bukan tunnel."),
+                 notes="Comparison: if the internet is bad too, the problem is the Plant ISP, not the tunnel."),
         ]
         for s in starters:
             db.add(EbsNetTarget(**s))

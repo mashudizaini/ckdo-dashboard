@@ -670,10 +670,10 @@ def trigger_online(payload: BackupOnlineIn, bg: BackgroundTasks, db: Session = D
         try:
             local = datetime.strptime(payload.run_at_local.strip()[:16], "%Y-%m-%d %H:%M")
         except ValueError:
-            raise HTTPException(400, "run_at_local harus berformat 'YYYY-MM-DD HH:MM' (waktu server database)")
+            raise HTTPException(400, "run_at_local must be 'YYYY-MM-DD HH:MM' (database server time)")
         run_at_utc = local - timedelta(hours=_db_utc_offset_hours())
         if run_at_utc <= datetime.utcnow():
-            raise HTTPException(400, "Waktu yang dipilih sudah lewat.")
+            raise HTTPException(400, "The chosen time is already in the past.")
         params = payload.model_dump()
         params["run_at_utc"] = run_at_utc.strftime("%Y-%m-%d %H:%M:%S")
         params["run_at_local"] = local.strftime("%Y-%m-%d %H:%M")
@@ -753,7 +753,7 @@ def backup_readiness():
     try:
         return readiness.collect()
     except Exception as e:
-        raise HTTPException(503, f"Tidak bisa membaca kondisi database: {e}")
+        raise HTTPException(503, f"Cannot read the database conditions: {e}")
 
 
 class RescheduleIn(BaseModel):
@@ -770,14 +770,14 @@ def reschedule_job(job_id: int, body: RescheduleIn, db: Session = Depends(get_db
     """
     job = db.query(BackupJob).filter(BackupJob.id == job_id).first()
     if not job or job.status != "scheduled":
-        raise HTTPException(400, "Hanya job berstatus terjadwal yang bisa diubah waktunya.")
+        raise HTTPException(400, "Only scheduled jobs can have their time changed.")
     try:
         local = datetime.strptime(body.run_at_local.strip()[:16], "%Y-%m-%d %H:%M")
     except ValueError:
-        raise HTTPException(400, "Format waktu harus 'YYYY-MM-DD HH:MM' (waktu server database)")
+        raise HTTPException(400, "The time must be 'YYYY-MM-DD HH:MM' (database server time)")
     run_at_utc = local - timedelta(hours=_db_utc_offset_hours())
     if run_at_utc <= datetime.utcnow():
-        raise HTTPException(400, "Waktu yang dipilih sudah lewat.")
+        raise HTTPException(400, "The chosen time is already in the past.")
 
     params = json.loads(job.parameters or "{}")
     params["run_at_utc"] = run_at_utc.strftime("%Y-%m-%d %H:%M:%S")
@@ -792,7 +792,7 @@ def cancel_scheduled(job_id: int, db: Session = Depends(get_db)):
     """Drop a job that has not started yet."""
     job = db.query(BackupJob).filter(BackupJob.id == job_id).first()
     if not job or job.status != "scheduled":
-        raise HTTPException(400, "Job ini tidak berstatus terjadwal.")
+        raise HTTPException(400, "This job is not scheduled.")
     db.delete(job)
     db.commit()
     return {"status": "cancelled"}
@@ -1095,8 +1095,8 @@ def _df_bytes(ssh, path: str) -> dict:
     parts = (r.stdout or "").split()
     if len(parts) < 4 or not parts[1].isdigit():
         if "No such file" in (r.stdout or "") or "tidak" in (r.stdout or ""):
-            return {"connected": False, "error": f"{path} tidak ada di server ini"}
-        return {"connected": False, "error": (r.stdout or "df gagal").strip()[:120]}
+            return {"connected": False, "error": f"{path} does not exist on this server"}
+        return {"connected": False, "error": (r.stdout or "df failed").strip()[:120]}
     return {"connected": True, "total_bytes": int(parts[1]),
             "used_bytes": int(parts[2]), "available_bytes": int(parts[3])}
 
@@ -1165,7 +1165,7 @@ def app_preflight(server_id: int, fs_target: str = "fs2",
                     Credential.cred_type.in_(["ssh_password", "ssh_key"]),
                 ).first() if remote else None
                 if not remote or not rcred:
-                    out["target"] = {"connected": False, "error": "Server tujuan atau kredensialnya belum ada"}
+                    out["target"] = {"connected": False, "error": "The destination server or its credentials are not set up"}
                 else:
                     out["mode"] = "remote_stream"
                     path = f"{settings.BACKUP_STAGING}/application/{fs_target}"
@@ -1180,8 +1180,8 @@ def app_preflight(server_id: int, fs_target: str = "fs2",
                 info = _df_bytes(ssh, settings.BACKUP_STAGING)
                 if not info.get("connected"):
                     info["error"] = (info.get("error", "") +
-                                     " — App server ini tidak punya partisi backup, "
-                                     "jadi pilih 'Stream to <DB server>' sebagai tujuan.")
+                                     " — this App server has no backup partition, "
+                                     "so choose 'Stream to <DB server>' as the destination.")
                 out["target"] = {**info, "server": server.name, "host": server.host, "path": path}
             # apps_base yang salah adalah kegagalan senyap: tar tidak menemukan
             # apa pun dan backup "berhasil" tanpa isi. Kalau direktori yang
@@ -1196,17 +1196,17 @@ def app_preflight(server_id: int, fs_target: str = "fs2",
                     detected = found[0].rsplit("/", 1)[0]
                     out["apps_base_hint"] = detected
                     out["warning"] = (
-                        f"Tidak ada fs1/fs2 di '{apps_base}', tapi ketemu di '{detected}'. "
-                        f"Ubah apps_base server ini jadi '{detected}' di tab Setup — "
-                        f"kalau tidak, backup akan berjalan tanpa menyalin apa pun."
+                        f"No fs1/fs2 under '{apps_base}', but found under '{detected}'. "
+                        f"Change this server's apps_base to '{detected}' in the Setup tab — "
+                        f"otherwise the backup will run without copying anything."
                     )
                 else:
                     out["warning"] = (
-                        f"Tidak ada fs1/fs2/fs_ne di bawah '{apps_base}', dan tidak ketemu "
-                        f"di mana pun di bawahnya. Periksa apps_base di tab Setup."
+                        f"No fs1/fs2/fs_ne under '{apps_base}', and none found "
+                        f"anywhere below it. Check apps_base in the Setup tab."
                     )
     except Exception as e:
-        raise HTTPException(500, f"Preflight app backup gagal: {e}")
+        raise HTTPException(500, f"App backup preflight failed: {e}")
 
     t = out["target"] or {}
     if t.get("available_bytes") is not None and out["source_total_bytes"]:
@@ -1263,10 +1263,10 @@ def trigger_app(payload: BackupAppIn, bg: BackgroundTasks, db: Session = Depends
         try:
             local = datetime.strptime(payload.run_at_local.strip()[:16], "%Y-%m-%d %H:%M")
         except ValueError:
-            raise HTTPException(400, "run_at_local harus berformat 'YYYY-MM-DD HH:MM' (waktu server database)")
+            raise HTTPException(400, "run_at_local must be 'YYYY-MM-DD HH:MM' (database server time)")
         run_at_utc = local - timedelta(hours=_db_utc_offset_hours())
         if run_at_utc <= datetime.utcnow():
-            raise HTTPException(400, "Waktu yang dipilih sudah lewat.")
+            raise HTTPException(400, "The chosen time is already in the past.")
         params = payload.model_dump()
         params["run_at_utc"] = run_at_utc.strftime("%Y-%m-%d %H:%M:%S")
         params["run_at_local"] = local.strftime("%Y-%m-%d %H:%M")
@@ -1484,7 +1484,7 @@ def get_job(job_id: int, tail_lines: int = 200, list_files: bool = False, db: Se
 
     if progress_percent is None and progress_total_bytes and progress_current_bytes is not None:
         progress_percent = min(99.0, round(progress_current_bytes / progress_total_bytes * 100, 1))
-        progress_source = "ukuran berkas (perkiraan kasar, keluarannya terkompresi)"
+        progress_source = "file size (rough estimate, the output is compressed)"
 
     return {
         **_serialize_job(job),
@@ -1610,8 +1610,8 @@ _JOB_LABEL = {
     "archivelog": "Archivelog",
     "offline_cold": "Database offline (cold)",
     "app_fs": "Application tier",
-    "db_sync_synology": "Salin ke Synology",
-    "db_sync_minio": "Salin ke MinIO",
+    "db_sync_synology": "Copy to Synology",
+    "db_sync_minio": "Copy to MinIO",
 }
 
 
@@ -1633,7 +1633,7 @@ def _job_description(j: BackupJob) -> str:
         if p.get("include_inst_top"):
             bits.append("+ fs_ne")
         if p.get("remote_target_server_id"):
-            bits.append("stream ke server DB")
+            bits.append("stream to DB server")
         if p.get("sync_synology_server_id"):
             bits.append("+ Synology")
     elif j.job_type == "online_incremental":
@@ -1646,7 +1646,7 @@ def _job_description(j: BackupJob) -> str:
             bits.append(f"{p['parallelism']} channel")
     elif j.job_type.startswith("db_sync_"):
         if p.get("source_job_id"):
-            bits.append(f"dari job #{p['source_job_id']}")
+            bits.append(f"from job #{p['source_job_id']}")
     return f"{label} — {', '.join(bits)}" if bits else label
 
 
@@ -1947,8 +1947,8 @@ def _diagnose_pubkey_failure(db: Session, tgt: Server, username: str) -> str:
         Credential.cred_type.in_(["ssh_password", "ssh_key"]),
     ).first()
     if not cred:
-        return ("Tidak ada kredensial tersimpan untuk server target, jadi penyebabnya "
-                "tidak bisa diperiksa dari sini.")
+        return ("No credential is stored for the target server, so the cause "
+                "cannot be checked from here.")
     try:
         with ssh_from_server(tgt, cred) as t:
             home = (t.run("readlink -f $HOME", timeout=15).stdout or "").strip()
@@ -1956,11 +1956,11 @@ def _diagnose_pubkey_failure(db: Session, tgt: Server, username: str) -> str:
             akeys = (t.run("wc -l < ~/.ssh/authorized_keys 2>/dev/null || echo 0", timeout=15).stdout or "0").strip()
             ssh_mode = (t.run("stat -c %a ~/.ssh 2>/dev/null", timeout=15).stdout or "").strip()
     except Exception as e:
-        return f"Gagal memeriksa server target: {e}"
+        return f"Failed to check the target server: {e}"
 
     problems = []
     if akeys in ("", "0"):
-        problems.append("authorized_keys kosong atau tidak ada — kunci belum sampai; ulangi langkah 2.")
+        problems.append("authorized_keys is empty or missing — the key has not arrived; repeat step 2.")
     # Group-write (0o020) or other-write (0o002) on the home directory is what
     # StrictModes rejects; the owner bits are irrelevant to it.
     try:
@@ -1969,17 +1969,17 @@ def _diagnose_pubkey_failure(db: Session, tgt: Server, username: str) -> str:
         group_or_other_writable = False
     if group_or_other_writable:
         problems.append(
-            f"Home '{home}' izinnya {mode} — bisa ditulis group/other. OpenSSH StrictModes "
-            f"(bawaan) menolak authorized_keys dalam kondisi ini: kunci ditawarkan, diabaikan "
-            f"diam-diam, lalu jatuh ke password. Perbaiki: chmod 755 {home}"
+            f"Home '{home}' has mode {mode} — writable by group/other. OpenSSH StrictModes "
+            f"(the default) rejects authorized_keys in this state: the key is offered, silently "
+            f"ignored, and it falls back to a password. Fix: chmod 755 {home}"
         )
     if ssh_mode and ssh_mode != "700":
-        problems.append(f"~/.ssh izinnya {ssh_mode}, seharusnya 700.")
+        problems.append(f"~/.ssh has mode {ssh_mode}, it should be 700.")
 
     if problems:
         return " | ".join(problems)
-    return (f"authorized_keys berisi {akeys} baris, home {home} ({mode}) dan ~/.ssh ({ssh_mode}) "
-            f"terlihat benar — periksa PubkeyAuthentication di sshd server target.")
+    return (f"authorized_keys has {akeys} lines, home {home} ({mode}) and ~/.ssh ({ssh_mode}) "
+            f"look right — check PubkeyAuthentication in the target server's sshd.")
 
 
 @router.post("/ssh-setup/test")
@@ -2829,10 +2829,10 @@ def _minio_archivelog_files(db: Session) -> tuple[list[dict], dict]:
     """Every object under archive-logs/ as {name, ref=object key, size, mtime}."""
     minio_srv, client = _minio_archivelog_client(db)
     if not minio_srv:
-        return [], {"ok": False, "error": "Tidak ada server MinIO aktif"}
+        return [], {"ok": False, "error": "No active MinIO server"}
     info = {"ok": False, "name": minio_srv.name, "path": f"{minio_srv.bucket}/{ARCHIVELOG_MINIO_PREFIX}"}
     if not client:
-        return [], {**info, "error": "Kredensial MinIO belum diisi"}
+        return [], {**info, "error": "MinIO credentials are not set"}
     try:
         files = [{"name": o.object_name.rsplit("/", 1)[-1], "ref": o.object_name, "size_bytes": o.size or 0,
                   "mtime_epoch": o.last_modified.timestamp() if o.last_modified else None}
@@ -2929,7 +2929,7 @@ def _build_recovery_catalog(db: Session) -> dict:
                     syn_dirs.setdefault(p.rstrip("/").rsplit("/", 1)[-1], p)
                 locations["synology"] = {"ok": True, "path": mp, "writable": writable}
             else:
-                locations["synology"] = {"ok": False, "error": f"Share Synology tidak ter-mount di {server.name}"}
+                locations["synology"] = {"ok": False, "error": f"The Synology share is not mounted on {server.name}"}
         except Exception as e:
             locations["synology"] = {"ok": False, "error": str(e)[:300]}
 
@@ -2961,7 +2961,7 @@ def delete_archivelogs(payload: ArchivelogDeleteIn, db: Session = Depends(get_db
     locs = set(payload.locations or []) | ({"minio"} if payload.include_minio else set())
     bad = locs - set(ARCHIVELOG_DELETE_LOCATIONS)
     if bad or not locs:
-        raise HTTPException(400, f"Lokasi tidak valid: {', '.join(sorted(bad)) or '(kosong)'}")
+        raise HTTPException(400, f"Invalid location: {', '.join(sorted(bad)) or '(empty)'}")
 
     catalog = _build_recovery_catalog(db)
     by_name = {a["name"]: a for a in catalog["archivelogs"] if a["copies"]}
@@ -2973,14 +2973,14 @@ def delete_archivelogs(payload: ArchivelogDeleteIn, db: Session = Depends(get_db
     for name in dict.fromkeys(payload.names):
         a = by_name.get(name)
         if not recovery_catalog.ARC_NAME_RE.match(name) or not a:
-            refused.append({"name": name, "reason": "Tidak ditemukan di staging / MinIO / Synology"})
+            refused.append({"name": name, "reason": "Not found on staging / MinIO / Synology"})
             continue
         if a["category"] in ("required", "unknown"):
-            refused.append({"name": name, "reason": "Masih wajib disimpan untuk recovery" if a["category"] == "required"
-                            else "Bukan archive log database PROD"})
+            refused.append({"name": name, "reason": "Still required for recovery" if a["category"] == "required"
+                            else "Not an archive log of the PROD database"})
             continue
         if a["category"] == "optional" and not payload.allow_optional:
-            refused.append({"name": name, "reason": "Kategori opsional — konfirmasi khusus diperlukan"})
+            refused.append({"name": name, "reason": "Optional category — explicit confirmation required"})
             continue
         for loc in locs:
             c = a["copies"].get(loc)
@@ -2996,7 +2996,7 @@ def delete_archivelogs(payload: ArchivelogDeleteIn, db: Session = Depends(get_db
                     plan[loc].append((name, ref, each))
 
     if plan["synology"] and not (catalog["locations"].get("synology") or {}).get("writable"):
-        refused += [{"name": n, "location": "synology", "reason": "Share Synology read-only dari server DB"}
+        refused += [{"name": n, "location": "synology", "reason": "The Synology share is read-only from the DB server"}
                     for n, _, _ in plan["synology"]]
         plan["synology"] = []
 
@@ -3022,19 +3022,19 @@ def delete_archivelogs(payload: ArchivelogDeleteIn, db: Session = Depends(get_db
                 left |= set(r.stdout.splitlines())
         for loc, name, ref, size in fs_items:
             if ref in left:
-                refused.append({"name": name, "location": loc, "reason": "rm gagal (cek permission)"})
+                refused.append({"name": name, "location": loc, "reason": "rm failed (check permissions)"})
             else:
                 _record(loc, name, size)
 
     if plan["minio"]:
         minio_srv, client = _minio_archivelog_client(db)
         if not client:
-            refused += [{"name": n, "location": "minio", "reason": "MinIO tidak bisa diakses"} for n, _, _ in plan["minio"]]
+            refused += [{"name": n, "location": "minio", "reason": "MinIO is not reachable"} for n, _, _ in plan["minio"]]
         else:
             failed = {e.name for e in client.remove_objects(minio_srv.bucket, [DeleteObject(ref) for _, ref, _ in plan["minio"]])}
             for name, ref, size in plan["minio"]:
                 if ref in failed:
-                    refused.append({"name": name, "location": "minio", "reason": "Gagal dihapus di MinIO"})
+                    refused.append({"name": name, "location": "minio", "reason": "Failed to delete on MinIO"})
                 else:
                     _record("minio", name, size)
 

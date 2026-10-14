@@ -45,7 +45,7 @@ def tcp_probe(host: str, port: int, samples: int = 5, timeout: float = 3.0, gap:
             with socket.create_connection((host, int(port)), timeout=timeout):
                 rtts.append((time.perf_counter() - start) * 1000)
         except (socket.timeout, TimeoutError):
-            last_error = f"Timeout setelah {timeout}s"
+            last_error = f"Timeout after {timeout}s"
         except OSError as e:
             last_error = str(e)
         if i < samples - 1:
@@ -61,7 +61,7 @@ def _error_text(rtts: list, samples: int, last_error: str | None) -> str | None:
         return None
     if not rtts:
         return last_error
-    return f"{samples - len(rtts)}/{samples} gagal — {last_error}"
+    return f"{samples - len(rtts)}/{samples} failed — {last_error}"
 
 
 def http_probe(url: str, samples: int = 3, timeout: float = 15.0) -> dict:
@@ -77,7 +77,7 @@ def http_probe(url: str, samples: int = 3, timeout: float = 15.0) -> dict:
                     rtts.append((time.perf_counter() - start) * 1000)
                     status = r.status_code
             except httpx.TimeoutException:
-                last_error = f"Timeout setelah {timeout}s"
+                last_error = f"Timeout after {timeout}s"
             except Exception as e:
                 last_error = str(e)
             if i < samples - 1:
@@ -93,8 +93,8 @@ def http_probe(url: str, samples: int = 3, timeout: float = 15.0) -> dict:
 def run_target(target, samples: int) -> dict:
     if target.check_type == "http":
         if not target.url:
-            return {"skipped": True, "error": "URL belum diisi"}
+            return {"skipped": True, "error": "URL not set"}
         return http_probe(target.url, samples=max(1, min(samples, 5)))
     if not target.host or not target.port:
-        return {"skipped": True, "error": "Host/port belum diisi"}
+        return {"skipped": True, "error": "Host/port not set"}
     return tcp_probe(target.host, target.port, samples=samples)

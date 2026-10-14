@@ -188,12 +188,12 @@ Write-Host "Output   : $OutputDir"
 Write-Host ''
 
 if (-not $Condition) {
-    Write-Host 'Bagaimana kondisi Oracle EBS SAAT INI?'
-    Write-Host '  1 = Normal   2 = Lambat   3 = Hang / tidak merespons   4 = Harus restart browser'
-    $ans = Read-Host 'Pilih 1-4 (Enter = Normal)'
+    Write-Host 'How is Oracle EBS RIGHT NOW?'
+    Write-Host '  1 = Normal   2 = Slow   3 = Hang / not responding   4 = Browser restart needed'
+    $ans = Read-Host 'Choose 1-4 (Enter = Normal)'
     switch ($ans) { '2' { $Condition = 'Slow' } '3' { $Condition = 'Hang' } '4' { $Condition = 'Restart' } default { $Condition = 'Normal' } }
 }
-if (-not $Note -and $Condition -ne 'Normal') { $Note = Read-Host 'Modul / transaksi EBS yang sedang dipakai (opsional)' }
+if (-not $Note -and $Condition -ne 'Normal') { $Note = Read-Host 'EBS module / transaction in use (optional)' }
 $StartedAt = Get-Date
 
 # ------------------------------------------------------------ 1. System
@@ -380,11 +380,11 @@ if (-not $NoUpload -and $INGEST_URL) {
         else { $r = Invoke-RestMethod -Method Post -Uri $INGEST_URL -Body $body -ContentType 'application/json; charset=utf-8' -TimeoutSec 60 -SkipCertificateCheck }
         $uploaded = $true
         Write-Host ''
-        Write-Host ("Terkirim ke dashboard. Verdict: {0}  {1}" -f $r.verdict, $r.verdict_text) -ForegroundColor Green
+        Write-Host ("Sent to the dashboard. Verdict: {0}  {1}" -f $r.verdict, $r.verdict_text) -ForegroundColor Green
     } catch {
         Write-Host ''
-        Write-Host "Upload gagal: $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host 'Upload summary.json secara manual di dashboard (Client Test > Upload hasil agen).' -ForegroundColor Red
+        Write-Host "Upload failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host 'Upload summary.json manually in the dashboard (Client Test > Upload summary.json).' -ForegroundColor Red
     }
 }
 
@@ -394,11 +394,11 @@ Write-Host ' DIAGNOSTIC COMPLETED' -ForegroundColor Yellow
 Write-Host '=====================================================' -ForegroundColor Yellow
 if ($pingGw) { Write-Host ("Gateway : avg {0} ms  max {1} ms  loss {2}%  jitter {3} ms" -f $pingGw.avg, $pingGw.max, $pingGw.loss_pct, $pingGw.jitter) }
 Write-Host ("EBS     : avg {0} ms  max {1} ms  loss {2}%  jitter {3} ms" -f $pingEbs.avg, $pingEbs.max, $pingEbs.loss_pct, $pingEbs.jitter)
-Write-Host ("MTU     : {0}    CPU {1}%   RAM free {2}%   Koneksi {3}" -f $pathMtu, $cpuPct, $ramAvail, $connection)
+Write-Host ("MTU     : {0}    CPU {1}%   RAM free {2}%   Connection {3}" -f $pathMtu, $cpuPct, $ramAvail, $connection)
 Write-Host "Folder  : $OutputDir"
 if (-not $uploaded) { Write-Host "Zip     : $zip" }
 Write-Host ''
-Write-Host 'PENTING: jalankan juga Network Test dari dalam Oracle EBS dan catat Round Trip Time + Data Rate.'
+Write-Host 'IMPORTANT: also run the Network Test from inside Oracle EBS and note the Round Trip Time + Data Rate.'
 """
 
 

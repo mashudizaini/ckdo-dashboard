@@ -80,15 +80,15 @@ def list_targets(db: Session = Depends(get_ebsnet_db)):
 @router.post("/targets")
 def upsert_target(payload: TargetIn, db: Session = Depends(get_ebsnet_db)):
     if payload.segment not in analysis.SEGMENTS:
-        raise HTTPException(400, f"Segment tidak dikenal: {payload.segment}")
+        raise HTTPException(400, f"Unknown segment: {payload.segment}")
     if payload.check_type not in ("tcp", "http"):
-        raise HTTPException(400, "check_type harus tcp atau http")
+        raise HTTPException(400, "check_type must be tcp or http")
     if payload.check_type == "http" and payload.url and not payload.url.startswith(("http://", "https://")):
-        raise HTTPException(400, "URL harus diawali http:// atau https://")
+        raise HTTPException(400, "The URL must start with http:// or https://")
     data = payload.model_dump(exclude={"id"})
     t = db.get(EbsNetTarget, payload.id) if payload.id else None
     if payload.id and not t:
-        raise HTTPException(404, "Target tidak ditemukan")
+        raise HTTPException(404, "Target not found")
     if not t:
         t = EbsNetTarget(**data)
         db.add(t)
@@ -104,7 +104,7 @@ def upsert_target(payload: TargetIn, db: Session = Depends(get_ebsnet_db)):
 def delete_target(target_id: int, db: Session = Depends(get_ebsnet_db)):
     t = db.get(EbsNetTarget, target_id)
     if not t:
-        raise HTTPException(404, "Target tidak ditemukan")
+        raise HTTPException(404, "Target not found")
     from app.models.ebs_netmon import EbsNetProbeLog
     db.query(EbsNetProbeLog).filter(EbsNetProbeLog.target_id == target_id).delete()
     db.delete(t)
@@ -132,7 +132,7 @@ def get_fortigate(db: Session = Depends(get_ebsnet_db)):
 @router.post("/fortigate/capture")
 def capture_fortigate(db: Session = Depends(get_ebsnet_db)):
     if not service.fortigate_ids(cfg.get_all(db)):
-        raise HTTPException(400, "Belum ada FortiGate dipilih di Setup")
+        raise HTTPException(400, "No FortiGate selected in Setup yet")
     return service.capture_fortigates(db)
 
 
@@ -159,7 +159,7 @@ def get_sdwan_config(db: Session = Depends(get_ebsnet_db)):
 @router.post("/sdwan-config/capture")
 def capture_sdwan_config(db: Session = Depends(get_ebsnet_db)):
     if not service.fortigate_ids(cfg.get_all(db)):
-        raise HTTPException(400, "Belum ada FortiGate dipilih di Setup")
+        raise HTTPException(400, "No FortiGate selected in Setup yet")
     return service.capture_sdwan_config(db)
 
 
@@ -195,7 +195,7 @@ def list_reports(hours: int = 168, db: Session = Depends(get_ebsnet_db)):
 def get_report(report_id: int, db: Session = Depends(get_ebsnet_db)):
     r = db.get(EbsNetClientReport, report_id)
     if not r:
-        raise HTTPException(404, "Laporan tidak ditemukan")
+        raise HTTPException(404, "Report not found")
     d = service.report_dict(r, with_detail=True)
     d["verdict_text"] = analysis.VERDICT_TEXT.get(r.verdict or "OK")
     d["code_labels"] = {c: analysis.ROOT_CAUSE_CODES.get(c) for c in d["codes"]}
@@ -206,7 +206,7 @@ def get_report(report_id: int, db: Session = Depends(get_ebsnet_db)):
 def delete_report(report_id: int, db: Session = Depends(get_ebsnet_db)):
     r = db.get(EbsNetClientReport, report_id)
     if not r:
-        raise HTTPException(404, "Laporan tidak ditemukan")
+        raise HTTPException(404, "Report not found")
     db.delete(r)
     db.commit()
     return {"deleted": True}
@@ -216,7 +216,7 @@ def delete_report(report_id: int, db: Session = Depends(get_ebsnet_db)):
 def upload_agent_report(payload: dict = Body(...), db: Session = Depends(get_ebsnet_db)):
     """summary.json from an agent that could not post it itself."""
     if "ping_ebs" not in payload:
-        raise HTTPException(400, "Bukan summary.json dari agen EBS diagnostic")
+        raise HTTPException(400, "Not a summary.json from the EBS diagnostic agent")
     return service.save_client_report(db, service.columns_from_agent(payload), payload)
 
 
@@ -233,7 +233,7 @@ class AgentIn(BaseModel):
 def generate_agent(payload: AgentIn, db: Session = Depends(get_ebsnet_db),
                    user: CurrentUser = Depends(get_current_user)):
     if not payload.base_url.startswith(("http://", "https://")):
-        raise HTTPException(400, "base_url tidak valid")
+        raise HTTPException(400, "Invalid base_url")
     s = cfg.get_all(db)
     expires = datetime.utcnow() + timedelta(days=min(max(payload.valid_days, 1), 90))
     tok = EbsNetAgentToken(token=secrets.token_urlsafe(32), label=payload.label, created_by=_who(user),
@@ -301,7 +301,7 @@ def list_incidents(days: int = 90, db: Session = Depends(get_ebsnet_db)):
 def create_incident(payload: IncidentIn, db: Session = Depends(get_ebsnet_db),
                     user: CurrentUser = Depends(get_current_user)):
     if payload.root_cause_code and payload.root_cause_code not in analysis.ROOT_CAUSE_CODES:
-        raise HTTPException(400, "Kode root cause tidak dikenal")
+        raise HTTPException(400, "Unknown root cause code")
     data = payload.model_dump(exclude={"capture_now"})
     data["started_at"] = _naive_utc(data["started_at"])
     data["ended_at"] = _naive_utc(data["ended_at"])
@@ -318,7 +318,7 @@ def create_incident(payload: IncidentIn, db: Session = Depends(get_ebsnet_db),
 def get_incident(incident_id: int, db: Session = Depends(get_ebsnet_db)):
     inc = db.get(EbsNetIncident, incident_id)
     if not inc:
-        raise HTTPException(404, "Insiden tidak ditemukan")
+        raise HTTPException(404, "Incident not found")
     d = _incident_dict(inc, full=True)
     d["correlation"] = service.nearest_snapshots(db, inc.started_at)
     if inc.client_report_id:
@@ -331,9 +331,9 @@ def get_incident(incident_id: int, db: Session = Depends(get_ebsnet_db)):
 def update_incident(incident_id: int, payload: IncidentIn, db: Session = Depends(get_ebsnet_db)):
     inc = db.get(EbsNetIncident, incident_id)
     if not inc:
-        raise HTTPException(404, "Insiden tidak ditemukan")
+        raise HTTPException(404, "Incident not found")
     if payload.root_cause_code and payload.root_cause_code not in analysis.ROOT_CAUSE_CODES:
-        raise HTTPException(400, "Kode root cause tidak dikenal")
+        raise HTTPException(400, "Unknown root cause code")
     for k, v in payload.model_dump(exclude={"capture_now"}).items():
         setattr(inc, k, _naive_utc(v) if k in ("started_at", "ended_at") else v)
     if payload.capture_now:
@@ -347,7 +347,7 @@ def update_incident(incident_id: int, payload: IncidentIn, db: Session = Depends
 def delete_incident(incident_id: int, db: Session = Depends(get_ebsnet_db)):
     inc = db.get(EbsNetIncident, incident_id)
     if not inc:
-        raise HTTPException(404, "Insiden tidak ditemukan")
+        raise HTTPException(404, "Incident not found")
     db.delete(inc)
     db.commit()
     return {"deleted": True}
@@ -368,7 +368,7 @@ def list_summary_reports(days: int = 30, db: Session = Depends(get_ebsnet_db)):
         "schedule": {
             "interval_hours": hours,
             "last_auto_at": last.isoformat() + "Z" if last else None,
-            "next_auto_at": ((last + timedelta(hours=hours)).isoformat() + "Z" if last else "segera")
+            "next_auto_at": ((last + timedelta(hours=hours)).isoformat() + "Z" if last else "soon")
                             if hours > 0 else None,
         },
     }
@@ -384,7 +384,7 @@ def run_summary_report(db: Session = Depends(get_ebsnet_db), user: CurrentUser =
 def get_summary_report(report_id: int, db: Session = Depends(get_ebsnet_db)):
     r = db.get(EbsNetSummaryReport, report_id)
     if not r:
-        raise HTTPException(404, "Laporan tidak ditemukan")
+        raise HTTPException(404, "Report not found")
     return report.row_dict(r, full=True)
 
 
@@ -392,7 +392,7 @@ def get_summary_report(report_id: int, db: Session = Depends(get_ebsnet_db)):
 def download_summary_report(report_id: int, fmt: str = "html", db: Session = Depends(get_ebsnet_db)):
     r = db.get(EbsNetSummaryReport, report_id)
     if not r:
-        raise HTTPException(404, "Laporan tidak ditemukan")
+        raise HTTPException(404, "Report not found")
     stamp = (r.created_at + timedelta(hours=7)).strftime("%Y%m%d_%H%M")
     if fmt == "json":
         return Response(content=r.content or "{}", media_type="application/json",
@@ -405,7 +405,7 @@ def download_summary_report(report_id: int, fmt: str = "html", db: Session = Dep
 def delete_summary_report(report_id: int, db: Session = Depends(get_ebsnet_db)):
     r = db.get(EbsNetSummaryReport, report_id)
     if not r:
-        raise HTTPException(404, "Laporan tidak ditemukan")
+        raise HTTPException(404, "Report not found")
     db.delete(r)
     db.commit()
     return {"deleted": True}

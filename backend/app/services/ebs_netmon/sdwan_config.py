@@ -46,8 +46,8 @@ _ENC = re.compile(r"(\bENC\s+)\S+")
 def redact(text: str) -> str:
     out = []
     for line in (text or "").splitlines():
-        line = _SECRET_KEY.sub(r"\1\2\3<disembunyikan>", line)
-        out.append(_ENC.sub(r"\1<disembunyikan>", line))
+        line = _SECRET_KEY.sub(r"\1\2\3<hidden>", line)
+        out.append(_ENC.sub(r"\1<hidden>", line))
     return "\n".join(out)
 
 
@@ -385,10 +385,10 @@ def match_service(dev: dict, src_ip: str | None, dst_ip: str) -> dict:
                 if _covers(snets, src_ip) == s["src_negate"]:
                     continue
             elif not any(n.prefixlen == 0 for n in snets):
-                note = f"hanya bila sumber termasuk {', '.join(s['src'])}"
+                note = f"only when the source is in {', '.join(s['src'])}"
         if s["protocol"] not in (None, 0) or (s["start_port"] not in (None, 1) or s["end_port"] not in (None, 65535)):
-            extra = f"protokol {s['protocol']} port {s['start_port']}-{s['end_port']}"
-            note = f"{note}; {extra}" if note else f"hanya {extra}"
+            extra = f"protocol {s['protocol']} port {s['start_port']}-{s['end_port']}"
+            note = f"{note}; {extra}" if note else f"only {extra}"
         return {"rule": s, "note": note}
     return {"rule": None, "note": None, "route": _route_for(dev, dst_ip)}
 
@@ -424,11 +424,11 @@ def pair_tunnels(ho: dict, plant: dict) -> list[dict]:
             if p["name"] in used:
                 continue
             if (h["remote_gw"] and h["remote_gw"] == p["local_ip"]) or (p["remote_gw"] and p["remote_gw"] == h["local_ip"]):
-                pairs.append({"ho": h["name"], "plant": p["name"], "by": "IP publik"})
+                pairs.append({"ho": h["name"], "plant": p["name"], "by": "public IP"})
                 used.add(p["name"])
                 break
     if not pairs and len(ho["phase1"]) == 1 and len(plant["phase1"]) == 1:
-        pairs.append({"ho": ho["phase1"][0]["name"], "plant": plant["phase1"][0]["name"], "by": "satu-satunya tunnel"})
+        pairs.append({"ho": ho["phase1"][0]["name"], "plant": plant["phase1"][0]["name"], "by": "the only tunnel"})
     for pr in pairs:
         h = next(x for x in ho["phase1"] if x["name"] == pr["ho"])
         p = next(x for x in plant["phase1"] if x["name"] == pr["plant"])
@@ -469,34 +469,34 @@ def _chk(level, device, title, detail):
 def _device_checks(role: str, dev: dict, ebs_ips: list[str]) -> list[dict]:
     out = []
     if dev["sdwan_status"] != "enable":
-        out.append(_chk("info", role, "SD-WAN belum aktif",
-                        "Routing masih statis biasa: trafik antar-site memakai route ke satu tunnel, jadi secara alami satu jalur bolak-balik — tetapi tanpa failover otomatis."))
+        out.append(_chk("info", role, "SD-WAN not enabled",
+                        "Routing is still plain static: inter-site traffic uses a route to one tunnel, so it is naturally one path both ways — but without automatic failover."))
     # `set members 0` on a health check means every member.
     covered = {s for h in dev["health_checks"] for s in h["members"]}
     for m in dev["members"]:
         if _is_tunnel(dev, m["interface"]) and 0 not in covered and m["seq"] not in covered:
-            out.append(_chk("warn", role, f"Tunnel {m['interface']} tanpa health check",
-                            "Member overlay ini tidak diukur oleh performance SLA mana pun, jadi SD-WAN tidak bisa tahu kapan tunnel ini buruk dan tidak akan memindahkan EBS darinya."))
+            out.append(_chk("warn", role, f"Tunnel {m['interface']} without a health check",
+                            "This overlay member is not measured by any performance SLA, so SD-WAN cannot tell when the tunnel is bad and will not move EBS off it."))
     for h in dev["health_checks"]:
         hc_members = dev["members"] if 0 in h["members"] else [m for m in map(lambda s: _member(dev, s), h["members"]) if m]
         if not any(_is_tunnel(dev, m["interface"]) for m in hc_members):
             continue
         if (h["recoverytime"] or 0) < 10:
             out.append(_chk("warn", role, f"Health check {h['name']}: recoverytime {h['recoverytime']}",
-                            "Runbook memakai recoverytime 10. Nilai kecil membuat jalur cepat kembali setelah pulih → risiko flapping saat link radio iForte naik-turun waktu hujan; setiap perpindahan bisa memutus sesi Forms."))
+                            "The runbook uses recoverytime 10. A small value makes a path come back quickly after recovering → risk of flapping when the iForte radio link goes up and down in the rain; every switch can drop Forms sessions."))
     if dev["asymroute"] == "enable":
-        out.append(_chk("warn", role, "asymroute aktif",
-                        "FortiGate meneruskan trafik asimetris tanpa inspeksi stateful. Ini menyembunyikan masalah jalur bolak-balik yang berbeda dan melemahkan keamanan — sebaiknya dimatikan."))
+        out.append(_chk("warn", role, "asymroute enabled",
+                        "The FortiGate forwards asymmetric traffic without stateful inspection. This hides different outbound/return paths and weakens security — better turned off."))
     for p in dev["phase1"]:
         if (p["dpd"] or "disable") == "disable":
-            out.append(_chk("warn", role, f"Tunnel {p['name']}: DPD mati",
-                            "Tanpa Dead Peer Detection tunnel yang mati tidak segera terdeteksi; failover menunggu SA kedaluwarsa."))
+            out.append(_chk("warn", role, f"Tunnel {p['name']}: DPD off",
+                            "Without Dead Peer Detection a dead tunnel is not detected promptly; failover waits for the SA to expire."))
     for sp in dev["shaping_policies"]:
         if sp["status"] != "enable" or not sp["traffic_shaper"] or sp["traffic_shaper_reverse"]:
             continue
         if _targets_ebs(dev, sp["srcaddr"] + sp["dstaddr"], ebs_ips):
-            out.append(_chk("warn", role, f"Shaping policy #{sp['id']} tanpa traffic-shaper-reverse",
-                            "Trafik EBS didominasi arah server → user. Tanpa shaper reverse, prioritas tidak berlaku di arah yang paling padat."))
+            out.append(_chk("warn", role, f"Shaping policy #{sp['id']} without traffic-shaper-reverse",
+                            "EBS traffic is mostly server → user. Without a reverse shaper, priority does not apply in the busiest direction."))
     return out
 
 
@@ -507,8 +507,8 @@ def analyze(ho: dict | None, plant: dict | None, ebs_ips: list[str]) -> dict:
     if plant:
         checks += _device_checks("Plant", plant, ebs_ips)
     if not (ho and plant):
-        checks.append(_chk("info", "HO↔Plant", "Perbandingan dua sisi belum bisa dibuat",
-                           "Baca konfigurasi kedua FortiGate untuk memeriksa apakah EBS memakai tunnel yang sama di kedua arah."))
+        checks.append(_chk("info", "HO↔Plant", "The two sides cannot be compared yet",
+                           "Read both FortiGates' configuration to check whether EBS uses the same tunnel in both directions."))
         return {"checks": checks, "pairs": pairs, "flows": flows, "ho_lans": [], "ebs_ips": ebs_ips}
 
     pairs = pair_tunnels(ho, plant)
@@ -516,33 +516,33 @@ def analyze(ho: dict | None, plant: dict | None, ebs_ips: list[str]) -> dict:
     by_plant = {p["plant"]: p for p in pairs}
     for p in ho["phase1"]:
         if p["name"] not in by_ho:
-            checks.append(_chk("warn", "HO", f"Tunnel {p['name']} tidak punya pasangan di Plant",
-                               f"remote-gw {p['remote_gw']} tidak cocok dengan IP WAN tunnel mana pun di FortiGate Plant."))
+            checks.append(_chk("warn", "HO", f"Tunnel {p['name']} has no partner at Plant",
+                               f"remote-gw {p['remote_gw']} matches no tunnel WAN IP on the Plant FortiGate."))
     for p in plant["phase1"]:
         if p["name"] not in by_plant:
-            checks.append(_chk("warn", "Plant", f"Tunnel {p['name']} tidak punya pasangan di HO",
-                               f"remote-gw {p['remote_gw']} tidak cocok dengan IP WAN tunnel mana pun di FortiGate HO."))
+            checks.append(_chk("warn", "Plant", f"Tunnel {p['name']} has no partner at HO",
+                               f"remote-gw {p['remote_gw']} matches no tunnel WAN IP on the HO FortiGate."))
 
     ho_lans = lan_subnets(ho)
     ho_probe = next((str(next(ipaddress.IPv4Network(n).hosts())) for n in ho_lans), None)
     ebs = ebs_ips[0] if ebs_ips else None
     if ebs:
-        f_ho = _flow(ho, None, ebs, "User HO membuka EBS (FGT HO memilih tunnel)")
+        f_ho = _flow(ho, None, ebs, "HO user opens EBS (the HO FGT chooses the tunnel)")
         flows.append(f_ho)
         f_pl = None
         if ho_probe:
-            f_pl = _flow(plant, ebs, ho_probe, "Server EBS membuka koneksi ke HO (FGT Plant memilih tunnel)")
+            f_pl = _flow(plant, ebs, ho_probe, "EBS server opens a connection to HO (the Plant FGT chooses the tunnel)")
             flows.append(f_pl)
 
         for role, f in (("HO", f_ho), ("Plant", f_pl)):
             if not f or f["via"] != "rule":
                 continue
             if f["mode"] == "load-balance":
-                checks.append(_chk("crit", role, f"Trafik EBS kena aturan load-balance #{f['rule_id']} {f['rule_name'] or ''}",
-                                   "Sesi EBS disebar ke beberapa jalur. Untuk Oracle Forms pakai mode sla (atau priority): satu jalur utama, jalur lain cadangan."))
+                checks.append(_chk("crit", role, f"EBS traffic hits load-balance rule #{f['rule_id']} {f['rule_name'] or ''}",
+                                   "EBS sessions are spread across several paths. For Oracle Forms use sla (or priority) mode: one primary path, the others as backup."))
             if f["mode"] == "sla" and not f["slas"]:
-                checks.append(_chk("warn", role, f"Aturan EBS #{f['rule_id']} mode sla tanpa SLA",
-                                   "Mode sla tanpa referensi health-check/SLA tidak punya dasar untuk memilih atau memindahkan jalur."))
+                checks.append(_chk("warn", role, f"EBS rule #{f['rule_id']} in sla mode without an SLA",
+                                   "sla mode without a health-check/SLA reference has no basis for choosing or moving the path."))
 
         def as_pairs(order, idx):
             """Member order → [(HO tunnel, Plant tunnel)] so both sides compare."""
@@ -551,46 +551,46 @@ def analyze(ho: dict | None, plant: dict | None, ebs_ips: list[str]) -> dict:
         if f_ho["via"] == "rule" and f_pl and f_pl["via"] == "rule":
             o_ho, o_pl = as_pairs(f_ho["order"], by_ho), as_pairs(f_pl["order"], by_plant)
             if o_ho and o_pl and o_ho != o_pl:
-                checks.append(_chk("crit", "HO↔Plant", "Urutan tunnel EBS berbeda di HO dan Plant",
-                                   f"HO memilih {' → '.join(a for a, _ in o_ho)}, Plant memilih {' → '.join(b for _, b in o_pl)} (dipasangkan per tunnel). "
-                                   "Koneksi yang dibuka dari dua sisi akan lewat tunnel berbeda — samakan priority-members."))
+                checks.append(_chk("crit", "HO↔Plant", "The EBS tunnel order differs between HO and Plant",
+                                   f"HO chooses {' → '.join(a for a, _ in o_ho)}, Plant chooses {' → '.join(b for _, b in o_pl)} (paired per tunnel). "
+                                   "Connections opened from the two sides will take different tunnels — make priority-members the same."))
             elif o_ho and o_pl:
-                checks.append(_chk("ok", "HO↔Plant", "Urutan tunnel EBS sama di kedua sisi",
-                                   f"Pasangan utama: {o_ho[0][0]} (HO) ↔ {o_ho[0][1]} (Plant)."))
+                checks.append(_chk("ok", "HO↔Plant", "The EBS tunnel order is the same on both sides",
+                                   f"Primary pair: {o_ho[0][0]} (HO) ↔ {o_ho[0][1]} (Plant)."))
             s_ho = [(s.get("latency_ms"), s.get("jitter_ms"), s.get("loss_pct"), tuple(s.get("link_cost_factor") or [])) for s in f_ho["slas"]]
             s_pl = [(s.get("latency_ms"), s.get("jitter_ms"), s.get("loss_pct"), tuple(s.get("link_cost_factor") or [])) for s in f_pl["slas"]]
             if s_ho and s_pl and s_ho[0] != s_pl[0]:
-                checks.append(_chk("warn", "HO↔Plant", "Ambang SLA EBS berbeda di HO dan Plant",
-                                   f"HO latency/jitter/loss {s_ho[0][:3]}, Plant {s_pl[0][:3]}. Satu sisi bisa pindah tunnel sementara sisi lain tidak."))
+                checks.append(_chk("warn", "HO↔Plant", "The EBS SLA thresholds differ between HO and Plant",
+                                   f"HO latency/jitter/loss {s_ho[0][:3]}, Plant {s_pl[0][:3]}. One side can switch tunnels while the other does not."))
             if f_ho["mode"] != f_pl["mode"]:
-                checks.append(_chk("warn", "HO↔Plant", "Mode aturan EBS berbeda",
+                checks.append(_chk("warn", "HO↔Plant", "The EBS rule mode differs",
                                    f"HO mode {f_ho['mode']}, Plant mode {f_pl['mode']}."))
         elif f_pl:
             # At least one side routes statically: compare the first choice.
             t_ho = next((o["interface"] for o in f_ho["order"] if o.get("interface") in by_ho), None)
             t_pl = next((o["interface"] for o in f_pl["order"] if o.get("interface") in by_plant), None)
             if t_ho and t_pl and by_ho[t_ho]["plant"] == t_pl:
-                checks.append(_chk("ok", "HO↔Plant", "EBS memakai satu jalur bolak-balik",
-                                   f"HO → Plant lewat {t_ho}, Plant → HO lewat {t_pl} — pasangan tunnel yang sama."))
+                checks.append(_chk("ok", "HO↔Plant", "EBS uses one path both ways",
+                                   f"HO → Plant via {t_ho}, Plant → HO via {t_pl} — the same tunnel pair."))
             elif t_ho and t_pl:
-                checks.append(_chk("crit", "HO↔Plant", "Jalur pergi dan pulang EBS berbeda",
-                                   f"HO memakai {t_ho} (pasangannya {by_ho[t_ho]['plant']}), tetapi Plant mengarah ke HO lewat {t_pl}."))
+                checks.append(_chk("crit", "HO↔Plant", "The EBS outbound and return paths differ",
+                                   f"HO uses {t_ho} (its partner is {by_ho[t_ho]['plant']}), but Plant routes to HO via {t_pl}."))
         if ho["sdwan_status"] == "enable" and f_ho["via"] == "route":
-            checks.append(_chk("warn", "HO", "Tidak ada aturan SD-WAN untuk EBS di HO",
-                               "Sesi EBS dibuka dari laptop HO, jadi FGT HO-lah yang memilih tunnel. Tanpa aturan sla di HO, EBS ikut routing table dan tidak dipindahkan saat tunnel buruk. Runbook Fase 6 baru menulis aturan sisi Plant — tambahkan cerminnya di HO."))
+            checks.append(_chk("warn", "HO", "No SD-WAN rule for EBS at HO",
+                               "EBS sessions are opened from HO laptops, so it is the HO FGT that chooses the tunnel. Without an sla rule at HO, EBS follows the routing table and is not moved when a tunnel goes bad. Runbook Phase 6 only writes the Plant-side rule — add its mirror at HO."))
         if f_ho["via"] == "rule" and f_pl and f_pl["via"] == "route" and plant["sdwan_status"] == "enable":
-            checks.append(_chk("info", "Plant", "Plant tidak punya aturan untuk koneksi EBS → HO",
-                               "Tidak masalah untuk sesi user (balasan mengikuti sesi), tetapi koneksi yang dibuka server EBS ke HO akan mengikuti routing table, bukan urutan tunnel HO."))
+            checks.append(_chk("info", "Plant", "Plant has no rule for EBS → HO connections",
+                               "Not a problem for user sessions (replies follow the session), but connections the EBS server opens to HO follow the routing table, not the HO tunnel order."))
         if f_ho["via"] == "route" and f_ho.get("route") is None:
-            checks.append(_chk("crit", "HO", f"Tidak ada route ke EBS {ebs}",
-                               "Tidak ada static route yang mencakup alamat EBS di FGT HO (bisa juga lewat BGP/OSPF — cek get router info routing-table details)."))
+            checks.append(_chk("crit", "HO", f"No route to EBS {ebs}",
+                               "No static route on the HO FGT covers the EBS address (it may come via BGP/OSPF — check get router info routing-table details)."))
 
     for h_hc in ho["health_checks"]:
         p_hc = next((x for x in plant["health_checks"] if x["name"] == h_hc["name"]), None)
         if p_hc and (h_hc["interval_ms"], h_hc["failtime"], h_hc["recoverytime"]) != (p_hc["interval_ms"], p_hc["failtime"], p_hc["recoverytime"]):
-            checks.append(_chk("warn", "HO↔Plant", f"Timer health check {h_hc['name']} berbeda",
+            checks.append(_chk("warn", "HO↔Plant", f"Health check {h_hc['name']} timers differ",
                                f"HO interval/failtime/recovery {h_hc['interval_ms']}/{h_hc['failtime']}/{h_hc['recoverytime']}, "
-                               f"Plant {p_hc['interval_ms']}/{p_hc['failtime']}/{p_hc['recoverytime']}. Kedua sisi bereaksi pada waktu berbeda."))
+                               f"Plant {p_hc['interval_ms']}/{p_hc['failtime']}/{p_hc['recoverytime']}. The two sides react at different times."))
 
     rank = {"crit": 0, "warn": 1, "info": 2, "ok": 3}
     checks.sort(key=lambda c: rank.get(c["level"], 9))
@@ -604,16 +604,16 @@ def capture(server_id: int) -> dict:
     srv = store.get_server(server_id, with_secret=True)
     if srv is None:
         return {"ok": False, "name": f"server #{server_id}", "summary": None, "raw": None,
-                "error": "Server tidak ditemukan di Server Control"}
+                "error": "Server not found in Server Control"}
     if srv.get("problem"):
         return {"ok": False, "name": srv["name"], "summary": None, "raw": None, "error": srv["problem"]}
     try:
         raw = {k: redact(v) for k, v in fortigate._run_all(srv, COMMANDS).items()}
     except Exception as e:
-        return {"ok": False, "name": srv["name"], "summary": None, "raw": None, "error": f"SSH gagal: {e}"}
+        return {"ok": False, "name": srv["name"], "summary": None, "raw": None, "error": f"SSH failed: {e}"}
     try:
         summary = {**normalize(raw), "address": srv["ip"]}
     except Exception as e:
         return {"ok": False, "name": srv["name"], "summary": None, "raw": raw,
-                "error": f"Gagal membaca output konfigurasi: {e} — lihat output mentah"}
+                "error": f"Failed to parse the configuration output: {e} — see the raw output"}
     return {"ok": True, "name": srv["name"], "summary": summary, "raw": raw, "error": None}

@@ -284,7 +284,7 @@ def _fire_scheduled_jobs(db):
             # servers and credentials through the main app's models.
             model, builder = BUILDERS.get(job.job_type, (None, None))
             if builder is None:
-                raise RuntimeError(f"Jenis job '{job.job_type}' belum bisa dijadwalkan")
+                raise RuntimeError(f"Job type '{job.job_type}' cannot be scheduled yet")
 
             app_db = SessionLocal()
             try:
@@ -305,7 +305,7 @@ def _fire_scheduled_jobs(db):
         except Exception:
             db.rollback()
             job.status = "failed"
-            job.error_message = "Gagal meluncurkan job terjadwal — lihat log backend."
+            job.error_message = "Failed to launch the scheduled job — see the backend log."
             job.finished_at = datetime.utcnow()
             db.commit()
             logger.exception("Could not fire scheduled job #%s", job.id)

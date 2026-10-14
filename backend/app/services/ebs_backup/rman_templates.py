@@ -195,9 +195,9 @@ if [ $RC -eq 0 ]; then
     if [ $SYNC_RC -ne 0 ]; then
         cat > "$TARGET_DIR/manifest.json" << MANIFEST
 {{"job_id": {job_id}, "status": "failed", "exit_code": $SYNC_RC,
-  "note": "RMAN backup ke staging BERHASIL, tapi sync ke {sync_target} GAGAL"}}
+  "note": "RMAN backup to staging SUCCEEDED, but the sync to {sync_target} FAILED"}}
 MANIFEST
-        echo "[$(date)] === SYNC FAILED (backup staging tetap utuh) ==="
+        echo "[$(date)] === SYNC FAILED (the staging backup is still intact) ==="
         exit $SYNC_RC
     fi
     cat > "$TARGET_DIR/manifest.json" << MANIFEST

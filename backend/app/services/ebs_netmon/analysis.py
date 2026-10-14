@@ -10,9 +10,9 @@ import statistics
 
 # Order = position on the path from the HO laptop to the EBS database.
 SEGMENTS = {
-    "ho_lan":    "LAN HO",
-    "wan":       "Jalur HO ↔ Plant (tunnel)",
-    "plant_lan": "LAN Plant",
+    "ho_lan":    "HO LAN",
+    "wan":       "HO ↔ Plant path (tunnel)",
+    "plant_lan": "Plant LAN",
     "ebs_web":   "EBS Web / App Tier",
     "ebs_db":    "EBS Database",
     "internet":  "Internet / ISP",
@@ -65,12 +65,12 @@ def fortigate_findings(name: str, s: dict | None, t: dict) -> tuple[str, list[st
     if (s.get("cpu_pct") or 0) >= t["fgt_cpu_warn"]:
         lvl = "warn"; notes.append(f"{name}: CPU firewall {s['cpu_pct']}%")
     if (s.get("mem_pct") or 0) >= t["fgt_mem_warn"]:
-        lvl = "warn"; notes.append(f"{name}: memori firewall {s['mem_pct']}% (conserve mode dimulai ~88%)")
+        lvl = "warn"; notes.append(f"{name}: firewall memory {s['mem_pct']}% (conserve mode starts at ~88%)")
     for tun in s.get("tunnels", []):
         if not tun["up"]:
             lvl = "crit"; notes.append(f"{name}: tunnel {tun['name']} DOWN (NET-04)")
         elif tun["rx_err"] or tun["tx_err"]:
-            lvl = _worst(lvl, "warn"); notes.append(f"{name}: tunnel {tun['name']} ada error rx/tx")
+            lvl = _worst(lvl, "warn"); notes.append(f"{name}: tunnel {tun['name']} has rx/tx errors")
     for m in s.get("sdwan", []):
         if m["state"] != "alive":
             lvl = _worst(lvl, "warn"); notes.append(f"{name}: SD-WAN member {m['member']} {m['state']}")
@@ -83,7 +83,7 @@ def fortigate_findings(name: str, s: dict | None, t: dict) -> tuple[str, list[st
                              f"latency {m.get('latency_ms')} ms, jitter {m.get('jitter_ms')} ms")
     for d in s.get("tunnel_detail", []):
         if d.get("mtu") and d["mtu"] < 1350:
-            notes.append(f"{name}: MTU tunnel {d['name']} = {d['mtu']} — pastikan MSS clamping (NET-06)")
+            notes.append(f"{name}: tunnel {d['name']} MTU = {d['mtu']} — make sure MSS clamping is set (NET-06)")
     return lvl, notes
 
 
@@ -93,28 +93,28 @@ def ebs_findings(s: dict | None) -> tuple[str, str, list[str]]:
         return "unknown", "unknown", []
     app, db, notes = "ok", "ok", []
     if s.get("icm_up") is False:
-        app = "crit"; notes.append("Internal Concurrent Manager (FNDICM) mati (EBS-04)")
+        app = "crit"; notes.append("Internal Concurrent Manager (FNDICM) is down (EBS-04)")
     down = [m["name"] for m in s.get("managers_down", [])]
     if down:
-        app = _worst(app, "warn"); notes.append(f"Manager di bawah target: {', '.join(down[:4])} (EBS-04)")
+        app = _worst(app, "warn"); notes.append(f"Managers below target: {', '.join(down[:4])} (EBS-04)")
     if (s.get("requests_pending") or 0) > 50:
         app = _worst(app, "warn"); notes.append(f"{s['requests_pending']} concurrent request pending")
     for srv in s.get("app_tier", []):
         if srv.get("status") == "error":
-            app = _worst(app, "warn"); notes.append(f"SSH ke {srv.get('server_label')} gagal")
+            app = _worst(app, "warn"); notes.append(f"SSH to {srv.get('server_label')} failed")
         elif (srv.get("cpu") or 0) >= 85:
             app = _worst(app, "warn"); notes.append(f"CPU {srv.get('server_label')} {srv['cpu']}% (EBS-03)")
         elif (srv.get("memory_percent") or 0) >= 92 or (srv.get("swap_percent") or 0) >= 30:
-            app = _worst(app, "warn"); notes.append(f"Memori/swap {srv.get('server_label')} tinggi (EBS-03)")
+            app = _worst(app, "warn"); notes.append(f"High memory/swap on {srv.get('server_label')} (EBS-03)")
     if (s.get("sessions_blocked") or 0) > 0:
         db = "warn" if s["sessions_blocked"] < 5 else "crit"
-        notes.append(f"{s['sessions_blocked']} sesi terblokir lock (DB-05)")
+        notes.append(f"{s['sessions_blocked']} sessions blocked by locks (DB-05)")
     if (s.get("host_cpu_pct") or 0) >= 85:
-        db = _worst(db, "warn"); notes.append(f"CPU host DB {s['host_cpu_pct']}% (DB-01)")
+        db = _worst(db, "warn"); notes.append(f"DB host CPU {s['host_cpu_pct']}% (DB-01)")
     if (s.get("single_block_read_ms") or 0) >= 20:
-        db = _worst(db, "warn"); notes.append(f"Latency baca single-block {s['single_block_read_ms']} ms (DB-03)")
+        db = _worst(db, "warn"); notes.append(f"Single-block read latency {s['single_block_read_ms']} ms (DB-03)")
     if s.get("long_sql"):
-        db = _worst(db, "warn"); notes.append(f"{len(s['long_sql'])} SQL aktif > 5 menit (DB-04)")
+        db = _worst(db, "warn"); notes.append(f"{len(s['long_sql'])} SQL active > 5 minutes (DB-04)")
     return app, db, notes
 
 
@@ -161,11 +161,11 @@ def classify_client(r: dict, t: dict, fleet_median_rtt: float | None = None) -> 
 
 
 VERDICT_TEXT = {
-    "A": "Case A — LAN HO bermasalah (laptop → gateway sudah buruk). Periksa Wi-Fi, kabel, AP, switch, NIC.",
-    "B": "Case B — LAN normal, jalur HO → Plant bermasalah. Fokus WAN/VPN, ISP, routing, MTU/MSS, congestion.",
-    "C": "Case C — jaringan normal tetapi EBS lambat. Fokus Forms/web tier, Concurrent Manager, database.",
-    "D": "Case D — kemungkinan hanya laptop ini. Periksa CPU/RAM/disk, browser, Java, Wi-Fi laptop.",
-    "OK": "Tidak ada indikasi masalah pada pengukuran ini.",
+    "A": "Case A — HO LAN problem (laptop → gateway is already bad). Check Wi-Fi, cabling, APs, switches, NIC.",
+    "B": "Case B — LAN normal, HO → Plant path problem. Focus on WAN/VPN, ISP, routing, MTU/MSS, congestion.",
+    "C": "Case C — network normal but EBS slow. Focus on Forms/web tier, Concurrent Manager, database.",
+    "D": "Case D — probably only this laptop. Check its CPU/RAM/disk, browser, Java, Wi-Fi.",
+    "OK": "No sign of a problem in this measurement.",
 }
 
 
@@ -199,7 +199,7 @@ def overview(latest_probes: list[dict], fortigates: list[dict], ebs: dict | None
 
     for fg in fortigates:
         if not fg.get("ok"):
-            seg["wan"]["notes"].append(f"{fg['name']}: {fg.get('error') or 'snapshot gagal'}")
+            seg["wan"]["notes"].append(f"{fg['name']}: {fg.get('error') or 'snapshot failed'}")
             continue
         lvl, notes = fortigate_findings(fg["name"], fg.get("summary"), t)
         seg["wan"]["level"] = lvl if seg["wan"]["level"] == "unknown" else _worst(seg["wan"]["level"], lvl)
@@ -218,9 +218,9 @@ def overview(latest_probes: list[dict], fortigates: list[dict], ebs: dict | None
         bad = [c for c in ho_clients if c.get("verdict") == "A"]
         seg["ho_lan"]["level"] = "warn" if bad else "ok"
         seg["ho_lan"]["notes"].append(
-            f"{len(ho_clients)} laporan agen 24 jam terakhir, {len(bad)} menunjukkan LAN/Wi-Fi bermasalah")
+            f"{len(ho_clients)} agent reports in the last 24 hours, {len(bad)} showing a LAN/Wi-Fi problem")
     else:
-        seg["ho_lan"]["notes"].append("Belum ada laporan agen dari laptop HO dalam 24 jam — jalankan Client Test.")
+        seg["ho_lan"]["notes"].append("No agent reports from HO laptops in 24 hours — run the Client Test.")
 
     levels = {k: v["level"] for k, v in seg.items()}
     if levels["ho_lan"] in ("warn", "crit"):

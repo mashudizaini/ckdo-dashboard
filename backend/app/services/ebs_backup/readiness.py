@@ -73,7 +73,7 @@ def collect(now_utc: Optional[datetime] = None) -> dict:
             "dashboard_utc": now_utc.strftime("%Y-%m-%d %H:%M:%S"),
             # The dashboard stores naive UTC; schedules are entered in server
             # local time. Returning both stops "22:00" meaning two things.
-            "note": "Jadwal diisi dalam waktu server database (WIB). Dashboard menyimpannya sebagai UTC.",
+            "note": "Schedules are entered in database server time (WIB). The dashboard stores them as UTC.",
         }
 
         # ── Who is on the database ────────────────────────────────────────
@@ -164,12 +164,12 @@ def _verdict(d: dict) -> dict:
     active = d["sessions"]["active_user"] or 0
     if active > _SESSIONS_BUSY:
         worse("avoid")
-        reasons.append(f"{active} sesi user aktif — database sedang sibuk.")
+        reasons.append(f"{active} active user sessions — the database is busy.")
     elif active > _SESSIONS_GOOD:
         worse("caution")
-        reasons.append(f"{active} sesi user aktif — di atas kondisi tenang ({_SESSIONS_GOOD}).")
+        reasons.append(f"{active} active user sessions — above the quiet level ({_SESSIONS_GOOD}).")
     else:
-        reasons.append(f"{active} sesi user aktif — tenang.")
+        reasons.append(f"{active} active user sessions — quiet.")
 
     txns = d.get("long_transactions") or []
     heavy = [t for t in txns if (t.get("undo_mb") or 0) >= _LONG_TXN_UNDO_MB]
@@ -177,37 +177,37 @@ def _verdict(d: dict) -> dict:
         worse("caution")
         biggest = max(t["undo_mb"] for t in heavy)
         reasons.append(
-            f"{len(heavy)} transaksi terbuka menahan undo besar (terbesar {biggest} MB) — "
-            "backup akan berjalan sementara undo itu tidak bisa didaur ulang."
+            f"{len(heavy)} open transactions hold large undo (largest {biggest} MB) — "
+            "the backup will run while that undo cannot be recycled."
         )
     elif txns:
         # Listed, not counted against the verdict: EBS always has a few of
         # these and they hold kilobytes.
         oldest = max(t.get("open_minutes") or 0 for t in txns)
         reasons.append(
-            f"{len(txns)} transaksi terbuka lama (terlama {oldest/1440:.0f} hari) tapi "
-            "undo-nya kecil — sesi EBS yang menganggur, bukan penghalang backup."
+            f"{len(txns)} long-open transactions (oldest {oldest/1440:.0f} days) but "
+            "their undo is small — idle EBS sessions, not a blocker for the backup."
         )
 
     cr = (d.get("concurrent_requests") or {}).get("running")
     if cr is None:
-        reasons.append("Jumlah concurrent request tidak terbaca — lewati penilaian ini.")
+        reasons.append("The concurrent request count could not be read — this check is skipped.")
     elif cr > _CONC_REQ_GOOD:
         worse("caution")
-        reasons.append(f"{cr} concurrent request EBS masih berjalan — berebut I/O dengan backup.")
+        reasons.append(f"{cr} EBS concurrent requests still running — competing with the backup for I/O.")
     elif cr:
-        reasons.append(f"{cr} concurrent request berjalan — masih wajar.")
+        reasons.append(f"{cr} concurrent requests running — still fine.")
     else:
-        reasons.append("Tidak ada concurrent request EBS yang berjalan.")
+        reasons.append("No EBS concurrent requests running.")
 
     if d.get("rman_running"):
         worse("avoid")
-        reasons.append("RMAN sudah menjalankan backup lain saat ini — jangan dijalankan bersamaan.")
+        reasons.append("RMAN is already running another backup — do not run them at the same time.")
 
     headline = {
-        "good": "Waktu yang tepat untuk backup.",
-        "caution": "Boleh dijalankan, tapi ada yang perlu Anda sadari.",
-        "avoid": "Sebaiknya tunda — kondisinya tidak tepat sekarang.",
+        "good": "A good time for a backup.",
+        "caution": "OK to run, but there is something you should be aware of.",
+        "avoid": "Better to postpone — conditions are not right at the moment.",
     }[level]
     return {"level": level, "headline": headline, "reasons": reasons}
 

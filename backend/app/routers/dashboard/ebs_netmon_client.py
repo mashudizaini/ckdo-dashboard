@@ -59,7 +59,7 @@ async def upload(request: Request, _: CurrentUser = Depends(get_current_user)):
     async for chunk in request.stream():
         received += len(chunk)
         if received > MAX_UPLOAD:
-            raise HTTPException(413, "Terlalu besar")
+            raise HTTPException(413, "Too large")
     return {"received": received, "server_ms": round((time.perf_counter() - start) * 1000, 1)}
 
 
@@ -81,13 +81,13 @@ def submit_report(payload: dict = Body(...), db=Depends(get_ebsnet_db),
 async def ingest(token: str, request: Request):
     body = await request.body()
     if len(body) > MAX_AGENT_BODY:
-        raise HTTPException(413, "Payload terlalu besar")
+        raise HTTPException(413, "Payload too large")
     try:
         payload = json.loads(body.decode("utf-8-sig"))
     except ValueError:
-        raise HTTPException(400, "JSON tidak valid")
+        raise HTTPException(400, "Invalid JSON")
     if not isinstance(payload, dict) or "ping_ebs" not in payload:
-        raise HTTPException(400, "Bukan summary dari agen EBS diagnostic")
+        raise HTTPException(400, "Not a summary from the EBS diagnostic agent")
     return await run_in_threadpool(_ingest, token, payload)
 
 
@@ -96,7 +96,7 @@ def _ingest(token: str, payload: dict) -> dict:
     try:
         tok = db.query(EbsNetAgentToken).filter(EbsNetAgentToken.token == token).first()
         if not tok or tok.expires_at < datetime.utcnow():
-            raise HTTPException(403, "Token agen tidak valid atau kedaluwarsa — unduh ulang script dari dashboard")
+            raise HTTPException(403, "The agent token is invalid or expired — download the script again from the dashboard")
         payload["_token_label"] = tok.label
         tok.uses = (tok.uses or 0) + 1
         db.commit()
