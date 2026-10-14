@@ -23,7 +23,7 @@ _CACHE: dict = {}
 
 AVAILABLE_SOURCES = [
     {"id": "auto",              "name": "Auto (BI -> ExchangeRate-API -> Frankfurter)", "needs_key": False},
-    {"id": "bi_html",           "name": "Bank Indonesia - Kurs Transaksi BI",          "needs_key": False},
+    {"id": "bi_html",           "name": "Bank Indonesia - BI Transaction Rates",       "needs_key": False},
     {"id": "exchangerate_api",  "name": "ExchangeRate-API (mid-market)",               "needs_key": False},
     {"id": "frankfurter",       "name": "Frankfurter / ECB (mid-market)",              "needs_key": False},
 ]
@@ -153,13 +153,13 @@ def _fetch_bi_html(timeout: int = 25) -> dict:
             errors.append(f"{label}: {type(e).__name__}({e})")
     else:
         raise RuntimeError(
-            f"Tidak bisa mengakses bi.go.id setelah 3 percobaan — {' | '.join(errors)}"
+            f"Could not reach bi.go.id after 3 attempts — {' | '.join(errors)}"
         )
 
     if len(html) < 5_000:
         raise RuntimeError(
-            f"Respons bi.go.id terlalu kecil ({len(html)} chars) — "
-            "kemungkinan bot-detection atau halaman error."
+            f"The bi.go.id response is too small ({len(html)} chars) — "
+            "probably bot detection or an error page."
         )
 
     parser = _RateParser()
@@ -167,7 +167,7 @@ def _fetch_bi_html(timeout: int = 25) -> dict:
 
     if not parser.rows:
         raise RuntimeError(
-            "Tabel kurs (class=table-lg) tidak ditemukan atau kosong di halaman BI."
+            "The rate table (class=table-lg) is missing or empty on the BI page."
         )
 
     rates = []
@@ -191,7 +191,7 @@ def _fetch_bi_html(timeout: int = 25) -> dict:
     if not rates:
         sample = parser.rows[:2] if parser.rows else []
         raise RuntimeError(
-            f"Tabel ada {len(parser.rows)} baris tapi tidak bisa di-parse. Sample: {sample}"
+            f"The table has {len(parser.rows)} rows but could not be parsed. Sample: {sample}"
         )
 
     full_text = "".join(parser.all_text)
@@ -249,7 +249,7 @@ def _bi_urlopen(opener, req, timeout: int) -> str:
                 return raw.decode(enc, errors="replace")
         except Exception as e:
             errors.append(f"{label}: {type(e).__name__}({e})")
-    raise RuntimeError(f"Tidak bisa mengakses bi.go.id setelah 3 percobaan — {' | '.join(errors)}")
+    raise RuntimeError(f"Could not reach bi.go.id after 3 attempts — {' | '.join(errors)}")
 
 
 def _extract_hidden_fields(html: str) -> dict:
@@ -300,13 +300,13 @@ def _fetch_bi_html_for_date(date_iso: str, timeout: int = 25) -> dict:
     html = _bi_urlopen(opener, urllib.request.Request(BI_URL, headers=_HEADERS), timeout)
 
     if len(html) < 5_000:
-        raise RuntimeError(f"Respons bi.go.id terlalu kecil ({len(html)} chars) saat mengambil form pencarian.")
+        raise RuntimeError(f"The bi.go.id response is too small ({len(html)} chars) when fetching the search form.")
 
     m = re.search(r'name="([^"]*\$txtTanggal)"', html)
     if not m:
         raise RuntimeError(
-            "Field pencarian tanggal (txtTanggal) tidak ditemukan di halaman BI — "
-            "kemungkinan struktur halaman bi.go.id berubah."
+            "The date search field (txtTanggal) is not on the BI page — "
+            "the bi.go.id page structure has probably changed."
         )
     prefix = m.group(1)[: -len("txtTanggal")]
     txt_name = prefix + "txtTanggal"
@@ -329,8 +329,8 @@ def _fetch_bi_html_for_date(date_iso: str, timeout: int = 25) -> dict:
     rates = _parse_search_result_table(result_html)
     if not rates:
         raise RuntimeError(
-            f"Tidak ada data Kurs Transaksi BI untuk tanggal {date_iso} "
-            "(kemungkinan hari libur/bukan hari kerja, atau tanggal belum tersedia di bi.go.id)."
+            f"No BI Transaction Rate data for {date_iso} "
+            "(probably a holiday/non-working day, or the date is not available on bi.go.id yet)."
         )
 
     label_m = re.search(r'id="[^"]*_lblKursTransaksiKTBI2"[^>]*>([^<]*)<', result_html)
@@ -380,7 +380,7 @@ def _fetch_exchangerate_api(timeout: int = 20) -> dict:
         })
 
     if not rates:
-        raise RuntimeError("ExchangeRate-API mengembalikan data kosong.")
+        raise RuntimeError("ExchangeRate-API returned no data.")
 
     return {"rates": rates, "date": date_str, "source": "exchangerate_api"}
 
@@ -417,7 +417,7 @@ def _fetch_frankfurter(timeout: int = 20) -> dict:
         })
 
     if not rates:
-        raise RuntimeError("Frankfurter mengembalikan data kosong.")
+        raise RuntimeError("Frankfurter returned no data.")
 
     date_str_fmt = None
     if date_str:
@@ -438,7 +438,7 @@ _FETCHERS = {
 }
 
 _SOURCE_LABELS = {
-    "bi_html":          "Bank Indonesia - Kurs Transaksi BI",
+    "bi_html":          "Bank Indonesia - BI Transaction Rates",
     "exchangerate_api": "ExchangeRate-API (mid-market)",
     "frankfurter":      "Frankfurter / ECB (mid-market)",
 }
@@ -505,7 +505,7 @@ def get_rates(source: str = "auto", force_refresh: bool = False, as_of_date: str
             continue
 
     if result is None:
-        result = {"rates": [], "date": None, "error": last_error or "Tidak ada sumber kurs yang berhasil."}
+        result = {"rates": [], "date": None, "error": last_error or "No exchange rate source succeeded."}
 
     return {
         "rates":          result.get("rates", []),
@@ -565,7 +565,7 @@ def push_rates_to_ebs(
         for code in currencies:
             r = rate_map.get(code)
             if not r:
-                results.append({"code": code, "status": "skipped", "reason": "Kurs tidak tersedia"})
+                results.append({"code": code, "status": "skipped", "reason": "Rate not available"})
                 continue
 
             if rate_source == "jual":
@@ -577,7 +577,7 @@ def push_rates_to_ebs(
                 value = _mid_rate(s, b)
 
             if value is None:
-                results.append({"code": code, "status": "skipped", "reason": "Nilai kurs kosong"})
+                results.append({"code": code, "status": "skipped", "reason": "Rate value empty"})
                 continue
 
             denom = r.get("denomination", 1)

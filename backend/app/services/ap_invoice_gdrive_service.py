@@ -312,7 +312,7 @@ def sync_folder(service, folder_id: str, user_label: str) -> dict:
             _download_file(service, file_id, local_path)
             invoice_data = svc.extract_pdf(local_path, filename, provider="onprem")
             if not invoice_data.get("invoice_num"):
-                raise ValueError("Invoice Number tidak ditemukan dalam PDF")
+                raise ValueError("No Invoice Number found in the PDF")
 
             pg_conn = _get_pg()
             try:

@@ -149,7 +149,7 @@ class OutlookMaterialService:
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 return f.read()
 
-        raise ValueError(f"Format {ext or '(tanpa ekstensi)'} belum didukung untuk convert otomatis")
+        raise ValueError(f"Format {ext or '(no extension)'} is not supported for automatic conversion yet")
 
     def _pptx_shapes_text(self, shapes, out: list):
         """Text, tables and chart data of a slide, in reading order (top to
@@ -219,12 +219,12 @@ class OutlookMaterialService:
         try:
             path = self.storage_path(row.filename)
             if not os.path.exists(path):
-                raise FileNotFoundError("File tidak ditemukan di server")
+                raise FileNotFoundError("File not found on the server")
 
             raw_text = await asyncio.to_thread(self._extract_text, path, row.original_name)
             raw_text = (raw_text or "").strip()
             if not raw_text:
-                raise ValueError("Tidak ada teks yang bisa diekstrak dari file ini (kemungkinan hasil scan/gambar)")
+                raise ValueError("No text could be extracted from this file (probably a scan/image)")
 
             # A format example (last year's deck) is used for its exact
             # tables, labels and wording — an AI summary flattens exactly
@@ -278,7 +278,7 @@ class OutlookMaterialService:
             brief = await ai.complete(system, prompt, provider=provider, gemini_api_key=gemini_api_key)
             brief = (brief or "").strip()
             if not brief:
-                raise ValueError("AI tidak mengembalikan ringkasan (respons kosong)")
+                raise ValueError("The AI returned no summary (empty response)")
 
             row.brief_text = brief
             row.brief_status = "done"

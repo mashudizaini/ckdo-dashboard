@@ -412,7 +412,7 @@ async def download_ap_invoice_attachment(
     """
     found = await asyncio.to_thread(attach.open_attachment, attached_document_id, "ap_invoice")
     if found is None:
-        raise HTTPException(404, "Lampiran tidak ditemukan.")
+        raise HTTPException(404, "Attachment not found.")
 
     logger.info("ap_invoice_attachment_download", user=user.username,
                 attached_document_id=attached_document_id,
@@ -447,11 +447,11 @@ ticket_router = APIRouter()
 async def download_by_ticket(ticket: str):
     payload = await asyncio.to_thread(attach.redeem_download_ticket, ticket)
     if payload is None:
-        raise HTTPException(404, "Tautan sudah dipakai atau kedaluwarsa. Minta lagi lewat CoChat.")
+        raise HTTPException(404, "The link has already been used or has expired. Ask for it again in CoChat.")
 
     found = await asyncio.to_thread(attach.open_attachment, payload["aid"], payload["scope"])
     if found is None:
-        raise HTTPException(404, "Lampiran tidak ditemukan.")
+        raise HTTPException(404, "Attachment not found.")
 
     logger.info("ebs_attachment_ticket_download", email=payload.get("email"),
                 attached_document_id=payload["aid"], file_name=found["file_name"],

@@ -178,13 +178,13 @@ def snapshot(server_id: int, ebs_ip: str | None) -> dict:
     srv = store.get_server(server_id, with_secret=True)
     if srv is None:
         return {"ok": False, "name": f"server #{server_id}", "summary": None, "raw": None,
-                "error": "Server tidak ditemukan di Server Control"}
+                "error": "Server not found in Server Control"}
     if srv.get("problem"):
         return {"ok": False, "name": srv["name"], "summary": None, "raw": None, "error": srv["problem"]}
     try:
         raw = _run_all(srv, _commands(ebs_ip))
     except Exception as e:
-        return {"ok": False, "name": srv["name"], "summary": None, "raw": None, "error": f"SSH gagal: {e}"}
+        return {"ok": False, "name": srv["name"], "summary": None, "raw": None, "error": f"SSH failed: {e}"}
 
     summary = {
         **parse_status(raw.get("status", "")),

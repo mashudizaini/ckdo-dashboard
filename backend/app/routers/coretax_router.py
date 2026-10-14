@@ -122,27 +122,27 @@ def _public_job(job_id: str) -> dict:
 async def _run_download_job(job_id: str, req: StartJobRequest):
     if not PLAYWRIGHT_AVAILABLE:
         _update_job(job_id, status="error",
-                    message="Playwright tidak terinstall. Jalankan: pip install playwright && playwright install chromium")
+                    message="Playwright is not installed. Run: pip install playwright && playwright install chromium")
         return
 
     out_dir = _job_dir(job_id)
-    _update_job(job_id, status="running", message="Membuka browser…")
+    _update_job(job_id, status="running", message="Opening the browser…")
 
     # Resolusi cookie: pakai yang baru (dan simpan), atau ambil yang tersimpan
     resolved_cookie: str | None = None
     if req.cookie_string and req.cookie_string.strip():
         resolved_cookie = req.cookie_string.strip()
         _save_cookie_to_file(resolved_cookie)          # simpan otomatis
-        _update_job(job_id, message="Cookie baru disimpan ke server.")
+        _update_job(job_id, message="New cookie saved on the server.")
     elif req.use_saved_cookie:
         saved = _load_saved_cookie()
         if saved:
             resolved_cookie = saved["cookie_string"]
             saved_at = saved.get("saved_at", "")[:16].replace("T", " ")
-            _update_job(job_id, message=f"Menggunakan cookie tersimpan (disimpan: {saved_at})…")
+            _update_job(job_id, message=f"Using the saved cookie (saved: {saved_at})…")
         else:
             _update_job(job_id, status="error",
-                        message="Tidak ada cookie tersimpan. Silakan paste cookie baru terlebih dahulu.")
+                        message="No saved cookie. Paste a new cookie first.")
             return
 
     use_cookie_mode = bool(resolved_cookie)
@@ -180,7 +180,7 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
             # MODE 1: COOKIE — skip login, langsung ke halaman issued
             # ══════════════════════════════════════════════════════════════════
             if use_cookie_mode:
-                _update_job(job_id, message="Mode cookie: menyiapkan sesi browser…")
+                _update_job(job_id, message="Cookie mode: preparing the browser session…")
 
                 # Parse cookie string → list of dicts untuk Playwright
                 # Gunakan "url" bukan domain+path agar flag secure/sameSite otomatis
@@ -198,11 +198,11 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
 
                 if not parsed_cookies:
                     raise RuntimeError(
-                        "Cookie string tidak valid. Pastikan format: 'nama1=nilai1; nama2=nilai2; ...'"
+                        "Invalid cookie string. Use the format: 'name1=value1; name2=value2; ...'"
                     )
 
                 await context.add_cookies(parsed_cookies)
-                _update_job(job_id, message=f"{len(parsed_cookies)} cookie di-set. Membuka halaman eBupot…")
+                _update_job(job_id, message=f"{len(parsed_cookies)} cookies set. Opening the eBupot page…")
 
                 # Langsung buka halaman issued — lewati seluruh flow login
                 await page.goto(ISSUED_URL, timeout=60_000)
@@ -213,12 +213,12 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                 await page.screenshot(path=str(out_dir / "debug_cookie_result.png"))
                 if "login" in current_url.lower() or "identityprovider" in current_url.lower():
                     raise RuntimeError(
-                        f"Cookie tidak diterima — browser diredirect ke: {current_url[:120]} "
-                        "Silakan login ulang di Chrome, copy cookie baru, lalu coba lagi. "
-                        "Cek screenshot debug_cookie_result.png untuk detail."
+                        f"Cookie not accepted — the browser was redirected to: {current_url[:120]} "
+                        "Log in again in Chrome, copy a new cookie, then try again. "
+                        "See screenshot debug_cookie_result.png for details."
                     )
 
-                _update_job(job_id, message=f"Sesi valid ✓  Membuka tabel eBupot BPU…")
+                _update_job(job_id, message=f"Session valid ✓  Opening the eBupot BPU table…")
                 await page.screenshot(path=str(out_dir / "debug_issued_page.png"))
 
             # ══════════════════════════════════════════════════════════════════
@@ -227,11 +227,11 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
             else:
                 if not req.username or not req.password:
                     raise RuntimeError(
-                        "Isi cookie_string (mode cookie) ATAU username+password (mode login)."
+                        "Fill in cookie_string (cookie mode) OR username+password (login mode)."
                     )
 
                 # ── 1. Buka halaman login ─────────────────────────────────────
-                _update_job(job_id, message="Membuka halaman login Coretax…")
+                _update_job(job_id, message="Opening the Coretax login page…")
                 await page.goto(LOGIN_URL, timeout=60_000)
                 await page.wait_for_load_state("networkidle", timeout=30_000)
                 await asyncio.sleep(1.5)
@@ -271,12 +271,12 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
 
                 captcha_event: asyncio.Event = jobs[job_id]["_captcha_event"]
                 _update_job(job_id, status="waiting_captcha",
-                            message="Silakan lihat gambar CAPTCHA dan isi kode di bawah, lalu klik Submit.")
+                            message="Look at the CAPTCHA image, enter the code below, then click Submit.")
                 await captcha_event.wait()
                 captcha_code: str = jobs[job_id].get("_captcha_code", "")
 
                 # ── 3. Isi form login ──────────────────────────────────────────
-                _update_job(job_id, status="running", message="Mengisi form login…")
+                _update_job(job_id, status="running", message="Filling in the login form…")
                 await page.screenshot(path=str(out_dir / "debug_before_fill.png"))
 
                 # Dump input fields untuk diagnostik
@@ -312,7 +312,7 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                         except Exception:
                             continue
                     await page.screenshot(path=str(out_dir / f"debug_no_{label}.png"))
-                    raise RuntimeError(f"Field '{label}' tidak ditemukan. Cek screenshot debug_no_{label}.png")
+                    raise RuntimeError(f"Field '{label}' not found. See screenshot debug_no_{label}.png")
 
                 await fill_field([
                     'input[name="UserName"]', 'input[id="UserName"]',
@@ -350,10 +350,10 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                         }))
                     """)
                     filled = [f"{v['name']}={v['val']!r}(len={v['len']})" for v in vals if v['len'] > 0]
-                    _update_job(job_id, message=f"Verifikasi nilai form: {' | '.join(filled)}")
+                    _update_job(job_id, message=f"Form values check: {' | '.join(filled)}")
                 except Exception:
                     pass
-                _update_job(job_id, message="Form terisi, submit login…")
+                _update_job(job_id, message="Form filled, submitting the login…")
 
                 # ── 4. Submit form ─────────────────────────────────────────────
                 SUBMIT_SELECTORS = [
@@ -375,7 +375,7 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                         continue
                 if not submitted:
                     await page.screenshot(path=str(out_dir / "debug_no_submit.png"))
-                    raise RuntimeError("Tombol Login tidak ditemukan. Cek debug_no_submit.png")
+                    raise RuntimeError("Login button not found. See debug_no_submit.png")
 
                 # ── 5. Tunggu redirect keluar dari halaman login ───────────────
                 try:
@@ -395,13 +395,13 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                             err_text = (await err_loc.text_content() or "").strip()[:150]
                     except Exception:
                         pass
-                    hint = f' Pesan server: "{err_text}"' if err_text else ""
+                    hint = f' Server message: "{err_text}"' if err_text else ""
                     raise RuntimeError(
-                        f"Login gagal — halaman tidak redirect.{hint} "
-                        "Lihat debug_after_submit.png dan debug_form_filled.png di panel Debug."
+                        f"Login failed — the page did not redirect.{hint} "
+                        "See debug_after_submit.png and debug_form_filled.png in the Debug panel."
                     )
 
-                _update_job(job_id, message="Login berhasil, memilih NPWP perusahaan…")
+                _update_job(job_id, message="Login succeeded, choosing the company NPWP…")
                 await asyncio.sleep(2)
 
                 # ── 6. Pilih NPWP perusahaan (impersonation) ──────────────────
@@ -430,16 +430,16 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                         if await npwp_option.is_visible(timeout=5_000):
                             await npwp_option.click()
                             await asyncio.sleep(2)
-                            _update_job(job_id, message=f"NPWP {req.npwp} dipilih.")
+                            _update_job(job_id, message=f"NPWP {req.npwp} selected.")
                         else:
-                            _update_job(job_id, message=f"Warning: Opsi NPWP {req.npwp} tidak ditemukan, lanjut.")
+                            _update_job(job_id, message=f"Warning: NPWP option {req.npwp} not found, continuing.")
                     else:
-                        _update_job(job_id, message="Warning: Dropdown NPWP tidak ditemukan, lanjut.")
+                        _update_job(job_id, message="Warning: NPWP dropdown not found, continuing.")
                 except Exception as e:
-                    _update_job(job_id, message=f"Warning: Gagal switch NPWP ({str(e)[:60]}), lanjut…")
+                    _update_job(job_id, message=f"Warning: failed to switch NPWP ({str(e)[:60]}), continuing…")
 
                 # ── 7. Navigasi ke halaman eBupot BPU Issued ──────────────────
-                _update_job(job_id, message="Membuka halaman eBupot BPU Issued…")
+                _update_job(job_id, message="Opening the eBupot BPU Issued page…")
                 await page.goto(ISSUED_URL, timeout=30_000)
                 await page.wait_for_load_state("networkidle", timeout=30_000)
                 await asyncio.sleep(2)
@@ -462,7 +462,7 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                 pass
 
             # ── Filter masa pajak ─────────────────────────────────────────────
-            _update_job(job_id, message=f"Filter masa pajak: {req.masa_pajak}…")
+            _update_job(job_id, message=f"Tax period filter: {req.masa_pajak}…")
             try:
                 masa_filter = page.locator(
                     'th:has-text("Masa Pajak") select, '
@@ -480,7 +480,7 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                         await page.get_by_text(req.masa_pajak, exact=True).first.click(timeout=5_000)
                         await asyncio.sleep(1.5)
             except Exception:
-                _update_job(job_id, message="Warning: Filter masa pajak tidak bisa diset, lanjut semua data")
+                _update_job(job_id, message="Warning: the tax period filter could not be set, continuing with all data")
 
             # ── Download per halaman ──────────────────────────────────────────
             downloaded = 0
@@ -502,11 +502,11 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                 if not pdf_buttons:
                     await page.screenshot(path=str(out_dir / f"debug_no_pdf_btn_page{page_num}.png"))
                     _update_job(job_id,
-                                message=f"Halaman {page_num}: Tidak ada tombol PDF. "
-                                        f"Cek debug_no_pdf_btn_page{page_num}.png")
+                                message=f"Page {page_num}: no PDF button. "
+                                        f"See debug_no_pdf_btn_page{page_num}.png")
                     break
 
-                _update_job(job_id, message=f"Halaman {page_num}: {len(pdf_buttons)} file, mulai download…")
+                _update_job(job_id, message=f"Page {page_num}: {len(pdf_buttons)} files, starting the download…")
 
                 for idx, btn in enumerate(pdf_buttons):
                     try:
@@ -517,12 +517,12 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                         await dl.save_as(out_dir / fname)
                         downloaded += 1
                         _update_job(job_id, downloaded=downloaded, failed=failed,
-                                    message=f"Hal.{page_num} — {downloaded} file diunduh…")
+                                    message=f"Page {page_num} — {downloaded} files downloaded…")
                         await asyncio.sleep(0.8)
                     except Exception as e:
                         failed += 1
                         _update_job(job_id, downloaded=downloaded, failed=failed,
-                                    message=f"Gagal baris {idx+1} hal.{page_num}: {str(e)[:80]}")
+                                    message=f"Row {idx+1} on page {page_num} failed: {str(e)[:80]}")
 
                 if req.max_pages and page_num >= req.max_pages:
                     break
@@ -542,7 +542,7 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                     break
 
             # ── Buat ZIP ──────────────────────────────────────────────────────
-            _update_job(job_id, message=f"Download selesai. Membuat ZIP dari {downloaded} file…")
+            _update_job(job_id, message=f"Download finished. Building a ZIP of {downloaded} files…")
             zip_path = DOWNLOAD_DIR / f"{job_id}.zip"
             pdf_files = list(out_dir.glob("*.pdf"))
 
@@ -559,8 +559,8 @@ async def _run_download_job(job_id: str, req: StartJobRequest):
                         downloaded=downloaded,
                         failed=failed,
                         zip_ready=zip_ready,
-                        message=f"Selesai! {downloaded} berhasil, {failed} gagal."
-                                + (" ZIP siap didownload." if zip_ready else " Tidak ada PDF yang berhasil."))
+                        message=f"Done! {downloaded} succeeded, {failed} failed."
+                                + (" The ZIP is ready to download." if zip_ready else " No PDF succeeded."))
 
         except Exception as e:
             _update_job(job_id, status="error", message=f"Error: {str(e)}")
@@ -585,9 +585,9 @@ async def save_cookie(body: dict):
     """Simpan cookie string ke server untuk dipakai di download berikutnya."""
     cookie_string = (body.get("cookie_string") or "").strip()
     if not cookie_string:
-        raise HTTPException(status_code=400, detail="cookie_string tidak boleh kosong")
+        raise HTTPException(status_code=400, detail="cookie_string cannot be empty")
     _save_cookie_to_file(cookie_string)
-    return {"message": "Cookie berhasil disimpan", "saved_at": datetime.now().isoformat()}
+    return {"message": "Cookie saved", "saved_at": datetime.now().isoformat()}
 
 
 @coretax_router.delete("/saved-cookie")
@@ -595,7 +595,7 @@ async def delete_saved_cookie():
     """Hapus cookie tersimpan."""
     if SAVED_COOKIE_FILE.exists():
         SAVED_COOKIE_FILE.unlink()
-    return {"message": "Cookie dihapus"}
+    return {"message": "Cookie deleted"}
 
 
 @coretax_router.post("/start", response_model=JobStatus)
@@ -608,7 +608,7 @@ async def start_job(req: StartJobRequest, background_tasks: BackgroundTasks):
         "total":          0,
         "downloaded":     0,
         "failed":         0,
-        "message":        "Job dibuat, menunggu eksekusi…",
+        "message":        "Job created, waiting to run…",
         "zip_ready":      False,
         "_captcha_event": asyncio.Event(),
         "_captcha_code":  None,
@@ -620,7 +620,7 @@ async def start_job(req: StartJobRequest, background_tasks: BackgroundTasks):
 @coretax_router.get("/status/{job_id}", response_model=JobStatus)
 async def get_status(job_id: str):
     if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job tidak ditemukan")
+        raise HTTPException(status_code=404, detail="Job not found")
     return _public_job(job_id)
 
 
@@ -628,10 +628,10 @@ async def get_status(job_id: str):
 async def get_captcha_image(job_id: str):
     """Kembalikan gambar CAPTCHA sebagai PNG."""
     if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job tidak ditemukan")
+        raise HTTPException(status_code=404, detail="Job not found")
     img_path = DOWNLOAD_DIR / job_id / "captcha.png"
     if not img_path.exists():
-        raise HTTPException(status_code=404, detail="Gambar CAPTCHA belum tersedia")
+        raise HTTPException(status_code=404, detail="The CAPTCHA image is not available yet")
     return FileResponse(path=str(img_path), media_type="image/png",
                         headers={"Cache-Control": "no-store"})
 
@@ -640,25 +640,25 @@ async def get_captcha_image(job_id: str):
 async def submit_captcha(job_id: str, body: CaptchaSubmit):
     """Transfer code CAPTCHA. Background task akan lanjut otomatis."""
     if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job tidak ditemukan")
+        raise HTTPException(status_code=404, detail="Job not found")
     if jobs[job_id].get("status") != "waiting_captcha":
-        raise HTTPException(status_code=400, detail="Job tidak sedang menunggu CAPTCHA")
+        raise HTTPException(status_code=400, detail="The job is not waiting for a CAPTCHA")
     if not body.code.strip():
-        raise HTTPException(status_code=400, detail="Kode CAPTCHA tidak boleh kosong")
+        raise HTTPException(status_code=400, detail="The CAPTCHA code cannot be empty")
     jobs[job_id]["_captcha_code"] = body.code.strip()
     jobs[job_id]["_captcha_event"].set()
-    return {"message": "CAPTCHA diterima, proses dilanjutkan"}
+    return {"message": "CAPTCHA accepted, continuing"}
 
 
 @coretax_router.get("/download/{job_id}")
 async def download_zip(job_id: str):
     if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job tidak ditemukan")
+        raise HTTPException(status_code=404, detail="Job not found")
     if not jobs[job_id].get("zip_ready"):
-        raise HTTPException(status_code=400, detail="ZIP belum siap")
+        raise HTTPException(status_code=400, detail="The ZIP is not ready yet")
     zip_path = DOWNLOAD_DIR / f"{job_id}.zip"
     if not zip_path.exists():
-        raise HTTPException(status_code=404, detail="File ZIP tidak ditemukan di server")
+        raise HTTPException(status_code=404, detail="The ZIP file is not on the server")
     return FileResponse(path=str(zip_path), media_type="application/zip",
                         filename=f"ebupot_bpu_{job_id}.zip")
 
@@ -666,7 +666,7 @@ async def download_zip(job_id: str):
 @coretax_router.delete("/job/{job_id}")
 async def delete_job(job_id: str):
     if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job tidak ditemukan")
+        raise HTTPException(status_code=404, detail="Job not found")
     event: asyncio.Event = jobs[job_id].get("_captcha_event")
     if event and not event.is_set():
         jobs[job_id]["_captcha_code"] = ""
@@ -679,7 +679,7 @@ async def delete_job(job_id: str):
     if zip_path.exists():
         zip_path.unlink()
     del jobs[job_id]
-    return {"message": "Job dihapus"}
+    return {"message": "Job deleted"}
 
 
 @coretax_router.get("/debug/screenshot/{job_id}/{filename}")
@@ -687,8 +687,8 @@ async def get_debug_screenshot(job_id: str, filename: str):
     """Ambil screenshot debug (hanya .png)."""
     safe_name = Path(filename).name
     if not safe_name.endswith(".png"):
-        raise HTTPException(status_code=400, detail="Hanya file .png")
+        raise HTTPException(status_code=400, detail="Only .png files")
     img_path = DOWNLOAD_DIR / job_id / safe_name
     if not img_path.exists():
-        raise HTTPException(status_code=404, detail=f"Screenshot tidak ditemukan: {safe_name}")
+        raise HTTPException(status_code=404, detail=f"Screenshot not found: {safe_name}")
     return FileResponse(path=str(img_path), media_type="image/png")

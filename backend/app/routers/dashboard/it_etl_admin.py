@@ -98,7 +98,7 @@ async def stop_etl(job_name: str, db: AsyncSession = Depends(get_db)):
         UPDATE eis.etl_job_log
            SET status = 'stopped',
                finished_at = NOW(),
-               error_message = 'Dihentikan oleh user'
+               error_message = 'Stopped by user'
          WHERE id = (
              SELECT id FROM eis.etl_job_log
               WHERE job_name = :job AND status = 'running'
@@ -107,7 +107,7 @@ async def stop_etl(job_name: str, db: AsyncSession = Depends(get_db)):
          )
     """), {"job": job_name})
     await db.commit()
-    return {"message": f"Job {job_name} dihentikan"}
+    return {"message": f"Job {job_name} stopped"}
 
 
 @router.get("/job-data/{job_name}")
@@ -364,19 +364,19 @@ _JOB_META = {
                         "source_system": "Oracle EBS + Linux",
                         "oracle_tables": ["dba_tablespace_usage_metrics", "dba_tablespaces", "v$session", "apps.fnd_concurrent_requests"],
                         "destination_table": "eis.fact_it_tablespace, eis.fact_it_server_metrics, eis.fact_it_disk_usage, eis.fact_it_top_process, eis.fact_it_oracle_activity"},
-    "etl_daily_sales": {"frequency": "On upload + hourly", "schedule": "menit ke-20 tiap jam", "source": "EIS Data Upload (Excel -> app/data/daily_sales.json)",
-                        "source_system": "Excel upload (bukan Oracle)",
+    "etl_daily_sales": {"frequency": "On upload + hourly", "schedule": "minute 20 of every hour", "source": "EIS Data Upload (Excel -> app/data/daily_sales.json)",
+                        "source_system": "Excel upload (not Oracle)",
                         "oracle_tables": [],
                         "destination_table": "eis.fact_daily_sales"},
-    "etl_mart_ap": {"frequency": "Hourly + weekly full", "schedule": "menit ke-40; Minggu 01:00 full", "source": "Oracle AP (EBS Data Mart)",
+    "etl_mart_ap": {"frequency": "Hourly + weekly full", "schedule": "minute 40; Sunday 01:00 full", "source": "Oracle AP (EBS Data Mart)",
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["ap_invoices_all", "ap_payment_schedules_all", "ap_invoice_payments_all", "ap_checks_all", "ap_holds_all", "ap_suppliers"],
                         "destination_table": "core.fact_ap_payment_schedule, core.fact_ap_payment, core.fact_ap_hold -> mart.ap_*"},
-    "etl_mart_inventory": {"frequency": "Hourly 06-20", "schedule": "menit ke-50, 06:00-20:00", "source": "Oracle INV on-hand per lot (org 121)",
+    "etl_mart_inventory": {"frequency": "Hourly 06-20", "schedule": "minute 50, 06:00-20:00", "source": "Oracle INV on-hand per lot (org 121)",
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["mtl_onhand_quantities_detail", "mtl_lot_numbers", "mtl_secondary_inventories", "mtl_system_items_b"],
                         "destination_table": "core.snap_onhand_lot, core.dim_subinventory, core.dim_item -> mart.inv_onhand_lot"},
-    "etl_mart_po": {"frequency": "Hourly + weekly full", "schedule": "menit ke-25; Minggu 01:30 full", "source": "Oracle PO/PR (EBS Data Mart)",
+    "etl_mart_po": {"frequency": "Hourly + weekly full", "schedule": "minute 25; Sunday 01:30 full", "source": "Oracle PO/PR (EBS Data Mart)",
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["po_headers_all", "po_lines_all", "po_line_locations_all", "po_distributions_all", "po_releases_all", "ap_invoice_distributions_all", "po_requisition_headers_all", "po_requisition_lines_all"],
                         "destination_table": "core.fact_po_shipment, core.fact_po_distribution, core.snap_pr_pending -> mart.po_*, mart.pr_pending"},
@@ -384,30 +384,30 @@ _JOB_META = {
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["cm_cmpt_dtl", "gmf_period_statuses", "cm_mthd_mst", "cm_cmpt_mst_b"],
                         "destination_table": "core.fact_item_cost -> mart.inv_valuation"},
-    "etl_mart_om": {"frequency": "Hourly + weekly full", "schedule": "menit ke-10; Minggu 02:00 full", "source": "Oracle OM + Shipping (EBS Data Mart)",
+    "etl_mart_om": {"frequency": "Hourly + weekly full", "schedule": "minute 10; Sunday 02:00 full", "source": "Oracle OM + Shipping (EBS Data Mart)",
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["oe_order_headers_all", "oe_order_lines_all", "oe_transaction_types_tl", "wsh_delivery_details", "wsh_delivery_assignments", "wsh_new_deliveries"],
                         "destination_table": "core.fact_so_line, core.fact_so_delivery_detail -> mart.so_*"},
-    "etl_mart_ar": {"frequency": "Hourly + weekly full", "schedule": "menit ke-55; Minggu 02:30 full", "source": "Oracle AR (EBS Data Mart)",
+    "etl_mart_ar": {"frequency": "Hourly + weekly full", "schedule": "minute 55; Sunday 02:30 full", "source": "Oracle AR (EBS Data Mart)",
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["ar_payment_schedules_all", "ra_customer_trx_all", "ra_customer_trx_lines_all", "ra_cust_trx_line_gl_dist_all", "ar_cash_receipts_all", "ar_receivable_applications_all", "gl_daily_rates"],
                         "destination_table": "core.fact_ar_* , core.dim_fx_rate -> mart.ar_*, mart.sales_by_customer_item_month"},
-    "etl_mart_opm": {"frequency": "Hourly + weekly full", "schedule": "menit ke-35; Minggu 03:00 full", "source": "Oracle OPM batch (EBS Data Mart)",
+    "etl_mart_opm": {"frequency": "Hourly + weekly full", "schedule": "minute 35; Sunday 03:00 full", "source": "Oracle OPM batch (EBS Data Mart)",
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["gme_batch_header", "gme_material_details", "fm_form_mst_b", "mtl_material_transactions", "mtl_transaction_lot_numbers"],
                         "destination_table": "core.fact_batch_material, core.fact_batch_lot -> mart.batch_*"},
-    "etl_mart_gl": {"frequency": "Hourly + weekly full", "schedule": "menit ke-5; Minggu 03:30 full", "source": "Oracle GL + SLA (EBS Data Mart)",
+    "etl_mart_gl": {"frequency": "Hourly + weekly full", "schedule": "minute 5; Sunday 03:30 full", "source": "Oracle GL + SLA (EBS Data Mart)",
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["gl_balances", "gl_code_combinations", "gl_periods", "fnd_flex_values_vl", "gl_je_headers", "gl_je_lines", "xla_ae_lines", "xla_transaction_entities"],
                         "destination_table": "core.fact_gl_balance, core.fact_gl_journal_line, meta.gl_account_map -> mart.gl_*, mart.pl_monthly"},
-    "etl_mart_close": {"frequency": "Hourly (06-20)", "schedule": "menit ke-15, 06:15-20:15",
+    "etl_mart_close": {"frequency": "Hourly (06-20)", "schedule": "minute 15, 06:15-20:15",
                        "source": "Oracle GL/XLA/AR/CE (EBS Data Mart — closing)", "source_system": "Oracle EBS",
                        "oracle_tables": ["gl_period_statuses", "org_acct_periods", "gmf_period_statuses", "xla_events",
                                          "xla_ae_headers", "gl_je_headers", "ra_interface_lines_all", "ra_interface_errors_all",
                                          "ce_statement_lines", "ap_checks_all", "ar_cash_receipts_all", "ce_cashflows"],
                        "destination_table": "core.fin_*, core.ar_interface_line, core.ce_* -> mart.gl_period_status, sla_gl_gap, ar_autoinvoice_error, so_shipped_not_invoiced, ce_unreconciled"},
-    "etl_mart_ext": {"frequency": "Hourly (06-20)", "schedule": "menit ke-45, 06:45-20:45",
-                     "source": "Oracle PO/OM/AP/GL + open interface (EBS Data Mart — katalog lanjutan)",
+    "etl_mart_ext": {"frequency": "Hourly (06-20)", "schedule": "minute 45, 06:45-20:45",
+                     "source": "Oracle PO/OM/AP/GL + open interface (EBS Data Mart — extended catalog)",
                      "source_system": "Oracle EBS",
                      "oracle_tables": ["po_headers_all", "po_requisition_headers_all", "po_action_history", "oe_order_holds_all",
                                        "ap_invoice_distributions_all", "gl_balances", "ap_invoices_interface", "gl_interface",
@@ -423,12 +423,12 @@ _JOB_META = {
                     "oracle_tables": ["fnd_user", "per_all_people_f", "fnd_user_resp_groups_direct", "fnd_user_resp_groups_indirect",
                                       "fnd_responsibility", "fnd_compiled_menu_functions", "fnd_form_functions_vl", "fnd_resp_functions",
                                       "fnd_request_group_units", "fnd_profile_option_values", "fnd_logins", "ad_bugs", "fnd_form_custom_rules"],
-                    "destination_table": "core.sa_* -> mart.sa_* (akses terbatas: llm_sa_ro)"},
+                    "destination_table": "core.sa_* -> mart.sa_* (restricted access: llm_sa_ro)"},
     "etl_mart_sa_ops": {"frequency": "Every 10 minutes", "schedule": "*/10", "source": "Oracle FND/WF (EBS Data Mart — System Administration)",
                         "source_system": "Oracle EBS",
                         "oracle_tables": ["fnd_concurrent_requests", "fnd_concurrent_queues_vl", "wf_notifications", "wf_items"],
                         "destination_table": "core.sa_conc_request, core.sa_conc_manager, core.sa_wf_notification -> mart.sa_*"},
-    "refresh_ebs_marts": {"frequency": "Daily", "schedule": "00:10 WIB", "source": "core.* (tanpa Oracle)",
+    "refresh_ebs_marts": {"frequency": "Daily", "schedule": "00:10 WIB", "source": "core.* (no Oracle)",
                         "source_system": "PostgreSQL (ckdo_dashboard)",
                         "oracle_tables": [],
                         "destination_table": "mart.* (REFRESH MATERIALIZED VIEW CONCURRENTLY)"},

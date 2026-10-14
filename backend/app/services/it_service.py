@@ -117,9 +117,9 @@ class OracleITService:
         ALTER DATABASE DATAFILE '<path>' RESIZE <new_size>M
         """
         if add_unit not in ("MB", "GB"):
-            return {"success": False, "error": "Unit harus MB atau GB"}
+            return {"success": False, "error": "Unit must be MB or GB"}
         if add_value <= 0 or add_value > 102400:
-            return {"success": False, "error": "Tambahan ukuran tidak valid (1 – 102400)"}
+            return {"success": False, "error": "Invalid size increase (1 – 102400)"}
 
         # Fetch current size in MB
         size_sql = """
@@ -131,10 +131,10 @@ class OracleITService:
             rows = await asyncio.to_thread(self._query, size_sql, {"fp": file_path})
         except Exception as e:
             logger.error("resize_fetch_size_error", error=str(e))
-            return {"success": False, "error": f"Gagal membaca ukuran file: {str(e)}"}
+            return {"success": False, "error": f"Failed to read the file size: {str(e)}"}
 
         if not rows:
-            return {"success": False, "error": f"Datafile tidak ditemukan: {file_path}"}
+            return {"success": False, "error": f"Datafile not found: {file_path}"}
 
         current_mb  = float(rows[0]["size_mb"])
         add_mb      = add_value * 1024 if add_unit == "GB" else add_value
@@ -153,7 +153,7 @@ class OracleITService:
             return {
                 "success": True,
                 "message": (
-                    f"Datafile berhasil di-resize: {current_mb:.0f} MB → {new_total_mb:.0f} MB"
+                    f"Datafile resized: {current_mb:.0f} MB → {new_total_mb:.0f} MB"
                     f" (+{add_mb:.0f} MB)"
                 ),
                 "ddl":          ddl,
@@ -176,11 +176,11 @@ class OracleITService:
         """Execute ALTER TABLESPACE … ADD DATAFILE to extend a tablespace."""
         import re
         if not re.match(r"^[A-Z0-9_\$#]+$", tablespace_name.upper()):
-            return {"success": False, "error": "Nama tablespace tidak valid"}
+            return {"success": False, "error": "Invalid tablespace name"}
         if size_unit not in ("MB", "GB"):
-            return {"success": False, "error": "Unit harus MB atau GB"}
+            return {"success": False, "error": "Unit must be MB or GB"}
         if size_value <= 0 or size_value > 102400:
-            return {"success": False, "error": "Ukuran tidak valid (1 – 102400)"}
+            return {"success": False, "error": "Invalid size (1 – 102400)"}
 
         ddl = (
             f"ALTER TABLESPACE {tablespace_name} ADD DATAFILE '{file_path}'"
@@ -199,7 +199,7 @@ class OracleITService:
             await asyncio.to_thread(_exec)
             return {
                 "success": True,
-                "message": f"Datafile berhasil ditambahkan ke tablespace {tablespace_name}",
+                "message": f"Datafile added to tablespace {tablespace_name}",
                 "ddl": ddl,
             }
         except Exception as e:

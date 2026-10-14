@@ -409,7 +409,7 @@ class SalesPlanService:
                 })
 
         if not lines:
-            return {"success": False, "error": f"Tidak ada Sales Plan Data (Value) untuk tahun {plan_year}."}
+            return {"success": False, "error": f"No Sales Plan Data (Value) for {plan_year}."}
         return {"success": True, "data": lines, "plan_year": plan_year}
 
     async def delete_sales_plan(self, db: AsyncSession, plan_id: int) -> dict:

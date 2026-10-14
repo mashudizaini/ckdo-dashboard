@@ -2765,7 +2765,7 @@ def etl_daily_sales(year: int = None, month: int = None):
     try:
         path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "daily_sales.json")
         if not os.path.exists(path):
-            _log_end(pg, job_id, "success", 0, "daily_sales.json belum ada (belum pernah ada unggahan)")
+            _log_end(pg, job_id, "success", 0, "daily_sales.json does not exist yet (nothing has been uploaded)")
             return {"records": 0}
 
         with open(path, encoding="utf-8") as fh:

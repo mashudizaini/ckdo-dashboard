@@ -211,18 +211,18 @@ async def server_terminal(websocket: WebSocket):
         try:
             caller = await verify_token(hello.get("token", ""))
         except Exception:
-            await websocket.send_json({"type": "error", "message": "Sesi login tidak valid, muat ulang halaman."})
+            await websocket.send_json({"type": "error", "message": "Invalid login session, reload the page."})
             await websocket.close(code=4401)
             return
         if not caller.has_any_role(Roles.IT, "admin"):
             logger.warning("server_terminal_forbidden", user=caller.username)
-            await websocket.send_json({"type": "error", "message": "Terminal server hanya untuk tim IT."})
+            await websocket.send_json({"type": "error", "message": "The server terminal is for the IT team only."})
             await websocket.close(code=4403)
             return
 
         payload = await term.redeem_ticket(hello.get("ticket", ""))
         if payload is None:
-            await websocket.send_json({"type": "error", "message": "Sesi kedaluwarsa, tutup lalu buka lagi."})
+            await websocket.send_json({"type": "error", "message": "Session expired, close it and open it again."})
             await websocket.close(code=4401)
             return
 
@@ -232,7 +232,7 @@ async def server_terminal(websocket: WebSocket):
         if payload.get("user") != (caller.username or "unknown"):
             logger.warning("server_terminal_ticket_mismatch",
                            token_user=caller.username, ticket_user=payload.get("user"))
-            await websocket.send_json({"type": "error", "message": "Tiket bukan milik sesi ini."})
+            await websocket.send_json({"type": "error", "message": "The ticket does not belong to this session."})
             await websocket.close(code=4403)
             return
 
@@ -242,7 +242,7 @@ async def server_terminal(websocket: WebSocket):
         async with AsyncSessionLocal() as db:
             target = await term.resolve_target(db, payload["credential_id"], payload["user"])
         if target is None:
-            await websocket.send_json({"type": "error", "message": "Kredensial tidak ditemukan."})
+            await websocket.send_json({"type": "error", "message": "Credential not found."})
             await websocket.close(code=4404)
             return
         if "error" in target:
@@ -261,14 +261,14 @@ async def server_terminal(websocket: WebSocket):
             # outside this screen.
             hint = ""
             if "Authentication failed" in str(e):
-                hint = (f" Password tersimpan untuk '{target['username']}' ditolak server. "
-                        "Periksa kredensialnya di Server Control — atau, kalau ini akun root, "
-                        "host-nya mungkin memang menolak login root dengan password "
-                        "(PermitRootLogin prohibit-password, bawaan Ubuntu), sehingga kredensial "
-                        "itu tidak akan pernah bisa dipakai lewat SSH.")
+                hint = (f" The stored password for '{target['username']}' was rejected by the server. "
+                        "Check the credential in Server Control — or, if this is the root account, "
+                        "the host may simply refuse root password logins "
+                        "(PermitRootLogin prohibit-password, the Ubuntu default), so that credential "
+                        "can never be used over SSH.")
             logger.warning("server_terminal_connect_failed", user=payload["user"],
                            host=target["host"], ssh_user=target["username"], error=str(e))
-            await websocket.send_json({"type": "error", "message": f"Gagal menyambung: {e}{hint}"})
+            await websocket.send_json({"type": "error", "message": f"Connection failed: {e}{hint}"})
             await websocket.close(code=4500)
             return
 
@@ -285,7 +285,7 @@ async def server_terminal(websocket: WebSocket):
                 if chunk is None:
                     break
                 await websocket.send_json({"type": "output", "data": chunk.decode("utf-8", "replace")})
-            await websocket.send_json({"type": "output", "data": _EOL + "[sesi berakhir]" + _EOL})
+            await websocket.send_json({"type": "output", "data": _EOL + "[session ended]" + _EOL})
 
         pump = asyncio.create_task(shell_to_browser())
 

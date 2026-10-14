@@ -200,7 +200,7 @@ def etl_mart_close(year: int = None, month: int = None, full_refresh: bool = Fal
     job = "etl_mart_close"
     run = _Run(job, trigger_type, triggered_by, {"ledger_id": EBS_LEDGER_ID})
     if not run.locked:
-        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.finish("skipped", error="The same job is already running (advisory lock) — skipped.")
         run.close()
         return {"status": "skipped"}
 
@@ -403,7 +403,7 @@ def etl_mart_fa(year: int = None, month: int = None, full_refresh: bool = False,
     job = "etl_mart_fa"
     run = _Run(job, trigger_type, triggered_by, {"ledger_id": EBS_LEDGER_ID})
     if not run.locked:
-        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.finish("skipped", error="The same job is already running (advisory lock) — skipped.")
         run.close()
         return {"status": "skipped"}
 
@@ -423,7 +423,7 @@ def etl_mart_fa(year: int = None, month: int = None, full_refresh: bool = False,
         finally:
             ora.close()
         if not books:
-            raise RuntimeError(f"Tidak ada buku FA CORPORATE untuk ledger {EBS_LEDGER_ID} di FA_BOOK_CONTROLS.")
+            raise RuntimeError(f"No CORPORATE FA book for ledger {EBS_LEDGER_ID} in FA_BOOK_CONTROLS.")
         rows_read = len(assets) + len(deprn) + len(periods)
 
         n = _replace(cur, "core.fa_asset",

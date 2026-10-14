@@ -137,7 +137,7 @@ def snapshot(include_app_tier: bool = True) -> dict:
         r, errors, connect_ms = _run_queries()
     except Exception as e:
         logger.warning("ebsnet_ebs_health_failed", error=str(e))
-        return {"ok": False, "summary": {"environment": env}, "error": f"Koneksi Oracle gagal: {e}"}
+        return {"ok": False, "summary": {"environment": env}, "error": f"Oracle connection failed: {e}"}
 
     sess = (r.get("sessions") or [{}])[0]
     req = (r.get("requests") or [{}])[0]

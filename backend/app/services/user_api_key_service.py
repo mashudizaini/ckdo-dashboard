@@ -59,7 +59,7 @@ async def validate_gemini_key(api_key: str) -> None:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(f"{gemini_service.BASE_URL}/models", params={"key": api_key})
     except httpx.HTTPError as e:
-        raise ValueError(f"Tidak bisa menghubungi Gemini API: {e}")
+        raise ValueError(f"Cannot reach the Gemini API: {e}")
 
     if resp.status_code == 200:
         return
@@ -67,7 +67,7 @@ async def validate_gemini_key(api_key: str) -> None:
         detail = resp.json().get("error", {}).get("message", f"HTTP {resp.status_code}")
     except Exception:
         detail = f"HTTP {resp.status_code}"
-    raise ValueError(f"API key tidak valid: {detail}")
+    raise ValueError(f"Invalid API key: {detail}")
 
 
 async def validate_anthropic_key(api_key: str) -> None:
@@ -78,14 +78,14 @@ async def validate_anthropic_key(api_key: str) -> None:
                 headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
             )
     except httpx.HTTPError as e:
-        raise ValueError(f"Tidak bisa menghubungi Anthropic API: {e}")
+        raise ValueError(f"Cannot reach the Anthropic API: {e}")
     if resp.status_code == 200:
         return
     try:
         detail = resp.json().get("error", {}).get("message", f"HTTP {resp.status_code}")
     except Exception:
         detail = f"HTTP {resp.status_code}"
-    raise ValueError(f"API key tidak valid: {detail}")
+    raise ValueError(f"Invalid API key: {detail}")
 
 
 async def validate_openai_key(api_key: str) -> None:
@@ -96,14 +96,14 @@ async def validate_openai_key(api_key: str) -> None:
                 headers={"Authorization": f"Bearer {api_key}"},
             )
     except httpx.HTTPError as e:
-        raise ValueError(f"Tidak bisa menghubungi OpenAI API: {e}")
+        raise ValueError(f"Cannot reach the OpenAI API: {e}")
     if resp.status_code == 200:
         return
     try:
         detail = resp.json().get("error", {}).get("message", f"HTTP {resp.status_code}")
     except Exception:
         detail = f"HTTP {resp.status_code}"
-    raise ValueError(f"API key tidak valid: {detail}")
+    raise ValueError(f"Invalid API key: {detail}")
 
 
 async def validate_kimi_key(api_key: str) -> None:
@@ -114,14 +114,14 @@ async def validate_kimi_key(api_key: str) -> None:
                 headers={"Authorization": f"Bearer {api_key}"},
             )
     except httpx.HTTPError as e:
-        raise ValueError(f"Tidak bisa menghubungi Kimi (Moonshot) API: {e}")
+        raise ValueError(f"Cannot reach the Kimi (Moonshot) API: {e}")
     if resp.status_code == 200:
         return
     try:
         detail = resp.json().get("error", {}).get("message", f"HTTP {resp.status_code}")
     except Exception:
         detail = f"HTTP {resp.status_code}"
-    raise ValueError(f"API key tidak valid: {detail}")
+    raise ValueError(f"Invalid API key: {detail}")
 
 
 # Provider -> validator dispatch, shared by user_settings.py so adding a new
@@ -139,7 +139,7 @@ async def set_user_key(db: AsyncSession, username: str, provider: str, plaintext
     encrypted = crypto.encrypt(plaintext)
     hint = f"••••{plaintext[-4:]}" if len(plaintext) >= 4 else "••••"
     if model and provider in ALLOWED_MODELS and model not in ALLOWED_MODELS[provider]:
-        raise ValueError(f"Model tidak dikenali untuk {provider}: {model}")
+        raise ValueError(f"Unknown model for {provider}: {model}")
 
     row = await _get_row(db, username, provider)
     if row:

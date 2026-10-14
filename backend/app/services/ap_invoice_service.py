@@ -192,7 +192,7 @@ def _parse_date(date_str: str) -> datetime:
                 return datetime(int(year), month, int(day))
             except ValueError:
                 pass
-    raise ValueError(f"Format tanggal tidak dikenali: '{date_str}'")
+    raise ValueError(f"Unrecognised date format: '{date_str}'")
 
 
 def _format_oracle_date(dt: datetime) -> str:

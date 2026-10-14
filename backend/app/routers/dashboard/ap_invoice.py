@@ -135,7 +135,7 @@ async def upload_pdf(
     provider: str = Query("onprem", description='"onprem" (standard, default) or "anthropic" (premium)'),
 ):
     if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(400, "File harus berformat PDF")
+        raise HTTPException(400, "The file must be a PDF")
     if provider not in ("onprem", "anthropic"):
         raise HTTPException(400, 'Invalid provider — use "onprem" or "anthropic"')
 
@@ -153,18 +153,18 @@ async def upload_pdf(
         raise HTTPException(502, f"On-premise AI engine unreachable: {e}")
     except Exception as e:
         os.remove(file_path)
-        raise HTTPException(422, f"Gagal extract PDF: {str(e)}")
+        raise HTTPException(422, f"PDF extraction failed: {str(e)}")
 
     if not invoice_data.get("invoice_num"):
         os.remove(file_path)
-        raise HTTPException(422, "Invoice Number tidak ditemukan dalam PDF")
+        raise HTTPException(422, "No Invoice Number found in the PDF")
 
     conn = _get_pg()
     try:
         stg_id = svc.save_to_staging(conn, invoice_data)
     except Exception as e:
         conn.close()
-        raise HTTPException(500, f"Gagal simpan ke staging: {str(e)}")
+        raise HTTPException(500, f"Failed to save to staging: {str(e)}")
     conn.close()
 
     return {"stg_id": stg_id, "status": "NEW", "preview": invoice_data}
@@ -179,11 +179,11 @@ async def get_po_lines(po_number: str):
     try:
         result = svc.get_po_lines_for_matching(ora, po_number)
     except Exception as e:
-        raise HTTPException(500, f"Gagal ambil PO lines: {str(e)}")
+        raise HTTPException(500, f"Failed to fetch PO lines: {str(e)}")
     finally:
         ora.close()
     if not result:
-        raise HTTPException(404, f"PO '{po_number}' tidak ditemukan di EBS")
+        raise HTTPException(404, f"PO '{po_number}' not found in EBS")
     return result
 
 
@@ -197,7 +197,7 @@ async def gl_date_preview(received_date: str = Query(..., description="DD-MON-YY
     try:
         base = svc._parse_date(received_date)
     except ValueError:
-        raise HTTPException(400, f"Format tanggal tidak dikenali: '{received_date}'")
+        raise HTTPException(400, f"Unrecognised date format: '{received_date}'")
     ora = get_oracle_connection()
     try:
         gl_date = svc._compute_gl_date(ora, base)
@@ -224,7 +224,7 @@ async def get_invoice(stg_id: int):
     finally:
         conn.close()
     if not result:
-        raise HTTPException(404, "Invoice tidak ditemukan")
+        raise HTTPException(404, "Invoice not found")
     return result
 
 
@@ -245,7 +245,7 @@ async def validate(stg_id: int):
 @router.post("/insert-interface/{stg_id}")
 async def insert_interface(stg_id: int, payload: dict):
     if "header" not in payload or "lines" not in payload:
-        raise HTTPException(400, "Payload header dan lines diperlukan")
+        raise HTTPException(400, "Both header and lines are required in the payload")
 
     pg = _get_pg()
     try:
@@ -253,9 +253,9 @@ async def insert_interface(stg_id: int, payload: dict):
         cur.execute("SELECT status FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
         row = cur.fetchone()
         if not row:
-            raise HTTPException(404, "STG_ID tidak ditemukan")
+            raise HTTPException(404, "STG_ID not found")
         if row[0] not in ("VALIDATED", "PROCESSING", "ERROR"):
-            raise HTTPException(409, f"Status harus VALIDATED, saat ini: '{row[0]}'")
+            raise HTTPException(409, f"Status must be VALIDATED, it is: '{row[0]}'")
 
         cur.execute("UPDATE ap_invoice_stg SET status = 'PROCESSING', error_msg = NULL, processed_date = NOW() WHERE stg_id = %s", (stg_id,))
         pg.commit()
@@ -275,12 +275,12 @@ async def insert_interface(stg_id: int, payload: dict):
         try:
             pg2 = _get_pg()
             pg2.cursor().execute("UPDATE ap_invoice_stg SET status = 'ERROR', error_msg = %s WHERE stg_id = %s",
-                                 (f"Insert interface gagal: {str(e)}", stg_id))
+                                 (f"Interface insert failed: {str(e)}", stg_id))
             pg2.commit()
             pg2.close()
         except Exception:
             pass
-        raise HTTPException(500, f"Insert interface gagal: {str(e)}")
+        raise HTTPException(500, f"Interface insert failed: {str(e)}")
     finally:
         if ora:
             ora.close()
@@ -295,9 +295,9 @@ async def run_import(stg_id: int):
         cur.execute("SELECT status FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
         row = cur.fetchone()
         if not row:
-            raise HTTPException(404, "STG_ID tidak ditemukan")
+            raise HTTPException(404, "STG_ID not found")
         if row[0] not in ("INTERFACED", "ERROR"):
-            raise HTTPException(409, f"Status harus INTERFACED, saat ini: '{row[0]}'")
+            raise HTTPException(409, f"Status must be INTERFACED, it is: '{row[0]}'")
     except HTTPException:
         pg.close()
         raise
@@ -311,12 +311,12 @@ async def run_import(stg_id: int):
         try:
             pg2 = _get_pg()
             pg2.cursor().execute("UPDATE ap_invoice_stg SET status = 'ERROR', error_msg = %s WHERE stg_id = %s",
-                                 (f"Run import gagal: {str(e)}", stg_id))
+                                 (f"Import run failed: {str(e)}", stg_id))
             pg2.commit()
             pg2.close()
         except Exception:
             pass
-        raise HTTPException(500, f"Run import gagal: {str(e)}")
+        raise HTTPException(500, f"Import run failed: {str(e)}")
     finally:
         if ora:
             ora.close()
@@ -331,7 +331,7 @@ async def attach_pdf(stg_id: int):
     row = cur.fetchone()
     if not row:
         pg.close()
-        raise HTTPException(404, "Invoice tidak ditemukan")
+        raise HTTPException(404, "Invoice not found")
 
     ap_invoice_id, invoice_num, vendor_id, source_file, status = row
 
@@ -347,22 +347,22 @@ async def attach_pdf(stg_id: int):
                             (ap_invoice_id, stg_id))
                 pg.commit()
             else:
-                raise HTTPException(409, f"Invoice '{invoice_num}' belum ditemukan di ap_invoices_all. Pastikan APXIIMPT sudah selesai.")
+                raise HTTPException(409, f"Invoice '{invoice_num}' is not in ap_invoices_all yet. Make sure APXIIMPT has finished.")
 
         if not source_file:
-            raise HTTPException(400, "Tidak ada source file untuk di-attach")
+            raise HTTPException(400, "No source file to attach")
 
         pdf_path = os.path.join(svc.UPLOAD_DIR, source_file)
         if not os.path.exists(pdf_path):
-            raise HTTPException(404, f"File tidak ditemukan: {source_file}")
+            raise HTTPException(404, f"File not found: {source_file}")
 
         svc.attach_pdf_to_invoice(ora, ap_invoice_id, pdf_path, source_file)
 
-        return {"stg_id": stg_id, "ap_invoice_id": ap_invoice_id, "message": f"PDF berhasil di-attach ke Invoice ID {ap_invoice_id}"}
+        return {"stg_id": stg_id, "ap_invoice_id": ap_invoice_id, "message": f"PDF attached to Invoice ID {ap_invoice_id}"}
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(500, f"Attach gagal: {str(e)}")
+        raise HTTPException(500, f"Attach failed: {str(e)}")
     finally:
         if ora:
             ora.close()
@@ -395,7 +395,7 @@ async def update_invoice(stg_id: int, payload: dict):
                "wht_enabled", "wht_amount", "awt_group_id", "awt_group_name"}
     updates = {k: v for k, v in payload.items() if k in allowed}
     if not updates:
-        raise HTTPException(400, "Tidak ada field valid untuk diupdate")
+        raise HTTPException(400, "No valid fields to update")
 
     pg = _get_pg()
     cur = pg.cursor()
@@ -419,7 +419,7 @@ async def update_invoice(stg_id: int, payload: dict):
         if updates.get(date_key):
             normalized = svc.normalize_date_str(updates[date_key])
             if normalized is None:
-                raise HTTPException(400, f"Format tanggal tidak dikenali untuk {date_key}: '{updates[date_key]}'")
+                raise HTTPException(400, f"Unrecognised date format for {date_key}: '{updates[date_key]}'")
             updates[date_key] = normalized
 
     # TOP (terms_date) is always derived from received_date + the invoice's
@@ -442,7 +442,7 @@ async def update_invoice(stg_id: int, payload: dict):
     cur.execute(f"UPDATE ap_invoice_stg SET {sets}, status = 'NEW' WHERE stg_id = %(stg_id)s AND status IN ('NEW','VALIDATED','ERROR')", updates)
     if cur.rowcount == 0:
         pg.close()
-        raise HTTPException(409, "Update gagal: record tidak ditemukan atau status tidak mengizinkan edit")
+        raise HTTPException(409, "Update failed: record not found or its status does not allow editing")
     pg.commit()
     pg.close()
     return {"message": "Updated", "stg_id": stg_id}
@@ -456,10 +456,10 @@ async def delete_invoice(stg_id: int):
     row = cur.fetchone()
     if not row:
         pg.close()
-        raise HTTPException(404, "Invoice tidak ditemukan")
+        raise HTTPException(404, "Invoice not found")
     if row[0] not in ("NEW", "VALIDATED", "ERROR"):
         pg.close()
-        raise HTTPException(409, f"Tidak bisa dihapus, status: '{row[0]}'")
+        raise HTTPException(409, f"Cannot be deleted, status: '{row[0]}'")
 
     cur.execute("DELETE FROM ap_invoice_stg WHERE stg_id = %s", (stg_id,))
     pg.commit()
@@ -488,10 +488,10 @@ async def gdrive_status():
 @router.post("/gdrive/sync")
 async def gdrive_sync_now():
     if not gdrive_svc.is_configured():
-        raise HTTPException(400, "Google Drive belum dikonfigurasi (service account JSON / Shared Drive ID belum diset)")
+        raise HTTPException(400, "Google Drive is not configured (service account JSON / Shared Drive ID not set)")
     from app.tasks.celery_app import celery_app
     task = celery_app.send_task("app.tasks.ap_invoice_gdrive_tasks.sync_gdrive_invoices", kwargs={"triggered_by": "manual"})
-    return {"message": "Sync Google Drive dimulai di background — cek status beberapa saat lagi.", "task_id": task.id}
+    return {"message": "Google Drive sync started in the background — check the status again shortly.", "task_id": task.id}
 
 
 @router.get("/gdrive/subfolders")
@@ -499,11 +499,11 @@ async def gdrive_list_subfolders():
     """Subfolders directly under the configured Shared Drive — lets the
     admin UI offer a picker instead of a hand-copied folder ID."""
     if not gdrive_svc.is_configured():
-        raise HTTPException(400, "Google Drive belum dikonfigurasi (service account JSON / Shared Drive ID belum diset)")
+        raise HTTPException(400, "Google Drive is not configured (service account JSON / Shared Drive ID not set)")
     try:
         return gdrive_svc.list_shared_drive_subfolders()
     except Exception as e:
-        raise HTTPException(502, f"Gagal ambil daftar folder dari Google Drive: {e}")
+        raise HTTPException(502, f"Failed to list folders from Google Drive: {e}")
 
 
 @router.get("/gdrive/folders")
@@ -514,7 +514,7 @@ async def gdrive_list_folders():
 @router.post("/gdrive/folders")
 async def gdrive_add_folder(body: GdriveFolderMapCreate):
     if not body.user_label.strip() or not body.folder_id.strip():
-        raise HTTPException(400, "user_label dan folder_id wajib diisi")
+        raise HTTPException(400, "user_label and folder_id are required")
     return gdrive_svc.add_folder_map(body.user_label.strip(), body.folder_id.strip())
 
 

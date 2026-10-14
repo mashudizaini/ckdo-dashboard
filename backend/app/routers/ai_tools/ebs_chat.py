@@ -34,7 +34,7 @@ class QueryRequest(BaseModel):
 
 async def _require_service_key(x_service_key: str = Header(None)):
     if not settings.ebs_chat_service_key:
-        raise HTTPException(503, "EBS Chat belum dikonfigurasi (EBS_CHAT_SERVICE_KEY belum diset)")
+        raise HTTPException(503, "EBS Chat is not configured (EBS_CHAT_SERVICE_KEY not set)")
     if not x_service_key or not hmac.compare_digest(x_service_key, settings.ebs_chat_service_key):
         raise HTTPException(401, "Invalid or missing X-Service-Key")
 

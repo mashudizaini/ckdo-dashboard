@@ -266,7 +266,7 @@ def etl_mart_ap(year: int = None, month: int = None, full_refresh: bool = False,
     job = "etl_mart_ap"
     run = _Run(job, trigger_type, triggered_by, {"full_refresh": full_refresh})
     if not run.locked:
-        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.finish("skipped", error="The same job is already running (advisory lock) — skipped.")
         run.close()
         return {"status": "skipped"}
 
@@ -426,7 +426,7 @@ def etl_mart_inventory(year: int = None, month: int = None,
     job = "etl_mart_inventory"
     run = _Run(job, trigger_type, triggered_by, {"organization_id": EBS_PROCESS_ORG_ID})
     if not run.locked:
-        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.finish("skipped", error="The same job is already running (advisory lock) — skipped.")
         run.close()
         return {"status": "skipped"}
 
@@ -701,7 +701,7 @@ def etl_mart_po(year: int = None, month: int = None, full_refresh: bool = False,
     job = "etl_mart_po"
     run = _Run(job, trigger_type, triggered_by, {"full_refresh": full_refresh})
     if not run.locked:
-        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.finish("skipped", error="The same job is already running (advisory lock) — skipped.")
         run.close()
         return {"status": "skipped"}
 
@@ -818,7 +818,7 @@ def etl_mart_item_cost(year: int = None, month: int = None,
     job = "etl_mart_item_cost"
     run = _Run(job, trigger_type, triggered_by, {"organization_id": EBS_PROCESS_ORG_ID, "method": OPM_COST_METHOD})
     if not run.locked:
-        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.finish("skipped", error="The same job is already running (advisory lock) — skipped.")
         run.close()
         return {"status": "skipped"}
 
@@ -834,9 +834,9 @@ def etl_mart_item_cost(year: int = None, month: int = None,
             rows = cur_ora.fetchall()
             if not rows:
                 cur_ora.execute(_ITEM_COST_DIAG_SQL, {"months": OPM_COST_HISTORY_MONTHS})
-                found = ", ".join(f"org {r[0]}/{r[1]}: {r[2]} baris" for r in cur_ora.fetchall()[:10])
-                note = (f"Tidak ada biaya {OPM_COST_METHOD} untuk org {EBS_PROCESS_ORG_ID}. "
-                        f"Yang tersedia: {found or 'tidak ada sama sekali'}")
+                found = ", ".join(f"org {r[0]}/{r[1]}: {r[2]} rows" for r in cur_ora.fetchall()[:10])
+                note = (f"No {OPM_COST_METHOD} cost for org {EBS_PROCESS_ORG_ID}. "
+                        f"Available: {found or 'none at all'}")
         finally:
             ora.close()
         rows_read = len(rows)
@@ -978,7 +978,7 @@ def etl_mart_om(year: int = None, month: int = None, full_refresh: bool = False,
     job = "etl_mart_om"
     run = _Run(job, trigger_type, triggered_by, {"full_refresh": full_refresh})
     if not run.locked:
-        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.finish("skipped", error="The same job is already running (advisory lock) — skipped.")
         run.close()
         return {"status": "skipped"}
 
@@ -1163,7 +1163,7 @@ def etl_mart_ar(year: int = None, month: int = None, full_refresh: bool = False,
     job = "etl_mart_ar"
     run = _Run(job, trigger_type, triggered_by, {"full_refresh": full_refresh})
     if not run.locked:
-        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.finish("skipped", error="The same job is already running (advisory lock) — skipped.")
         run.close()
         return {"status": "skipped"}
 
@@ -1314,7 +1314,7 @@ def etl_mart_opm(year: int = None, month: int = None, full_refresh: bool = False
     job = "etl_mart_opm"
     run = _Run(job, trigger_type, triggered_by, {"full_refresh": full_refresh, "organization_id": EBS_PROCESS_ORG_ID})
     if not run.locked:
-        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.finish("skipped", error="The same job is already running (advisory lock) — skipped.")
         run.close()
         return {"status": "skipped"}
 
@@ -1514,7 +1514,7 @@ def etl_mart_gl(year: int = None, month: int = None, full_refresh: bool = False,
     job = "etl_mart_gl"
     run = _Run(job, trigger_type, triggered_by, {"full_refresh": full_refresh, "ledger_id": EBS_LEDGER_ID})
     if not run.locked:
-        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.finish("skipped", error="The same job is already running (advisory lock) — skipped.")
         run.close()
         return {"status": "skipped"}
 

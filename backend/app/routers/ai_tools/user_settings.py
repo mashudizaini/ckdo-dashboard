@@ -28,7 +28,7 @@ class ApiKeyRequest(BaseModel):
 
 def _check_provider(provider: str):
     if provider not in svc.ALLOWED_PROVIDERS:
-        raise HTTPException(400, f"Provider tidak didukung: {provider}")
+        raise HTTPException(400, f"Unsupported provider: {provider}")
 
 
 @router.get("/api-key/{provider}")
@@ -51,7 +51,7 @@ async def save_api_key(
     _check_provider(provider)
     key = request.api_key.strip()
     if not key:
-        raise HTTPException(400, "API key tidak boleh kosong")
+        raise HTTPException(400, "The API key cannot be empty")
 
     try:
         await svc.VALIDATORS[provider](key)
@@ -62,7 +62,7 @@ async def save_api_key(
         hint = await svc.set_user_key(db, user.username, provider, key, request.model)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    return {"message": "API key berhasil disimpan dan tervalidasi", "key_hint": hint, "model": request.model}
+    return {"message": "API key saved and validated", "key_hint": hint, "model": request.model}
 
 
 @router.get("/api-key/{provider}/models")
@@ -80,5 +80,5 @@ async def remove_api_key(
     _check_provider(provider)
     deleted = await svc.delete_user_key(db, user.username, provider)
     if not deleted:
-        raise HTTPException(404, "Belum ada API key tersimpan untuk provider ini")
-    return {"message": "API key dihapus — kembali memakai key perusahaan (shared)"}
+        raise HTTPException(404, "No API key saved for this provider yet")
+    return {"message": "API key deleted — back to the company (shared) key"}

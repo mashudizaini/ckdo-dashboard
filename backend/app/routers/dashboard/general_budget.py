@@ -35,7 +35,7 @@ from app.services.budget_access_service import resolve_budget_access
 import asyncio
 
 router = APIRouter()
-MONTH_NAMES = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"]
+MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 
 
 async def _enforce_dept_access(user: CurrentUser, dept: str, db: AsyncSession) -> None:
@@ -127,7 +127,7 @@ async def debug_gl_balance(
             "dept": dept, "year": year,
             "dept_col": DEPT_COL, "account_col": ACCOUNT_COL,
             **result,
-            "hint": "Lihat 'flags' — jika actual_flag='B' tidak ada berarti budget belum diinput di Oracle GL untuk dept/tahun ini."
+            "hint": "See 'flags' — if actual_flag='B' is missing, no budget has been entered in Oracle GL for this department/year."
         }
     except Exception as e:
         return {"error": str(e)}
@@ -212,13 +212,13 @@ async def export_budget(
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = f"Budget {dept}"
-    ws.append(["Department", "Tahun", "Filter Bulan (s.d.)", "Kode Akun", "Nama Akun",
+    ws.append(["Department", "Year", "Month Filter (to)", "Account Code", "Account Name",
                "Budget (Rp)", "Encumbrance (Rp)", "Actual (Rp)", "Funds Available (Rp)"])
 
     for acc in accounts:
         ws.append([
             dept, year,
-            MONTH_NAMES[month - 1] if month else "Semua",
+            MONTH_NAMES[month - 1] if month else "All",
             acc["account_code"],
             acc["account_name"],
             acc["budget"],

@@ -264,7 +264,7 @@ async def convert_outlook_material(
     gemini_key = await _resolve_gemini_key(db, user) if provider == "gemini" else None
     result = await OutlookMaterialService().convert_material(db, material_id, provider, gemini_key)
     if result.get("data") is None:
-        raise HTTPException(404, result.get("error", "Material tidak ditemukan"))
+        raise HTTPException(404, result.get("error", "Material not found"))
     return result
 
 
@@ -278,10 +278,10 @@ async def download_outlook_material(
     service = OutlookMaterialService()
     row = await service.get_material(db, material_id)
     if not row:
-        raise HTTPException(404, "Material tidak ditemukan")
+        raise HTTPException(404, "Material not found")
     path = service.storage_path(row.filename)
     if not os.path.exists(path):
-        raise HTTPException(404, "File tidak ditemukan di server")
+        raise HTTPException(404, "File not found on the server")
     with open(path, "rb") as f:
         content = f.read()
     return StreamingResponse(
@@ -1020,7 +1020,7 @@ def _build_investment_plan_report_xlsx(plans: list, plan_year: int) -> Streaming
             })
 
     if not rows_by_clarification:
-        raise HTTPException(404, f"Tidak ada data Investment Plan untuk tahun {plan_year}")
+        raise HTTPException(404, f"No Investment Plan data for {plan_year}")
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -1150,7 +1150,7 @@ def _build_purchase_plan_report_xlsx(plans_this: list, plans_prior: list, plan_y
             })
 
     if not rows_by_type:
-        raise HTTPException(404, f"Tidak ada data Purchase Plan untuk tahun {plan_year}")
+        raise HTTPException(404, f"No Purchase Plan data for {plan_year}")
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -1698,7 +1698,7 @@ def _build_sales_plan_report_xlsx(plans: list, plan_year: int) -> StreamingRespo
                 arr[i] += months[i]
 
     if not tree:
-        raise HTTPException(404, f"Tidak ada data Sales Plan untuk tahun {plan_year}")
+        raise HTTPException(404, f"No Sales Plan data for {plan_year}")
 
     def sum_months(node):
         if isinstance(node, list):
@@ -1826,7 +1826,7 @@ def _build_personnel_plan_report_xlsx(plans: list, plan_year: int) -> StreamingR
             dept_totals[dept] = hc["total"]
 
     if not dept_rows:
-        raise HTTPException(404, f"Tidak ada data Personnel Plan untuk tahun {plan_year}")
+        raise HTTPException(404, f"No Personnel Plan data for {plan_year}")
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -1939,7 +1939,7 @@ def _build_opex_plan_report_xlsx(plans: list, plan_year: int) -> StreamingRespon
             g[coa_name] = g.get(coa_name, 0.0) + total
 
     if not groups:
-        raise HTTPException(404, f"Tidak ada data OPEX Plan untuk tahun {plan_year}")
+        raise HTTPException(404, f"No OPEX Plan data for {plan_year}")
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -2045,7 +2045,7 @@ async def export_manufacture_plan_detail_report(
         raise HTTPException(400, result.get("error") or "Failed to load Manufacture Plan data")
     rows = [row for plan in result["data"] for row in (plan.get("content") or {}).get("rows", [])]
     if not rows:
-        raise HTTPException(404, f"Tidak ada data Manufacture Plan untuk tahun {plan_year}")
+        raise HTTPException(404, f"No Manufacture Plan data for {plan_year}")
     try:
         return _build_manufacture_plan_detail_xlsx(rows, plan_year)
     except Exception as e:
@@ -2315,7 +2315,7 @@ async def push_exchange_rates_to_ebs(
     # Get current cached rates (don't re-scrape unless cache is empty)
     cached = await asyncio.to_thread(exchange_rate_service.get_rates, "auto", False)
     if not cached.get("rates"):
-        return {"success": False, "error": "Tidak ada data kurs — ambil data kurs terlebih dahulu", "results": []}
+        return {"success": False, "error": "No exchange rate data — fetch the rates first", "results": []}
 
     results = await asyncio.to_thread(
         exchange_rate_service.push_rates_to_ebs,

@@ -59,7 +59,7 @@ async def _get_recording_or_404(db: AsyncSession, recording_id: int) -> MeetingR
     result = await db.execute(select(MeetingRecording).where(MeetingRecording.id == recording_id))
     rec = result.scalar_one_or_none()
     if not rec:
-        raise HTTPException(404, "Recording tidak ditemukan")
+        raise HTTPException(404, "Recording not found")
     return rec
 
 
@@ -289,7 +289,7 @@ async def _save_manual_transcript(
     feed it into the exact same setTranscript()/step="transcript" flow."""
     text = (text or "").strip()
     if not text:
-        raise HTTPException(400, "Transcript tidak boleh kosong")
+        raise HTTPException(400, "The transcript cannot be empty")
 
     rec = MeetingRecording(
         filename="",
@@ -409,7 +409,7 @@ async def download_audio(
     rec = await _get_recording_or_404(db, recording_id)
     path = os.path.join(_UPLOAD_DIR, rec.filename)
     if not os.path.exists(path):
-        raise HTTPException(404, "File audio tidak ditemukan di server")
+        raise HTTPException(404, "Audio file not found on the server")
     with open(path, "rb") as f:
         data = f.read()
     return Response(
@@ -462,7 +462,7 @@ async def generate_mom(
         raise HTTPException(400, f'Invalid provider — use one of {", ".join(_MOM_PROVIDERS)}')
     rec = await _get_recording_or_404(db, recording_id)
     if not (rec.transcript or "").strip():
-        raise HTTPException(400, "Recording ini belum punya transcript")
+        raise HTTPException(400, "This recording has no transcript yet")
 
     api_key = None
     if body.provider in _USER_KEY_PROVIDERS:
@@ -521,7 +521,7 @@ async def download_mom_docx(
 ):
     rec = await _get_recording_or_404(db, recording_id)
     if not rec.mom_json:
-        raise HTTPException(400, "MOM belum di-generate untuk recording ini")
+        raise HTTPException(400, "No MOM has been generated for this recording yet")
 
     docx_bytes = MeetingNotesService().build_mom_docx(
         rec.mom_json, rec.meeting_title or "Meeting", rec.participants or "", rec.mom_meta or {}
@@ -558,7 +558,7 @@ async def enroll_speaker(
     20s+) clip. Re-enrolling the same name overwrites their embedding
     (e.g. a better/cleaner sample recorded later)."""
     if not name.strip():
-        raise HTTPException(400, "Nama tidak boleh kosong")
+        raise HTTPException(400, "Name cannot be empty")
     content = await file.read()
     try:
         embedding = await speaker_id_service.embed_clip(content, file.filename or "clip.wav")
@@ -608,7 +608,7 @@ async def delete_speaker(
     result = await db.execute(select(SpeakerVoiceprint).where(SpeakerVoiceprint.id == speaker_id))
     vp = result.scalar_one_or_none()
     if not vp:
-        raise HTTPException(404, "Speaker tidak ditemukan")
+        raise HTTPException(404, "Speaker not found")
     await db.delete(vp)
     await db.commit()
     return {"message": "Deleted"}
@@ -628,15 +628,15 @@ async def identify_speakers(
     didn't return per-segment timestamps)."""
     rec = await _get_recording_or_404(db, recording_id)
     if not rec.filename:
-        raise HTTPException(400, "Recording ini tidak punya file audio")
+        raise HTTPException(400, "This recording has no audio file")
     path = os.path.join(_UPLOAD_DIR, rec.filename)
     if not os.path.exists(path) or os.path.getsize(path) == 0:
-        raise HTTPException(400, "File audio tidak ditemukan di server")
+        raise HTTPException(400, "Audio file not found on the server")
 
     result = await db.execute(select(SpeakerVoiceprint))
     voiceprints = result.scalars().all()
     if not voiceprints:
-        raise HTTPException(400, "Belum ada speaker yang di-enroll — tambahkan lewat POST /speakers dulu")
+        raise HTTPException(400, "No speakers enrolled yet — add one via POST /speakers first")
 
     with open(path, "rb") as f:
         content = f.read()

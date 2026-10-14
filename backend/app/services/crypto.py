@@ -15,14 +15,14 @@ _fernet = Fernet(settings.field_encryption_key.encode()) if settings.field_encry
 
 def encrypt(value: str) -> str:
     if not _fernet:
-        raise RuntimeError("FIELD_ENCRYPTION_KEY belum diset di environment")
+        raise RuntimeError("FIELD_ENCRYPTION_KEY is not set in the environment")
     return _fernet.encrypt(value.encode()).decode()
 
 
 def decrypt(token: str) -> str:
     if not _fernet:
-        raise RuntimeError("FIELD_ENCRYPTION_KEY belum diset di environment")
+        raise RuntimeError("FIELD_ENCRYPTION_KEY is not set in the environment")
     try:
         return _fernet.decrypt(token.encode()).decode()
     except InvalidToken:
-        raise ValueError("Data terenkripsi tidak valid atau FIELD_ENCRYPTION_KEY sudah berubah")
+        raise ValueError("Invalid encrypted data, or FIELD_ENCRYPTION_KEY has changed")

@@ -227,7 +227,7 @@ COLUMNS = [
     ("journal_category",          "Journal Category"),
     ("period",                    "Period"),
     ("posted_date",               "Posted Date"),
-    ("faktur_pajak",              "Faktur Pajak"),
+    ("faktur_pajak",              "Tax Invoice No"),
     ("invoice_no",                "Invoice No"),
     ("inv_sequence_no",           "Inv Sequence No"),
     ("invoice_type",              "Invoice Type"),

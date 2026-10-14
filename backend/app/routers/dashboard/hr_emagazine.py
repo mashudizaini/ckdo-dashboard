@@ -108,11 +108,11 @@ async def upload_magazine(
 ):
     """Upload a PDF magazine and register it in index.json."""
     if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(400, "Hanya file PDF yang diperbolehkan.")
+        raise HTTPException(400, "Only PDF files are allowed.")
 
     content = await file.read()
     if len(content) > MAX_PDF_MB * 1024 * 1024:
-        raise HTTPException(413, f"Ukuran file melebihi {MAX_PDF_MB} MB.")
+        raise HTTPException(413, f"The file is larger than {MAX_PDF_MB} MB.")
 
     try:
         qr_links = json.loads(qr_links_json) if qr_links_json else []
@@ -157,10 +157,10 @@ async def upload_album(
     meta, delete) since they're all keyed generically by the entry's
     `filename` — here that's the album's folder name, not a real file."""
     if not photos:
-        raise HTTPException(400, "Minimal 1 foto diperlukan.")
+        raise HTTPException(400, "At least 1 photo is required.")
     for p in photos:
         if p.content_type not in ALLOWED_PHOTO_TYPES:
-            raise HTTPException(400, f"'{p.filename}' bukan tipe gambar yang didukung (JPEG/PNG/WebP).")
+            raise HTTPException(400, f"'{p.filename}' is not a supported image type (JPEG/PNG/WebP).")
 
     try:
         qr_links = json.loads(qr_links_json) if qr_links_json else []
@@ -177,7 +177,7 @@ async def upload_album(
         for i, p in enumerate(photos, start=1):
             content = await p.read()
             if len(content) > MAX_PHOTO_MB * 1024 * 1024:
-                raise HTTPException(413, f"'{p.filename}' melebihi {MAX_PHOTO_MB} MB.")
+                raise HTTPException(413, f"'{p.filename}' is larger than {MAX_PHOTO_MB} MB.")
             ext = Path(p.filename or "").suffix.lower() or ".jpg"
             photo_filename = f"photo_{i}{ext}"
             (album_dir / photo_filename).write_bytes(content)
@@ -185,10 +185,10 @@ async def upload_album(
         music_filename = None
         if music is not None and music.filename:
             if music.content_type not in ALLOWED_AUDIO_TYPES:
-                raise HTTPException(400, f"'{music.filename}' bukan tipe audio yang didukung (MP3, OGG, atau WAV).")
+                raise HTTPException(400, f"'{music.filename}' is not a supported audio type (MP3, OGG or WAV).")
             music_content = await music.read()
             if len(music_content) > MAX_AUDIO_MB * 1024 * 1024:
-                raise HTTPException(413, f"Ukuran musik melebihi {MAX_AUDIO_MB} MB.")
+                raise HTTPException(413, f"The music file is larger than {MAX_AUDIO_MB} MB.")
             ext = Path(music.filename or "").suffix.lower() or ".mp3"
             music_filename = f"music{ext}"
             (album_dir / music_filename).write_bytes(music_content)
@@ -230,14 +230,14 @@ async def add_photos(
     entries = _read_index()
     entry = next((e for e in entries if e["filename"] == safe_name), None)
     if not entry:
-        raise HTTPException(404, "Album tidak ditemukan.")
+        raise HTTPException(404, "Album not found.")
     if entry.get("type") != "photo_album":
-        raise HTTPException(400, "Hanya photo album yang bisa ditambah foto.")
+        raise HTTPException(400, "Only photo albums can have photos added.")
     if not photos:
-        raise HTTPException(400, "Minimal 1 foto diperlukan.")
+        raise HTTPException(400, "At least 1 photo is required.")
     for p in photos:
         if p.content_type not in ALLOWED_PHOTO_TYPES:
-            raise HTTPException(400, f"'{p.filename}' bukan tipe gambar yang didukung (JPEG/PNG/WebP).")
+            raise HTTPException(400, f"'{p.filename}' is not a supported image type (JPEG/PNG/WebP).")
 
     album_dir = UPLOAD_DIR / safe_name
     album_dir.mkdir(parents=True, exist_ok=True)
@@ -248,7 +248,7 @@ async def add_photos(
         for i, p in enumerate(photos, start=len(existing_photos) + 1):
             content = await p.read()
             if len(content) > MAX_PHOTO_MB * 1024 * 1024:
-                raise HTTPException(413, f"'{p.filename}' melebihi {MAX_PHOTO_MB} MB.")
+                raise HTTPException(413, f"'{p.filename}' is larger than {MAX_PHOTO_MB} MB.")
             ext = Path(p.filename or "").suffix.lower() or ".jpg"
             photo_filename = f"photo_{i}{ext}"
             (album_dir / photo_filename).write_bytes(content)
@@ -282,17 +282,17 @@ async def reorder_photos(
     entries = _read_index()
     entry = next((e for e in entries if e["filename"] == safe_name), None)
     if not entry:
-        raise HTTPException(404, "Album tidak ditemukan.")
+        raise HTTPException(404, "Album not found.")
     if entry.get("type") != "photo_album":
-        raise HTTPException(400, "Hanya photo album yang punya urutan foto.")
+        raise HTTPException(400, "Only photo albums have a photo order.")
 
     new_order = payload.get("photos")
     if not isinstance(new_order, list) or not new_order:
-        raise HTTPException(400, "Urutan foto tidak valid.")
+        raise HTTPException(400, "Invalid photo order.")
 
     existing = entry.get("photos", [])
     if sorted(new_order) != sorted(existing):
-        raise HTTPException(400, "Urutan baru harus berisi foto yang sama persis, tanpa tambah/hapus.")
+        raise HTTPException(400, "The new order must contain exactly the same photos, with none added or removed.")
 
     entry["photos"] = new_order
     _write_index(entries)
@@ -312,15 +312,15 @@ async def upload_music(
     entries = _read_index()
     entry = next((e for e in entries if e["filename"] == safe_name), None)
     if not entry:
-        raise HTTPException(404, "Album tidak ditemukan.")
+        raise HTTPException(404, "Album not found.")
     if entry.get("type") != "photo_album":
-        raise HTTPException(400, "Hanya photo album yang bisa punya musik latar.")
+        raise HTTPException(400, "Only photo albums can have background music.")
     if music.content_type not in ALLOWED_AUDIO_TYPES:
-        raise HTTPException(400, f"'{music.filename}' bukan tipe audio yang didukung (MP3, OGG, atau WAV).")
+        raise HTTPException(400, f"'{music.filename}' is not a supported audio type (MP3, OGG or WAV).")
 
     content = await music.read()
     if len(content) > MAX_AUDIO_MB * 1024 * 1024:
-        raise HTTPException(413, f"Ukuran musik melebihi {MAX_AUDIO_MB} MB.")
+        raise HTTPException(413, f"The music file is larger than {MAX_AUDIO_MB} MB.")
 
     album_dir = UPLOAD_DIR / safe_name
     album_dir.mkdir(parents=True, exist_ok=True)
@@ -348,7 +348,7 @@ async def delete_music(
     entries = _read_index()
     entry = next((e for e in entries if e["filename"] == safe_name), None)
     if not entry:
-        raise HTTPException(404, "Album tidak ditemukan.")
+        raise HTTPException(404, "Album not found.")
 
     music_filename = entry.get("music")
     if music_filename:
@@ -374,7 +374,7 @@ async def update_qr_links(
             found = True
             break
     if not found:
-        raise HTTPException(404, "Edisi tidak ditemukan.")
+        raise HTTPException(404, "Edition not found.")
     _write_index(entries)
     return {"ok": True, "filename": safe_name}
 
@@ -395,7 +395,7 @@ async def update_meta(
             if "title" in payload:
                 title = (payload.get("title") or "").strip()
                 if not title:
-                    raise HTTPException(400, "Title tidak boleh kosong.")
+                    raise HTTPException(400, "Title cannot be empty.")
                 e["title"] = title
             if "date" in payload:
                 e["date"] = (payload.get("date") or "").strip()
@@ -404,7 +404,7 @@ async def update_meta(
             found = True
             break
     if not found:
-        raise HTTPException(404, "Edisi tidak ditemukan.")
+        raise HTTPException(404, "Edition not found.")
     _write_index(entries)
     return {"ok": True, "filename": safe_name}
 
@@ -420,7 +420,7 @@ async def delete_magazine(
     entries = _read_index()
     entry = next((e for e in entries if e["filename"] == safe_name), None)
     if not entry:
-        raise HTTPException(404, "File tidak ditemukan.")
+        raise HTTPException(404, "File not found.")
 
     if entry.get("type") == "photo_album":
         shutil.rmtree(UPLOAD_DIR / safe_name, ignore_errors=True)
@@ -446,17 +446,17 @@ async def convert_to_text(
     entries = _read_index()
     entry = next((e for e in entries if e["filename"] == _safe_filename(filename)), None)
     if entry and entry.get("type") == "photo_album":
-        raise HTTPException(400, "Convert to Text hanya berlaku untuk e-Magazine PDF, bukan photo album.")
+        raise HTTPException(400, "Convert to Text only applies to e-Magazine PDFs, not photo albums.")
 
     safe_name = _safe_filename(filename)
     pdf_path = UPLOAD_DIR / safe_name
     if not pdf_path.exists():
-        raise HTTPException(404, "File tidak ditemukan.")
+        raise HTTPException(404, "File not found.")
 
     try:
         pages = await asyncio.to_thread(_extract_pdf_pages_text, pdf_path)
     except Exception as e:
-        raise HTTPException(500, f"Konversi teks gagal: {e}")
+        raise HTTPException(500, f"Text conversion failed: {e}")
 
     converted_at = datetime.now(timezone.utc).isoformat()
     text_path = UPLOAD_DIR / f"{safe_name}.pages.json"

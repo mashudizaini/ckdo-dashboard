@@ -215,7 +215,7 @@ async def list_documents(
     user: CurrentUser = Depends(require_role(Roles.IT, Roles.HR, Roles.ACCOUNTING, Roles.PAC, Roles.PURCHASING, Roles.ADMIN)),
 ):
     if not rag_service.is_configured():
-        raise HTTPException(400, "OLLAMA_API_URL belum diset — knowledge base belum aktif")
+        raise HTTPException(400, "OLLAMA_API_URL is not set — the knowledge base is not active")
     return rag_service.list_documents()
 
 
@@ -228,7 +228,7 @@ async def get_document_content(
     """Full concatenated text of a document's chunks — used by Document Converter's 'reopen for editing'."""
     content = rag_service.get_document_content(source, title)
     if content is None:
-        raise HTTPException(404, "Dokumen tidak ditemukan")
+        raise HTTPException(404, "Document not found")
     return {"content": content}
 
 
@@ -242,9 +242,9 @@ async def ingest_document(
     user: CurrentUser = Depends(require_role(Roles.IT, Roles.HR, Roles.ACCOUNTING, Roles.PAC, Roles.PURCHASING, Roles.ADMIN)),
 ):
     if department not in rag_service.DEPARTMENTS:
-        raise HTTPException(400, f"Department harus salah satu dari: {', '.join(rag_service.DEPARTMENTS)}")
+        raise HTTPException(400, f"Department must be one of: {', '.join(rag_service.DEPARTMENTS)}")
     if not rag_service.is_configured():
-        raise HTTPException(400, "OLLAMA_API_URL belum diset di environment. Tambahkan dulu lalu restart backend.")
+        raise HTTPException(400, "OLLAMA_API_URL is not set in the environment. Add it, then restart the backend.")
 
     content    = text.strip()
     from_file  = False
@@ -293,7 +293,7 @@ async def ingest_document(
                 if not content.strip() and ocr_errors:
                     # Expose OCR error so admin can diagnose
                     tess_path = shutil.which("tesseract") or "not found"
-                    raise HTTPException(500, f"OCR gagal (tesseract: {tess_path}): {ocr_errors[0]}")
+                    raise HTTPException(500, f"OCR failed (tesseract: {tess_path}): {ocr_errors[0]}")
             elif ext in (".docx", ".doc"):
                 import docx
                 d = docx.Document(tmp_path)
@@ -302,15 +302,15 @@ async def ingest_document(
                 with open(tmp_path, "r", encoding="utf-8", errors="ignore") as f:
                     content = f.read()
             else:
-                raise HTTPException(400, f"Format file tidak didukung: {ext}")
+                raise HTTPException(400, f"Unsupported file format: {ext}")
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
     if not content.strip():
-        detail = "Tidak ada teks yang berhasil diekstrak dari file."
+        detail = "No text could be extracted from the file."
         if from_file and file_name and file_name.lower().endswith(".pdf"):
-            detail += " PDF ini mungkin merupakan file scan (image-only). Pastikan Tesseract OCR terinstall di server, atau konversi PDF ke format digital terlebih dahulu."
+            detail += " This PDF may be a scan (image-only). Make sure Tesseract OCR is installed on the server, or convert the PDF to a digital format first."
         raise HTTPException(400, detail)
 
     # OCR'd text loses paragraph structure (table cells/fragments often land
@@ -329,12 +329,12 @@ async def ingest_document(
             timeout=40.0,
         )
     except asyncio.TimeoutError:
-        raise HTTPException(504, "Timeout: server AI lokal tidak merespons dalam 40 detik. Periksa koneksi ke ai-engine (172.21.2.27).")
+        raise HTTPException(504, "Timeout: the local AI server did not respond within 40 seconds. Check the connection to ai-engine (172.21.2.27).")
     except Exception as e:
-        raise HTTPException(500, f"Gagal ingest dokumen: {str(e)}")
+        raise HTTPException(500, f"Document ingest failed: {str(e)}")
 
     return {
-        "message":   f"Berhasil menyimpan {len(ids)} chunk dari dokumen '{title}'",
+        "message":   f"Saved {len(ids)} chunks from document '{title}'",
         "chunk_ids": ids,
         "from_file": from_file,
         "file_name": file_name,
@@ -392,10 +392,10 @@ async def trigger_openwebui_sync(
     # instance, far past any reasonable request/response window. Poll
     # GET /openwebui-sync/status afterward for the result.
     if not openwebui_sync_service.is_configured():
-        raise HTTPException(400, "CoChat sync belum dikonfigurasi (OPENWEBUI_BASE_URL/API_KEY/KNOWLEDGE_ID belum diset)")
+        raise HTTPException(400, "CoChat sync is not configured (OPENWEBUI_BASE_URL/API_KEY/KNOWLEDGE_ID not set)")
     from app.tasks.celery_app import celery_app
     task = celery_app.send_task(
         "app.tasks.openwebui_sync_tasks.sync_to_openwebui",
         kwargs={"triggered_by": user.username or "manual"},
     )
-    return {"message": "Sync ke CoChat dimulai di background — cek status beberapa menit lagi.", "task_id": task.id}
+    return {"message": "CoChat sync started in the background — check the status again in a few minutes.", "task_id": task.id}

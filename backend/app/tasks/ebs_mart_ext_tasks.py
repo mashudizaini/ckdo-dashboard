@@ -209,7 +209,7 @@ def etl_mart_ext(year: int = None, month: int = None, full_refresh: bool = False
     job = "etl_mart_ext"
     run = _Run(job, trigger_type, triggered_by, {"org_id": EBS_OPERATING_UNIT_ID, "ledger_id": EBS_LEDGER_ID})
     if not run.locked:
-        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.finish("skipped", error="The same job is already running (advisory lock) — skipped.")
         run.close()
         return {"status": "skipped"}
 

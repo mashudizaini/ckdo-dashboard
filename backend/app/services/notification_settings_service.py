@@ -29,9 +29,9 @@ from app.models.announcement import Announcement
 from app.models.notification_settings import NotificationSetting
 
 NOTIFICATION_REGISTRY: dict[str, dict] = {
-    "birthday":         {"label": "Birthday",         "description": "Karyawan yang berulang tahun bulan ini", "icon": "🎂"},
-    "late_attendance":  {"label": "Late Attendance",   "description": "Karyawan yang terlambat bulan ini",      "icon": "⏰"},
-    "task_alert":       {"label": "Task Alert",        "description": "Tugas HRGA yang mendekati/lewat deadline", "icon": "📋"},
+    "birthday":         {"label": "Birthday",         "description": "Employees with a birthday this month", "icon": "🎂"},
+    "late_attendance":  {"label": "Late Attendance",   "description": "Employees late this month",              "icon": "⏰"},
+    "task_alert":       {"label": "Task Alert",        "description": "HRGA tasks near or past their deadline", "icon": "📋"},
 }
 
 

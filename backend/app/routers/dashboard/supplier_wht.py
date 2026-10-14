@@ -35,7 +35,7 @@ async def sync_from_oracle(updated_by: str = Query("oracle-sync")):
     try:
         return svc.seed_from_oracle(updated_by=updated_by)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Sync gagal: {e}")
+        raise HTTPException(status_code=500, detail=f"Sync failed: {e}")
 
 
 @router.post("")
@@ -47,14 +47,14 @@ async def upsert_wht(body: WhtUpsertRequest):
             updated_by=body.updated_by, awt_group_id=body.awt_group_id,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Simpan gagal: {e}")
+        raise HTTPException(status_code=500, detail=f"Save failed: {e}")
 
 
 @router.put("/{id_}/active")
 async def set_active(id_: int, body: ActiveRequest):
     result = svc.set_active(id_, body.is_active)
     if not result["updated"]:
-        raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+        raise HTTPException(status_code=404, detail="Data not found")
     return result
 
 
@@ -62,7 +62,7 @@ async def set_active(id_: int, body: ActiveRequest):
 async def delete_wht(id_: int):
     deleted = svc.delete_wht_master(id_)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Data tidak ditemukan")
+        raise HTTPException(status_code=404, detail="Data not found")
     return {"deleted": deleted}
 
 
@@ -73,5 +73,5 @@ async def get_wht_for_vendor(vendor_id: int, vendor_name: Optional[str] = Query(
     # falls back to this path with the OCR'd vendor_name as the only clue.
     row = svc.get_wht_for_vendor(vendor_id if vendor_id else None, vendor_name)
     if not row:
-        raise HTTPException(status_code=404, detail="Belum ada data WHT untuk supplier ini")
+        raise HTTPException(status_code=404, detail="No WHT data for this supplier yet")
     return row

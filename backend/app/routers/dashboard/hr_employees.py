@@ -1100,7 +1100,7 @@ _EXPORT_COLUMNS = [
     ("employment_status",  "Employment Status", 18),
     ("employee_grade",     "Grade",            10),
     ("date_of_joining",    "Join Date",        14),
-    ("pkwt_ke",            "PKWT Ke",          10),
+    ("pkwt_ke",            "PKWT No.",         10),
     ("starting_pkwt",      "Starting PKWT",    14),
     ("end_pkwt",           "End PKWT",         14),
     ("permanent_date",     "Permanent Date",   14),

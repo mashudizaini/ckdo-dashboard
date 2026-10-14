@@ -23,7 +23,7 @@ router = APIRouter()
 
 def _require_keycloak_admin_configured():
     if not keycloak_admin_service.is_configured():
-        raise HTTPException(503, "Keycloak Admin API belum dikonfigurasi (KEYCLOAK_ADMIN_CLIENT_ID/SECRET belum diset)")
+        raise HTTPException(503, "The Keycloak Admin API is not configured (KEYCLOAK_ADMIN_CLIENT_ID/SECRET not set)")
 
 
 @router.get("/keycloak/roles")

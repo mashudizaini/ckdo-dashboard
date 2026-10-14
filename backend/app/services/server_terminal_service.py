@@ -113,11 +113,11 @@ async def resolve_target(db, credential_id: int, accessed_by: str) -> Optional[d
     host = (server.address or "").strip()
     if not host or "://" in host or "/" in host:
         return {"error": (
-            f"'{server.name}' tersimpan sebagai alamat web ({host or 'kosong'}), bukan host SSH. "
-            "Buka lewat link alamatnya, atau isi kolom address dengan IP/hostname saja."
+            f"'{server.name}' is stored as a web address ({host or 'empty'}), not an SSH host. "
+            "Open it through its address link, or put just the IP/hostname in the address field."
         )}
     if not cred.username:
-        return {"error": f"Kredensial '{cred.label or credential_id}' belum punya username."}
+        return {"error": f"Credential '{cred.label or credential_id}' has no username yet."}
 
     db.add(ServerCredentialAccessLog(
         credential_id=cred.id, server_name=server.name,

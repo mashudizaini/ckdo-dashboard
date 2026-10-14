@@ -51,19 +51,19 @@ _KIT = Path(__file__).resolve().parents[2] / "services" / "ebs_mart" / "openwebu
 JOBS = {
     "etl_mart_ap": "AP (incremental)",
     "etl_mart_inventory": "Inventory on-hand per lot (snapshot)",
-    "etl_inventory_txn": "Mutasi inventory (sumber inv_movement_daily)",
+    "etl_inventory_txn": "Inventory movements (source of inv_movement_daily)",
     "etl_mart_po": "PO & PR (incremental)",
-    "etl_mart_item_cost": "Biaya OPM PMAC (valuasi)",
-    "etl_mart_om": "Sales order & pengiriman (incremental)",
-    "etl_mart_ar": "Piutang, invoice & penerimaan kas (incremental)",
-    "etl_mart_opm": "Batch produksi OPM (incremental)",
-    "etl_mart_gl": "GL: saldo, jurnal & laba rugi (incremental)",
-    "etl_mart_close": "Closing: status periode, selisih SLA-GL, AutoInvoice, rekon bank (per jam)",
-    "etl_mart_fa": "Aset tetap & penyusutan (harian)",
-    "etl_mart_ext": "Approval PO/PR, hold SO, withholding, budget, interface (per jam)",
-    "etl_mart_sa": "System Administration: user, akses, profile, login, patch (harian)",
-    "etl_mart_sa_ops": "System Administration: concurrent request/manager & workflow (10 menit)",
-    "refresh_ebs_marts": "Refresh semua mart",
+    "etl_mart_item_cost": "OPM PMAC cost (valuation)",
+    "etl_mart_om": "Sales orders & shipments (incremental)",
+    "etl_mart_ar": "Receivables, invoices & cash receipts (incremental)",
+    "etl_mart_opm": "OPM production batches (incremental)",
+    "etl_mart_gl": "GL: balances, journals & P&L (incremental)",
+    "etl_mart_close": "Closing: period status, SLA-GL gap, AutoInvoice, bank reconciliation (hourly)",
+    "etl_mart_fa": "Fixed assets & depreciation (daily)",
+    "etl_mart_ext": "PO/PR approvals, SO holds, withholding, budget, interfaces (hourly)",
+    "etl_mart_sa": "System Administration: users, access, profiles, logins, patches (daily)",
+    "etl_mart_sa_ops": "System Administration: concurrent requests/managers & workflow (10 min)",
+    "refresh_ebs_marts": "Refresh all marts",
 }
 
 
@@ -143,7 +143,7 @@ class TriggerIn(BaseModel):
 @router.post("/trigger/{job}")
 async def trigger(job: str, body: TriggerIn = TriggerIn(), user: CurrentUser = Depends(_admin)):
     if job not in JOBS:
-        raise HTTPException(400, f"Job tidak dikenal. Pilihan: {list(JOBS)}")
+        raise HTTPException(400, f"Unknown job. Choices: {list(JOBS)}")
     from app.tasks.celery_app import celery_app
     kwargs: dict = {}
     if job != "etl_inventory_txn":
@@ -151,7 +151,7 @@ async def trigger(job: str, body: TriggerIn = TriggerIn(), user: CurrentUser = D
     if job in ("etl_mart_ap", "etl_mart_po", "etl_mart_om", "etl_mart_ar", "etl_mart_opm", "etl_mart_gl") and body.full_refresh:
         kwargs["full_refresh"] = True
     result = celery_app.send_task(f"app.tasks.etl_tasks.{job}", kwargs=kwargs)
-    return {"message": f"{JOBS[job]} dijalankan", "task_id": result.id}
+    return {"message": f"{JOBS[job]} started", "task_id": result.id}
 
 
 # ── Catalog ──────────────────────────────────────────────────────────────────
@@ -177,7 +177,7 @@ async def update_catalog(mart: str, column: str, body: CatalogIn, user: CurrentU
          WHERE mart_name = %s AND column_name = %s""",
         (body.description_id, syn, user.username, mart, column))
     if not n:
-        raise HTTPException(404, "Kolom tidak ada di katalog")
+        raise HTTPException(404, "Column not in the catalog")
     return {"ok": True}
 
 
@@ -202,7 +202,7 @@ def _check_sql(sql: str):
         # value; they are always quoted literals, so only those are replaced.
         sql_guard.validate(re.sub(r"'<[^'<>]+>'", "'X'", sql))
     except sql_guard.SqlRejected as e:
-        raise HTTPException(400, f"SQL ditolak guardrail: {e}")
+        raise HTTPException(400, f"SQL refused by the guardrail: {e}")
 
 
 @router.post("/golden-queries")
@@ -214,7 +214,7 @@ async def golden_add(body: GoldenIn, user: CurrentUser = Depends(_admin)):
         VALUES (%s, %s, %s, %s) RETURNING id""", (body.domain, body.question_id.strip(), body.sql_text, user.username),
             True)
     except psycopg2.errors.UniqueViolation:
-        raise HTTPException(400, "Pertanyaan yang sama sudah ada di golden query")
+        raise HTTPException(400, "The same question already exists as a golden query")
     return rows[0]
 
 
@@ -267,7 +267,7 @@ def _tool_call(fn, *args, **kwargs):
 @router.post("/sql")
 async def run_sql(body: SqlIn, user: CurrentUser = Depends(_admin)):
     if body.group not in policy.role_codes():
-        raise HTTPException(400, "Grup tidak dikenal")
+        raise HTTPException(400, "Unknown group")
     caller = _admin_caller(user, body.group)
     return await run_in_threadpool(_tool_call, tools.run_sql, caller, body.sql, "admin playground")
 
@@ -320,9 +320,9 @@ class ToolIn(BaseModel):
 async def call_tool(name: str, body: ToolIn, user: CurrentUser = Depends(_admin)):
     fn = _INTENT_TOOLS.get(name)
     if not fn:
-        raise HTTPException(400, f"Tool tidak dikenal: {name}")
+        raise HTTPException(400, f"Unknown tool: {name}")
     if body.group not in policy.role_codes():
-        raise HTTPException(400, "Grup tidak dikenal")
+        raise HTTPException(400, "Unknown group")
     # "" = not given (tool default); explicit null = "no filter".
     args = {k: v for k, v in body.args.items() if v != ""}
     for flag in ("late_only", "include_reversed", "include_expired", "ytd", "compare_prior_year",
@@ -335,7 +335,7 @@ async def call_tool(name: str, body: ToolIn, user: CurrentUser = Depends(_admin)
             try:
                 args[k] = date.fromisoformat(str(args[k]))
             except ValueError:
-                raise HTTPException(400, f"{k} harus YYYY-MM-DD")
+                raise HTTPException(400, f"{k} must be YYYY-MM-DD")
     for k in ("days", "min_days_overdue", "min_days_waiting", "hours", "days_open", "weeks_ahead", "min_days",
               "days_no_movement"):
         if args.get(k) is not None:
@@ -347,27 +347,27 @@ async def call_tool(name: str, body: ToolIn, user: CurrentUser = Depends(_admin)
     try:
         return await run_in_threadpool(_tool_call, fn, caller, **args)
     except TypeError as e:
-        raise HTTPException(400, f"Argumen tidak valid: {e}")
+        raise HTTPException(400, f"Invalid argument: {e}")
 
 
 # ── Security self-test (blueprint section 11, "Uji keamanan tool server") ────
 
 _NEGATIVE_SQL = [
-    ("DELETE ditolak", "DELETE FROM mart.ap_open_invoice"),
-    ("UPDATE ditolak", "UPDATE mart.ap_open_invoice SET vendor_name = 'x'"),
-    ("INSERT ditolak", "INSERT INTO mart.ap_open_invoice (invoice_id) VALUES (1)"),
-    ("DROP ditolak", "DROP TABLE mart.ap_open_invoice"),
-    ("Multi-statement ditolak", "SELECT 1 FROM mart.ap_open_invoice; DROP TABLE mart.ap_open_invoice"),
-    ("raw.* ditolak", "SELECT * FROM raw.ap_invoices_all"),
-    ("core.* ditolak", "SELECT * FROM core.fact_ap_payment_schedule"),
-    ("pg_catalog ditolak", "SELECT * FROM pg_catalog.pg_authid"),
-    ("information_schema ditolak", "SELECT * FROM information_schema.tables"),
-    ("eis.* ditolak", "SELECT * FROM eis.fact_sales"),
-    ("Subquery ke tabel lain ditolak", "SELECT (SELECT COUNT(*) FROM public.employees) FROM mart.ap_open_invoice"),
-    ("pg_sleep ditolak", "SELECT pg_sleep(20) FROM mart.ap_open_invoice"),
-    ("set_config ditolak", "SELECT set_config('statement_timeout', '0', false) FROM mart.ap_open_invoice"),
-    ("SELECT INTO ditolak", "SELECT * INTO mart.x FROM mart.ap_open_invoice"),
-    ("FOR UPDATE ditolak", "SELECT * FROM mart.ap_open_invoice FOR UPDATE"),
+    ("DELETE refused", "DELETE FROM mart.ap_open_invoice"),
+    ("UPDATE refused", "UPDATE mart.ap_open_invoice SET vendor_name = 'x'"),
+    ("INSERT refused", "INSERT INTO mart.ap_open_invoice (invoice_id) VALUES (1)"),
+    ("DROP refused", "DROP TABLE mart.ap_open_invoice"),
+    ("Multi-statement refused", "SELECT 1 FROM mart.ap_open_invoice; DROP TABLE mart.ap_open_invoice"),
+    ("raw.* refused", "SELECT * FROM raw.ap_invoices_all"),
+    ("core.* refused", "SELECT * FROM core.fact_ap_payment_schedule"),
+    ("pg_catalog refused", "SELECT * FROM pg_catalog.pg_authid"),
+    ("information_schema refused", "SELECT * FROM information_schema.tables"),
+    ("eis.* refused", "SELECT * FROM eis.fact_sales"),
+    ("Subquery to another table refused", "SELECT (SELECT COUNT(*) FROM public.employees) FROM mart.ap_open_invoice"),
+    ("pg_sleep refused", "SELECT pg_sleep(20) FROM mart.ap_open_invoice"),
+    ("set_config refused", "SELECT set_config('statement_timeout', '0', false) FROM mart.ap_open_invoice"),
+    ("SELECT INTO refused", "SELECT * INTO mart.x FROM mart.ap_open_invoice"),
+    ("FOR UPDATE refused", "SELECT * FROM mart.ap_open_invoice FOR UPDATE"),
 ]
 
 
@@ -391,31 +391,31 @@ def _security_test(user: CurrentUser) -> dict:
     for label, sql in _NEGATIVE_SQL:
         try:
             tools.run_sql(admin, sql, "security-test")
-            results.append({"test": label, "passed": False, "detail": "Query LOLOS guardrail"})
+            results.append({"test": label, "passed": False, "detail": "The query PASSED the guardrail"})
         except sql_guard.SqlRejected as e:
             results.append({"test": label, "passed": True, "detail": str(e)})
         except Exception as e:
-            results.append({"test": label, "passed": True, "detail": f"Ditolak di database: {e}"})
+            results.append({"test": label, "passed": True, "detail": f"Refused by the database: {e}"})
 
     # Cross-domain 403: warehouse must not read AP (gl_* is not built yet;
     # AP is the finance mart that exists today).
     wh = _admin_caller(user, "ebs-warehouse", source="security-test")
     try:
         tools.run_sql(wh, "SELECT COUNT(*) FROM mart.ap_open_invoice", "security-test")
-        results.append({"test": "Grup gudang ditolak membaca mart AP", "passed": False, "detail": "Tidak ditolak"})
+        results.append({"test": "Warehouse group refused reading the AP mart", "passed": False, "detail": "Not refused"})
     except AccessDenied as e:
-        results.append({"test": "Grup gudang ditolak membaca mart AP", "passed": True, "detail": str(e)})
+        results.append({"test": "Warehouse group refused reading the AP mart", "passed": True, "detail": str(e)})
     try:
         tools.ap_get_aging(wh)
-        results.append({"test": "Grup gudang ditolak intent tool AP", "passed": False, "detail": "Tidak ditolak"})
+        results.append({"test": "Warehouse group refused the AP intent tool", "passed": False, "detail": "Not refused"})
     except AccessDenied as e:
-        results.append({"test": "Grup gudang ditolak intent tool AP", "passed": True, "detail": str(e)})
+        results.append({"test": "Warehouse group refused the AP intent tool", "passed": True, "detail": str(e)})
     nobody = Caller(email=admin.email, groups=set(), source="security-test")
     try:
         tools.run_sql(nobody, "SELECT COUNT(*) FROM mart.inv_onhand_lot", "security-test")
-        results.append({"test": "User tanpa grup EBS ditolak", "passed": False, "detail": "Tidak ditolak"})
+        results.append({"test": "User without an EBS group refused", "passed": False, "detail": "Not refused"})
     except AccessDenied as e:
-        results.append({"test": "User tanpa grup EBS ditolak", "passed": True, "detail": str(e)})
+        results.append({"test": "User without an EBS group refused", "passed": True, "detail": str(e)})
 
     # Quantity-only access (policy): money columns never leave the dashboard.
     qty_cases = [(r, m) for r, g in policy.load()["grants"].items() for m, lv in g.items() if lv == "qty"]
@@ -424,10 +424,10 @@ def _security_test(user: CurrentUser) -> dict:
         qc = Caller(email="qty-check@ckd-otto.com", groups={role}, source="security-test")
         try:
             tools.run_sql(qc, f"SELECT * FROM mart.{mart}", "security-test")
-            results.append({"test": f"Akses kuantitas ({role} → {mart}): SELECT * ditolak", "passed": False,
-                            "detail": "Tidak ditolak"})
+            results.append({"test": f"Quantity access ({role} → {mart}): SELECT * refused", "passed": False,
+                            "detail": "Not refused"})
         except AccessDenied as e:
-            results.append({"test": f"Akses kuantitas ({role} → {mart}): SELECT * ditolak", "passed": True,
+            results.append({"test": f"Quantity access ({role} → {mart}): SELECT * refused", "passed": True,
                             "detail": str(e)})
         cols = [c for c, _ in _mart_cols(mart)]
         money = [c for c in cols if policy.is_money(c)]
@@ -435,32 +435,32 @@ def _security_test(user: CurrentUser) -> dict:
         if money:
             try:
                 tools.run_sql(qc, f"SELECT {money[0]} AS x FROM mart.{mart}", "security-test")
-                results.append({"test": f"Akses kuantitas: kolom nilai {money[0]} ditolak walau di-alias",
-                                "passed": False, "detail": "Tidak ditolak"})
+                results.append({"test": f"Quantity access: value column {money[0]} refused even when aliased",
+                                "passed": False, "detail": "Not refused"})
             except AccessDenied as e:
-                results.append({"test": f"Akses kuantitas: kolom nilai {money[0]} ditolak walau di-alias",
+                results.append({"test": f"Quantity access: value column {money[0]} refused even when aliased",
                                 "passed": True, "detail": str(e)})
         if plain:
             r = tools.run_sql(qc, f"SELECT {', '.join(plain)} FROM mart.{mart}", "security-test")
-            results.append({"test": "Akses kuantitas: kolom non-nilai tetap terbaca", "passed": r["row_count"] >= 0,
-                            "detail": f"{r['row_count']} baris, kolom {r['columns']}"})
+            results.append({"test": "Quantity access: non-value columns still readable", "passed": r["row_count"] >= 0,
+                            "detail": f"{r['row_count']} rows, columns {r['columns']}"})
 
     # System Administration: three fences (blueprint v2 section 7).
-    outsider = Caller(email="bukan-sysadmin@ckd-otto.com", groups={"ebs-management"}, source="security-test")
+    outsider = Caller(email="not-sysadmin@ckd-otto.com", groups={"ebs-management"}, source="security-test")
     try:
         sa_tools.sa_get_user(outsider, "SYSADMIN")
-        results.append({"test": "SA: email di luar allowlist ditolak (walau grup ebs-management)", "passed": False,
-                        "detail": "Tidak ditolak"})
+        results.append({"test": "SA: email outside the allowlist refused (even with group ebs-management)", "passed": False,
+                        "detail": "Not refused"})
     except AccessDenied as e:
-        results.append({"test": "SA: email di luar allowlist ditolak (walau grup ebs-management)", "passed": True,
+        results.append({"test": "SA: email outside the allowlist refused (even with group ebs-management)", "passed": True,
                         "detail": str(e)})
     sa_admin = Caller(email=sorted(SYSADMIN_ALLOWLIST)[0], groups=set(), source="security-test")
     try:
         tools.run_sql(sa_admin, "SELECT COUNT(*) FROM mart.sa_user", "security-test")
-        results.append({"test": "SA: run_sql ke mart.sa_* ditolak (juga untuk allowlist)", "passed": False,
-                        "detail": "Tidak ditolak"})
+        results.append({"test": "SA: run_sql on mart.sa_* refused (also for the allowlist)", "passed": False,
+                        "detail": "Not refused"})
     except (AccessDenied, sql_guard.SqlRejected) as e:
-        results.append({"test": "SA: run_sql ke mart.sa_* ditolak (juga untuk allowlist)", "passed": True,
+        results.append({"test": "SA: run_sql on mart.sa_* refused (also for the allowlist)", "passed": True,
                         "detail": str(e)})
     conn = query._reader()
     try:
@@ -470,7 +470,7 @@ def _security_test(user: CurrentUser) -> dict:
         conn.rollback()
     finally:
         conn.close()
-    results.append({"test": "SA: role reader biasa tanpa grant ke mart.sa_*", "passed": not can,
+    results.append({"test": "SA: the ordinary reader role has no grant on mart.sa_*", "passed": not can,
                     "detail": f"role={role}, SELECT mart.sa_user={can}"})
     try:
         conn = query._sa_reader()
@@ -484,12 +484,12 @@ def _security_test(user: CurrentUser) -> dict:
             conn.rollback()
         finally:
             conn.close()
-        results.append({"test": f"SA: tool sa_* membaca sebagai {SA_READER_ROLE}, hanya mart.sa_*",
+        results.append({"test": f"SA: sa_* tools read as {SA_READER_ROLE}, mart.sa_* only",
                         "passed": sa_role == SA_READER_ROLE and sa_can and not sa_ap and not sa_core,
                         "detail": f"role={sa_role}, sa_user={sa_can}, ap_open_invoice={sa_ap}, core={sa_core}"})
     except Exception as e:
-        results.append({"test": f"SA: tool sa_* membaca sebagai {SA_READER_ROLE}, hanya mart.sa_*", "passed": False,
-                        "detail": f"Koneksi {SA_READER_ROLE} gagal: {e}"})
+        results.append({"test": f"SA: sa_* tools read as {SA_READER_ROLE}, mart.sa_* only", "passed": False,
+                        "detail": f"{SA_READER_ROLE} connection failed: {e}"})
 
     # The reader connection itself: read-only, timeout, and no write grant.
     conn = query._reader()
@@ -508,27 +508,27 @@ def _security_test(user: CurrentUser) -> dict:
     finally:
         conn.close()
     results.append({"test": f"statement_timeout = {STATEMENT_TIMEOUT}", "passed": timeout == STATEMENT_TIMEOUT, "detail": timeout})
-    results.append({"test": "Koneksi reader read-only", "passed": ro == "on", "detail": f"transaction_read_only={ro}"})
-    results.append({"test": "Role reader tanpa akses core.*", "passed": not core_usage,
+    results.append({"test": "Reader connection is read-only", "passed": ro == "on", "detail": f"transaction_read_only={ro}"})
+    results.append({"test": "Reader role has no access to core.*", "passed": not core_usage,
                     "detail": f"role={role}, USAGE core={core_usage}"
-                              + ("" if role == "llm_ro" else " — role llm_ro belum dipakai (EIS_LLM_RO_URL kosong)")})
+                              + ("" if role == "llm_ro" else " — role llm_ro not in use yet (EIS_LLM_RO_URL empty)")})
 
     # Heavy query stops at the timeout (runs as a real query through run_sql).
     try:
         tools.run_sql(admin, "SELECT COUNT(*) FROM mart.inv_movement_daily a CROSS JOIN mart.inv_movement_daily b "
                              "CROSS JOIN mart.inv_movement_daily c CROSS JOIN mart.inv_movement_daily d",
                       "security-test")
-        results.append({"test": "Query berat berhenti di timeout", "passed": None,
-                        "detail": "Query selesai sebelum timeout (data masih kecil) — tidak terbukti"})
+        results.append({"test": "Heavy query stops at the timeout", "passed": None,
+                        "detail": "The query finished before the timeout (data still small) — not proven"})
     except QueryFailed as e:
-        results.append({"test": "Query berat berhenti di timeout", "passed": "statement_timeout" in str(e), "detail": str(e)})
+        results.append({"test": "Heavy query stops at the timeout", "passed": "statement_timeout" in str(e), "detail": str(e)})
 
     # Every call above must be in the audit log.
     logged = _rows("""SELECT COUNT(*) AS n FROM meta.chat_query_log
                        WHERE id > %s AND source = 'security-test'""", (before,))[0]["n"]
     expected = len(_NEGATIVE_SQL) + 3 + 1 + 2
-    results.append({"test": "Setiap panggilan tercatat di meta.chat_query_log", "passed": logged >= expected,
-                    "detail": f"{logged} baris tercatat (diharapkan ≥ {expected})"})
+    results.append({"test": "Every call is logged in meta.chat_query_log", "passed": logged >= expected,
+                    "detail": f"{logged} rows logged (expected ≥ {expected})"})
 
     passed = sum(1 for r in results if r["passed"] is True)
     return {"passed": passed, "total": len(results), "results": results}
@@ -640,11 +640,11 @@ async def openwebui_kit(user: CurrentUser = Depends(_admin)):
         "model_settings": {
             "name": "EBS Analyst",
             "function_calling": "Native",
-            "temperature": "default (Claude Opus 5.5 menolak parameter temperature)",
+            "temperature": "default (Claude Opus 5.5 rejects the temperature parameter)",
             "context_length_min": 16384,
-            "memory": "Nonaktif",
-            "web_search": "Nonaktif",
-            "access": "Grup ebs-* saja",
+            "memory": "Off",
+            "web_search": "Off",
+            "access": "ebs-* groups only",
         },
     }
 

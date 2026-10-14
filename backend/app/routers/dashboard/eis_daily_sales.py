@@ -180,13 +180,13 @@ def _parse_excel(content: bytes, filename: str = "") -> dict:
     perf_idx = next((i for i, s in enumerate(sheet_names_lower) if "daily sales" in s or "performance" in s), None)
 
     if chart_idx is None:
-        raise HTTPException(status_code=422, detail="Sheet 'Chart' tidak ditemukan di file Excel")
+        raise HTTPException(status_code=422, detail="Sheet 'Chart' not found in the Excel file")
 
     ws = wb[wb.sheetnames[chart_idx]]
     rows = list(ws.iter_rows(min_row=1, max_row=35, values_only=True))
 
     if len(rows) < 2:
-        raise HTTPException(status_code=422, detail="Sheet 'Chart' tidak memiliki baris header yang valid")
+        raise HTTPException(status_code=422, detail="Sheet 'Chart' has no valid header row")
 
     # Kolom pertama boleh berisi "YEAR" (opsional) diikuti WD, Target, Acc, Sales
     # per bulan. Tanpa kolom YEAR, urutannya WD, Target, Acc, Sales per bulan.
@@ -216,7 +216,7 @@ def _parse_excel(content: bytes, filename: str = "") -> dict:
     if not table_rows:
         raise HTTPException(
             status_code=422,
-            detail="Tidak ada baris data valid di sheet 'Chart'. Pastikan kolom WD berisi angka.",
+            detail="No valid data rows in sheet 'Chart'. Make sure the WD column holds numbers.",
         )
 
     month_targets = {}
@@ -409,7 +409,7 @@ async def upload_daily_sales(
     user = Depends(get_current_user),
 ):
     if not file.filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=422, detail="File harus berformat .xlsx atau .xls")
+        raise HTTPException(status_code=422, detail="The file must be .xlsx or .xls")
     content = await file.read()
     parsed = _parse_excel(content, file.filename)
     detected_year = parsed.pop("detected_year", None)
@@ -419,11 +419,11 @@ async def upload_daily_sales(
     _save_store(store)
 
     result = {**parsed, "year": year}
-    message = f"Data berhasil diupload untuk tahun {year}"
+    message = f"Data uploaded for {year}"
     if detected_year and detected_year != year:
         message += (
-            f" (perhatian: tahun yang terbaca dari file adalah {detected_year}, "
-            f"berbeda dari tahun {year} yang dipilih — periksa kembali file atau pilihan tahunnya)"
+            f" (note: the year read from the file is {detected_year}, "
+            f"not the selected year {year} — check the file or the chosen year)"
         )
     return {"message": message, "detected_year": detected_year, "data": result}
 
@@ -437,7 +437,7 @@ async def delete_daily_sales(
     cleared without having to overwrite it with another file first."""
     store = _load_store()
     if str(year) not in store:
-        raise HTTPException(status_code=404, detail=f"Tidak ada data Daily Sales untuk tahun {year}")
+        raise HTTPException(status_code=404, detail=f"No Daily Sales data for {year}")
     del store[str(year)]
     _save_store(store)
-    return {"message": f"Data Daily Sales tahun {year} berhasil dihapus"}
+    return {"message": f"Daily Sales data for {year} deleted"}

@@ -61,8 +61,8 @@ def _parse_overtime_excel(content: bytes) -> list[dict]:
     if overtime_row is None or working_row is None:
         raise HTTPException(
             status_code=422,
-            detail="Format tidak valid: baris 'Overtime Hour' atau 'Working Hour' tidak ditemukan. "
-                   "Pastikan kolom B berisi label tersebut.",
+            detail="Invalid format: the 'Overtime Hour' or 'Working Hour' row was not found. "
+                   "Make sure column B holds those labels.",
         )
 
     result = []
@@ -112,7 +112,7 @@ async def upload_overtime(
 ):
     """Parse overtime Excel and upsert into fact_overtime."""
     if not file.filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=422, detail="File harus .xlsx atau .xls")
+        raise HTTPException(status_code=422, detail="The file must be .xlsx or .xls")
 
     uploaded_by = user.full_name or user.username or "upload"
     content = await file.read()
@@ -148,11 +148,11 @@ async def upload_overtime(
     except Exception as e:
         logger.exception("[upload_overtime] failed")
         await _log_upload("overtime", file.filename, year, 0, "failed", str(e), uploaded_by)
-        raise HTTPException(status_code=500, detail=f"Upload gagal: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
 
     await _log_upload("overtime", file.filename, year, loaded, "success", None, uploaded_by)
     return {
-        "message": f"Berhasil upload {loaded} bulan overtime untuk tahun {year}",
+        "message": f"Uploaded {loaded} months of overtime for {year}",
         "year": year,
         "loaded": loaded,
         "data": months,
@@ -294,9 +294,9 @@ def _parse_cogs_new_excel(content: bytes) -> list[dict]:
         raise HTTPException(
             status_code=422,
             detail=(
-                "Tidak ada data yang bisa dibaca. "
-                "Pastikan format file sesuai: baris 3 header, baris 4 nama bulan, "
-                "baris 5+ data produk dengan kolom No di kolom B."
+                "No data could be read. "
+                "Make sure the file follows the format: row 3 header, row 4 month names, "
+                "rows 5+ product data with the No column in column B."
             ),
         )
 
@@ -361,7 +361,7 @@ async def upload_cogs(
     - Kolom AO  : Kode barang (opsional, jika kosong digenerate otomatis)
     """
     if not file.filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=422, detail="File harus .xlsx atau .xls")
+        raise HTTPException(status_code=422, detail="The file must be .xlsx or .xls")
 
     uploaded_by = user.full_name or user.username or "upload"
     content = await file.read()
@@ -377,7 +377,7 @@ async def upload_cogs(
         period_map = {r[0]: r[1] for r in periods_res.fetchall()}
 
         if not period_map:
-            raise HTTPException(status_code=422, detail=f"Tidak ada data periode untuk tahun {year}")
+            raise HTTPException(status_code=422, detail=f"No period data for {year}")
 
         loaded_products = 0
         loaded_cogs = 0
@@ -456,11 +456,11 @@ async def upload_cogs(
     except Exception as e:
         logger.exception("[upload_cogs] failed")
         await _log_upload("cogs", file.filename, year, 0, "failed", str(e), uploaded_by)
-        raise HTTPException(status_code=500, detail=f"Upload gagal: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
 
     await _log_upload("cogs", file.filename, year, loaded_cogs, "success", None, uploaded_by)
     return {
-        "message": f"Berhasil upload {loaded_products} produk ({loaded_cogs} baris COGS) untuk tahun {year}",
+        "message": f"Uploaded {loaded_products} products ({loaded_cogs} COGS rows) for {year}",
         "year":    year,
         "products": loaded_products,
         "cogs_rows": loaded_cogs,
@@ -591,10 +591,10 @@ def _parse_sales_bp_excel(content: bytes) -> dict:
         raise HTTPException(
             status_code=422,
             detail=(
-                "Format file tidak dapat dibaca. "
-                "Pastikan file memiliki header bulan (Jan–Dec) dan baris segment "
+                "The file format could not be read. "
+                "Make sure the file has a month header (Jan–Dec) and segment rows "
                 "(Total / Local / CMO / Export). "
-                "Nilai dalam juta IDR."
+                "Values in million IDR."
             ),
         )
 
@@ -643,7 +643,7 @@ async def upload_sales_bp(
     - fact_sales.bp_amount langsung di-update per bulan per segmen.
     """
     if not file.filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=422, detail="File harus .xlsx atau .xls")
+        raise HTTPException(status_code=422, detail="The file must be .xlsx or .xls")
 
     uploaded_by = user.full_name or user.username or "upload"
     content = await file.read()
@@ -728,13 +728,13 @@ async def upload_sales_bp(
     except Exception as e:
         logger.exception("[upload_sales_bp] failed")
         await _log_upload("sales-bp", file.filename, year, 0, "failed", str(e), uploaded_by)
-        raise HTTPException(status_code=500, detail=f"Upload gagal: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
 
     await _log_upload("sales-bp", file.filename, year, loaded_bp, "success", None, uploaded_by)
     return {
         "message": (
-            f"Berhasil upload Business Plan: {loaded_bp} segmen, "
-            f"{updated_sales} baris sales diupdate untuk tahun {year}"
+            f"Uploaded Business Plan: {loaded_bp} segments, "
+            f"{updated_sales} sales rows updated for {year}"
         ),
         "year":               year,
         "loaded_segments":    loaded_bp,
@@ -820,8 +820,8 @@ def _parse_expansion_excel(content: bytes) -> dict:
         raise HTTPException(
             status_code=422,
             detail=(
-                "Format tidak valid: header bulan (Jan–Dec) tidak ditemukan. "
-                "Pastikan sheet mengikuti format 'Business Expansion_Dashboard'."
+                "Invalid format: the month header (Jan–Dec) was not found. "
+                "Make sure the sheet follows the 'Business Expansion_Dashboard' format."
             ),
         )
 
@@ -864,8 +864,8 @@ def _parse_expansion_excel(content: bytes) -> dict:
         raise HTTPException(
             status_code=422,
             detail=(
-                "Tidak ada data produk yang bisa dibaca. Pastikan kolom Product (B), "
-                "Potential Supplier (D), dan bulan Jan–Dec terisi."
+                "No product data could be read. Make sure the Product (B), "
+                "Potential Supplier (D) and Jan–Dec month columns are filled."
             ),
         )
 
@@ -882,7 +882,7 @@ async def upload_expansion(
     """Parse Business Expansion.xlsx dan insert langsung ke
     dim_pipeline_product + fact_pipeline_progress untuk tahun yang dipilih."""
     if not file.filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=422, detail="File harus .xlsx atau .xls")
+        raise HTTPException(status_code=422, detail="The file must be .xlsx or .xls")
 
     uploaded_by = user.full_name or user.username or "upload"
     content = await file.read()
@@ -897,7 +897,7 @@ async def upload_expansion(
         )
         period_map = {r[0]: r[1] for r in period_res.fetchall()}
         if not period_map:
-            raise HTTPException(status_code=422, detail=f"Tidak ada data periode untuk tahun {year}")
+            raise HTTPException(status_code=422, detail=f"No period data for {year}")
 
         stage_res = await db.execute(text("SELECT stage_order, id FROM eis.dim_dev_stage"))
         stage_map = {r[0]: r[1] for r in stage_res.fetchall()}
@@ -955,11 +955,11 @@ async def upload_expansion(
     except Exception as e:
         logger.exception("[upload_expansion] failed")
         await _log_upload("expansion", file.filename, year, 0, "failed", str(e), uploaded_by)
-        raise HTTPException(status_code=500, detail=f"Upload gagal: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
 
     await _log_upload("expansion", file.filename, year, loaded_rows, "success", None, uploaded_by)
     return {
-        "message": f"Berhasil upload {loaded_products} produk ({loaded_rows} baris progress) untuk tahun {year}",
+        "message": f"Uploaded {loaded_products} products ({loaded_rows} progress rows) for {year}",
         "year": year,
         "products": loaded_products,
         "rows": loaded_rows,
@@ -1139,7 +1139,7 @@ def _parse_eis_template(content: bytes) -> dict[str, list[dict]]:
         if missing:
             raise HTTPException(
                 status_code=422,
-                detail=f"Sheet '{ws.title}': kolom {', '.join(missing)} tidak ditemukan di baris 1.",
+                detail=f"Sheet '{ws.title}': columns {', '.join(missing)} not found in row 1.",
             )
 
         parsed = []
@@ -1154,7 +1154,7 @@ def _parse_eis_template(content: bytes) -> dict[str, list[dict]]:
             if year is None or month is None:
                 raise HTTPException(
                     status_code=422,
-                    detail=f"Sheet '{ws.title}' baris {n}: year/month tidak valid ({r['year']!r}, {r['month']!r}).",
+                    detail=f"Sheet '{ws.title}' row {n}: invalid year/month ({r['year']!r}, {r['month']!r}).",
                 )
             rec = build(r)
             if any(not rec[k] for k in _TEMPLATE_KEY_COLS.get(table, ())):
@@ -1167,7 +1167,7 @@ def _parse_eis_template(content: bytes) -> dict[str, list[dict]]:
     if not out:
         raise HTTPException(
             status_code=422,
-            detail="Tidak ada sheet EIS Template di file ini. Sheet yang dibaca: Production_BatchYield, "
+            detail="No EIS Template sheet in this file. Sheets read: Production_BatchYield, "
                    "Production_Ratios, Production_Release, Production_COGSRatio, "
                    "Production_MachineUtilization, SalesSummary_Monthly, Sales_Ledger, "
                    "AreaSales_Ledger, Marketing_Activities, Administration_Headcount, "
@@ -1186,7 +1186,7 @@ async def upload_eis_template(
     into the eis.prod_* / eis.perf_* tables. Years come from the file itself
     (no year parameter)."""
     if not file.filename.endswith(".xlsx"):
-        raise HTTPException(status_code=422, detail="File harus .xlsx (EIS Template)")
+        raise HTTPException(status_code=422, detail="The file must be .xlsx (EIS Template)")
 
     uploaded_by = user.full_name or user.username or "upload"
     content = await file.read()
@@ -1215,7 +1215,7 @@ async def upload_eis_template(
     except Exception as e:
         logger.exception("[upload_eis_template] failed")
         await _log_upload("eis-template", file.filename, None, 0, "failed", str(e), uploaded_by)
-        raise HTTPException(status_code=500, detail=f"Upload gagal: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
 
     total = sum(s["rows"] for s in summary.values())
     all_years = sorted({y for s in summary.values() for y in s["years"]})
@@ -1224,7 +1224,7 @@ async def upload_eis_template(
         total, "success", None, uploaded_by,
     )
     return {
-        "message": f"Berhasil upload {total} baris dari {len(summary)} sheet (tahun "
+        "message": f"Uploaded {total} rows from {len(summary)} sheets (year "
                    f"{', '.join(map(str, all_years)) or '—'})",
         "tables": summary,
     }

@@ -248,7 +248,7 @@ def etl_mart_sa(year: int = None, month: int = None, full_refresh: bool = False,
     job = "etl_mart_sa"
     run = _Run(job, trigger_type, triggered_by, {"full_refresh": full_refresh})
     if not run.locked:
-        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.finish("skipped", error="The same job is already running (advisory lock) — skipped.")
         run.close()
         return {"status": "skipped"}
 
@@ -285,8 +285,8 @@ def etl_mart_sa(year: int = None, month: int = None, full_refresh: bool = False,
         rows_read = sum(map(len, (users, employees, resps, user_resps, menu_fns, functions, menus, excls, apps, programs,
                                   reqsets, rg_units, profiles, logins, patches, form_rules)))
         if not menu_fns:
-            raise RuntimeError("FND_COMPILED_MENU_FUNCTIONS kosong untuk menu responsibility yang dipakai — "
-                               "jalankan concurrent program 'Compile Security' di EBS, lalu ulangi job ini.")
+            raise RuntimeError("FND_COMPILED_MENU_FUNCTIONS is empty for the responsibility menus in use — "
+                               "run the 'Compile Security' concurrent program in EBS, then repeat this job.")
 
         n = 0
         n += _replace(cur, "core.hr_ebs_employee", ["person_id", "employee_number", "full_name", "email"],
@@ -434,7 +434,7 @@ def etl_mart_sa_ops(year: int = None, month: int = None, full_refresh: bool = Fa
     job = "etl_mart_sa_ops"
     run = _Run(job, trigger_type, triggered_by, {"full_refresh": full_refresh})
     if not run.locked:
-        run.finish("skipped", error="Job yang sama sedang berjalan (advisory lock) — dilewati.")
+        run.finish("skipped", error="The same job is already running (advisory lock) — skipped.")
         run.close()
         return {"status": "skipped"}
 

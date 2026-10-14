@@ -210,7 +210,7 @@ class MeetingNotesService:
             try:
                 doc = Document(io.BytesIO(file_bytes))
             except Exception as e:
-                raise ValueError(f"Tidak bisa membaca file .docx: {e}") from e
+                raise ValueError(f"Cannot read the .docx file: {e}") from e
             return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
         try:
             return file_bytes.decode("utf-8")
@@ -218,7 +218,7 @@ class MeetingNotesService:
             try:
                 return file_bytes.decode("latin-1")
             except Exception as e:
-                raise ValueError(f"Tidak bisa membaca file sebagai teks: {e}") from e
+                raise ValueError(f"Cannot read the file as text: {e}") from e
 
     async def generate_mom(
         self, transcript: str, meeting_title: str = "", participants: str = "",
@@ -256,8 +256,8 @@ class MeetingNotesService:
             except anthropic.APIStatusError as e:
                 if _is_credit_error(e.status_code, str(e)):
                     raise MomProviderCreditError(
-                        "Saldo/kredit API Claude (Anthropic) tidak cukup. Silakan isi ulang di "
-                        "console.anthropic.com > Plans & Billing, atau pilih provider lain."
+                        "Not enough Claude (Anthropic) API credit. Top up at "
+                        "console.anthropic.com > Plans & Billing, or choose another provider."
                     ) from e
                 raise
             raw = (response.content[0].text or "").strip()
@@ -271,8 +271,8 @@ class MeetingNotesService:
             except httpx.HTTPStatusError as e:
                 if _is_credit_error(e.response.status_code, e.response.text):
                     raise MomProviderCreditError(
-                        "Kuota/saldo API Gemini tidak cukup. Silakan cek kuota di Google AI Studio, "
-                        "atau pilih provider lain."
+                        "Not enough Gemini API quota/credit. Check the quota in Google AI Studio, "
+                        "or choose another provider."
                     ) from e
                 raise
         elif provider == "deepseek":
@@ -289,8 +289,8 @@ class MeetingNotesService:
                 )
                 if _is_credit_error(resp.status_code, resp.text):
                     raise MomProviderCreditError(
-                        "Saldo API DeepSeek tidak cukup. Silakan top up di platform.deepseek.com, "
-                        "atau pilih provider lain."
+                        "Not enough DeepSeek API credit. Top up at platform.deepseek.com, "
+                        "or choose another provider."
                     )
                 resp.raise_for_status()
                 raw = (resp.json()["choices"][0]["message"]["content"] or "").strip()
@@ -309,8 +309,8 @@ class MeetingNotesService:
                 )
                 if _is_credit_error(resp.status_code, resp.text):
                     raise MomProviderCreditError(
-                        "Saldo/kredit API OpenAI (ChatGPT) tidak cukup. Silakan cek billing di "
-                        "platform.openai.com, atau pilih provider lain."
+                        "Not enough OpenAI (ChatGPT) API credit. Check billing at "
+                        "platform.openai.com, or choose another provider."
                     )
                 resp.raise_for_status()
                 raw = (resp.json()["choices"][0]["message"]["content"] or "").strip()
@@ -328,8 +328,8 @@ class MeetingNotesService:
                 )
                 if _is_credit_error(resp.status_code, resp.text):
                     raise MomProviderCreditError(
-                        "Saldo API Kimi (Moonshot AI) tidak cukup. Silakan top up di platform.moonshot.ai, "
-                        "atau pilih provider lain."
+                        "Not enough Kimi (Moonshot AI) API credit. Top up at platform.moonshot.ai, "
+                        "or choose another provider."
                     )
                 resp.raise_for_status()
                 raw = (resp.json()["choices"][0]["message"]["content"] or "").strip()
@@ -373,9 +373,9 @@ class MeetingNotesService:
             # Without this check that silently became AttributeError:
             # 'NoneType' object has no attribute 'strip' before this fix.
             raise ValueError(
-                "Model tidak mengembalikan hasil apa pun (respons kosong). Transkrip mungkin "
-                "terlalu panjang untuk provider ini, atau model gagal memproses permintaan. "
-                "Coba lagi, atau gunakan provider lain (Claude/Gemini) untuk rapat yang panjang."
+                "The model returned nothing (empty response). The transcript may be "
+                "too long for this provider, or the model failed to process the request. "
+                "Try again, or use another provider (Claude/Gemini) for long meetings."
             )
 
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
@@ -388,8 +388,8 @@ class MeetingNotesService:
             # the raw parser error ("Unterminated string...") means nothing to
             # a user, so translate it into an actionable message instead.
             raise ValueError(
-                "Model menghasilkan JSON yang terpotong (kemungkinan transkrip terlalu panjang). "
-                "Coba lagi, atau gunakan provider lain (Claude/Gemini) untuk rapat yang sangat panjang."
+                "The model produced truncated JSON (the transcript is probably too long). "
+                "Try again, or use another provider (Claude/Gemini) for very long meetings."
             ) from e
 
     def build_mom_docx(self, mom_json: dict, meeting_title: str, participants: str, meta: dict) -> bytes:

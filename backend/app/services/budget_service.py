@@ -287,8 +287,8 @@ class BudgetService:
             m = int(item["month"])
             items_by_month.setdefault(m, []).append({**item, "source": "Purchase Requisition"})
 
-        MONTH_NAMES = ["Jan","Feb","Mar","Apr","Mei","Jun",
-                       "Jul","Agu","Sep","Okt","Nov","Des"]
+        MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun",
+                       "Jul","Aug","Sep","Oct","Nov","Dec"]
 
         last_month = month if month else 12
         monthly = []

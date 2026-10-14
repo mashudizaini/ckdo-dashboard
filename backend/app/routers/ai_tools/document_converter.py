@@ -114,7 +114,7 @@ async def convert_document(
 ):
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in svc.SUPPORTED_EXTENSIONS:
-        raise HTTPException(400, f"Format tidak didukung: {ext}. Gunakan PDF, DOCX, atau gambar (PNG/JPG).")
+        raise HTTPException(400, f"Unsupported format: {ext}. Use PDF, DOCX or an image (PNG/JPG).")
     if translate_target not in (None, "", "en", "id"):
         raise HTTPException(400, 'translate_target must be "en" or "id"')
     if translate_provider not in _TRANSLATE_PROVIDERS:
