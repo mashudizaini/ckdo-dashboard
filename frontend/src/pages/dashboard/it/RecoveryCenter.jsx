@@ -20,7 +20,7 @@ import { ebsBackupApi } from "@/api/ebsBackup";
 
 /* ─── Formatting ─────────────────────────────────── */
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function fmtBytes(n) {
   if (n === null || n === undefined) return "—";
@@ -49,15 +49,15 @@ function fmtLocal(s, { time = true } = {}) {
 function fmtIso(iso) {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    return new Date(iso).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   } catch (_) { return iso; }
 }
 
 function fmtMinutes(min) {
   if (min === null || min === undefined) return "—";
-  if (min < 60) return `${min} menit`;
-  if (min < 1440) return `${Math.floor(min / 60)} jam ${min % 60} m`;
-  return `${Math.floor(min / 1440)} hari ${Math.floor((min % 1440) / 60)} jam`;
+  if (min < 60) return `${min} min`;
+  if (min < 1440) return `${Math.floor(min / 60)} h ${min % 60} m`;
+  return `${Math.floor(min / 1440)} d ${Math.floor((min % 1440) / 60)} h`;
 }
 
 function daysAgo(s) {
@@ -76,10 +76,10 @@ const C = {
 };
 
 const CATEGORY = {
-  required: { label: "Wajib disimpan", short: "Wajib", color: C.red, bg: "rgba(220,38,38,0.08)" },
-  optional: { label: "Opsional (PITR lama)", short: "Opsional", color: C.amber, bg: "rgba(217,119,6,0.1)" },
-  obsolete: { label: "Aman dihapus", short: "Aman dihapus", color: C.green, bg: "rgba(22,163,74,0.1)" },
-  unknown: { label: "Bukan milik PROD", short: "Bukan PROD", color: C.sub, bg: "rgba(100,116,139,0.1)" },
+  required: { label: "Must keep", short: "Must keep", color: C.red, bg: "rgba(220,38,38,0.08)" },
+  optional: { label: "Optional (older PITR)", short: "Optional", color: C.amber, bg: "rgba(217,119,6,0.1)" },
+  obsolete: { label: "Safe to delete", short: "Safe to delete", color: C.green, bg: "rgba(22,163,74,0.1)" },
+  unknown: { label: "Not from PROD", short: "Not PROD", color: C.sub, bg: "rgba(100,116,139,0.1)" },
 };
 
 // Where archive log copies live. archive_dest (the database's own folder) is
@@ -174,11 +174,11 @@ function errMsg(e, fallback) {
 /* ─── Main ───────────────────────────────────────── */
 
 const VIEWS = [
-  { id: "summary", label: "Ringkasan", icon: ShieldCheck },
+  { id: "summary", label: "Summary", icon: ShieldCheck },
   { id: "fulls", label: "Full Backup (RMAN)", icon: Database },
   { id: "archivelog", label: "Archive Log", icon: FileArchive },
-  { id: "files", label: "Semua File Backup", icon: FolderOpen },
-  { id: "guide", label: "Panduan", icon: BookOpen },
+  { id: "files", label: "All Backup Files", icon: FolderOpen },
+  { id: "guide", label: "Guide", icon: BookOpen },
 ];
 
 export default function RecoveryCenter() {
@@ -193,14 +193,14 @@ export default function RecoveryCenter() {
   const loadCatalog = useCallback(async () => {
     setCatalogLoading(true); setCatalogErr(null);
     try { setCatalog(await ebsBackupApi.recoveryCatalog()); }
-    catch (e) { setCatalogErr(errMsg(e, "Gagal membaca katalog RMAN")); }
+    catch (e) { setCatalogErr(errMsg(e, "Failed to read the RMAN catalog")); }
     finally { setCatalogLoading(false); }
   }, []);
 
   const loadInventory = useCallback(async () => {
     setInventoryLoading(true); setInventoryErr(null);
     try { setInventory(await ebsBackupApi.scanInventory()); }
-    catch (e) { setInventoryErr(errMsg(e, "Gagal memindai file backup")); }
+    catch (e) { setInventoryErr(errMsg(e, "Failed to scan backup files")); }
     finally { setInventoryLoading(false); }
   }, []);
 
@@ -215,11 +215,11 @@ export default function RecoveryCenter() {
         <div>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>Backup &amp; Recovery Center</h3>
           <p style={{ fontSize: 11.5, color: C.sub, marginTop: 2 }}>
-            Status recovery dibaca langsung dari catatan RMAN (control file) PROD — bukan tebakan dari nama file.
-            {catalog?.generated_at && <> Terakhir dipindai {fmtIso(catalog.generated_at + "Z")}.</>}
+            Recovery status is read directly from PROD's RMAN records (control file) — not guessed from file names.
+            {catalog?.generated_at && <> Last scanned {fmtIso(catalog.generated_at + "Z")}.</>}
           </p>
         </div>
-        <Button icon={loading ? Loader2 : RefreshCw} onClick={refreshAll} disabled={loading}>{loading ? "Memindai…" : "Pindai Ulang"}</Button>
+        <Button icon={loading ? Loader2 : RefreshCw} onClick={refreshAll} disabled={loading}>{loading ? "Scanning…" : "Rescan"}</Button>
       </div>
 
       <div className="flex gap-1 flex-wrap px-5 pt-3">
@@ -250,16 +250,16 @@ export default function RecoveryCenter() {
   );
 }
 
-/* ─── Ringkasan ──────────────────────────────────── */
+/* ─── Summary ────────────────────────────────────── */
 
 function SummaryView({ catalog, err, goTo }) {
   if (err) return <ErrorBox>{err}</ErrorBox>;
-  if (!catalog) return <Empty>Membaca katalog RMAN…</Empty>;
+  if (!catalog) return <Empty>Reading the RMAN catalog…</Empty>;
   const s = catalog.summary;
   const cfg = {
-    green: { icon: ShieldCheck, color: C.green, title: "SIAP RESTORE" },
-    amber: { icon: ShieldAlert, color: C.amber, title: "PERLU PERHATIAN" },
-    red: { icon: ShieldX, color: C.red, title: "TIDAK SIAP RESTORE" },
+    green: { icon: ShieldCheck, color: C.green, title: "READY TO RESTORE" },
+    amber: { icon: ShieldAlert, color: C.amber, title: "NEEDS ATTENTION" },
+    red: { icon: ShieldX, color: C.red, title: "NOT READY TO RESTORE" },
   }[s.status] || { icon: ShieldAlert, color: C.faint, title: "—" };
   const Icon = cfg.icon;
   const latest = catalog.full_backups.find((f) => f.is_latest);
@@ -281,25 +281,25 @@ function SummaryView({ catalog, err, goTo }) {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
-        <Stat icon={Clock} label="Bisa dipulihkan sampai" value={fmtLocal(s.recoverable_until)} sub="titik terbaru (WIB)" color={C.green} />
-        <Stat icon={Clock} label="Titik terlama" value={fmtLocal(s.oldest_point)} sub="dengan full backup tertua" />
-        <Stat icon={Database} label="Full backup siap restore" value={`${s.restorable_count} / ${catalog.full_backups.length}`}
-          sub={latest ? `terbaru ${daysAgo(latest.start_time)} hari lalu` : "—"} color={s.restorable_count ? C.ink : C.red} />
-        <Stat icon={AlertTriangle} label="Potensi data hilang (RPO)" value={fmtMinutes(s.rpo_minutes)}
-          sub="jika server hilang total saat ini" color={s.rpo_minutes > 1440 ? C.red : s.rpo_minutes > 360 ? C.amber : C.ink} />
-        <Stat icon={HardDrive} label="Archive log aman dihapus" value={fmtBytes(obs.bytes)}
+        <Stat icon={Clock} label="Recoverable up to" value={fmtLocal(s.recoverable_until)} sub="latest point (WIB)" color={C.green} />
+        <Stat icon={Clock} label="Oldest point" value={fmtLocal(s.oldest_point)} sub="with the oldest full backup" />
+        <Stat icon={Database} label="Restorable full backups" value={`${s.restorable_count} / ${catalog.full_backups.length}`}
+          sub={latest ? `latest ${daysAgo(latest.start_time)} days ago` : "—"} color={s.restorable_count ? C.ink : C.red} />
+        <Stat icon={AlertTriangle} label="Potential data loss (RPO)" value={fmtMinutes(s.rpo_minutes)}
+          sub="if the server were lost right now" color={s.rpo_minutes > 1440 ? C.red : s.rpo_minutes > 360 ? C.amber : C.ink} />
+        <Stat icon={HardDrive} label="Archive logs safe to delete" value={fmtBytes(obs.bytes)}
           sub={`${obs.count} sequence · ${LOCS.map((l) => `${l.label} ${fmtBytes(obs.by_location?.[l.id]?.bytes || 0)}`).join(" · ")}`} color={C.green} />
       </div>
 
       <RecoveryTimeline catalog={catalog} />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-5">
-        <QuickLink onClick={() => goTo("fulls")} icon={Database} title="Lihat full backup"
-          text="Backup mana yang bisa di-restore, sampai kapan, dan perintah RMAN-nya." />
-        <QuickLink onClick={() => goTo("archivelog")} icon={FileArchive} title="Kelola archive log"
-          text={`${obs.count} file (${fmtBytes(obs.bytes)}) sudah tidak dibutuhkan backup mana pun.`} />
-        <QuickLink onClick={() => goTo("guide")} icon={BookOpen} title="Cara kerja recovery"
-          text="Penjelasan singkat full backup + archive log dan kebijakan retensi." />
+        <QuickLink onClick={() => goTo("fulls")} icon={Database} title="View full backups"
+          text="Which backups can be restored, up to when, and their RMAN commands." />
+        <QuickLink onClick={() => goTo("archivelog")} icon={FileArchive} title="Manage archive logs"
+          text={`${obs.count} files (${fmtBytes(obs.bytes)}) are no longer needed by any backup.`} />
+        <QuickLink onClick={() => goTo("guide")} icon={BookOpen} title="How recovery works"
+          text="A short explanation of full backups + archive logs and the retention policy." />
       </div>
     </>
   );
@@ -326,8 +326,8 @@ function RecoveryTimeline({ catalog }) {
   return (
     <Card style={{ padding: 16 }}>
       <div className="flex items-center justify-between mb-3">
-        <p style={{ fontSize: 12, fontWeight: 800, color: C.ink }}>Jendela recovery (point-in-time)</p>
-        <p style={{ fontSize: 11, color: C.faint }}>Bar hijau = rentang waktu yang bisa dipulihkan dengan backup tersebut</p>
+        <p style={{ fontSize: 12, fontWeight: 800, color: C.ink }}>Recovery window (point-in-time)</p>
+        <p style={{ fontSize: 11, color: C.faint }}>Green bar = the time range that backup can be recovered to</p>
       </div>
       <div className="space-y-3">
         {fulls.map((f) => {
@@ -336,14 +336,14 @@ function RecoveryTimeline({ catalog }) {
             <div key={f.tag} className="flex items-center gap-3">
               <div style={{ width: 150, flexShrink: 0, fontSize: 11.5 }}>
                 <div style={{ fontWeight: 700, color: C.ink }}>{fmtLocal(f.start_time, { time: false })}</div>
-                <div style={{ color: C.faint, fontSize: 10.5 }}>{f.is_latest ? "Full backup terbaru" : "Full backup lama"}</div>
+                <div style={{ color: C.faint, fontSize: 10.5 }}>{f.is_latest ? "Latest full backup" : "Older full backup"}</div>
               </div>
               <div className="relative flex-1 rounded-full" style={{ height: 14, background: "#eef2f7" }}>
                 <div className="absolute rounded-full" title={`Restore + recover: ${fmtLocal(f.recoverable_from)} → ${fmtLocal(f.recoverable_until)}`}
                   style={{ left: `${left}%`, width: `${Math.max(right - left, 0.8)}%`, top: 0, bottom: 0, background: f.is_latest ? C.green : "rgba(22,163,74,0.45)" }} />
-                <div className="absolute" title="Full backup diambil" style={{ left: `calc(${left}% - 1px)`, top: -3, bottom: -3, width: 3, borderRadius: 2, background: C.blue }} />
+                <div className="absolute" title="Full backup taken" style={{ left: `calc(${left}% - 1px)`, top: -3, bottom: -3, width: 3, borderRadius: 2, background: C.blue }} />
               </div>
-              <div style={{ width: 130, flexShrink: 0, fontSize: 11, color: C.sub, textAlign: "right" }}>s/d {fmtLocal(f.recoverable_until)}</div>
+              <div style={{ width: 130, flexShrink: 0, fontSize: 11, color: C.sub, textAlign: "right" }}>to {fmtLocal(f.recoverable_until)}</div>
             </div>
           );
         })}
@@ -361,8 +361,8 @@ function RecoveryTimeline({ catalog }) {
 function FullBackupsView({ catalog, err, inventory }) {
   const [open, setOpen] = useState({});
   if (err) return <ErrorBox>{err}</ErrorBox>;
-  if (!catalog) return <Empty>Membaca katalog RMAN…</Empty>;
-  if (!catalog.full_backups.length) return <Empty>Belum ada full backup RMAN yang tercatat di control file.</Empty>;
+  if (!catalog) return <Empty>Reading the RMAN catalog…</Empty>;
+  if (!catalog.full_backups.length) return <Empty>No RMAN full backup is recorded in the control file yet.</Empty>;
 
   // Offsite copies come from the inventory scan, matched by folder name.
   const copiesFor = (f) => {
@@ -374,8 +374,8 @@ function FullBackupsView({ catalog, err, inventory }) {
   return (
     <>
       <p style={{ fontSize: 12, color: C.sub, marginBottom: 12 }}>
-        Diurutkan dari yang terbaru. Sebuah full backup <b>bisa di-restore</b> bila semua datafile ter-backup, semua backup piece masih ada,
-        ada backup controlfile, dan archive log sejak backup dimulai tersedia tanpa celah.
+        Newest first. A full backup <b>can be restored</b> when every datafile is backed up, every backup piece still exists,
+        a controlfile backup exists, and the archive logs since the backup started are available without gaps.
       </p>
       <div className="space-y-3">
         {catalog.full_backups.map((f) => {
@@ -385,25 +385,25 @@ function FullBackupsView({ catalog, err, inventory }) {
             <Card key={f.tag} style={{ borderColor: f.restorable ? (f.is_latest ? "rgba(22,163,74,0.45)" : C.line) : "rgba(220,38,38,0.35)" }}>
               <div className="flex items-start gap-4 p-4 flex-wrap">
                 <div style={{ minWidth: 170 }}>
-                  <div style={{ fontSize: 10.5, color: C.sub, fontWeight: 700 }}>TANGGAL BACKUP</div>
+                  <div style={{ fontSize: 10.5, color: C.sub, fontWeight: 700 }}>BACKUP DATE</div>
                   <div style={{ fontSize: 15, fontWeight: 800, color: C.ink }}>{fmtLocal(f.start_time, { time: false })}</div>
-                  <div style={{ fontSize: 11, color: C.faint }}>{f.start_time?.slice(11, 16)} – {f.end_time?.slice(11, 16)} WIB · {daysAgo(f.start_time)} hari lalu</div>
+                  <div style={{ fontSize: 11, color: C.faint }}>{f.start_time?.slice(11, 16)} – {f.end_time?.slice(11, 16)} WIB · {daysAgo(f.start_time)} days ago</div>
                 </div>
                 <div className="flex-1" style={{ minWidth: 240 }}>
                   <div className="flex items-center gap-2 flex-wrap mb-1.5">
                     {f.restorable
-                      ? <Pill color={C.green}><CheckCircle2 size={11} />Bisa di-restore</Pill>
-                      : <Pill color={C.red}><XCircle size={11} />Tidak bisa di-restore</Pill>}
-                    {f.is_latest && <Pill color={C.blue}>Terbaru</Pill>}
+                      ? <Pill color={C.green}><CheckCircle2 size={11} />Restorable</Pill>
+                      : <Pill color={C.red}><XCircle size={11} />Not restorable</Pill>}
+                    {f.is_latest && <Pill color={C.blue}>Latest</Pill>}
                     <Pill color={C.sub}>{f.datafiles}/{f.datafiles_total} datafile</Pill>
                     <Pill color={C.sub}>{fmtBytes(f.size_bytes)}</Pill>
                     {f.controlfile_ok && <Pill color={C.sub}>+ controlfile</Pill>}
-                    {(f.copies || []).map((loc) => <Pill key={loc} color={C.blue}>{loc === "synology" ? "Salinan Synology" : "Di staging"}</Pill>)}
-                    {f.restorable && !(f.copies || []).includes("synology") && <Pill color={C.amber} title="Bila server DB rusak, backup ini ikut hilang">Belum ada di Synology</Pill>}
+                    {(f.copies || []).map((loc) => <Pill key={loc} color={C.blue}>{loc === "synology" ? "Synology copy" : "On staging"}</Pill>)}
+                    {f.restorable && !(f.copies || []).includes("synology") && <Pill color={C.amber} title="If the DB server fails, this backup is lost with it">Not on Synology yet</Pill>}
                   </div>
                   {f.restorable ? (
                     <div style={{ fontSize: 12, color: C.ink }}>
-                      Bisa dipulihkan ke waktu mana pun dari <b>{fmtLocal(f.recoverable_from)}</b> sampai <b>{fmtLocal(f.recoverable_until)}</b> WIB
+                      Can be recovered to any time from <b>{fmtLocal(f.recoverable_from)}</b> to <b>{fmtLocal(f.recoverable_until)}</b> WIB
                       <span style={{ color: C.faint }}> (archive log seq {f.start_seq}–{f.last_seq})</span>
                     </div>
                   ) : (
@@ -411,13 +411,13 @@ function FullBackupsView({ catalog, err, inventory }) {
                   )}
                   {(f.notes || []).map((n, i) => <div key={i} style={{ fontSize: 11.5, color: C.amber, marginTop: 2 }}>• {n}</div>)}
                   <div style={{ fontSize: 11, color: C.faint, marginTop: 4 }}>
-                    Tag {f.tag} · {f.dirs.join(", ") || "lokasi tidak diketahui"}
+                    Tag {f.tag} · {f.dirs.join(", ") || "location unknown"}
                     {f.synology_paths?.length > 0 && <> · Synology: {f.synology_paths.join(", ")}</>}
-                    {copies.length > 0 && <> · Salinan: {copies.join(", ")}</>}
+                    {copies.length > 0 && <> · Copies: {copies.join(", ")}</>}
                   </div>
                 </div>
                 <Button size="sm" variant="ghost" icon={isOpen ? ChevronUp : ChevronDown} onClick={() => setOpen((o) => ({ ...o, [f.tag]: !o[f.tag] }))}>
-                  Perintah restore
+                  Restore commands
                 </Button>
               </div>
               {isOpen && <RestoreScript f={f} stagingPath={catalog.staging_path} />}
@@ -434,16 +434,16 @@ function RestoreScript({ f, stagingPath }) {
   const until = f.recoverable_until || f.end_time;
   const dir = f.restore_dir || f.dirs[0];
   const script = [
-    "# REFERENSI — jalankan di server target (Dev / server pengganti), JANGAN di PROD yang sedang berjalan.",
-    "# 1. Startup nomount dengan pfile/spfile PROD, lalu:",
+    "# REFERENCE — run on the target server (Dev / replacement server), NEVER on the running PROD.",
+    "# 1. Startup nomount with the PROD pfile/spfile, then:",
     "rman target /",
     "",
-    ...(f.restore_source === "synology" ? ["# Folder staging sudah tidak ada — memakai salinan di Synology (mount NFS)."] : []),
+    ...(f.restore_source === "synology" ? ["# The staging folder is gone — using the Synology copy (NFS mount)."] : []),
     `RESTORE CONTROLFILE FROM '<${dir || "folder_backup"}/CTL_...bkp>';`,
     "ALTER DATABASE MOUNT;",
     `CATALOG START WITH '${dir || "<folder_backup>"}/' NOPROMPT;`,
     `CATALOG START WITH '${stagingPath}/' NOPROMPT;`,
-    "# Bila archive log yang dibutuhkan sudah tidak ada di staging, CATALOG juga folder archive log di Synology.",
+    "# If the archive logs needed are no longer on staging, also CATALOG the archive log folder on Synology.",
     "",
     "RUN {",
     `  SET UNTIL TIME "TO_DATE('${until}','YYYY-MM-DD HH24:MI:SS')";`,
@@ -462,12 +462,12 @@ function RestoreScript({ f, stagingPath }) {
       <div className="relative rounded-lg" style={{ background: "#0f172a" }}>
         <button type="button" onClick={copy} className="absolute flex items-center gap-1 rounded-md"
           style={{ top: 8, right: 8, background: "rgba(255,255,255,0.1)", color: "#e2e8f0", border: "none", fontSize: 10.5, padding: "3px 8px", cursor: "pointer" }}>
-          <Copy size={11} />{copied ? "Tersalin" : "Salin"}
+          <Copy size={11} />{copied ? "Copied" : "Copy"}
         </button>
         <pre style={{ color: "#e2e8f0", fontSize: 11, padding: 14, overflowX: "auto", whiteSpace: "pre" }}>{script}</pre>
       </div>
       <p style={{ fontSize: 11, color: C.faint, marginTop: 6 }}>
-        Ganti waktu di <code>SET UNTIL TIME</code> untuk memulihkan ke titik sebelum kejadian (mis. sebelum data terhapus). Untuk uji restore ke Dev, gunakan tab <b>Restore</b>.
+        Change the time in <code>SET UNTIL TIME</code> to recover to a point before an incident (e.g. before data was deleted). To test a restore to Dev, use the <b>Restore</b> tab.
       </p>
     </div>
   );
@@ -486,12 +486,12 @@ function LocationStatus({ locations }) {
         const ok = s?.ok;
         return (
           <span key={l.id} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1"
-            title={ok ? s.path : s?.error || "Tidak dipindai"}
+            title={ok ? s.path : s?.error || "Not scanned"}
             style={{ fontSize: 11, background: ok ? "rgba(22,163,74,0.07)" : "rgba(217,119,6,0.08)", color: ok ? C.green : C.amber, fontWeight: 700 }}>
             {ok ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}
             {l.long}
             <span style={{ color: C.faint, fontWeight: 500 }}>
-              {ok ? (s.path || "") : (s?.error || "tidak dipindai")}
+              {ok ? (s.path || "") : (s?.error || "not scanned")}
               {ok && l.id === "synology" && s.writable === false ? " · read-only" : ""}
             </span>
           </span>
@@ -525,7 +525,7 @@ function ArchivelogView({ catalog, err, onChanged }) {
   ), [logs, filter, locFilter, query]);
 
   if (err) return <ErrorBox>{err}</ErrorBox>;
-  if (!catalog) return <Empty>Membaca katalog RMAN…</Empty>;
+  if (!catalog) return <Empty>Reading the RMAN catalog…</Empty>;
 
   const sum = catalog.archivelog_summary;
   const chosen = Object.keys(selected).filter((n) => selected[n]).map((n) => byName[n]).filter(Boolean);
@@ -557,7 +557,7 @@ function ArchivelogView({ catalog, err, onChanged }) {
               style={{ background: active ? c.bg : "#fff", border: `1px solid ${active ? c.color : C.line}`, cursor: "pointer" }}>
               <div className="flex items-center justify-between">
                 <span style={{ fontSize: 11, fontWeight: 800, color: c.color }}>{c.label.toUpperCase()}</span>
-                <span style={{ fontSize: 11, color: C.faint }}>{active ? "filter aktif" : "klik untuk filter"}</span>
+                <span style={{ fontSize: 11, color: C.faint }}>{active ? "filter on" : "click to filter"}</span>
               </div>
               <div style={{ fontSize: 18, fontWeight: 800, color: C.ink, marginTop: 4 }}>{sum[k].count} sequence · {fmtBytes(sum[k].bytes)}</div>
               <div className="flex gap-3 flex-wrap" style={{ fontSize: 10.5, color: C.sub, marginTop: 3 }}>
@@ -566,9 +566,9 @@ function ArchivelogView({ catalog, err, onChanged }) {
                 ))}
               </div>
               <div style={{ fontSize: 11, color: C.sub, marginTop: 4 }}>
-                {k === "required" && "Dibutuhkan full backup terbaru untuk recovery sampai sekarang. Tidak bisa dihapus di lokasi mana pun."}
-                {k === "optional" && "Hanya untuk recovery ke masa lalu memakai full backup lama. Boleh dihapus dengan konfirmasi."}
-                {k === "obsolete" && "Lebih tua dari semua full backup yang bisa di-restore — tidak dibutuhkan lagi."}
+                {k === "required" && "Needed by the latest full backup to recover up to now. Cannot be deleted from any location."}
+                {k === "optional" && "Only for recovering to an earlier time with an older full backup. May be deleted with confirmation."}
+                {k === "obsolete" && "Older than every restorable full backup — no longer needed."}
               </div>
             </button>
           );
@@ -577,44 +577,44 @@ function ArchivelogView({ catalog, err, onChanged }) {
       {sum.unknown?.count > 0 && (
         <p className="flex items-start gap-1.5 mb-3" style={{ fontSize: 11.5, color: C.sub }}>
           <Info size={13} style={{ marginTop: 1, flexShrink: 0 }} />
-          {sum.unknown.count} archive log ({fmtBytes(sum.unknown.bytes)}) punya resetlogs id yang tidak dikenal database PROD —
-          kemungkinan milik database lain (DEV/TEST) di share/bucket yang sama. Tidak bisa dihapus dari halaman ini.
+          {sum.unknown.count} archive logs ({fmtBytes(sum.unknown.bytes)}) have a resetlogs id the PROD database does not know —
+          probably from another database (DEV/TEST) on the same share/bucket. They cannot be deleted from this page.
         </p>
       )}
 
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <div className="flex items-center gap-1.5 rounded-lg px-2.5" style={{ border: `1px solid ${C.line}`, height: 32 }}>
           <Search size={13} color={C.faint} />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cari sequence / nama file"
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search sequence / file name"
             style={{ border: "none", outline: "none", fontSize: 12, width: 180 }} />
         </div>
         <select value={filter} onChange={(e) => setFilter(e.target.value)} style={{ border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 12, height: 32, padding: "0 8px" }}>
-          <option value="all">Semua status</option>
-          <option value="required">Wajib disimpan</option>
-          <option value="optional">Opsional</option>
-          <option value="obsolete">Aman dihapus</option>
-          <option value="unknown">Bukan milik PROD</option>
+          <option value="all">All statuses</option>
+          <option value="required">Must keep</option>
+          <option value="optional">Optional</option>
+          <option value="obsolete">Safe to delete</option>
+          <option value="unknown">Not from PROD</option>
         </select>
         <select value={locFilter} onChange={(e) => setLocFilter(e.target.value)} style={{ border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 12, height: 32, padding: "0 8px" }}>
-          <option value="all">Semua lokasi</option>
-          {LOCS.map((l) => <option key={l.id} value={l.id}>Ada di {l.label}</option>)}
-          <option value="archive_dest">Ada di /archive DB</option>
+          <option value="all">All locations</option>
+          {LOCS.map((l) => <option key={l.id} value={l.id}>On {l.label}</option>)}
+          <option value="archive_dest">On /archive DB</option>
         </select>
-        <Button size="sm" icon={CheckCircle2} onClick={() => selectCategory("obsolete")} disabled={!sum.obsolete.count}>Pilih semua yang aman dihapus</Button>
-        {chosen.length > 0 && <Button size="sm" onClick={() => setSelected({})}>Batal pilih</Button>}
+        <Button size="sm" icon={CheckCircle2} onClick={() => selectCategory("obsolete")} disabled={!sum.obsolete.count}>Select all safe to delete</Button>
+        {chosen.length > 0 && <Button size="sm" onClick={() => setSelected({})}>Clear selection</Button>}
         <div className="flex-1" />
         <Button variant="danger" icon={Trash2} disabled={!chosen.length} onClick={() => { setResult(null); setConfirming(true); }}>
-          Hapus terpilih {chosen.length ? `(${chosen.length} · ${fmtBytes(chosenBytes)})` : ""}
+          Delete selected {chosen.length ? `(${chosen.length} · ${fmtBytes(chosenBytes)})` : ""}
         </Button>
       </div>
 
       {result && (
         <div className="rounded-lg px-3 py-2 mb-3" style={{ background: "rgba(22,163,74,0.08)", fontSize: 12, color: C.ink }}>
-          <b style={{ color: C.green }}>{result.deleted.length} salinan dihapus</b> ({fmtBytes(result.freed_bytes)} dibebaskan
+          <b style={{ color: C.green }}>{result.deleted.length} copies deleted</b> ({fmtBytes(result.freed_bytes)} freed
           {result.by_location ? ` — ${LOCS.filter((l) => result.by_location[l.id]?.count).map((l) => `${l.label} ${result.by_location[l.id].count} file / ${fmtBytes(result.by_location[l.id].bytes)}`).join(", ")}` : ""}).
           {result.refused.length > 0 && (
             <div style={{ color: C.amber, marginTop: 4 }}>
-              {result.refused.length} ditolak: {result.refused.slice(0, 5).map((r) => `${r.name}${r.location ? ` @${r.location}` : ""} (${r.reason})`).join("; ")}
+              {result.refused.length} refused: {result.refused.slice(0, 5).map((r) => `${r.name}${r.location ? ` @${r.location}` : ""} (${r.reason})`).join("; ")}
               {result.refused.length > 5 ? "…" : ""}
             </div>
           )}
@@ -627,14 +627,14 @@ function ArchivelogView({ catalog, err, onChanged }) {
             <tr style={{ background: C.soft, color: C.sub, fontWeight: 700 }}>
               <td className="px-3 py-2" style={{ width: 28 }}>
                 <input type="checkbox" checked={allVisibleChecked} disabled={!visibleDeletable.length} onChange={(e) => toggleVisible(e.target.checked)}
-                  title="Pilih semua baris yang bisa dihapus di tampilan ini" />
+                  title="Select every deletable row in this view" />
               </td>
               <td className="px-3 py-2">Seq</td>
-              <td className="px-3 py-2">Periode redo (WIB)</td>
-              <td className="px-3 py-2">Ukuran</td>
-              <td className="px-3 py-2">Salinan tersedia</td>
+              <td className="px-3 py-2">Redo period (WIB)</td>
+              <td className="px-3 py-2">Size</td>
+              <td className="px-3 py-2">Copies available</td>
               <td className="px-3 py-2">Status</td>
-              <td className="px-3 py-2">Alasan</td>
+              <td className="px-3 py-2">Reason</td>
             </tr>
           </thead>
           <tbody>
@@ -644,7 +644,7 @@ function ArchivelogView({ catalog, err, onChanged }) {
                 <tr key={`${a.resetlogs_id}:${a.name}`} style={{ borderTop: `1px solid ${C.line}`, background: selected[a.name] ? "rgba(220,38,38,0.03)" : undefined }}>
                   <td className="px-3 py-2">
                     <input type="checkbox" disabled={!a.deletable} checked={!!selected[a.name]}
-                      title={a.deletable ? "" : a.location === "archive_dest" ? "Hanya di archive destination — dikelola RMAN" : c.label}
+                      title={a.deletable ? "" : a.location === "archive_dest" ? "Only in the archive destination — managed by RMAN" : c.label}
                       onChange={(e) => setSelected((s) => ({ ...s, [a.name]: e.target.checked }))} />
                   </td>
                   <td className="px-3 py-2">
@@ -652,7 +652,7 @@ function ArchivelogView({ catalog, err, onChanged }) {
                     <div style={{ color: C.faint, fontSize: 10 }}>{a.name}</div>
                   </td>
                   <td className="px-3 py-2" style={{ whiteSpace: "nowrap" }}>
-                    {a.first_time ? <>{fmtLocal(a.first_time)}<div style={{ color: C.faint, fontSize: 10 }}>s/d {fmtLocal(a.end_time)}</div></>
+                    {a.first_time ? <>{fmtLocal(a.first_time)}<div style={{ color: C.faint, fontSize: 10 }}>to {fmtLocal(a.end_time)}</div></>
                       : <span style={{ color: C.faint }}>file: {fmtIso(a.modified_at)}</span>}
                   </td>
                   <td className="px-3 py-2" style={{ whiteSpace: "nowrap" }}>{fmtBytes(a.size_bytes)}</td>
@@ -675,11 +675,11 @@ function ArchivelogView({ catalog, err, onChanged }) {
             })}
           </tbody>
         </table>
-        {!rows.length && <Empty>Tidak ada archive log yang cocok dengan filter.</Empty>}
+        {!rows.length && <Empty>No archive logs match the filter.</Empty>}
       </div>
       {rows.length > limit && (
         <div className="flex justify-center mt-3">
-          <Button size="sm" onClick={() => setLimit((l) => l + PAGE)}>Tampilkan {Math.min(PAGE, rows.length - limit)} lagi (dari {rows.length - limit})</Button>
+          <Button size="sm" onClick={() => setLimit((l) => l + PAGE)}>Show {Math.min(PAGE, rows.length - limit)} more (of {rows.length - limit})</Button>
         </div>
       )}
 
@@ -709,7 +709,7 @@ function DeleteArchivelogModal({ chosen, locations, onClose, onDone }) {
   const seqs = chosen.map((a) => a.sequence).sort((x, y) => x - y);
   const picked = LOCS.filter((l) => locs[l.id] && usable(l.id)).map((l) => l.id);
   const pickedBytes = picked.reduce((t, id) => t + perLoc[id].bytes, 0);
-  const ok = typed === "HAPUS" && picked.length > 0 && (!optional.length || ack);
+  const ok = typed === "DELETE" && picked.length > 0 && (!optional.length || ack);
 
   const submit = async () => {
     setBusy(true); setError(null);
@@ -717,28 +717,28 @@ function DeleteArchivelogModal({ chosen, locations, onClose, onDone }) {
       const res = await ebsBackupApi.deleteArchivelogs({ names: chosen.map((a) => a.name), locations: picked, allow_optional: optional.length > 0 });
       onDone(res);
     } catch (e) {
-      setError(errMsg(e, "Gagal menghapus"));
+      setError(errMsg(e, "Delete failed"));
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <Modal title="Hapus archive log" onClose={busy ? undefined : onClose}
+    <Modal title="Delete archive logs" onClose={busy ? undefined : onClose}
       footer={<>
-        <Button onClick={onClose} disabled={busy}>Batal</Button>
-        <Button variant="danger" icon={busy ? Loader2 : Trash2} disabled={!ok || busy} onClick={submit}>{busy ? "Menghapus…" : `Hapus (${fmtBytes(pickedBytes)})`}</Button>
+        <Button onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="danger" icon={busy ? Loader2 : Trash2} disabled={!ok || busy} onClick={submit}>{busy ? "Deleting…" : `Delete (${fmtBytes(pickedBytes)})`}</Button>
       </>}>
       <p>
-        <b>{chosen.length} archive log</b> terpilih, sequence <b>{seqs[0]}</b>
-        {seqs.length > 1 && <> s/d <b>{seqs[seqs.length - 1]}</b></>}. Pilih dari lokasi mana salinannya dihapus:
+        <b>{chosen.length} archive logs</b> selected, sequence <b>{seqs[0]}</b>
+        {seqs.length > 1 && <> to <b>{seqs[seqs.length - 1]}</b></>}. Choose the locations to delete the copies from:
       </p>
 
       <div className="rounded-lg mt-3" style={{ border: `1px solid ${C.line}` }}>
         {LOCS.map((l) => {
           const can = usable(l.id);
-          const why = !perLoc[l.id].files ? "tidak ada salinan" : !locations?.[l.id]?.ok ? "lokasi tidak terjangkau"
-            : l.id === "synology" && locations.synology.writable === false ? "share read-only dari server DB" : "";
+          const why = !perLoc[l.id].files ? "no copy there" : !locations?.[l.id]?.ok ? "location unreachable"
+            : l.id === "synology" && locations.synology.writable === false ? "read-only share from the DB server" : "";
           return (
             <label key={l.id} className="flex items-center gap-2 px-3 py-2" style={{ fontSize: 12, borderTop: l.id === "staging" ? "none" : `1px solid ${C.line}`, opacity: can ? 1 : 0.5 }}>
               <input type="checkbox" disabled={!can || busy} checked={can && !!locs[l.id]} onChange={(e) => setLocs((s) => ({ ...s, [l.id]: e.target.checked }))} />
@@ -750,29 +750,29 @@ function DeleteArchivelogModal({ chosen, locations, onClose, onDone }) {
         })}
       </div>
       <p style={{ color: C.sub, marginTop: 8 }}>
-        Server memeriksa ulang setiap file sebelum menghapus — yang ternyata masih wajib disimpan ditolak otomatis.
-        File di archive destination database (/archive DB) tidak disentuh; itu dikelola RMAN.
+        The server re-checks every file before deleting — any that turn out to be still required are refused automatically.
+        Files in the database's archive destination (/archive DB) are not touched; RMAN manages them.
       </p>
 
       {optional.length > 0 && (
         <div className="rounded-lg p-3 mt-3" style={{ background: "rgba(217,119,6,0.08)", border: "1px solid rgba(217,119,6,0.3)" }}>
           <p style={{ fontWeight: 700, color: C.amber }}>
             <AlertTriangle size={13} style={{ display: "inline", marginRight: 4, verticalAlign: -2 }} />
-            {optional.length} archive log berstatus Opsional
+            {optional.length} archive logs marked Optional
           </p>
           <p style={{ fontSize: 12, marginTop: 4 }}>
-            Bila dihapus dari semua lokasi, full backup yang lebih lama hanya bisa dipulihkan sampai sequence sebelum file yang dihapus.
-            Recovery dari full backup terbaru tidak terpengaruh.
+            If deleted from every location, older full backups can only be recovered up to the sequence before the deleted files.
+            Recovery from the latest full backup is not affected.
           </p>
           <label className="flex items-center gap-2 mt-2" style={{ fontSize: 12 }}>
-            <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} /> Saya mengerti dan tetap ingin menghapus.
+            <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} /> I understand and still want to delete.
           </label>
         </div>
       )}
 
       <div className="mt-3">
-        <label style={{ fontSize: 11, fontWeight: 700, color: C.sub, display: "block", marginBottom: 4 }}>Ketik <b>HAPUS</b> untuk konfirmasi</label>
-        <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="HAPUS"
+        <label style={{ fontSize: 11, fontWeight: 700, color: C.sub, display: "block", marginBottom: 4 }}>Type <b>DELETE</b> to confirm</label>
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="DELETE"
           style={{ width: 200, padding: "7px 10px", borderRadius: 8, fontSize: 12.5, border: `1px solid ${C.line}` }} />
       </div>
       {error && <div className="mt-3"><ErrorBox>{error}</ErrorBox></div>}
@@ -780,13 +780,13 @@ function DeleteArchivelogModal({ chosen, locations, onClose, onDone }) {
   );
 }
 
-/* ─── Semua File Backup (inventory) ──────────────── */
+/* ─── All Backup Files (inventory) ───────────────── */
 
 const REC = {
-  delete: { label: "Hapus", color: C.red },
-  move_offsite: { label: "Salin ke offsite", color: C.amber },
-  review: { label: "Tinjau", color: C.sub },
-  keep: { label: "Simpan", color: C.green },
+  delete: { label: "Delete", color: C.red },
+  move_offsite: { label: "Copy offsite", color: C.amber },
+  review: { label: "Review", color: C.sub },
+  keep: { label: "Keep", color: C.green },
 };
 
 function FilesView({ inventory, err, catalog, onChanged }) {
@@ -822,7 +822,7 @@ function FilesView({ inventory, err, catalog, onChanged }) {
   }, [inventory, fullByFolder, sort, typeFilter]);
 
   if (err) return <ErrorBox>{err}</ErrorBox>;
-  if (!inventory) return <Empty>Memindai folder backup di server DB, MinIO, dan Synology…</Empty>;
+  if (!inventory) return <Empty>Scanning backup folders on the DB server, MinIO and Synology…</Empty>;
 
   const types = [...new Map(inventory.items.map((it) => [it.type, it.type_label])).entries()];
   // Never offer to delete the folder holding the newest restorable full backup.
@@ -852,21 +852,21 @@ function FilesView({ inventory, err, catalog, onChanged }) {
   return (
     <>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-        <Stat label="Total ukuran backup" value={fmtBytes(inventory.total_bytes)} icon={HardDrive} />
-        <Stat label="Disarankan dihapus" value={fmtBytes(inventory.reclaimable_bytes)} color={C.green} icon={Trash2} />
-        <Stat label="Jumlah folder backup" value={inventory.items.length} icon={FolderOpen} />
-        <Stat label="Backup terbaru" value={fmtIso(items.find((i) => i.sortDate)?.sortDate)} icon={Clock} />
+        <Stat label="Total backup size" value={fmtBytes(inventory.total_bytes)} icon={HardDrive} />
+        <Stat label="Recommended to delete" value={fmtBytes(inventory.reclaimable_bytes)} color={C.green} icon={Trash2} />
+        <Stat label="Backup folders" value={inventory.items.length} icon={FolderOpen} />
+        <Stat label="Latest backup" value={fmtIso(items.find((i) => i.sortDate)?.sortDate)} icon={Clock} />
       </div>
 
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={{ border: `1px solid ${C.line}`, borderRadius: 8, fontSize: 12, height: 32, padding: "0 8px" }}>
-          <option value="all">Semua jenis backup</option>
+          <option value="all">All backup types</option>
           {types.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </select>
-        <span style={{ fontSize: 11.5, color: C.faint }}>Klik judul kolom untuk mengurutkan. Default: tanggal terbaru di atas.</span>
+        <span style={{ fontSize: 11.5, color: C.faint }}>Click a column header to sort. Default: newest date first.</span>
         <div className="flex-1" />
         <Button variant="danger" icon={Trash2} disabled={!chosen.length} onClick={() => setConfirming(true)}>
-          Hapus terpilih {chosen.length ? `(${chosen.length})` : ""}
+          Delete selected {chosen.length ? `(${chosen.length})` : ""}
         </Button>
       </div>
 
@@ -875,13 +875,13 @@ function FilesView({ inventory, err, catalog, onChanged }) {
           <thead>
             <tr style={{ background: C.soft }}>
               <td className="px-3 py-2" style={{ width: 28 }}></td>
-              <td className="px-3 py-2">{header("date", "Tanggal Backup")}</td>
-              <td className="px-3 py-2">{header("name", "Nama")}</td>
-              <td className="px-3 py-2">{header("type", "Jenis")}</td>
-              <td className="px-3 py-2">{header("size", "Ukuran")}</td>
-              <td className="px-3 py-2" style={{ color: C.sub, fontWeight: 700 }}>Lokasi</td>
-              <td className="px-3 py-2" style={{ color: C.sub, fontWeight: 700 }}>Bisa di-restore?</td>
-              <td className="px-3 py-2" style={{ color: C.sub, fontWeight: 700 }}>Rekomendasi</td>
+              <td className="px-3 py-2">{header("date", "Backup Date")}</td>
+              <td className="px-3 py-2">{header("name", "Name")}</td>
+              <td className="px-3 py-2">{header("type", "Type")}</td>
+              <td className="px-3 py-2">{header("size", "Size")}</td>
+              <td className="px-3 py-2" style={{ color: C.sub, fontWeight: 700 }}>Location</td>
+              <td className="px-3 py-2" style={{ color: C.sub, fontWeight: 700 }}>Restorable?</td>
+              <td className="px-3 py-2" style={{ color: C.sub, fontWeight: 700 }}>Recommendation</td>
             </tr>
           </thead>
           <tbody>
@@ -895,7 +895,7 @@ function FilesView({ inventory, err, catalog, onChanged }) {
                   </td>
                   <td className="px-3 py-2" style={{ whiteSpace: "nowrap" }}>
                     <div style={{ fontWeight: 700, color: C.ink }}>{fmtIso(it.sortDate)}</div>
-                    <div style={{ color: C.faint, fontSize: 10 }}>{it.age_days != null ? `${it.age_days} hari lalu` : ""}</div>
+                    <div style={{ color: C.faint, fontSize: 10 }}>{it.age_days != null ? `${it.age_days} days ago` : ""}</div>
                   </td>
                   <td className="px-3 py-2" style={{ color: C.ink, fontWeight: 600 }}>{it.name}</td>
                   <td className="px-3 py-2">{it.type_label}</td>
@@ -905,36 +905,36 @@ function FilesView({ inventory, err, catalog, onChanged }) {
                     {it.rman ? (
                       it.rman.restorable ? (
                         <div>
-                          <Pill color={C.green}><CheckCircle2 size={11} />Ya{it.rman.is_latest ? " · terbaru" : ""}</Pill>
-                          <div style={{ color: C.faint, fontSize: 10, marginTop: 2 }}>s/d {fmtLocal(it.rman.recoverable_until)}</div>
+                          <Pill color={C.green}><CheckCircle2 size={11} />Yes{it.rman.is_latest ? " · latest" : ""}</Pill>
+                          <div style={{ color: C.faint, fontSize: 10, marginTop: 2 }}>to {fmtLocal(it.rman.recoverable_until)}</div>
                         </div>
-                      ) : <Pill color={C.red} title={it.rman.problems.join(" ")}><XCircle size={11} />Tidak</Pill>
+                      ) : <Pill color={C.red} title={it.rman.problems.join(" ")}><XCircle size={11} />No</Pill>
                     ) : it.type === "rman_full" ? (
-                      <Pill color={C.faint} title="Folder ini tidak tercatat di control file — perlu CATALOG manual sebelum bisa dipakai">Tidak tercatat RMAN</Pill>
+                      <Pill color={C.faint} title="This folder is not recorded in the control file — it needs a manual CATALOG before it can be used">Not in RMAN</Pill>
                     ) : <span style={{ color: C.faint }}>—</span>}
                   </td>
                   <td className="px-3 py-2" style={{ minWidth: 220 }}>
                     <span style={{ color: rec.color, fontWeight: 700 }}>{rec.label}</span>
-                    <div style={{ color: C.faint, fontSize: 10 }}>{protectedRow(it) ? "Full backup terbaru yang bisa di-restore — dilindungi." : it.reason}</div>
+                    <div style={{ color: C.faint, fontSize: 10 }}>{protectedRow(it) ? "Latest restorable full backup — protected." : it.reason}</div>
                   </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-        {!items.length && <Empty>Tidak ada folder backup.</Empty>}
+        {!items.length && <Empty>No backup folders.</Empty>}
       </div>
 
       {confirming && (
-        <ConfirmTyped title="Hapus folder backup" onClose={() => setConfirming(false)} onConfirm={doDelete}
+        <ConfirmTyped title="Delete backup folders" onClose={() => setConfirming(false)} onConfirm={doDelete}
           body={<>
-            <p>{chosen.length} folder akan dihapus permanen dari semua lokasinya ({fmtBytes(chosen.reduce((t, i) => t + i.size_bytes, 0))}):</p>
+            <p>{chosen.length} folders will be permanently deleted from all their locations ({fmtBytes(chosen.reduce((t, i) => t + i.size_bytes, 0))}):</p>
             <ul style={{ margin: "8px 0 0 16px", listStyle: "disc", color: C.sub }}>
               {chosen.slice(0, 8).map((i) => <li key={i.key}>{i.name} — {fmtIso(i.sortDate)}</li>)}
-              {chosen.length > 8 && <li>…dan {chosen.length - 8} lainnya</li>}
+              {chosen.length > 8 && <li>…and {chosen.length - 8} more</li>}
             </ul>
             {chosen.some((i) => i.rman?.restorable) && (
-              <p style={{ color: C.amber, marginTop: 8 }}>Sebagian folder berisi full backup yang masih bisa di-restore. Jendela recovery akan menyempit setelah dihapus.</p>
+              <p style={{ color: C.amber, marginTop: 8 }}>Some folders hold full backups that can still be restored. The recovery window will shrink once they are deleted.</p>
             )}
           </>} />
       )}
@@ -949,20 +949,20 @@ function ConfirmTyped({ title, body, onClose, onConfirm }) {
   return (
     <Modal title={title} onClose={busy ? undefined : onClose}
       footer={<>
-        <Button onClick={onClose} disabled={busy}>Batal</Button>
-        <Button variant="danger" icon={busy ? Loader2 : Trash2} disabled={typed !== "HAPUS" || busy} onClick={run}>{busy ? "Menghapus…" : "Hapus"}</Button>
+        <Button onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="danger" icon={busy ? Loader2 : Trash2} disabled={typed !== "DELETE" || busy} onClick={run}>{busy ? "Deleting…" : "Delete"}</Button>
       </>}>
       {body}
       <div className="mt-3">
-        <label style={{ fontSize: 11, fontWeight: 700, color: C.sub, display: "block", marginBottom: 4 }}>Ketik <b>HAPUS</b> untuk konfirmasi</label>
-        <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="HAPUS"
+        <label style={{ fontSize: 11, fontWeight: 700, color: C.sub, display: "block", marginBottom: 4 }}>Type <b>DELETE</b> to confirm</label>
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="DELETE"
           style={{ width: 200, padding: "7px 10px", borderRadius: 8, fontSize: 12.5, border: `1px solid ${C.line}` }} />
       </div>
     </Modal>
   );
 }
 
-/* ─── Panduan ────────────────────────────────────── */
+/* ─── Guide ──────────────────────────────────────── */
 
 function GuideView({ catalog }) {
   const s = catalog?.summary;
@@ -974,32 +974,32 @@ function GuideView({ catalog }) {
   );
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-      <Section title="Bagaimana recovery Oracle bekerja?">
-        <p><b>Full backup RMAN (online)</b> adalah salinan seluruh datafile pada saat backup dijalankan. Karena database tetap berjalan selama backup, salinan itu belum konsisten.</p>
-        <p style={{ marginTop: 6 }}><b>Archive log</b> adalah catatan setiap perubahan setelahnya. Saat recovery, RMAN me-restore full backup lalu "memutar ulang" archive log satu per satu, sehingga database bisa dipulihkan ke <b>detik mana pun</b> sampai archive log terakhir yang tersedia.</p>
-        <p style={{ marginTop: 6 }}>Syaratnya: archive log harus <b>berurutan tanpa celah</b> mulai dari sequence saat full backup dimulai. Satu sequence hilang = recovery berhenti di situ.</p>
+      <Section title="How does Oracle recovery work?">
+        <p>An <b>RMAN full backup (online)</b> is a copy of every datafile at the time the backup runs. Because the database keeps running during the backup, that copy is not yet consistent.</p>
+        <p style={{ marginTop: 6 }}><b>Archive logs</b> record every change after that. During recovery, RMAN restores the full backup and then "replays" the archive logs one by one, so the database can be recovered to <b>any second</b> up to the last archive log available.</p>
+        <p style={{ marginTop: 6 }}>The condition: archive logs must be <b>continuous, without gaps</b>, from the sequence at which the full backup started. One missing sequence = recovery stops there.</p>
       </Section>
-      <Section title="Kapan archive log boleh dihapus?">
+      <Section title="When can archive logs be deleted?">
         <ul style={{ listStyle: "disc", paddingLeft: 18 }}>
-          <li><b style={{ color: C.red }}>Wajib disimpan</b> — sequence sejak full backup terbaru. Ini satu-satunya jalan recovery sampai kondisi terkini.</li>
-          <li><b style={{ color: C.amber }}>Opsional</b> — hanya dipakai bila ingin memulihkan ke tanggal lampau memakai full backup lama.</li>
-          <li><b style={{ color: C.green }}>Aman dihapus</b> — lebih tua dari semua full backup yang masih ada; tidak ada backup yang bisa memakainya.</li>
+          <li><b style={{ color: C.red }}>Must keep</b> — sequences since the latest full backup. This is the only way to recover up to the present.</li>
+          <li><b style={{ color: C.amber }}>Optional</b> — only used to recover to an earlier date with an older full backup.</li>
+          <li><b style={{ color: C.green }}>Safe to delete</b> — older than every remaining full backup; no backup can use them.</li>
         </ul>
-        <p style={{ marginTop: 6 }}>Saat full backup lama dihapus, archive log "opsional" miliknya otomatis menjadi "aman dihapus" pada pemindaian berikutnya.</p>
+        <p style={{ marginTop: 6 }}>When an older full backup is deleted, its "optional" archive logs automatically become "safe to delete" on the next scan.</p>
       </Section>
-      <Section title="Kebijakan retensi yang disarankan">
+      <Section title="Recommended retention policy">
         <ul style={{ listStyle: "disc", paddingLeft: 18 }}>
-          <li>Full backup online <b>mingguan</b> ke staging + salinan Synology; simpan minimal <b>2</b> full backup terakhir.</li>
-          <li>Archive log disalin ke staging, MinIO, dan Synology <b>setiap hari</b>. Ketiganya salinan yang setara — cukup satu yang utuh untuk recovery.</li>
-          <li>Hapus archive log berstatus <b>Aman dihapus</b> dari ketiga lokasi setelah full backup baru berhasil dan tersalin ke Synology.</li>          <li>Uji restore ke Dev minimal <b>sebulan sekali</b> (tab Restore) — backup yang belum pernah diuji belum terbukti.</li>
+          <li>A <b>weekly</b> online full backup to staging + a Synology copy; keep at least the last <b>2</b> full backups.</li>
+          <li>Archive logs are copied to staging, MinIO and Synology <b>every day</b>. The three are equivalent copies — one intact copy is enough for recovery.</li>
+          <li>Delete archive logs marked <b>Safe to delete</b> from all three locations once a new full backup has succeeded and been copied to Synology.</li>          <li>Test a restore to Dev at least <b>once a month</b> (Restore tab) — a backup that has never been tested is not proven.</li>
         </ul>
       </Section>
-      <Section title="Kondisi saat ini">
-        {!s ? <p>Memuat…</p> : (
+      <Section title="Current state">
+        {!s ? <p>Loading…</p> : (
           <>
             <p>{s.message}</p>
-            <p style={{ marginTop: 6 }}>Sequence aktif sekarang: <b>{catalog.db.current_sequence ?? "—"}</b> · archive log terakhir: <b>{catalog.db.latest_archived_sequence ?? "—"}</b> · jumlah datafile: <b>{catalog.db.datafile_count}</b>.</p>
-            <p style={{ marginTop: 6, color: C.sub }}>Archive log yang masih di archive destination database (/archive) dihapus otomatis oleh RMAN setelah 7 hari (cron 05:00), setelah sebelumnya disalin ke staging oleh cron 01:00.</p>
+            <p style={{ marginTop: 6 }}>Current sequence: <b>{catalog.db.current_sequence ?? "—"}</b> · latest archive log: <b>{catalog.db.latest_archived_sequence ?? "—"}</b> · datafiles: <b>{catalog.db.datafile_count}</b>.</p>
+            <p style={{ marginTop: 6, color: C.sub }}>Archive logs still in the database's archive destination (/archive) are deleted automatically by RMAN after 7 days (cron 05:00), after being copied to staging by the 01:00 cron.</p>
           </>
         )}
       </Section>

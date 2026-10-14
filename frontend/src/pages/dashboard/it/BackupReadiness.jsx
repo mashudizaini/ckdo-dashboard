@@ -34,7 +34,7 @@ export default function BackupReadiness({ onServerClock }) {
       // the browser may be in any timezone and is not the clock that matters.
       onServerClock?.(d?.clock?.db_server_time || null);
     } catch (e) {
-      setError(e?.detail || e?.message || "Tidak bisa membaca kondisi database");
+      setError(e?.detail || e?.message || "Cannot read the database conditions");
     } finally {
       setBusy(false);
     }
@@ -53,7 +53,7 @@ export default function BackupReadiness({ onServerClock }) {
   if (!data && busy) {
     return (
       <p className="flex items-center gap-2" style={{ fontSize: 12, color: "#64748b" }}>
-        <Loader2 size={13} className="animate-spin" /> membaca kondisi database…
+        <Loader2 size={13} className="animate-spin" /> reading database conditions…
       </p>
     );
   }
@@ -72,10 +72,10 @@ export default function BackupReadiness({ onServerClock }) {
         <span className="flex items-center gap-1.5">
           <Clock size={12} />
           <b style={{ color: "#e2e8f0" }}>{data.clock?.db_server_time}</b>
-          <span>waktu server database ({data.clock?.db_server_tz_offset})</span>
+          <span>database server time ({data.clock?.db_server_tz_offset})</span>
         </span>
         <span>· dashboard UTC {data.clock?.dashboard_utc}</span>
-        <button onClick={load} disabled={busy} title="Muat ulang"
+        <button onClick={load} disabled={busy} title="Reload"
           style={{ background: "none", border: "none", cursor: "pointer", color: "#60a5fa", lineHeight: 0 }}>
           {busy ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
         </button>
@@ -93,18 +93,18 @@ export default function BackupReadiness({ onServerClock }) {
 
       {/* Numbers */}
       <div className="flex gap-3 flex-wrap" style={{ fontSize: 11.5 }}>
-        <Stat label="Sesi user aktif" value={s.active_user} sub={`dari ${s.total_user ?? "?"} terhubung`} />
-        <Stat label="Concurrent request" value={cr.running ?? "—"} sub="EBS, sedang berjalan" />
-        <Stat label="Ukuran database" value={`${data.db_size_gb ?? "?"} GB`} sub="datafile" />
-        <Stat label="Archivelog aktif" value={`${data.archivelog?.active_gb ?? "?"} GB`}
-          sub={`${data.archivelog?.last_24h_gb ?? "?"} GB dalam 24 jam`} />
+        <Stat label="Active user sessions" value={s.active_user} sub={`of ${s.total_user ?? "?"} connected`} />
+        <Stat label="Concurrent request" value={cr.running ?? "—"} sub="EBS, running now" />
+        <Stat label="Database size" value={`${data.db_size_gb ?? "?"} GB`} sub="datafile" />
+        <Stat label="Active archivelog" value={`${data.archivelog?.active_gb ?? "?"} GB`}
+          sub={`${data.archivelog?.last_24h_gb ?? "?"} GB in 24 hours`} />
       </div>
 
       {/* Who is working right now */}
       {(s.longest_active || []).length > 0 && (
         <details>
           <summary style={{ fontSize: 11.5, color: "#94a3b8", cursor: "pointer" }}>
-            Sesi yang sedang berjalan ({(s.longest_active || []).length} terlama)
+            Running sessions ({(s.longest_active || []).length} longest)
           </summary>
           <table className="w-full" style={{ fontSize: 11, marginTop: 6 }}>
             <thead>
@@ -112,7 +112,7 @@ export default function BackupReadiness({ onServerClock }) {
                 <th style={{ padding: "2px 6px" }}>SID</th>
                 <th style={{ padding: "2px 6px" }}>User</th>
                 <th style={{ padding: "2px 6px" }}>Module</th>
-                <th style={{ padding: "2px 6px", textAlign: "right" }}>Menit</th>
+                <th style={{ padding: "2px 6px", textAlign: "right" }}>Minutes</th>
                 <th style={{ padding: "2px 6px" }}>Event</th>
               </tr>
             </thead>
@@ -134,11 +134,11 @@ export default function BackupReadiness({ onServerClock }) {
       {(cr.detail || []).length > 0 && (
         <details>
           <summary style={{ fontSize: 11.5, color: "#94a3b8", cursor: "pointer" }}>
-            Concurrent request berjalan ({cr.detail.length})
+            Running concurrent requests ({cr.detail.length})
           </summary>
           <ul style={{ margin: "6px 0 0 18px", fontSize: 11, color: "#cbd5e1" }}>
             {cr.detail.map((r) => (
-              <li key={r.request_id}>#{r.request_id} {r.program} — {r.running_minutes} menit</li>
+              <li key={r.request_id}>#{r.request_id} {r.program} — {r.running_minutes} min</li>
             ))}
           </ul>
         </details>

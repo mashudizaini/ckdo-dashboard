@@ -200,7 +200,7 @@ export default function ServerControl() {
         setRevealed((prev) => { const next = { ...prev }; delete next[credentialId]; return next; });
       }, REVEAL_TIMEOUT_MS);
     } catch (e) {
-      setError(e?.detail || e?.message || "Gagal membuka password");
+      setError(e?.detail || e?.message || "Failed to reveal the password");
     } finally {
       setRevealing(null);
     }
@@ -227,19 +227,19 @@ export default function ServerControl() {
       setServerModal(null);
       await load();
     } catch (e) {
-      setError(e?.detail || e?.message || "Gagal menyimpan server");
+      setError(e?.detail || e?.message || "Failed to save the server");
     } finally {
       setSaving(false);
     }
   };
 
   const removeServer = async (server) => {
-    if (!confirm(`Hapus "${server.name}" beserta semua credential-nya?`)) return;
+    if (!confirm(`Delete "${server.name}" and all its credentials?`)) return;
     try {
       await serverRegistryApi.deleteServer(server.id);
       await load();
     } catch (e) {
-      setError(e?.detail || e?.message || "Gagal menghapus server");
+      setError(e?.detail || e?.message || "Failed to delete the server");
     }
   };
 
@@ -252,20 +252,20 @@ export default function ServerControl() {
       setCredModal(null);
       await load();
     } catch (e) {
-      setError(e?.detail || e?.message || "Gagal menyimpan credential");
+      setError(e?.detail || e?.message || "Failed to save the credential");
     } finally {
       setSaving(false);
     }
   };
 
   const removeCredential = async (credential) => {
-    if (!confirm("Hapus credential ini?")) return;
+    if (!confirm("Delete this credential?")) return;
     try {
       await serverRegistryApi.deleteCredential(credential.id);
       hide(credential.id);
       await load();
     } catch (e) {
-      setError(e?.detail || e?.message || "Gagal menghapus credential");
+      setError(e?.detail || e?.message || "Failed to delete the credential");
     }
   };
 
@@ -282,17 +282,17 @@ export default function ServerControl() {
     <div>
       <Panel
         title="Server Control"
-        subtitle="Inventaris server & network device perusahaan — password terenkripsi, setiap akses dicatat"
+        subtitle="Company server & network device inventory — passwords encrypted, every access logged"
         action={
           <>
             <Btn icon={History} onClick={openLog}>Access Log</Btn>
-            <Btn icon={Plus} variant="primary" onClick={() => setServerModal({ mode: "add" })}>Tambah Server</Btn>
+            <Btn icon={Plus} variant="primary" onClick={() => setServerModal({ mode: "add" })}>Add Server</Btn>
           </>
         }
       >
         <div className="relative mb-4" style={{ maxWidth: 360 }}>
           <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari nama server, IP, username..."
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search server name, IP, username..."
             style={{ ...inputStyle, paddingLeft: 32 }} />
         </div>
 
@@ -305,7 +305,7 @@ export default function ServerControl() {
 
         {Object.keys(grouped).length === 0 ? (
           <div className="text-center py-10" style={{ color: "#94a3b8", fontSize: 12.5 }}>
-            {search ? "Tidak ada hasil." : "Belum ada server terdaftar."}
+            {search ? "No results." : "No servers registered yet."}
           </div>
         ) : (
           Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([category, list]) => (
@@ -409,8 +409,8 @@ function ServerRow({
         </div>
         <div className="flex gap-1.5 shrink-0">
           <Btn size="sm" icon={KeyRound} onClick={onAddCredential}>Credential</Btn>
-          <Btn size="sm" icon={Pencil} title="Ubah nama, kategori, alamat" onClick={onEditServer}>Edit</Btn>
-          <Btn size="sm" icon={Trash2} variant="danger" title="Hapus server beserta kredensialnya" onClick={onDeleteServer} />
+          <Btn size="sm" icon={Pencil} title="Edit name, category, address" onClick={onEditServer}>Edit</Btn>
+          <Btn size="sm" icon={Trash2} variant="danger" title="Delete the server and its credentials" onClick={onDeleteServer} />
         </div>
       </div>
 
@@ -435,22 +435,22 @@ function ServerRow({
                   </span>
                   {isRevealed ? (
                     <>
-                      <Btn size="sm" icon={copied === c.id ? Check : Copy} title="Salin password" onClick={() => onCopy(c.id, isRevealed.password)} />
-                      <Btn size="sm" icon={EyeOff} title="Sembunyikan password" onClick={() => onHide(c.id)} />
+                      <Btn size="sm" icon={copied === c.id ? Check : Copy} title="Copy password" onClick={() => onCopy(c.id, isRevealed.password)} />
+                      <Btn size="sm" icon={EyeOff} title="Hide password" onClick={() => onHide(c.id)} />
                     </>
                   ) : (
-                    <Btn size="sm" icon={isRevealing ? Loader2 : Eye} title="Tampilkan password (tercatat di access log)" disabled={isRevealing} onClick={() => onReveal(c.id)} />
+                    <Btn size="sm" icon={isRevealing ? Loader2 : Eye} title="Show password (recorded in the access log)" disabled={isRevealing} onClick={() => onReveal(c.id)} />
                   )}
                   {/* Opens an SSH shell in the page — the password never
                       reaches the browser, unlike reveal-and-paste beside it.
                       Hidden for rows whose address is a web console: a
                       terminal there would only fail. */}
                   {sshable && (
-                    <Btn size="sm" icon={TerminalSquare} title="Buka terminal SSH"
+                    <Btn size="sm" icon={TerminalSquare} title="Open SSH terminal"
                       onClick={() => onTerminal(c)} />
                   )}
-                  <Btn size="sm" icon={Pencil} title="Ubah kredensial" onClick={() => onEditCredential(c)} />
-                  <Btn size="sm" icon={Trash2} variant="danger" title="Hapus kredensial" onClick={() => onDeleteCredential(c)} />
+                  <Btn size="sm" icon={Pencil} title="Edit credential" onClick={() => onEditCredential(c)} />
+                  <Btn size="sm" icon={Trash2} variant="danger" title="Delete credential" onClick={() => onDeleteCredential(c)} />
                 </div>
               </div>
             );
@@ -473,13 +473,13 @@ function ServerModal({ mode, initial, categories, saving, onSave, onClose }) {
   });
   const creds = initial.credentials || [];
   return (
-    <Modal title={mode === "edit" ? "Edit Server" : "Tambah Server"} onClose={onClose}
+    <Modal title={mode === "edit" ? "Edit Server" : "Add Server"} onClose={onClose}
       footer={<>
-        <Btn onClick={onClose}>Batal</Btn>
+        <Btn onClick={onClose}>Cancel</Btn>
         <Btn variant="primary" disabled={saving || !form.name.trim()} icon={saving ? Loader2 : undefined}
-          onClick={() => { const { newCategory, ...body } = form; onSave(body); }}>Simpan</Btn>
+          onClick={() => { const { newCategory, ...body } = form; onSave(body); }}>Save</Btn>
       </>}>
-      <Field label="Nama Server *">
+      <Field label="Server Name *">
         <input style={inputStyle} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} autoFocus />
       </Field>
       {/* Memindahkan server antar kategori dilakukan di sini — pilih kategori
@@ -490,14 +490,14 @@ function ServerModal({ mode, initial, categories, saving, onSave, onClose }) {
           server, dan tidak ada yang tampak salah. Daftar pilihan membuat
           perpindahan jadi dua klik dan menutup celah itu; kategori betul-betul
           baru tetap bisa dibuat, tapi harus disengaja. */}
-      <Field label="Kategori">
+      <Field label="Category">
         {form.newCategory ? (
           <div className="flex gap-2">
             <input style={inputStyle} autoFocus value={form.category}
-              placeholder="Nama kategori baru"
+              placeholder="New category name"
               onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} />
             <Btn onClick={() => setForm((f) => ({ ...f, newCategory: false, category: initial.category || "" }))}>
-              Batal
+              Cancel
             </Btn>
           </div>
         ) : (
@@ -506,21 +506,21 @@ function ServerModal({ mode, initial, categories, saving, onSave, onClose }) {
               if (e.target.value === "__new__") setForm((f) => ({ ...f, newCategory: true, category: "" }));
               else setForm((f) => ({ ...f, category: e.target.value }));
             }}>
-            <option value="">— pilih kategori —</option>
+            <option value="">— select category —</option>
             {categories.map((c) => <option key={c} value={c}>{c}</option>)}
             {/* Kategori yang sedang dipakai server ini tapi belum ada di daftar
                 (mis. baru dibuat di tab lain) supaya pilihannya tidak hilang. */}
             {form.category && !categories.includes(form.category) && (
               <option value={form.category}>{form.category}</option>
             )}
-            <option value="__new__">+ kategori baru…</option>
+            <option value="__new__">+ new category…</option>
           </select>
         )}
       </Field>
       <Field label="Address / IP / URL">
         <input style={inputStyle} value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
       </Field>
-      <Field label="Catatan">
+      <Field label="Notes">
         <textarea style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} value={form.notes}
           onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
       </Field>
@@ -565,20 +565,20 @@ function CredentialModal({ mode, initial, saving, onSave, onClose }) {
   });
   const [showPw, setShowPw] = useState(false);
   return (
-    <Modal title={mode === "edit" ? "Edit Credential" : "Tambah Credential"} onClose={onClose}
+    <Modal title={mode === "edit" ? "Edit Credential" : "Add Credential"} onClose={onClose}
       footer={<>
-        <Btn onClick={onClose}>Batal</Btn>
+        <Btn onClick={onClose}>Cancel</Btn>
         <Btn variant="primary" disabled={saving || (mode === "add" && !form.password)} icon={saving ? Loader2 : undefined}
-          onClick={() => onSave(form)}>Simpan</Btn>
+          onClick={() => onSave(form)}>Save</Btn>
       </>}>
-      <Field label="Label (opsional)">
+      <Field label="Label (optional)">
         <input style={inputStyle} value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
           placeholder="Local Admin, Domain Admin, ..." autoFocus />
       </Field>
       <Field label="Username">
         <input style={inputStyle} value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} />
       </Field>
-      <Field label={mode === "edit" ? "Password (kosongkan jika tidak diubah)" : "Password *"}>
+      <Field label={mode === "edit" ? "Password (leave empty to keep it)" : "Password *"}>
         <div className="relative">
           <input type={showPw ? "text" : "password"} style={{ ...inputStyle, paddingRight: 32 }} value={form.password}
             onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} />
@@ -588,7 +588,7 @@ function CredentialModal({ mode, initial, saving, onSave, onClose }) {
           </button>
         </div>
       </Field>
-      <Field label="Catatan">
+      <Field label="Notes">
         <textarea style={{ ...inputStyle, minHeight: 50, resize: "vertical" }} value={form.notes}
           onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
       </Field>
@@ -598,21 +598,21 @@ function CredentialModal({ mode, initial, saving, onSave, onClose }) {
 
 function AccessLogModal({ log, onClose }) {
   return (
-    <Modal title="Access Log — riwayat reveal password" onClose={onClose}>
+    <Modal title="Access Log — password reveal history" onClose={onClose}>
       {log === null ? (
         <div className="flex justify-center py-8"><Loader2 size={18} className="animate-spin text-gray-400" /></div>
       ) : log.length === 0 ? (
-        <p style={{ fontSize: 12, color: "#94a3b8", textAlign: "center", padding: "20px 0" }}>Belum ada aktivitas.</p>
+        <p style={{ fontSize: 12, color: "#94a3b8", textAlign: "center", padding: "20px 0" }}>No activity yet.</p>
       ) : (
         <div className="space-y-1.5" style={{ maxHeight: 400, overflow: "auto" }}>
           {log.map((r) => (
             <div key={r.id} className="flex items-center justify-between gap-2 py-1.5" style={{ borderBottom: "1px solid rgba(15,23,42,0.05)", fontSize: 11.5 }}>
               <div className="min-w-0">
                 <span style={{ fontWeight: 700, color: "#0f172a" }}>{r.accessed_by}</span>
-                <span style={{ color: "#64748b" }}> membuka </span>
+                <span style={{ color: "#64748b" }}> revealed </span>
                 <span style={{ fontWeight: 600, color: "#334155" }}>{r.server_name || "?"}{r.credential_label ? ` (${r.credential_label})` : ""}</span>
               </div>
-              <span style={{ color: "#94a3b8", whiteSpace: "nowrap" }}>{new Date(r.accessed_at).toLocaleString("id-ID")}</span>
+              <span style={{ color: "#94a3b8", whiteSpace: "nowrap" }}>{new Date(r.accessed_at).toLocaleString("en-GB")}</span>
             </div>
           ))}
         </div>

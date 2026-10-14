@@ -53,23 +53,23 @@ export default function OverviewTab({ goTo }) {
   const laptopLevel = !c.count ? "unknown" : (c.by_verdict.D || c.by_verdict.A) ? "warn" : "ok";
   segs.laptop = {
     key: "laptop", label: "Laptop HO", level: laptopLevel,
-    notes: [c.count ? `${c.count} laporan 24 jam · Case D: ${c.by_verdict.D || 0} · Case A: ${c.by_verdict.A || 0}` : "Belum ada tes laptop 24 jam terakhir"],
+    notes: [c.count ? `${c.count} reports in 24 h · Case D: ${c.by_verdict.D || 0} · Case A: ${c.by_verdict.A || 0}` : "No laptop tests in the last 24 hours"],
   };
   const tabFor = { laptop: "client", ho_lan: "client", wan: "fortigate", plant_lan: "path", ebs_web: "ebs", ebs_db: "ebs", internet: "path" };
   const dv = VERDICT_LABEL[data.diagnosis] || VERDICT_LABEL.OK;
 
   const missing = [];
-  if (!data.configured.fortigates) missing.push("FortiGate HO/Plant belum dipilih (Setup) — SD-WAN SLA & status tunnel belum terbaca");
-  if (!data.configured.ebs_web_url) missing.push("URL login EBS belum diisi (Setup) — agen tidak bisa mengukur waktu respons web tier");
-  if (!data.probes.some((p) => p.segment === "wan" && p.enabled)) missing.push("Belum ada target aktif di segmen Jalur HO↔Plant (Setup) — isi IP LAN FortiGate HO");
+  if (!data.configured.fortigates) missing.push("HO/Plant FortiGates not selected (Setup) — SD-WAN SLA & tunnel status cannot be read");
+  if (!data.configured.ebs_web_url) missing.push("EBS login URL not set (Setup) — the agent cannot measure web tier response time");
+  if (!data.probes.some((p) => p.segment === "wan" && p.enabled)) missing.push("No active target in the HO↔Plant Path segment (Setup) — enter the HO FortiGate LAN IP");
 
   return (
     <>
-      <Panel title="Kondisi jalur akses Oracle EBS dari HO"
-        subtitle={`Diperbarui ${fmtDate(data.generated_at)} · server memprobe otomatis tiap 5 menit`}
+      <Panel title="Oracle EBS access path from HO"
+        subtitle={`Updated ${fmtDate(data.generated_at)} · the server probes automatically every 5 minutes`}
         action={<>
-          <Btn size="sm" icon={busy === "probe" ? Loader2 : RefreshCw} spin={busy === "probe"} disabled={!!busy} onClick={() => act("probe")}>Probe sekarang</Btn>
-          <Btn size="sm" variant="primary" icon={busy === "all" ? Loader2 : RefreshCw} spin={busy === "all"} disabled={!!busy} onClick={() => act("all")}>Snapshot semua</Btn>
+          <Btn size="sm" icon={busy === "probe" ? Loader2 : RefreshCw} spin={busy === "probe"} disabled={!!busy} onClick={() => act("probe")}>Probe now</Btn>
+          <Btn size="sm" variant="primary" icon={busy === "all" ? Loader2 : RefreshCw} spin={busy === "all"} disabled={!!busy} onClick={() => act("all")}>Snapshot all</Btn>
         </>}>
         <div className="flex items-stretch gap-1.5 flex-wrap">
           {PATH.map((k, i) => (
@@ -83,10 +83,10 @@ export default function OverviewTab({ goTo }) {
           <div style={{ flex: "0 0 200px" }}><SegmentCard seg={segs.internet} onClick={() => goTo("path")} /></div>
           <div className="flex-1" style={{ minWidth: 260 }}>
             <Note tone={data.diagnosis === "OK" ? "info" : "warn"}>
-              <div className="flex items-center gap-2 mb-1"><Level level={dv.level} label={dv.text} /><b>Diagnosis otomatis</b></div>
+              <div className="flex items-center gap-2 mb-1"><Level level={dv.level} label={dv.text} /><b>Automatic diagnosis</b></div>
               {data.diagnosis_text}
               <div style={{ marginTop: 6, fontSize: 11, opacity: 0.85 }}>
-                Petunjuk arah investigasi, bukan kesimpulan. Ukur berulang di jam berbeda dan cocokkan timestamp sebelum mengubah konfigurasi VPN, routing, MTU, firewall, atau Oracle.
+                A pointer for the investigation, not a conclusion. Measure repeatedly at different hours and match timestamps before changing VPN, routing, MTU, firewall or Oracle configuration.
               </div>
             </Note>
           </div>
@@ -94,40 +94,40 @@ export default function OverviewTab({ goTo }) {
         {missing.length > 0 && (
           <div className="mt-3">
             <Note tone="warn">
-              <b>Belum lengkap:</b>
+              <b>Incomplete:</b>
               <ul style={{ marginTop: 4, paddingLeft: 16, listStyle: "disc" }}>{missing.map((m) => <li key={m}>{m}</li>)}</ul>
-              <button type="button" onClick={() => goTo("setup")} style={{ marginTop: 6, fontWeight: 700, textDecoration: "underline" }}>Buka Setup</button>
+              <button type="button" onClick={() => goTo("setup")} style={{ marginTop: 6, fontWeight: 700, textDecoration: "underline" }}>Open Setup</button>
             </Note>
           </div>
         )}
       </Panel>
 
-      <Panel title="Hasil probe terakhir" subtitle="TCP connect (1 RTT per sampel) atau TTFB HTTP dari server dashboard di Plant"
-        action={<Btn size="sm" variant="ghost" onClick={() => goTo("path")}>Detail & grafik</Btn>}>
-        <Table rows={data.probes.filter((p) => p.enabled)} empty="Belum ada target aktif."
+      <Panel title="Latest probe results" subtitle="TCP connect (1 RTT per sample) or HTTP TTFB from the dashboard server at Plant"
+        action={<Btn size="sm" variant="ghost" onClick={() => goTo("path")}>Detail & charts</Btn>}>
+        <Table rows={data.probes.filter((p) => p.enabled)} empty="No active targets."
           columns={[
             { key: "name", label: "Target" },
-            { key: "segment", label: "Segmen", render: (r) => segs[r.segment]?.label || r.segment },
+            { key: "segment", label: "Segment", render: (r) => segs[r.segment]?.label || r.segment },
             { key: "status", label: "Status", render: (r) => <Level size="sm" level={segs[r.segment]?.targets?.find((x) => x.name === r.name)?.level || "unknown"} /> },
             { key: "avg", label: "Avg", align: "right", render: (r) => r.last?.rtt_avg != null ? `${r.last.rtt_avg} ms` : "—" },
             { key: "max", label: "Max", align: "right", render: (r) => r.last?.rtt_max != null ? `${r.last.rtt_max} ms` : "—" },
             { key: "jit", label: "Jitter", align: "right", render: (r) => r.last?.jitter_ms != null ? `${r.last.jitter_ms} ms` : "—" },
             { key: "loss", label: "Loss", align: "right", render: (r) => r.last?.loss_pct != null ? `${r.last.loss_pct}%` : "—" },
-            { key: "day", label: "Avg 24 jam", align: "right", render: (r) => r.day?.rtt_avg != null ? `${r.day.rtt_avg} ms` : "—" },
-            { key: "at", label: "Waktu", render: (r) => fmtDate(r.last?.checked_at) },
+            { key: "day", label: "24 h avg", align: "right", render: (r) => r.day?.rtt_avg != null ? `${r.day.rtt_avg} ms` : "—" },
+            { key: "at", label: "Time", render: (r) => fmtDate(r.last?.checked_at) },
           ]} />
       </Panel>
 
-      <Panel title="Tes laptop terbaru (24 jam)" action={<Btn size="sm" variant="ghost" onClick={() => goTo("client")}>Semua laporan</Btn>}>
-        <Table rows={c.latest} empty="Belum ada laporan. Minta user HO membuka /dashboard/ebs-check atau jalankan agen PowerShell."
+      <Panel title="Latest laptop tests (24 hours)" action={<Btn size="sm" variant="ghost" onClick={() => goTo("client")}>All reports</Btn>}>
+        <Table rows={c.latest} empty="No reports yet. Ask HO users to open /dashboard/ebs-check or run the PowerShell agent."
           columns={[
-            { key: "created_at", label: "Waktu", render: (r) => fmtDate(r.created_at) },
+            { key: "created_at", label: "Time", render: (r) => fmtDate(r.created_at) },
             { key: "who", label: "User / Laptop", render: (r) => r.hostname || r.reported_by },
-            { key: "source", label: "Sumber" },
-            { key: "ebs_condition", label: "Kondisi EBS" },
+            { key: "source", label: "Source" },
+            { key: "ebs_condition", label: "EBS condition" },
             { key: "ebs_rtt_avg", label: "RTT", align: "right", render: (r) => r.ebs_rtt_avg != null ? `${r.ebs_rtt_avg} ms` : "—" },
             { key: "verdict", label: "Verdict", render: (r) => <Level size="sm" level={VERDICT_LABEL[r.verdict]?.level} label={VERDICT_LABEL[r.verdict]?.text} /> },
-            { key: "codes", label: "Kode", render: (r) => r.codes.join(", ") || "—" },
+            { key: "codes", label: "Codes", render: (r) => r.codes.join(", ") || "—" },
           ]} />
       </Panel>
     </>

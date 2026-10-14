@@ -23,14 +23,14 @@ import ReportTab from "./ReportTab";
 
 const TABS = [
   ["overview", "Overview"],
-  ["report", "Laporan & Kesimpulan"],
-  ["path", "Jalur & Probe"],
+  ["report", "Report & Conclusion"],
+  ["path", "Path & Probes"],
   ["fortigate", "FortiGate / SD-WAN"],
-  ["sdwancfg", "Konfigurasi SD-WAN"],
+  ["sdwancfg", "SD-WAN Configuration"],
   ["ebs", "EBS Server"],
   ["client", "Client Test (Laptop)"],
   ["incidents", "Incident Log"],
-  ["playbook", "Playbook & Rekomendasi"],
+  ["playbook", "Playbook & Recommendations"],
   ["setup", "Setup"],
 ];
 

@@ -86,19 +86,19 @@ export default function BrowserTest({ onSubmitted, compact = false }) {
   const run = async () => {
     setRunning(true); setResult(null); setSubmitted(null);
     try {
-      setPhase("Pemanasan koneksi…");
+      setPhase("Warming up the connection…");
       for (let i = 0; i < 2; i++) { try { await ebsNetClientApi.ping(); } catch (_) {} }
 
       const rtts = [];
       for (let i = 0; i < PING_COUNT; i++) {
-        setPhase(`Mengukur latency ${i + 1}/${PING_COUNT}…`);
+        setPhase(`Measuring latency ${i + 1}/${PING_COUNT}…`);
         const t0 = performance.now();
         try { await ebsNetClientApi.ping(); rtts.push(performance.now() - t0); } catch (_) {}
         await sleep(100);
       }
       const latency = stats(rtts, PING_COUNT);
 
-      setPhase("Mengukur kecepatan download…");
+      setPhase("Measuring download speed…");
       let down = null;
       for (const size of [1_000_000, 4_000_000]) {
         const t0 = performance.now();
@@ -108,7 +108,7 @@ export default function BrowserTest({ onSubmitted, compact = false }) {
         if (ms > 4000) break;
       }
 
-      setPhase("Mengukur kecepatan upload…");
+      setPhase("Measuring upload speed…");
       const blob = randomBlob(2_000_000);
       const t1 = performance.now();
       await ebsNetClientApi.upload(blob);
@@ -116,7 +116,7 @@ export default function BrowserTest({ onSubmitted, compact = false }) {
 
       let ebsProbe = null;
       if (cfg.browser_probe_url) {
-        setPhase("Probe langsung ke web EBS…");
+        setPhase("Probing the EBS web directly…");
         try { ebsProbe = await imageProbe(cfg.browser_probe_url); } catch (_) {}
       }
 
@@ -136,7 +136,7 @@ export default function BrowserTest({ onSubmitted, compact = false }) {
       });
       setPhase("");
     } catch (e) {
-      setPhase(`Tes gagal: ${errText(e)}`);
+      setPhase(`Test failed: ${errText(e)}`);
     } finally {
       setRunning(false);
     }
@@ -150,7 +150,7 @@ export default function BrowserTest({ onSubmitted, compact = false }) {
       setSubmitted(r);
       onSubmitted?.(r);
     } catch (e) {
-      alert(errText(e, "Gagal mengirim hasil"));
+      alert(errText(e, "Failed to send the results"));
     } finally {
       setSubmitting(false);
     }
@@ -163,33 +163,33 @@ export default function BrowserTest({ onSubmitted, compact = false }) {
   return (
     <div className="space-y-4">
       <div className={`grid gap-3 ${compact ? "grid-cols-2" : "grid-cols-2 md:grid-cols-4"}`}>
-        <Field label="Kondisi EBS saat ini">
+        <Field label="EBS condition right now">
           <select style={inputStyle} value={form.condition} onChange={(e) => setForm({ ...form, condition: e.target.value })}>
             <option value="Normal">Normal</option>
-            <option value="Slow">Lambat</option>
-            <option value="Hang">Hang / tidak merespons</option>
-            <option value="Restart">Harus restart browser</option>
+            <option value="Slow">Slow</option>
+            <option value="Hang">Hang / not responding</option>
+            <option value="Restart">Browser restart needed</option>
           </select>
         </Field>
-        <Field label="Koneksi laptop">
+        <Field label="Laptop connection">
           <select style={inputStyle} value={form.connection} onChange={(e) => setForm({ ...form, connection: e.target.value })}>
-            <option value="">Tidak tahu</option>
-            <option value="LAN">Kabel LAN</option>
+            <option value="">Don't know</option>
+            <option value="LAN">Wired LAN</option>
             <option value="Wi-Fi">Wi-Fi</option>
             <option value="VPN">VPN (FortiClient)</option>
           </select>
         </Field>
-        <Field label="Nama laptop (opsional)">
-          <input style={inputStyle} value={form.hostname} onChange={(e) => setForm({ ...form, hostname: e.target.value })} placeholder="mis. HO-ACC-01" />
+        <Field label="Laptop name (optional)">
+          <input style={inputStyle} value={form.hostname} onChange={(e) => setForm({ ...form, hostname: e.target.value })} placeholder="e.g. HO-ACC-01" />
         </Field>
-        <Field label="Modul / transaksi EBS (opsional)">
-          <input style={inputStyle} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="mis. AP Invoice Workbench" />
+        <Field label="EBS module / transaction (optional)">
+          <input style={inputStyle} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="e.g. AP Invoice Workbench" />
         </Field>
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
         <Btn variant="primary" icon={running ? Loader2 : Play} spin={running} disabled={running} onClick={run}>
-          {running ? "Sedang mengetes…" : result ? "Ulangi Tes" : "Mulai Tes (±20 detik)"}
+          {running ? "Testing…" : result ? "Run Again" : "Start Test (±20 seconds)"}
         </Btn>
         {phase && <span style={{ fontSize: 12, color: "#64748b" }}>{phase}</span>}
       </div>
@@ -197,33 +197,33 @@ export default function BrowserTest({ onSubmitted, compact = false }) {
       {result && (
         <>
           <div className="flex gap-2.5 flex-wrap">
-            <Stat label="RTT rata-rata" value={lat.rtt_avg} unit="ms" level={latLevel} />
+            <Stat label="Average RTT" value={lat.rtt_avg} unit="ms" level={latLevel} />
             <Stat label="RTT p95 / max" value={lat.rtt_p95 != null ? `${lat.rtt_p95} / ${lat.rtt_max}` : null} unit="ms" />
             <Stat label="Jitter" value={lat.jitter_ms} unit="ms"
               level={lat.jitter_ms >= t.jitter_crit ? "crit" : lat.jitter_ms >= t.jitter_warn ? "warn" : "ok"} />
-            <Stat label="Request gagal" value={lat.loss_pct} unit="%"
+            <Stat label="Failed requests" value={lat.loss_pct} unit="%"
               level={lat.loss_pct >= t.loss_crit ? "crit" : lat.loss_pct >= t.loss_warn ? "warn" : "ok"} />
             <Stat label="Download" value={result.down_mbps} unit="Mbps" />
             <Stat label="Upload" value={result.up_mbps} unit="Mbps" />
-            <Stat label="CPU benchmark" value={result.device.cpu_bench_ms} unit="ms" hint="makin kecil makin baik" />
-            {result.ebs_probe && <Stat label="Web EBS langsung" value={result.ebs_probe.rtt_avg} unit="ms" />}
+            <Stat label="CPU benchmark" value={result.device.cpu_bench_ms} unit="ms" hint="lower is better" />
+            {result.ebs_probe && <Stat label="EBS web direct" value={result.ebs_probe.rtt_avg} unit="ms" />}
           </div>
           <p style={{ fontSize: 11, color: "#94a3b8" }}>
-            RTT diukur dari browser ke server dashboard di Plant (jalur yang sama dengan EBS), termasuk ±2–5 ms waktu proses server.
-            Untuk Forms EBS, stabilitas (jitter &amp; loss) lebih menentukan daripada kecepatan download.
+            RTT is measured from the browser to the dashboard server at Plant (the same path as EBS), including ±2–5 ms of server processing time.
+            For EBS Forms, stability (jitter &amp; loss) matters more than download speed.
           </p>
           {!submitted ? (
             <Btn icon={submitting ? Loader2 : Send} spin={submitting} disabled={submitting} onClick={submit}>
-              {submitting ? "Mengirim…" : "Kirim hasil ke tim IT"}
+              {submitting ? "Sending…" : "Send results to IT"}
             </Btn>
           ) : (
             <Note tone={submitted.verdict === "OK" ? "info" : "warn"}>
               <div className="flex items-center gap-2 mb-1">
                 <Level level={VERDICT_LABEL[submitted.verdict]?.level} label={VERDICT_LABEL[submitted.verdict]?.text} />
-                <span style={{ fontWeight: 700 }}>Terkirim — laporan #{submitted.id}</span>
+                <span style={{ fontWeight: 700 }}>Sent — report #{submitted.id}</span>
               </div>
               {submitted.verdict_text}
-              {submitted.codes?.length > 0 && <div style={{ marginTop: 4 }}>Indikasi: {submitted.codes.join(", ")}</div>}
+              {submitted.codes?.length > 0 && <div style={{ marginTop: 4 }}>Indications: {submitted.codes.join(", ")}</div>}
             </Note>
           )}
         </>

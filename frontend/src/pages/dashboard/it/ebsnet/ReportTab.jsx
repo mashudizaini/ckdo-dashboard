@@ -12,15 +12,17 @@ import { Btn, Empty, Field, Level, Note, Panel, Spinner, Table, fmtDate, errText
 
 // Report statuses → the module's level vocabulary (ok/warn/crit/unknown).
 const LV = { good: "ok", warn: "warn", bad: "crit", unknown: "unknown" };
-const LABEL = { good: "Bagus", warn: "Waspada", bad: "Buruk", unknown: "Tidak ada data" };
+const LABEL = { good: "Good", warn: "Warning", bad: "Bad", unknown: "No data" };
 const PATH = ["laptop", "ho_lan", "wan", "plant_lan", "ebs_web", "ebs_db"];
 const PRIORITY = {
-  tinggi: { bg: "rgba(208,59,59,0.09)", color: "#b42318" },
-  sedang: { bg: "rgba(250,178,25,0.14)", color: "#854d0e" },
-  data:   { bg: "rgba(100,116,139,0.1)", color: "#475569" },
-  rutin:  { bg: "rgba(12,163,12,0.08)", color: "#0a7d0a" },
+  high:    { bg: "rgba(208,59,59,0.09)", color: "#b42318" },
+  medium:  { bg: "rgba(250,178,25,0.14)", color: "#854d0e" },
+  data:    { bg: "rgba(100,116,139,0.1)", color: "#475569" },
+  routine: { bg: "rgba(12,163,12,0.08)", color: "#0a7d0a" },
 };
-const INTERVALS = [[0, "Mati"], [1, "Setiap 1 jam"], [2, "Setiap 2 jam"], [3, "Setiap 3 jam"], [6, "Setiap 6 jam"], [12, "Setiap 12 jam"], [24, "Setiap 24 jam"]];
+// Reports saved before the English switch carry the old priority values.
+const PRIORITY_ALIAS = { tinggi: "high", sedang: "medium", rutin: "routine" };
+const INTERVALS = [[0, "Off"], [1, "Every 1 hour"], [2, "Every 2 hours"], [3, "Every 3 hours"], [6, "Every 6 hours"], [12, "Every 12 hours"], [24, "Every 24 hours"]];
 
 const fmtVal = (v, unit) => (v == null ? "—" : `${v}${unit ? ` ${unit}` : ""}`);
 
@@ -34,7 +36,7 @@ async function saveFile(id, fmt, createdAt) {
     const a = document.createElement("a");
     a.href = url; a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
-  } catch (e) { alert(errText(e, "Gagal mengunduh")); }
+  } catch (e) { alert(errText(e, "Download failed")); }
 }
 
 function PathChain({ sections, bottleneck }) {
@@ -52,9 +54,9 @@ function PathChain({ sections, bottleneck }) {
             }}>
               <p style={{ fontSize: 11.5, fontWeight: 800, color: "#0f172a", marginBottom: 4 }}>{s.label}</p>
               <Level size="sm" level={LV[s.status]} label={LABEL[s.status]} />
-              {hit && <p style={{ fontSize: 10.5, fontWeight: 800, color: "#d03b3b", marginTop: 4 }}>◀ TITIK MACET</p>}
+              {hit && <p style={{ fontSize: 10.5, fontWeight: 800, color: "#d03b3b", marginTop: 4 }}>◀ BOTTLENECK</p>}
               <p style={{ fontSize: 10, color: "#94a3b8", marginTop: 3 }}>
-                {s.counts.bad ? `${s.counts.bad} buruk · ` : ""}{s.counts.warn ? `${s.counts.warn} waspada · ` : ""}{s.counts.good} bagus
+                {s.counts.bad ? `${s.counts.bad} bad · ` : ""}{s.counts.warn ? `${s.counts.warn} warning · ` : ""}{s.counts.good} good
               </p>
             </div>
             {i < PATH.length - 1 && <ChevronRight size={14} className="hidden xl:block" style={{ color: "#cbd5e1", flexShrink: 0 }} />}
@@ -70,47 +72,48 @@ function ReportView({ row }) {
   const internet = c.sections.find((s) => s.key === "internet");
   return (
     <>
-      <Panel title={`Laporan #${row.id} — ${fmtDate(row.created_at)}`}
-        subtitle={`${c.trigger === "auto" ? "Otomatis (terjadwal)" : `Manual oleh ${c.created_by || "-"}`} · lingkungan EBS ${c.context.ebs_environment || "-"} · ${c.context.client_reports} tes laptop (${c.context.client_window_hours} jam) · insiden 7 hari ${c.context.incidents_7d} · diproses ${c.duration_s} s`}
+      <Panel title={`Report #${row.id} — ${fmtDate(row.created_at)}`}
+        subtitle={`${c.trigger === "auto" ? "Automatic (scheduled)" : `Manual by ${c.created_by || "-"}`} · EBS environment ${c.context.ebs_environment || "-"} · ${c.context.client_reports} laptop tests (${c.context.client_window_hours} h) · incidents in 7 days ${c.context.incidents_7d} · processed in ${c.duration_s} s`}
         action={<>
-          <Btn size="sm" icon={Download} onClick={() => saveFile(row.id, "html", row.created_at)}>Unduh HTML</Btn>
+          <Btn size="sm" icon={Download} onClick={() => saveFile(row.id, "html", row.created_at)}>Download HTML</Btn>
           <Btn size="sm" icon={FileText} onClick={() => saveFile(row.id, "json", row.created_at)}>JSON</Btn>
         </>}>
         <div className="rounded-xl px-4 py-3 mb-4" style={{
           background: { good: "rgba(12,163,12,0.07)", warn: "rgba(250,178,25,0.12)", bad: "rgba(208,59,59,0.08)", unknown: "#f1f5f9" }[c.overall],
         }}>
           <div className="flex items-center gap-2 flex-wrap mb-1">
-            <span style={{ fontSize: 12.5, fontWeight: 700 }}>Status keseluruhan</span>
+            <span style={{ fontSize: 12.5, fontWeight: 700 }}>Overall status</span>
             <Level level={LV[c.overall]} label={LABEL[c.overall]} />
-            {c.bottleneck && <><span style={{ fontSize: 12.5, fontWeight: 700, marginLeft: 8 }}>Titik macet:</span>
+            {c.bottleneck && <><span style={{ fontSize: 12.5, fontWeight: 700, marginLeft: 8 }}>Bottleneck:</span>
               <Level level="crit" label={c.bottleneck_label} /></>}
           </div>
           <p style={{ fontSize: 13.5, fontWeight: 700, color: "#0f172a", lineHeight: 1.5 }}>{c.headline}</p>
         </div>
         <PathChain sections={c.sections} bottleneck={c.bottleneck} />
         <div className="mt-2 flex items-center gap-2" style={{ fontSize: 11.5, color: "#475569" }}>
-          Internet / ISP Plant (pembanding): <Level size="sm" level={LV[internet.status]} label={LABEL[internet.status]} />
+          Internet / Plant ISP (comparison): <Level size="sm" level={LV[internet.status]} label={LABEL[internet.status]} />
         </div>
       </Panel>
 
-      <Panel title="Kesimpulan">
+      <Panel title="Conclusion">
         <ul style={{ paddingLeft: 18, listStyle: "disc", fontSize: 12.5, color: "#1e293b", lineHeight: 1.7 }}>
           {c.conclusion.map((x, i) => <li key={i}>{x}</li>)}
         </ul>
         <p style={{ fontSize: 11, color: "#94a3b8", marginTop: 8 }}>
-          Titik macet = segmen pertama di sepanjang jalur laptop → database yang bermasalah; hambatan di depan membuat segmen di belakangnya ikut terlihat lambat.
-          Konfirmasi dengan laporan berulang sebelum mengubah konfigurasi.
+          Bottleneck = the first segment along the laptop → database path that has a problem; a hold-up early on makes every segment after it look slow too.
+          Confirm with repeated reports before changing any configuration.
         </p>
       </Panel>
 
-      <Panel title="Tindakan" subtitle="Urut prioritas: segmen titik macet dulu, lalu sesuai urutan jalur">
-        {!c.actions.length ? <Empty>Tidak ada tindakan.</Empty> : (
+      <Panel title="Actions" subtitle="By priority: the bottleneck segment first, then in path order">
+        {!c.actions.length ? <Empty>No actions.</Empty> : (
           <div className="space-y-2">
             {c.actions.map((a, i) => {
-              const p = PRIORITY[a.priority] || PRIORITY.data;
+              const pk = PRIORITY_ALIAS[a.priority] || a.priority;
+              const p = PRIORITY[pk] || PRIORITY.data;
               return (
                 <div key={i} className="flex gap-3 items-start rounded-lg p-2.5" style={{ border: "1px solid rgba(0,0,0,0.05)" }}>
-                  <span className="rounded-md" style={{ background: p.bg, color: p.color, fontSize: 10.5, fontWeight: 800, padding: "2px 8px", textTransform: "uppercase", flexShrink: 0, minWidth: 62, textAlign: "center" }}>{a.priority}</span>
+                  <span className="rounded-md" style={{ background: p.bg, color: p.color, fontSize: 10.5, fontWeight: 800, padding: "2px 8px", textTransform: "uppercase", flexShrink: 0, minWidth: 62, textAlign: "center" }}>{pk}</span>
                   <div>
                     <p style={{ fontSize: 12.5, color: "#0f172a" }}>{a.text}</p>
                     <p style={{ fontSize: 10.5, color: "#94a3b8", marginTop: 2 }}>{a.section}{a.item ? ` · ${a.item}` : ""}</p>
@@ -124,13 +127,13 @@ function ReportView({ row }) {
 
       {c.sections.map((s) => (
         <Panel key={s.key} title={<span className="flex items-center gap-2">{s.label} <Level size="sm" level={LV[s.status]} label={LABEL[s.status]} /></span>}>
-          <Table rows={s.items} empty="Tidak ada data untuk segmen ini."
+          <Table rows={s.items} empty="No data for this segment."
             columns={[
               { key: "name", label: "Item", wrap: true },
-              { key: "value", label: "Nilai", wrap: true, render: (r) => <b style={{ fontWeight: 700 }}>{fmtVal(r.value, r.unit)}</b> },
-              { key: "standard", label: "Standar", wrap: true },
+              { key: "value", label: "Value", wrap: true, render: (r) => <b style={{ fontWeight: 700 }}>{fmtVal(r.value, r.unit)}</b> },
+              { key: "standard", label: "Standard", wrap: true },
               { key: "status", label: "Status", render: (r) => <Level size="sm" level={LV[r.status]} label={LABEL[r.status]} /> },
-              { key: "note", label: "Catatan", wrap: true },
+              { key: "note", label: "Notes", wrap: true },
             ]} />
         </Panel>
       ))}
@@ -171,16 +174,16 @@ export default function ReportTab({ settings, onSettingsSaved }) {
       const r = await ebsNetApi.runSummaryReport();
       setCurrent(r);
       await load(false);
-    } catch (e) { alert(errText(e, "Proses gagal")); } finally { setRunning(false); }
+    } catch (e) { alert(errText(e, "Processing failed")); } finally { setRunning(false); }
   };
 
   const setInterval_ = async (hours) => {
     try { await ebsNetApi.putSettings({ report_interval_hours: Number(hours) }); await onSettingsSaved(); await load(false); }
-    catch (e) { alert(errText(e, "Gagal menyimpan jadwal")); }
+    catch (e) { alert(errText(e, "Failed to save the schedule")); }
   };
 
   const del = async (id) => {
-    if (!confirm("Hapus laporan ini?")) return;
+    if (!confirm("Delete this report?")) return;
     try {
       await ebsNetApi.deleteSummaryReport(id);
       if (current?.id === id) setCurrent(null);
@@ -193,14 +196,14 @@ export default function ReportTab({ settings, onSettingsSaved }) {
 
   return (
     <>
-      <Panel title="Laporan diagnosis — di mana akses EBS tersendat?"
-        subtitle="Memproses ulang semua: probe jalur, FortiGate HO & Plant, kesehatan EBS/DB, dan tes laptop terbaru — lalu menilai, menyimpulkan, dan menyimpan file laporan">
+      <Panel title="Diagnosis report — where does EBS access get stuck?"
+        subtitle="Re-runs everything: path probes, HO & Plant FortiGates, EBS/DB health and the latest laptop tests — then grades, concludes and saves a report file">
         <div className="flex items-end gap-4 flex-wrap">
           <Btn variant="primary" icon={running ? Loader2 : Play} spin={running} disabled={running} onClick={run}>
-            {running ? `Memproses semua… ${elapsed} s` : "Proses Ulang Semua"}
+            {running ? `Processing everything… ${elapsed} s` : "Re-run Everything"}
           </Btn>
           <div style={{ width: 200 }}>
-            <Field label="Proses otomatis">
+            <Field label="Automatic run">
               <select style={inputStyle} value={interval} onChange={(e) => setInterval_(e.target.value)}>
                 {INTERVALS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
@@ -209,28 +212,28 @@ export default function ReportTab({ settings, onSettingsSaved }) {
           {interval > 0 && (
             <p className="flex items-center gap-1.5" style={{ fontSize: 11.5, color: "#64748b" }}>
               <Clock size={12} />
-              Terakhir otomatis: {schedule?.last_auto_at ? fmtDate(schedule.last_auto_at) : "belum pernah"} ·
-              berikutnya: {schedule?.next_auto_at === "segera" ? "dalam ≤ 5 menit" : fmtDate(schedule?.next_auto_at)}
+              Last automatic run: {schedule?.last_auto_at ? fmtDate(schedule.last_auto_at) : "never"} ·
+              next: {["soon", "segera"].includes(schedule?.next_auto_at) ? "within ≤ 5 minutes" : fmtDate(schedule?.next_auto_at)}
             </p>
           )}
         </div>
         {running && (
-          <div className="mt-3"><Note>Sedang mengukur ulang semua segmen (termasuk SSH ke FortiGate dan server EBS) — biasanya 20–60 detik.</Note></div>
+          <div className="mt-3"><Note>Re-measuring every segment (including SSH to the FortiGates and the EBS server) — usually 20–60 seconds.</Note></div>
         )}
       </Panel>
 
       {current?.content ? <ReportView row={current} /> : (
-        <Panel><Empty>Belum ada laporan. Klik "Proses Ulang Semua" untuk membuat laporan pertama.</Empty></Panel>
+        <Panel><Empty>No reports yet. Click "Re-run Everything" to create the first one.</Empty></Panel>
       )}
 
-      <Panel title="Arsip laporan (30 hari)" subtitle="Disimpan 180 hari · klik baris untuk membuka">
-        <Table rows={list} onRowClick={(r) => open(r.id)} empty="Belum ada laporan tersimpan."
+      <Panel title="Report archive (30 days)" subtitle="Kept for 180 days · click a row to open it">
+        <Table rows={list} onRowClick={(r) => open(r.id)} empty="No saved reports yet."
           columns={[
-            { key: "created_at", label: "Waktu", render: (r) => <span style={{ fontWeight: r.id === current?.id ? 800 : 500 }}>{fmtDate(r.created_at)}</span> },
-            { key: "trigger", label: "Jenis", render: (r) => (r.trigger === "auto" ? "Otomatis" : `Manual · ${r.created_by || ""}`) },
+            { key: "created_at", label: "Time", render: (r) => <span style={{ fontWeight: r.id === current?.id ? 800 : 500 }}>{fmtDate(r.created_at)}</span> },
+            { key: "trigger", label: "Type", render: (r) => (r.trigger === "auto" ? "Automatic" : `Manual · ${r.created_by || ""}`) },
             { key: "overall", label: "Status", render: (r) => <Level size="sm" level={LV[r.overall] || "unknown"} label={LABEL[r.overall] || "—"} /> },
-            { key: "bottleneck_label", label: "Titik macet", render: (r) => r.bottleneck_label || "—" },
-            { key: "headline", label: "Ringkasan", wrap: true },
+            { key: "bottleneck_label", label: "Bottleneck", render: (r) => r.bottleneck_label || "—" },
+            { key: "headline", label: "Summary", wrap: true },
             { key: "act", label: "", render: (r) => (
               <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
                 <Btn size="sm" variant="ghost" icon={Download} onClick={() => saveFile(r.id, "html", r.created_at)}>HTML</Btn>

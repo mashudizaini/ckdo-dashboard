@@ -5,7 +5,7 @@ import { ebsNetApi } from "@/api/dashboard";
 import { Btn, Empty, Level, Note, Panel, Spinner, Table, fmtDate, fmtTime, errText, inputStyle, probeLevel, SERIES } from "./ui";
 
 const SEG_LABEL = {
-  ho_lan: "LAN HO", wan: "Jalur HO ↔ Plant", plant_lan: "LAN Plant",
+  ho_lan: "HO LAN", wan: "HO ↔ Plant path", plant_lan: "Plant LAN",
   ebs_web: "EBS Web / App", ebs_db: "EBS Database", internet: "Internet / ISP",
 };
 
@@ -45,32 +45,32 @@ export default function PathTab({ thresholds }) {
   return (
     <>
       <Note>
-        Probe berjalan dari <b>server dashboard (LAN Plant, satu subnet dengan EBS)</b>. Target di segmen <i>Jalur HO ↔ Plant</i> (mis. IP LAN FortiGate HO)
-        diukur melewati tunnel, jadi angkanya mewakili kesehatan WAN/VPN. Kondisi LAN HO sendiri hanya terlihat dari laptop di HO — lihat tab Client Test.
+        Probes run from the <b>dashboard server (Plant LAN, same subnet as EBS)</b>. Targets in the <i>HO ↔ Plant path</i> segment (e.g. the HO FortiGate LAN IP)
+        are measured through the tunnel, so their figures reflect WAN/VPN health. The HO LAN itself is only visible from laptops at HO — see the Client Test tab.
       </Note>
       <div className="h-4" />
-      <Panel title="Target probe" subtitle="Klik baris untuk melihat riwayat · tambah/ubah target di Setup"
-        action={<Btn size="sm" icon={busy ? Loader2 : RefreshCw} spin={busy} disabled={busy} onClick={runAll}>Probe semua sekarang</Btn>}>
-        <Table rows={targets} onRowClick={(r) => setSel(r.id)} empty="Belum ada target."
+      <Panel title="Probe targets" subtitle="Click a row to see its history · add/change targets in Setup"
+        action={<Btn size="sm" icon={busy ? Loader2 : RefreshCw} spin={busy} disabled={busy} onClick={runAll}>Probe all now</Btn>}>
+        <Table rows={targets} onRowClick={(r) => setSel(r.id)} empty="No targets yet."
           columns={[
             { key: "name", label: "Target", render: (r) => <span style={{ fontWeight: r.id === sel ? 800 : 500 }}>{r.name}</span> },
-            { key: "segment", label: "Segmen", render: (r) => SEG_LABEL[r.segment] || r.segment },
-            { key: "addr", label: "Alamat", render: (r) => r.check_type === "http" ? (r.url || "—") : `${r.host || "?"}:${r.port || "?"}` },
-            { key: "status", label: "Status", render: (r) => r.enabled ? <Level size="sm" level={probeLevel(r.last, thresholds)} /> : <span style={{ color: "#94a3b8" }}>nonaktif</span> },
+            { key: "segment", label: "Segment", render: (r) => SEG_LABEL[r.segment] || r.segment },
+            { key: "addr", label: "Address", render: (r) => r.check_type === "http" ? (r.url || "—") : `${r.host || "?"}:${r.port || "?"}` },
+            { key: "status", label: "Status", render: (r) => r.enabled ? <Level size="sm" level={probeLevel(r.last, thresholds)} /> : <span style={{ color: "#94a3b8" }}>disabled</span> },
             { key: "avg", label: "Avg", align: "right", render: (r) => r.last?.rtt_avg != null ? `${r.last.rtt_avg} ms` : "—" },
             { key: "jit", label: "Jitter", align: "right", render: (r) => r.last?.jitter_ms != null ? `${r.last.jitter_ms} ms` : "—" },
             { key: "loss", label: "Loss", align: "right", render: (r) => r.last?.loss_pct != null ? `${r.last.loss_pct}%` : "—" },
-            { key: "d", label: "24 jam: avg / max / loss", align: "right", render: (r) => r.day?.runs ? `${r.day.rtt_avg ?? "—"} / ${r.day.rtt_max ?? "—"} ms / ${r.day.loss_avg ?? 0}%` : "—" },
-            { key: "err", label: "Error terakhir", wrap: true, render: (r) => <span style={{ color: "#dc2626" }}>{r.last?.error || ""}</span> },
+            { key: "d", label: "24 h: avg / max / loss", align: "right", render: (r) => r.day?.runs ? `${r.day.rtt_avg ?? "—"} / ${r.day.rtt_max ?? "—"} ms / ${r.day.loss_avg ?? 0}%` : "—" },
+            { key: "err", label: "Last error", wrap: true, render: (r) => <span style={{ color: "#dc2626" }}>{r.last?.error || ""}</span> },
           ]} />
       </Panel>
 
       {target && (
-        <Panel title={`Riwayat — ${target.name}`} subtitle={target.notes || undefined}
+        <Panel title={`History — ${target.name}`} subtitle={target.notes || undefined}
           action={<select style={{ ...inputStyle, width: "auto" }} value={hours} onChange={(e) => setHours(Number(e.target.value))}>
-            <option value={6}>6 jam</option><option value={24}>24 jam</option><option value={72}>3 hari</option><option value={168}>7 hari</option>
+            <option value={6}>6 hours</option><option value={24}>24 hours</option><option value={72}>3 days</option><option value={168}>7 days</option>
           </select>}>
-          {!hist.length ? <Empty>Belum ada data untuk rentang ini.</Empty> : (
+          {!hist.length ? <Empty>No data for this range yet.</Empty> : (
             <>
               <p style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", marginBottom: 4 }}>Latency (ms)</p>
               <ResponsiveContainer width="100%" height={220}>
@@ -80,8 +80,8 @@ export default function PathTab({ thresholds }) {
                   <YAxis tick={axis} width={44} />
                   <Tooltip contentStyle={tooltipStyle} labelFormatter={(_, p) => p?.[0]?.payload?.at || ""} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  <Line type="monotone" dataKey="rtt_avg" name="Rata-rata" stroke={SERIES[0]} strokeWidth={2} dot={false} connectNulls={false} />
-                  <Line type="monotone" dataKey="rtt_max" name="Maksimum" stroke={SERIES[1]} strokeWidth={2} dot={false} connectNulls={false} />
+                  <Line type="monotone" dataKey="rtt_avg" name="Average" stroke={SERIES[0]} strokeWidth={2} dot={false} connectNulls={false} />
+                  <Line type="monotone" dataKey="rtt_max" name="Maximum" stroke={SERIES[1]} strokeWidth={2} dot={false} connectNulls={false} />
                 </LineChart>
               </ResponsiveContainer>
               <p style={{ fontSize: 11.5, fontWeight: 700, color: "#334155", margin: "12px 0 4px" }}>Packet / connect loss (%)</p>

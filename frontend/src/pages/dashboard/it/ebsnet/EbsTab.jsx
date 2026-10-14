@@ -47,19 +47,19 @@ export default function EbsTab() {
 
   return (
     <>
-      <Panel title="Kesehatan Oracle EBS (application & database tier)"
-        subtitle={snap ? `Lingkungan: ${s.environment || "?"} · ${fmtDate(snap.checked_at)} · otomatis tiap 5 menit (app tier tiap 15 menit)` : "Belum ada snapshot"}
-        action={<Btn size="sm" icon={busy ? Loader2 : RefreshCw} spin={busy} disabled={busy} onClick={capture}>Snapshot sekarang</Btn>}>
-        {!snap ? <Empty>Belum ada snapshot. Klik "Snapshot sekarang".</Empty> : !snap.ok ? (
+      <Panel title="Oracle EBS health (application & database tier)"
+        subtitle={snap ? `Environment: ${s.environment || "?"} · ${fmtDate(snap.checked_at)} · automatic every 5 minutes (app tier every 15 minutes)` : "No snapshot yet"}
+        action={<Btn size="sm" icon={busy ? Loader2 : RefreshCw} spin={busy} disabled={busy} onClick={capture}>Snapshot now</Btn>}>
+        {!snap ? <Empty>No snapshot yet. Click "Snapshot now".</Empty> : !snap.ok ? (
           <p style={{ color: "#dc2626", fontSize: 12 }}>{snap.error}</p>
         ) : (
           <div className="space-y-4">
             <div className="flex gap-2.5 flex-wrap">
-              <Stat label="Koneksi DB" value={s.db_connect_ms} unit="ms" hint="dari server dashboard" />
-              <Stat label="Sesi aktif / total" value={s.sessions_total != null ? `${s.sessions_active} / ${s.sessions_total}` : null} />
-              <Stat label="Sesi Forms" value={s.forms_sessions} />
+              <Stat label="DB connect" value={s.db_connect_ms} unit="ms" hint="from the dashboard server" />
+              <Stat label="Active / total sessions" value={s.sessions_total != null ? `${s.sessions_active} / ${s.sessions_total}` : null} />
+              <Stat label="Forms sessions" value={s.forms_sessions} />
               <Stat label="User web 15 mnt" value={s.web_users_15m} />
-              <Stat label="Sesi terblokir" value={s.sessions_blocked} level={s.sessions_blocked ? (s.sessions_blocked >= 5 ? "crit" : "warn") : "ok"} />
+              <Stat label="Blocked sessions" value={s.sessions_blocked} level={s.sessions_blocked ? (s.sessions_blocked >= 5 ? "crit" : "warn") : "ok"} />
               <Stat label="CPU host DB" value={s.host_cpu_pct} unit="%" level={s.host_cpu_pct >= 85 ? "warn" : s.host_cpu_pct != null ? "ok" : undefined} />
               <Stat label="Avg active sessions" value={s.avg_active_sessions} />
               <Stat label="DB wait ratio" value={s.db_wait_ratio} unit="%" />
@@ -69,51 +69,51 @@ export default function EbsTab() {
               <Stat label="Internal Manager" value={s.icm_up == null ? null : s.icm_up ? "UP" : "DOWN"} level={s.icm_up == null ? undefined : s.icm_up ? "ok" : "crit"} />
               <Stat label="Request pending" value={s.requests_pending} level={s.requests_pending > 50 ? "warn" : "ok"} />
               <Stat label="Request running" value={s.requests_running} />
-              <Stat label="Running > 1 jam" value={s.requests_long_running} level={s.requests_long_running ? "warn" : "ok"} />
-              <Stat label="Error 1 jam" value={s.requests_errors_1h} />
+              <Stat label="Running > 1 hour" value={s.requests_long_running} level={s.requests_long_running ? "warn" : "ok"} />
+              <Stat label="Errors, 1 hour" value={s.requests_errors_1h} />
             </div>
             {Object.keys(s.query_errors || {}).length > 0 && (
-              <Note tone="warn">Sebagian query gagal (biasanya grant v$ view untuk user APPS): {Object.entries(s.query_errors).map(([k, v]) => `${k}: ${v}`).join(" · ")}</Note>
+              <Note tone="warn">Some queries failed (usually the v$ view grants for the APPS user): {Object.entries(s.query_errors).map(([k, v]) => `${k}: ${v}`).join(" · ")}</Note>
             )}
           </div>
         )}
       </Panel>
 
       {hist.length > 1 && (
-        <Panel title="Tren 24 jam">
+        <Panel title="24-hour trend">
           <div className="flex gap-4 flex-wrap">
-            <MiniChart title="Sesi aktif & Forms" data={hist} keys={[["sessions_active", "Sesi aktif"], ["forms_sessions", "Sesi Forms"]]} />
+            <MiniChart title="Active & Forms sessions" data={hist} keys={[["sessions_active", "Active sessions"], ["forms_sessions", "Forms sessions"]]} />
             <MiniChart title="CPU host DB (%)" data={hist} keys={[["host_cpu_pct", "CPU"]]} />
-            <MiniChart title="Waktu koneksi DB dari server (ms)" data={hist} keys={[["db_connect_ms", "Connect"]]} />
+            <MiniChart title="DB connect time from the server (ms)" data={hist} keys={[["db_connect_ms", "Connect"]]} />
           </div>
         </Panel>
       )}
 
       {snap?.ok && (
         <>
-          <Panel title="Wait event aktif saat ini" subtitle="Sesi user ACTIVE, non-Idle — apa yang sedang ditunggu database">
-            <Table rows={s.waits} empty="Tidak ada sesi aktif yang menunggu (bagus)."
+          <Panel title="Current wait events" subtitle="ACTIVE, non-Idle user sessions — what the database is waiting on">
+            <Table rows={s.waits} empty="No active sessions waiting (good)."
               columns={[{ key: "event", label: "Event" }, { key: "wait_class", label: "Class" },
-                { key: "sessions", label: "Sesi", align: "right" }, { key: "max_wait_s", label: "Max tunggu (s)", align: "right" }]} />
+                { key: "sessions", label: "Sessions", align: "right" }, { key: "max_wait_s", label: "Max wait (s)", align: "right" }]} />
           </Panel>
-          <Panel title="Sesi terblokir (lock)">
-            <Table rows={s.blocking} empty="Tidak ada blocking."
+          <Panel title="Blocked sessions (locks)">
+            <Table rows={s.blocking} empty="No blocking."
               columns={[{ key: "sid", label: "SID" }, { key: "username", label: "User DB" }, { key: "module", label: "Module" },
-                { key: "blocking_session", label: "Diblokir oleh SID" }, { key: "seconds_in_wait", label: "Tunggu (s)", align: "right" }, { key: "event", label: "Event" }]} />
+                { key: "blocking_session", label: "Blocked by SID" }, { key: "seconds_in_wait", label: "Wait (s)", align: "right" }, { key: "event", label: "Event" }]} />
           </Panel>
-          <Panel title="SQL aktif > 5 menit">
-            <Table rows={s.long_sql} empty="Tidak ada."
+          <Panel title="SQL active > 5 minutes">
+            <Table rows={s.long_sql} empty="None."
               columns={[{ key: "sid", label: "SID" }, { key: "username", label: "User" }, { key: "module", label: "Module" },
-                { key: "sql_id", label: "SQL ID" }, { key: "seconds_active", label: "Aktif (s)", align: "right" }, { key: "event", label: "Event" }]} />
+                { key: "sql_id", label: "SQL ID" }, { key: "seconds_active", label: "Active (s)", align: "right" }, { key: "event", label: "Event" }]} />
           </Panel>
           <Panel title="Concurrent Managers" subtitle="Target vs actual process">
-            <Table rows={s.managers} empty="Tidak terbaca."
-              columns={[{ key: "name", label: "Manager" }, { key: "short_name", label: "Kode" },
+            <Table rows={s.managers} empty="Could not be read."
+              columns={[{ key: "name", label: "Manager" }, { key: "short_name", label: "Code" },
                 { key: "target", label: "Target", align: "right" }, { key: "actual", label: "Actual", align: "right" },
-                { key: "st", label: "Status", render: (r) => <Level size="sm" level={(r.actual || 0) >= (r.target || 0) ? "ok" : (r.actual || 0) === 0 ? "crit" : "warn"} label={(r.actual || 0) >= (r.target || 0) ? "OK" : "Kurang"} /> }]} />
+                { key: "st", label: "Status", render: (r) => <Level size="sm" level={(r.actual || 0) >= (r.target || 0) ? "ok" : (r.actual || 0) === 0 ? "crit" : "warn"} label={(r.actual || 0) >= (r.target || 0) ? "OK" : "Short"} /> }]} />
           </Panel>
-          <Panel title="Server EBS (OS)" subtitle="Server bertanda 'monitor' di Server Control — sama dengan Server Process Monitoring">
-            <Table rows={s.app_tier} empty="Belum ada data app tier di snapshot ini (diambil tiap 15 menit)."
+          <Panel title="EBS servers (OS)" subtitle="Servers marked 'monitor' in Server Control — the same as Server Process Monitoring">
+            <Table rows={s.app_tier} empty="No app tier data in this snapshot yet (taken every 15 minutes)."
               columns={[{ key: "server_label", label: "Server" }, { key: "server_ip", label: "IP" },
                 { key: "status", label: "Status", render: (r) => <Level size="sm" level={r.status === "online" ? "ok" : "crit"} label={r.status} /> },
                 { key: "cpu", label: "CPU %", align: "right" }, { key: "memory_percent", label: "Mem %", align: "right" },

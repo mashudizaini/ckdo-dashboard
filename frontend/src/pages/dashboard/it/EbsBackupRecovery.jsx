@@ -502,13 +502,13 @@ function JobsList({ jobTypes, refreshSignal }) {
   useEffect(() => { refresh(); }, [refresh, refreshSignal]);
 
   const cancelJob = async (j) => {
-    if (!confirm(`Batalkan jadwal job #${j.id}?
+    if (!confirm(`Cancel the schedule for job #${j.id}?
 ${j.description || j.job_type} — ${j.run_at_local || "?"}`)) return;
     try {
       await ebsBackupApi.cancelScheduled(j.id);
       refresh();
     } catch (e) {
-      alert(e?.detail || "Gagal membatalkan");
+      alert(e?.detail || "Cancel failed");
     }
   };
 
@@ -517,18 +517,18 @@ ${j.description || j.job_type} — ${j.run_at_local || "?"}`)) return;
     // lama dijadikan default supaya mengoreksi jam tidak berarti mengetik ulang
     // seluruh tanggal.
     const next = prompt(
-      `Jadwal baru untuk job #${j.id} (${j.description || j.job_type})
+      `New schedule for job #${j.id} (${j.description || j.job_type})
 `
-      + "Format: YYYY-MM-DD HH:MM — waktu server database (WIB)",
+      + "Format: YYYY-MM-DD HH:MM — database server time (WIB)",
       j.run_at_local || "",
     );
     if (!next) return;
     try {
       const r = await ebsBackupApi.rescheduleJob(j.id, next.trim());
-      alert(`Dipindah ke ${r.run_at_local} WIB.`);
+      alert(`Moved to ${r.run_at_local} WIB.`);
       refresh();
     } catch (e) {
-      alert(e?.detail || "Gagal mengubah jadwal");
+      alert(e?.detail || "Failed to change the schedule");
     }
   };
 
@@ -553,8 +553,8 @@ ${j.description || j.job_type} — ${j.run_at_local || "?"}`)) return;
                 {/* "Type" dulu hanya menampilkan slug job_type, jadi dua app backup
                     dengan filesystem dan tujuan berbeda terlihat sama persis, dan
                     baris terjadwal tidak memberi tahu apa yang akan dikerjakannya. */}
-                <td className="px-3 py-2">Yang di-backup</td><td className="px-3 py-2">Status</td>
-                <td className="px-3 py-2">Mulai / terjadwal</td><td className="px-3 py-2">Duration</td><td className="px-3 py-2">Size</td><td className="px-3 py-2"></td>
+                <td className="px-3 py-2">What is backed up</td><td className="px-3 py-2">Status</td>
+                <td className="px-3 py-2">Started / scheduled</td><td className="px-3 py-2">Duration</td><td className="px-3 py-2">Size</td><td className="px-3 py-2"></td>
               </tr>
             </thead>
             <tbody>
@@ -567,7 +567,7 @@ ${j.description || j.job_type} — ${j.run_at_local || "?"}`)) return;
                     <td className="px-3 py-2" style={{ color: "#64748b" }}>
                       {j.status === "scheduled"
                         ? (j.run_at_local
-                            ? <span title="Waktu server database">{j.run_at_local} <span style={{ fontSize: 10 }}>WIB</span></span>
+                            ? <span title="Database server time">{j.run_at_local} <span style={{ fontSize: 10 }}>WIB</span></span>
                             : "—")
                         : fmtDate(j.started_at)}
                     </td>
@@ -577,11 +577,11 @@ ${j.description || j.job_type} — ${j.run_at_local || "?"}`)) return;
                       <div className="flex items-center gap-1">
                         {j.status === "scheduled" && (
                           <>
-                            <button title="Ubah jadwal" style={{ color: "#2563eb" }}
+                            <button title="Change schedule" style={{ color: "#2563eb" }}
                               onClick={() => rescheduleJob(j)}>
                               <Pencil size={13} />
                             </button>
-                            <button title="Batalkan jadwal" style={{ color: "#dc2626" }}
+                            <button title="Cancel schedule" style={{ color: "#dc2626" }}
                               onClick={() => cancelJob(j)}>
                               <Trash2 size={13} />
                             </button>
@@ -657,10 +657,10 @@ function JobDetail({ jobId, onChanged }) {
           <div className="flex items-center justify-between" style={{ fontSize: 11, color: "#64748b", marginBottom: 3 }}>
             <span>
               Progress: <b style={{ color: "#0f172a" }}>{detail.progress_percent}%</b>
-              {detail.progress_elapsed_minutes != null && ` · berjalan ${detail.progress_elapsed_minutes} menit`}
-              {detail.progress_eta_minutes != null && ` · perkiraan sisa ${detail.progress_eta_minutes} menit`}
+              {detail.progress_elapsed_minutes != null && ` · running ${detail.progress_elapsed_minutes} min`}
+              {detail.progress_eta_minutes != null && ` · about ${detail.progress_eta_minutes} min left`}
             </span>
-            {detail.progress_source && <span style={{ fontSize: 10 }}>sumber: {detail.progress_source}</span>}
+            {detail.progress_source && <span style={{ fontSize: 10 }}>source: {detail.progress_source}</span>}
           </div>
           <div style={{ height: 6, borderRadius: 4, background: "#e2e8f0", overflow: "hidden" }}>
             <div style={{
@@ -792,9 +792,9 @@ function DbBackupTab({ servers }) {
           run_at_local: runAtLocal || null,
         });
         if (res?.status === "scheduled") {
-          alert(`Dijadwalkan jalan ${res.run_at_local} waktu server database.
+          alert(`Scheduled to run at ${res.run_at_local} database server time.
 `
-              + `Job #${res.job_id} akan diluncurkan otomatis — halaman tidak perlu dibuka.`);
+              + `Job #${res.job_id} will start automatically — the page does not need to stay open.`);
           setRunAtLocal("");
         }
       }
@@ -809,8 +809,8 @@ function DbBackupTab({ servers }) {
 
   return (
     <>
-      <Panel title="Kondisi Database Sekarang"
-        subtitle="Apakah ini saat yang tepat untuk backup — beban, sesi berjalan, dan jam server. Diperbarui tiap 30 detik.">
+      <Panel title="Database Conditions Now"
+        subtitle="Is this a good time for a backup — load, running sessions and the server clock. Refreshed every 30 seconds.">
         <BackupReadiness onServerClock={setServerClock} />
       </Panel>
 
@@ -836,7 +836,7 @@ function DbBackupTab({ servers }) {
             </Field>
           )}
           {["online_full", "online_incremental"].includes(jobType) && (
-            <Field label="Jalankan nanti (kosongkan = sekarang)">
+            <Field label="Run later (leave empty = now)">
               {/* Diisi dalam waktu SERVER DATABASE, yang ditampilkan di panel
                   atas — bukan waktu browser dan bukan UTC. Dashboard menyimpan
                   UTC, dan tanpa label ini "22:00" bisa berarti dua jam yang
@@ -844,8 +844,8 @@ function DbBackupTab({ servers }) {
               <input type="datetime-local" style={inputStyle} value={runAtLocal}
                 onChange={(e) => setRunAtLocal(e.target.value.replace("T", " "))} />
               <p style={{ fontSize: 10.5, color: "#64748b", marginTop: 3 }}>
-                Waktu server database{serverClock ? ` — sekarang ${serverClock}` : ""}.
-                Job diluncurkan otomatis; halaman tidak perlu dibuka.
+                Database server time{serverClock ? ` — now ${serverClock}` : ""}.
+                The job starts automatically; the page does not need to stay open.
               </p>
             </Field>
           )}
@@ -988,15 +988,15 @@ function AppPreflight({ pre }) {
           fontSize: 11.5, color: "#92400e", background: "rgba(217,119,6,0.12)",
           border: "1px solid rgba(217,119,6,0.35)", borderRadius: 8, padding: "7px 10px", marginBottom: 10,
         }}>
-          <b>Perhatian:</b> {pre.warning}
+          <b>Note:</b> {pre.warning}
         </p>
       )}
       <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginBottom: 8 }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>
-          Sumber — {pre.apps_base}
+          Source — {pre.apps_base}
         </span>
         <span style={{ fontSize: 11, color: "#64748b" }}>
-          mode: {pre.mode === "remote_stream" ? "dialirkan lewat SSH ke server lain" : "disk lokal App server"}
+          mode: {pre.mode === "remote_stream" ? "streamed over SSH to another server" : "App server local disk"}
         </span>
       </div>
 
@@ -1007,21 +1007,21 @@ function AppPreflight({ pre }) {
               <td style={{ padding: "2px 0", color: "#475569", width: 70 }}>{src.name}</td>
               <td style={{ padding: "2px 8px", color: "#64748b", fontFamily: "monospace" }}>{src.path}</td>
               <td style={{ padding: "2px 0", textAlign: "right", color: src.exists ? "#0f172a" : "#dc2626" }}>
-                {src.exists ? fmtBytes(src.bytes) : "tidak ada"}
+                {src.exists ? fmtBytes(src.bytes) : "missing"}
               </td>
             </tr>
           ))}
           <tr style={{ borderTop: "1px solid rgba(15,23,42,0.1)" }}>
-            <td colSpan={2} style={{ padding: "4px 0", fontWeight: 700, color: "#0f172a" }}>Total sumber</td>
+            <td colSpan={2} style={{ padding: "4px 0", fontWeight: 700, color: "#0f172a" }}>Total source</td>
             <td style={{ padding: "4px 0", textAlign: "right", fontWeight: 700 }}>{fmtBytes(pre.source_total_bytes)}</td>
           </tr>
         </tbody>
       </table>
 
-      <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Tujuan</div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Destination</div>
       {t.connected === false ? (
         <p style={{ fontSize: 11.5, color: "#dc2626" }}>
-          Tidak bisa dibaca{t.server ? ` (${t.server})` : ""}: {t.error}
+          Cannot be read{t.server ? ` (${t.server})` : ""}: {t.error}
         </p>
       ) : (
         <>
@@ -1030,8 +1030,8 @@ function AppPreflight({ pre }) {
           </p>
           <div className="flex gap-4 flex-wrap" style={{ fontSize: 11.5, color: "#475569" }}>
             <span>Total {fmtBytes(t.total_bytes)}</span>
-            <span>Terpakai {fmtBytes(t.used_bytes)}</span>
-            <span>Sisa <b style={{ color: "#0f172a" }}>{fmtBytes(t.available_bytes)}</b></span>
+            <span>Used {fmtBytes(t.used_bytes)}</span>
+            <span>Free <b style={{ color: "#0f172a" }}>{fmtBytes(t.available_bytes)}</b></span>
           </div>
           {fits != null && (
             <p style={{
@@ -1039,8 +1039,8 @@ function AppPreflight({ pre }) {
               color: fits ? "#16a34a" : "#dc2626",
             }}>
               {fits
-                ? `Muat — sisa ${fmtBytes(pre.headroom_bytes)} setelah disalin, dan arsipnya dikompresi jadi biasanya jauh lebih kecil dari angka sumber.`
-                : `TIDAK MUAT — kurang ${fmtBytes(Math.abs(pre.headroom_bytes))} dibanding ukuran sumber mentah. Kompresi mungkin menyelamatkan, tapi jangan diandalkan.`}
+                ? `Fits — ${fmtBytes(pre.headroom_bytes)} left after copying, and the archive is compressed so it is usually much smaller than the source figure.`
+                : `DOES NOT FIT — ${fmtBytes(Math.abs(pre.headroom_bytes))} short of the raw source size. Compression may save it, but do not rely on it.`}
             </p>
           )}
         </>
@@ -1070,12 +1070,12 @@ function AppBackupTab({ servers }) {
   // fs1 dan fs2 sangat berbeda antar instalasi, jadi tebakan tidak berguna.
   // Karena itu bisa memakan waktu, hanya dijalankan saat diminta.
   const runPre = async () => {
-    if (!serverId) return alert("Pilih App server dulu");
+    if (!serverId) return alert("Select an App server first");
     setPreBusy(true);
     try {
       setPre(await ebsBackupApi.appPreflight(serverId, fsTarget, remoteTargetId || null));
     } catch (e) {
-      alert(e?.detail || "Preflight gagal");
+      alert(e?.detail || "Preflight failed");
     } finally {
       setPreBusy(false);
     }
@@ -1092,9 +1092,9 @@ function AppBackupTab({ servers }) {
         sync_synology_server_id: syncSynologyId ? Number(syncSynologyId) : null,
       });
       if (res?.status === "scheduled") {
-        alert(`Dijadwalkan jalan ${res.run_at_local} waktu server database.
+        alert(`Scheduled to run at ${res.run_at_local} database server time.
 `
-            + `Job #${res.job_id} diluncurkan otomatis — halaman tidak perlu dibuka.`);
+            + `Job #${res.job_id} starts automatically — the page does not need to stay open.`);
         setRunAtLocal("");
       }
       setRefreshSignal((n) => n + 1);
@@ -1130,18 +1130,18 @@ function AppBackupTab({ servers }) {
           </Field>
         </div>
         <div className="grid grid-cols-3 gap-4 mb-4">
-          <Field label="Salin juga ke Synology (setelah selesai)">
+          <Field label="Also copy to Synology (when done)">
             {/* Dua tahap, bukan dua tujuan sekaligus: arsipnya mendarat di
                 server DB yang punya ruang, lalu disalin dari sana. Menyalurkan
                 ke dua tempat bersamaan berarti membaca application tier dua
                 kali lewat jaringan. Salinannya dimulai sendiri begitu backup
                 selesai — tidak perlu ada yang menunggui halaman. */}
             <select style={inputStyle} value={syncSynologyId} onChange={(e) => setSyncSynologyId(e.target.value)}>
-              <option value="">Tidak</option>
-              {synologyServers.map((s) => <option key={s.id} value={s.id}>Ya — {s.name}</option>)}
+              <option value="">No</option>
+              {synologyServers.map((s) => <option key={s.id} value={s.id}>Yes — {s.name}</option>)}
             </select>
           </Field>
-          <Field label="Jalankan nanti (kosongkan = sekarang)">
+          <Field label="Run later (leave empty = now)">
             {/* Waktu server database, sama seperti tab DB Backup — bukan waktu
                 browser dan bukan UTC. */}
             <input type="datetime-local" style={inputStyle} value={runAtLocal}
@@ -1154,18 +1154,18 @@ function AppBackupTab({ servers }) {
 
         <div className="flex gap-2 mb-4">
           <Btn size="sm" icon={preBusy ? Loader2 : RefreshCw} disabled={preBusy || !serverId} onClick={runPre}>
-            {preBusy ? "Mengukur… (bisa beberapa menit)" : "Cek ukuran & tujuan"}
+            {preBusy ? "Measuring… (may take a few minutes)" : "Check size & destination"}
           </Btn>
           {preBusy && (
             <span style={{ fontSize: 11, color: "#64748b", alignSelf: "center" }}>
-              du menelusuri ratusan ribu berkas di application tier — biarkan berjalan.
+              du walks hundreds of thousands of files on the application tier — let it run.
             </span>
           )}
         </div>
         {pre && <AppPreflight pre={pre} />}
 
         <Btn variant="primary" icon={Play} disabled={submitting} onClick={submit}>
-          {submitting ? "Submitting…" : runAtLocal ? "Jadwalkan App Backup" : "Trigger App Backup"}
+          {submitting ? "Submitting…" : runAtLocal ? "Schedule App Backup" : "Trigger App Backup"}
         </Btn>
       </Panel>
 
@@ -1652,19 +1652,19 @@ function SshSetupWizard({ servers }) {
           langkah 2 tampak mustahil dilakukan. Sekarang jadi kolom berlabel
           seperti kolom lain di halaman ini. */}
       <div className="grid grid-cols-3 gap-4 mb-4">
-        <Field label="Password target (hanya untuk langkah 2)">
+        <Field label="Target password (step 2 only)">
           <input type="password" style={inputStyle} autoComplete="new-password"
-            placeholder="password akun di server target"
+            placeholder="account password on the target server"
             value={targetPassword} onChange={(e) => setTargetPassword(e.target.value)} />
           <p style={{ fontSize: 10.5, color: "#64748b", marginTop: 3 }}>
-            Dipakai sekali untuk menitipkan kunci, lalu dibuang — tidak disimpan di mana pun.
+            Used once to install the key, then discarded — it is not stored anywhere.
           </p>
         </Field>
       </div>
       <div className="flex gap-2 flex-wrap mb-3">
         <Btn disabled={busy} onClick={genKey}>1. Generate Key on Source</Btn>
         <Btn disabled={busy || !targetPassword} onClick={copyId}
-          title={targetPassword ? "" : "Isi password target dulu"}>2. Copy Key to Target</Btn>
+          title={targetPassword ? "" : "Enter the target password first"}>2. Copy Key to Target</Btn>
         <Btn disabled={busy} onClick={test}>3. Test Passwordless</Btn>
       </div>
       {pubKey && <pre style={{ background: "#f8fafc", fontSize: 10.5, padding: 8, borderRadius: 8, overflow: "auto", marginBottom: 8 }}>{pubKey}</pre>}

@@ -10,71 +10,70 @@ import { Note, Panel, errText, fmtDate } from "./ui";
 
 const GROUPS = [
   {
-    title: "1 · Ukur dulu (baseline sebelum mengubah apa pun)",
+    title: "1 · Measure first (baseline before changing anything)",
     items: [
-      ["base-agent", "Jalankan agen PowerShell di 3–5 laptop HO pada 08:00, 11:00, 14:00 dan 15:00–16:00 selama satu minggu.", "Membedakan masalah satu laptop (Case D) dari masalah jalur (Case B), dan memperlihatkan pola jam sibuk di Matriks waktu tes."],
-      ["base-ebs-test", "Catat Network Test bawaan Oracle EBS (RTT + data rate) bersamaan dengan agen.", "Angka resmi Oracle yang bisa dibandingkan langsung dengan probe dashboard."],
-      ["base-incident", "Setiap keluhan “EBS lambat”: catat insiden SAAT itu juga dengan snapshot dicentang.", "Timestamp yang tepat = korelasi firewall / VPN / app server / DB. Tanpa itu, root cause cuma tebakan."],
-      ["base-change", "Aturan: tidak ada perubahan VPN, routing, MTU, firewall atau Oracle tanpa baseline sebelum & sesudah.", "Menghindari “sudah diubah tapi tidak tahu efeknya”."],
+      ["base-agent", "Run the PowerShell agent on 3–5 HO laptops at 08:00, 11:00, 14:00 and 15:00–16:00 for one week.", "Separates a single-laptop problem (Case D) from a path problem (Case B), and shows the busy-hour pattern in the Test time matrix."],
+      ["base-ebs-test", "Record Oracle EBS's built-in Network Test (RTT + data rate) at the same time as the agent.", "Official Oracle figures that compare directly with the dashboard probes."],
+      ["base-incident", "For every “EBS is slow” complaint: log an incident RIGHT THEN with the snapshot ticked.", "An exact timestamp = correlation across firewall / VPN / app server / DB. Without it, the root cause is just a guess."],
+      ["base-change", "Rule: no VPN, routing, MTU, firewall or Oracle change without a before & after baseline.", "Avoids “we changed it but don't know what it did”."],
     ],
   },
   {
-    title: "2 · Jalur HO ↔ Plant (FortiGate 121G / SD-WAN)",
+    title: "2 · HO ↔ Plant path (FortiGate 121G / SD-WAN)",
     items: [
-      ["fg-sla", "Buat SD-WAN performance SLA khusus EBS: probe ping + HTTP ke server EBS (172.21.2.x) lewat tunnel, target latency ≤ 50 ms, jitter ≤ 10 ms, loss ≤ 1 %.", "FortiGate sendiri jadi sensor 24 jam; hasilnya tampil di tab FortiGate."],
-      ["fg-rule", "SD-WAN rule untuk subnet EBS dengan strategi Lowest Cost (SLA) / Best Quality — bukan load-balance yang bisa memindah sesi di tengah jalan.", "Satu sesi TCP Forms yang berpindah link = Forms hang / FRM-92101. Load-balance cocok untuk internet, bukan untuk EBS."],
-      ["fg-dual-tunnel", "Tunnel IPsec kedua lewat iForte di Plant sebagai member SD-WAN, failover otomatis; uji failover di luar jam kerja.", "Saat ini satu tunnel = satu titik gagal. iForte radio rentan hujan, jadi pakai sebagai cadangan SLA-based, bukan jalur utama."],
-      ["fg-mss", "Set tcp-mss (≈1350) pada policy tunnel EBS dan cek MTU tunnel; bandingkan dengan Path MTU dari agen.", "Fragmentasi paket IPsec (NET-06) gejalanya khas: login lancar, layar/LOV besar macet."],
-      ["fg-qos", "Traffic shaping: prioritas + guaranteed bandwidth untuk port EBS; batasi Windows Update, OneDrive/backup, streaming di jam kerja, terutama di link Plant 30 Mbps.", "Forms sangat sensitif antrian (bufferbloat) — satu upload besar bisa menaikkan RTT semua user EBS."],
-      ["fg-ttl", "Session-TTL policy EBS lebih panjang dari ICX Session Timeout dan heartbeat Forms; DPD on-idle aktif.", "Firewall yang memotong sesi idle diam-diam membuat Forms “hang” saat user kembali dari rapat."],
-      ["fg-offload", "Pastikan tunnel EBS ter-offload NPU dan tidak melewati inspeksi proxy-based / deep SSL inspection.", "Inspeksi menambah latency & CPU firewall dan mematikan hardware offload untuk traffic internal yang tepercaya."],
-      ["fg-license", "Perpanjang lisensi FortiGuard (jatuh tempo 11 Mei 2026).", "IPS/AV/Web Filter tidak lagi update — bukan penyebab lambat, tapi risiko keamanan di perangkat yang sama."],
-      ["fg-snmp", "Monitor utilisasi WAN & tunnel (SNMP / FortiAnalyzer) dengan alarm > 70–80 %.", "Bandwidth saturation (NET-05) hanya terbukti dengan grafik utilisasi pada jam insiden."],
-      ["fg-ho-isp", "Pertimbangkan link kedua di HO (saat ini hanya CBN).", "Kalau link HO putus, seluruh HO kehilangan EBS walau Plant punya dua ISP."],
+      ["fg-sla", "Create an EBS-specific SD-WAN performance SLA: ping + HTTP probe to the EBS server (172.21.2.x) through the tunnel, target latency ≤ 50 ms, jitter ≤ 10 ms, loss ≤ 1 %.", "The FortiGate itself becomes a 24-hour sensor; the results show in the FortiGate tab."],
+      ["fg-rule", "An SD-WAN rule for the EBS subnet with the Lowest Cost (SLA) / Best Quality strategy — not load-balance, which can move a session mid-way.", "One Forms TCP session that moves link = Forms hang / FRM-92101. Load-balance suits internet traffic, not EBS."],
+      ["fg-dual-tunnel", "A second IPsec tunnel over iForte at Plant as an SD-WAN member, with automatic failover; test failover outside working hours.", "Today one tunnel = one point of failure. iForte radio is rain-sensitive, so use it as an SLA-based backup, not the primary path."],
+      ["fg-mss", "Set tcp-mss (≈1350) on the EBS tunnel policy and check the tunnel MTU; compare with the Path MTU from the agent.", "IPsec packet fragmentation (NET-06) has a typical symptom: login is fine, large screens/LOVs freeze."],
+      ["fg-qos", "Traffic shaping: priority + guaranteed bandwidth for the EBS ports; limit Windows Update, OneDrive/backup and streaming during working hours, especially on the 30 Mbps Plant link.", "Forms is very sensitive to queuing (bufferbloat) — one large upload can raise the RTT for every EBS user."],
+      ["fg-ttl", "EBS policy session-TTL longer than the ICX Session Timeout and the Forms heartbeat; DPD on-idle enabled.", "A firewall that silently cuts idle sessions makes Forms “hang” when users come back from a meeting."],
+      ["fg-offload", "Make sure the EBS tunnel is NPU-offloaded and does not go through proxy-based / deep SSL inspection.", "Inspection adds latency & firewall CPU and disables hardware offload for trusted internal traffic."],
+      ["fg-license", "Renew the FortiGuard licence (expires 11 May 2026).", "IPS/AV/Web Filter no longer update — not a cause of slowness, but a security risk on the same device."],
+      ["fg-snmp", "Monitor WAN & tunnel utilisation (SNMP / FortiAnalyzer) with an alarm at > 70–80 %.", "Bandwidth saturation (NET-05) can only be proven with a utilisation graph at the time of the incident."],
+      ["fg-ho-isp", "Consider a second link at HO (currently CBN only).", "If the HO link goes down, all of HO loses EBS even though Plant has two ISPs."],
     ],
   },
   {
-    title: "3 · LAN HO & laptop",
+    title: "3 · HO LAN & laptops",
     items: [
-      ["cli-wired", "User Forms intensif (Finance, Purchasing, PPIC) memakai kabel LAN; Wi-Fi hanya 5 GHz dengan sinyal > 70 %.", "Wi-Fi menambah jitter di hop pertama — kalau gateway sudah jitter, sisa jalur tidak bisa memperbaikinya (Case A)."],
-      ["cli-wifi-survey", "Survey Wi-Fi HO: overlap channel, jumlah klien per AP, roaming 802.11k/v/r.", "Laporan agen yang menunjukkan jitter ke gateway tinggi di banyak laptop = masalah AP, bukan laptop."],
-      ["cli-ram", "Standar laptop: RAM ≥ 8 GB (16 GB untuk pengguna Excel + Teams + EBS), SSD.", "Agen menandai CLI-02 saat RAM bebas < 20 % — Java Forms ikut swap."],
-      ["cli-java", "Standarisasi Java untuk Forms 12.2 (JRE 8 / Java Web Start) dengan versi seragam di semua laptop.", "Versi berbeda memaksa unduh ulang jar Forms lewat WAN dan memicu pesan keamanan yang membuat user menutup sesi."],
-      ["cli-proxy-dns", "Bypass proxy untuk hostname EBS dan pastikan DNS internal me-resolve EBS ke IP privat.", "Proxy atau hairpin lewat IP publik menambah hop & latency di setiap request."],
-      ["cli-power-av", "Power plan Balanced/High performance saat dicolok; matikan power-saving NIC; kecualikan cache Java/Forms dari scan real-time antivirus.", "CPU throttling & scan antivirus terasa seperti EBS lambat (CLI-01/CLI-05)."],
-      ["cli-browser", "Profil browser khusus EBS tanpa ekstensi berat; bersihkan cache Java/JNLP saat ada keluhan satu laptop.", "Penyebab umum Case D (CLI-04)."],
+      ["cli-wired", "Heavy Forms users (Finance, Purchasing, PPIC) use wired LAN; Wi-Fi only on 5 GHz with signal > 70 %.", "Wi-Fi adds jitter at the first hop — if the gateway already has jitter, the rest of the path cannot fix it (Case A)."],
+      ["cli-wifi-survey", "HO Wi-Fi survey: channel overlap, clients per AP, 802.11k/v/r roaming.", "Agent reports showing high jitter to the gateway on many laptops = an AP problem, not a laptop problem."],
+      ["cli-ram", "Laptop standard: RAM ≥ 8 GB (16 GB for Excel + Teams + EBS users), SSD.", "The agent flags CLI-02 when free RAM < 20 % — Java Forms ends up swapping."],
+      ["cli-java", "Standardise Java for Forms 12.2 (JRE 8 / Java Web Start) with the same version on every laptop.", "Different versions force the Forms jars to be downloaded again over the WAN and trigger security prompts that make users close the session."],
+      ["cli-proxy-dns", "Bypass the proxy for the EBS hostname and make sure internal DNS resolves EBS to its private IP.", "A proxy or hairpin through a public IP adds hops & latency to every request."],
+      ["cli-power-av", "Balanced/High performance power plan when plugged in; turn off NIC power saving; exclude the Java/Forms cache from real-time antivirus scanning.", "CPU throttling & antivirus scans feel like slow EBS (CLI-01/CLI-05)."],
+      ["cli-browser", "A dedicated browser profile for EBS without heavy extensions; clear the Java/JNLP cache when a single laptop complains.", "A common cause of Case D (CLI-04)."],
     ],
   },
   {
     title: "4 · Oracle EBS 12.2 (application & database tier)",
     items: [
-      ["ebs-forms-retry", "Atur networkRetries dan heartBeat Forms lewat AutoConfig (bukan edit manual formsweb.cfg).", "Membuat Forms tahan putus sesaat tunnel alih-alih langsung FRM-92101/92102."],
-      ["ebs-compress", "Aktifkan kompresi HTTP & cache header file statis di OHS untuk halaman OAF.", "Mengurangi byte yang lewat link Plant 30 Mbps tanpa mengubah aplikasi."],
-      ["ebs-schedule", "Jadwalkan request berat (Gather Schema Statistics, purge, report besar) di luar jam kerja HO; output report besar dikirim via email/NAS.", "Concurrent request berat menaikkan CPU/I/O DB saat user HO bekerja (DB-01/DB-03)."],
-      ["ebs-purge", "Purge rutin FND_CONCURRENT_REQUESTS, Workflow & log; Gather Stats terjadwal.", "Tabel FND/WF yang menggembung memperlambat layar yang tampak “network”."],
-      ["ebs-jvm", "Review heap & jumlah managed server oacore/forms sesuai jumlah user.", "Full GC JVM terasa persis seperti hang beberapa detik (EBS-02/EBS-03)."],
-      ["ebs-awr", "Saat insiden Case C: ambil AWR/ASH di jendela waktu insiden (Top SQL, wait event, blocking).", "Tab EBS Server memberi gambaran cepat; AWR memberi bukti."],
+      ["ebs-forms-retry", "Set Forms networkRetries and heartBeat through AutoConfig (not by editing formsweb.cfg by hand).", "Lets Forms survive a brief tunnel drop instead of going straight to FRM-92101/92102."],
+      ["ebs-compress", "Enable HTTP compression & cache headers for static files on OHS for OAF pages.", "Reduces the bytes crossing the 30 Mbps Plant link without changing the application."],
+      ["ebs-schedule", "Schedule heavy requests (Gather Schema Statistics, purges, large reports) outside HO working hours; send large report output via email/NAS.", "Heavy concurrent requests raise DB CPU/I/O while HO users are working (DB-01/DB-03)."],
+      ["ebs-purge", "Routine purge of FND_CONCURRENT_REQUESTS, Workflow & logs; scheduled Gather Stats.", "Bloated FND/WF tables slow down screens in a way that looks like “network”."],
+      ["ebs-jvm", "Review heap & the number of oacore/forms managed servers against the number of users.", "A JVM full GC feels exactly like a hang of a few seconds (EBS-02/EBS-03)."],
+      ["ebs-awr", "During a Case C incident: take AWR/ASH for the incident time window (Top SQL, wait events, blocking).", "The EBS Server tab gives a quick picture; AWR gives proof."],
     ],
   },
   {
-    title: "5 · Kalau RTT HO → Plant memang tidak bisa turun",
+    title: "5 · If HO → Plant RTT really cannot come down",
     items: [
-      ["arch-rds", "Jump host / RDS / Citrix di Plant untuk power user Forms.", "Hanya gambar layar yang lewat WAN; Forms bicara ke server via LAN Plant (~1 ms). Paling efektif untuk Forms yang “chatty”."],
-      ["arch-oaf", "Arahkan transaksi ke halaman OAF/self-service (HTML) bila tersedia.", "Halaman HTML jauh lebih toleran latency daripada Forms Java applet."],
-      ["arch-isp-sla", "Minta SLA latency/jitter/loss tertulis dari ISP, lampirkan baseline dari modul ini.", "Data probe 24/7 adalah bukti saat eskalasi ke ISP (NET-08)."],
+      ["arch-rds", "A jump host / RDS / Citrix at Plant for Forms power users.", "Only screen images cross the WAN; Forms talks to the server over the Plant LAN (~1 ms). Most effective for “chatty” Forms."],
+      ["arch-oaf", "Steer transactions to OAF/self-service (HTML) pages where available.", "HTML pages tolerate latency far better than the Forms Java applet."],
+      ["arch-isp-sla", "Ask the ISP for a written latency/jitter/loss SLA, attaching the baseline from this module.", "24/7 probe data is the evidence when escalating to the ISP (NET-08)."],
     ],
   },
   {
-    title: "Pertanyaan untuk Network Team (§12 script)",
+    title: "Questions for the Network Team (script §12)",
     items: [
-      ["q-provider", "Traffic EBS melewati provider mana, dan VPN tunnel memakai provider mana?", "Cek di tab FortiGate: kolom “Rute ke EBS via”."],
-      ["q-lb", "Apakah kedua provider load-balance, dan bisakah satu sesi TCP berpindah provider?", ""],
-      ["q-failover", "Bagaimana mekanisme failover, dan kapan terakhir diuji?", ""],
-      ["q-metrics", "Berapa latency, loss, jitter, utilisasi tunnel, serta MTU/MSS tunnel saat ini?", "Sebagian besar sudah terbaca otomatis di tab FortiGate & Jalur."],
+      ["q-provider", "Which provider does EBS traffic go through, and which provider does the VPN tunnel use?", "Check in the FortiGate tab: the “Route to EBS via” column."],
+      ["q-lb", "Do the two providers load-balance, and can one TCP session move between providers?", ""],
+      ["q-failover", "How does failover work, and when was it last tested?", ""],
+      ["q-metrics", "What are the current latency, loss, jitter, tunnel utilisation and tunnel MTU/MSS?", "Most of these are already read automatically in the FortiGate & Path tabs."],
     ],
   },
 ];
-
 export default function PlaybookTab({ settings, user }) {
   const [state, setState] = useState(settings?.playbook_checklist || {});
   useEffect(() => { setState(settings?.playbook_checklist || {}); }, [settings]);
@@ -85,7 +84,7 @@ export default function PlaybookTab({ settings, user }) {
     else next[id] = { done: true, by: user, at: new Date().toISOString() };
     setState(next);
     try { await ebsNetApi.putSettings({ playbook_checklist: next }); }
-    catch (e) { alert(errText(e, "Gagal menyimpan")); setState(state); }
+    catch (e) { alert(errText(e, "Save failed")); setState(state); }
   };
 
   const total = GROUPS.reduce((n, g) => n + g.items.length, 0);
@@ -94,9 +93,9 @@ export default function PlaybookTab({ settings, user }) {
   return (
     <>
       <Note>
-        Rekomendasi agar akses Oracle EBS dari HO stabil. Prinsipnya: <b>Forms EBS sensitif terhadap round-trip dan stabilitas, bukan bandwidth</b> —
-        satu layar Forms bisa ratusan round-trip, jadi 60 ms × 200 = 12 detik. Turunkan jitter & loss, jaga sesi TCP tidak berpindah jalur, dan buktikan setiap
-        perubahan dengan data sebelum/sesudah. Progres: <b>{done}/{total}</b> selesai.
+        Recommendations for stable Oracle EBS access from HO. The principle: <b>EBS Forms is sensitive to round-trips and stability, not bandwidth</b> —
+        one Forms screen can take hundreds of round-trips, so 60 ms × 200 = 12 seconds. Bring jitter & loss down, keep TCP sessions from switching paths, and prove every
+        change with before/after data. Progress: <b>{done}/{total}</b> done.
       </Note>
       <div className="h-4" />
       {GROUPS.map((g) => (
@@ -111,7 +110,7 @@ export default function PlaybookTab({ settings, user }) {
                   <div>
                     <p style={{ fontSize: 12.5, color: "#0f172a", fontWeight: 600, textDecoration: st?.done ? "line-through" : "none", opacity: st?.done ? 0.7 : 1 }}>{text}</p>
                     {why && <p style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>{why}</p>}
-                    {st?.done && <p style={{ fontSize: 10.5, color: "#0ca30c", marginTop: 2 }}>Selesai · {st.by} · {fmtDate(st.at)}</p>}
+                    {st?.done && <p style={{ fontSize: 10.5, color: "#0ca30c", marginTop: 2 }}>Done · {st.by} · {fmtDate(st.at)}</p>}
                   </div>
                 </button>
               );

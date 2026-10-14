@@ -8,9 +8,9 @@ import { CheckCircle2, AlertTriangle, XCircle, HelpCircle } from "lucide-react";
 export const SERIES = ["#2a78d6", "#eb6834"];
 export const STATUS = {
   ok:      { color: "#0ca30c", bg: "rgba(12,163,12,0.08)",  label: "Normal",   Icon: CheckCircle2 },
-  warn:    { color: "#b77d00", bg: "rgba(250,178,25,0.14)", label: "Waspada",  Icon: AlertTriangle },
-  crit:    { color: "#d03b3b", bg: "rgba(208,59,59,0.09)",  label: "Kritis",   Icon: XCircle },
-  unknown: { color: "#64748b", bg: "rgba(100,116,139,0.08)", label: "Belum ada data", Icon: HelpCircle },
+  warn:    { color: "#b77d00", bg: "rgba(250,178,25,0.14)", label: "Warning",  Icon: AlertTriangle },
+  crit:    { color: "#d03b3b", bg: "rgba(208,59,59,0.09)",  label: "Critical", Icon: XCircle },
+  unknown: { color: "#64748b", bg: "rgba(100,116,139,0.08)", label: "No data yet", Icon: HelpCircle },
 };
 
 export function Panel({ title, subtitle, action, children, pad = true }) {
@@ -104,7 +104,7 @@ export function Stat({ label, value, unit, level, hint }) {
   );
 }
 
-export function Table({ columns, rows, empty = "Tidak ada data.", onRowClick }) {
+export function Table({ columns, rows, empty = "No data.", onRowClick }) {
   if (!rows?.length) return <Empty>{empty}</Empty>;
   return (
     <div className="rounded-xl overflow-x-auto" style={{ border: "1px solid rgba(0,0,0,0.06)" }}>
@@ -132,7 +132,7 @@ export function Table({ columns, rows, empty = "Tidak ada data.", onRowClick }) 
   );
 }
 
-export function RawBlock({ title = "Output mentah", text }) {
+export function RawBlock({ title = "Raw output", text }) {
   if (!text) return null;
   return (
     <details className="mt-2">
@@ -153,15 +153,15 @@ export function Note({ children, tone = "info" }) {
 
 export function fmtDate(iso) {
   if (!iso) return "—";
-  try { return new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }); } catch (_) { return iso; }
+  try { return new Date(iso).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }); } catch (_) { return iso; }
 }
 
 export function fmtTime(iso) {
   if (!iso) return "";
-  try { return new Date(iso).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }); } catch (_) { return iso; }
+  try { return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }); } catch (_) { return iso; }
 }
 
-export function errText(e, fallback = "Gagal") {
+export function errText(e, fallback = "Failed") {
   const d = e?.response?.data?.detail ?? e?.detail;
   if (typeof d === "string") return d;
   return e?.message || fallback;

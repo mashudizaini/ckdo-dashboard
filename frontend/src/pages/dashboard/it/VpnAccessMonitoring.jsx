@@ -158,14 +158,14 @@ export default function VpnAccessMonitoring() {
 
       {!gateway ? (
         <Panel title="VPN Access Monitoring" subtitle="No gateway configured yet — add one in Setup below.">
-          <Empty>Belum ada VPN gateway terdaftar. Buka Setup di bawah untuk menambahkan.</Empty>
+          <Empty>No VPN gateway registered yet. Open Setup below to add one.</Empty>
         </Panel>
       ) : (
         <>
           <Panel title={`Status — ${gateway.name}`} subtitle={`${gateway.public_host}:${gateway.public_port}`}
             action={<Btn icon={checking ? Loader2 : RefreshCw} disabled={checking} onClick={checkNow}>{checking ? "Checking…" : "Check Now"}</Btn>}>
             {!checkResult ? (
-              <Empty>Klik "Check Now" untuk cek status VPN sekarang.</Empty>
+              <Empty>Click "Check Now" to check the VPN status now.</Empty>
             ) : (
               <div className="flex items-center gap-4 flex-wrap">
                 <div className="flex items-center gap-2.5 rounded-xl px-4 py-3" style={{

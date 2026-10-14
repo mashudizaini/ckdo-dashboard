@@ -14,16 +14,16 @@ function FgCard({ snap, t }) {
         <div className="space-y-4">
           <div className="flex gap-2.5 flex-wrap">
             <Stat label="CPU" value={s.cpu_pct} unit="%" level={s.cpu_pct >= t.fgt_cpu_warn ? "warn" : "ok"} />
-            <Stat label="Memori" value={s.mem_pct} unit="%" level={s.mem_pct >= t.fgt_mem_warn ? "warn" : "ok"} hint={s.mem_pct >= 80 ? "conserve mode ~88%" : undefined} />
-            <Stat label="Sesi (1 mnt)" value={s.sessions?.toLocaleString("id-ID")} />
-            <Stat label="Trafik in / out" value={s.net_in_kbps != null ? `${(s.net_in_kbps / 1000).toFixed(1)} / ${(s.net_out_kbps / 1000).toFixed(1)}` : null} unit="Mbps" />
+            <Stat label="Memory" value={s.mem_pct} unit="%" level={s.mem_pct >= t.fgt_mem_warn ? "warn" : "ok"} hint={s.mem_pct >= 80 ? "conserve mode ~88%" : undefined} />
+            <Stat label="Sessions (1 min)" value={s.sessions?.toLocaleString("en-US")} />
+            <Stat label="Traffic in / out" value={s.net_in_kbps != null ? `${(s.net_in_kbps / 1000).toFixed(1)} / ${(s.net_out_kbps / 1000).toFixed(1)}` : null} unit="Mbps" />
             <Stat label="Uptime" value={s.uptime} />
-            <Stat label="Rute ke EBS via" value={s.ebs_route_via?.join(", ") || null} />
+            <Stat label="Route to EBS via" value={s.ebs_route_via?.join(", ") || null} />
           </div>
 
           <div>
             <p style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>SD-WAN performance SLA</p>
-            <Table rows={s.sdwan} empty="Tidak ada health-check SD-WAN (atau SD-WAN belum dikonfigurasi). Buat performance SLA yang memprobe server EBS/FortiGate seberang."
+            <Table rows={s.sdwan} empty="No SD-WAN health checks (or SD-WAN not configured). Create a performance SLA that probes the EBS server / the FortiGate on the other side."
               columns={[
                 { key: "check", label: "Health check" },
                 { key: "member", label: "Member" },
@@ -39,7 +39,7 @@ function FgCard({ snap, t }) {
           <div>
             <p style={{ fontSize: 12, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>Tunnel IPsec</p>
             <Table rows={(s.tunnels || []).map((tun) => ({ ...tun, ...(s.tunnel_detail || []).find((d) => d.name === tun.name) }))}
-              empty="Tidak ada tunnel IPsec terbaca."
+              empty="No IPsec tunnels read."
               columns={[
                 { key: "name", label: "Tunnel" },
                 { key: "peer", label: "Peer" },
@@ -47,11 +47,11 @@ function FgCard({ snap, t }) {
                 { key: "sel", label: "Selector up", render: (r) => `${r.selectors_up}/${r.selectors_total}` },
                 { key: "err", label: "Err rx / tx", align: "right", render: (r) => `${r.rx_err} / ${r.tx_err}` },
                 { key: "mtu", label: "MTU", align: "right", render: (r) => r.mtu ?? "—" },
-                { key: "dpd", label: "DPD", render: (r) => r.dpd_mode ? `${r.dpd_mode} (gagal ${r.dpd_fail_count ?? 0})` : "—" },
-                { key: "npu", label: "NPU offload", render: (r) => r.npu_offload ? "ya" : "tidak" },
+                { key: "dpd", label: "DPD", render: (r) => r.dpd_mode ? `${r.dpd_mode} (failed ${r.dpd_fail_count ?? 0})` : "—" },
+                { key: "npu", label: "NPU offload", render: (r) => r.npu_offload ? "yes" : "no" },
               ]} />
           </div>
-          {snap.raw && Object.entries(snap.raw).map(([k, v]) => <RawBlock key={k} title={`Output mentah: ${k}`} text={v} />)}
+          {snap.raw && Object.entries(snap.raw).map(([k, v]) => <RawBlock key={k} title={`Raw output: ${k}`} text={v} />)}
         </div>
       )}
     </Panel>
@@ -97,21 +97,21 @@ export default function FortigateTab({ thresholds, goTo }) {
 
   return (
     <>
-      <Panel title="FortiGate HO & Plant" subtitle="SSH baca-saja (get / diagnose) memakai kredensial dari Server Control · snapshot otomatis tiap 5 menit"
-        action={<Btn size="sm" icon={busy ? Loader2 : RefreshCw} spin={busy} disabled={busy} onClick={capture}>Snapshot sekarang</Btn>}>
+      <Panel title="HO & Plant FortiGates" subtitle="Read-only SSH (get / diagnose) with credentials from Server Control · automatic snapshot every 5 minutes"
+        action={<Btn size="sm" icon={busy ? Loader2 : RefreshCw} spin={busy} disabled={busy} onClick={capture}>Snapshot now</Btn>}>
         {!snaps.length ? (
           <>
-            <Empty>Belum ada snapshot FortiGate.</Empty>
-            <Note>Daftarkan kedua FortiGate di <b>Server Control</b> (IP LAN + akun admin read-only, port SSH), lalu pilih di <button type="button" style={{ textDecoration: "underline", fontWeight: 700 }} onClick={() => goTo("setup")}>Setup</button>.
-              Disarankan membuat admin profile khusus read-only (<code>sysgrp read, netgrp read, vpngrp read</code>) — modul ini tidak pernah mengubah konfigurasi.</Note>
+            <Empty>No FortiGate snapshot yet.</Empty>
+            <Note>Register both FortiGates in <b>Server Control</b> (LAN IP + read-only admin account, SSH port), then choose them in <button type="button" style={{ textDecoration: "underline", fontWeight: 700 }} onClick={() => goTo("setup")}>Setup</button>.
+              A dedicated read-only admin profile is recommended (<code>sysgrp read, netgrp read, vpngrp read</code>) — this module never changes the configuration.</Note>
           </>
         ) : (
-          <p style={{ fontSize: 12, color: "#475569" }}>Perintah yang dijalankan: <code>get system status</code>, <code>get system performance status</code>, <code>diagnose sys sdwan health-check / member / service</code>, <code>get vpn ipsec tunnel summary</code>, <code>diagnose vpn tunnel list</code>, <code>get router info routing-table details &lt;IP EBS&gt;</code>.</p>
+          <p style={{ fontSize: 12, color: "#475569" }}>Commands run: <code>get system status</code>, <code>get system performance status</code>, <code>diagnose sys sdwan health-check / member / service</code>, <code>get vpn ipsec tunnel summary</code>, <code>diagnose vpn tunnel list</code>, <code>get router info routing-table details &lt;EBS IP&gt;</code>.</p>
         )}
       </Panel>
 
       {chart && (
-        <Panel title={`Latency SD-WAN SLA 24 jam — ${chart.name}`} subtitle="Diukur oleh FortiGate sendiri (performance SLA), terpisah dari probe server">
+        <Panel title={`SD-WAN SLA latency, 24 hours — ${chart.name}`} subtitle="Measured by the FortiGate itself (performance SLA), separate from the server probes">
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={chart.data} margin={{ top: 6, right: 12, left: -10, bottom: 0 }}>
               <CartesianGrid stroke="#f1f5f9" vertical={false} />

@@ -77,7 +77,7 @@ function TerminalSession({ session, active, onStatus }) {
         );
         ticket = res.ticket;
       } catch (e) {
-        report("error", e?.detail || e?.message || "Gagal meminta tiket sesi");
+        report("error", e?.detail || e?.message || "Failed to request a session ticket");
         return;
       }
       if (cancelled) return;
@@ -201,9 +201,9 @@ export default function TerminalDock({
           right: 16, bottom: 16, zIndex: 50, background: "#0b1220", color: "#e2e8f0",
           border: "1px solid rgba(148,163,184,0.3)", borderRadius: 10, padding: "8px 11px",
           boxShadow: "0 8px 24px rgba(2,6,23,0.45)", cursor: "pointer", fontSize: 12,
-        }} onClick={() => setMinimised(false)} title="Buka kembali terminal">
+        }} onClick={() => setMinimised(false)} title="Reopen terminal">
           <TerminalSquare size={14} color="#38bdf8" />
-          <span style={{ fontWeight: 700 }}>{sessions.length} sesi berjalan</span>
+          <span style={{ fontWeight: 700 }}>{sessions.length} sessions running</span>
           {sessions.map((s) => (
             <span key={s.id} title={s.serverName} style={{
               width: 7, height: 7, borderRadius: 99,
@@ -253,13 +253,13 @@ export default function TerminalDock({
                     <span style={{ color: "#64748b", whiteSpace: "nowrap" }}>{s.credential.username}</span>
                   )}
                   <button onClick={(e) => { e.stopPropagation(); onCloseSession(s.id); }}
-                    title="Tutup sesi ini" style={{ ...btnReset, color: "#64748b", padding: 2 }}>
+                    title="Close this session" style={{ ...btnReset, color: "#64748b", padding: 2 }}>
                     <X size={12} />
                   </button>
                 </div>
               );
             })}
-            <button onClick={() => setPicking((v) => !v)} title="Buka sesi baru"
+            <button onClick={() => setPicking((v) => !v)} title="Open a new session"
               className="flex items-center shrink-0"
               style={{ ...btnReset, color: picking ? "#38bdf8" : "#94a3b8", padding: "4px 6px" }}>
               <Plus size={15} />
@@ -267,14 +267,14 @@ export default function TerminalDock({
           </div>
 
           <span className="flex items-center gap-1.5 shrink-0" style={{ fontSize: 11, color: "#94a3b8", paddingRight: 4 }}>
-            {activeMeta.status === "connecting" ? "menyambung…" : activeMeta.message || activeMeta.status}
+            {activeMeta.status === "connecting" ? "connecting…" : activeMeta.message || activeMeta.status}
           </span>
-          <button onClick={() => setMinimised(true)} title="Kecilkan — sesi tetap berjalan"
+          <button onClick={() => setMinimised(true)} title="Minimise — sessions keep running"
             style={{ ...btnReset, color: "#94a3b8", padding: 4 }}>
             <Minus size={16} />
           </button>
           <button onClick={onCloseAll}
-            title={sessions.length > 1 ? `Tutup semua (${sessions.length} sesi)` : "Tutup sesi"}
+            title={sessions.length > 1 ? `Close all (${sessions.length} sessions)` : "Close session"}
             style={{ ...btnReset, color: "#94a3b8", padding: 4 }}>
             <X size={16} />
           </button>
@@ -289,7 +289,7 @@ export default function TerminalDock({
           }}>
             {sshTargets.length === 0 && (
               <p style={{ fontSize: 11.5, color: "#64748b", padding: 8 }}>
-                Tidak ada server ber-alamat SSH. Baris yang alamatnya URL adalah konsol web, bukan shell.
+                No server has an SSH address. Rows whose address is a URL are web consoles, not shells.
               </p>
             )}
             {sshTargets.map((t) => (
@@ -309,7 +309,7 @@ export default function TerminalDock({
                     borderRadius: 6, border: "1px solid rgba(56,189,248,0.35)",
                     color: openIds.has(t.credential.id) ? "#64748b" : "#38bdf8",
                   }}>
-                  {openIds.has(t.credential.id) ? "sudah terbuka" : "buka"}
+                  {openIds.has(t.credential.id) ? "already open" : "open"}
                 </button>
               </div>
             ))}
@@ -320,7 +320,7 @@ export default function TerminalDock({
           {activeMeta.status === "connecting" && (
             <div className="absolute inset-0 flex items-center justify-center gap-2"
               style={{ color: "#94a3b8", fontSize: 12, zIndex: 1, pointerEvents: "none" }}>
-              <Loader2 size={14} className="animate-spin" /> membuka sesi SSH…
+              <Loader2 size={14} className="animate-spin" /> opening SSH session…
             </div>
           )}
           {sessions.map((s) => (
@@ -329,9 +329,9 @@ export default function TerminalDock({
         </div>
 
         <div className="px-3 py-1.5" style={{ borderTop: "1px solid rgba(148,163,184,0.18)", fontSize: 10.5, color: "#475569" }}>
-          <Plus size={10} style={{ display: "inline", verticalAlign: -1 }} /> tambah sesi tanpa menutup apa pun
+          <Plus size={10} style={{ display: "inline", verticalAlign: -1 }} /> add a session without closing anything
           <span style={{ margin: "0 6px" }}>·</span>
-          <Minus size={10} style={{ display: "inline", verticalAlign: -1 }} /> kecilkan untuk memakai halaman, sesi tetap berjalan
+          <Minus size={10} style={{ display: "inline", verticalAlign: -1 }} /> minimise to use the page; sessions keep running
         </div>
       </div>
     </div>
