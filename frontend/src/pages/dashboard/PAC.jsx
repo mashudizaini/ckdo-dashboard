@@ -905,7 +905,7 @@ function PushToEBSDialog({ rates, onClose }) {
       });
       setResults(res.data);
     } catch (e) {
-      setResults({ success: false, error: e.response?.data?.detail || "Gagal terhubung ke server", results: [] });
+      setResults({ success: false, error: e.response?.data?.detail || "Could not connect to the server", results: [] });
     } finally {
       setPushing(false);
     }
@@ -925,7 +925,7 @@ function PushToEBSDialog({ rates, onClose }) {
               <Upload size={16} className="text-red-400" />
             </div>
             <div>
-              <h3 className="text-white font-semibold text-sm">Push Kurs ke Oracle EBS</h3>
+              <h3 className="text-white font-semibold text-sm">Push Exchange Rates to Oracle EBS</h3>
               <p className="text-gray-500 text-xs">GL_DAILY_RATES_API — GL Daily Rates</p>
             </div>
           </div>
@@ -940,7 +940,7 @@ function PushToEBSDialog({ rates, onClose }) {
               {/* Config row */}
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs text-gray-400 mb-1.5 block">Tanggal Kurs</label>
+                  <label className="text-xs text-gray-400 mb-1.5 block">Rate Date</label>
                   <input type="date" value={rateDate} onChange={e => setRateDate(e.target.value)}
                     className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-amber-500/50 focus:outline-none" />
                 </div>
@@ -955,12 +955,12 @@ function PushToEBSDialog({ rates, onClose }) {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-gray-400 mb-1.5 block">Sumber Rate BI</label>
+                  <label className="text-xs text-gray-400 mb-1.5 block">BI Rate Source</label>
                   <select value={rateSource} onChange={e => setRateSource(e.target.value)}
                     className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-white focus:border-amber-500/50 focus:outline-none">
-                    <option value="tengah">Tengah (Rata-rata Jual+Beli)</option>
-                    <option value="jual">Kurs Jual</option>
-                    <option value="beli">Kurs Beli</option>
+                    <option value="tengah">Middle (average of Sell + Buy)</option>
+                    <option value="jual">Sell Rate</option>
+                    <option value="beli">Buy Rate</option>
                   </select>
                 </div>
               </div>
@@ -968,13 +968,13 @@ function PushToEBSDialog({ rates, onClose }) {
               {/* Currency selection */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs text-gray-400">Mata Uang yang akan di-push ({selected.length} dipilih)</label>
+                  <label className="text-xs text-gray-400">Currencies to push ({selected.length} selected)</label>
                   <div className="flex gap-2">
                     <button onClick={() => setSelected(UNIQUE_EBS_CCY.filter(c => rateMap[c]))}
-                      className="text-xs text-amber-400 hover:text-amber-300">Pilih Semua</button>
+                      className="text-xs text-amber-400 hover:text-amber-300">Select All</button>
                     <span className="text-gray-700">·</span>
                     <button onClick={() => setSelected([])}
-                      className="text-xs text-gray-500 hover:text-gray-400">Hapus Semua</button>
+                      className="text-xs text-gray-500 hover:text-gray-400">Clear All</button>
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-1.5">
@@ -1009,8 +1009,8 @@ function PushToEBSDialog({ rates, onClose }) {
               <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-400/80 flex gap-2">
                 <AlertCircle size={13} className="shrink-0 mt-0.5" />
                 <span>
-                  Proses ini akan INSERT atau UPDATE GL Daily Rates di Oracle EBS untuk tanggal <strong>{rateDate}</strong>.
-                  Rate yang sudah ada akan di-UPDATE secara otomatis.
+                  This will INSERT or UPDATE GL Daily Rates in Oracle EBS for <strong>{rateDate}</strong>.
+                  Existing rates are UPDATEd automatically.
                 </span>
               </div>
 
@@ -1018,12 +1018,12 @@ function PushToEBSDialog({ rates, onClose }) {
               <div className="flex justify-end gap-3">
                 <button onClick={onClose}
                   className="rounded-lg border border-gray-700 px-4 py-2 text-sm text-gray-400 hover:text-white hover:border-gray-600 transition-colors">
-                  Batal
+                  Cancel
                 </button>
                 <button onClick={handlePush} disabled={pushing || selected.length === 0}
                   className="flex items-center gap-2 rounded-lg bg-red-600 hover:bg-red-500 disabled:opacity-50 px-4 py-2 text-sm text-white font-medium transition-colors">
                   {pushing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                  {pushing ? "Mengirim ke EBS…" : `Push ${selected.length} Mata Uang ke Oracle EBS`}
+                  {pushing ? "Sending to EBS…" : `Push ${selected.length} Currencies to Oracle EBS`}
                 </button>
               </div>
             </>
@@ -1049,15 +1049,15 @@ function PushToEBSDialog({ rates, onClose }) {
                   )}
                   {results.success_count !== undefined && (
                     <p className="text-sm text-white">
-                      Berhasil: <span className="text-green-400 font-semibold">{results.success_count}</span>
+                      Succeeded: <span className="text-green-400 font-semibold">{results.success_count}</span>
                       {results.error_count > 0 && (
-                        <span className="ml-2">Gagal: <span className="text-red-400 font-semibold">{results.error_count}</span></span>
+                        <span className="ml-2">Failed: <span className="text-red-400 font-semibold">{results.error_count}</span></span>
                       )}
                     </p>
                   )}
                   {results.rate_date && (
                     <p className="text-xs text-gray-500 mt-0.5">
-                      Tanggal: {results.rate_date} · Rate Type: {results.rate_type}
+                      Date: {results.rate_date} · Rate Type: {results.rate_type}
                     </p>
                   )}
                 </div>
@@ -1067,7 +1067,7 @@ function PushToEBSDialog({ rates, onClose }) {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-800">
-                      {["Kode", "Action", "Rate (IDR)", "Status", "Keterangan"].map(h => (
+                      {["Code", "Action", "Rate (IDR)", "Status", "Notes"].map(h => (
                         <th key={h} className="px-3 py-2 text-left text-xs text-gray-500">{h}</th>
                       ))}
                     </tr>
@@ -1112,11 +1112,11 @@ function PushToEBSDialog({ rates, onClose }) {
               <div className="flex justify-end gap-3">
                 <button onClick={() => setResults(null)}
                   className="rounded-lg border border-gray-700 px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors">
-                  ← Kembali
+                  ← Back
                 </button>
                 <button onClick={onClose}
                   className="rounded-lg bg-gray-700 hover:bg-gray-600 px-4 py-2 text-sm text-white transition-colors">
-                  Tutup
+                  Close
                 </button>
               </div>
             </div>
@@ -1142,7 +1142,7 @@ function ExchangeRateSection() {
       setData(res);
       if (res?.error) setError(res.error);
     } catch (e) {
-      setError(e.response?.data?.detail || "Gagal memuat data kurs");
+      setError(e.response?.data?.detail || "Failed to load exchange rates");
     } finally {
       setLoading(false);
     }
@@ -1151,7 +1151,7 @@ function ExchangeRateSection() {
 
   useEffect(() => { load(); }, [load]);
 
-  const sourceLabel = data?.source || "Bank Indonesia — Kurs Transaksi BI";
+  const sourceLabel = data?.source || "Bank Indonesia — BI Transaction Rates";
   const isMidMarket = data?.source_id && data.source_id !== "bi_html";
 
   const ratesMap = Object.fromEntries((data?.rates ?? []).map(r => [r.code, r]));
@@ -1163,7 +1163,7 @@ function ExchangeRateSection() {
   const fmtTs = (iso) => {
     if (!iso) return null;
     try {
-      return new Date(iso).toLocaleString("id-ID", {
+      return new Date(iso).toLocaleString("en-GB", {
         day: "2-digit", month: "short", year: "numeric",
         hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta",
       }) + " WIB";
@@ -1182,24 +1182,24 @@ function ExchangeRateSection() {
         <div>
           <h2 className="text-white font-semibold text-base flex items-center gap-2">
             <Globe size={16} className="text-amber-400" />
-            Kurs Transaksi Bank Indonesia
+            Bank Indonesia Transaction Rates
           </h2>
           <p className="text-gray-400 text-xs mt-1">
             {loading
-              ? "Mengambil data kurs…"
+              ? "Fetching exchange rates…"
               : data?.date
-                ? `Tanggal kurs: ${data.date}`
-                : "Tanggal tidak tersedia"
+                ? `Rate date: ${data.date}`
+                : "Date not available"
             }
             {!loading && data?.source && (
               <span className="ml-2 text-gray-500">
-                · Sumber: {sourceLabel}
+                · Source: {sourceLabel}
                 {isMidMarket && <span className="ml-1 text-amber-500/60">(mid-market)</span>}
               </span>
             )}
             {!loading && fmtTs(data?.cached_at) && (
               <span className="ml-2 text-gray-600">
-                · Diperbarui: {fmtTs(data.cached_at)}
+                · Updated: {fmtTs(data.cached_at)}
                 {data?.from_cache && <span className="ml-1 text-amber-500/60">(cache)</span>}
               </span>
             )}
@@ -1221,7 +1221,7 @@ function ExchangeRateSection() {
               className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/20 transition-colors whitespace-nowrap"
             >
               <Upload size={13} />
-              Push ke Oracle EBS
+              Push to Oracle EBS
             </button>
           )}
           <button
@@ -1240,9 +1240,9 @@ function ExchangeRateSection() {
         <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300 flex items-start gap-2">
           <span className="text-red-400 mt-0.5 shrink-0">⚠</span>
           <div>
-            <span className="font-medium">Gagal mengambil data:</span> {error}
+            <span className="font-medium">Failed to fetch data:</span> {error}
             {allRates.length > 0 && (
-              <span className="block text-xs text-red-400/70 mt-1">Menampilkan data cache terakhir.</span>
+              <span className="block text-xs text-red-400/70 mt-1">Showing the last cached data.</span>
             )}
           </div>
         </div>
@@ -1277,13 +1277,13 @@ function ExchangeRateSection() {
               ) : (
                 <div className="space-y-1.5">
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-500 text-xs">Jual</span>
+                    <span className="text-gray-500 text-xs">Sell</span>
                     <span className="text-red-400 font-mono text-xs font-semibold">
                       {fmtRate(r?.sell)}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-500 text-xs">Beli</span>
+                    <span className="text-gray-500 text-xs">Buy</span>
                     <span className="text-green-400 font-mono text-xs font-semibold">
                       {fmtRate(r?.buy)}
                     </span>
@@ -1298,24 +1298,24 @@ function ExchangeRateSection() {
       {/* ── Full Table ────────────────────────────────────── */}
       <div className="rounded-xl border border-gray-800 bg-gray-900 overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-          <span className="text-gray-300 text-sm font-medium">Semua Mata Uang</span>
+          <span className="text-gray-300 text-sm font-medium">All Currencies</span>
           <span className="text-gray-500 text-xs">
-            {loading ? "memuat…" : `${allRates.length} mata uang`}
+            {loading ? "loading…" : `${allRates.length} currencies`}
           </span>
         </div>
 
         {loading ? (
           <div className="flex items-center justify-center py-12 gap-2 text-gray-500">
             <Loader2 size={16} className="animate-spin" />
-            <span className="text-sm">Mengambil data kurs…</span>
+            <span className="text-sm">Fetching exchange rates…</span>
           </div>
         ) : allRates.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 gap-2 text-gray-600">
             <Globe size={32} className="opacity-30" />
-            <span className="text-sm">Tidak ada data kurs tersedia</span>
+            <span className="text-sm">No exchange rates available</span>
             <button onClick={() => load(true)}
               className="mt-1 text-xs text-amber-400 hover:text-amber-300 transition-colors">
-              Coba lagi
+              Try again
             </button>
           </div>
         ) : (
@@ -1323,7 +1323,7 @@ function ExchangeRateSection() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-800">
-                  {["Mata Uang", "Nama", "Nilai", "Kurs Jual (IDR)", "Kurs Beli (IDR)"].map(h => (
+                  {["Currency", "Name", "Unit", "Sell Rate (IDR)", "Buy Rate (IDR)"].map(h => (
                     <th key={h}
                       className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 bg-gray-900/80 whitespace-nowrap">
                       {h}
@@ -1371,7 +1371,7 @@ function ExchangeRateSection() {
 
         <div className="px-4 py-2.5 border-t border-gray-800 bg-gray-900/50 flex items-center justify-between">
           <span className="text-gray-600 text-xs">
-            {data?.source || "Sumber: Bank Indonesia — Kurs Transaksi BI"}
+            {data?.source || "Source: Bank Indonesia — BI Transaction Rates"}
           </span>
           {data?.source_id === "bi_html" && (
             <a
@@ -1380,7 +1380,7 @@ function ExchangeRateSection() {
               rel="noopener noreferrer"
               className="flex items-center gap-1 text-xs text-amber-400/70 hover:text-amber-400 transition-colors"
             >
-              Lihat di BI <ExternalLink size={10} />
+              View on BI <ExternalLink size={10} />
             </a>
           )}
         </div>
@@ -3509,7 +3509,7 @@ function PurchasePlanPanel({ year }) {
                   <span className="px-2 py-1 rounded bg-violet-500/10 border border-violet-500/30 text-violet-300 font-medium">{selectedPlan.plan_category}</span>
                   {selectedPlan.content.meta?.type && <span className="px-2 py-1 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-medium">{selectedPlan.content.meta.type}</span>}
                   <span className="text-gray-500">{selectedPlan.department} / {selectedPlan.team_code} - {selectedPlan.team_name}</span>
-                  {!!selectedPlan.content.meta?.exchange_rate && <span className="text-gray-500">Kurs: {fmtNum(selectedPlan.content.meta.exchange_rate)}</span>}
+                  {!!selectedPlan.content.meta?.exchange_rate && <span className="text-gray-500">Rate: {fmtNum(selectedPlan.content.meta.exchange_rate)}</span>}
                 </div>
                 <PurchasePlanTable items={selectedPlan.content.items || []} editable={false} />
               </div>
@@ -3541,7 +3541,7 @@ function PurchasePlanPanel({ year }) {
               <input className={`${INP} max-w-xs`} value={form.content.meta?.type || ""}
                 onChange={e => setForm({ ...form, content: { ...form.content, meta: { ...form.content.meta, type: e.target.value } } })}
                 placeholder="e.g. API, Excipient & Packaging - Local" />
-              <label className="text-xs text-gray-500">Kurs USD/IDR:</label>
+              <label className="text-xs text-gray-500">USD/IDR rate:</label>
               <input type="number" className={`${INP} max-w-[120px]`} value={form.content.meta?.exchange_rate || 0}
                 onChange={e => setForm({ ...form, content: { ...form.content, meta: { ...form.content.meta, exchange_rate: Number(e.target.value) || 0 } } })} />
               <label className="text-xs text-gray-500">Status:</label>
@@ -3900,7 +3900,7 @@ function PurchasePlanFGPanel({ year }) {
                   <span className="px-2 py-1 rounded bg-violet-500/10 border border-violet-500/30 text-violet-300 font-medium">{selectedPlan.plan_category}</span>
                   {selectedPlan.content.meta?.type && <span className="px-2 py-1 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 font-medium">{selectedPlan.content.meta.type}</span>}
                   <span className="text-gray-500">{selectedPlan.department} / {selectedPlan.team_code} - {selectedPlan.team_name}</span>
-                  {!!selectedPlan.content.meta?.exchange_rate && <span className="text-gray-500">Kurs: {fmtNum(selectedPlan.content.meta.exchange_rate)}</span>}
+                  {!!selectedPlan.content.meta?.exchange_rate && <span className="text-gray-500">Rate: {fmtNum(selectedPlan.content.meta.exchange_rate)}</span>}
                 </div>
                 <PurchasePlanFGTable items={selectedPlan.content.items || []} editable={false} />
               </div>
@@ -3932,7 +3932,7 @@ function PurchasePlanFGPanel({ year }) {
               <input className={`${INP} max-w-xs`} value={form.content.meta?.type || ""}
                 onChange={e => setForm({ ...form, content: { ...form.content, meta: { ...form.content.meta, type: e.target.value } } })}
                 placeholder="e.g. Importation Product - Export" />
-              <label className="text-xs text-gray-500">Kurs USD/IDR:</label>
+              <label className="text-xs text-gray-500">USD/IDR rate:</label>
               <input type="number" className={`${INP} max-w-[120px]`} value={form.content.meta?.exchange_rate || 0}
                 onChange={e => setForm({ ...form, content: { ...form.content, meta: { ...form.content.meta, exchange_rate: Number(e.target.value) || 0 } } })} />
               <label className="text-xs text-gray-500">Status:</label>

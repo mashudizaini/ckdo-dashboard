@@ -114,9 +114,9 @@ function GdriveSyncPanel() {
     setMsg(null);
     try {
       await apInvoiceApi.gdriveSyncNow();
-      setMsg({ type: "success", text: "Sync dimulai di background — status akan diperbarui dalam beberapa saat." });
+      setMsg({ type: "success", text: "Sync started in the background — the status will update shortly." });
     } catch (e) {
-      setMsg({ type: "error", text: e?.detail || "Gagal memulai sync" });
+      setMsg({ type: "error", text: e?.detail || "Failed to start the sync" });
     } finally {
       setSyncing(false);
       // The sync itself runs in a Celery worker, not this request — give it
@@ -128,24 +128,24 @@ function GdriveSyncPanel() {
   };
 
   const handleAddFolder = async () => {
-    if (!newLabel.trim() || !newFolderId) { setMsg({ type: "error", text: "Pilih nama user dan folder-nya" }); return; }
+    if (!newLabel.trim() || !newFolderId) { setMsg({ type: "error", text: "Choose a user name and their folder" }); return; }
     setMsg(null);
     try {
       await apInvoiceApi.gdriveAddFolder({ user_label: newLabel.trim(), folder_id: newFolderId });
       setNewLabel(""); setNewFolderId("");
       await loadFolders();
     } catch (e) {
-      setMsg({ type: "error", text: e?.detail || "Gagal menambah folder" });
+      setMsg({ type: "error", text: e?.detail || "Failed to add the folder" });
     }
   };
 
   const handleRemoveFolder = async (id) => {
-    if (!confirm("Berhenti memantau folder ini? Invoice yang sudah diproses tidak terpengaruh.")) return;
+    if (!confirm("Stop watching this folder? Invoices already processed are not affected.")) return;
     try {
       await apInvoiceApi.gdriveDeleteFolder(id);
       await loadFolders();
     } catch (e) {
-      setMsg({ type: "error", text: e?.detail || "Gagal menghapus" });
+      setMsg({ type: "error", text: e?.detail || "Delete failed" });
     }
   };
 
@@ -177,9 +177,9 @@ function GdriveSyncPanel() {
       {open && (
         <div style={{ padding: "0 18px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
           <p style={{ fontSize: 11.5, color: "#64748b", margin: 0 }}>
-            Setiap user upload PDF invoice ke subfolder mereka sendiri di Shared Drive — sistem otomatis
-            memindai tiap ~10 menit, memproses PDF baru persis seperti upload manual, lalu memindahkan file
-            ke subfolder <b>Processed</b> (berhasil) atau <b>Error</b> (gagal, nama file diberi keterangan error).
+            Each user uploads invoice PDFs to their own subfolder in the Shared Drive — the system
+            scans every ~10 minutes, processes new PDFs exactly like a manual upload, then moves the file
+            to the <b>Processed</b> subfolder (success) or <b>Error</b> (failed, with the error noted in the file name).
           </p>
 
           {msg && (
@@ -196,13 +196,13 @@ function GdriveSyncPanel() {
             <div style={{ fontSize: 11, color: "#64748b" }}>
               {lastRun ? (
                 <>
-                  Terakhir sync: <b>{lastRun.finished_at ? new Date(lastRun.finished_at).toLocaleString("id-ID") : "sedang berjalan..."}</b>
+                  Last sync: <b>{lastRun.finished_at ? new Date(lastRun.finished_at).toLocaleString("en-GB") : "running..."}</b>
                   {lastRunSummary && lastRunSummary.skipped !== true && (
-                    <> — {lastRunSummary.processed ?? 0} diproses, {lastRunSummary.errors ?? 0} gagal, {lastRunSummary.skipped ?? 0} dilewati</>
+                    <> — {lastRunSummary.processed ?? 0} processed, {lastRunSummary.errors ?? 0} failed, {lastRunSummary.skipped ?? 0} skipped</>
                   )}
                   {lastRun.error_message && <span style={{ color: "#dc2626" }}> — {lastRun.error_message}</span>}
                 </>
-              ) : "Belum pernah sync."}
+              ) : "Never synced yet."}
             </div>
             <NeuBtn small icon={RefreshCw} label={syncing ? "Syncing..." : "Sync Now"} color="#0369a1"
               onClick={handleSyncNow} loading={syncing} disabled={!status?.configured} />
@@ -210,10 +210,10 @@ function GdriveSyncPanel() {
 
           <div>
             <div style={{ fontSize: 10.5, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-              Folder yang dipantau ({folders.length})
+              Watched folders ({folders.length})
             </div>
             {folders.length === 0 ? (
-              <p style={{ fontSize: 11.5, color: "#94a3b8", margin: 0 }}>Belum ada folder terdaftar.</p>
+              <p style={{ fontSize: 11.5, color: "#94a3b8", margin: 0 }}>No folders registered yet.</p>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {folders.map(f => (
@@ -222,7 +222,7 @@ function GdriveSyncPanel() {
                     padding: "6px 10px", borderRadius: 8, background: "#fff", fontSize: 11.5,
                   }}>
                     <span style={{ fontWeight: 600, color: "#1e293b" }}>{f.user_label}</span>
-                    <button onClick={() => handleRemoveFolder(f.id)} title="Berhenti memantau"
+                    <button onClick={() => handleRemoveFolder(f.id)} title="Stop watching"
                       style={{ background: "none", border: "none", cursor: "pointer", color: "#dc2626", padding: 2 }}>
                       <Trash2 size={12} />
                     </button>
@@ -233,14 +233,14 @@ function GdriveSyncPanel() {
           </div>
 
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="Nama user (mis. Budi Santoso)"
+            <input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="User name (e.g. Budi Santoso)"
               style={{ fontSize: 11.5, fontWeight: 600, padding: "7px 10px", borderRadius: 8, border: "none", background: "#fff", color: "#1e293b", outline: "none", flex: "1 1 180px" }} />
             <select value={newFolderId} onChange={e => setNewFolderId(e.target.value)} disabled={loadingSubfolders}
               style={{ fontSize: 11.5, fontWeight: 600, padding: "7px 10px", borderRadius: 8, border: "none", background: "#fff", color: "#1e293b", outline: "none", cursor: "pointer", flex: "1 1 200px" }}>
-              <option value="">{loadingSubfolders ? "Memuat folder..." : "— Pilih subfolder di Shared Drive —"}</option>
+              <option value="">{loadingSubfolders ? "Loading folders..." : "— Choose a subfolder in the Shared Drive —"}</option>
               {availableSubfolders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
             </select>
-            <NeuBtn small icon={FolderPlus} label="Tambah" color="#2563eb" onClick={handleAddFolder} />
+            <NeuBtn small icon={FolderPlus} label="Add" color="#2563eb" onClick={handleAddFolder} />
           </div>
         </div>
       )}
@@ -463,7 +463,7 @@ export default function APAutoInvoice() {
       if (current.po_number && (current.lines || []).some(ln => !ln.po_line_number)) {
         setMessage({
           type: "warning",
-          text: `Invoice ini punya PO Number ${current.po_number} dan masih ada line yang belum di-match ke PO Line/Receipt. Silakan match dulu lewat Edit, lalu lanjutkan dengan tombol per-step.`,
+          text: `This invoice has PO Number ${current.po_number} and still has lines not matched to a PO Line/Receipt. Match them first via Edit, then continue with the per-step buttons.`,
         });
         return;
       }
@@ -473,7 +473,7 @@ export default function APAutoInvoice() {
       if (blocking.length) {
         setMessage({
           type: "warning",
-          text: `Validasi berhasil tapi ada yang perlu dikonfirmasi manual: ${blocking.map(w => w.message).join("; ")}. Silakan lanjutkan dengan tombol per-step.`,
+          text: `Validation passed but some items need manual confirmation: ${blocking.map(w => w.message).join("; ")}. Continue with the per-step buttons.`,
         });
         return;
       }
@@ -485,12 +485,12 @@ export default function APAutoInvoice() {
       const rres = await apInvoiceApi.runImport(id);
       setMessage({
         type: "success",
-        text: `Sekali klik selesai — APXIIMPT submitted (Request ID: ${rres.conc_request_id}). Klik "Check Status" untuk cek hasil.`,
+        text: `One-click run done — APXIIMPT submitted (Request ID: ${rres.conc_request_id}). Click "Check Status" to see the result.`,
       });
     } catch (e) {
       setMessage({
         type: "error",
-        text: (e?.detail || e?.message || String(e)) + " — silakan lanjutkan secara manual dari status terakhir.",
+        text: (e?.detail || e?.message || String(e)) + " — continue manually from the last status.",
       });
     } finally {
       setActionLoading("");
@@ -516,7 +516,7 @@ export default function APAutoInvoice() {
     const runnable = targets.filter(inv => nextActionFor(inv.status));
     const skipped = targets.length - runnable.length;
     if (runnable.length === 0) {
-      setMessage({ type: "warning", text: "Tidak ada invoice terpilih yang bisa diproses otomatis (status ERROR ditangani satu per satu, IMPORTED sudah selesai)." });
+      setMessage({ type: "warning", text: "None of the selected invoices can be processed automatically (ERROR status is handled one by one, IMPORTED is already done)." });
       return;
     }
     setBulkProgress({ done: 0, total: runnable.length, current: runnable[0].invoice_num });
@@ -546,9 +546,9 @@ export default function APAutoInvoice() {
     const failed = results.filter(r => !r.success);
     setMessage({
       type: failed.length === 0 ? "success" : okCount === 0 ? "error" : "warning",
-      text: `Bulk process: ${okCount}/${runnable.length} berhasil` +
-        (skipped ? `, ${skipped} dilewati (status ERROR/Imported)` : "") +
-        (failed.length ? ` — gagal: ${failed.map(f => `${f.invoice_num} (${f.error})`).join("; ")}` : "."),
+      text: `Bulk process: ${okCount}/${runnable.length} succeeded` +
+        (skipped ? `, ${skipped} skipped (status ERROR/Imported)` : "") +
+        (failed.length ? ` — failed: ${failed.map(f => `${f.invoice_num} (${f.error})`).join("; ")}` : "."),
     });
     setSelectedIds(new Set());
     setBulkProgress(null);
@@ -741,7 +741,7 @@ export default function APAutoInvoice() {
                             detail panel below) — this just reflects the
                             resulting header value once any line is flagged. */}
                         {inv.wht_enabled ? (
-                          <span title={`Estimasi: Rp ${Number(inv.wht_amount || 0).toLocaleString("id-ID")} (dihitung Oracle saat validasi)`} style={{
+                          <span title={`Estimate: Rp ${Number(inv.wht_amount || 0).toLocaleString("id-ID")} (calculated by Oracle at validation)`} style={{
                             fontSize: 11, fontWeight: 700, color: "#d97706",
                             background: "#fef3c7", borderRadius: 6, padding: "2px 8px", whiteSpace: "nowrap",
                           }}>
@@ -996,8 +996,8 @@ function DetailPanel({ detail, onAction, onProcessAll, onDelete, onSave, actionL
     { key: "received_date",  label: "Received Date (Stamp)" },
     { key: "vendor_name",    label: "Vendor Name" },
     { key: "po_number",      label: "PO Number" },
-    { key: "tax_serial_number", label: "No Faktur" },
-    { key: "faktur_pajak_date", label: "Tgl Faktur Pajak" },
+    { key: "tax_serial_number", label: "Tax Invoice No" },
+    { key: "faktur_pajak_date", label: "Tax Invoice Date" },
     { key: "currency_code",  label: "Currency" },
     { key: "subtotal",       label: "Taxbase", type: "number", fmt: true },
     { key: "tax_amount",     label: "VAT", type: "number", fmt: true },
@@ -1106,7 +1106,7 @@ function DetailPanel({ detail, onAction, onProcessAll, onDelete, onSave, actionL
                 {d.awt_group_name || "—"}
               </div>
               <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
-                Estimasi: Rp {Number(d.wht_amount || 0).toLocaleString("id-ID")} (dihitung ulang oleh Oracle)
+                Estimate: Rp {Number(d.wht_amount || 0).toLocaleString("id-ID")} (recalculated by Oracle)
               </div>
             </div>
           )}
@@ -1148,7 +1148,7 @@ function DetailPanel({ detail, onAction, onProcessAll, onDelete, onSave, actionL
                       }}>
                         {h === "WHT" ? (
                           <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: editing && whtMaster ? "pointer" : "default" }}
-                            title={whtMaster ? "Centang/hapus semua baris" : "Tidak ada data WHT untuk supplier ini"}>
+                            title={whtMaster ? "Tick/untick all lines" : "No WHT data for this supplier"}>
                             <input type="checkbox"
                               checked={editing ? editLines.length > 0 && editLines.every(ln => ln.wht_flag) : (d.lines || []).length > 0 && (d.lines || []).every(ln => ln.wht_flag)}
                               disabled={!editing || !whtMaster}
@@ -1220,7 +1220,7 @@ function DetailPanel({ detail, onAction, onProcessAll, onDelete, onSave, actionL
                       <td style={{ padding: "8px 6px", textAlign: "center", width: 44 }}>
                         {editing ? (
                           <input type="checkbox" checked={!!ln.wht_flag} disabled={!whtMaster}
-                            title={whtMaster ? "Kenakan WHT pada baris ini" : "Tidak ada data WHT untuk supplier ini"}
+                            title={whtMaster ? "Apply WHT to this line" : "No WHT data for this supplier"}
                             onChange={() => updateLine(i, "wht_flag", !ln.wht_flag)}
                             style={{ width: 14, height: 14, cursor: whtMaster ? "pointer" : "not-allowed" }} />
                         ) : ln.wht_flag ? (
@@ -1415,11 +1415,11 @@ function DetailPanel({ detail, onAction, onProcessAll, onDelete, onSave, actionL
                     {lastReceipt ? (
                       <div style={{ fontSize: 11, fontWeight: 700, color: "#059669", marginTop: 4 }}>
                         Receive Date: {lastReceipt.transaction_date} (Qty {lastReceipt.quantity})
-                        {receipts.length > 1 ? ` · ${receipts.length} penerimaan` : ""}
+                        {receipts.length > 1 ? ` · ${receipts.length} receipts` : ""}
                       </div>
                     ) : (
                       <div style={{ fontSize: 11, fontWeight: 700, color: "#dc2626", marginTop: 4 }}>
-                        Belum ada penerimaan barang (Belum di-Receiving)
+                        No goods received yet (not received)
                       </div>
                     )}
                     {usedByLine && (

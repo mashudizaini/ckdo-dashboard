@@ -1019,7 +1019,7 @@ function CategoryTrendChart({ label, color, years, values }) {
   return (
     <div style={{ borderRadius: 12, boxShadow: NEU.shadowOutSm, background: "#ffffff", padding: "14px 18px" }}>
       <p style={{ fontSize: 12.5, fontWeight: 700, color: "#1e293b", marginBottom: 4 }}>
-        {label} <span style={{ fontWeight: 400, color: "#94a3b8" }}>— Rp miliar</span>
+        {label} <span style={{ fontWeight: 400, color: "#94a3b8" }}>— Rp billion</span>
       </p>
       <ResponsiveContainer width="100%" height={220}>
         <ComposedChart data={chartData} margin={{ top: 30, right: 24, left: 8, bottom: 4 }}>
@@ -1042,9 +1042,9 @@ function CategoryTrendChart({ label, color, years, values }) {
             contentStyle={{ background: "#ffffff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 8, fontSize: 12, color: "#1e293b", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
             formatter={(v, name) => name === "Growth %"
               ? [v == null ? "n/a" : `${v.toFixed(1)}%`, name]
-              : [v.toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 }), "Rp miliar"]}
+              : [v.toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 }), "Rp billion"]}
           />
-          <Bar yAxisId="value" dataKey="valueBillion" name="Rp miliar" fill={color} radius={[5, 5, 0, 0]} barSize={46}>
+          <Bar yAxisId="value" dataKey="valueBillion" name="Rp billion" fill={color} radius={[5, 5, 0, 0]} barSize={46}>
             <LabelList
               dataKey="valueBillion" position="top"
               formatter={v => v.toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
@@ -1063,7 +1063,7 @@ function CategoryTrendChart({ label, color, years, values }) {
 
 // Gross Profit / Profit (Loss) Before Tax / Total Comprehensive Income
 // (Loss), one panel per category, each showing value-per-fiscal-year bars
-// (Rp miliar) with a year-over-year growth-rate line overlaid — see
+// (Rp billion) with a year-over-year growth-rate line overlaid — see
 // CategoryTrendChart above.
 function ProfitLossChart({ data }) {
   if (!data?.columns?.length) return null;

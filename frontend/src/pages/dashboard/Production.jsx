@@ -106,10 +106,10 @@ function useOrganizations() {
 function OrgSelect({ orgs, value, onChange }) {
   return (
     <div>
-      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Organisasi</label>
+      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Organization</label>
       <select value={value} onChange={(e) => onChange(e.target.value)}
         className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500 cursor-pointer">
-        <option value="">Semua</option>
+        <option value="">All</option>
         {orgs.map((o) => <option key={o.organization_id} value={o.organization_id}>{o.organization_name}</option>)}
       </select>
     </div>
@@ -120,12 +120,12 @@ function DateRangeInputs({ dateFrom, setDateFrom, dateTo, setDateTo }) {
   return (
     <>
       <div>
-        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Dari</label>
+        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">From</label>
         <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
           className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500" />
       </div>
       <div>
-        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Sampai</label>
+        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">To</label>
         <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
           className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500" />
       </div>
@@ -178,18 +178,18 @@ function StatusOverviewSection() {
       {data && (
         <div className="grid grid-cols-2 gap-3">
           <KpiCard label="Total Batch" value={String(data.total_batches)} color="text-blue-400" bg="bg-blue-500/10 border-blue-500/20" />
-          <KpiCard label="Tingkat Pembatalan" value={fmtPct(data.cancellation_rate)}
+          <KpiCard label="Cancellation Rate" value={fmtPct(data.cancellation_rate)}
             color={data.cancellation_rate > 15 ? "text-red-400" : "text-green-400"}
             bg={data.cancellation_rate > 15 ? "bg-red-500/10 border-red-500/20" : "bg-green-500/10 border-green-500/20"} />
         </div>
       )}
 
       <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
-        <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider mb-3">Trend Batch Dimulai</p>
+        <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider mb-3">Batches Started Trend</p>
         {loading || !RC ? (
           <div className="py-10 text-center text-xs text-gray-500">Loading…</div>
         ) : trend.length === 0 ? (
-          <div className="py-10 text-center text-xs text-gray-600">Tidak ada data untuk periode ini.</div>
+          <div className="py-10 text-center text-xs text-gray-600">No data for this period.</div>
         ) : (
           <RC.ResponsiveContainer width="100%" height={220}>
             <RC.BarChart data={trend} margin={{ top: 4, right: 16, bottom: 0, left: -10 }}>
@@ -208,12 +208,12 @@ function StatusOverviewSection() {
           <thead>
             <tr className="bg-gray-800/60 text-gray-500 uppercase tracking-wider">
               <th className="px-3 py-2 text-left font-semibold">Status</th>
-              <th className="px-3 py-2 text-right font-semibold">Jumlah Batch</th>
+              <th className="px-3 py-2 text-right font-semibold">Batches</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800/60">
             {byStatus.length === 0 ? (
-              <tr><td colSpan={2} className="px-3 py-8 text-center text-gray-600">Tidak ada data.</td></tr>
+              <tr><td colSpan={2} className="px-3 py-8 text-center text-gray-600">No data.</td></tr>
             ) : byStatus.map((r) => (
               <tr key={r.batch_status_name} className="hover:bg-gray-800/30">
                 <td className="px-3 py-2 whitespace-nowrap"><StatusBadge status={r.batch_status_name} /></td>
@@ -229,15 +229,15 @@ function StatusOverviewSection() {
           <thead>
             <tr className="bg-gray-800/60 text-gray-500 uppercase tracking-wider">
               <th className="px-3 py-2 text-left font-semibold">Batch No</th>
-              <th className="px-3 py-2 text-left font-semibold">Produk</th>
+              <th className="px-3 py-2 text-left font-semibold">Product</th>
               <th className="px-3 py-2 text-left font-semibold">Status</th>
-              <th className="px-3 py-2 text-left font-semibold">Plan Mulai</th>
-              <th className="px-3 py-2 text-left font-semibold">Selesai Aktual</th>
+              <th className="px-3 py-2 text-left font-semibold">Planned Start</th>
+              <th className="px-3 py-2 text-left font-semibold">Actual Finish</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800/60">
             {rows.length === 0 ? (
-              <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-600">Tidak ada batch pada periode ini.</td></tr>
+              <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-600">No batches in this period.</td></tr>
             ) : rows.map((r) => (
               <tr key={r.batch_id} className="hover:bg-gray-800/30">
                 <td className="px-3 py-2 text-gray-300 whitespace-nowrap">{r.batch_no}</td>
@@ -289,8 +289,8 @@ function YieldSection() {
         <DateRangeInputs dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} />
         <OrgSelect orgs={orgs} value={orgId} onChange={setOrgId} />
         <div>
-          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Kode Produk</label>
-          <input value={productCode} onChange={(e) => setProductCode(e.target.value)} placeholder="Semua produk…"
+          <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Product Code</label>
+          <input value={productCode} onChange={(e) => setProductCode(e.target.value)} placeholder="All products…"
             className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500 w-44" />
         </div>
         <button onClick={load} disabled={loading}
@@ -301,10 +301,10 @@ function YieldSection() {
 
       {data && (
         <div className="grid grid-cols-2 gap-3">
-          <KpiCard label="Yield Keseluruhan" value={fmtPct(data.overall_yield_pct)}
+          <KpiCard label="Overall Yield" value={fmtPct(data.overall_yield_pct)}
             color={data.overall_yield_pct >= 90 ? "text-green-400" : "text-amber-400"}
             bg={data.overall_yield_pct >= 90 ? "bg-green-500/10 border-green-500/20" : "bg-amber-500/10 border-amber-500/20"} />
-          <KpiCard label="Jumlah Produk" value={String(byProduct.length)} color="text-gray-300" bg="bg-gray-800/40 border-gray-700" />
+          <KpiCard label="Products" value={String(byProduct.length)} color="text-gray-300" bg="bg-gray-800/40 border-gray-700" />
         </div>
       )}
 
@@ -312,8 +312,8 @@ function YieldSection() {
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-gray-800/60 text-gray-500 uppercase tracking-wider">
-              <th className="px-3 py-2 text-left font-semibold">Produk</th>
-              <th className="px-3 py-2 text-right font-semibold">Jumlah Batch</th>
+              <th className="px-3 py-2 text-left font-semibold">Product</th>
+              <th className="px-3 py-2 text-right font-semibold">Batches</th>
               <th className="px-3 py-2 text-right font-semibold">Plan Qty</th>
               <th className="px-3 py-2 text-right font-semibold">Actual Qty</th>
               <th className="px-3 py-2 text-right font-semibold">Yield %</th>
@@ -323,7 +323,7 @@ function YieldSection() {
             {loading ? (
               <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-500"><Loader2 size={16} className="animate-spin inline" /></td></tr>
             ) : byProduct.length === 0 ? (
-              <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-600">Tidak ada data batch selesai pada periode ini.</td></tr>
+              <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-600">No completed batch data in this period.</td></tr>
             ) : byProduct.map((r) => (
               <tr key={r.product_item_code} className="hover:bg-gray-800/30">
                 <td className="px-3 py-2 text-gray-300 whitespace-nowrap">{r.product_item_code} — {r.product_item_description || "—"}</td>
@@ -344,8 +344,8 @@ function YieldSection() {
           <thead>
             <tr className="bg-gray-800/60 text-gray-500 uppercase tracking-wider">
               <th className="px-3 py-2 text-left font-semibold">Batch No</th>
-              <th className="px-3 py-2 text-left font-semibold">Produk</th>
-              <th className="px-3 py-2 text-left font-semibold">Selesai</th>
+              <th className="px-3 py-2 text-left font-semibold">Product</th>
+              <th className="px-3 py-2 text-left font-semibold">Completed</th>
               <th className="px-3 py-2 text-right font-semibold">Plan Qty</th>
               <th className="px-3 py-2 text-right font-semibold">Actual Qty</th>
               <th className="px-3 py-2 text-right font-semibold">Yield %</th>
@@ -353,7 +353,7 @@ function YieldSection() {
           </thead>
           <tbody className="divide-y divide-gray-800/60">
             {rows.length === 0 ? (
-              <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-600">Tidak ada data.</td></tr>
+              <tr><td colSpan={6} className="px-3 py-8 text-center text-gray-600">No data.</td></tr>
             ) : rows.map((r) => (
               <tr key={r.batch_id} className="hover:bg-gray-800/30">
                 <td className="px-3 py-2 text-gray-300 whitespace-nowrap">{r.batch_no}</td>
@@ -412,11 +412,11 @@ function ScheduleAdherenceSection() {
 
       {data && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          <KpiCard label="Batch Selesai" value={String(data.total_batches)} color="text-gray-300" bg="bg-gray-800/40 border-gray-700" />
-          <KpiCard label="Tepat Waktu" value={fmtPct(data.on_time_rate)}
+          <KpiCard label="Completed Batches" value={String(data.total_batches)} color="text-gray-300" bg="bg-gray-800/40 border-gray-700" />
+          <KpiCard label="On Time" value={fmtPct(data.on_time_rate)}
             color={data.on_time_rate >= 80 ? "text-green-400" : "text-amber-400"}
             bg={data.on_time_rate >= 80 ? "bg-green-500/10 border-green-500/20" : "bg-amber-500/10 border-amber-500/20"} />
-          <KpiCard label="Rata-rata Keterlambatan (hari)" value={data.avg_delay_days != null ? String(data.avg_delay_days) : "—"}
+          <KpiCard label="Average Delay (days)" value={data.avg_delay_days != null ? String(data.avg_delay_days) : "—"}
             color={data.avg_delay_days > 0 ? "text-red-400" : "text-green-400"}
             bg={data.avg_delay_days > 0 ? "bg-red-500/10 border-red-500/20" : "bg-green-500/10 border-green-500/20"} />
         </div>
@@ -427,17 +427,17 @@ function ScheduleAdherenceSection() {
           <thead>
             <tr className="bg-gray-800/60 text-gray-500 uppercase tracking-wider">
               <th className="px-3 py-2 text-left font-semibold">Batch No</th>
-              <th className="px-3 py-2 text-left font-semibold">Produk</th>
-              <th className="px-3 py-2 text-left font-semibold">Plan Selesai</th>
-              <th className="px-3 py-2 text-left font-semibold">Selesai Aktual</th>
-              <th className="px-3 py-2 text-right font-semibold">Keterlambatan (hari)</th>
+              <th className="px-3 py-2 text-left font-semibold">Product</th>
+              <th className="px-3 py-2 text-left font-semibold">Planned Finish</th>
+              <th className="px-3 py-2 text-left font-semibold">Actual Finish</th>
+              <th className="px-3 py-2 text-right font-semibold">Delay (days)</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800/60">
             {loading ? (
               <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-500"><Loader2 size={16} className="animate-spin inline" /></td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-600">Tidak ada batch selesai pada periode ini.</td></tr>
+              <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-600">No completed batches in this period.</td></tr>
             ) : rows.map((r) => (
               <tr key={r.batch_id} className="hover:bg-gray-800/30">
                 <td className="px-3 py-2 text-gray-300 whitespace-nowrap">{r.batch_no}</td>

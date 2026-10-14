@@ -87,10 +87,10 @@ function useOrganizations() {
 function OrgSelect({ orgs, value, onChange }) {
   return (
     <div>
-      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Organisasi</label>
+      <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Organization</label>
       <select value={value} onChange={(e) => onChange(e.target.value)}
         className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500 cursor-pointer">
-        <option value="">Semua</option>
+        <option value="">All</option>
         {orgs.map((o) => <option key={o.organization_code} value={o.organization_code}>{o.organization_code} — {o.organization_name}</option>)}
       </select>
     </div>
@@ -101,12 +101,12 @@ function DateRangeInputs({ dateFrom, setDateFrom, dateTo, setDateTo }) {
   return (
     <>
       <div>
-        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Dari</label>
+        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">From</label>
         <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
           className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500" />
       </div>
       <div>
-        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Sampai</label>
+        <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">To</label>
         <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
           className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500" />
       </div>
@@ -164,16 +164,16 @@ function DirectionSection({ direction }) {
           <KpiCard label="Total Qty" value={fmtQty(data.total_qty)}
             color={direction === "IN" ? "text-green-400" : "text-red-400"}
             bg={direction === "IN" ? "bg-green-500/10 border-green-500/20" : "bg-red-500/10 border-red-500/20"} />
-          <KpiCard label="Total Transaksi" value={String(data.total_txn_count)} color="text-gray-300" bg="bg-gray-800/40 border-gray-700" />
+          <KpiCard label="Total Transactions" value={String(data.total_txn_count)} color="text-gray-300" bg="bg-gray-800/40 border-gray-700" />
         </div>
       )}
 
       <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
-        <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider mb-3">Trend Harian</p>
+        <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider mb-3">Daily Trend</p>
         {loading || !RC ? (
           <div className="py-10 text-center text-xs text-gray-500">Loading…</div>
         ) : trend.length === 0 ? (
-          <div className="py-10 text-center text-xs text-gray-600">Tidak ada data untuk periode ini.</div>
+          <div className="py-10 text-center text-xs text-gray-600">No data for this period.</div>
         ) : (
           <RC.ResponsiveContainer width="100%" height={260}>
             <RC.BarChart data={trend} margin={{ top: 4, right: 16, bottom: 0, left: -10 }}>
@@ -191,14 +191,14 @@ function DirectionSection({ direction }) {
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-gray-800/60 text-gray-500 uppercase tracking-wider">
-              <th className="px-3 py-2 text-left font-semibold">Jenis Transaksi</th>
-              <th className="px-3 py-2 text-right font-semibold">Jumlah Transaksi</th>
+              <th className="px-3 py-2 text-left font-semibold">Transaction Type</th>
+              <th className="px-3 py-2 text-right font-semibold">Transactions</th>
               <th className="px-3 py-2 text-right font-semibold">Total Qty</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800/60">
             {byType.length === 0 ? (
-              <tr><td colSpan={3} className="px-3 py-8 text-center text-gray-600">Tidak ada data.</td></tr>
+              <tr><td colSpan={3} className="px-3 py-8 text-center text-gray-600">No data.</td></tr>
             ) : byType.map((r) => (
               <tr key={r.transaction_type_name} className="hover:bg-gray-800/30">
                 <td className="px-3 py-2 text-gray-300 whitespace-nowrap">{r.transaction_type_name}</td>
@@ -262,7 +262,7 @@ function StockCardSection() {
         <div className="relative">
           <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Item</label>
           <input value={query} onChange={(e) => { setQuery(e.target.value); setSelectedItem(null); }}
-            placeholder="Cari item code / nama…"
+            placeholder="Search item code / name…"
             className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500 w-64" />
           {suggestions.length > 0 && (
             <div className="absolute z-10 mt-1 w-96 max-h-64 overflow-y-auto rounded-lg border border-gray-700 bg-gray-900 shadow-lg">
@@ -280,32 +280,32 @@ function StockCardSection() {
       </div>
 
       {!selectedItem ? (
-        <div className="py-16 text-center text-xs text-gray-600">Cari dan pilih item untuk melihat kartu stok.</div>
+        <div className="py-16 text-center text-xs text-gray-600">Search for and choose an item to see its stock card.</div>
       ) : loading ? (
         <div className="flex justify-center py-16"><Loader2 size={22} className="animate-spin text-gray-600" /></div>
       ) : !data ? (
-        <div className="py-16 text-center text-xs text-gray-600">Gagal memuat data kartu stok.</div>
+        <div className="py-16 text-center text-xs text-gray-600">Failed to load the stock card.</div>
       ) : (
         <>
           <p className="text-sm text-gray-200 font-semibold">{data.item_code} — {data.item_description || "—"}</p>
           <div className="grid grid-cols-2 gap-3">
-            <KpiCard label="Saldo Awal" value={fmtQty(data.saldo_awal)} color="text-gray-300" bg="bg-gray-800/40 border-gray-700" />
-            <KpiCard label="Saldo Akhir" value={fmtQty(data.saldo_akhir)} color="text-blue-400" bg="bg-blue-500/10 border-blue-500/20" />
+            <KpiCard label="Opening Balance" value={fmtQty(data.saldo_awal)} color="text-gray-300" bg="bg-gray-800/40 border-gray-700" />
+            <KpiCard label="Closing Balance" value={fmtQty(data.saldo_akhir)} color="text-blue-400" bg="bg-blue-500/10 border-blue-500/20" />
           </div>
           <div className="rounded-lg border border-gray-800 overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-gray-800/60 text-gray-500 uppercase tracking-wider">
-                  <th className="px-3 py-2 text-left font-semibold">Tanggal</th>
-                  <th className="px-3 py-2 text-left font-semibold">Jenis Transaksi</th>
+                  <th className="px-3 py-2 text-left font-semibold">Date</th>
+                  <th className="px-3 py-2 text-left font-semibold">Transaction Type</th>
                   <th className="px-3 py-2 text-left font-semibold">Subinventory</th>
                   <th className="px-3 py-2 text-right font-semibold">Qty</th>
-                  <th className="px-3 py-2 text-right font-semibold">Saldo</th>
+                  <th className="px-3 py-2 text-right font-semibold">Balance</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800/60">
                 {data.rows.length === 0 ? (
-                  <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-600">Tidak ada mutasi pada periode ini.</td></tr>
+                  <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-600">No movements in this period.</td></tr>
                 ) : data.rows.map((r) => (
                   <tr key={r.transaction_id} className="hover:bg-gray-800/30">
                     <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.transaction_date?.slice(0, 10)}</td>
@@ -336,7 +336,7 @@ function StockCardSection() {
 const TABS = [
   { id: "inbound",    label: "Inventory In",  icon: ArrowDownCircle },
   { id: "outbound",   label: "Inventory Out", icon: ArrowUpCircle },
-  { id: "stock-card", label: "Kartu Stok",     icon: ClipboardList },
+  { id: "stock-card", label: "Stock Card",     icon: ClipboardList },
 ];
 
 export default function PPWH() {
@@ -355,13 +355,13 @@ export default function PPWH() {
     <div className="p-6 space-y-4">
       <SubTabs tabs={TABS} active={activeSection} onChange={(id) => navigate(`/dashboard/ppwh/${id}`)} />
       {activeSection === "inbound" && (
-        <SectionCard title="Inventory In (Penerimaan Barang)"><DirectionSection direction="IN" /></SectionCard>
+        <SectionCard title="Inventory In (Goods Received)"><DirectionSection direction="IN" /></SectionCard>
       )}
       {activeSection === "outbound" && (
-        <SectionCard title="Inventory Out (Pengeluaran Barang)"><DirectionSection direction="OUT" /></SectionCard>
+        <SectionCard title="Inventory Out (Goods Issued)"><DirectionSection direction="OUT" /></SectionCard>
       )}
       {activeSection === "stock-card" && (
-        <SectionCard title="Kartu Stok"><StockCardSection /></SectionCard>
+        <SectionCard title="Stock Card"><StockCardSection /></SectionCard>
       )}
     </div>
   );

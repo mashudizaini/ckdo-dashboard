@@ -339,7 +339,7 @@ function APOutstandingPanel() {
               <RefreshCw size={13} className={rateLoading ? "animate-spin" : ""} />
             </button>
             {rateInfo && (
-              <span style={{ fontSize: 9.5, color: "#94a3b8", whiteSpace: "nowrap" }}>Kurs Tengah BI{rateInfo.date ? ` · ${rateInfo.date}` : ""}</span>
+              <span style={{ fontSize: 9.5, color: "#94a3b8", whiteSpace: "nowrap" }}>BI Middle Rate{rateInfo.date ? ` · ${rateInfo.date}` : ""}</span>
             )}
           </div>
         </div>
@@ -859,7 +859,7 @@ function AROutstandingPanel() {
               <RefreshCw size={13} className={rateLoading ? "animate-spin" : ""} />
             </button>
             {rateInfo && (
-              <span style={{ fontSize: 9.5, color: "#94a3b8", whiteSpace: "nowrap" }}>Kurs Tengah BI{rateInfo.date ? ` · ${rateInfo.date}` : ""}</span>
+              <span style={{ fontSize: 9.5, color: "#94a3b8", whiteSpace: "nowrap" }}>BI Middle Rate{rateInfo.date ? ` · ${rateInfo.date}` : ""}</span>
             )}
           </div>
         </div>
@@ -1277,7 +1277,7 @@ const QTY_MOVE_COLS = [
   { key: "q_wip_issue",         label: "WIP Issue",            sign: -1 },
   { key: "q_wip_return",        label: "WIP Return",           sign: +1 },
   { key: "q_repacking",         label: "Repacking",            sign:  0 },
-  { key: "q_rusak",             label: "Issue Rusak",          sign: -1 },
+  { key: "q_rusak",             label: "Damaged Issue",        sign: -1 },
   { key: "q_investigation_adj", label: "Investigation Adj",    sign:  0 },
   { key: "q_trial_production",  label: "Trial Production",     sign: -1 },
   { key: "q_mediafill_wo",      label: "Media Fill W/O",       sign: -1 },
@@ -1289,7 +1289,7 @@ const AMT_MOVE_COLS = [
   { key: "a_sample",            label: "Sample" },
   { key: "a_wip_issue",         label: "WIP Issue" },
   { key: "a_repacking",         label: "Repacking" },
-  { key: "a_rusak",             label: "Issue Rusak" },
+  { key: "a_rusak",             label: "Damaged Issue" },
   { key: "a_investigation_adj", label: "Investigation Adj" },
   { key: "a_trial_production",  label: "Trial Production" },
   { key: "a_mediafill",         label: "Mediafill Adj" },
@@ -1640,7 +1640,7 @@ const VAT_HEADERS = [
   { key: "journal_category",          label: "Journal Category",           mono: false, minW: 130 },
   { key: "period",                    label: "Period",                     mono: true,  minW: 80  },
   { key: "posted_date",               label: "Posted Date",                mono: false, minW: 100, date: true },
-  { key: "faktur_pajak",              label: "Faktur Pajak",               mono: true,  minW: 160 },
+  { key: "faktur_pajak",              label: "Tax Invoice No",             mono: true,  minW: 160 },
   { key: "invoice_no",                label: "Invoice No",                 mono: true,  minW: 160 },
   { key: "inv_sequence_no",           label: "Inv Sequence No",            mono: true,  minW: 110 },
   { key: "invoice_type",              label: "Invoice Type",               mono: false, minW: 100 },

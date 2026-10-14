@@ -65,8 +65,8 @@ const fmtRp = (v) => {
 };
 const fmtAxis = (v) => {
   const abs = Math.abs(v);
-  if (abs >= 1e9) return `${(v / 1e9).toFixed(1)}M`; // miliar
-  if (abs >= 1e6) return `${(v / 1e6).toFixed(0)}jt`; // juta
+  if (abs >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `${(v / 1e6).toFixed(0)}M`;
   return v;
 };
 
@@ -185,14 +185,14 @@ function SalesTrendSection() {
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <KpiCard label="Total Actual (IDR)" value={fmtRp(totalActual)} color="text-blue-400" bg="bg-blue-500/10 border-blue-500/20" />
-            <KpiCard label="Total Tahun Lalu (IDR)" value={fmtRp(totalPrior)} color="text-gray-400" bg="bg-gray-800/40 border-gray-700" />
+            <KpiCard label="Prior Year Total (IDR)" value={fmtRp(totalPrior)} color="text-gray-400" bg="bg-gray-800/40 border-gray-700" />
             <KpiCard label="YoY Growth" value={yoyPct !== null ? `${yoyPct}%` : "—"}
               color={yoyPct >= 0 ? "text-green-400" : "text-red-400"}
               bg={yoyPct >= 0 ? "bg-green-500/10 border-green-500/20" : "bg-red-500/10 border-red-500/20"} />
           </div>
 
           <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
-            <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider mb-3">Sales Trend per Bulan — {year}</p>
+            <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider mb-3">Sales Trend per Month — {year}</p>
             {!RC ? (
               <div className="py-10 text-center text-xs text-gray-500">Loading chart…</div>
             ) : chartData.length === 0 ? (
@@ -209,12 +209,12 @@ function SalesTrendSection() {
                     <RC.Bar key={bt} dataKey={bt} stackId="a" fill={BIZ_COLOR[bt]} radius={[2, 2, 0, 0]}
                       cursor="pointer" onClick={(row) => handleBarClick(row, bt)} />
                   ))}
-                  <RC.Line type="monotone" dataKey="prior" name="Tahun Lalu" stroke="#94a3b8" strokeWidth={2} strokeDasharray="4 3" dot={{ r: 2, fill: "#94a3b8" }} />
+                  <RC.Line type="monotone" dataKey="prior" name="Prior Year" stroke="#94a3b8" strokeWidth={2} strokeDasharray="4 3" dot={{ r: 2, fill: "#94a3b8" }} />
                 </RC.ComposedChart>
               </RC.ResponsiveContainer>
             )}
             {!RC ? null : chartData.length > 0 && (
-              <p className="text-[11px] text-gray-600 mt-2">Klik salah satu bar untuk lihat rincian order bulan tersebut.</p>
+              <p className="text-[11px] text-gray-600 mt-2">Click a bar to see that month's order detail.</p>
             )}
           </div>
 
@@ -222,15 +222,15 @@ function SalesTrendSection() {
             <div className="rounded-xl border border-gray-800 bg-gray-900">
               <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800">
                 <h4 className="text-xs font-semibold text-gray-200">
-                  Rincian Order — {selected.businessType}, {selected.periodLabel} {year}
+                  Order Detail — {selected.businessType}, {selected.periodLabel} {year}
                 </h4>
-                <button onClick={() => setSelected(null)} className="text-gray-500 hover:text-gray-300 text-xs">Tutup ✕</button>
+                <button onClick={() => setSelected(null)} className="text-gray-500 hover:text-gray-300 text-xs">Close ✕</button>
               </div>
               <div className="p-0">
                 {detailLoading ? (
                   <div className="flex justify-center py-10"><Loader2 size={18} className="animate-spin text-gray-600" /></div>
                 ) : !detail || detail.length === 0 ? (
-                  <div className="py-10 text-center text-xs text-gray-600">Tidak ada data order untuk periode ini.</div>
+                  <div className="py-10 text-center text-xs text-gray-600">No order data for this period.</div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
@@ -310,7 +310,7 @@ function SalesVsBudgetSection() {
           </div>
 
           <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
-            <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider mb-3">Budget vs Actual per Bulan — {year}</p>
+            <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider mb-3">Budget vs Actual per Month — {year}</p>
             {!RC ? (
               <div className="py-10 text-center text-xs text-gray-500">Loading chart…</div>
             ) : chartData.length === 0 ? (
@@ -389,7 +389,7 @@ function OpenSalesOrderSection() {
           <KpiCard label="Open Orders" value={String(kpi.open_order_count)} color="text-blue-400" bg="bg-blue-500/10 border-blue-500/20" />
           <KpiCard label="Open Lines" value={String(kpi.open_line_count)} color="text-gray-300" bg="bg-gray-800/40 border-gray-700" />
           <KpiCard label="Backlog Value (IDR)" value={fmtRp(kpi.total_backlog_idr)} color="text-amber-400" bg="bg-amber-500/10 border-amber-500/20" />
-          <KpiCard label="Oldest Order (hari)" value={kpi.oldest_order_days != null ? String(kpi.oldest_order_days) : "—"}
+          <KpiCard label="Oldest Order (days)" value={kpi.oldest_order_days != null ? String(kpi.oldest_order_days) : "—"}
             color={kpi.oldest_order_days > 30 ? "text-red-400" : "text-green-400"}
             bg={kpi.oldest_order_days > 30 ? "bg-red-500/10 border-red-500/20" : "bg-green-500/10 border-green-500/20"} />
         </div>

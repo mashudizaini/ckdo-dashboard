@@ -126,7 +126,7 @@ function getEmployeeFullCols(employeeNames) {
     { label: "Employment",       field: "employment_status", render: (e) => _empBadge(e.employment_status, EMPLOYMENT_STATUS_BADGE) },
     { label: "Grade",            field: "employee_grade",    align: "center", mono: true },
     { label: "Join Date",        field: "date_of_joining",   render: (e) => _fmtEmpDate(e.date_of_joining) },
-    { label: "PKWT Ke",          field: "pkwt_ke" },
+    { label: "PKWT No.",         field: "pkwt_ke" },
     { label: "Starting PKWT",    field: "starting_pkwt",     render: (e) => _fmtEmpDate(e.starting_pkwt) },
     { label: "End PKWT",         field: "end_pkwt",
       render: (e) => e.end_pkwt
@@ -919,7 +919,7 @@ const EMPLOYEE_DETAIL_FIELDS = [
     ["level", "Level"], ["department", "Department"], ["division", "Division"], ["team", "Team"],
     ["job_title", "Job Title"], ["supervisor_id", "Direct Supervisor"], ["work_placement", "Placement"], ["status", "Status"],
     ["employment_status", "Employment Status"], ["employee_grade", "Grade"], ["scheduled_checkin", "Scheduled Check-in"],
-    ["date_of_joining", "Join Date"], ["pkwt_ke", "PKWT Ke"], ["starting_pkwt", "Starting PKWT"], ["end_pkwt", "End PKWT"],
+    ["date_of_joining", "Join Date"], ["pkwt_ke", "PKWT No."], ["starting_pkwt", "Starting PKWT"], ["end_pkwt", "End PKWT"],
     ["permanent_date", "Permanent Date"], ["resign_date", "Resign Date"], ["resign_reason", "Resign Reason"], ["retire_date", "Retire Date"],
   ] },
   { section: "Education & Experience", fields: [
@@ -4029,10 +4029,10 @@ function TurnoverResignedListModal({ year, month, department, team, label, onClo
 // Tenure buckets matching HR's own breakdown convention — "< 1 Tahun",
 // "1 - 3 thn", ">3 - 5 thn", ">5 thn". Boundaries: [0,1) / [1,3] / (3,5] / (5,∞).
 const TENURE_BUCKETS = [
-  { label: "< 1 Tahun", test: (t) => t < 1 },
-  { label: "1 - 3 thn", test: (t) => t >= 1 && t <= 3 },
-  { label: ">3 - 5 thn", test: (t) => t > 3 && t <= 5 },
-  { label: ">5 thn", test: (t) => t > 5 },
+  { label: "< 1 yr", test: (t) => t < 1 },
+  { label: "1 - 3 yrs", test: (t) => t >= 1 && t <= 3 },
+  { label: ">3 - 5 yrs", test: (t) => t > 3 && t <= 5 },
+  { label: ">5 yrs", test: (t) => t > 5 },
 ];
 const TENURE_STATUS_ORDER = ["Permanent", "Contract", "Probation"];
 
@@ -5545,7 +5545,7 @@ function AttendanceEditModal({ record, onClose, onSaved }) {
           <div>
             <label className="text-xs text-gray-500 block mb-1">Reason for this edit (optional, logged in history)</label>
             <input value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))}
-              placeholder='e.g. "Surat izin sakit menyusul"'
+              placeholder='e.g. "Sick note to follow"'
               className="w-full text-xs rounded-lg border border-gray-700 bg-gray-800 text-gray-200 px-2 py-1.5" />
           </div>
 
@@ -7192,7 +7192,7 @@ function AnnualLeaveReportSection() {
         <div>
           <label className="text-xs text-gray-500 block mb-1">&nbsp;</label>
           <button onClick={fetchReport} disabled={loading}
-            title="Hitung ulang laporan dari data attendance/leave terbaru"
+            title="Recalculate the report from the latest attendance/leave data"
             className="flex items-center gap-1.5 text-xs rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 px-2 py-1.5">
             <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
             Reprocess
@@ -7395,7 +7395,7 @@ function EMagazineSection() {
     const files = Array.from(e.target.files || []);
     const invalid = files.filter(f => !ALLOWED_PHOTO_TYPES.includes(f.type));
     if (invalid.length > 0) {
-      setError(`${invalid.map(f => f.name).join(", ")} — hanya JPEG, PNG, atau WebP yang didukung.`);
+      setError(`${invalid.map(f => f.name).join(", ")} — only JPEG, PNG or WebP are supported.`);
       return;
     }
     setPhotos(prev => [...prev, ...files]);
@@ -7578,7 +7578,7 @@ function EMagazineSection() {
 
   const handleSaveMeta = async () => {
     if (!editMeta) return;
-    if (!editMeta.title.trim()) { setError("Title tidak boleh kosong."); return; }
+    if (!editMeta.title.trim()) { setError("Title cannot be empty."); return; }
     setSavingMeta(editMeta.filename);
     try {
       await hrApi.eMagazineUpdateMeta(editMeta.filename, {

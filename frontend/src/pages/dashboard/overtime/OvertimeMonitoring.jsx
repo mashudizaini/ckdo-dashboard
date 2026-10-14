@@ -215,7 +215,7 @@ export default function OvertimeMonitoring() {
             <BarChart data={data?.monthly || []} margin={{ top: 6, right: 8, left: 6, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
               <XAxis dataKey="month_label" {...axis} />
-              <YAxis {...axis} tickFormatter={(v) => (v >= 1e6 ? `${(v / 1e6).toFixed(0)}jt` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}rb` : v)} />
+              <YAxis {...axis} tickFormatter={(v) => (v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : v)} />
               <Tooltip {...chartTooltip} formatter={(v) => fmtIDR(v)} />
               <Bar dataKey="estimated_cost" name="Estimated cost" fill={COLORS.cost} radius={[5, 5, 0, 0]} />
             </BarChart>

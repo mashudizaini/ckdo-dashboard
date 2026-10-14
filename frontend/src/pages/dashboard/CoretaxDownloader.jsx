@@ -27,6 +27,13 @@ const MASA_PAJAK_OPTIONS = [
   "Mei 2025","Juni 2025","Juli 2025","Agustus 2025",
   "September 2025","Oktober 2025","November 2025","Desember 2025",
 ];
+// The values above are what Coretax (in Indonesian) expects; only the label
+// shown here is English.
+const ID_MONTH_EN = {
+  Januari: "January", Februari: "February", Maret: "March", April: "April", Mei: "May", Juni: "June",
+  Juli: "July", Agustus: "August", September: "September", Oktober: "October", November: "November", Desember: "December",
+};
+const masaLabel = (m) => m.replace(/^(\S+)/, (w) => ID_MONTH_EN[w] || w);
 
 const STATUS_COLOR = {
   pending:         { bg: "rgba(251,191,36,0.1)",  text: "#fbbf24", border: "rgba(251,191,36,0.3)"  },
@@ -397,7 +404,7 @@ export default function CoretaxDownloader() {
               <label style={S.label}>Tax Period</label>
               <select style={S.select} value={form.masa_pajak}
                 onChange={(e) => setForm({ ...form, masa_pajak: e.target.value })}>
-                {MASA_PAJAK_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
+                {MASA_PAJAK_OPTIONS.map((m) => <option key={m} value={m}>{masaLabel(m)}</option>)}
               </select>
             </div>
             <div>
@@ -543,7 +550,7 @@ export default function CoretaxDownloader() {
               <label style={S.label}>Tax Period</label>
               <select style={S.select} value={form.masa_pajak}
                 onChange={(e) => setForm({ ...form, masa_pajak: e.target.value })}>
-                {MASA_PAJAK_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
+                {MASA_PAJAK_OPTIONS.map((m) => <option key={m} value={m}>{masaLabel(m)}</option>)}
               </select>
             </div>
             <div>
@@ -668,7 +675,7 @@ export default function CoretaxDownloader() {
           )}
 
           {/* Jika cookie expired: tampilkan shortcut ke panel perbarui cookie */}
-          {job.status === "error" && job.message?.includes("kedaluwarsa") && uiMode === "ready" && (
+          {job.status === "error" && (job.message?.includes("kedaluwarsa") || job.message?.toLowerCase().includes("expired")) && uiMode === "ready" && (
             <div style={{ marginTop: 14, display: "flex", gap: 10, padding: "12px 14px",
                           background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.2)",
                           borderRadius: 10, fontSize: 13, color: "#fbbf24", alignItems: "center" }}>

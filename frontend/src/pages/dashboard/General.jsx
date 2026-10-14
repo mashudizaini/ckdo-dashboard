@@ -96,7 +96,7 @@ function BudgetTransactionList({ items, monthName }) {
   return (
     <div className="bg-gray-950 border-t border-b border-gray-800/60 px-3 py-2">
       <p className="text-[10px] text-gray-600 uppercase tracking-wider mb-1.5">
-        Transaksi {monthName} — bukan penjumlah langsung ke Actual GL, ditampilkan untuk transparansi sumber
+        {monthName} transactions — not added directly to Actual GL, shown to make the source transparent
       </p>
       {items.length === 0 ? (
         <p className="text-gray-700 italic py-2">No Expense Report / Purchase Requisition data for this period.</p>
@@ -148,7 +148,7 @@ function BudgetPeriodBalances({ detail, fmtRp, accName }) {
           <span className="font-bold text-gray-200">Period Balances (YTDE)</span>
           <span className="text-gray-600 ml-2">{accName}</span>
         </div>
-        <span className="text-gray-600">Klik baris untuk lihat transaksi Expense Report &amp; Purchase Requisition</span>
+        <span className="text-gray-600">Click a row to see the Expense Report &amp; Purchase Requisition transactions</span>
       </div>
 
       <table className="w-full">
@@ -312,18 +312,18 @@ function GLBudgetSection({ dept }) {
         <select
           value={month}
           onChange={e => setMonth(+e.target.value)}
-          title="Year-To-Date sampai bulan ini (mis. Maret = Jan-Mar dijumlah)"
+          title="Year-To-Date up to this month (e.g. March = Jan-Mar summed)"
           className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
         >
           <option value={0}>All Months (Jan-Des)</option>
-          {MONTHS_ID.map((m, i) => <option key={i + 1} value={i + 1}>s.d. {m}</option>)}
+          {MONTHS_ID.map((m, i) => <option key={i + 1} value={i + 1}>to {m}</option>)}
         </select>
 
         <input
           value={accountInput}
           onChange={e => setAccountInput(e.target.value)}
           placeholder="Account code..."
-          title="Filter per kode akun (segment4) — kosongkan untuk semua akun"
+          title="Filter by account code (segment4) — leave empty for all accounts"
           className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500 w-40"
         />
 
@@ -394,7 +394,7 @@ function GLBudgetSection({ dept }) {
             <div className="col-span-4">Account</div>
             <div className="col-span-2 text-right">Budget</div>
             <div className="col-span-2 text-right">Encumbrance</div>
-            <div className="col-span-2 text-right" title="Klik baris untuk lihat transaksi Expense Report &amp; Purchase Requisition">Actual</div>
+            <div className="col-span-2 text-right" title="Click a row to see the Expense Report &amp; Purchase Requisition transactions">Actual</div>
             <div className="col-span-2 text-right">Funds Available</div>
           </div>
 
@@ -421,7 +421,7 @@ function GLBudgetSection({ dept }) {
                   </div>
                   <div className="col-span-2 text-right text-blue-400 font-semibold">{fmtRp(acc.budget)}</div>
                   <div className="col-span-2 text-right text-amber-400 font-semibold">{fmtRp(acc.encumbrance)}</div>
-                  <div className="col-span-2 text-right text-violet-400 font-semibold underline decoration-dotted underline-offset-4" title="Klik untuk lihat transaksi">
+                  <div className="col-span-2 text-right text-violet-400 font-semibold underline decoration-dotted underline-offset-4" title="Click to see the transactions">
                     {fmtRp(acc.actual)}
                   </div>
                   <div className={`col-span-2 text-right font-semibold ${remainOk ? "text-green-400" : "text-red-400"}`}>
@@ -527,7 +527,7 @@ function BudgetGraphSection({ dept }) {
     if (v === undefined || v === null) return "Rp 0";
     return (v < 0 ? "-Rp " : "Rp ") + Math.abs(Math.round(v)).toLocaleString("id-ID");
   };
-  const fmtAxis = (v) => Math.abs(v) >= 1e6 ? `${(v / 1e6).toFixed(0)}jt` : v;
+  const fmtAxis = (v) => Math.abs(v) >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : v;
 
   const accounts = (data?.accounts || []).filter(a => a.budget !== 0 || a.encumbrance !== 0 || a.actual !== 0);
   const accountChartData = accounts.map(a => ({
@@ -566,18 +566,18 @@ function BudgetGraphSection({ dept }) {
         <select
           value={month}
           onChange={e => setMonth(+e.target.value)}
-          title="Year-To-Date sampai bulan ini (mis. Maret = Jan-Mar dijumlah)"
+          title="Year-To-Date up to this month (e.g. March = Jan-Mar summed)"
           className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500"
         >
           <option value={0}>All Months (Jan-Des)</option>
-          {MONTHS_ID.map((m, i) => <option key={i + 1} value={i + 1}>s.d. {m}</option>)}
+          {MONTHS_ID.map((m, i) => <option key={i + 1} value={i + 1}>to {m}</option>)}
         </select>
 
         <input
           value={accountInput}
           onChange={e => setAccountInput(e.target.value)}
           placeholder="Account code..."
-          title="Filter per kode akun untuk lihat trend bulanan — kosongkan untuk bandingkan semua akun"
+          title="Filter by account code to see the monthly trend — leave empty to compare all accounts"
           className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500 w-40"
         />
 
@@ -604,7 +604,7 @@ function BudgetGraphSection({ dept }) {
           )}
 
           {/* ── Bar chart per akun ── */}
-          <SummaryChartCard title={`Budget vs Encumbrance vs Actual per Akun — ${year}${month ? ` (s.d. ${MONTHS_ID[month - 1]})` : ""}`}>
+          <SummaryChartCard title={`Budget vs Encumbrance vs Actual per Account — ${year}${month ? ` (to ${MONTHS_ID[month - 1]})` : ""}`}>
             {!RC ? (
               <div className="py-10 text-center text-xs text-gray-500">Loading chart…</div>
             ) : accountChartData.length === 0 ? (
@@ -627,7 +627,7 @@ function BudgetGraphSection({ dept }) {
 
           {/* ── Trend bulanan — hanya kalau 1 akun difilter ── */}
           {account && (
-            <SummaryChartCard title={`Trend Bulanan — ${detail?.account_code || account}`}>
+            <SummaryChartCard title={`Monthly Trend — ${detail?.account_code || account}`}>
               {!RC || !detail ? (
                 <div className="py-10 text-center text-xs text-gray-500">Loading chart…</div>
               ) : trendData.length === 0 ? (
@@ -1110,7 +1110,7 @@ function APListSection() {
           <input type="date" value={glDateTo} onChange={e => setGlDateTo(e.target.value)} className={INPUT} />
         </div>
         <div>
-          <label className={LBL} title="Pembayaran setelah tanggal ini tidak dihitung sebagai Payment">Payment Date Cutoff</label>
+          <label className={LBL} title="Payments after this date are not counted as Payment">Payment Date Cutoff</label>
           <input type="date" value={paymentCutoff} onChange={e => setPaymentCutoff(e.target.value)} className={INPUT} />
         </div>
         <div>
@@ -1154,14 +1154,14 @@ function APListSection() {
       {data && data.total_count > data.count && (
         <div className="rounded-lg px-4 py-2.5 text-xs flex items-center gap-2 bg-amber-500/10 text-amber-400 border border-amber-500/20">
           <AlertTriangle size={13} />
-          Menampilkan {data.count.toLocaleString("id-ID")} dari total {data.total_count.toLocaleString("id-ID")} baris yang cocok dengan filter —
-          naikkan Limit untuk menampilkan semuanya di tabel. Grafik &amp; kartu ringkasan di bawah selalu menghitung total sebenarnya, tidak dibatasi Limit.
+          Showing {data.count.toLocaleString("id-ID")} of {data.total_count.toLocaleString("id-ID")} rows matching the filter —
+          raise the Limit to show them all in the table. The charts &amp; summary cards below always use the real total, not limited by Limit.
         </div>
       )}
 
       {data?.monthly?.length > 0 && (
         <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-4">
-          <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider mb-3">Total AP per Bulan (sesuai filter, tidak dibatasi Limit)</p>
+          <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider mb-3">Total AP per Month (per filter, not limited by Limit)</p>
           {!RC ? (
             <div className="py-10 text-center text-xs text-gray-500">Loading chart…</div>
           ) : (
@@ -1169,7 +1169,7 @@ function APListSection() {
               <RC.BarChart data={data.monthly} margin={{ top: 4, right: 16, bottom: 0, left: -10 }}>
                 <RC.CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <RC.XAxis dataKey="period" tick={{ fill: "#cbd5e1", fontSize: 10 }} />
-                <RC.YAxis tick={{ fill: "#cbd5e1", fontSize: 10 }} tickFormatter={(v) => `${(v / 1e6).toFixed(0)}jt`} />
+                <RC.YAxis tick={{ fill: "#cbd5e1", fontSize: 10 }} tickFormatter={(v) => `${(v / 1e6).toFixed(0)}M`} />
                 <RC.Tooltip contentStyle={{ borderRadius: 8, fontSize: 11 }} formatter={(v) => `Rp ${fmtNum(v)}`} />
                 <RC.Legend wrapperStyle={{ fontSize: 11, color: "#f1f5f9" }} />
                 <RC.Bar dataKey="total_ap" name="Total AP" fill="#60a5fa" radius={[3, 3, 0, 0]} />

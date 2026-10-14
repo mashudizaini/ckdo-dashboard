@@ -109,8 +109,8 @@ function EisKpiCard({ title, value, unit, target, icon: Icon, color = "cyan" }) 
 
 const EXPECTATION_STATUS_CFG = {
   actual:          { valueColor: "text-gray-100",  badge: null },
-  projected:       { valueColor: "text-purple-400", badge: "Proyeksi" },
-  carried_forward: { valueColor: "text-gray-400 italic", badge: "YTD s/d bulan lalu" },
+  projected:       { valueColor: "text-purple-400", badge: "Projected" },
+  carried_forward: { valueColor: "text-gray-400 italic", badge: "YTD to last month" },
   no_data:         { valueColor: "text-gray-700",  badge: null },
 };
 
@@ -170,7 +170,7 @@ function RequiredColumnsTable({ columns }) {
   return (
     <div className="mt-2 rounded-lg border border-gray-800 bg-gray-950/40">
       <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold text-gray-300">
-        <span className="flex items-center gap-1.5"><FileSpreadsheet size={12} /> Kolom yang dibutuhkan ({columns.length})</span>
+        <span className="flex items-center gap-1.5"><FileSpreadsheet size={12} /> Required columns ({columns.length})</span>
         {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
       </button>
       {open && (
@@ -178,10 +178,10 @@ function RequiredColumnsTable({ columns }) {
           <table className="w-full text-[11px]">
             <thead>
               <tr className="bg-gray-800/60 text-gray-500">
-                <th className="px-2 py-1.5 text-left">Kolom</th>
-                <th className="px-2 py-1.5 text-left">Nama</th>
-                <th className="px-2 py-1.5 text-left">Wajib</th>
-                <th className="px-2 py-1.5 text-left">Catatan</th>
+                <th className="px-2 py-1.5 text-left">Column</th>
+                <th className="px-2 py-1.5 text-left">Name</th>
+                <th className="px-2 py-1.5 text-left">Required</th>
+                <th className="px-2 py-1.5 text-left">Notes</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
@@ -190,7 +190,7 @@ function RequiredColumnsTable({ columns }) {
                   <td className="px-2 py-1.5 text-gray-500 font-mono whitespace-nowrap">{c.idx}</td>
                   <td className="px-2 py-1.5 text-gray-200 font-medium whitespace-nowrap">{c.name}</td>
                   <td className="px-2 py-1.5">
-                    {c.required ? <span className="text-red-400 font-semibold">Ya</span> : <span className="text-gray-600">Tidak</span>}
+                    {c.required ? <span className="text-red-400 font-semibold">Yes</span> : <span className="text-gray-600">No</span>}
                   </td>
                   <td className="px-2 py-1.5 text-gray-500">{c.note || "—"}</td>
                 </tr>
@@ -211,7 +211,7 @@ function RequiredFormatNote({ children }) {
   return (
     <div className="mt-2 rounded-lg border border-gray-800 bg-gray-950/40">
       <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold text-gray-300">
-        <span className="flex items-center gap-1.5"><FileSpreadsheet size={12} /> Format file yang dibutuhkan</span>
+        <span className="flex items-center gap-1.5"><FileSpreadsheet size={12} /> Required file format</span>
         {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
       </button>
       {open && <div className="border-t border-gray-800 px-3 py-2.5 text-[11px] text-gray-400 space-y-2">{children}</div>}
@@ -239,7 +239,7 @@ function UploadHistoryTable({ uploadType, refreshKey }) {
   return (
     <div className="mt-2 rounded-lg border border-gray-800 bg-gray-950/40">
       <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold text-gray-300">
-        <span className="flex items-center gap-1.5"><Clock size={12} /> Riwayat Upload</span>
+        <span className="flex items-center gap-1.5"><Clock size={12} /> Upload History</span>
         {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
       </button>
       {open && (
@@ -247,17 +247,17 @@ function UploadHistoryTable({ uploadType, refreshKey }) {
           {loading ? (
             <div className="py-4 text-center text-xs text-gray-600"><Loader2 size={13} className="animate-spin inline" /></div>
           ) : logs.length === 0 ? (
-            <div className="py-4 text-center text-xs text-gray-600">Belum ada riwayat upload.</div>
+            <div className="py-4 text-center text-xs text-gray-600">No upload history yet.</div>
           ) : (
             <table className="w-full text-[11px]">
               <thead>
                 <tr className="bg-gray-800/60 text-gray-500">
-                  <th className="px-2 py-1.5 text-left">Waktu</th>
+                  <th className="px-2 py-1.5 text-left">Time</th>
                   <th className="px-2 py-1.5 text-left">File</th>
-                  <th className="px-2 py-1.5 text-left">Tahun</th>
-                  <th className="px-2 py-1.5 text-left">Baris</th>
+                  <th className="px-2 py-1.5 text-left">Year</th>
+                  <th className="px-2 py-1.5 text-left">Rows</th>
                   <th className="px-2 py-1.5 text-left">Status</th>
-                  <th className="px-2 py-1.5 text-left">Oleh</th>
+                  <th className="px-2 py-1.5 text-left">By</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
@@ -269,8 +269,8 @@ function UploadHistoryTable({ uploadType, refreshKey }) {
                     <td className="px-2 py-1.5 text-gray-400">{l.rows_loaded ?? "—"}</td>
                     <td className="px-2 py-1.5">
                       {l.status === "success"
-                        ? <span className="text-emerald-400 font-semibold">Sukses</span>
-                        : <span className="text-red-400 font-semibold" title={l.error_message}>Gagal</span>}
+                        ? <span className="text-emerald-400 font-semibold">Success</span>
+                        : <span className="text-red-400 font-semibold" title={l.error_message}>Failed</span>}
                     </td>
                     <td className="px-2 py-1.5 text-gray-500">{l.uploaded_by || "—"}</td>
                   </tr>
@@ -285,17 +285,17 @@ function UploadHistoryTable({ uploadType, refreshKey }) {
 }
 
 const OVERTIME_COLUMNS = [
-  { idx: "B", name: "Label baris", required: true, note: 'Satu baris berisi teks "Overtime Hour", satu baris lain "Working Hour" (dicari di antara baris 1–10)' },
-  { idx: "C–N", name: "Jan–Dec", required: true, note: "12 nilai jam bulanan untuk masing-masing baris label" },
+  { idx: "B", name: "Row label", required: true, note: 'One row with the text "Overtime Hour", another with "Working Hour" (searched within rows 1–10)' },
+  { idx: "C–N", name: "Jan–Dec", required: true, note: "12 monthly hour values for each label row" },
 ];
 
 const COGS_COLUMNS = [
-  { idx: "B", name: "No", required: true, note: "Nomor urut, harus angka — baris tanpa angka di kolom ini dilewati" },
-  { idx: "C", name: "Market", required: false, note: 'Public/Private/CMO/Export/Service Agreement/Accounting — default "Public" kalau kosong' },
-  { idx: "E", name: "Products", required: true, note: 'Nama produk pendek, mis. "Carboplatin 150 mg" — suffix kekuatan dihapus otomatis untuk digabung per produk' },
-  { idx: "I", name: "Price IDR", required: false, note: "Harga per unit (rupiah) — dipakai hitung Net Sales" },
-  { idx: "J–U", name: "COGS Quantity Jan–Dec", required: true, note: "12 kolom qty bulanan" },
-  { idx: "W–AH", name: "COGS Amount Jan–Dec", required: true, note: "12 kolom nilai COGS bulanan, dalam JUTA IDR" },
+  { idx: "B", name: "No", required: true, note: "Sequence number, must be numeric — rows without a number in this column are skipped" },
+  { idx: "C", name: "Market", required: false, note: 'Public/Private/CMO/Export/Service Agreement/Accounting — defaults to "Public" when empty' },
+  { idx: "E", name: "Products", required: true, note: 'Short product name, e.g. "Carboplatin 150 mg" — the strength suffix is removed automatically to group by product' },
+  { idx: "I", name: "Price IDR", required: false, note: "Unit price (rupiah) — used to calculate Net Sales" },
+  { idx: "J–U", name: "COGS Quantity Jan–Dec", required: true, note: "12 monthly quantity columns" },
+  { idx: "W–AH", name: "COGS Amount Jan–Dec", required: true, note: "12 monthly COGS value columns, in MILLION IDR" },
 ];
 
 /* ─── Tab: Summary ────────────────────────────────────────────────
@@ -353,7 +353,7 @@ function ProductPortfolio({ year, period, initial }) {
   const [busy, setBusy] = useState(false);
   useEffect(() => { setP(initial); }, [initial]);
 
-  if (!p) return <div className="py-8 text-center text-xs text-gray-600">Belum ada data Sales_Ledger. Upload workbook EIS Template di EIS → Data Upload.</div>;
+  if (!p) return <div className="py-8 text-center text-xs text-gray-600">No Sales_Ledger data yet. Upload the EIS Template workbook in EIS → Data Upload.</div>;
   const sel = p.selected;
   const markets = p.markets.filter((m) => m.business === sel.business);
   const products = (p.markets.find((m) => m.market === sel.market) || { products: [] }).products;
@@ -398,11 +398,11 @@ function ProductPortfolio({ year, period, initial }) {
         { h: "FOH", v: fmtOrDash(costCell("foh")?.amount), num: true }, { h: "%", v: pctOrDash(costCell("foh")?.pct), num: true, w: ".6fr" },
       ]} />
       <div className="text-[10px] text-gray-600">
-        Nilai mengikuti skala Sales_Ledger. Pecahan COGS = rasio cost component Oracle OPM
+        Values follow the Sales_Ledger scale. COGS split = Oracle OPM cost component ratio
         {c && !c.error ? ` (${c.item_code} ${c.item_desc}, ${c.period})` : ""}
-        {c && !c.error && !c.detailed ? " — costing periode ini belum memecah Labour/Depreciation; keduanya masih di dalam FOH (GL Allocation)." : "."}
-        {!c && " — item tidak ditemukan di costing Oracle untuk periode ini."}
-        {c?.error && ` — Oracle tidak bisa dibaca: ${c.error}`}
+        {c && !c.error && !c.detailed ? " — this period's costing does not split Labour/Depreciation yet; both are still inside FOH (GL Allocation)." : "."}
+        {!c && " — item not found in Oracle costing for this period."}
+        {c?.error && ` — Oracle could not be read: ${c.error}`}
       </div>
     </div>
   );
@@ -423,13 +423,13 @@ function EisSummaryTab({ year, period }) {
   }, [year, period]);
 
   if (loading) return <Loading />;
-  if (!d) return <ChartCard title=""><div className="py-12 text-center text-sm text-gray-500">Gagal memuat Summary.</div></ChartCard>;
+  if (!d) return <ChartCard title=""><div className="py-12 text-center text-sm text-gray-500">Failed to load the Summary.</div></ChartCard>;
 
   const k = d.kpi, cl = d.closing, n = d.nwc;
   const closeLabel = `${MONTH_NAMES[cl.month - 1]} ${cl.year}`;
   const estNote = cl.daily_sales
-    ? `Local = proyeksi Daily Sales (${cl.daily_sales.wd_actual}/${cl.daily_sales.wd_total} WD)`
-    : "Local = belum ada Daily Sales bulan ini";
+    ? `Local = Daily Sales projection (${cl.daily_sales.wd_actual}/${cl.daily_sales.wd_total} WD)`
+    : "Local = no Daily Sales this month yet";
 
   return (
     <div className="space-y-4">
@@ -442,7 +442,7 @@ function EisSummaryTab({ year, period }) {
         <EisKpiCard title="Net Profit Achievement (YTD)" value={k.net_profit_progress_pct ?? "—"} unit={k.net_profit_progress_pct == null ? "" : "%"} icon={Landmark} color="amber" />
         <EisKpiCard title="Cashflow Achievement" value={k.cash_achievement_pct ?? "—"} unit={k.cash_achievement_pct == null ? "" : "%"} icon={Wallet} color="orange" />
       </div>
-      {k.financial_error && <div className="text-[11px] text-red-600">Net profit / cashflow: data Oracle tidak bisa dibaca ({k.financial_error}).</div>}
+      {k.financial_error && <div className="text-[11px] text-red-600">Net profit / cashflow: Oracle data could not be read ({k.financial_error}).</div>}
 
       <EisSection title="Product Portfolio">
         <ProductPortfolio year={year} period={period} initial={d.portfolio} />
@@ -457,12 +457,12 @@ function EisSummaryTab({ year, period }) {
           <ClosingEstBox title="Export" seg={cl.export} planLabel="Plan" estLabel="Est." />
         </div>
         <div className="text-[10px] text-gray-600 mt-1">
-          Plan: SalesSummary_Monthly{["local", "cmo_other", "export"].some((s) => cl[s].plan_source === "pac") ? " (bulan yang belum ada di template: PAC Sales Plan)" : ""} · {estNote} · CMO &amp; Export = actual bulan itu bila sudah ada · juta IDR
+          Plan: SalesSummary_Monthly{["local", "cmo_other", "export"].some((s) => cl[s].plan_source === "pac") ? " (months not yet in the template: PAC Sales Plan)" : ""} · {estNote} · CMO &amp; Export = that month's actual once available · million IDR
         </div>
       </EisSection>
 
       <EisSection title="Net Working Capital">
-        {n.error ? <div className="py-6 text-center text-xs text-red-600">Data Oracle tidak bisa dibaca: {n.error}</div> : (
+        {n.error ? <div className="py-6 text-center text-xs text-red-600">Oracle data could not be read: {n.error}</div> : (
           <div className="flex items-stretch gap-3 overflow-x-auto">
             <div className="shrink-0 min-w-[180px] border border-gray-800 rounded-lg text-center">
               <div className="text-xs font-bold text-gray-200 py-1 border-b border-gray-800">NWC (Days)</div>
@@ -481,7 +481,7 @@ function EisSummaryTab({ year, period }) {
             </div>
           </div>
         )}
-        <div className="text-[10px] text-gray-600 mt-1">NWC = DSO + DIO − DPO · DSO/DPO dari Administration (Oracle), DIO dari Production{n.dio_month && n.dio_month !== period ? ` (as of ${MONTHS_SHORT[n.dio_month - 1]})` : ""}</div>
+        <div className="text-[10px] text-gray-600 mt-1">NWC = DSO + DIO − DPO · DSO/DPO from Administration (Oracle), DIO from Production{n.dio_month && n.dio_month !== period ? ` (as of ${MONTHS_SHORT[n.dio_month - 1]})` : ""}</div>
       </EisSection>
     </div>
   );
@@ -628,7 +628,7 @@ function GrowthBars({ seg, year, period, height = 180 }) {
         </ComposedChart>
       </ResponsiveContainer>
       {seg.prev_ytd_actual == null && (
-        <div className="text-[10px] text-amber-600 text-center">Belum ada data {year - 1} (Jan–{MONTHS_SHORT[period - 1]}) di SalesSummary_Monthly</div>
+        <div className="text-[10px] text-amber-600 text-center">No {year - 1} data (Jan–{MONTHS_SHORT[period - 1]}) in SalesSummary_Monthly yet</div>
       )}
     </>
   );
@@ -650,7 +650,7 @@ function YearlyGrowthColumn({ seg, year, period }) {
 }
 
 function AreaSalesBlock({ area }) {
-  if (!area) return <div className="py-8 text-center text-xs text-gray-600">Belum ada data area sales.</div>;
+  if (!area) return <div className="py-8 text-center text-xs text-gray-600">No area sales data yet.</div>;
   return (
     <div className="text-xs">
       <div className="grid grid-cols-2 border border-gray-800 rounded-lg overflow-hidden mb-2">
@@ -683,7 +683,7 @@ function AreaSalesBlock({ area }) {
 }
 
 function MarketingBlock({ marketing, year, period }) {
-  if (!marketing.length) return <div className="py-8 text-center text-xs text-gray-600">Belum ada data marketing activity.</div>;
+  if (!marketing.length) return <div className="py-8 text-center text-xs text-gray-600">No marketing activity data yet.</div>;
   return (
     <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${marketing.length}, minmax(0, 1fr))` }}>
       {marketing.map((e) => (
@@ -730,8 +730,8 @@ function EisPerformanceTab({ year, period }) {
       <ChartCard title="">
         <div className="text-center py-12 text-gray-500">
           <BarChart2 size={32} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm">Belum ada data Performance untuk {MONTH_NAMES[period - 1]} {year}.</p>
-          <p className="text-xs text-gray-600 mt-1">Upload workbook EIS Template di menu EIS → Data Upload → "EIS Template".</p>
+          <p className="text-sm">No Performance data for {MONTH_NAMES[period - 1]} {year} yet.</p>
+          <p className="text-xs text-gray-600 mt-1">Upload the EIS Template workbook in EIS → Data Upload → "EIS Template".</p>
         </div>
       </ChartCard>
     );
@@ -761,7 +761,7 @@ function EisPerformanceTab({ year, period }) {
                 {loading && <Loader2 size={13} className="animate-spin text-gray-500" />}
               </div>
               <BlockTitle>EBIT - Product</BlockTitle>
-              {ebitItems.length === 0 ? <div className="py-8 text-center text-xs text-gray-600">Tidak ada produk dengan EBIT positif untuk market ini.</div> : (
+              {ebitItems.length === 0 ? <div className="py-8 text-center text-xs text-gray-600">No product with a positive EBIT in this market.</div> : (
                 <ResponsiveContainer width="100%" height={ebitItems.length * 30 + 40}>
                   <BarChart data={ebitItems} layout="vertical" margin={{ left: 8, right: 44, top: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={TPL_GRID} horizontal={false} />
@@ -775,7 +775,7 @@ function EisPerformanceTab({ year, period }) {
                 </ResponsiveContainer>
               )}
               {d.ebit && <AsOf year={d.ebit.year} month={d.ebit.month} selYear={year} selMonth={period} />}
-              <div className="text-[10px] text-gray-600 text-center mt-0.5">5 produk penjualan terbesar dengan EBIT positif · EBIT ÷ sales</div>
+              <div className="text-[10px] text-gray-600 text-center mt-0.5">Top 5 products by sales with a positive EBIT · EBIT ÷ sales</div>
             </div>
           </div>
         </div>
@@ -855,8 +855,8 @@ function EisProductionTab({ year, period }) {
       <ChartCard title="">
         <div className="text-center py-12 text-gray-500">
           <BarChart2 size={32} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm">Belum ada data Production untuk {MONTH_NAMES[period - 1]} {year}.</p>
-          <p className="text-xs text-gray-600 mt-1">Upload workbook EIS Template di menu EIS → Data Upload → "EIS Template — Production".</p>
+          <p className="text-sm">No Production data for {MONTH_NAMES[period - 1]} {year} yet.</p>
+          <p className="text-xs text-gray-600 mt-1">Upload the EIS Template workbook in EIS → Data Upload → "EIS Template — Production".</p>
         </div>
       </ChartCard>
     );
@@ -946,7 +946,7 @@ function EisProductionTab({ year, period }) {
 
           <EisSection title="COGS Performance">
             <div className="text-center text-xs font-semibold text-gray-300 mb-1">GPM</div>
-            {gpm.length === 0 ? <div className="py-8 text-center text-xs text-gray-600">Belum ada data GPM.</div> : (
+            {gpm.length === 0 ? <div className="py-8 text-center text-xs text-gray-600">No GPM data yet.</div> : (
               <ResponsiveContainer width="100%" height={Math.max(180, gpm.length * 22 + 30)}>
                 <BarChart data={gpm} layout="vertical" margin={{ left: 8, right: 44, top: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={TPL_GRID} horizontal={false} />
@@ -963,7 +963,7 @@ function EisProductionTab({ year, period }) {
           </EisSection>
 
           <EisSection title="Machine Utilization">
-            {!m ? <div className="py-8 text-center text-xs text-gray-600">Belum ada data machine utilization.</div> : (
+            {!m ? <div className="py-8 text-center text-xs text-gray-600">No machine utilization data yet.</div> : (
               <>
                 <div className="grid grid-cols-[1.4fr_auto_1.6fr] gap-3 items-center">
                   <div className="rounded-lg border border-gray-800 overflow-hidden text-xs">
@@ -1167,7 +1167,7 @@ function KpiBox({ title, value }) {
 }
 
 function OracleError({ block }) {
-  return <div className="py-8 text-center text-xs text-red-600">Data Oracle tidak bisa dibaca: {block.error}</div>;
+  return <div className="py-8 text-center text-xs text-red-600">Oracle data could not be read: {block.error}</div>;
 }
 
 /** Monthly bars with value labels (negative bars allowed). */
@@ -1204,7 +1204,7 @@ function EisAdministrationTab({ year, period }) {
   }, [year, period]);
 
   if (loading) return <Loading />;
-  if (!d) return <ChartCard title=""><div className="py-12 text-center text-sm text-gray-500">Gagal memuat data Administration.</div></ChartCard>;
+  if (!d) return <ChartCard title=""><div className="py-12 text-center text-sm text-gray-500">Failed to load the Administration data.</div></ChartCard>;
 
   const p = d.personnel, f = d.financial, r = d.ratios, b = d.budget;
   const g = p.groups;
@@ -1217,11 +1217,11 @@ function EisAdministrationTab({ year, period }) {
       <EisHeaderBand title="ADMINISTRATION" year={year} period={period} />
       {!d.has_plan && (
         <div className="text-xs text-amber-700 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
-          Plan (Business Plan headcount, Net Profit, Cashflow, Budget) belum ada untuk {year}. Upload workbook EIS Template (sheet Administration_Headcount &amp; Administration_Financial) di EIS → Data Upload.
+          Plan (Business Plan headcount, Net Profit, Cashflow, Budget) is not available for {year} yet. Upload the EIS Template workbook (sheets Administration_Headcount &amp; Administration_Financial) in EIS → Data Upload.
         </div>
       )}
 
-      <EisSection title="Personel Plan" subtitle="Total Employee">
+      <EisSection title="Personnel Plan" subtitle="Total Employee">
         <div className="grid grid-cols-1 lg:grid-cols-[150px_1fr_170px] gap-3">
           <div className="grid grid-rows-2 gap-3">
             <KpiBox title="Total" value={fmtInt(p.total)} />
@@ -1234,8 +1234,8 @@ function EisAdministrationTab({ year, period }) {
             <PersonRow label="Plant Direct" count={p.plant_direct} indent />
             <PersonRow label="Plant Indirect" count={p.plant_indirect} indent />
             <PersonRow label="Admin" count={g.Administration} />
-            {p.unassigned > 0 && <PersonRow label="Tanpa department" count={p.unassigned} />}
-            <div className="text-[10px] text-gray-600 mt-1">Plant Direct = team Production &amp; PPWH · turnover = resign Jan–{MONTHS_SHORT[period - 1]} ÷ rata-rata headcount</div>
+            {p.unassigned > 0 && <PersonRow label="No department" count={p.unassigned} />}
+            <div className="text-[10px] text-gray-600 mt-1">Plant Direct = Production &amp; PPWH teams · turnover = resignations Jan–{MONTHS_SHORT[period - 1]} ÷ average headcount</div>
           </div>
           <div className="grid grid-rows-2 gap-3">
             <KpiBox title="Business Plan" value={p.plan == null ? "—" : fmtInt(p.plan)} />
@@ -1281,7 +1281,7 @@ function EisAdministrationTab({ year, period }) {
                 <div>
                   <BlockTitle>Achievement</BlockTitle>
                   <FullDonut pct={f.cash_achievement_pct} />
-                  <div className="text-[10px] text-gray-600 text-center">Saldo kas {MONTHS_SHORT[period - 1]} ÷ plan {f.cash_plan == null ? "—" : fmtInt(f.cash_plan)}</div>
+                  <div className="text-[10px] text-gray-600 text-center">Cash balance {MONTHS_SHORT[period - 1]} ÷ plan {f.cash_plan == null ? "—" : fmtInt(f.cash_plan)}</div>
                 </div>
                 <div>
                   <BlockTitle>Monthly - IDR Million</BlockTitle>
@@ -1338,7 +1338,7 @@ function EisAdministrationTab({ year, period }) {
                   <Legend layout="vertical" align="right" verticalAlign="middle" wrapperStyle={{ fontSize: 11 }} />
                 </PieChart>
               </ResponsiveContainer>
-              <div className="text-[10px] text-gray-600 text-center">Actual Oracle GL (beban per department, segment3) · plan dari EIS Template</div>
+              <div className="text-[10px] text-gray-600 text-center">Actual from Oracle GL (expenses per department, segment3) · plan from the EIS Template</div>
             </div>
           </div>
         )}
@@ -1589,7 +1589,7 @@ function EisDailySalesTab({ year }) {
 
       {(kpiYearly || kpiMonthly) && !(kpiYearly?.has_pac_data ?? kpiMonthly?.has_pac_data) && (
         <div className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
-          PAC dashboard belum punya data Business Plan (Sales Plan) untuk tahun {year} — kartu Business Plan &amp; Achievement di bawah akan 0 sampai data itu diupload di PAC.
+          The PAC dashboard has no Business Plan (Sales Plan) data for {year} yet — the Business Plan &amp; Achievement cards below show 0 until it is uploaded in PAC.
         </div>
       )}
 
@@ -1618,7 +1618,7 @@ function EisDailySalesTab({ year }) {
         </ResponsiveContainer>
       </ChartCard>
 
-      <ChartCard title="Daily Sales Detail per Working Day" subtitle="in Million IDR · Acc = Accumulated, Sales = Daily · angka ungu miring = proyeksi run-rate (belum ada data asli)" className="overflow-x-auto">
+      <ChartCard title="Daily Sales Detail per Working Day" subtitle="in Million IDR · Acc = Accumulated, Sales = Daily · purple italic = run-rate projection (no actual data yet)" className="overflow-x-auto">
         <table className="text-[11px] border-collapse" style={{ minWidth: "1100px", width: "100%" }}>
           <thead>
             <tr className="bg-gray-950 text-gray-200">
@@ -1647,7 +1647,7 @@ function EisDailySalesTab({ year }) {
                 {MONTHS_FULL_ID.map((m) => {
                   const cell = row[m.key] || {};
                   const overTarget = cell.acc != null && monthTargets[m.key] && cell.acc >= monthTargets[m.key];
-                  const title = cell.projected ? "Projected — belum ada data asli, dihitung dari run-rate bulan berjalan" : undefined;
+                  const title = cell.projected ? "Projected — no actual data yet, calculated from the current month's run-rate" : undefined;
                   return (
                     <Fragment key={m.key}>
                       <td title={title} className={`px-1.5 py-1.5 text-right font-mono border-l border-gray-800/60 ${
@@ -1722,7 +1722,7 @@ function EisDataUploadTab({ year: sharedYear }) {
       setOvertime(res.data || []);
       setOtMsg({ type: "ok", text: res.message });
       setOtLogsKey((k) => k + 1);
-    } catch (err) { setOtMsg({ type: "err", text: "Gagal: " + (err?.response?.data?.detail || err?.detail || err.message) }); setOtLogsKey((k) => k + 1); }
+    } catch (err) { setOtMsg({ type: "err", text: "Failed: " + (err?.response?.data?.detail || err?.detail || err.message) }); setOtLogsKey((k) => k + 1); }
     setOtUploading(false); e.target.value = "";
   };
 
@@ -1733,10 +1733,10 @@ function EisDataUploadTab({ year: sharedYear }) {
       const fd = new FormData(); fd.append("file", file);
       const res = await eisApi.uploadCogsData(selectedYear, fd);
       await loadCogs();
-      const skipped = res.skipped?.length > 0 ? ` (tidak cocok: ${res.skipped.join(", ")})` : "";
+      const skipped = res.skipped?.length > 0 ? ` (no match: ${res.skipped.join(", ")})` : "";
       setCogsMsg({ type: "ok", text: res.message + skipped });
       setCogsLogsKey((k) => k + 1);
-    } catch (err) { setCogsMsg({ type: "err", text: "Gagal: " + (err?.response?.data?.detail || err?.detail || err.message) }); setCogsLogsKey((k) => k + 1); }
+    } catch (err) { setCogsMsg({ type: "err", text: "Failed: " + (err?.response?.data?.detail || err?.detail || err.message) }); setCogsLogsKey((k) => k + 1); }
     setCogsUploading(false); e.target.value = "";
   };
 
@@ -1747,10 +1747,10 @@ function EisDataUploadTab({ year: sharedYear }) {
       const fd = new FormData(); fd.append("file", file);
       const res = await eisApi.uploadSalesBP(selectedYear, fd);
       await loadSalesBP();
-      const note = res.detected_year && res.detected_year !== selectedYear ? ` (tahun di file: ${res.detected_year})` : "";
+      const note = res.detected_year && res.detected_year !== selectedYear ? ` (year in the file: ${res.detected_year})` : "";
       setBpMsg({ type: "ok", text: res.message + note });
       setBpLogsKey((k) => k + 1);
-    } catch (err) { setBpMsg({ type: "err", text: "Gagal: " + (err?.response?.data?.detail || err?.detail || err.message) }); setBpLogsKey((k) => k + 1); }
+    } catch (err) { setBpMsg({ type: "err", text: "Failed: " + (err?.response?.data?.detail || err?.detail || err.message) }); setBpLogsKey((k) => k + 1); }
     setBpUploading(false); e.target.value = "";
   };
 
@@ -1760,10 +1760,10 @@ function EisDataUploadTab({ year: sharedYear }) {
     try {
       const fd = new FormData(); fd.append("file", file);
       const res = await eisApi.uploadExpansionData(selectedYear, fd);
-      const note = res.detected_year && res.detected_year !== selectedYear ? ` (tahun di file: ${res.detected_year})` : "";
+      const note = res.detected_year && res.detected_year !== selectedYear ? ` (year in the file: ${res.detected_year})` : "";
       setExpMsg({ type: "ok", text: res.message + note });
       setExpLogsKey((k) => k + 1);
-    } catch (err) { setExpMsg({ type: "err", text: "Gagal: " + (err?.response?.data?.detail || err?.detail || err.message) }); setExpLogsKey((k) => k + 1); }
+    } catch (err) { setExpMsg({ type: "err", text: "Failed: " + (err?.response?.data?.detail || err?.detail || err.message) }); setExpLogsKey((k) => k + 1); }
     setExpUploading(false); e.target.value = "";
   };
 
@@ -1774,14 +1774,14 @@ function EisDataUploadTab({ year: sharedYear }) {
       const fd = new FormData(); fd.append("file", file);
       const res = await eisApi.uploadEisTemplate(fd);
       setPtMsg({ type: "ok", text: res.message });
-    } catch (err) { setPtMsg({ type: "err", text: "Gagal: " + (err?.response?.data?.detail || err?.detail || err.message) }); }
+    } catch (err) { setPtMsg({ type: "err", text: "Failed: " + (err?.response?.data?.detail || err?.detail || err.message) }); }
     setPtLogsKey((k) => k + 1);
     setPtUploading(false); e.target.value = "";
   };
 
   const YearSelector = () => (
     <div className="flex items-center gap-2">
-      <label className="text-xs text-gray-500 font-medium">Tahun:</label>
+      <label className="text-xs text-gray-500 font-medium">Year:</label>
       <select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className={selCls}>
         {Array.from({ length: 5 }, (_, i) => CY - i).map((y) => <option key={y} value={y}>{y}</option>)}
       </select>
@@ -1790,42 +1790,42 @@ function EisDataUploadTab({ year: sharedYear }) {
 
   return (
     <div className="space-y-4">
-      <ChartCard title="EIS Template — Production, Performance & Administration" subtitle="Workbook EIS Template (mis. EIS_Template_2026_V2_Filled_v4-PRODUCTION.xlsx). Hanya sheet yang ada di file yang diperbarui; sheet lain diabaikan. Tahun diambil dari isi file."
+      <ChartCard title="EIS Template — Production, Performance & Administration" subtitle="EIS Template workbook (e.g. EIS_Template_2026_V2_Filled_v4-PRODUCTION.xlsx). Only the sheets in the file are updated; other sheets are ignored. The year is taken from the file contents."
         right={
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={() => ptFileRef.current?.click()} disabled={ptUploading} className={`${uploadBtnCls} bg-indigo-600 hover:bg-indigo-700`}>
-              {ptUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {ptUploading ? "Mengupload..." : "Pilih File"}
+              {ptUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {ptUploading ? "Uploading..." : "Choose File"}
             </button>
             <input ref={ptFileRef} type="file" accept=".xlsx" className="hidden" onChange={handlePtUpload} />
           </div>
         }>
         <MsgBanner msg={ptMsg} onClose={() => setPtMsg(null)} />
         <RequiredFormatNote>
-          <p>Setiap sheet berupa tabel dengan <strong className="text-gray-300">header di baris 1</strong> (nama kolom, urutan bebas). Kolom <strong className="text-gray-300">notes</strong> hanya panduan pengisian dan tidak disimpan.</p>
+          <p>Each sheet is a table with its <strong className="text-gray-300">header in row 1</strong> (column names, any order). The <strong className="text-gray-300">notes</strong> column is only a filling guide and is not stored.</p>
           <ul className="list-disc pl-4 space-y-0.5">
-            <li><strong className="text-gray-300">Production_BatchYield</strong>: segment, year, month, plan_qty, batch_size_qty, actual_qty — segmen "(Total Company)" berisi batch size &amp; actual untuk yield</li>
+            <li><strong className="text-gray-300">Production_BatchYield</strong>: segment, year, month, plan_qty, batch_size_qty, actual_qty — the "(Total Company)" segment holds the batch size &amp; actual for yield</li>
             <li><strong className="text-gray-300">Production_Ratios</strong>: metric (DIO / Overtime Ratio), segment, year, month, value_1, Type (COGS, Average Inventory / Overtime Hour, Working Hour)</li>
             <li><strong className="text-gray-300">Production_Release</strong>: product_code, year, month, plan_days, actual_days</li>
-            <li><strong className="text-gray-300">Production_COGSRatio</strong>: product_code (nama molekul), year, month, gpm_ratio (1.87 = 187%)</li>
+            <li><strong className="text-gray-300">Production_COGSRatio</strong>: product_code (molecule name), year, month, gpm_ratio (1.87 = 187%)</li>
             <li><strong className="text-gray-300">Production_MachineUtilization</strong>: plant, year, month, availability_pct, performance_pct, quality_pct (0.8 = 80%)</li>
-            <li><strong className="text-gray-300">SalesSummary_Monthly</strong>: business_type (Local / CMO &amp; Others / Export), year, month, plan_amount, actual_amount — bulanan, juta IDR. Isi juga tahun sebelumnya agar Growth tampil</li>
-            <li><strong className="text-gray-300">Sales_Ledger</strong>: product_name, market, year, month, scenario (Actual / Business Plan), sales_amount, cogs_amount, opex_amount, ebit_amount — dipakai untuk EBIT - Product</li>
-            <li><strong className="text-gray-300">AreaSales_Ledger</strong>: region, city, year, month, segment, sales_amount — bulanan per area</li>
-            <li><strong className="text-gray-300">Marketing_Activities</strong>: event_name, region, year, Month, plan_event_count (target tahunan), actual_event_count (kumulatif YTD)</li>
-            <li><strong className="text-gray-300">Administration_Headcount</strong>: department, year, month, plan_count, actual_count — yang dipakai hanya plan baris company (department kosong); actual headcount live dari HRGA</li>
-            <li><strong className="text-gray-300">Administration_Financial</strong>: metric (Net Profit / Cashflow Ending Balance / Budget Usage / Budget Allocation), department, year, month, plan_amount, actual_amount — yang dipakai hanya plan; actual live dari Oracle GL</li>
+            <li><strong className="text-gray-300">SalesSummary_Monthly</strong>: business_type (Local / CMO &amp; Others / Export), year, month, plan_amount, actual_amount — monthly, million IDR. Also fill in the previous year so Growth can be shown</li>
+            <li><strong className="text-gray-300">Sales_Ledger</strong>: product_name, market, year, month, scenario (Actual / Business Plan), sales_amount, cogs_amount, opex_amount, ebit_amount — used for EBIT - Product</li>
+            <li><strong className="text-gray-300">AreaSales_Ledger</strong>: region, city, year, month, segment, sales_amount — monthly per area</li>
+            <li><strong className="text-gray-300">Marketing_Activities</strong>: event_name, region, year, Month, plan_event_count (annual target), actual_event_count (cumulative YTD)</li>
+            <li><strong className="text-gray-300">Administration_Headcount</strong>: department, year, month, plan_count, actual_count — only the company-row plan (empty department) is used; actual headcount comes live from HRGA</li>
+            <li><strong className="text-gray-300">Administration_Financial</strong>: metric (Net Profit / Cashflow Ending Balance / Budget Usage / Budget Allocation), department, year, month, plan_amount, actual_amount — only the plan is used; actuals come live from Oracle GL</li>
           </ul>
-          <p><strong className="text-gray-300">month</strong> = nama bulan Inggris (January…) atau 1–12. Upload ulang mengganti seluruh data tahun yang ada di file; sel kosong disimpan kosong (bukan nol).</p>
+          <p><strong className="text-gray-300">month</strong> = English month name (January…) or 1–12. Re-uploading replaces all data for the years in the file; empty cells are stored empty (not zero).</p>
         </RequiredFormatNote>
         <UploadHistoryTable uploadType="eis-template" refreshKey={ptLogsKey} />
       </ChartCard>
 
-      <ChartCard title="Upload Data Overtime" subtitle="Format kolom B: label (Overtime Hour / Working Hour) · Kolom C–N: Jan–Dec · Referensi: overtime_data.xlsx"
+      <ChartCard title="Upload Overtime Data" subtitle="Column B format: label (Overtime Hour / Working Hour) · Columns C–N: Jan–Dec · Reference: overtime_data.xlsx"
         right={
           <div className="flex items-center gap-2 shrink-0">
             <YearSelector />
             <button onClick={() => otFileRef.current?.click()} disabled={otUploading} className={`${uploadBtnCls} bg-cyan-600 hover:bg-cyan-700`}>
-              {otUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {otUploading ? "Mengupload..." : "Pilih File"}
+              {otUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {otUploading ? "Uploading..." : "Choose File"}
             </button>
             <input ref={otFileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleOtUpload} />
           </div>
@@ -1835,21 +1835,21 @@ function EisDataUploadTab({ year: sharedYear }) {
         <UploadHistoryTable uploadType="overtime" refreshKey={otLogsKey} />
       </ChartCard>
 
-      <ChartCard title="Upload Data Business Plan Sales" subtitle="Header bulan (Jan–Dec) + baris segmen (Total/Local/CMO/Export), nilai dalam juta IDR. Referensi: DATA BP.xlsx"
+      <ChartCard title="Upload Business Plan Sales Data" subtitle="Month header (Jan–Dec) + segment rows (Total/Local/CMO/Export), values in million IDR. Reference: DATA BP.xlsx"
         right={
           <div className="flex items-center gap-2 shrink-0">
             <YearSelector />
             <button onClick={() => bpFileRef.current?.click()} disabled={bpUploading} className={`${uploadBtnCls} bg-blue-600 hover:bg-blue-700`}>
-              {bpUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {bpUploading ? "Mengupload..." : "Pilih File"}
+              {bpUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {bpUploading ? "Uploading..." : "Choose File"}
             </button>
             <input ref={bpFileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleBPUpload} />
           </div>
         }>
         <MsgBanner msg={bpMsg} onClose={() => setBpMsg(null)} />
         <RequiredFormatNote>
-          <p>File harus punya <strong className="text-gray-300">1 baris header berisi nama bulan</strong> (Jan–Dec, minimal 6 dari 12 bulan terdeteksi) di kolom manapun, diikuti baris-baris berisi label segmen di salah satu dari 6 kolom pertama:</p>
-          <p><strong className="text-gray-300">Total</strong> / <strong className="text-gray-300">Local</strong> (atau "Lokal") / <strong className="text-gray-300">CMO</strong> / <strong className="text-gray-300">Export</strong> (atau "Ekspor") — bisa juga "Grand Total", "Jumlah", "Total Local", dst.</p>
-          <p>Nilai di bawah kolom bulan yang cocok dibaca sebagai angka. <strong className="text-gray-300">Nilai dalam juta IDR.</strong></p>
+          <p>The file must have <strong className="text-gray-300">1 header row with month names</strong> (Jan–Dec, at least 6 of 12 months detected) in any columns, followed by rows with a segment label in one of the first 6 columns:</p>
+          <p><strong className="text-gray-300">Total</strong> / <strong className="text-gray-300">Local</strong> (or "Lokal") / <strong className="text-gray-300">CMO</strong> / <strong className="text-gray-300">Export</strong> (or "Ekspor") — "Grand Total", "Jumlah", "Total Local", etc. also work.</p>
+          <p>Values under the matching month columns are read as numbers. <strong className="text-gray-300">Values in million IDR.</strong></p>
           <div className="mt-1 rounded border border-gray-800 overflow-hidden">
             <table className="w-full text-[10.5px]">
               <thead><tr className="bg-gray-800/60 text-gray-500"><th className="px-2 py-1 text-left">—</th><th className="px-2 py-1 text-right">Jan</th><th className="px-2 py-1 text-right">Feb</th><th className="px-2 py-1 text-right">...</th><th className="px-2 py-1 text-right">Dec</th></tr></thead>
@@ -1868,7 +1868,7 @@ function EisDataUploadTab({ year: sharedYear }) {
           <table className="text-xs border-collapse" style={{ minWidth: "900px", width: "100%" }}>
             <thead>
               <tr className="bg-blue-950 text-white">
-                <th className="px-3 py-2 text-left font-semibold sticky left-0 bg-blue-950 z-10">Segmen</th>
+                <th className="px-3 py-2 text-left font-semibold sticky left-0 bg-blue-950 z-10">Segment</th>
                 {BP_MONTH_LABELS.map((m) => <th key={m} className="px-2 py-2 text-right font-semibold">{m}</th>)}
                 <th className="px-3 py-2 text-right font-semibold">Total</th>
               </tr>
@@ -1890,12 +1890,12 @@ function EisDataUploadTab({ year: sharedYear }) {
         </ChartCard>
       )}
 
-      <ChartCard title="Upload Data COGS" subtitle={'Format "COGS Data New.xlsx": baris 3 header, baris 4 nama bulan, baris 5+ data produk (lihat detail kolom di bawah)'}
+      <ChartCard title="Upload COGS Data" subtitle={'"COGS Data New.xlsx" format: row 3 header, row 4 month names, rows 5+ product data (see column details below)'}
         right={
           <div className="flex items-center gap-2 shrink-0">
             <YearSelector />
             <button onClick={() => cogsFileRef.current?.click()} disabled={cogsUploading} className={`${uploadBtnCls} bg-amber-600 hover:bg-amber-700`}>
-              {cogsUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {cogsUploading ? "Mengupload..." : "Pilih File"}
+              {cogsUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {cogsUploading ? "Uploading..." : "Choose File"}
             </button>
             <input ref={cogsFileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleCogsUpload} />
           </div>
@@ -1905,21 +1905,21 @@ function EisDataUploadTab({ year: sharedYear }) {
         <UploadHistoryTable uploadType="cogs" refreshKey={cogsLogsKey} />
       </ChartCard>
 
-      <ChartCard title="Upload Data Business Expansion" subtitle="Sheet 'Business Expansion_Dashboard': kolom Product, Potential Supplier, header bulan Jan–Dec. Referensi: Business Expansion.xlsx"
+      <ChartCard title="Upload Business Expansion Data" subtitle="Sheet 'Business Expansion_Dashboard': columns Product, Potential Supplier, month headers Jan–Dec. Reference: Business Expansion.xlsx"
         right={
           <div className="flex items-center gap-2 shrink-0">
             <YearSelector />
             <button onClick={() => expFileRef.current?.click()} disabled={expUploading} className={`${uploadBtnCls} bg-emerald-600 hover:bg-emerald-700`}>
-              {expUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {expUploading ? "Mengupload..." : "Pilih File"}
+              {expUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {expUploading ? "Uploading..." : "Choose File"}
             </button>
             <input ref={expFileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleExpUpload} />
           </div>
         }>
         <MsgBanner msg={expMsg} onClose={() => setExpMsg(null)} />
         <RequiredFormatNote>
-          <p>Header <strong className="text-gray-300">Product</strong> (kolom B) dan <strong className="text-gray-300">Potential Supplier</strong> (kolom D) diikuti header bulan <strong className="text-gray-300">Jan–Dec</strong> (dicari otomatis, minimal 10 dari 12 bulan terdeteksi di baris manapun).</p>
-          <p>Format Potential Supplier: <strong className="text-gray-300">"Nama Supplier - Negara"</strong> (mis. "Kexing Biopharm - China") — bagian negara opsional.</p>
-          <p>Kolom bulan diisi nama <strong className="text-gray-300">stage</strong> hanya di bulan stage-nya berubah (sel boleh merge sepanjang beberapa bulan) — bulan kosong di antaranya otomatis dianggap melanjutkan stage terakhir. Isi "-" atau kosong = belum ada stage. Stage yang dikenali:</p>
+          <p>Headers <strong className="text-gray-300">Product</strong> (column B) and <strong className="text-gray-300">Potential Supplier</strong> (column D), followed by month headers <strong className="text-gray-300">Jan–Dec</strong> (found automatically, at least 10 of 12 months detected in any row).</p>
+          <p>Potential Supplier format: <strong className="text-gray-300">"Supplier Name - Country"</strong> (e.g. "Kexing Biopharm - China") — the country part is optional.</p>
+          <p>Fill the month columns with the <strong className="text-gray-300">stage</strong> name only in the month the stage changes (cells may be merged across several months) — empty months in between automatically continue the last stage. "-" or empty = no stage yet. Recognised stages:</p>
           <p className="text-gray-300">Market Analysis &middot; Resource Supplier &middot; Contract Agreement &middot; Registration &middot; Launch Preparation</p>
         </RequiredFormatNote>
         <UploadHistoryTable uploadType="expansion" refreshKey={expLogsKey} />
@@ -1934,8 +1934,8 @@ function EisDataUploadTab({ year: sharedYear }) {
             <button onClick={loadCogs} className="text-cyan-400 hover:text-cyan-300"><RefreshCw size={13} /></button>
           </div>
         }>
-        {cogsLoading ? <div className="py-8 text-center text-gray-600 text-sm">Memuat...</div> : cogs.length === 0 ? (
-          <div className="py-8 text-center text-gray-600 text-sm">Belum ada data COGS. Upload file dan pastikan etl_cogs sudah dijalankan.</div>
+        {cogsLoading ? <div className="py-8 text-center text-gray-600 text-sm">Loading...</div> : cogs.length === 0 ? (
+          <div className="py-8 text-center text-gray-600 text-sm">No COGS data yet. Upload the file and make sure etl_cogs has run.</div>
         ) : (
           <>
             <ResponsiveContainer width="100%" height={Math.max(200, cogs.length * 36)}>
@@ -1955,7 +1955,7 @@ function EisDataUploadTab({ year: sharedYear }) {
               <table className="w-full text-xs border-collapse">
                 <thead>
                   <tr className="bg-gray-950 text-gray-200">
-                    <th className="px-3 py-2 text-left font-semibold">Produk</th>
+                    <th className="px-3 py-2 text-left font-semibold">Product</th>
                     <th className="px-3 py-2 text-right font-semibold">Net Sales (IDR)</th>
                     <th className="px-3 py-2 text-right font-semibold">COGS (IDR)</th>
                     <th className="px-3 py-2 text-right font-semibold">COGS Ratio</th>
@@ -1981,7 +1981,7 @@ function EisDataUploadTab({ year: sharedYear }) {
         <ChartCard title="">
           <div className="text-center py-10 text-gray-600">
             <BarChart2 size={32} className="mx-auto mb-3 opacity-30" />
-            <p className="text-sm">Belum ada data overtime untuk tahun {selectedYear}.</p>
+            <p className="text-sm">No overtime data for {selectedYear} yet.</p>
           </div>
         </ChartCard>
       ) : (
@@ -2005,7 +2005,7 @@ function EisDataUploadTab({ year: sharedYear }) {
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="bg-gray-950 text-gray-200 text-xs">
-                  <th className="px-4 py-2 text-left font-semibold">Bulan</th>
+                  <th className="px-4 py-2 text-left font-semibold">Month</th>
                   <th className="px-4 py-2 text-right font-semibold">Overtime Hours</th>
                   <th className="px-4 py-2 text-right font-semibold">Working Hours</th>
                   <th className="px-4 py-2 text-right font-semibold">Total Hours</th>
