@@ -216,18 +216,27 @@ async def _cash_flow_from_excel(db: AsyncSession, years_csv: str) -> dict:
 
 
 def _pl_monthly_merge_lines(this_lines: list, last_lines: list, this_i: int, this_iy: int, last_i: Optional[int], last_iy: Optional[int]) -> list:
-    """`this` year's lines are authoritative for order/labels (it's the
-    period actually being reported); a `last`-year value is looked up by
-    label and defaults to 0 if that line didn't exist that year — same
-    zero-fallback convention parse_balance_sheet_excel already uses."""
+    """`this` year's lines come first, in their own order (it's the period
+    actually being reported); a `last`-year value is looked up by label and
+    is 0 where that line didn't exist that year. Lines that exist only
+    last year are appended after them, with 0 this year — dropping them
+    would leave the Last Year columns' lines no longer adding up to their
+    TOTAL row. A line that is 0 in all four shown columns is left out."""
     last_by_label = {l["label"]: l for l in last_lines}
+    this_labels = {l["label"] for l in this_lines}
     out = []
     for l in this_lines:
         last_l = last_by_label.get(l["label"])
         last_mtd = last_l["mtd"][last_i] if (last_l and last_i is not None) else 0.0
         last_ytd = last_l["ytd"][last_iy] if (last_l and last_iy is not None) else 0.0
         out.append({"label": l["label"], "values": [last_mtd, last_ytd, l["mtd"][this_i], l["ytd"][this_iy]]})
-    return out
+    for l in last_lines:
+        if l["label"] in this_labels:
+            continue
+        last_mtd = l["mtd"][last_i] if last_i is not None else 0.0
+        last_ytd = l["ytd"][last_iy] if last_iy is not None else 0.0
+        out.append({"label": l["label"], "values": [last_mtd, last_ytd, 0.0, 0.0]})
+    return [l for l in out if any(v for v in l["values"])]
 
 
 def _pl_monthly_merge_total(this_dual: dict, last_dual: Optional[dict], this_i: int, this_iy: int, last_i: Optional[int], last_iy: Optional[int]) -> list:

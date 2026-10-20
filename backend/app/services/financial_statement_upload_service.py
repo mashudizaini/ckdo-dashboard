@@ -57,6 +57,7 @@ in the file, so — like balance_sheet/profit_loss/cash_flow — a new
 upload simply replaces the previous one wholesale instead of adding a
 new per-month row.
 """
+import calendar
 import io
 import re
 from datetime import datetime
@@ -365,21 +366,40 @@ def _year_month_blocks(ws, header_row: int, month_row: int) -> dict:
     return blocks
 
 
+def _cell_text(ws, row: int, col: int) -> str | None:
+    v = ws.cell(row=row, column=col).value
+    return _norm(v) if isinstance(v, str) and v.strip() else None
+
+
+def _account_label(ws, row: int) -> str | None:
+    """A monthly year-sheet line's label: column D (ACCOUNT) first, then
+    column B ("Mapping"), then any text in A..F. Column D is filled on every
+    line and spelled the same in every year sheet, whereas column B (the
+    Oracle mapping name) is blank on some rows and differs between years —
+    e.g. "RELATED PARTIES - CKD / EXPORT" has B = "NET SALES-RELATED
+    PARTIES-EXPORT" in 2026 but no B in 2025 — and last-year values are
+    looked up by label, so a B label silently zeroed them (verified on
+    FS_CKD OTTO 2015-2026_profit-or-loss.xlsx, 2020-2026)."""
+    label = _cell_text(ws, row, 4) or _cell_text(ws, row, 2) or _row_label(ws, row)
+    return _ALIASES.get(label, label) if label else None
+
+
 def _lines_between_dual(ws, header_row: int, total_row: int, mtd_cols: list[int], ytd_cols: list[int]) -> list[dict]:
     """Same idea as _lines_between(), but keeping the MTD and YTD series
     separate per line instead of one flat `values` list — a month index
     means something different in each series (MTD's Nth column is that
-    month alone; YTD's Nth column is cumulative through that month)."""
+    month alone; YTD's Nth column is cumulative through that month).
+    Labelled by _account_label(); column B is kept as `mapping`."""
     lines = []
     for r in range(header_row + 1, total_row):
-        label = _row_label(ws, r)
+        label = _account_label(ws, r)
         if not label:
             continue
         mtd = [_num(ws.cell(row=r, column=c).value) for c in mtd_cols]
         ytd = [_num(ws.cell(row=r, column=c).value) for c in ytd_cols]
         if all(v == 0 for v in mtd) and all(v == 0 for v in ytd):
             continue
-        lines.append({"label": label, "mtd": mtd, "ytd": ytd})
+        lines.append({"label": label, "mapping": _cell_text(ws, r, 2), "mtd": mtd, "ytd": ytd})
     return lines
 
 
@@ -459,7 +479,16 @@ def parse_profit_loss_monthly_excel(content: bytes) -> dict:
     years = [y for y, _ in year_sheets]
     latest = by_year[str(years[-1])]
 
-    return {"years": years, "as_of_label": latest["as_of_label"], "by_year": by_year}
+    # The sheet's own title date isn't kept up to date (the 2026 sheet says
+    # "July 31, 2026" while holding data through September), so the as-of
+    # label is the last month that actually has both MTD and YTD columns.
+    as_of_label = latest["as_of_label"]
+    posted = [m for m in latest["mtd_months"] if m in latest["ytd_months"]]
+    if posted:
+        m = _MONTH_FULL.index(posted[-1]) + 1
+        as_of_label = f"{posted[-1]} {calendar.monthrange(years[-1], m)[1]}, {years[-1]}"
+
+    return {"years": years, "as_of_label": as_of_label, "by_year": by_year}
 
 
 # ── Cash Flow ─────────────────────────────────────────────────────────────

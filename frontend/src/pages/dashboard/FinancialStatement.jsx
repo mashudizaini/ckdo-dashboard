@@ -366,9 +366,11 @@ const FS_FORMAT_GUIDE = {
   profit_loss_monthly: {
     sheetName: "one sheet per year, e.g. \"2026\", \"2025\", \"2024\" (bare 4-digit year as the sheet name)",
     notes: [
-      "PL_Monthly_Dashboard_Sent.xlsx format (since 2026-08-27) — one upload covers every year/month in the file; a Month + Year picker below lets you view any (month, year) combo the file contains, compared against the same month a year earlier if that year is also in the file.",
+      "FS_CKD OTTO 2015-2026_profit-or-loss.xlsx format (also the older PL_Monthly_Dashboard_Sent.xlsx) — one upload covers every year/month in the file; a Month + Year picker below lets you view any (month, year) combo the file contains, compared against the same month a year earlier if that year is also in the file.",
       "Each year's sheet: row 6 has \"20XX (MTD)\" starting one column, and \"20XX (YTD)\" starting a later column; row 7 has the month names (January, February, ...) repeated under each block, one column per posted month.",
-      "Column B (\"Mapping\") holds each line item's label; column D holds a fuller description used only when column B is blank. Column C holds section headers and TOTAL rows.",
+      "Column D (\"ACCOUNT\") is each line item's label — keep it spelled the same in every year sheet, since last year's figures are matched to this year's by that label. Column B (\"Mapping\") is used only when column D is blank. Column C holds section headers and TOTAL rows.",
+      "A line that only has figures last year is still shown in the comparison (with 0 this year), so each column's lines always add up to its TOTAL row.",
+      "The as-of date is the last month that has both an MTD and a YTD column in the newest year's sheet — the sheet's own title date isn't used.",
       "Same section headers as the annual \"Profit or loss\" sheet: NET SALES, COGS, EXPENSES, OTHER INCOME / EXPENSES, INCOME TAX.",
       "The TOTAL row names are DIFFERENT from the annual sheet — see the exact wording below.",
     ],
