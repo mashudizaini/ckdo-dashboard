@@ -672,6 +672,22 @@ async def ensure_eis_template_tables():
             UNIQUE (metric, department, fiscal_year, month_num)
         )
         """,
+        # Administration_Ratios: the DSO / DPO components per month
+        # (Sales + Average AR, COGS + Average AP), read by the EIS
+        # Summary's Net Working Capital.
+        """
+        CREATE TABLE IF NOT EXISTS eis.adm_ratio (
+            id              SERIAL PRIMARY KEY,
+            metric          VARCHAR(50) NOT NULL,
+            fiscal_year     INTEGER NOT NULL,
+            month_num       INTEGER NOT NULL CHECK (month_num BETWEEN 1 AND 12),
+            value_type      VARCHAR(50) NOT NULL,
+            value           NUMERIC(20,6),
+            uploaded_by     VARCHAR(150),
+            uploaded_at     TIMESTAMPTZ DEFAULT now(),
+            UNIQUE (metric, fiscal_year, month_num, value_type)
+        )
+        """,
     ]
     async with eis_async_engine.begin() as conn:
         for stmt in ddl:

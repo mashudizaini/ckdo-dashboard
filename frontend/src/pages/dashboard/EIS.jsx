@@ -467,7 +467,6 @@ function EisSummaryTab({ year, period }) {
             <div className="shrink-0 min-w-[180px] border border-gray-800 rounded-lg text-center">
               <div className="text-xs font-bold text-gray-200 py-1 border-b border-gray-800">NWC (Days)</div>
               <div className="text-3xl font-extrabold text-gray-100 py-3">{n.nwc_days == null ? "—" : fmtN(n.nwc_days, 0)}</div>
-              <div className="text-[11px] italic text-blue-700 pb-1">Month {n.nwc_months == null ? "—" : fmtN(n.nwc_months, 0)}</div>
             </div>
             <ClosingEstArrow />
             <div className="flex-1 grid grid-cols-3 border border-gray-800 rounded-lg divide-x divide-gray-800 min-w-[420px]">
@@ -481,7 +480,12 @@ function EisSummaryTab({ year, period }) {
             </div>
           </div>
         )}
-        <div className="text-[10px] text-gray-600 mt-1">NWC = DSO + DIO − DPO · DSO/DPO from Administration (Oracle), DIO from Production{n.dio_month && n.dio_month !== period ? ` (as of ${MONTHS_SHORT[n.dio_month - 1]})` : ""}</div>
+        <div className="text-[10px] text-gray-600 mt-1">
+          NWC = DSO + DIO − DPO · DSO = Average AR ÷ Sales × 365, DPO = Average AP ÷ COGS × 365
+          {" "}({[["DSO", n.dso_source, n.dso_month], ["DPO", n.dpo_source, n.dpo_month]].map(([k, src, mo]) =>
+            `${k}: ${src === "template" ? "Administration_Ratios" : src === "oracle" ? "Oracle GL (not in Administration_Ratios)" : "no data"}${src && mo && mo !== period ? ` as of ${MONTHS_SHORT[mo - 1]}` : ""}`).join(" · ")})
+          {" "}· DIO from Production{n.dio_month && n.dio_month !== period ? ` (as of ${MONTHS_SHORT[n.dio_month - 1]})` : ""}
+        </div>
       </EisSection>
     </div>
   );
@@ -864,7 +868,8 @@ function EisPerformanceTab({ year, period }) {
 /* ─── Tab: Production ─────────────────────────────────────────────
    Laid out after the template's Production_Dashboard sheet (Executive
    Information Summary): Batch & Yield, DIO, Quality Release, COGS
-   Performance (GPM), Machine Utilization (OEE), Overtime Ratio. Data comes
+   Performance (GPM), Overtime Ratio (Machine Utilization removed
+   2026-10-22 — no longer used). Data comes
    from the EIS template upload (eis.prod_*), one call for the whole page;
    every formula lives in the backend (eis_production.py /dashboard).
    Shared pieces (header band, sections, gauge) are defined above the
@@ -906,7 +911,6 @@ function EisProductionTab({ year, period }) {
     : [80, 100];
   const sel = { selYear: year, selMonth: period };
   const gpm = d.gpm?.items || [];
-  const m = d.machine;
 
   return (
     <div className="space-y-4">
@@ -995,32 +999,6 @@ function EisProductionTab({ year, period }) {
             )}
             {d.gpm && <AsOf year={d.gpm.year} month={d.gpm.month} {...sel} />}
           </EisSection>
-
-          <EisSection title="Machine Utilization">
-            {!m ? <div className="py-8 text-center text-xs text-gray-600">No machine utilization data yet.</div> : (
-              <>
-                <div className="grid grid-cols-[1.4fr_auto_1.6fr] gap-3 items-center">
-                  <div className="rounded-lg border border-gray-800 overflow-hidden text-xs">
-                    <div className="bg-gray-800/60 text-center font-semibold text-gray-300 py-1">Indicator</div>
-                    {[["Availability", m.availability_pct], ["Performance", m.performance_pct], ["Quality", m.quality_pct]].map(([k, v]) => (
-                      <div key={k} className="grid grid-cols-2 border-t border-gray-800">
-                        <div className="px-2 py-1.5 font-bold text-gray-200">{k}</div>
-                        <div className="px-2 py-1.5 text-center text-gray-300 border-l border-gray-800">{v == null ? "—" : `${fmtN(v, 0)}%`}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <ChevronDown size={34} className="-rotate-90 text-blue-500" strokeWidth={3} />
-                  <div className="rounded-lg border border-gray-800 h-full flex flex-col">
-                    <div className="bg-gray-800/60 text-center text-xs font-semibold text-gray-300 py-1">Overall Equipment Effectiveness</div>
-                    <div className="flex-1 flex items-center justify-center py-3">
-                      <BigNumber value={m.oee_pct == null ? "—" : `${fmtN(m.oee_pct, 0)}%`} />
-                    </div>
-                  </div>
-                </div>
-                <AsOf year={m.year} month={m.month} {...sel} />
-              </>
-            )}
-          </EisSection>
         </div>
       </div>
 
@@ -1032,7 +1010,7 @@ function EisProductionTab({ year, period }) {
             <XAxis dataKey="name" tick={TPL_TICK} />
             <YAxis yAxisId="h" tick={TPL_TICK} tickFormatter={fmtInt} width={56} />
             <YAxis yAxisId="r" orientation="right" tick={TPL_TICK} tickFormatter={(v) => `${v}%`} width={40} domain={[0, (max) => Math.max(25, Math.ceil(max / 5) * 5)]} />
-            <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, n) => n === "Overtime Ratio" ? [`${fmtN(v, 1)}%`, n] : [fmtN(v, 1), n]} />
+            <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, n) => n === "Overtime Ratio" ? [`${fmtN(v, 0)}%`, n] : [fmtInt(v), n]} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
             <Bar yAxisId="h" dataKey="overtime_hours" name="Overtime Hour" fill={XL_BLUE} />
             <Bar yAxisId="h" dataKey="working_hours" name="Working Hour" fill={XL_ORANGE} />
@@ -1848,6 +1826,7 @@ function EisDataUploadTab({ year: sharedYear }) {
             <li><strong className="text-gray-300">Marketing_Activities</strong>: event_name, region, year, Month, plan_event_count (annual target), actual_event_count (cumulative YTD)</li>
             <li><strong className="text-gray-300">Administration_Headcount</strong>: department, year, month, plan_count, actual_count — only the company-row plan (empty department) is used; actual headcount comes live from HRGA</li>
             <li><strong className="text-gray-300">Administration_Financial</strong>: metric (Net Profit / Cashflow Ending Balance / Budget Usage / Budget Allocation), department, year, month, plan_amount, actual_amount — only the plan is used; actuals come live from Oracle GL</li>
+            <li><strong className="text-gray-300">Administration_Ratios</strong>: metric (DSO / DPO), year, month, value_1, Type (Sales, Average AR / COGS, Average AP) — the Summary's Net Working Capital uses DSO = Average AR ÷ Sales × 365 and DPO = Average AP ÷ COGS × 365</li>
           </ul>
           <p><strong className="text-gray-300">month</strong> = English month name (January…) or 1–12. Re-uploading replaces all data for the years in the file; empty cells are stored empty (not zero).</p>
         </RequiredFormatNote>

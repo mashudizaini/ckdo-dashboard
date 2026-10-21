@@ -999,6 +999,8 @@ async def upload_expansion(
 #                                actual_count
 #   Administration_Financial     metric, department, year, month,
 #                                plan_amount, actual_amount
+#   Administration_Ratios        metric (DSO / DPO), year, month, value_1, type
+#                                (Sales, Average AR / COGS, Average AP)
 #
 # `month` is an English month name or 1–12. Every year present in a sheet
 # is replaced wholesale for that sheet's table, so re-uploading a corrected
@@ -1103,6 +1105,11 @@ _TEMPLATE_SHEETS = {
         lambda r: {"metric": _txt(r["metric"], 80), "department": _txt(r["department"], 80),
                    "plan_amount": _num(r["plan_amount"]), "actual_amount": _num(r["actual_amount"])},
     ),
+    "administration_ratios": (
+        "adm_ratio",
+        ["metric", "year", "month", "value_1", "type"],
+        lambda r: {"metric": _txt(r["metric"], 50), "value_type": _txt(r["type"], 50), "value": _num(r["value_1"])},
+    ),
 }
 
 # Columns that must be non-empty for a row to mean anything.
@@ -1115,6 +1122,7 @@ _TEMPLATE_KEY_COLS = {
     "perf_area_sales": ("region",),
     "perf_marketing": ("event_name",),
     "adm_financial": ("metric",),
+    "adm_ratio": ("metric", "value_type"),
 }
 
 
@@ -1171,7 +1179,7 @@ def _parse_eis_template(content: bytes) -> dict[str, list[dict]]:
                    "Production_Ratios, Production_Release, Production_COGSRatio, "
                    "Production_MachineUtilization, SalesSummary_Monthly, Sales_Ledger, "
                    "AreaSales_Ledger, Marketing_Activities, Administration_Headcount, "
-                   "Administration_Financial.",
+                   "Administration_Financial, Administration_Ratios.",
         )
     return out
 

@@ -132,11 +132,11 @@ async def product_release_time(
 #   Yield             (Total Company) actual ÷ batch size, per month
 #   DIO               average inventory ÷ COGS (12-month rolling) × 365
 #   Overtime ratio    overtime hour ÷ working hour
-#   OEE               availability × performance × quality
 # Point-in-time blocks (yield, DIO, release) use the selected month, or the
-# latest earlier month of that year that has data; snapshot blocks (GPM,
-# machine utilization — the template has one period each) use the latest
-# snapshot at or before the selected month, else the latest one there is.
+# latest earlier month of that year that has data; the GPM snapshot (the
+# template has one period) uses the latest one at or before the selected
+# month, else the latest one there is. Machine Utilization (OEE) was taken
+# off the page on 2026-10-22 (no longer used); its sheet still uploads.
 # Each carries its as-of month so the page can say which month it shows.
 # ══════════════════════════════════════════════════════════════
 
@@ -264,7 +264,7 @@ async def production_dashboard(
     rel_by_m = {r["month_num"]: {"plan_days": _f(r["plan_days"]), "actual_days": _f(r["actual_days"])} for r in rel}
     rm, rr = _latest(rel_by_m, period, lambda r: r["plan_days"] is not None or r["actual_days"] is not None)
 
-    # ── Snapshots: GPM + machine utilization ─────────────────────
+    # ── Snapshot: GPM ────────────────────────────────────────────
     gpm_at, gpm_rows = await _snapshot(db, "prod_gpm", "product_name, gpm_ratio", year, period)
     gpm_items = sorted(
         ({"product": r["product_name"], "gpm_pct": round(float(r["gpm_ratio"]) * 100, 1)}
@@ -272,22 +272,9 @@ async def production_dashboard(
         key=lambda x: x["gpm_pct"],
     )
 
-    mu_at, mu_rows = await _snapshot(
-        db, "prod_machine_utilization", "availability_pct, performance_pct, quality_pct", year, period)
-    machine = None
-    if mu_rows:
-        r = mu_rows[0]
-        a, p, q = _f(r["availability_pct"]), _f(r["performance_pct"]), _f(r["quality_pct"])
-        pct = lambda v: round(v * 100, 1) if v is not None else None
-        machine = {
-            **mu_at,
-            "availability_pct": pct(a), "performance_pct": pct(p), "quality_pct": pct(q),
-            "oee_pct": pct(a * p * q) if None not in (a, p, q) else None,
-        }
-
     return {
         "year": year, "period": period,
-        "has_data": bool(by or ratios or rel or gpm_rows or mu_rows),
+        "has_data": bool(by or ratios or rel or gpm_rows),
         "batch": batch,
         "yield": {
             "monthly": yield_monthly,
@@ -297,6 +284,5 @@ async def production_dashboard(
         "dio": {"month": dm, **dr} if dr else None,
         "release": {"month": rm, **rr} if rr else None,
         "gpm": {**gpm_at, "items": gpm_items} if gpm_at else None,
-        "machine": machine,
         "overtime": overtime,
     }
