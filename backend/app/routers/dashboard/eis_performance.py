@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from app.eis_database import get_eis_db as get_db
+from app.database import get_db as get_main_db
 from app.dependencies import get_current_user
 
 router = APIRouter()
@@ -215,25 +216,38 @@ def _pct(num, den):
     return round(num / den * 100, 1) if num is not None and den else None
 
 
-def ledger_business(market: str) -> str:
-    """Sales_Ledger market -> business line: Public / Private are Local,
-    every "Export ..." market is Export, the rest (CMO, Service Agreement,
-    Dossier Fee) is CMO & Others. Shared with the EIS Summary's Product
-    Portfolio."""
-    m = (market or "").strip().lower()
+async def market_business_map(main_db) -> dict[str, str]:
+    """Sales_Ledger market -> business type, from the common lookup
+    EIS_MARKET_BUSINESS_TYPE (lookup_values: meaning = market, tag =
+    business type), keyed by upper-cased market."""
+    from app.services.lookup_service import MARKET_BUSINESS_TYPE, tag_map
+    return await tag_map(main_db, MARKET_BUSINESS_TYPE)
+
+
+def ledger_business(market: str, mapping: dict | None = None) -> tuple[str, bool]:
+    """(business type, found_in_lookup) for a Sales_Ledger market. A market
+    the lookup doesn't list falls back to the original rule — Public /
+    Private Local, "Export ..." Export, anything else CMO & Others — and is
+    reported as unmapped so it can be added to the lookup. Shared with the
+    EIS Summary's Product Portfolio."""
+    key = (market or "").strip().upper()
+    if mapping and key in mapping:
+        return mapping[key], True
+    m = key.lower()
     if m in ("public", "private"):
-        return "Local"
+        return "Local", False
     if m.startswith("export"):
-        return "Export"
-    return "CMO & Others"
+        return "Export", False
+    return "CMO & Others", False
 
 
-async def _sales_from_ledger(db, year: int, period: int, finish) -> dict:
+async def _sales_from_ledger(db, year: int, period: int, finish, mapping: dict) -> dict:
     """Company, Local, CMO & Others and Export Sales Performance (Yearly,
     Monthly, Growth) from Sales_Ledger (eis.perf_sales_ledger), as the user
     asked on 2026-10-21: the scenario column says Business Plan vs Actual,
     the value is sales_amount, summed per month — per business line via
-    ledger_business(), and over every market for Company.
+    ledger_business() (the EIS_MARKET_BUSINESS_TYPE lookup), and over every
+    market for Company.
 
     The ledger as delivered so far is quarterly — Actual only in Mar / Jun /
     Sep / Dec, the Business Plan as one annual figure filed under March —
@@ -250,11 +264,15 @@ async def _sales_from_ledger(db, year: int, period: int, finish) -> dict:
         GROUP BY fiscal_year, month_num, market, lower(trim(scenario))
     """), {"y": year, "py": year - 1, "p": period})).mappings().all()
     val = {}  # (business, year, month, kind) -> amount; business "Company" = all
+    unmapped = set()
     for r in rows:
         kind = "plan" if r["scenario"] == "business plan" else "actual" if r["scenario"] == "actual" else None
         if not kind or not r["n"]:
             continue
-        for biz in ("Company", ledger_business(r["market"])):
+        biz_type, found = ledger_business(r["market"], mapping)
+        if not found:
+            unmapped.add(r["market"])
+        for biz in ("Company", biz_type):
             key = (biz, r["fiscal_year"], r["month_num"], kind)
             val[key] = val.get(key, 0.0) + float(r["amount"])
 
@@ -272,6 +290,8 @@ async def _sales_from_ledger(db, year: int, period: int, finish) -> dict:
             "months_with_plan": [r["month"] for r in monthly if r["plan"] is not None],
             # largest vs smallest non-zero month — >100x is a scale mix, not a trend
             "scale_ratio": round(sizes[-1] / sizes[0]) if len(sizes) > 1 and sizes[0] else None,
+            # markets not in the lookup — classified by the fallback rule
+            "unmapped_markets": sorted(unmapped),
         }
         return out
 
@@ -281,7 +301,8 @@ async def _sales_from_ledger(db, year: int, period: int, finish) -> dict:
 async def performance_dashboard(
     year: int = Query(...), period: int = Query(..., ge=1, le=12),
     ebit_market: str = Query("Public"),
-    db: AsyncSession = Depends(get_db), user = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db), main_db: AsyncSession = Depends(get_main_db),
+    user = Depends(get_current_user),
 ):
     # ── Sales: Company + business lines from Sales_Ledger ────────
     def finish(monthly, prev):
@@ -297,7 +318,7 @@ async def performance_dashboard(
             "growth_amount": round(ytd_actual - prev, 1) if growth_ok else None,
         }
 
-    segments = await _sales_from_ledger(db, year, period, finish)
+    segments = await _sales_from_ledger(db, year, period, finish, await market_business_map(main_db))
 
     # ── Area sales (YTD) ─────────────────────────────────────────
     area_rows = (await db.execute(text("""

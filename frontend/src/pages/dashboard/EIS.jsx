@@ -655,6 +655,7 @@ function LedgerCheckNote({ seg, period, markets }) {
   if (!c.months_with_plan.length) issues.push(`no Business Plan for Jan–${MONTHS_SHORT[period - 1]}`);
   else if (c.months_with_plan.length < period) issues.push(`Business Plan only in ${mon(c.months_with_plan)}`);
   if (c.scale_ratio && c.scale_ratio > 100) issues.push(`the largest month is ${fmtInt(c.scale_ratio)}× the smallest — the months look to be on different scales`);
+  if (c.unmapped_markets?.length) issues.push(`market ${c.unmapped_markets.join(", ")} is not in lookup EIS_MARKET_BUSINESS_TYPE (classified by name for now)`);
   return (
     <div className={`mb-2 text-[11px] rounded-lg px-3 py-1.5 border ${issues.length ? "text-amber-700 bg-amber-500/10 border-amber-500/30" : "text-gray-500 border-gray-800"}`}>
       Source: Sales_Ledger{markets ? ` (${markets})` : ""} — scenario Business Plan / Actual, sum of sales_amount per month.
@@ -812,7 +813,7 @@ function EisPerformanceTab({ year, period }) {
       </EisSection>
 
       <EisSection title="Local Performance" subtitle="Achievement">
-        <LedgerCheckNote seg={s.Local} period={period} markets="markets Public + Private" />
+        <LedgerCheckNote seg={s.Local} period={period} markets="markets with business type Local in lookup EIS_MARKET_BUSINESS_TYPE" />
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-4">
           <YearlyGrowthColumn seg={s.Local} year={year} period={period} />
           <div className="space-y-3">
@@ -835,8 +836,8 @@ function EisPerformanceTab({ year, period }) {
       </EisSection>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        {[["CMO & Others Performance", s["CMO & Others"], "markets CMO, Service Agreement, Dossier Fee"],
-          ["Export Performance", s.Export, "every Export market"]].map(([title, seg, markets]) => (
+        {[["CMO & Others Performance", s["CMO & Others"], "markets with business type CMO & Others in lookup EIS_MARKET_BUSINESS_TYPE"],
+          ["Export Performance", s.Export, "markets with business type Export in lookup EIS_MARKET_BUSINESS_TYPE"]].map(([title, seg, markets]) => (
           <EisSection key={title} title={title}>
             <LedgerCheckNote seg={seg} period={period} markets={markets} />
             <div className="grid grid-cols-1 sm:grid-cols-[1fr_1.4fr] gap-3">

@@ -40,6 +40,7 @@ import app.models.document_conversion_job  # noqa: F401
 import app.models.document_glossary  # noqa: F401
 import app.models.overtime  # noqa: F401
 import app.models.emagazine  # noqa: F401 — register emagazine models
+import app.models.lookup  # noqa: F401 — common lookup (lookup_types / lookup_values)
 from app.models.ebs_backup import init_ebs_db
 from app.models.vpn_monitor import init_vpn_db
 from app.models.ebs_netmon import init_ebsnet_db
@@ -55,6 +56,7 @@ from app.routers.dashboard import ebs_backup
 from app.routers.dashboard import vpn_monitor
 from app.routers.dashboard import ebs_netmon, ebs_netmon_client
 from app.routers.dashboard import it_hikcentral
+from app.routers.dashboard import lookups
 from app.routers.dashboard import it_zkteco
 from app.routers.dashboard import it_etl_admin
 from app.routers.dashboard import hr_overtime, hr_overtime_admin
@@ -97,6 +99,11 @@ async def lifespan(app: FastAPI):
     # order for Employee Summary etc.) — no-ops once already seeded.
     from app.services.department_master_service import ensure_seeded as ensure_department_master_seeded
     await ensure_department_master_seeded()
+
+    # Common lookup tables (Oracle FND_LOOKUP-style small master data):
+    # created if missing, seeded values inserted once — see lookup_service.py.
+    from app.services.lookup_service import ensure_seeded as ensure_lookups_seeded
+    await ensure_lookups_seeded()
 
     # Organization Chart — add employee_id (links a chart entry to its
     # Employee master record once matched by /sync-from-employees).
@@ -403,6 +410,7 @@ app.include_router(eis_performance.router,    prefix=f"{API_PREFIX}/dashboard/ei
 app.include_router(eis_production.router,     prefix=f"{API_PREFIX}/dashboard/eis/production",  tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
 app.include_router(eis_expansion.router,      prefix=f"{API_PREFIX}/dashboard/eis/expansion",   tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
 app.include_router(eis_administration.router, prefix=f"{API_PREFIX}/dashboard/eis/admin",       tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
+app.include_router(lookups.router,            prefix=f"{API_PREFIX}/lookups",                  tags=["Common Lookup"])
 app.include_router(eis_business_plan.router,  prefix=f"{API_PREFIX}/dashboard/eis/bp",          tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
 app.include_router(eis_daily_sales.router,    prefix=f"{API_PREFIX}/dashboard/eis/daily-sales", tags=["Dashboard - EIS"], dependencies=_eis_mgmt)
 app.include_router(eis_data_upload.router,    prefix=f"{API_PREFIX}/dashboard/eis/data-upload", tags=["Dashboard - EIS"], dependencies=_eis_mgmt)

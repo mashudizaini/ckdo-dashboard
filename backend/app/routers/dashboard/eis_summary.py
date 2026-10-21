@@ -266,7 +266,7 @@ async def get_kpi_cards(
 _SEGMENTS = [("local", "Local"), ("cmo_other", "CMO & Others"), ("export", "Export")]
 
 # Sales_Ledger market -> business line (the template's Business column)
-from app.routers.dashboard.eis_performance import ledger_business as _business_of
+from app.routers.dashboard.eis_performance import ledger_business, market_business_map
 
 
 # OPM cost component class -> the template's four COGS buckets. 2025 costing
@@ -325,7 +325,7 @@ def _opm_cost_split(product_name: str, year: int, month: int) -> Optional[dict]:
     }
 
 
-async def _portfolio(eis_db, year: int, period: int, market: Optional[str], product: Optional[str]):
+async def _portfolio(eis_db, main_db, year: int, period: int, market: Optional[str], product: Optional[str]):
     at = (await eis_db.execute(text("""
         SELECT fiscal_year, month_num FROM eis.perf_sales_ledger
         WHERE scenario = 'Actual' AND sales_amount IS NOT NULL
@@ -350,7 +350,9 @@ async def _portfolio(eis_db, year: int, period: int, market: Optional[str], prod
     options = {}
     for r in rows:
         options.setdefault(r["market"], []).append(r["product_name"])
-    markets = [{"market": m, "business": _business_of(m), "products": ps} for m, ps in options.items()]
+    mapping = await market_business_map(main_db)
+    biz_of = lambda m: ledger_business(m, mapping)[0]
+    markets = [{"market": m, "business": biz_of(m), "products": ps} for m, ps in options.items()]
 
     pick = next((r for r in rows if r["market"] == market and r["product_name"] == product), None) \
         or next((r for r in rows if r["market"] == market), None) \
@@ -378,7 +380,7 @@ async def _portfolio(eis_db, year: int, period: int, market: Optional[str], prod
         "as_of": {"year": at[0], "month": at[1]},
         "markets": markets,
         "selected": {
-            "business": _business_of(pick["market"]), "market": pick["market"], "product": pick["product_name"],
+            "business": biz_of(pick["market"]), "market": pick["market"], "product": pick["product_name"],
             "sales": sales, "cogs": cogs, "cogs_pct": pct(cogs), "gross_profit": gp, "gp_pct": pct(gp),
             "opex": opex, "opex_pct": pct(opex), "ebit": ebit, "ebit_pct": pct(ebit),
         },
@@ -457,7 +459,7 @@ async def summary_dashboard(
     from app.routers.dashboard.eis_production import production_dashboard
     from app.routers.dashboard.eis_administration import load_admin_plans, financial_and_ratios
 
-    perf = await performance_dashboard(year=year, period=period, ebit_market="Public", db=db, user=user)
+    perf = await performance_dashboard(year=year, period=period, ebit_market="Public", db=db, main_db=main_db, user=user)
     prod = await production_dashboard(year=year, period=period, db=db, user=user)
     _, plan, _ = await load_admin_plans(db, year, period)
     financial, ratios = await financial_and_ratios(year, period, plan)
@@ -492,7 +494,7 @@ async def summary_dashboard(
 
     return {
         "year": year, "period": period, "kpi": kpi,
-        "portfolio": await _portfolio(db, year, period, market, product),
+        "portfolio": await _portfolio(db, main_db, year, period, market, product),
         "closing": await _closing(db, main_db, year, period),
         "nwc": nwc,
     }
@@ -502,8 +504,9 @@ async def summary_dashboard(
 async def summary_portfolio(
     year: int = Query(...), period: int = Query(..., ge=1, le=12),
     market: Optional[str] = Query(None), product: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db), user = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db), main_db: AsyncSession = Depends(get_main_db),
+    user = Depends(get_current_user),
 ):
     """Product Portfolio block alone — for the Summary page's product
     selector, without re-running the Oracle financial queries."""
-    return await _portfolio(db, year, period, market, product)
+    return await _portfolio(db, main_db, year, period, market, product)
