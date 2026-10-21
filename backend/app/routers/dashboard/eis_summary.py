@@ -266,13 +266,7 @@ async def get_kpi_cards(
 _SEGMENTS = [("local", "Local"), ("cmo_other", "CMO & Others"), ("export", "Export")]
 
 # Sales_Ledger market -> business line (the template's Business column)
-def _business_of(market: str) -> str:
-    m = (market or "").strip().lower()
-    if m in ("public", "private"):
-        return "Local"
-    if m.startswith("export"):
-        return "Export"
-    return "CMO & Others"
+from app.routers.dashboard.eis_performance import ledger_business as _business_of
 
 
 # OPM cost component class -> the template's four COGS buckets. 2025 costing

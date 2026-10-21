@@ -646,7 +646,7 @@ function GrowthBars({ seg, year, period, height = 180 }) {
 
 /** Company figures come straight from Sales_Ledger (no rescaling or
  * filling) — say so when the ledger is thin or mixes scales. */
-function LedgerCheckNote({ seg, period }) {
+function LedgerCheckNote({ seg, period, markets }) {
   const c = seg?.ledger_check;
   if (!c) return null;
   const mon = (ms) => ms.map((m) => MONTHS_SHORT[m - 1]).join(", ");
@@ -657,7 +657,7 @@ function LedgerCheckNote({ seg, period }) {
   if (c.scale_ratio && c.scale_ratio > 100) issues.push(`the largest month is ${fmtInt(c.scale_ratio)}× the smallest — the months look to be on different scales`);
   return (
     <div className={`mb-2 text-[11px] rounded-lg px-3 py-1.5 border ${issues.length ? "text-amber-700 bg-amber-500/10 border-amber-500/30" : "text-gray-500 border-gray-800"}`}>
-      Source: Sales_Ledger — scenario Business Plan / Actual, sum of sales_amount per month.
+      Source: Sales_Ledger{markets ? ` (${markets})` : ""} — scenario Business Plan / Actual, sum of sales_amount per month.
       {issues.length > 0 && <> Check the uploaded ledger: {issues.join("; ")}.</>}
     </div>
   );
@@ -812,6 +812,7 @@ function EisPerformanceTab({ year, period }) {
       </EisSection>
 
       <EisSection title="Local Performance" subtitle="Achievement">
+        <LedgerCheckNote seg={s.Local} period={period} markets="markets Public + Private" />
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-4">
           <YearlyGrowthColumn seg={s.Local} year={year} period={period} />
           <div className="space-y-3">
@@ -834,8 +835,10 @@ function EisPerformanceTab({ year, period }) {
       </EisSection>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        {[["CMO & Others Performance", s["CMO & Others"]], ["Export Performance", s.Export]].map(([title, seg]) => (
+        {[["CMO & Others Performance", s["CMO & Others"], "markets CMO, Service Agreement, Dossier Fee"],
+          ["Export Performance", s.Export, "every Export market"]].map(([title, seg, markets]) => (
           <EisSection key={title} title={title}>
+            <LedgerCheckNote seg={seg} period={period} markets={markets} />
             <div className="grid grid-cols-1 sm:grid-cols-[1fr_1.4fr] gap-3">
               <div>
                 <BlockTitle>Yearly</BlockTitle>

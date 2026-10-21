@@ -188,8 +188,9 @@ async def sales_forecast(
 #   Yearly       YTD actual ÷ YTD business plan, Jan..selected month
 #   Growth       YTD actual vs the same months of the previous year
 #   Monthly      business plan vs actual per month (SalesSummary_Monthly)
-#   Company      Sales_Ledger (scenario Business Plan / Actual, sales_amount),
-#                not the sum of the three segments — see _company_from_ledger
+#   Segments     Company / Local / CMO & Others / Export from Sales_Ledger
+#                (scenario Business Plan / Actual, sales_amount) — see
+#                _sales_from_ledger
 #   Area         YTD sum per region; West / East per the sheet's grouping
 #   Marketing    latest month's plan (annual target) vs actual (YTD)
 #   EBIT-Product latest Sales_Ledger snapshot (quarterly) for one market:
@@ -214,50 +215,67 @@ def _pct(num, den):
     return round(num / den * 100, 1) if num is not None and den else None
 
 
-async def _company_from_ledger(db, year: int, period: int, finish) -> dict:
-    """Company Sales Performance (Yearly, Monthly, Growth) from Sales_Ledger
-    (eis.perf_sales_ledger), as the user asked on 2026-10-21: the scenario
-    column says Business Plan vs Actual, the value is sales_amount, summed
-    over every product and market per month. Local / CMO & Others / Export
-    stay on SalesSummary_Monthly.
+def ledger_business(market: str) -> str:
+    """Sales_Ledger market -> business line: Public / Private are Local,
+    every "Export ..." market is Export, the rest (CMO, Service Agreement,
+    Dossier Fee) is CMO & Others. Shared with the EIS Summary's Product
+    Portfolio."""
+    m = (market or "").strip().lower()
+    if m in ("public", "private"):
+        return "Local"
+    if m.startswith("export"):
+        return "Export"
+    return "CMO & Others"
+
+
+async def _sales_from_ledger(db, year: int, period: int, finish) -> dict:
+    """Company, Local, CMO & Others and Export Sales Performance (Yearly,
+    Monthly, Growth) from Sales_Ledger (eis.perf_sales_ledger), as the user
+    asked on 2026-10-21: the scenario column says Business Plan vs Actual,
+    the value is sales_amount, summed per month — per business line via
+    ledger_business(), and over every market for Company.
 
     The ledger as delivered so far is quarterly — Actual only in Mar / Jun /
     Sep / Dec, the Business Plan as one annual figure filed under March —
     and its Q3/Q4 values are on a different scale from Q1/Q2 (the sheet's
     own notes flag this as unconfirmed). Nothing is rescaled or filled in
-    here; `ledger_check` lists the months without Actual and flags a month
-    whose value is far off the others, so the page can say so rather than
+    here; each block's `ledger_check` lists the months without Actual and
+    flags a month far off the others, so the page can say so rather than
     present the figures as clean."""
     rows = (await db.execute(text("""
-        SELECT fiscal_year, month_num, lower(trim(scenario)) AS scenario,
+        SELECT fiscal_year, month_num, market, lower(trim(scenario)) AS scenario,
                SUM(sales_amount) AS amount, COUNT(sales_amount) AS n
         FROM eis.perf_sales_ledger
         WHERE fiscal_year IN (:y, :py) AND month_num <= :p
-        GROUP BY fiscal_year, month_num, lower(trim(scenario))
+        GROUP BY fiscal_year, month_num, market, lower(trim(scenario))
     """), {"y": year, "py": year - 1, "p": period})).mappings().all()
-    val = {}
+    val = {}  # (business, year, month, kind) -> amount; business "Company" = all
     for r in rows:
         kind = "plan" if r["scenario"] == "business plan" else "actual" if r["scenario"] == "actual" else None
-        if kind and r["n"]:
-            val[(r["fiscal_year"], r["month_num"], kind)] = float(r["amount"])
+        if not kind or not r["n"]:
+            continue
+        for biz in ("Company", ledger_business(r["market"])):
+            key = (biz, r["fiscal_year"], r["month_num"], kind)
+            val[key] = val.get(key, 0.0) + float(r["amount"])
 
-    monthly = [{"month": m, "plan": val.get((year, m, "plan")), "actual": val.get((year, m, "actual"))}
-               for m in range(1, period + 1)]
-    prev = _sum(val.get((year - 1, m, "actual")) for m in range(1, period + 1))
-    block = finish(monthly, prev)
+    def block(biz):
+        monthly = [{"month": m, "plan": val.get((biz, year, m, "plan")), "actual": val.get((biz, year, m, "actual"))}
+                   for m in range(1, period + 1)]
+        prev = _sum(val.get((biz, year - 1, m, "actual")) for m in range(1, period + 1))
+        out = finish(monthly, prev)
+        actual_months = [r["month"] for r in monthly if r["actual"] is not None]
+        sizes = sorted(abs(r["actual"]) for r in monthly if r["actual"])
+        out["source"] = "sales_ledger"
+        out["ledger_check"] = {
+            "months_with_actual": actual_months,
+            "months_without_actual": [m for m in range(1, period + 1) if m not in actual_months],
+            "months_with_plan": [r["month"] for r in monthly if r["plan"] is not None],
+            # largest vs smallest non-zero month — >100x is a scale mix, not a trend
+            "scale_ratio": round(sizes[-1] / sizes[0]) if len(sizes) > 1 and sizes[0] else None,
+        }
+        return out
 
-    actual_months = [r["month"] for r in monthly if r["actual"] is not None]
-    sizes = sorted(abs(r["actual"]) for r in monthly if r["actual"])
-    block["source"] = "sales_ledger"
-    block["ledger_check"] = {
-        "months_with_actual": actual_months,
-        "months_without_actual": [m for m in range(1, period + 1) if m not in actual_months],
-        "months_with_plan": [r["month"] for r in monthly if r["plan"] is not None],
-        # largest vs smallest non-zero month — >100x is a scale mix, not a trend
-        "scale_ratio": round(sizes[-1] / sizes[0]) if len(sizes) > 1 and sizes[0] else None,
-    }
-    return block
-
+    return {biz: block(biz) for biz in ["Company", *SALES_SEGMENTS]}
 
 @router.get("/dashboard")
 async def performance_dashboard(
@@ -265,17 +283,7 @@ async def performance_dashboard(
     ebit_market: str = Query("Public"),
     db: AsyncSession = Depends(get_db), user = Depends(get_current_user),
 ):
-    # ── Sales summary: this year + previous year, Jan..period ─────
-    ss = (await db.execute(text("""
-        SELECT business_type, fiscal_year, month_num, plan_amount, actual_amount
-        FROM eis.perf_sales_summary
-        WHERE fiscal_year IN (:y, :py) AND month_num <= :p
-    """), {"y": year, "py": year - 1, "p": period})).mappings().all()
-    cell = {(r["business_type"], r["fiscal_year"], r["month_num"]):
-            (float(r["plan_amount"]) if r["plan_amount"] is not None else None,
-             float(r["actual_amount"]) if r["actual_amount"] is not None else None)
-            for r in ss}
-
+    # ── Sales: Company + business lines from Sales_Ledger ────────
     def finish(monthly, prev):
         ytd_plan = _sum(r["plan"] for r in monthly)
         ytd_actual = _sum(r["actual"] for r in monthly)
@@ -289,16 +297,7 @@ async def performance_dashboard(
             "growth_amount": round(ytd_actual - prev, 1) if growth_ok else None,
         }
 
-    def segment_block(types):
-        monthly = []
-        for m in range(1, period + 1):
-            vals = [cell.get((t, year, m), (None, None)) for t in types]
-            monthly.append({"month": m, "plan": _sum(v[0] for v in vals), "actual": _sum(v[1] for v in vals)})
-        prev = _sum(cell.get((t, year - 1, m), (None, None))[1] for t in types for m in range(1, period + 1))
-        return finish(monthly, prev)
-
-    segments = {t: segment_block([t]) for t in SALES_SEGMENTS}
-    segments["Company"] = await _company_from_ledger(db, year, period, finish)
+    segments = await _sales_from_ledger(db, year, period, finish)
 
     # ── Area sales (YTD) ─────────────────────────────────────────
     area_rows = (await db.execute(text("""
@@ -372,7 +371,8 @@ async def performance_dashboard(
 
     return {
         "year": year, "period": period,
-        "has_data": bool(ss or area_rows or mk or at),
+        "has_data": bool(any(seg["ytd_actual"] is not None or seg["ytd_plan"] is not None for seg in segments.values())
+                         or area_rows or mk or at),
         "segments": segments,
         "area": area,
         "marketing": marketing,
