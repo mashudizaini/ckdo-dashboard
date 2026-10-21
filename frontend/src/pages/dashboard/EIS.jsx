@@ -576,9 +576,15 @@ function BlockTitle({ children, right }) {
   );
 }
 
-function PctTag({ pct }) {
+function PctTag({ pct, amount }) {
   if (pct == null) return null;
-  return <span className={pct < 0 ? "text-red-600" : "text-emerald-600"}>{pct > 0 ? "+" : ""}{fmtN(pct, 0)}%</span>;
+  const sign = (v) => (v > 0 ? "+" : "");
+  return (
+    <span className={pct < 0 ? "text-red-600" : "text-emerald-600"}>
+      {sign(pct)}{fmtN(pct, 0)}%
+      {amount != null && <span className="font-semibold"> ({sign(amount)}{fmtInt(amount)})</span>}
+    </span>
+  );
 }
 
 /* ─── Tab: Performance ──────────────────────────────────────────── */
@@ -599,7 +605,7 @@ function MonthlyPlanActual({ seg, height = 230 }) {
         <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => fmtInt(v)} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
         <Bar dataKey="plan" name="Business Plan" fill={XL_BLUE} />
-        <Line type="linear" dataKey="actual" name="Actual" stroke={XL_ORANGE} strokeWidth={2} dot={false}>
+        <Line type="linear" dataKey="actual" name="Actual" stroke={XL_ORANGE} strokeWidth={2} dot={{ r: 3, fill: XL_ORANGE }}>
           <LabelList dataKey="actual" position="top" formatter={(v) => v == null ? "" : fmtInt(v)} style={TPL_LABEL} />
         </Line>
       </ComposedChart>
@@ -627,10 +633,33 @@ function GrowthBars({ seg, year, period, height = 180 }) {
           <Line type="linear" dataKey="value" stroke={XL_ORANGE} strokeDasharray="3 3" dot={false} legendType="none" tooltipType="none" />
         </ComposedChart>
       </ResponsiveContainer>
-      {seg.prev_ytd_actual == null && (
-        <div className="text-[10px] text-amber-600 text-center">No {year - 1} data (Jan–{MONTHS_SHORT[period - 1]}) in SalesSummary_Monthly yet</div>
+      {seg.prev_ytd_actual == null ? (
+        <div className="text-[10px] text-amber-600 text-center">No {year - 1} data (Jan–{MONTHS_SHORT[period - 1]}) in {seg.source === "sales_ledger" ? "Sales_Ledger" : "SalesSummary_Monthly"} yet</div>
+      ) : (
+        <div className="text-[11px] text-center text-gray-400">
+          Growth {year - 1} → {year} (Jan–{MONTHS_SHORT[period - 1]}): <PctTag pct={seg.growth_pct} amount={seg.growth_amount} />
+        </div>
       )}
     </>
+  );
+}
+
+/** Company figures come straight from Sales_Ledger (no rescaling or
+ * filling) — say so when the ledger is thin or mixes scales. */
+function LedgerCheckNote({ seg, period }) {
+  const c = seg?.ledger_check;
+  if (!c) return null;
+  const mon = (ms) => ms.map((m) => MONTHS_SHORT[m - 1]).join(", ");
+  const issues = [];
+  if (c.months_without_actual.length) issues.push(`no Actual for ${mon(c.months_without_actual)}`);
+  if (!c.months_with_plan.length) issues.push(`no Business Plan for Jan–${MONTHS_SHORT[period - 1]}`);
+  else if (c.months_with_plan.length < period) issues.push(`Business Plan only in ${mon(c.months_with_plan)}`);
+  if (c.scale_ratio && c.scale_ratio > 100) issues.push(`the largest month is ${fmtInt(c.scale_ratio)}× the smallest — the months look to be on different scales`);
+  return (
+    <div className={`mb-2 text-[11px] rounded-lg px-3 py-1.5 border ${issues.length ? "text-amber-700 bg-amber-500/10 border-amber-500/30" : "text-gray-500 border-gray-800"}`}>
+      Source: Sales_Ledger — scenario Business Plan / Actual, sum of sales_amount per month.
+      {issues.length > 0 && <> Check the uploaded ledger: {issues.join("; ")}.</>}
+    </div>
   );
 }
 
@@ -642,7 +671,7 @@ function YearlyGrowthColumn({ seg, year, period }) {
         <HalfGauge pct={seg.achievement_pct} height={180} />
       </div>
       <div>
-        <BlockTitle right={<PctTag pct={seg.growth_pct} />}>Growth</BlockTitle>
+        <BlockTitle right={<PctTag pct={seg.growth_pct} amount={seg.growth_amount} />}>Growth</BlockTitle>
         <GrowthBars seg={seg} year={year} period={period} />
       </div>
     </div>
@@ -746,6 +775,7 @@ function EisPerformanceTab({ year, period }) {
       <EisHeaderBand title="PERFORMANCE" year={year} period={period} />
 
       <EisSection title="Company Sales Performance" subtitle="Achievement">
+        <LedgerCheckNote seg={s.Company} period={period} />
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-4">
           <YearlyGrowthColumn seg={s.Company} year={year} period={period} />
           <div className="space-y-3">
@@ -812,7 +842,7 @@ function EisPerformanceTab({ year, period }) {
                 <HalfGauge pct={seg.achievement_pct} />
               </div>
               <div>
-                <BlockTitle right={<PctTag pct={seg.growth_pct} />}>GROWTH</BlockTitle>
+                <BlockTitle right={<PctTag pct={seg.growth_pct} amount={seg.growth_amount} />}>GROWTH</BlockTitle>
                 <GrowthBars seg={seg} year={year} period={period} height={150} />
               </div>
             </div>

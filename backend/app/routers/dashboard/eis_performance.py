@@ -188,7 +188,8 @@ async def sales_forecast(
 #   Yearly       YTD actual ÷ YTD business plan, Jan..selected month
 #   Growth       YTD actual vs the same months of the previous year
 #   Monthly      business plan vs actual per month (SalesSummary_Monthly)
-#   Company      Local + CMO & Others + Export
+#   Company      Sales_Ledger (scenario Business Plan / Actual, sales_amount),
+#                not the sum of the three segments — see _company_from_ledger
 #   Area         YTD sum per region; West / East per the sheet's grouping
 #   Marketing    latest month's plan (annual target) vs actual (YTD)
 #   EBIT-Product latest Sales_Ledger snapshot (quarterly) for one market:
@@ -213,6 +214,51 @@ def _pct(num, den):
     return round(num / den * 100, 1) if num is not None and den else None
 
 
+async def _company_from_ledger(db, year: int, period: int, finish) -> dict:
+    """Company Sales Performance (Yearly, Monthly, Growth) from Sales_Ledger
+    (eis.perf_sales_ledger), as the user asked on 2026-10-21: the scenario
+    column says Business Plan vs Actual, the value is sales_amount, summed
+    over every product and market per month. Local / CMO & Others / Export
+    stay on SalesSummary_Monthly.
+
+    The ledger as delivered so far is quarterly — Actual only in Mar / Jun /
+    Sep / Dec, the Business Plan as one annual figure filed under March —
+    and its Q3/Q4 values are on a different scale from Q1/Q2 (the sheet's
+    own notes flag this as unconfirmed). Nothing is rescaled or filled in
+    here; `ledger_check` lists the months without Actual and flags a month
+    whose value is far off the others, so the page can say so rather than
+    present the figures as clean."""
+    rows = (await db.execute(text("""
+        SELECT fiscal_year, month_num, lower(trim(scenario)) AS scenario,
+               SUM(sales_amount) AS amount, COUNT(sales_amount) AS n
+        FROM eis.perf_sales_ledger
+        WHERE fiscal_year IN (:y, :py) AND month_num <= :p
+        GROUP BY fiscal_year, month_num, lower(trim(scenario))
+    """), {"y": year, "py": year - 1, "p": period})).mappings().all()
+    val = {}
+    for r in rows:
+        kind = "plan" if r["scenario"] == "business plan" else "actual" if r["scenario"] == "actual" else None
+        if kind and r["n"]:
+            val[(r["fiscal_year"], r["month_num"], kind)] = float(r["amount"])
+
+    monthly = [{"month": m, "plan": val.get((year, m, "plan")), "actual": val.get((year, m, "actual"))}
+               for m in range(1, period + 1)]
+    prev = _sum(val.get((year - 1, m, "actual")) for m in range(1, period + 1))
+    block = finish(monthly, prev)
+
+    actual_months = [r["month"] for r in monthly if r["actual"] is not None]
+    sizes = sorted(abs(r["actual"]) for r in monthly if r["actual"])
+    block["source"] = "sales_ledger"
+    block["ledger_check"] = {
+        "months_with_actual": actual_months,
+        "months_without_actual": [m for m in range(1, period + 1) if m not in actual_months],
+        "months_with_plan": [r["month"] for r in monthly if r["plan"] is not None],
+        # largest vs smallest non-zero month — >100x is a scale mix, not a trend
+        "scale_ratio": round(sizes[-1] / sizes[0]) if len(sizes) > 1 and sizes[0] else None,
+    }
+    return block
+
+
 @router.get("/dashboard")
 async def performance_dashboard(
     year: int = Query(...), period: int = Query(..., ge=1, le=12),
@@ -230,25 +276,29 @@ async def performance_dashboard(
              float(r["actual_amount"]) if r["actual_amount"] is not None else None)
             for r in ss}
 
-    def segment_block(types):
-        monthly = []
-        for m in range(1, period + 1):
-            vals = [cell.get((t, year, m), (None, None)) for t in types]
-            monthly.append({"month": m, "plan": _sum(v[0] for v in vals), "actual": _sum(v[1] for v in vals)})
+    def finish(monthly, prev):
         ytd_plan = _sum(r["plan"] for r in monthly)
         ytd_actual = _sum(r["actual"] for r in monthly)
-        prev = _sum(cell.get((t, year - 1, m), (None, None))[1] for t in types for m in range(1, period + 1))
+        growth_ok = ytd_actual is not None and prev
         return {
             "monthly": monthly,
             "ytd_plan": ytd_plan, "ytd_actual": ytd_actual,
             "achievement_pct": _pct(ytd_actual, ytd_plan),
             "prev_ytd_actual": prev,
-            "growth_pct": round((ytd_actual / prev - 1) * 100, 1) if ytd_actual is not None and prev else None,
+            "growth_pct": round((ytd_actual / prev - 1) * 100, 1) if growth_ok else None,
+            "growth_amount": round(ytd_actual - prev, 1) if growth_ok else None,
         }
 
-    segments = {"Company": segment_block(SALES_SEGMENTS)}
-    for t in SALES_SEGMENTS:
-        segments[t] = segment_block([t])
+    def segment_block(types):
+        monthly = []
+        for m in range(1, period + 1):
+            vals = [cell.get((t, year, m), (None, None)) for t in types]
+            monthly.append({"month": m, "plan": _sum(v[0] for v in vals), "actual": _sum(v[1] for v in vals)})
+        prev = _sum(cell.get((t, year - 1, m), (None, None))[1] for t in types for m in range(1, period + 1))
+        return finish(monthly, prev)
+
+    segments = {t: segment_block([t]) for t in SALES_SEGMENTS}
+    segments["Company"] = await _company_from_ledger(db, year, period, finish)
 
     # ── Area sales (YTD) ─────────────────────────────────────────
     area_rows = (await db.execute(text("""
