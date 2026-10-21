@@ -262,8 +262,8 @@ async def get_kpi_cards(
 #                when SalesSummary_Monthly has one (no daily source for them)
 #   NWC          DSO + DIO − DPO: DSO = Average AR ÷ Sales × 365 and DPO =
 #                Average AP ÷ COGS × 365 from the Administration_Ratios
-#                sheet (eis.adm_ratio; Oracle via Administration only when
-#                the sheet has no such month), DIO from Production
+#                sheet — eis_administration.ratios_for_month, shared with the
+#                Administration page — DIO from Production
 # ══════════════════════════════════════════════════════════════
 
 _SEGMENTS = [("local", "Local"), ("cmo_other", "CMO & Others"), ("export", "Export")]
@@ -451,30 +451,6 @@ async def _closing(eis_db, main_db, year: int, period: int):
             "daily_sales": {"wd_actual": daily["wd_actual"], "wd_total": daily["wd_total"]} if daily else None}
 
 
-async def _template_ratios(eis_db, year: int, period: int) -> dict:
-    """DSO and DPO from the Administration_Ratios sheet (eis.adm_ratio):
-    DSO = Average AR ÷ Sales × 365, DPO = Average AP ÷ COGS × 365, for the
-    selected month or the latest earlier month of that year holding both
-    components. Jul 2026 in the template: DSO 91.65, DPO 90.05."""
-    rows = (await eis_db.execute(text("""
-        SELECT metric, month_num, lower(value_type) AS value_type, value
-        FROM eis.adm_ratio
-        WHERE fiscal_year = :y AND month_num <= :p AND metric IN ('DSO', 'DPO')
-    """), {"y": year, "p": period})).mappings().all()
-    parts = {}
-    for r in rows:
-        if r["value"] is not None:
-            parts.setdefault((r["metric"], r["month_num"]), {})[r["value_type"]] = float(r["value"])
-    out = {}
-    for key, metric, num, den in (("dso", "DSO", "average ar", "sales"), ("dpo", "DPO", "average ap", "cogs")):
-        for m in range(period, 0, -1):
-            v = parts.get((metric, m), {})
-            if v.get(num) is not None and v.get(den):
-                out[key] = {"days": round(v[num] / v[den] * 365, 1), "month": m}
-                break
-    return out
-
-
 @router.get("/dashboard")
 async def summary_dashboard(
     year: int = Query(...), period: int = Query(..., ge=1, le=12),
@@ -484,7 +460,7 @@ async def summary_dashboard(
 ):
     from app.routers.dashboard.eis_performance import performance_dashboard
     from app.routers.dashboard.eis_production import production_dashboard
-    from app.routers.dashboard.eis_administration import load_admin_plans, financial_and_ratios
+    from app.routers.dashboard.eis_administration import load_admin_plans, financial_and_ratios, ratios_for_month
 
     perf = await performance_dashboard(year=year, period=period, ebit_market="Public", db=db, main_db=main_db, user=user)
     prod = await production_dashboard(year=year, period=period, db=db, user=user)
@@ -506,17 +482,8 @@ async def summary_dashboard(
     }
 
     dio = prod["dio"]
-    tpl = await _template_ratios(db, year, period)
-    ratios_ok = ratios and "error" not in ratios
-    picked = {}
-    for key in ("dso", "dpo"):
-        if tpl.get(key):
-            picked[key] = (tpl[key]["days"], "template", tpl[key]["month"])
-        elif ratios_ok and ratios.get(f"{key}_days") is not None:
-            picked[key] = (ratios[f"{key}_days"], "oracle", period)
-        else:
-            picked[key] = (None, None, None)
-    dso, dpo = picked["dso"][0], picked["dpo"][0]
+    rt = await ratios_for_month(db, year, period, ratios)
+    dso, dpo = rt["dso_days"], rt["dpo_days"]
     dio_days = dio["days"] if dio else None
     nwc_days = dso + dio_days - dpo if None not in (dso, dio_days, dpo) else None
     to_month = lambda d: round(d / 30, 1) if d is not None else None
@@ -524,9 +491,9 @@ async def summary_dashboard(
         "dso_days": dso, "dio_days": dio_days, "dpo_days": dpo, "nwc_days": round(nwc_days, 1) if nwc_days is not None else None,
         "dso_months": to_month(dso), "dio_months": to_month(dio_days), "dpo_months": to_month(dpo),
         "dio_month": dio["month"] if dio else None,
-        "dso_source": picked["dso"][1], "dso_month": picked["dso"][2],
-        "dpo_source": picked["dpo"][1], "dpo_month": picked["dpo"][2],
-        "error": None if (dso is not None or dpo is not None or ratios_ok) else (ratios or {}).get("error"),
+        "dso_source": rt["dso_source"], "dso_month": rt["dso_month"],
+        "dpo_source": rt["dpo_source"], "dpo_month": rt["dpo_month"],
+        "error": rt["error"],
     }
 
     return {

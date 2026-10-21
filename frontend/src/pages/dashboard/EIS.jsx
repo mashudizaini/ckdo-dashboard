@@ -1308,14 +1308,20 @@ function EisAdministrationTab({ year, period }) {
       <EisSection title="Financial Ratio (days)">
         {r?.error ? <OracleError block={r} /> : (
           <div className="grid grid-cols-2 divide-x divide-gray-800 border border-gray-800 rounded-lg">
-            {[["DSO", r.dso_days, `avg AR ${fmtInt(r.avg_ar)} ÷ sales 12 bln ${fmtInt(r.sales_12m)} × 365`],
-              ["DPO", r.dpo_days, `avg AP ${fmtInt(r.avg_ap)} ÷ COGS 12 bln ${fmtInt(r.cogs_12m)} × 365`]].map(([k, v, note]) => (
-              <div key={k} className="text-center py-2">
-                <div className="text-sm font-bold text-gray-200 border-b border-gray-800 pb-1 mb-2">{k}</div>
-                <div className="text-3xl font-extrabold text-gray-100">{v == null ? "—" : fmtN(v, 0)}</div>
-                <div className="text-[10px] text-gray-600 mt-1">{note}</div>
-              </div>
-            ))}
+            {[["DSO", "dso", `Average AR ${fmtInt(r.avg_ar)} ÷ Sales ${fmtInt(r.sales)} × 365`],
+              ["DPO", "dpo", `Average AP ${fmtInt(r.avg_ap)} ÷ COGS ${fmtInt(r.cogs)} × 365`]].map(([k, key, formula]) => {
+              const src = r[`${key}_source`], mo = r[`${key}_month`];
+              const from = src === "template" ? "Administration_Ratios" : src === "oracle" ? "Oracle GL (not in Administration_Ratios)" : null;
+              return (
+                <div key={k} className="text-center py-2">
+                  <div className="text-sm font-bold text-gray-200 border-b border-gray-800 pb-1 mb-2">{k}</div>
+                  <div className="text-3xl font-extrabold text-gray-100">{r[`${key}_days`] == null ? "—" : fmtN(r[`${key}_days`], 0)}</div>
+                  <div className="text-[10px] text-gray-600 mt-1">
+                    {from ? `${formula} · ${from}${mo && mo !== period ? ` as of ${MONTHS_SHORT[mo - 1]}` : ""}` : "No data"}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </EisSection>

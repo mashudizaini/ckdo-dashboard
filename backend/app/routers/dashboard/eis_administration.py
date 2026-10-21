@@ -1,4 +1,5 @@
 from calendar import monthrange
+from typing import Optional
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
@@ -214,10 +215,11 @@ async def budget_utilization(
 #               vs Administration_Financial "Net Profit" plan (progress =
 #               YTD actual ÷ YTD plan); cash & cash equivalents at month end
 #               vs "Cashflow Ending Balance" plan.
-#   Ratios      DSO = avg AR ÷ net sales of the last 12 months × 365,
-#               DPO = avg AP ÷ COGS of the last 12 months × 365, the average
-#               being (this month + same month last year) ÷ 2 — the
-#               template's own formula (reproduces its Oct 2025 84.79 days).
+#   Ratios      from the Administration_Ratios sheet: DSO = Average AR ÷
+#               Sales × 365, DPO = Average AP ÷ COGS × 365 (ratios_for_month);
+#               Oracle only for a month the sheet lacks — there avg AR/AP =
+#               (this month + same month last year) ÷ 2 over the last 12
+#               months' net sales / COGS.
 #   Budget      actual = Oracle GL expense postings (actual_flag 'A') per
 #               department via segment3 (CKDO_GL_COA_DEPARTMENT, as Budget
 #               Monitoring); codes outside the department ranges (0xx/9xx:
@@ -395,6 +397,51 @@ async def financial_and_ratios(year: int, period: int, plan: dict):
     return financial, ratios
 
 
+async def ratios_for_month(eis_db, year: int, period: int, oracle: Optional[dict]) -> dict:
+    """DSO / DPO for the Administration page and the EIS Summary's NWC.
+    Primary source is the Administration_Ratios sheet (eis.adm_ratio, from
+    the EIS Template upload) — user's rule, 2026-10-22: DSO = Average AR ÷
+    Sales × 365, DPO = Average AP ÷ COGS × 365 — for the selected month or
+    the latest earlier month of that year holding both components (Jul
+    2026: DSO 91.65, DPO 90.05). `oracle` (the ratios block from
+    financial_and_ratios) is used per metric only when the sheet has no
+    such month. Each metric records its source and month."""
+    rows = (await eis_db.execute(text("""
+        SELECT metric, month_num, lower(value_type) AS value_type, value
+        FROM eis.adm_ratio
+        WHERE fiscal_year = :y AND month_num <= :p AND metric IN ('DSO', 'DPO')
+    """), {"y": year, "p": period})).mappings().all()
+    parts = {}
+    for r in rows:
+        if r["value"] is not None:
+            parts.setdefault((r["metric"], r["month_num"]), {})[r["value_type"]] = float(r["value"])
+
+    oracle_ok = bool(oracle) and "error" not in oracle
+    out = {"error": None}
+    for key, metric, num_t, den_t, num_k, den_k, o_num, o_den in (
+        ("dso", "DSO", "average ar", "sales", "avg_ar", "sales", "avg_ar", "sales_12m"),
+        ("dpo", "DPO", "average ap", "cogs", "avg_ap", "cogs", "avg_ap", "cogs_12m"),
+    ):
+        hit = None
+        for m in range(period, 0, -1):
+            v = parts.get((metric, m), {})
+            if v.get(num_t) is not None and v.get(den_t):
+                hit = (m, v[num_t], v[den_t])
+                break
+        if hit:
+            m, num, den = hit
+            out.update({f"{key}_days": round(num / den * 365, 1), f"{key}_source": "template",
+                        f"{key}_month": m, num_k: round(num, 1), den_k: round(den, 1)})
+        elif oracle_ok and oracle.get(f"{key}_days") is not None:
+            out.update({f"{key}_days": oracle[f"{key}_days"], f"{key}_source": "oracle", f"{key}_month": period,
+                        num_k: oracle.get(o_num), den_k: oracle.get(o_den)})
+        else:
+            out.update({f"{key}_days": None, f"{key}_source": None, f"{key}_month": None, num_k: None, den_k: None})
+    if out["dso_days"] is None and out["dpo_days"] is None and not oracle_ok:
+        out["error"] = (oracle or {}).get("error")
+    return out
+
+
 @router.get("/dashboard")
 async def administration_dashboard(
     year: int = Query(...), period: int = Query(..., ge=1, le=12),
@@ -421,7 +468,8 @@ async def administration_dashboard(
     personnel["plan_month"] = hc_plan_row[0] if hc_plan_row else None
     personnel["achievement_pct"] = _ratio_pct(personnel["total"], personnel["plan"])
 
-    financial, ratios = await financial_and_ratios(year, period, plan)
+    financial, oracle_ratios = await financial_and_ratios(year, period, plan)
+    ratios = await ratios_for_month(eis_db, year, period, oracle_ratios)
 
     # ── Budget (Oracle actual, template plan) ─────────────────────
     budget = None
