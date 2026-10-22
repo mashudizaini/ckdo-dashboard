@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     # defaults to the on-premise Ollama engine below ("Standard") and only
     # calls Anthropic when the caller explicitly asks for provider="anthropic".
     anthropic_api_key: str = ""
+    # Workspace the company key's calls run in. An organisation-level key
+    # (not scoped to one workspace) is rejected by the API unless every
+    # request names a workspace in the anthropic-workspace-id header — that
+    # is what broke every Claude call on PROD from 2026-10-19. Empty = no
+    # header (a key that is already workspace-scoped needs none). Set as
+    # ANTHROPIC_WORKSPACE_ID in .env; see app/services/anthropic_client.py.
+    anthropic_workspace_id: str = ""
 
     # Ollama — local AI server (VM "ai-engine", 172.21.2.27). Chat completion
     # + RAG embeddings for the AI Chatbot, and the default ("Standard") text

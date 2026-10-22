@@ -19,6 +19,8 @@ from typing import Optional
 
 import fitz  # PyMuPDF
 import anthropic
+
+from app.services.anthropic_client import anthropic_client
 import httpx
 
 from app.config import get_settings
@@ -95,7 +97,7 @@ def _pdf_to_images_base64(pdf_path: str) -> list[str]:
 
 
 def _call_claude_vision(images: list[str]) -> dict:
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = anthropic_client()
     content = []
     for i, img in enumerate(images):
         content.append({"type": "text", "text": f"--- Page {i+1} of {len(images)} ---"})

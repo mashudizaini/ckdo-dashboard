@@ -25,6 +25,8 @@ import json
 import re
 
 import anthropic
+
+from app.services.anthropic_client import anthropic_client
 import httpx
 
 from app.config import get_settings
@@ -75,7 +77,7 @@ def _strip_fences(raw: str) -> str:
 async def _call_llm(provider: str, system: str, prompt: str, api_key: str | None) -> str:
     """Single non-streaming call — returns raw text (may still be ```json-fenced)."""
     if provider == "anthropic":
-        client = anthropic.AsyncAnthropic(api_key=api_key or settings.anthropic_api_key)
+        client = anthropic_client(api_key, async_=True)
         response = await client.messages.create(
             model="claude-opus-5",
             max_tokens=MAX_OUTPUT_TOKENS,

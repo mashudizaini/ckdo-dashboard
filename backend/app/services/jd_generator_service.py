@@ -18,6 +18,8 @@ import json
 import re
 
 import anthropic
+
+from app.services.anthropic_client import anthropic_client
 import httpx
 
 from app.config import get_settings
@@ -89,7 +91,7 @@ Analyze this job description and create an IMPROVED, STRUCTURED version that is:
 
 
 def generate_jd_with_anthropic(original_jd: str) -> dict:
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = anthropic_client()
     prompt = _build_prompt(original_jd)
 
     response = client.messages.create(

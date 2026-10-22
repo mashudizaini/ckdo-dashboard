@@ -19,6 +19,8 @@ from typing import Optional
 import fitz  # PyMuPDF
 import docx
 import anthropic
+
+from app.services.anthropic_client import anthropic_client
 import httpx
 
 from app.config import get_settings
@@ -124,7 +126,7 @@ Scoring weights to apply: skills={job.get('weight_skills', 40)}, experience={job
 
 
 def analyze_cv_with_anthropic(cv_text: str, job: dict) -> dict:
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = anthropic_client()
     prompt = _build_prompt(cv_text, job)
 
     response = client.messages.create(

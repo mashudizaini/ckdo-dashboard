@@ -21,6 +21,8 @@ See sumber/AI_Chat_Implementation_Guide.md section 5.
 import json
 import httpx
 import anthropic
+
+from app.services.anthropic_client import anthropic_client
 from app.config import get_settings
 from app.services import eis_tools
 from app.services import gemini_service
@@ -283,7 +285,7 @@ class OracleChatService:
         self, message: str, history: list[dict], user,
         anthropic_api_key: str = None, anthropic_model: str = None,
     ):
-        client = anthropic.AsyncAnthropic(api_key=anthropic_api_key or settings.anthropic_api_key)
+        client = anthropic_client(anthropic_api_key, async_=True)
         model = anthropic_model or ANTHROPIC_CHAT_DEFAULT_MODEL
         messages = [
             {"role": m.get("role") if m.get("role") in ("user", "assistant") else "user", "content": m.get("content", "")}

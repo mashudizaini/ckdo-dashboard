@@ -62,6 +62,8 @@ import re
 from typing import Optional
 
 import anthropic
+
+from app.services.anthropic_client import anthropic_client
 import psycopg2
 import structlog
 from sqlalchemy import select, func
@@ -491,7 +493,7 @@ async def _run_tool_calling_turn(
     second check is what actually matters for safety, the first is just
     what keeps the model from wasting a turn asking for something it can't
     have."""
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    client = anthropic_client(async_=True)
     model = ANTHROPIC_CHAT_DEFAULT_MODEL
     messages = [{"role": "user", "content": question}]
 

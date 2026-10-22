@@ -35,6 +35,8 @@ import re
 import io
 import httpx
 import anthropic
+
+from app.services.anthropic_client import anthropic_client
 from docx import Document
 from docx.shared import Pt, Cm
 from docx.enum.text import WD_TAB_ALIGNMENT
@@ -247,7 +249,7 @@ class MeetingNotesService:
 
         if provider == "anthropic":
             try:
-                client = anthropic.AsyncAnthropic(api_key=api_key or settings.anthropic_api_key)
+                client = anthropic_client(api_key, async_=True)
                 response = await client.messages.create(
                     model="claude-opus-5",
                     max_tokens=ANTHROPIC_MOM_MAX_OUTPUT_TOKENS,

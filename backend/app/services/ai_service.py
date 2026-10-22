@@ -13,6 +13,8 @@ import asyncio
 import json
 import httpx
 import anthropic
+
+from app.services.anthropic_client import anthropic_client
 from app.config import get_settings
 from app.services import rag_service
 from app.services import gemini_service
@@ -69,7 +71,7 @@ class AIService:
         self.model = settings.ollama_chat_model
 
     def _anthropic_complete(self, system: str, message: str, max_tokens: int = 4096) -> str:
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        client = anthropic_client()
         response = client.messages.create(
             model="claude-opus-4-8",
             max_tokens=max_tokens,
@@ -99,7 +101,7 @@ class AIService:
         returned ({"title", "url", "cited"}) — cited=True for pages the
         answer actually quotes — so a report built on the answer can be
         checked against its sources."""
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        client = anthropic_client()
         messages = [{"role": "user", "content": message}]
         # Unbounded, a "ground everything" prompt drove Claude to 35 searches
         # and 5.5 minutes on one measured run — way past any reasonable HTTP
@@ -174,7 +176,7 @@ class AIService:
         api_key/model: the caller's personal Claude key/model preference
         (see My API Key), falling back to the shared company key and the
         chatbot's default model when not set."""
-        client = anthropic.Anthropic(api_key=api_key or settings.anthropic_api_key)
+        client = anthropic_client(api_key)
         messages = [
             {"role": m.get("role") if m.get("role") in ("user", "assistant") else "user", "content": m.get("content", "")}
             for m in history if m.get("content")
@@ -405,7 +407,7 @@ class AIService:
         elif provider == "anthropic":
             # Personal key/model if the user set one via My API Key,
             # otherwise the shared company key on the default chat model.
-            client = anthropic.AsyncAnthropic(api_key=anthropic_api_key or settings.anthropic_api_key)
+            client = anthropic_client(anthropic_api_key, async_=True)
             anthropic_history = [
                 {"role": m.get("role") if m.get("role") in ("user", "assistant") else "user", "content": m.get("content", "")}
                 for m in history if m.get("content")
