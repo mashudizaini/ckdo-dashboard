@@ -130,13 +130,15 @@ const SETUP_ITEMS = [
 // DASHBOARD modules above — kept as a separate sidebar section.
 const EIS_ITEMS = [
   { label: "EIS", path: "/dashboard/eis", icon: TrendingUp, roles: ["management"], children: [
+    // Order per user (2026-10-22): Summary, Production, Performance,
+    // Administration, Daily Sales — then the remaining pages.
     { label: "Summary", path: "/dashboard/eis/summary" },
-    { label: "Performance", path: "/dashboard/eis/performance" },
     { label: "Production", path: "/dashboard/eis/production" },
-    { label: "Expansion", path: "/dashboard/eis/expansion" },
+    { label: "Performance", path: "/dashboard/eis/performance" },
     { label: "Administration", path: "/dashboard/eis/administration" },
-    // { label: "Business Plan", path: "/dashboard/eis/business-plan" }, // hidden — already covered by PAC dashboard
     { label: "Daily Sales", path: "/dashboard/eis/daily-sales" },
+    { label: "Expansion", path: "/dashboard/eis/expansion" },
+    // { label: "Business Plan", path: "/dashboard/eis/business-plan" }, // hidden — already covered by PAC dashboard
     { label: "Data Upload", path: "/dashboard/eis/data-upload" },
   ] },
 ];

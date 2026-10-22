@@ -285,9 +285,7 @@ export const hrApi = {
 const EIS = "/dashboard/eis";
 export const eisApi = {
   // Summary
-  getKpiCards:          (year, period) => api.get(`${EIS}/summary/kpi-cards`, { params: { year, period } }),
   getPortfolio:         (params)       => api.get(`${EIS}/summary/portfolio`, { params }),
-  getClosingEstimation: (year, month) => api.get(`${EIS}/summary/closing-estimation`, { params: { year, month } }),
   getNwc:               (year, period) => api.get(`${EIS}/summary/nwc`, { params: { year, period } }),
   getSummaryDashboard:  (year, period) => api.get(`${EIS}/summary/dashboard`, { params: { year, period } }),
   getSummaryPortfolio:  (year, period, market, product) => api.get(`${EIS}/summary/dashboard/portfolio`, { params: { year, period, market, product: product || undefined } }),

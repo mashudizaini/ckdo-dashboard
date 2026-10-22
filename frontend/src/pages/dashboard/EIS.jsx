@@ -425,7 +425,7 @@ function EisSummaryTab({ year, period }) {
   if (loading) return <Loading />;
   if (!d) return <ChartCard title=""><div className="py-12 text-center text-sm text-gray-500">Failed to load the Summary.</div></ChartCard>;
 
-  const k = d.kpi, cl = d.closing, n = d.nwc;
+  const cl = d.closing, n = d.nwc;
   const closeLabel = `${MONTH_NAMES[cl.month - 1]} ${cl.year}`;
   const estNote = cl.daily_sales
     ? `Local = Daily Sales projection (${cl.daily_sales.wd_actual}/${cl.daily_sales.wd_total} WD)`
@@ -435,14 +435,6 @@ function EisSummaryTab({ year, period }) {
     <div className="space-y-4">
       <SourceTag>Performance · Production · Administration · Daily Sales · Oracle OPM</SourceTag>
       <EisHeaderBand title="Summary" year={year} period={period} />
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <EisKpiCard title="Sales Achievement (YTD)" value={k.sales_achievement_pct ?? "—"} unit={k.sales_achievement_pct == null ? "" : "%"} icon={DollarSign} color="cyan" />
-        <EisKpiCard title="Production Yield" value={k.yield_pct ?? "—"} unit={k.yield_pct == null ? "" : "%"} target={k.yield_pct == null ? undefined : k.yield_target_pct} icon={Activity} color="emerald" />
-        <EisKpiCard title="Net Profit Achievement (YTD)" value={k.net_profit_progress_pct ?? "—"} unit={k.net_profit_progress_pct == null ? "" : "%"} icon={Landmark} color="amber" />
-        <EisKpiCard title="Cashflow Achievement" value={k.cash_achievement_pct ?? "—"} unit={k.cash_achievement_pct == null ? "" : "%"} icon={Wallet} color="orange" />
-      </div>
-      {k.financial_error && <div className="text-[11px] text-red-600">Net profit / cashflow: Oracle data could not be read ({k.financial_error}).</div>}
 
       <EisSection title="Product Portfolio">
         <ProductPortfolio year={year} period={period} initial={d.portfolio} />
@@ -457,7 +449,7 @@ function EisSummaryTab({ year, period }) {
           <ClosingEstBox title="Export" seg={cl.export} planLabel="Plan" estLabel="Est." />
         </div>
         <div className="text-[10px] text-gray-600 mt-1">
-          Plan: SalesSummary_Monthly{["local", "cmo_other", "export"].some((s) => cl[s].plan_source === "pac") ? " (months not yet in the template: PAC Sales Plan)" : ""} · {estNote} · CMO &amp; Export = that month's actual once available · million IDR
+          Plan: SalesSummary_Monthly{["local", "cmo_other", "export"].some((s) => cl[s].plan == null) ? ` (no plan for ${closeLabel} in SalesSummary_Monthly yet — upload it under EIS → Data Upload)` : ""} · {estNote} · CMO &amp; Export = that month's actual once available · million IDR
         </div>
       </EisSection>
 
@@ -2059,12 +2051,12 @@ function EisDataUploadTab({ year: sharedYear }) {
 /* ─── Main: EIS Dashboard ───────────────────────────────────────── */
 const EIS_TABS = [
   { id: "summary", label: "Summary" },
-  { id: "performance", label: "Performance" },
   { id: "production", label: "Production" },
-  { id: "expansion", label: "Expansion" },
+  { id: "performance", label: "Performance" },
   { id: "administration", label: "Administration" },
-  { id: "business-plan", label: "Business Plan" },
   { id: "daily-sales", label: "Daily Sales" },
+  { id: "expansion", label: "Expansion" },
+  { id: "business-plan", label: "Business Plan" },
   { id: "data-upload", label: "Data Upload" },
 ];
 
