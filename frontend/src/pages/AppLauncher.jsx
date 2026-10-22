@@ -363,32 +363,39 @@ export default function AppLauncher() {
       .catch(() => {});
   }, []);
 
+  // Which notification types are on (Setup > General > Notification
+  // Settings). Birthday is the only one on by default: if the settings
+  // can't be read (e.g. a 401 while the login token refreshes), fall back
+  // to birthday-only rather than to everything — failing open used to show
+  // task alerts and late arrivals even though both are switched off.
+  const [enabledTypes, setEnabledTypes] = useState(["birthday"]);
+
   useEffect(() => {
     if (!token) return;
     const headers = { Authorization: `Bearer ${token}` };
     const NOTIF_API = "/api/v1/dashboard/general/notification-settings";
-    Promise.all([
-      fetch(`${NOTIF_API}/types`, { headers }).then(r => r.ok ? r.json() : []),
-      fetch(`${NOTIF_API}/announcements/active`, { headers }).then(r => r.ok ? r.json() : []),
-      fetch("/api/v1/dashboard/hr/todo/active-alerts", { headers }).then(r => r.ok ? r.json() : []),
-      fetch("/api/v1/dashboard/hr/employees/birthdays-this-month", { headers }).then(r => r.ok ? r.json() : []),
-      fetch("/api/v1/dashboard/hr/attendance/late-this-month", { headers }).then(r => r.ok ? r.json() : []),
-    ])
-      .then(([types, customAnnouncements, alerts, birthdays, lateArrivals]) => {
-        // Missing/failed types fetch defaults every type to visible — same
-        // fail-open behavior these 3 always had before this setting existed.
-        const enabled = (key) => {
-          const t = types.find(x => x.key === key);
-          return t ? t.is_enabled : true;
-        };
-        setAnnouncements([
-          ...customAnnouncements.map(a => ({ ...a, kind: "announcement" })),
-          ...(enabled("task_alert") ? alerts.map(a => ({ ...a, kind: "task_alert" })) : []),
-          ...(enabled("birthday") ? birthdays.map(b => ({ ...b, kind: "birthday" })) : []),
-          ...(enabled("late_attendance") ? lateArrivals.map(l => ({ ...l, kind: "late" })) : []),
-        ]);
-      })
-      .catch(() => {});
+    const getJson = (url) => fetch(url, { headers }).then(r => (r.ok ? r.json() : [])).catch(() => []);
+    (async () => {
+      const types = await getJson(`${NOTIF_API}/types`);
+      const on = Array.isArray(types) && types.length
+        ? types.filter(t => t.is_enabled).map(t => t.key)
+        : ["birthday"];
+      setEnabledTypes(on);
+      const has = (key) => on.includes(key);
+      // Only fetch the sources that are switched on.
+      const [customAnnouncements, alerts, birthdays, lateArrivals] = await Promise.all([
+        getJson(`${NOTIF_API}/announcements/active`),
+        has("task_alert") ? getJson("/api/v1/dashboard/hr/todo/active-alerts") : [],
+        has("birthday") ? getJson("/api/v1/dashboard/hr/employees/birthdays-this-month") : [],
+        has("late_attendance") ? getJson("/api/v1/dashboard/hr/attendance/late-this-month") : [],
+      ]);
+      setAnnouncements([
+        ...customAnnouncements.map(a => ({ ...a, kind: "announcement" })),
+        ...alerts.map(a => ({ ...a, kind: "task_alert" })),
+        ...birthdays.map(b => ({ ...b, kind: "birthday" })),
+        ...lateArrivals.map(l => ({ ...l, kind: "late" })),
+      ]);
+    })();
   }, [token]);
 
   const [splitPct, setSplitPct] = useState(22); // left panel width % (kept narrow by default so the e-magazine spread has room to breathe)
@@ -650,7 +657,9 @@ export default function AppLauncher() {
               <div>
                 <span style={{ fontSize: 9.5, color: "#2563eb", fontWeight: 700, letterSpacing: "0.1em", display: "block" }}>ANNOUNCEMENT & NOTIFICATION</span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: "#1e293b" }}>
-                  ⏰ Task Alerts &amp; 🎂 Birthdays — {time.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+                  {[["task_alert", "⏰ Task Alerts"], ["birthday", "🎂 Birthdays"], ["late_attendance", "🕘 Late Arrivals"]]
+                    .filter(([k]) => enabledTypes.includes(k)).map(([, label]) => label).join(" · ") || "Announcements"}
+                  {" — "}{time.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
                 </span>
               </div>
             </div>

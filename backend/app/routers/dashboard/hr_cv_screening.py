@@ -7,6 +7,7 @@ each CV against the position's requirements → structured score + recommendatio
 """
 import io
 import json
+import logging
 import os
 from datetime import datetime
 from typing import Optional, List
@@ -25,6 +26,8 @@ from app.dependencies import require_role, CurrentUser, Roles
 from app.models.cv_screening import CvScreeningJob, CvScreeningCandidate
 from app.services import cv_screening_service as svc
 from app.services import jd_generator_service as jd_svc
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -249,6 +252,10 @@ async def upload_and_screen(
         # Reported back to the caller instead, per-file, so HR knows to
         # retry that one CV.
         if data.get("error"):
+            # Logged as well as returned: these never reach the database, so
+            # without this a whole batch failing (e.g. the Anthropic key
+            # being rejected) left no trace on the server at all.
+            logger.warning("[cv-screening] job %s, %s (%s): %s", job_id, f.filename, provider, data["error"])
             failed.append({"filename": f.filename, "error": data["error"]})
             continue
 

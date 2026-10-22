@@ -757,7 +757,15 @@ function layout(){
   // spread — most are landscape, so splitting the viewer in half (the
   // normal two-page book layout) shrank each one hard. Always show one
   // photo at a time, full width/height, regardless of window size.
-  singleMode = window.innerWidth < 720 || !!albumPhotos;
+  //
+  // The App Center embeds the reader in a small frame (?embed=1) next to
+  // the Announcement & Notification panel, where window.innerWidth is the
+  // frame's width — usually well under 720px on a laptop, which used to
+  // drop the magazine to one page. A magazine is read as a two-page spread,
+  // so the embed keeps the spread down to 480px; the full-screen reader
+  // keeps the original 720px phone/tablet cut-off.
+  const embedded = new URLSearchParams(location.search).get("embed") === "1";
+  singleMode = window.innerWidth < (embedded ? 480 : 720) || !!albumPhotos;
   const availW = els.scrollArea.clientWidth - 140;
   const availH = els.scrollArea.clientHeight - 70;
   let ph = availH;
